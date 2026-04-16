@@ -20,7 +20,6 @@ package config
 
 import (
 	"context"
-	_ "embed"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -151,11 +150,6 @@ var (
 	// we need a way to override the preferred prefix.
 	testingPreferredPrefix ConfigPrefix
 
-	//go:embed resources/defaults.yaml
-	defaultsYaml string
-	//go:embed resources/osdf.yaml
-	osdfDefaultsYaml string
-
 	// Potentially holds a directory to cleanup
 	tempRunDir  string
 	cleanupOnce sync.Once
@@ -184,6 +178,9 @@ var (
 	uni *ut.UniversalTranslator
 
 	onceValidate sync.Once
+
+	// Guard so InitConfigInternal runs at most once per process (reset by ResetConfig).
+	initConfigOnce sync.Once
 
 	// English translator
 	translator *ut.Translator
@@ -884,7 +881,11 @@ func handleDeprecatedConfig() {
 					log.Warningf("The configuration key %q is being deprecated. While your setting for debug logging has been applied, you should set %q to 'debug' to achieve this behavior in the future.", param.Debug.GetName(), param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
-						if viper.IsSet(rep) {
+						// Check if the user explicitly set the replacement key (via
+						// config file, env var, or v.Set).
+						repSource, hasSource := GetSourceTracker().Get(strings.ToLower(rep))
+						userSetReplacement := hasSource && repSource.Type != SourceDefault
+						if userSetReplacement {
 							log.Warningf("The configuration key %q is deprecated. The value from its replacement %q will be used instead, and the value of the deprecated configuration key %q will be ignored.", deprecated, rep, deprecated)
 						} else {
 							log.Warningf("The configuration key %q is deprecated. Please use %q instead. Will use the value of deprecated config key %q for the new config key %q.", deprecated, rep, deprecated, rep)
@@ -966,11 +967,14 @@ func handleContinuedCfg() error {
 			}
 			defer fHandle.Close()
 
+			fullPath := filepath.Join(cfgDir, file)
+			preSnap := snapshotViperKeys(viper.GetViper())
 			reader := io.Reader(fHandle)
 			err = viper.MergeConfig(reader)
 			if err != nil {
-				return errors.Wrapf(err, "failed to merge extra configuration file %s", filepath.Join(cfgDir, file))
+				return errors.Wrapf(err, "failed to merge extra configuration file %s", fullPath)
 			}
+			GetSourceTracker().RecordConfigFileDiff(preSnap, viper.GetViper(), fullPath, SourceConfigFile)
 		}
 	}
 
@@ -980,9 +984,9 @@ func handleContinuedCfg() error {
 	return nil
 }
 
-// Read config file from web UI changes, and call viper.Set() to explicitly override the value
-// so that env wouldn't take precedence
-func setWebConfigOverride(v *viper.Viper, configPath string) error {
+// SetWebConfigOverride reads config file from web UI changes, and calls viper.Set() to
+// explicitly override values so that env wouldn't take precedence.
+func SetWebConfigOverride(v *viper.Viper, configPath string) error {
 	if configPath == "" {
 		return nil
 	}
@@ -1003,6 +1007,7 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	allKeys := tempV.AllKeys()
 	for _, key := range allKeys {
 		v.Set(key, tempV.Get(key))
+		GetSourceTracker().Record(key, ConfigSource{Type: SourceWebConfig, Detail: configPath})
 	}
 
 	// Keep the param package's cached config in sync with viper after overrides.
@@ -1020,27 +1025,32 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
-// For the given Viper instance, load up the default YAML files.
+// SetBaseDefaultsInConfig seeds the given Viper instance with all parameter
+// defaults derived from parameters.yaml. It first sets the "seed" values
+// (ConfigBase, Server.Hostname) that downstream defaults may reference, then
+// calls the generated SetParameterDefaults to register every remaining default
+// in topologically-sorted dependency order.
 func SetBaseDefaultsInConfig(v *viper.Viper) {
-	//Load defaults.yaml
-	v.SetConfigType("yaml")
-	err := v.MergeConfig(strings.NewReader(defaultsYaml))
-	if err != nil {
-		cobra.CheckErr(err)
+	// Determine runtime context for default tier selection.
+	isRoot := IsRootExecution()
+	prefix := GetPreferredPrefix()
+	isOSDF := prefix == OsdfPrefix
+	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
+		isOSDF = isOSDF || (prefix == "STASH")
 	}
 
-	//Load osdf.yaml (if needed)
-	prefix := GetPreferredPrefix()
-	loadOSDF := prefix == OsdfPrefix
-	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
-		loadOSDF = loadOSDF || (prefix == "STASH")
+	// Set seed values that the generated SetParameterDefaults reads inline
+	// when resolving ${Param.Name} references. These must be set before the
+	// generated function is called.
+	v.SetDefault(param.ConfigBase.GetName(), getConfigBase())
+
+	if hostname, err := os.Hostname(); err == nil {
+		v.SetDefault(param.Server_Hostname.GetName(), hostname)
 	}
-	if loadOSDF {
-		err := v.MergeConfig(strings.NewReader(osdfDefaultsYaml))
-		if err != nil {
-			cobra.CheckErr(err)
-		}
-	}
+
+	// Set all remaining defaults in topologically-sorted dependency order.
+	// This replaces the previous defaults.yaml + osdf.yaml loading.
+	SetParameterDefaults(v, isRoot, isOSDF)
 }
 
 // Helper func that uses configured params to toggle the correct logging level
@@ -1081,9 +1091,15 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
+// It is idempotent: subsequent calls after the first are no-ops. Call
+// ResetConfig() to allow re-initialization (tests only).
 func InitConfigInternal(logLevel log.Level) {
+	initConfigOnce.Do(func() { initConfigInternalImpl(logLevel) })
+}
+
+func initConfigInternalImpl(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
-	// This must happen before config base initialization so that Pelican
+	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config base with PELICAN_CONFIGBASE
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
@@ -1104,6 +1120,9 @@ func InitConfigInternal(logLevel log.Level) {
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
+
+	// Set the config type for viper to properly parse config files
+	viper.SetConfigType("yaml")
 
 	// Set default values in the global Viper instance
 	SetBaseDefaultsInConfig(viper.GetViper())
@@ -1134,10 +1153,27 @@ func InitConfigInternal(logLevel log.Level) {
 
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Source tracking: snapshot before config file merge so we can diff after.
+	st := GetSourceTracker()
+	st.Reset()
+
+	// Record all keys currently in viper as defaults. Later stages (config
+	// file merges, env var binding) will overwrite relevant entries via the
+	// tracker's "last writer wins" policy, leaving only truly-default keys
+	// tagged as SourceDefault.
+	st.RecordDefaultKeys(viper.GetViper())
+
+	preConfigSnap := snapshotViperKeys(viper.GetViper())
+
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
 		}
+	}
+	// Record which keys the primary config file changed.
+	if cfgFile := viper.ConfigFileUsed(); cfgFile != "" {
+		st.RecordConfigFileDiff(preConfigSnap, viper.GetViper(), cfgFile, SourceConfigFile)
 	}
 
 	// Handle config file specified via <PREFIX>_CONFIG_FILE environment variable
@@ -1152,9 +1188,11 @@ func InitConfigInternal(logLevel log.Level) {
 			// If file doesn't exist, continue without it
 		} else {
 			defer fp.Close()
+			preEnvCfgSnap := snapshotViperKeys(viper.GetViper())
 			if err := viper.MergeConfig(fp); err != nil {
 				cobra.CheckErr(errors.Wrapf(err, "failed to read config file specified via %s_CONFIG_FILE", upperPrefix.String()))
 			}
+			st.RecordConfigFileDiff(preEnvCfgSnap, viper.GetViper(), envConfigFile, SourceConfigFile)
 		}
 	}
 	// Handle any extra yaml configurations specified in the ConfigLocations key
@@ -1162,6 +1200,11 @@ func InitConfigInternal(logLevel log.Level) {
 	if err != nil {
 		cobra.CheckErr(err)
 	}
+
+	// Record environment variable sources. This must happen after all config file
+	// merges because env vars take precedence in viper, and we want the source
+	// tracker to reflect that.
+	st.RecordEnvVarSources()
 
 	// Now that defaults + config files + env (including continued configs) have
 	// been applied to viper, refresh the cached param config struct used by
@@ -1352,7 +1395,6 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 
 	if IsRootExecution() {
 		runtimeDir := filepath.Join("/run", "pelican")
-		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(runtimeDirCleanupKey, false)
 		return runtimeDir, false, nil
@@ -1360,7 +1402,6 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 
 	if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 		runtimeDir := filepath.Join(userRuntimeDir, "pelican")
-		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(runtimeDirCleanupKey, false)
 		return runtimeDir, false, nil
@@ -1371,7 +1412,6 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 		return "", false, errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
 	}
 	// Temporary runtime directories are cleaned up on shutdown.
-	v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
 	v.Set(param.RuntimeDir.GetName(), runtimeDir)
 	v.Set(runtimeDirCleanupKey, true)
 	return runtimeDir, true, nil
@@ -1423,232 +1463,65 @@ func ComputeExternalWebUrl(v *viper.Viper) error {
 
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
+//
 // We operate on the passed viper instance instead of the global because it lets us
 // construct two config instances for comparing defaults and overrides in the config
 // tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
 // here as part of the logic for setting defaults on the passed `v` because you'll be
 // operating on two different config structs!
+//
+// GUIDANCE FOR DEVELOPERS — where should new defaults go?
+//
+// Most parameter defaults belong in docs/parameters.yaml and are registered
+// automatically by the generated SetParameterDefaults (run `cd generate && go run .`
+// after editing the YAML). The only v.SetDefault calls that should appear here
+// (or in SetClientDefaults) fall into these categories:
+//
+//  1. Deprecated params — the generator skips params marked `deprecated: true`,
+//     so their defaults must be set here until the params are fully removed.
+//
+//  2. Runtime-computed values — defaults that depend on runtime state not
+//     expressible in YAML (e.g. Server.ExternalWebUrl composed from hostname
+//     + port, or RuntimeDir chosen by probing XDG_RUNTIME_DIR / MkdirTemp).
+//     Use v.Set() (not v.SetDefault) when the value must not be overridable.
+//
+//  3. Conditional federation URLs — keys like Federation.DirectorUrl that are
+//     set conditionally based on which servers are enabled. These are informal
+//     keys not in parameters.yaml.
+//
+// If none of these apply, add the default to parameters.yaml instead.
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString(param.ConfigBase.GetName())
 	v.SetConfigType("yaml")
 
-	// Duplicate setting a default logging level so that this function picks picks up
-	// the one case where we need to set client/server defaults differently directly in
-	// InitConfigInternal. We need to do that because internal logging levels are set by
-	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
-	v.SetDefault(param.Logging_Level.GetName(), "info")
-	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
-	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
-	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
-	v.SetDefault(param.Server_TLSCAKey.GetName(), filepath.Join(configDir, "certificates", "tlsca.key"))
-	v.SetDefault(param.Server_SessionSecretFile.GetName(), filepath.Join(configDir, "session-secret"))
-	v.SetDefault(param.Xrootd_RobotsTxtFile.GetName(), filepath.Join(configDir, "robots.txt"))
-	v.SetDefault(param.Xrootd_ScitokensConfig.GetName(), filepath.Join(configDir, "xrootd", "scitokens.cfg"))
-	v.SetDefault(param.Xrootd_Authfile.GetName(), filepath.Join(configDir, "xrootd", "authfile"))
-	v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), filepath.Join(configDir, "macaroons-secret"))
-	v.SetDefault(param.Xrootd_ShutdownTimeout.GetName(), 1*time.Minute)
-	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
-	v.SetDefault(param.Xrootd_MaxThreads.GetName(), 20000)
-	v.SetDefault(param.Cache_EvictionMonitoringInterval.GetName(), "60s")
-	v.SetDefault(param.Cache_EvictionMonitoringMaxDepth.GetName(), 1)
+	// Apply server-specific Logging.Level default ("info"), which differs from
+	// the base default ("none") and the client default ("warn").
+	ApplyServerDefaults(v)
+
+	// Deprecated param defaults: excluded from generated SetParameterDefaults
+	// because deprecated params are skipped during generation. Keep these until
+	// the params are fully removed.
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
-	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
-	v.SetDefault(param.Server_UIPasswordFile.GetName(), filepath.Join(configDir, "server-web-passwd"))
-	v.SetDefault(param.Server_UIActivationCodeFile.GetName(), filepath.Join(configDir, "server-web-activation-code"))
-	v.SetDefault(param.OIDC_ClientIDFile.GetName(), filepath.Join(configDir, "oidc-client-id"))
-	v.SetDefault(param.OIDC_ClientSecretFile.GetName(), filepath.Join(configDir, "oidc-client-secret"))
-	v.SetDefault(param.Server_EnablePKCS11.GetName(), false)
-	v.SetDefault(param.Cache_ExportLocation.GetName(), "/")
-	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
-	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
-	v.SetDefault(param.Origin_SelfTest.GetName(), true)
-	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
-	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
-	// Defaults for XRootD authfile, scitokens config, and self-test staleness checks
-	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
-	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
+	if IsRootExecution() {
+		v.SetDefault(param.Cache_DbLocation.GetName(), "/var/lib/pelican/cache.sqlite")
+		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
+		v.SetDefault(param.Registry_DbLocation.GetName(), "/var/lib/pelican/registry.sqlite")
+	} else {
+		v.SetDefault(param.Cache_DbLocation.GetName(), filepath.Join(configDir, "cache.sqlite"))
+		v.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
+		v.SetDefault(param.Registry_DbLocation.GetName(), filepath.Join(configDir, "ns-registry.sqlite"))
+	}
 
-	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
-	// Origin (2026-02-05), but they may be soon for things like third party copy.
-	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "origin-fed-token"))
-	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "cache-fed-token"))
-
-	runtimeDir, _, err := ensureRuntimeDir(v)
+	// Create runtime directory (side effect: creates dirs on filesystem).
+	_, _, err := ensureRuntimeDir(v)
 	if err != nil {
 		return err
-	}
-	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
-	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
-	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
-	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
-	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
-
-	// At the time of this comment, Pelican's default log level is set to "info" for servers. However, that's still
-	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
-	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives
-	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
-	// default for other params.
-	defaultLevel := GetEffectiveLogLevel().String()
-	// Logrus parses "warn" and converts it to "warning". Pelican uses "warn" in its config and docs,
-	// so we map it back here. This makes sure that something like `param.Logging_Origin_Cms.GetString()`
-	// returns a pelican-compatible log level.
-	if defaultLevel == log.WarnLevel.String() {
-		defaultLevel = "warn"
-	}
-	for _, param := range []param.StringParam{
-		param.Logging_Origin_Cms,
-		param.Logging_Origin_Xrd,
-		param.Logging_Origin_Ofs,
-		param.Logging_Origin_Oss,
-		param.Logging_Origin_Http,
-		param.Logging_Cache_Ofs,
-		param.Logging_Cache_Pss,
-		param.Logging_Cache_PssSetOpt,
-		param.Logging_Cache_Http,
-		param.Logging_Cache_Xrd,
-		param.Logging_Cache_Xrootd,
-		param.Logging_Cache_Lotman,
-	} {
-		v.SetDefault(param.GetName(), defaultLevel)
-	}
-
-	// If Pelican is at its default info level, do our custom mapping
-	if defaultLevel == log.InfoLevel.String() {
-		v.SetDefault(param.Logging_Origin_Scitokens.GetName(), "fatal")
-		v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
-		v.SetDefault(param.Logging_Cache_Scitokens.GetName(), "fatal")
-		v.SetDefault(param.Logging_Cache_Pfc.GetName(), "info")
-	} else { // Otherwise treat them as any other log level
-		for _, param := range []param.StringParam{
-			param.Logging_Origin_Scitokens,
-			param.Logging_Origin_Xrootd,
-			param.Logging_Cache_Scitokens,
-			param.Logging_Cache_Pfc,
-		} {
-			v.SetDefault(param.GetName(), defaultLevel)
-		}
-	}
-
-	if IsRootExecution() {
-		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin"))
-		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "cache"))
-
-		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
-
-		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "localcache"))
-		v.SetDefault(param.Origin_Multiuser.GetName(), true)
-		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
-		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
-		v.SetDefault(param.Registry_DbLocation.GetName(), "/var/lib/pelican/registry.sqlite")
-		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
-		v.SetDefault(param.Cache_DbLocation.GetName(), "/var/lib/pelican/cache.sqlite")
-		v.SetDefault(param.Server_DbLocation.GetName(), "/var/lib/pelican/pelican.sqlite")
-		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
-		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/lotman")
-		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
-		v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), "/var/lib/pelican/backups")
-		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
-		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), "/etc/pelican/shoveler-token")
-		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
-	} else {
-		v.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
-		v.SetDefault(param.Director_GeoIPLocation.GetName(), filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
-		v.SetDefault(param.Registry_DbLocation.GetName(), filepath.Join(configDir, "ns-registry.sqlite"))
-		v.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
-		v.SetDefault(param.Cache_DbLocation.GetName(), filepath.Join(configDir, "cache.sqlite"))
-		v.SetDefault(param.Server_DbLocation.GetName(), filepath.Join(configDir, "pelican.sqlite"))
-		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
-		v.SetDefault(param.Lotman_LotHome.GetName(), configDir)
-		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))
-		v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), filepath.Join(configDir, "backups"))
-		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), filepath.Join(configDir, "shoveler/queue"))
-		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), filepath.Join(configDir, "shoveler-token"))
-
-		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "origin"))
-
-		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
-
-		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
-
-		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Origin_Multiuser.GetName(), false)
-	}
-
-	v.SetDefault(param.Director_EnableFederationMetadataHosting.GetName(), true)
-	v.SetDefault(param.Director_CheckOriginPresence.GetName(), true)
-	v.SetDefault(param.Director_CheckCachePresence.GetName(), true)
-
-	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
-	v.SetDefault(param.Origin_EnableReads.GetName(), true)
-	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
-	v.SetDefault(param.Origin_EnableListings.GetName(), true)
-	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
-	v.SetDefault(param.Origin_DisableCopies.GetName(), false)
-	v.SetDefault(param.Origin_EnableAtomicUploads.GetName(), false)
-
-	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(v.GetString(param.Cache_RunLocation.GetName()), "xrootd.stats"))
-
-	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
-	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
-	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
-
-	// Set the default for Origin.UploadTempLocation
-	originStorageType, err := server_structs.ParseOriginStorageType(v.GetString(param.Origin_StorageType.GetName()))
-	if err != nil {
-		return errors.Wrapf(err, "failed to parse Origin.StorageType: %s", v.GetString(param.Origin_StorageType.GetName()))
-	}
-
-	if originStorageType == server_structs.OriginStoragePosix {
-		v.SetDefault(param.Origin_UploadTempLocation.GetName(), filepath.Join(v.GetString(param.Origin_RunLocation.GetName()), "in-progress"))
 	}
 
 	// Any platform-specific paths should go here
 	err = InitServerOSDefaults(v)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
-	}
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-	v.SetDefault(param.Server_Hostname.GetName(), hostname)
-	// For the rest of the function, use the hostname provided by the admin if
-	// they have overridden the defaults.
-	hostname = v.GetString(param.Server_Hostname.GetName())
-	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
-	v.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
-
-	v.SetDefault(param.Origin_Port.GetName(), 8443)
-	v.SetDefault(param.Cache_Port.GetName(), 8442)
-
-	xrootdPort := v.GetInt(param.Xrootd_Port.GetName())
-	if !v.IsSet(param.Origin_Port.GetName()) && xrootdPort != 0 {
-		v.SetDefault(param.Origin_Port.GetName(), xrootdPort)
-	}
-	if !v.IsSet(param.Cache_Port.GetName()) && xrootdPort != 0 {
-		v.SetDefault(param.Cache_Port.GetName(), xrootdPort)
-	}
-
-	originPort := v.GetInt(param.Origin_Port.GetName())
-	if originPort != 443 {
-		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), originPort))
-	} else {
-		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
-	}
-
-	cachePort := v.GetInt(param.Cache_Port.GetName())
-	if cachePort != 443 {
-		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), cachePort))
-	} else {
-		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
 
 	webPort := v.GetInt(param.Server_WebPort.GetName())
@@ -1661,11 +1534,26 @@ func SetServerDefaults(v *viper.Viper) error {
 		return err
 	}
 
+	// Strip :443 from URL parameters so that port-443 URLs render as
+	// "https://host" rather than "https://host:443". The generated defaults in
+	// SetParameterDefaults unconditionally produce "https://host:port"; this
+	// post-processing step normalizes the standard HTTPS port away.
+	// Origin.TokenAudience defaults to ${Origin.Url} and is resolved during
+	// SetParameterDefaults before stripping, so it must be included here too.
+	// We use v.Set (not v.SetDefault) because SetDefault is first-wins and
+	// would be silently ignored after the generator has already registered
+	// a default. This mirrors how ComputeExternalWebUrl strips :443.
+	for _, urlParam := range []param.StringParam{param.Origin_Url, param.Cache_Url, param.Origin_TokenAudience} {
+		original := v.GetString(urlParam.GetName())
+		if stripped := stripPort443(original); stripped != original {
+			v.Set(urlParam.GetName(), stripped)
+		}
+	}
+
 	if originConcurrency := v.GetInt(param.Origin_Concurrency.GetName()); originConcurrency < 0 {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
 			originConcurrency, param.Origin_Concurrency.GetName())
 	}
-	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
 	if originConcThreshold := v.GetInt(param.Origin_ConcurrencyDegradedThreshold.GetName()); originConcThreshold < 0 || originConcThreshold > 100 {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
 			originConcThreshold, param.Origin_ConcurrencyDegradedThreshold.GetName())
@@ -1675,7 +1563,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
 			cacheConcurrency, param.Cache_Concurrency.GetName())
 	}
-	v.SetDefault(param.Cache_ConcurrencyDegradedThreshold.GetName(), 90)
 	if cacheConcThreshold := v.GetInt(param.Cache_ConcurrencyDegradedThreshold.GetName()); cacheConcThreshold < 0 || cacheConcThreshold > 100 {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
 			cacheConcThreshold, param.Cache_ConcurrencyDegradedThreshold.GetName())
@@ -1688,41 +1575,97 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(p.GetName(), 5*time.Minute)
 	}
 
-	// By default, set adaptive sort truncate to the same number of servers the Director expects to send.
 	// Cannot be set below 3 because Pelican clients expect to try that many servers.
-	v.SetDefault(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	if adaptiveSortTruncateConst := v.GetInt(param.Director_AdaptiveSortTruncateConstant.GetName()); adaptiveSortTruncateConst < 3 {
 		log.Warningf("Invalid value of '%d' for config param %s; must be greater than or equal to 3. Resetting to default of %d",
 			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
 
-	v.SetDefault(param.Monitoring_DataRetentionSize.GetName(), "0B")
+	return err
+}
 
-	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
-	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
-	// configuration but we don't know the origin's port until after xrootd has started), we
-	// stash a copy of its value now.
-	v.SetDefault(param.Origin_TokenAudience.GetName(), v.GetString(param.Origin_Url.GetName()))
+// ApplyLogLevelInheritance propagates the user-set Logging.Level to sub-loggers
+// that the user did not explicitly pin. It uses v.Set() to override defaults
+// because SetParameterDefaults already established the default sub-logger values
+// via v.SetDefault() (first-wins), so subsequent SetDefault calls are no-ops.
+//
+// This function should be called after SetServerDefaults and after all config
+// files / env vars have been loaded.
+//
+// The SourceTracker is consulted to determine whether Logging.Level was
+// user-set (config file, env var, or web-config) and whether each sub-logger
+// was individually pinned by the user.
+func ApplyLogLevelInheritance(v *viper.Viper) {
+	st := GetSourceTracker()
 
-	// Set defaults for Director and Registry URLs only if the Discovery URL is not set.
-	// This is necessary because, in Viper, there is currently no way to check if a value is coming
-	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
-	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
-	// checks if these values are empty. An empty value indicates that the URLs were not explicitly
-	// set, so values obtained through the discovery process should be used.
-	//
-	// If we set default values now, there would be no way for discoverFederationImpl to determine
-	// whether the values are defaults (and should be overridden) or were explicitly set by the user
-	// (and should not be overridden).
-	// A feature request to address this issue has already been submitted to the Viper repository by our team:
-	// https://github.com/spf13/viper/issues/1814
-	if !v.IsSet(param.Federation_DiscoveryUrl.GetName()) {
-		v.SetDefault("Federation.RegistryUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
+	// Check if Logging.Level was explicitly set by the user.
+	loggingKey := param.Logging_Level.GetName()
+	src, hasSource := st.Get(strings.ToLower(loggingKey))
+	if !hasSource {
+		return // No source recorded — still the default, nothing to propagate.
+	}
+	if src.Type == SourceDefault {
+		return // Explicitly recorded as default — nothing to propagate.
 	}
 
-	return err
+	effectiveLevel := v.GetString(loggingKey)
+	// Normalize logrus "warning" → "warn" for consistency with Pelican convention.
+	if effectiveLevel == log.WarnLevel.String() {
+		effectiveLevel = "warn"
+	}
+
+	// All xrootd sub-loggers whose defaults should be inherited from Logging.Level.
+	allSubLoggers := []param.StringParam{
+		param.Logging_Origin_Cms,
+		param.Logging_Origin_Xrd,
+		param.Logging_Origin_Ofs,
+		param.Logging_Origin_Oss,
+		param.Logging_Origin_Http,
+		param.Logging_Cache_Ofs,
+		param.Logging_Cache_Pss,
+		param.Logging_Cache_PssSetOpt,
+		param.Logging_Cache_Http,
+		param.Logging_Cache_Xrd,
+		param.Logging_Cache_Xrootd,
+		param.Logging_Cache_Lotman,
+	}
+
+	// Sub-loggers that have special defaults at the "info" log level.
+	specialInfoSubLoggers := map[string]string{
+		param.Logging_Origin_Scitokens.GetName(): "fatal",
+		param.Logging_Origin_Xrootd.GetName():    "info",
+		param.Logging_Cache_Scitokens.GetName():   "fatal",
+		param.Logging_Cache_Pfc.GetName():         "info",
+	}
+
+	isPinned := func(key string) bool {
+		s, ok := st.Get(strings.ToLower(key))
+		if !ok {
+			return false
+		}
+		// Pinned = explicitly set by the user (config file, env var, or web config).
+		return s.Type == SourceConfigFile || s.Type == SourceEnvVar || s.Type == SourceWebConfig
+	}
+
+	// Propagate to standard sub-loggers.
+	for _, p := range allSubLoggers {
+		if !isPinned(p.GetName()) {
+			v.Set(p.GetName(), effectiveLevel)
+		}
+	}
+
+	// Handle special-case sub-loggers.
+	for name, infoDefault := range specialInfoSubLoggers {
+		if isPinned(name) {
+			continue
+		}
+		if effectiveLevel == log.InfoLevel.String() {
+			v.Set(name, infoDefault)
+		} else {
+			v.Set(name, effectiveLevel)
+		}
+	}
 }
 
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
@@ -1779,10 +1722,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
 		}
 	}
-	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
+	if err := SetWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
 		logging.FlushLogs(true)
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
+
+	// Apply log level inheritance after all config sources (config files, env vars,
+	// and web-config) have been loaded, so the final Logging.Level is visible.
+	ApplyLogLevelInheritance(viper.GetViper())
 
 	// Flush logs only after we potentially ingest changes from the web UI. This must
 	// be done in sequence because the web UI may change the log location.
@@ -1801,7 +1748,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {
-			return errors.New("Xrootd.RunLocation is set, but both modules are enabled. Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+			return errors.Errorf("%s is set, but both modules are enabled. Please set %s "+
+				"and %s or disable %s so the default location can be used.",
+				param.Xrootd_RunLocation.GetName(), param.Cache_RunLocation.GetName(), param.Origin_RunLocation.GetName(), param.Xrootd_RunLocation.GetName())
 		}
 	} else if param.Server_DropPrivileges.GetBool() {
 		puser, err := GetPelicanUser()
@@ -1880,11 +1829,11 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.OriginStorageHTTPS:
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
-				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an https backend", param.Origin_HttpServiceUrl.GetName())
 			}
 			_, err := url.Parse(httpSvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_HttpServiceUrl.GetName())
 			}
 		case server_structs.OriginStorageGlobus:
 			if !param.Server_EnableUI.GetBool() {
@@ -1892,7 +1841,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			}
 			pvd, err := GetOIDCProvider()
 			if err != nil || pvd != Globus {
-				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
+				log.Infof("Server OIDC provider is not Globus. Use %s instead", param.Origin_GlobusClientIDFile.GetName())
 			} else {
 				// OIDC provider is globus
 				break
@@ -1901,36 +1850,36 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			clientIDPath := param.Origin_GlobusClientIDFile.GetString()
 			clientSecretPath := param.Origin_GlobusClientSecretFile.GetString()
 			if clientIDPath == "" {
-				return errors.New("Origin.GlobusClientIDFile may not be empty with Globus storage backend ")
+				return errors.Errorf("%s may not be empty with Globus storage backend", param.Origin_GlobusClientIDFile.GetName())
 			}
 			_, err = os.Stat(clientIDPath)
 			if err != nil {
-				return errors.Wrap(err, "Origin.GlobusClientIDFile is not a valid filepath")
+				return errors.Wrapf(err, "%s is not a valid filepath", param.Origin_GlobusClientIDFile.GetName())
 			}
 			if clientSecretPath == "" {
-				return errors.New("Origin.GlobusClientSecretFile may not be empty with Globus storage backend ")
+				return errors.Errorf("%s may not be empty with Globus storage backend", param.Origin_GlobusClientSecretFile.GetName())
 			}
 			_, err = os.Stat(clientSecretPath)
 			if err != nil {
-				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
+				return errors.Wrapf(err, "%s is not a valid filepath", param.Origin_GlobusClientSecretFile.GetName())
 			}
 		case server_structs.OriginStorageXRoot:
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
-				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an xroot backend", param.Origin_XRootServiceUrl.GetName())
 			}
 			_, err := url.Parse(xrootSvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_XRootServiceUrl.GetName())
 			}
 		case server_structs.OriginStorageS3:
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
-				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an s3 backend", param.Origin_S3ServiceUrl.GetName())
 			}
 			_, err := url.Parse(s3SvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_S3ServiceUrl.GetName())
 			}
 		}
 
@@ -1951,18 +1900,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.CacheType) && !param.Cache_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Cache.Port is not set but the Cache module is enabled. Please set Cache.Port")
+		return errors.Errorf("the configuration %s is not set but the Cache module is enabled. Please set %s", param.Cache_Port.GetName(), param.Cache_Port.GetName())
 	}
 	if currentServers.IsEnabled(server_structs.OriginType) && !param.Origin_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled. Please set Origin.Port")
+		return errors.Errorf("the configuration %s is not set but the Origin module is enabled. Please set %s", param.Origin_Port.GetName(), param.Origin_Port.GetName())
 	}
 
-	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && param.Cache_Port.GetInt() == param.Origin_Port.GetInt() && param.Xrootd_Port.IsSet() {
-		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled. Please set both variables")
-	}
-
-	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetString(), param.Cache_LowWatermark.GetName(), false)
+	if param.Cache_LowWaterMark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
 		if err != nil {
 			return err
 		}
@@ -1972,21 +1917,22 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 		if lwmIsAbs == hwmIsAbs && lowWm >= highWm {
 			// Use config strings in error to present the configured values (as opposed to whatever conversion we get from validation)
-			return errors.Errorf("invalid Cache.HighWaterMark/LowWaterMark values. The high watermark must be greater than the low "+
-				"watermark. Got %s (low) and %s (high)", param.Cache_LowWatermark.GetString(), param.Cache_HighWaterMark.GetString())
+			return errors.Errorf("invalid %s and %s values. The high watermark must be greater than the low "+
+				"watermark. Got %s (low) and %s (high)", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetString(), param.Cache_HighWaterMark.GetString())
 		}
 	}
 
 	if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
 		// Must have high/low watermarks
-		if !param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, then Cache.LowWatermark " +
-				"and Cache.HighWatermark must also be set")
+		if !param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.Errorf("if any of the parameters %s, %s or %s is set, then %s "+
+				"and %s must also be set", param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
 		}
 
 		// Further, if one is set, all three must be set
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() {
-			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, all three must be set")
+			return errors.Errorf("if any of the parameters %s, %s or %s is set, all three must be set",
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
 
 		var base, nominal, max float64
@@ -2002,9 +1948,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return err
 		}
 		if base >= nominal || nominal >= max {
-			return errors.Errorf("invalid Cache.FilesBaseSize/FilesNominalSize/FilesMaxSize values. The base size must be less than the "+
+			return errors.Errorf("invalid %s, %s and %s values. The base size must be less than the "+
 				"nominal size, and the nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
-				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
 		}
 
 		// File sizes must also be less than the low watermark, but that's not straightforward to check, especially when the cache spread across
@@ -2016,9 +1962,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// We already validate that one means all three, but I'm duplicating that here to make this safer in the case we switch orders
 		// in the future.
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
-			!param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.New("If Cache.EnableLotman is true, the following Cache parameters must also be set: HighWaterMark, LowWaterMark, " +
-				"FilesBaseSize, FilesNominalSize, FilesMaxSize")
+			!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, " +
+				"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
 		// Lotman boundary checks. These were previously scattered across
 		// the lotman package and xrootd config builder; consolidating
@@ -2084,14 +2031,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			}
 		}
 
-		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
+		viper.SetDefault(param.Federation_DirectorUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
 		if minStatRes <= 0 || maxStatRes <= 0 {
-			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+			return errors.Errorf("invalid %s or %s. These must be positive integers",
+				param.Director_MinStatResponse.GetName(), param.Director_MaxStatResponse.GetName())
 		}
 		if maxStatRes < minStatRes {
-			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+			return errors.Errorf("invalid %s and %s pair. The min must be less than the max.",
+				param.Director_MinStatResponse.GetName(), param.Director_MaxStatResponse.GetName())
 		}
 
 		switch s := (server_structs.SortType)(param.Director_CacheSortMethod.GetString()); s {
@@ -2102,23 +2051,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return err
 			}
 		default:
-			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of %q, %q, %q, or %q, but you configured %q.",
-				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
+			return errors.Errorf("invalid %s. Must be one of %q, %q, %q, or %q, but you configured %q.",
+				param.Director_CacheSortMethod.GetName(), server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s)
 		}
-	} else {
-		viper.SetDefault("Federation.DirectorUrl", "")
 	}
 
 	if currentServers.IsEnabled(server_structs.RegistryType) {
-		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
-	} else {
-		viper.SetDefault("Federation.RegistryUrl", "")
+		viper.SetDefault(param.Federation_RegistryUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 	}
 
 	if currentServers.IsEnabled(server_structs.BrokerType) {
-		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-	} else {
-		viper.SetDefault("Federation.BrokerURL", "")
+		viper.SetDefault(param.Federation_BrokerUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
@@ -2131,14 +2074,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}); err != nil {
 			return err
 		}
-		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
+		log.Warningf("Invalid %s or %s. Fallback to 5m for refresh interval and 1h for valid interval",
+			param.Monitoring_TokenRefreshInterval.GetName(), param.Monitoring_TokenExpiresIn.GetName())
 	}
 
 	if currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType) {
 		if param.Xrootd_ConfigFile.IsSet() {
 			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
 			if err != nil {
-				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
+				return fmt.Errorf("failed to open the file %s at %s: %v", param.Xrootd_ConfigFile.GetName(), param.Xrootd_ConfigFile.GetString(), err)
 			}
 		}
 	}
@@ -2295,30 +2239,24 @@ func ResetClientInitialized() {
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString(param.ConfigBase.GetName())
 
-	// Duplicate setting a default logging level so that this function picks picks up
-	// the one case where we need to set client/server defaults differently directly in
-	// InitConfigInternal. We need to do that because internal logging levels are set by
-	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
-	v.SetDefault(param.Logging_Level.GetName(), "warn")
+	// Apply client-specific Logging.Level default ("warn"), which differs from
+	// the base default ("none") and the server default ("info").
+	ApplyClientDefaults(v)
+
+	// Deprecated param defaults: excluded from generated SetParameterDefaults.
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
-	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 
 	upperPrefix := GetPreferredPrefix()
 	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
-	// Set our default worker count
-	v.SetDefault(param.Client_WorkerCount.GetName(), 5)
-	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
-	// Default is set outside of defaults.yaml to allow SetDefault call below to override
-	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	// Deprecated MinimumDownloadSpeed fallback to Client.MinimumDownloadSpeed
 	if v.IsSet(param.MinimumDownloadSpeed.GetName()) {
 		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
+
 	// Some client actions may take different defaults depending on whether we detect the plugin
-	v.SetDefault(param.Client_IsPlugin.GetName(), false)
-	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
 	if v.GetBool(param.Client_IsPlugin.GetName()) {
 		// If we _are_ the plugin, be more aggressive about retries
 		v.Set(param.Client_DirectorRetries.GetName(), 2*v.GetInt(param.Client_DirectorRetries.GetName()))
@@ -2430,12 +2368,17 @@ func ResetConfig() {
 	warnDeprecatedOnce = sync.Once{}
 	warnDebugOnce = sync.Once{}
 
+	initConfigOnce = sync.Once{}
+
 	setServerOnce = sync.Once{}
 	enabledServers.Clear()
 
 	ResetIssuerPrivateKeys()
 
 	ResetClientInitialized()
+
+	// Reset config source tracking
+	GetSourceTracker().Reset()
 
 	// There are other test state resets in server_utils.ResetTestState()
 }
