@@ -51,7 +51,9 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	// glebarez/sqlite (modernc.org/sqlite) requires pragmas in `_pragma=name(value)`
+	// form; the mattn-style `_name=value` shorthand is silently ignored.
+	dbName := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 
 	globalLogLevel := config.GetEffectiveLogLevel()
 	var ormLevel logger.LogLevel

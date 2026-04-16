@@ -42,8 +42,10 @@ type Store struct {
 
 // NewStore creates a new Store instance and runs migrations
 func NewStore(dbPath string) (*Store, error) {
-	// Open SQLite database
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// Open SQLite database. glebarez/sqlite (modernc.org/sqlite) requires pragmas
+	// in `_pragma=name(value)` form; the mattn-style `_name=value` shorthand is
+	// silently ignored, which silently leaves the DB in rollback-journal mode.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open database")
 	}
