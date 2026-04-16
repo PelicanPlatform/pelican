@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -210,7 +210,7 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 func InitClient(t *testing.T, initCfg map[param.Param]any) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	for p, val := range initCfg {
 		func() {
 			defer func() {

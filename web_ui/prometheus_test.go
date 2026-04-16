@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -67,7 +67,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -115,7 +115,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	kDir := filepath.Join(tDir, "testKeyDir")
 	// Setup a private key directory
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -187,7 +187,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	t.Cleanup(func() {
 		os.RemoveAll(configDir)
 	})
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -326,7 +326,7 @@ func TestPrometheusRulesEndpoint(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -410,7 +410,7 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)

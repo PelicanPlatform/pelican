@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -1086,7 +1086,7 @@ func TestMergeConfig(t *testing.T) {
 	require.NoError(t, param.Origin_Port.Set(8443))
 	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/"))
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
@@ -1298,7 +1298,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
-			require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+			require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 			require.NoError(t, param.Logging_Level.Set("debug"))
 
 			test_utils.MockFederationRoot(t, nil, nil)
@@ -1585,7 +1585,7 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 			tmpDir := t.TempDir()
-			require.NoError(t, param.ConfigDir.Set(tmpDir))
+			require.NoError(t, param.ConfigBase.Set(tmpDir))
 			require.NoError(t, param.Logging_Level.Set("debug"))
 			require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
 			require.NoError(t, param.Origin_SelfTest.Set(true))
@@ -1627,7 +1627,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_SelfTest.Set(true))

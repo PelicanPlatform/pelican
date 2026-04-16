@@ -375,7 +375,7 @@ func TestHomeDir(t *testing.T) {
 			require.NoError(t, param.Reset())
 
 			if tc.configDir != "" {
-				require.NoError(t, param.ConfigDir.Set(tc.configDir))
+				require.NoError(t, param.ConfigBase.Set(tc.configDir))
 			}
 
 			if !tc.homeEnv {
@@ -384,7 +384,7 @@ func TestHomeDir(t *testing.T) {
 
 			InitConfigDir(viper.GetViper())
 
-			cDir := viper.GetString("ConfigDir")
+			cDir := param.ConfigBase.GetString()
 			require.Equal(t, tc.expectedDir, cDir)
 		})
 	}
@@ -540,7 +540,7 @@ func TestDeprecationHandling(t *testing.T) {
 
 	tlsCertPath := filepath.Join(tmpConfigDirPath, "somerandomfile.txt")
 
-	require.NoError(t, param.ConfigDir.Set(tmpConfigDirPath))
+	require.NoError(t, param.ConfigBase.Set(tmpConfigDirPath))
 	require.NoError(t, param.Logging_Level.Set("Warning"))
 
 	// Set the deprecated config parameter `Server.TLSCertificate`.
@@ -700,7 +700,7 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		mockFederationRoot(t)
 		tempDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(tempDir))
+		require.NoError(t, param.ConfigBase.Set(tempDir))
 	}
 
 	initDirectoryConfig := func() {
@@ -841,7 +841,7 @@ func TestWebConfigSetsLogFile(t *testing.T) {
 	ResetConfig()
 	defer ResetConfig()
 	configDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	webConfigFile := filepath.Join(configDir, "web-config.yaml")
 	require.NoError(t, param.Server_WebConfigFile.Set(webConfigFile))
@@ -876,7 +876,7 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("globus"))
 	require.NoError(t, param.Server_EnableUI.Set(false))
 	require.NoError(t, param.OIDC_Issuer.Set("globus"))
@@ -895,7 +895,7 @@ func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("s3"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_S3ServiceUrl.Set("https://s3.example.com"))
@@ -913,7 +913,7 @@ func TestInitServerAtomicUploadsRequiresTempLocation(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("posix"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_UploadTempLocation.Set(""))

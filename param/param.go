@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -39,12 +39,6 @@ var (
 	callbackMux sync.RWMutex
 	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
 )
-
-// ConfigDir is the typed parameter for the "ConfigDir" configuration key.
-// ConfigDir is not defined in parameters.yaml (it is a special internal key
-// injected directly into the Config struct), so its typed constant lives here
-// rather than in the generated parameters.go.
-var ConfigDir = StringParam{"ConfigDir"}
 
 // ConfigCallback is a function that is called when configuration changes.
 // It receives the old and new configuration.

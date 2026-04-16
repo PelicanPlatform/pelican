@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -71,7 +71,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "xrd")))

@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -967,10 +967,10 @@ func setLoggingInternal() error {
 	return nil
 }
 
-// For the given Viper instance, set the default config directory.
+// For the given Viper instance, set the default config base directory.
 func InitConfigDir(v *viper.Viper) {
-	if configDir := v.GetString("ConfigDir"); configDir == "" {
-		v.SetDefault("ConfigDir", getConfigBase())
+	if configBase := v.GetString(param.ConfigBase.GetName()); configBase == "" {
+		v.SetDefault(param.ConfigBase.GetName(), getConfigBase())
 	}
 	v.SetConfigName("pelican")
 }
@@ -979,8 +979,8 @@ func InitConfigDir(v *viper.Viper) {
 // user-defined config files, validates config params, and initializes logging.
 func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
-	// This must happen before config dir initialization so that Pelican
-	// can pick up setting the config dir with PELICAN_CONFIGDIR
+	// This must happen before config base initialization so that Pelican
+	// can pick up setting the config base with PELICAN_CONFIGBASE
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 
@@ -1015,7 +1015,7 @@ func InitConfigInternal(logLevel log.Level) {
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
-		viper.AddConfigPath(viper.GetString("ConfigDir"))
+		viper.AddConfigPath(param.ConfigBase.GetString())
 
 		// Add /etc/pelican as a fallback path for all configs
 		// Note that viper only grabs the first config file it finds
@@ -1325,7 +1325,7 @@ func ComputeExternalWebUrl(v *viper.Viper) error {
 // here as part of the logic for setting defaults on the passed `v` because you'll be
 // operating on two different config structs!
 func SetServerDefaults(v *viper.Viper) error {
-	configDir := v.GetString("ConfigDir")
+	configDir := v.GetString(param.ConfigBase.GetName())
 	v.SetConfigType("yaml")
 
 	// Duplicate setting a default logging level so that this function picks picks up
@@ -2137,7 +2137,7 @@ func ResetClientInitialized() {
 // here as part of the logic for setting defaults on the passed `v` because you'll be
 // operating on two different config structs!
 func SetClientDefaults(v *viper.Viper) error {
-	configDir := v.GetString("ConfigDir")
+	configDir := v.GetString(param.ConfigBase.GetName())
 
 	// Duplicate setting a default logging level so that this function picks picks up
 	// the one case where we need to set client/server defaults differently directly in

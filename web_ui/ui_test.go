@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -86,7 +86,7 @@ func setupWebUIEnv(t *testing.T) {
 
 	testCfgDir := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(testCfgDir))
+	require.NoError(t, param.ConfigBase.Set(testCfgDir))
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -117,7 +117,7 @@ func setupWebUIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal("Error making temp config dir:", err)
 	}
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
 	test_utils.MockFederationRoot(t, nil, nil)
@@ -586,7 +586,7 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -839,7 +839,7 @@ func TestGroupManagementAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
 	test_utils.MockFederationRoot(t, nil, nil)

@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -217,7 +217,7 @@ func TestPurgeFirst(t *testing.T) {
 	server_utils.ResetTestState()
 
 	configDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
 	require.NoError(t, param.RuntimeDir.Set(configDir))
 

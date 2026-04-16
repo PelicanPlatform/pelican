@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -59,7 +59,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	require.NoError(t, param.IssuerKeysDirectory.Set(ikeyDir))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(issuerTempDir, "test.sql")))
 	require.NoError(t, param.Server_WebPort.Set(8444))
-	require.NoError(t, param.ConfigDir.Set(tDir))
+	require.NoError(t, param.ConfigBase.Set(tDir))
 
 	err := config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	config.ResetIssuerPrivateKeys()
 	tDir2 := t.TempDir()
 	require.NoError(t, param.IssuerKeysDirectory.Set(tDir2+"/keychaining2"))
-	require.NoError(t, param.ConfigDir.Set(tDir2))
+	require.NoError(t, param.ConfigBase.Set(tDir2))
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
@@ -510,7 +510,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()+"/keychaining2"))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
