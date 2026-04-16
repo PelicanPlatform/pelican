@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -14,9 +14,101 @@
 # limitations under the License.
 #
 
-# This file contains structured documentation about the Pelican parameters.
-# While it is somewhat human-readable, it is meant to help with the documentation
-# generation.
+# This file is the authoritative source for Pelican's configuration parameters.
+# It serves two purposes:
+#
+#   1. Documentation generation — the descriptions, types, and component lists
+#      are used to build the online parameter reference and MDX docs.
+#
+#   2. Source-code generation — the default values defined here are used by
+#      `go generate` (via generate/param_generator.go) to produce
+#      config/parameter_defaults.go, which sets most parameter defaults at
+#      startup. New defaults should generally be added here rather than
+#      hard-coded in Go source. The exceptions that must remain in Go are:
+#
+#        - "Seed" params (ConfigBase, Server.Hostname, RuntimeDir) whose
+#          defaults require runtime calls (os.Hostname, XDG dir probing,
+#          etc.) and are set in SetBaseDefaultsInConfig before the
+#          generated code runs. Other params may reference these seeds
+#          via ${ConfigBase}, ${Server.Hostname}, etc.
+#
+#        - Deprecated params (marked `deprecated: true` here) — the
+#          generator skips them so that viper.IsSet stays false,
+#          preserving migration logic in handleDeprecatedConfig. Their
+#          defaults are set manually in SetServerDefaults.
+#
+#        - Runtime-computed values that depend on conditional logic not
+#          expressible in YAML (e.g. ${Server.ExternalWebUrl}, which
+#          requires special logic for stripping default HTTPS ports).
+#
+# ── Parameter naming ──────────────────────────────────────────────────────
+#
+#   - Names use dot-separated CamelCase sections: <Component>.<Field>
+#     Examples: Server.Hostname, Origin.EnableCmsd, Cache.LowWatermark
+#
+#   - Top-level params (no dot) are allowed for global settings:
+#     ConfigBase, RuntimeDir, Debug, TLSSkipVerify
+#
+#   - References to other params in default values use ${Param.Name} syntax:
+#       default: ${ConfigBase}/certificates/tls.crt
+#     The code generator resolves these via v.GetString at startup and
+#     builds a dependency graph to ensure correct ordering.
+#
+#   - References to environment variables use bare $ENV_VAR syntax:
+#       default: $XDG_RUNTIME_DIR/pelican
+#     These are resolved via os.Getenv at startup.
+#
+# ── Default tiers ─────────────────────────────────────────────────────────
+#
+#   Each parameter must have a `default` key and may additionally specify
+#   one or more override tiers. At startup the code generator selects the
+#   appropriate tier based on runtime context:
+#
+#   default          - The base default applied unconditionally. Every
+#                      parameter must declare this. Use "none" (the string)
+#                      to indicate no meaningful default — the generator
+#                      will skip the v.SetDefault call so viper.IsSet
+#                      returns false, letting downstream code distinguish
+#                      "not configured" from "set to default".
+#
+#   root_default     - Overrides `default` when Pelican runs as root (UID 0).
+#                      Typically used for FHS-compliant paths like /etc/pelican
+#                      or /run/pelican. If omitted, `default` is used for root
+#                      and non-root alike. When a root_default is present, the
+#                      `default` value applies only to non-root users.
+#
+#   osdf_default     - Overrides `default` (and root_default, if present) when
+#                      running in OSDF federation mode. Used for OSDF-specific
+#                      endpoints and service URLs. Set to "none" if the OSDF
+#                      mode should explicitly have no default (e.g. when the
+#                      value is discovered dynamically).
+#
+#   client_default   - Applied after the base defaults for client commands only
+#                      (pelican object get/put/copy, etc.). Use this when a
+#                      param should have a different default in client context
+#                      than in server context. Example: Logging.Level defaults
+#                      to "warn" for clients but "info" for servers.
+#
+#   server_default   - Applied after the base defaults for server commands only
+#                      (pelican origin serve, pelican cache serve, etc.). Use
+#                      this when a param needs a server-specific override.
+#                      Example: Logging.Level defaults to "info" for servers.
+#
+#   Tier precedence (highest wins):
+#     client_default / server_default  >  osdf_default  >  root_default  >  default
+#
+# ── Other keys ────────────────────────────────────────────────────────────
+#
+#   name             - Dot-separated CamelCase parameter name (required)
+#   description      - Human-readable description in YAML block scalar (required)
+#   type             - Go-oriented type: string, bool, int, filename, url,
+#                      duration, stringSlice, object (required)
+#   components       - List of components that use this param:
+#                      ["client", "origin", "cache", "director", "registry", "*"]
+#   deprecated       - true if this param is deprecated
+#   replacedby       - The replacement param name, or "none" if no replacement
+#   hidden           - true to hide from public documentation
+#   runtime_configurable - true if changes take effect without restart
 
 ############################
 #     Top-Level Configs    #
@@ -24,8 +116,11 @@
 ---
 name: ConfigBase
 description: |+
-  The directory containing the Pelican configurations and data when the utility
-  is run as non-root.  Automatically configured; cannot be overridden.
+  The directory containing Pelican configurations and data. For non-root users,
+  this defaults to ~/.config/pelican. For root users, this defaults to /etc/pelican.
+  This value can be overridden by setting the PELICAN_CONFIGBASE environment variable
+  or by specifying ConfigBase in a configuration file.
+root_default: /etc/pelican
 default: "~/.config/pelican"
 components: ["*"]
 type: filename
@@ -49,9 +144,12 @@ components: ["*"]
 ---
 name: RuntimeDir
 description: |+
-  Directory where Pelican writes runtime artifacts such as address files; if unset it defaults to /run/pelican for root, $XDG_RUNTIME_DIR/pelican when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
+  Directory where Pelican writes runtime artifacts such as address files. For root users,
+  this defaults to /run/pelican. For non-root users, it defaults to $XDG_RUNTIME_DIR/pelican
+  when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
 type: filename
-default: ""
+root_default: /run/pelican
+default: $XDG_RUNTIME_DIR/pelican
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Debug
@@ -92,8 +190,7 @@ description: |+
 type: filename
 deprecated: true
 replacedby: none
-root_default: /etc/pelican/issuer.jwk
-default: $ConfigBase/issuer.jwk
+default: ${ConfigBase}/issuer.jwk
 components: ["origin", "cache", "registry", "director"]
 ---
 name: IssuerKeysDirectory
@@ -103,8 +200,7 @@ description: |+
 
   A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
-root_default: /etc/pelican/issuer-keys
-default: $ConfigBase/issuer-keys
+default: ${ConfigBase}/issuer-keys
 components: ["*"]
 ---
 name: Transport.DialerTimeout
@@ -450,7 +546,7 @@ name: Federation.DirectorUrl
 description: |+
   A URL indicating where a director service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
+osdf_default: none
 default: none
 direct_access: false
 components: ["client", "origin", "cache", "registry"]
@@ -459,7 +555,7 @@ name: Federation.RegistryUrl
 description: |+
   A URL indicating where the namespace registry service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+osdf_default: none
 default: none
 direct_access: false
 components: ["client", "director", "origin", "cache"]
@@ -468,7 +564,7 @@ name: Federation.JwkUrl
 description: |+
   A URL indicating where the JWKS for the Federation is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
+osdf_default: none
 default: none
 direct_access: false
 components: ["*"]
@@ -702,11 +798,8 @@ description: |+
   The filepath to the SQLite database used by the client API server for persisting
   transfer job state, history, and recovery information. If not specified, defaults
   to `~/.pelican/client-agent.db`.
-
-  Set this to an empty string to disable database persistence entirely and run
-  the client API server in memory-only mode.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.HistoryRetentionDays
@@ -739,7 +832,7 @@ description: |+
   The PID file is used to track the running daemon process and prevent multiple
   instances from starting simultaneously.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.Socket
@@ -750,7 +843,7 @@ description: |+
 
   If not specified, the default location is `~/.pelican/client-api.sock`.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.IdleTimeout
@@ -789,7 +882,7 @@ description: |+
   A filepath to the intended location of the origin's database.
 type: filename
 root_default: /var/lib/pelican/origin.sqlite
-default: $ConfigBase/origin.sqlite
+default: ${ConfigBase}/origin.sqlite
 components: ["origin"]
 ---
 name: Origin.Url
@@ -1087,7 +1180,7 @@ description: |+
   StoragePrefix, because POSIX filesystems do not support renaming files across filesystem
   boundaries. If a mismatch is detected, Pelican will reject the configuration at startup.
 type: filename
-default: $Origin.RunLocation/in-progress
+default: ${Origin.RunLocation}/in-progress
 components: ["origin"]
 hidden: true
 ---
@@ -1618,7 +1711,7 @@ description: |+
   to prove the origin's membership in the federation. For example, a third-party copy from one Origin to another that serves a namespace
   without DirectReads enabled may require a token to prove the origin's membership in the federation.
 type: filename
-default: $ConfigBase/origin-fed-token
+default: ${ConfigBase}/origin-fed-token
 components: ["origin"]
 ---
 name: Origin.SelfTestMaxAge
@@ -1876,14 +1969,14 @@ description: |+
   The directory for the location of the cache data files - this is where the actual data in the cache is stored
   for the local cache.
 type: filename
-default: $PELICAN_LOCALCACHE_RUNLOCATION/cache
+default: ${LocalCache.RunLocation}/cache
 components: ["localcache"]
 ---
 name: LocalCache.Socket
 description: |+
   The location of the socket used for client communication for the local cache.
 type: filename
-default: $PELICAN_LOCALCACHE_RUNLOCATION/cache.sock
+default: ${LocalCache.RunLocation}/cache.sock
 components: ["localcache"]
 ---
 name: LocalCache.Size
@@ -2309,7 +2402,7 @@ description: |+
   A filepath to the intended location of the cache's database.
 type: filename
 root_default: /var/lib/pelican/cache.sqlite
-default: $ConfigBase/cache.sqlite
+default: ${ConfigBase}/cache.sqlite
 components: ["cache"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
@@ -2329,7 +2422,7 @@ description: |+
   to prove the cache's membership in the federation. For example, Origins serving a namespace without DirectReads enabled require
   that all clients prove they come from within the federation.
 type: filename
-default: $ConfigBase/cache-fed-token
+default: ${ConfigBase}/cache-fed-token
 components: ["cache"]
 ---
 name: Cache.DisableClientX509
@@ -2447,7 +2540,7 @@ description: |+
 
   If not set, Server.ExternalWebUrl will be used instead.
 type: url
-default: $(Server.ExternalWebUrl)
+default: ${Server.ExternalWebUrl}
 components: ["director"]
 ---
 name: Director.DbLocation
@@ -2455,7 +2548,7 @@ description: |+
   A filepath to the intended location of the director's database, where server downtime info is stored.
 type: filename
 root_default: /var/lib/pelican/director.sqlite
-default: $ConfigBase/director.sqlite
+default: ${ConfigBase}/director.sqlite
 components: ["director"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
@@ -2579,7 +2672,7 @@ description: |+
   an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
 type: filename
 root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
-default: $ConfigBase/maxmind/GeoLite2-city.mmdb
+default: ${ConfigBase}/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
 name: Director.MinStatResponse
@@ -2790,7 +2883,7 @@ description: |+
   A filepath to the intended location of the namespace registry's database.
 type: filename
 root_default: /var/lib/pelican/registry.sqlite
-default: $ConfigBase/ns-registry.sqlite
+default: ${ConfigBase}/ns-registry.sqlite
 components: ["registry"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
@@ -2945,8 +3038,7 @@ description: |+
   If you override this filepath, you need to provide the matched-pair private key
   via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
 type: filename
-root_default: /etc/pelican/certificates/tls.crt
-default: "$ConfigBase/certificates/tls.crt"
+default: "${ConfigBase}/certificates/tls.crt"
 deprecated: true
 replacedby: "Server.TLSCertificateChain"
 components: ["cache", "director", "origin", "registry"]
@@ -2959,8 +3051,7 @@ description: |+
   If you override this filepath, you need to provide the matched-pair private key
   via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
 type: filename
-root_default: /etc/pelican/certificates/tls.crt
-default: "$ConfigBase/certificates/tls.crt"
+default: "${ConfigBase}/certificates/tls.crt"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateFile
@@ -2970,8 +3061,7 @@ description: |+
 
   Do not override this filepath unless you want to provide your TLS host certificate
 type: filename
-root_default: /etc/pelican/certificates/tlsca.pem
-default: "$ConfigBase/certificates/tlsca.pem"
+default: "${ConfigBase}/certificates/tlsca.pem"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateDirectory
@@ -2990,8 +3080,7 @@ description: |+
   The name of a file containing a private key corresponding to the TLSCACertificate.
   Used when running server components of Pelican.
 type: filename
-root_default: /etc/pelican/certificates/tlsca.key
-default: "$ConfigBase/certificates/tlsca.key"
+default: "${ConfigBase}/certificates/tlsca.key"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSKey
@@ -3000,8 +3089,7 @@ description: |+
   in the TLSCertificateChain.
   Used when running server components of Pelican.
 type: filename
-root_default: /etc/pelican/certificates/tls.key
-default: "$ConfigBase/certificates/tls.key"
+default: "${ConfigBase}/certificates/tls.key"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
@@ -3031,14 +3119,19 @@ description: |+
 
   Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`.
 type: url
-default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
+default: https://${Server.Hostname}:${Server.WebPort}
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.Hostname
 description: |+
-  The server's hostname, by default it's os.Hostname().
+  The server's hostname. Defaults to the system hostname as reported by the operating system
+  (via Go's os.Hostname, not the $HOSTNAME environment variable). This value is a "seed
+  parameter" — it is computed at runtime before any generated defaults run, so other
+  parameters that reference ${Server.Hostname} will resolve correctly. The $HOSTNAME
+  shown below is a documentary approximation; the actual value comes from os.Hostname().
+  Can be overridden if the server should advertise a different hostname externally.
 type: string
-default: none
+default: $HOSTNAME
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.HealthMonitoringPublic
@@ -3095,14 +3188,14 @@ description: |+
   If the server's web UI has not yet been configured, this file will
   contain the activation code necessary to turn it on.
 type: filename
-default: $ConfigBase/server-web-activation-code
+default: ${ConfigBase}/server-web-activation-code
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIPasswordFile
 description: |+
   A filepath specifying where the server's web UI password file should be stored.
 type: filename
-default: $ConfigBase/server-web-passwd
+default: ${ConfigBase}/server-web-passwd
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.SessionSecretFile
@@ -3111,9 +3204,10 @@ description: |+
 
   This is used for sending redirect request for OAuth2 authentication follow.
   This is also used for CSRF auth key.
+
+  The default content of the file is the hash of the concatenation of "pelican" and the DER form of the issuer key.
 type: filename
-default: $ConfigBase/session-secret
-  The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
+default: ${ConfigBase}/session-secret
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.WebReadOnly
@@ -3154,8 +3248,7 @@ name: Server.WebConfigFile
 description: |+
   A filepath to the file where web-based configuration changes are stored
 type: filename
-root_default: /etc/pelican/web-config.yaml
-default: "$ConfigBase/web-config.yaml"
+default: "${ConfigBase}/web-config.yaml"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIAdminUsers
@@ -3267,7 +3360,7 @@ description: |+
   A filepath to the intended location of the server's database.
 type: filename
 root_default: /var/lib/pelican/pelican.sqlite
-default: $ConfigBase/pelican.sqlite
+default: ${ConfigBase}/pelican.sqlite
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.DatabaseBackup.Location
@@ -3276,7 +3369,7 @@ description: |+
   Each backup file is compressed and encrypted using the server's issuer keys.
 type: filename
 root_default: /var/lib/pelican/backups
-default: $ConfigBase/backups
+default: ${ConfigBase}/backups
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.DatabaseBackup.Frequency
@@ -3359,7 +3452,7 @@ name: Issuer.IssuerClaimValue
 description: |+
   Contents of the issuer (`iss`) claim in the generated tokens
 type: string
-default: $(Server.ExternalWebUrl)
+default: ${Server.ExternalWebUrl}
 components: ["origin"]
 ---
 name: Issuer.AuthenticationSource
@@ -3600,8 +3693,7 @@ description: |+
   This is a required parameter for the origin/cache/director server if
   `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
-root_default: /etc/pelican/oidc-client-id
-default: $ConfigBase/oidc-client-id
+default: ${ConfigBase}/oidc-client-id
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientID
@@ -3625,8 +3717,7 @@ description: |+
   This is a required parameter for the origin/cache/director server if
   `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
-root_default: /etc/pelican/oidc-client-secret
-default: $ConfigBase/oidc-client-secret
+default: ${ConfigBase}/oidc-client-secret
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.DeviceAuthEndpoint
@@ -3752,8 +3843,7 @@ description: |+
   If this file is not present, it will be auto-created with a default policy of
   blocking all indexing.
 type: filename
-root_default: /etc/pelican/robots.txt
-default: $ConfigBase/robots.txt
+default: ${ConfigBase}/robots.txt
 components: ["origin"]
 ---
 name: Xrootd.ScitokensConfig
@@ -3763,8 +3853,7 @@ description: |+
   This file allows arbitrary changes to the authorization configuration and will be merged with any
   auto-generated configuration; it's recommended for use by experts only.
 type: filename
-root_default: /etc/pelican/xrootd/scitokens.cfg
-default: $ConfigBase/xrootd/scitokens.cfg
+default: ${ConfigBase}/xrootd/scitokens.cfg
 components: ["cache", "origin"]
 ---
 name: Xrootd.Mount
@@ -3778,14 +3867,14 @@ name: Xrootd.MacaroonsKeyFile
 description: |+
   The filepath to a Macaroons key for setting up authorization in XRootD.
 type: string
-default: none
+default: ${ConfigBase}/macaroons-secret
 components: ["origin"]
 ---
 name: Xrootd.Authfile
 description: |+
   The filepath to an auth file for setting up authorization in XRootD.
 type: string
-default: none
+default: ${ConfigBase}/xrootd/authfile
 components: ["cache", "origin"]
 ---
 name: Xrootd.AuthRefreshInterval
@@ -3881,7 +3970,7 @@ description: |+
 
   For both cahces/origins the sitename will be displayed as the service's name in the federation's Director.
 type: string
-default: none
+default: ${Server.Hostname}
 components: ["cache", "origin"]
 ---
 name: Xrootd.MaxStartupWait
@@ -3955,7 +4044,7 @@ description: |+
   A filepath where Prometheus should host its monitoring data.
 type: string
 root_default: /var/lib/pelican/monitoring/data
-default: $ConfigBase/monitoring/data
+default: ${ConfigBase}/monitoring/data
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PortLower
@@ -4168,8 +4257,7 @@ description: |+
 
   A filepath to the location of the JWT used for authenticating amqp connection.
 type: filename
-default: $ConfigBase/shoveler-token
-root_default: /etc/pelican/shoveler-token
+default: ${ConfigBase}/shoveler-token
 components: ["origin", "cache"]
 ---
 name: Shoveler.StompUsername
@@ -4244,7 +4332,7 @@ description: |+
   the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
 type: filename
 root_default: /var/spool/pelican/shoveler/queue
-default: $ConfigBase/shoveler/queue
+default: ${ConfigBase}/shoveler/queue
 components: ["origin", "cache"]
 ---
 name: Shoveler.IPMapping
@@ -4334,7 +4422,7 @@ description: |+
   will be stored at `<path>/.lot/lotman_cpp.sqlite`.
 type: filename
 root_default: /var/lib/lotman
-default: $ConfigBase
+default: ${ConfigBase}
 components: ["cache"]
 ---
 name: Lotman.DbLocation
@@ -4346,7 +4434,7 @@ description: |+
   will be stored at <path>/.lot/lotman_cpp.sqlite.
 type: filename
 root_default: /var/lib/lotman
-default: $ConfigBase
+default: ${ConfigBase}
 deprecated: true
 replacedby: ["Lotman.LotHome"]
 components: ["cache"]
@@ -4505,7 +4593,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableCacheX509
@@ -4514,7 +4601,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["cache"]
 ---
 name: Topology.DisableOriginX509
@@ -4523,7 +4609,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["origin"]
 ---
 name: Topology.DisableCaches
@@ -4532,7 +4617,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableOrigins
@@ -4541,5 +4625,4 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director", "registry"]
