@@ -938,6 +938,12 @@ func TestValidatePosixPermissions(t *testing.T) {
 	// supplementary membership (not the primary GID).  Before the fix, the check would
 	// fall through to world permission bits and incorrectly deny access.
 	t.Run("SupplementaryGroupAccess", func(t *testing.T) {
+		// Chowning a file to a different UID requires root (or CAP_CHOWN on Linux);
+		// unprivileged CI runners will get EPERM.  Skip rather than fail there.
+		if os.Geteuid() != 0 {
+			t.Skip("requires root to chown the test directory to another user")
+		}
+
 		daemonUser, err := config.GetDaemonUserInfo()
 		require.NoError(t, err)
 
