@@ -69,7 +69,7 @@ func TestCollectionsAPI(t *testing.T) {
 	defer cancel()
 
 	testCfgDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(testCfgDir))
+	require.NoError(t, param.ConfigBase.Set(testCfgDir))
 
 	// set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")

@@ -35,10 +35,10 @@ export PELICAN_SERVER_WEBPORT=0
 export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/xrootdRunLocation"
 export PELICAN_ORIGIN_ENABLEVOMS=false
 
-export PELICAN_CONFIGDIR="${TEST_ROOT}"
+export PELICAN_CONFIGBASE="${TEST_ROOT}"
 export PELICAN_RUNTIMEDIR="${TEST_ROOT}"
 export PELICAN_SERVER_DBLOCATION="${TEST_ROOT}/test-registry.sql"
-export PELICAN_CONFIG="${PELICAN_CONFIGDIR}/empty.yaml"
+export PELICAN_CONFIG="${PELICAN_CONFIGBASE}/empty.yaml"
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_OIDC_CLIENTSECRETFILE="${TEST_ROOT}/oidc-secret"
 echo "Placeholder OIDC secret" > "${TEST_ROOT}/oidc-secret"
@@ -72,7 +72,7 @@ cleanup() {
     # Clean up temporary files
     rm -rf "${TEST_ROOT:-}"
 
-    unset PELICAN_CONFIGDIR
+    unset PELICAN_CONFIGBASE
     unset PELICAN_RUNTIMEDIR
     unset PELICAN_FEDERATION_DIRECTORURL
     unset PELICAN_FEDERATION_REGISTRYURL
@@ -104,12 +104,12 @@ pid_federationServe=$!
 trap cleanup EXIT
 
 # Wait for the address file to be created
-# Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigDir
+# Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigBase
 if [ -n "$XDG_RUNTIME_DIR" ]; then
     RUNTIME_BASE="${XDG_RUNTIME_DIR%/}"
     ADDRESS_FILE="${RUNTIME_BASE}/pelican/pelican.addresses"
 else
-    CONFIG_BASE="${PELICAN_CONFIGDIR%/}"
+    CONFIG_BASE="${PELICAN_CONFIGBASE%/}"
     ADDRESS_FILE="${CONFIG_BASE}/pelican.addresses"
 fi
 echo "Waiting for address file: $ADDRESS_FILE"

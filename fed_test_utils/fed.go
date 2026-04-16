@@ -133,7 +133,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to a per-test location to avoid race conditions in parallel tests
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	// Configure all relevant logging levels. We don't let the XRootD

@@ -39,7 +39,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	defer server.Close()
 
 	// Set up server config like a real cache.
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 

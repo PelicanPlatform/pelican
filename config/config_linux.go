@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -32,7 +32,7 @@ func InitServerOSDefaults(v *viper.Viper) error {
 	// For Linux, even if we have well-known system CAs, we don't want to
 	// use them, because we want to always generate our own CA if Server_TLSCertificateChain (host certificate chain)
 	// is not explicitly set so that we can sign our host cert by our CA instead of self-signing
-	configDir := v.GetString("ConfigDir")
+	configDir := v.GetString(param.ConfigBase.GetName())
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 	return nil
 }
