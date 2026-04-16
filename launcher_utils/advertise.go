@@ -201,7 +201,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			if resp.StatusCode > 299 {
 				var respErr directorResponse
 				if unmarshalErr := json.Unmarshal(respbody, &respErr); unmarshalErr != nil { // Error creating json
-					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
+					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(respbody))
 				}
 				if respErr.ApprovalError {
 					// Removed the "Please contact admin..." section since the director now provides contact information
@@ -212,7 +212,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 				}
 				var respSimpleError server_structs.SimpleApiResp
 				if unmarshalErr := json.Unmarshal(respbody, &respSimpleError); unmarshalErr != nil { // Error creating json
-					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
+					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(respbody))
 				}
 				log.Warningln("Error response from", directorUrl.String(), "status:", resp.StatusCode, "message:", respSimpleError.Msg)
 				return errors.Errorf("error during director advertisement: %v", respSimpleError.Msg)
