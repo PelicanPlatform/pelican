@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -1611,7 +1611,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	defer cancel()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err = initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 

@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -128,7 +128,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to a per-test location to avoid race conditions in parallel tests
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	// Configure all relevant logging levels. We don't let the XRootD

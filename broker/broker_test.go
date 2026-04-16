@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -139,7 +139,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 
 	server_utils.ResetTestState()
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(filepath.Join(dirpath, "config")))
+	require.NoError(t, param.ConfigBase.Set(filepath.Join(dirpath, "config")))
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(dirpath, "ns-registry.sqlite")))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/foo"))

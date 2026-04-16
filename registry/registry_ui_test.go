@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -74,7 +74,7 @@ func TestListNamespaces(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-server.com"))
 
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	require.NoError(t, param.Origin_Port.Set(0))
 	test_utils.MockFederationRoot(t, nil, nil)

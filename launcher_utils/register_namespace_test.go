@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -62,7 +62,7 @@ func TestRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
@@ -187,7 +187,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
 
 	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
 	// function overrides the IssuerKeysDirectory value if not already set. Since we don't

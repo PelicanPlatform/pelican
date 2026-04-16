@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -43,7 +43,7 @@ func TestWriteAddressFile(t *testing.T) {
 	}
 
 	// Set up ConfigDir
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	setRuntimeDir(t)
 
 	t.Run("WriteAddressFileWithAllModules", func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestWriteAddressFile(t *testing.T) {
 	})
 
 	t.Run("WriteAddressFileOriginOnly", func(t *testing.T) {
-		require.NoError(t, param.ConfigDir.Set(tmpDir))
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://origin.example.com:9443"))
 		require.NoError(t, param.Origin_Url.Set("https://origin.example.com:9444"))
@@ -102,7 +102,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("WriteAddressFileDirectorOnly", func(t *testing.T) {
 		// Reset and set up new test parameters
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://director.example.com:8443"))
 
@@ -140,7 +140,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("AtomicWrite", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://atomic.example.com:8443"))
 
@@ -164,7 +164,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("ParseableFormat", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://parseable.example.com:8443"))
 		require.NoError(t, param.Origin_Url.Set("https://parseable.example.com:8444"))
@@ -200,7 +200,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("ReadAddressFile", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://read.example.com:8443"))
 		require.NoError(t, param.Origin_Url.Set("https://read.example.com:8444"))
@@ -226,7 +226,7 @@ func TestWriteAddressFile(t *testing.T) {
 		// Reset and set up with a different directory
 		viper.Reset()
 		nonExistentDir := filepath.Join(tmpDir, "nonexistent")
-		viper.Set("ConfigDir", nonExistentDir)
+		require.NoError(t, param.ConfigBase.Set(nonExistentDir))
 		viper.Set("RuntimeDir", nonExistentDir)
 
 		// Try to read the address file - should fail

@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -54,7 +54,7 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	tmpDir := t.TempDir()
 	server_utils.ResetTestState()
 
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	require.NoError(t, param.Xrootd_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Cache_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
@@ -198,7 +198,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	server_utils.ResetTestState()
 
 	require.NoError(t, param.Cache_RunLocation.Set(dirname))
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	err = config.InitServer(ctx, server_structs.CacheType)
@@ -373,7 +373,7 @@ func TestUpdateAuth(t *testing.T) {
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
-	require.NoError(t, param.ConfigDir.Set(configDirname))
+	require.NoError(t, param.ConfigBase.Set(configDirname))
 	authfileName := filepath.Join(configDirname, "authfile")
 	require.NoError(t, param.Xrootd_Authfile.Set(authfileName))
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
@@ -476,7 +476,7 @@ func TestCopyCertificates(t *testing.T) {
 	server_utils.ResetTestState()
 	require.NoError(t, param.Logging_Level.Set("Debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
-	require.NoError(t, param.ConfigDir.Set(configDirname))
+	require.NoError(t, param.ConfigBase.Set(configDirname))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -570,7 +570,7 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	runDir := t.TempDir()
 	configDir := t.TempDir()
 	require.NoError(t, param.Origin_RunLocation.Set(runDir))
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -771,7 +771,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	})
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Cache_RunLocation.Set(dir))
 
 	// Start with a valid authfile and scitokens so the first cycles succeed
@@ -842,7 +842,7 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 	})
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Cache_RunLocation.Set(dir))
 	require.NoError(t, param.Xrootd_AutoShutdownEnabled.Set(true))
 	require.NoError(t, param.Xrootd_ConfigUpdateFailureTimeout.Set(1*time.Second))

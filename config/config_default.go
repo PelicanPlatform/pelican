@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -34,10 +34,10 @@ func InitServerOSDefaults(v *viper.Viper) error {
 	// a well-known location as is expected by XRootD. We want to always generate our own CA
 	// if Server_TLSCertificateChain (host certificate chain) is not explicitly set so that
 	// we can sign our host cert by our CA instead of self-signing
-	tlscaFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlsca.pem")
+	tlscaFile := filepath.Join(v.GetString(param.ConfigBase.GetName()), "certificates", "tlsca.pem")
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tlscaFile)
 
-	tlscaKeyFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlscakey.pem")
+	tlscaKeyFile := filepath.Join(v.GetString(param.ConfigBase.GetName()), "certificates", "tlscakey.pem")
 	v.SetDefault(param.Server_TLSCAKey.GetName(), tlscaKeyFile)
 
 	if err := os.MkdirAll(filepath.Dir(tlscaFile), 0755); err != nil {
