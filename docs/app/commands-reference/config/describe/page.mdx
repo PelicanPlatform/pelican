@@ -36,7 +36,9 @@ pelican config describe server.webPort
   -f, --federation string   Pelican federation to utilize
       --json                output results in JSON format
   -L, --log string          Specified log output file
+  -s, --service string      Load config as if running the given service. Valid values: cache, origin, director, registry. Mutually exclusive with --config.
       --version             Print the version and exit
+      --with-discovery      Enable federation discovery to resolve Federation.DirectorUrl, Federation.RegistryUrl, etc. Without this flag, no network calls are made.
 ```
 
 ### SEE ALSO

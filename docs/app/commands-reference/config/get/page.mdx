@@ -33,6 +33,7 @@ pelican config get log monitor -m origin -m cache --include-deprecated
       --include-deprecated   Include deprecated configuration parameters
       --include-hidden       Include hidden configuration parameters
   -m, --module config get    Specify modules to filter the output of config get. The recognized modules are `client`, `registry`, `director`, `origin`, `cache`, and `localcache`. Multiple modules can be specified at the same time, for example: `config get -m cache -m origin`. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no module-based filter is applied to the search space.
+  -v, --verbose              Show the source of each configuration value (e.g. config file path, environment variable)
 ```
 
 ### Options inherited from parent commands
@@ -43,7 +44,9 @@ pelican config get log monitor -m origin -m cache --include-deprecated
   -f, --federation string   Pelican federation to utilize
       --json                output results in JSON format
   -L, --log string          Specified log output file
+  -s, --service string      Load config as if running the given service. Valid values: cache, origin, director, registry. Mutually exclusive with --config.
       --version             Print the version and exit
+      --with-discovery      Enable federation discovery to resolve Federation.DirectorUrl, Federation.RegistryUrl, etc. Without this flag, no network calls are made.
 ```
 
 ### SEE ALSO
