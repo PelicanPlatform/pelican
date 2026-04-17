@@ -37,6 +37,7 @@ Server:
   StartupTimeout: 10s
   UILoginRateLimit: 1
   UnprivilegedUser: pelican
+  SSRFProtection: true
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"

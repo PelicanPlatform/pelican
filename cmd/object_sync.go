@@ -21,7 +21,6 @@ package main
 import (
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -31,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -55,36 +55,14 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	objectCmd.AddCommand(syncCmd)
 }
 
-func getLastScheme(scheme string) string {
-	idx := strings.LastIndex(scheme, "+")
-	if idx == -1 {
-		return scheme
-	}
-	return scheme[idx+1:]
-}
-
 // Returns true if the input is a url-like object that
 // pelican can consume.
-//
-// Schemes we understand are "osdf", "pelican",
-// "foo+osdf", or "foo+pelican" where "foo" is some arbitrary
-// prefix not containing a "/"
 func isPelicanUrl(input string) bool {
-	prefix, _, found := strings.Cut(input, "://")
-	if !found {
+	u, err := url.Parse(input)
+	if err != nil || u.Scheme == "" {
 		return false
 	}
-	if strings.Contains(prefix, "/") {
-		return false
-	}
-	scheme := getLastScheme(prefix)
-	if scheme != "pelican" && scheme != "osdf" {
-		return false
-	}
-	if _, err := url.Parse(input); err != nil {
-		return false
-	}
-	return true
+	return pelican_url.IsPelicanScheme(u.Scheme)
 }
 
 func syncMain(cmd *cobra.Command, args []string) {
@@ -221,6 +199,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 				client.WithTokenLocation(tokenLocation),
 				client.WithSynchronize(client.SyncSize),
 				client.WithCaches(caches...),
+				client.WithDryRun(dryRun),
 			}
 			if _, err = client.DoCopy(ctx, src, dest, true, options...); err != nil {
 				lastSrc = src

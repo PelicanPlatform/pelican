@@ -35,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -274,12 +275,19 @@ func copyMain(cmd *cobra.Command, args []string) {
 	directRead, _ := cmd.Flags().GetBool("direct")
 	if directRead {
 		for i, src := range source {
-			// Check for conflicting prefercached parameter
 			u, pErr := url.Parse(src)
 			if pErr != nil {
 				log.Errorln("Failed to parse URL:", pErr)
 				os.Exit(1)
 			}
+
+			// --direct is only meaningful for pelican/osdf URLs
+			if !pelican_url.IsPelicanScheme(u.Scheme) {
+				log.Warnln("--direct flag is ignored for non-pelican source:", src)
+				continue
+			}
+
+			// Check for conflicting prefercached parameter
 			if u.Query().Has("prefercached") {
 				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
 				os.Exit(1)

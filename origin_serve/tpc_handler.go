@@ -19,20 +19,70 @@
 package origin_serve
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/version"
 )
+
+// tpcProgressWriter wraps an io.Writer and tracks bytes written and
+// transfer rate using an exponentially weighted moving average, mirroring
+// the approach used by the client's progressWriter.
+type tpcProgressWriter struct {
+	writer         io.Writer
+	bytesWritten   atomic.Int64
+	firstByteTime  time.Time
+	bytesPerSecond atomic.Int64
+	lastRateSample time.Time
+}
+
+func (pw *tpcProgressWriter) Write(p []byte) (n int, err error) {
+	if pw.firstByteTime.IsZero() && len(p) > 0 {
+		pw.firstByteTime = time.Now()
+	}
+	now := time.Now()
+	startupTime := now.Sub(pw.firstByteTime)
+	startupTimeUS := startupTime.Microseconds()
+	if startupTime < 5*time.Second && startupTimeUS > 0 {
+		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / startupTimeUS)
+		pw.lastRateSample = now
+	} else {
+		elapsed := now.Sub(pw.lastRateSample)
+		pw.lastRateSample = now
+		elapsedUS := elapsed.Microseconds()
+		if elapsedUS > 0 {
+			oldBPS := pw.bytesPerSecond.Load()
+			alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
+			recentRate := 1000000 * int64(len(p)) / elapsedUS
+			pw.bytesPerSecond.Store(int64(float64(oldBPS)*alpha + float64(recentRate)*(1-alpha)))
+		}
+	}
+	n, err = pw.writer.Write(p)
+	pw.bytesWritten.Add(int64(n))
+	return n, err
+}
+
+func (pw *tpcProgressWriter) BytesComplete() int64 {
+	return pw.bytesWritten.Load()
+}
+
+func (pw *tpcProgressWriter) BytesPerSecond() int64 {
+	return pw.bytesPerSecond.Load()
+}
 
 // handleCopyTPC implements HTTP third-party copy (TPC) in "pull" mode.
 //
@@ -93,8 +143,10 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 	}
 	log.WithFields(fields).Info("Starting third-party copy")
 
-	// Build the GET request to pull the object from the source
-	getReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, sourceHeader, nil)
+	// Build the GET request to pull the object from the source.
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceHeader, nil)
 	if err != nil {
 		log.WithFields(fields).Errorf("Failed to create GET request to source: %v", err)
 		c.String(http.StatusInternalServerError, "Failed to create request to source")
@@ -112,7 +164,9 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 	// Propagate Pelican tracing headers to the source request
 	getReq = server_utils.StashPelicanHeaders(getReq)
 
-	client := &http.Client{Transport: config.GetTransport()}
+	client := &http.Client{
+		Transport: config.GetSSRFHttpTransport(),
+	}
 
 	getResp, err := client.Do(getReq)
 	if err != nil {
@@ -152,36 +206,113 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 	c.Writer.WriteHeader(http.StatusCreated)
 	c.Writer.Flush()
 
-	// Copy data from source to destination in chunks, emitting
-	// performance markers periodically.
-	const markerInterval int64 = 32 * 1024 * 1024 // emit a marker every ~32 MiB
-	buf := make([]byte, 256*1024)                 // 256 KiB read buffer
-	var totalCopied int64
-	var sinceLastMarker int64
-	copyErr := func() error {
-		for {
-			n, readErr := getResp.Body.Read(buf)
-			if n > 0 {
-				written, writeErr := destFile.Write(buf[:n])
-				if writeErr != nil {
-					return fmt.Errorf("write to destination failed: %w", writeErr)
-				}
-				totalCopied += int64(written)
-				sinceLastMarker += int64(written)
+	// Copy data from source to destination, monitoring progress with
+	// the same timeout mechanisms used by the client's downloadHTTP:
+	//   - Stopped transfer timeout: cancel if no bytes flow for too long
+	//   - Slow transfer ramp-up: grace period before enforcing minimum speed
+	//   - Slow transfer window: cancel if speed stays below limit after ramp-up
+	stoppedTransferTimeout := param.Client_StoppedTransferTimeout.GetDuration()
+	slowTransferRampupTime := param.Client_SlowTransferRampupTime.GetDuration()
+	slowTransferWindow := param.Client_SlowTransferWindow.GetDuration()
+	downloadLimit := int64(param.Client_MinimumDownloadSpeed.GetInt())
 
-				if sinceLastMarker >= markerInterval {
-					writePerfMarker(c.Writer, totalCopied)
-					sinceLastMarker = 0
-				}
-			}
-			if readErr != nil {
-				if readErr == io.EOF {
-					return nil
-				}
-				return fmt.Errorf("read from source failed: %w", readErr)
-			}
-		}
+	log.WithFields(fields).Debugf("TPC timeout config: stopped=%s, ramp-up=%s, slow window=%s, min speed=%d B/s",
+		stoppedTransferTimeout, slowTransferRampupTime, slowTransferWindow, downloadLimit)
+
+	pw := &tpcProgressWriter{writer: destFile}
+
+	// Run the copy in a background goroutine so the main goroutine can
+	// monitor progress and enforce timeouts.  Cancelling `ctx` (via
+	// cancel()) will cause the response body read to return an error,
+	// terminating the goroutine.
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(pw, getResp.Body)
+		done <- err
+		close(done)
 	}()
+
+	// Ticker for checking transfer speed and stopped-transfer (every 500ms)
+	speedTicker := time.NewTicker(500 * time.Millisecond)
+	defer speedTicker.Stop()
+
+	// Ticker for emitting performance markers (every ~2 seconds)
+	markerTicker := time.NewTicker(2 * time.Second)
+	defer markerTicker.Stop()
+
+	copyStart := time.Now()
+	var lastBytesComplete int64
+	var noProgressStartTime time.Time
+	startBelowLimit := time.Time{}
+	var lastMarkerBytes int64
+
+	var copyErr error
+Loop:
+	for {
+		select {
+		case <-markerTicker.C:
+			current := pw.BytesComplete()
+			if current != lastMarkerBytes {
+				writePerfMarker(c.Writer, current)
+				lastMarkerBytes = current
+			}
+
+		case <-speedTicker.C:
+			currentDownloaded := pw.BytesComplete()
+
+			// --- Stopped transfer check ---
+			if currentDownloaded == lastBytesComplete {
+				if noProgressStartTime.IsZero() {
+					noProgressStartTime = time.Now()
+				} else if time.Since(noProgressStartTime) > stoppedTransferTimeout {
+					copyErr = fmt.Errorf("transfer stalled: no bytes received for %s (transferred %d bytes)",
+						time.Since(noProgressStartTime).Round(time.Second), currentDownloaded)
+					log.WithFields(fields).Error(copyErr)
+					cancel()
+					<-done
+					break Loop
+				}
+			} else {
+				noProgressStartTime = time.Time{}
+			}
+			lastBytesComplete = currentDownloaded
+
+			// --- Slow transfer check ---
+			transferRate := pw.BytesPerSecond()
+			if downloadLimit > 0 && transferRate < downloadLimit {
+				if time.Since(copyStart) < slowTransferRampupTime {
+					continue
+				} else if startBelowLimit.IsZero() {
+					log.WithFields(fields).Warnf("TPC transfer speed %d B/s is below minimum %d B/s; will cancel if it persists for %s",
+						transferRate, downloadLimit, slowTransferWindow)
+					startBelowLimit = time.Now()
+					continue
+				} else if time.Since(startBelowLimit) < slowTransferWindow {
+					continue
+				}
+				copyErr = fmt.Errorf("transfer too slow: %d B/s is below minimum %d B/s (persisted for %s, transferred %d bytes)",
+					transferRate, downloadLimit, time.Since(startBelowLimit).Round(time.Second), currentDownloaded)
+				log.WithFields(fields).Error(copyErr)
+				cancel()
+				<-done
+				break Loop
+			} else {
+				startBelowLimit = time.Time{}
+			}
+
+		case readErr := <-done:
+			if readErr != nil {
+				copyErr = fmt.Errorf("read from source failed: %w", readErr)
+			}
+			break Loop
+
+		case <-ctx.Done():
+			copyErr = ctx.Err()
+			break Loop
+		}
+	}
+
+	totalCopied := pw.BytesComplete()
 
 	// Close the destination file; surface any deferred write/sync errors
 	if closeErr := destFile.Close(); closeErr != nil && copyErr == nil {
@@ -192,6 +323,10 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 		log.WithFields(fields).Errorf("Third-party copy failed: %v", copyErr)
 		fmt.Fprintf(c.Writer, "failure: %s\n", copyErr.Error())
 		c.Writer.Flush()
+		// Clean up the partial destination file on failure
+		if removeErr := fs.RemoveAll(c.Request.Context(), destPath); removeErr != nil {
+			log.WithFields(fields).Warningf("Failed to clean up partial destination file after copy failure: %v", removeErr)
+		}
 		return
 	}
 
@@ -201,6 +336,10 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 		log.WithFields(fields).Error(msg)
 		fmt.Fprintf(c.Writer, "failure: %s\n", msg)
 		c.Writer.Flush()
+		// Clean up the incomplete destination file
+		if removeErr := fs.RemoveAll(c.Request.Context(), destPath); removeErr != nil {
+			log.WithFields(fields).Warningf("Failed to clean up incomplete destination file: %v", removeErr)
+		}
 		return
 	}
 
@@ -279,8 +418,11 @@ func forwardTransferHeaders(inbound http.Header, dst *http.Request) {
 			log.Debugf("TPC: skipping denied TransferHeader override for %s", canonical)
 			continue
 		}
+		// Override any existing header values on dst, but preserve
+		// all values provided on the inbound request.
+		dst.Header.Del(canonical)
 		for _, v := range values {
-			dst.Header.Set(canonical, v)
+			dst.Header.Add(canonical, v)
 		}
 	}
 }

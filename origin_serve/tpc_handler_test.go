@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -33,8 +34,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/webdav"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
+
+// toLocalhostURL rewrites an httptest URL (http://127.0.0.1:PORT) to use
+// "localhost" instead of the literal IP for consistency.
+func toLocalhostURL(serverURL string) string {
+	u, _ := url.Parse(serverURL)
+	u.Host = "localhost:" + u.Port()
+	return u.String()
+}
 
 // mockBackend is a minimal OriginBackend for testing the TPC handler.
 type mockBackend struct {
@@ -63,6 +74,14 @@ func setupTPCRouter(backend *mockBackend) *gin.Engine {
 }
 
 func TestHandleCopyTPC(t *testing.T) {
+	// Disable SSRF protection for functional tests that connect to
+	// httptest servers on localhost. The SSRF dialer is thoroughly
+	// tested in config/ssrf_transport_test.go.
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
+	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+	config.ResetSSRFTransportForTest()
+
 	fileContent := []byte("hello from the TPC source server")
 
 	// Source server that serves GET and HEAD
@@ -86,7 +105,7 @@ func TestHandleCopyTPC(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/testfile.txt", nil)
-		req.Header.Set("Source", srcServer.URL+"/testfile.txt")
+		req.Header.Set("Source", toLocalhostURL(srcServer.URL)+"/testfile.txt")
 		req.Header.Set("Authorization", "Bearer dest-token")
 		req.Header.Set("TransferHeaderAuthorization", "Bearer src-token")
 		w := httptest.NewRecorder()
@@ -135,6 +154,52 @@ func TestHandleCopyTPC(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "Invalid Source URL")
 	})
 
+	t.Run("SSRFBlocksLoopbackIP", func(t *testing.T) {
+		// Enable SSRF protection for this subtest
+		require.NoError(t, param.Server_SSRFProtection_Disabled.Set(false))
+		require.NoError(t, param.Server_SSRFProtection_AllowedCIDRs.Set([]string{}))
+		config.ResetSSRFTransportForTest()
+		t.Cleanup(func() {
+			require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+			config.ResetSSRFTransportForTest()
+		})
+
+		backend := newMockBackend(t)
+		router := setupTPCRouter(backend)
+
+		req := httptest.NewRequest("COPY", "/testfile.txt", nil)
+		req.Header.Set("Source", "http://127.0.0.1:8080/testfile.txt")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadGateway, w.Code)
+		assert.Contains(t, w.Body.String(), "not publicly routable")
+	})
+
+	t.Run("SSRFBlocksPrivateIP", func(t *testing.T) {
+		// Enable SSRF protection for this subtest
+		require.NoError(t, param.Server_SSRFProtection_Disabled.Set(false))
+		require.NoError(t, param.Server_SSRFProtection_AllowedCIDRs.Set([]string{}))
+		config.ResetSSRFTransportForTest()
+		t.Cleanup(func() {
+			require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+			config.ResetSSRFTransportForTest()
+		})
+
+		backend := newMockBackend(t)
+		router := setupTPCRouter(backend)
+
+		req := httptest.NewRequest("COPY", "/testfile.txt", nil)
+		req.Header.Set("Source", "http://10.0.0.1:8080/testfile.txt")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadGateway, w.Code)
+		assert.Contains(t, w.Body.String(), "not publicly routable")
+	})
+
 	t.Run("SourceServerError", func(t *testing.T) {
 		errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
@@ -146,7 +211,7 @@ func TestHandleCopyTPC(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/testfile.txt", nil)
-		req.Header.Set("Source", errServer.URL+"/testfile.txt")
+		req.Header.Set("Source", toLocalhostURL(errServer.URL)+"/testfile.txt")
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -169,7 +234,7 @@ func TestHandleCopyTPC(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/auth-test.txt", nil)
-		req.Header.Set("Source", authCheckServer.URL+"/src.txt")
+		req.Header.Set("Source", toLocalhostURL(authCheckServer.URL)+"/src.txt")
 		req.Header.Set("TransferHeaderAuthorization", "Bearer my-source-token")
 		w := httptest.NewRecorder()
 
@@ -193,7 +258,7 @@ func TestHandleCopyTPC(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/hdr-test.txt", nil)
-		req.Header.Set("Source", headerServer.URL+"/src.txt")
+		req.Header.Set("Source", toLocalhostURL(headerServer.URL)+"/src.txt")
 		// These should be forwarded (prefix stripped)
 		req.Header.Set("TransferHeaderAuthorization", "Bearer tok")
 		req.Header.Set("TransferHeaderX-Custom-Meta", "some-value")
@@ -222,7 +287,7 @@ func TestHandleCopyTPC(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/markers.txt", nil)
-		req.Header.Set("Source", srcServer.URL+"/testfile.txt")
+		req.Header.Set("Source", toLocalhostURL(srcServer.URL)+"/testfile.txt")
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -264,6 +329,13 @@ func TestGetActionFromMethodCOPY(t *testing.T) {
 }
 
 func TestHandleCopyTPCMidTransferFailures(t *testing.T) {
+	// Disable SSRF protection for functional tests that connect to
+	// httptest servers on localhost.
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
+	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+	config.ResetSSRFTransportForTest()
+
 	t.Run("SourceDisconnectsMidStream", func(t *testing.T) {
 		// Source server sends some bytes then abruptly closes the connection
 		const totalBytes = 8192
@@ -282,7 +354,7 @@ func TestHandleCopyTPCMidTransferFailures(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/partial.txt", nil)
-		req.Header.Set("Source", srcServer.URL+"/big.dat")
+		req.Header.Set("Source", toLocalhostURL(srcServer.URL)+"/big.dat")
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -319,7 +391,7 @@ func TestHandleCopyTPCMidTransferFailures(t *testing.T) {
 		router := setupTPCRouter(backend)
 
 		req := httptest.NewRequest("COPY", "/should-fail.txt", nil)
-		req.Header.Set("Source", srcServer.URL+"/data.bin")
+		req.Header.Set("Source", toLocalhostURL(srcServer.URL)+"/data.bin")
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -380,7 +452,8 @@ func (f *failAfterNBytesFile) Write(p []byte) (int, error) {
 	toWrite := int64(len(p))
 	if toWrite > f.remaining {
 		// Write partial, then fail on the next call
-		n, err := f.real.Write(p[:f.remaining])
+		nBytes := int(f.remaining)
+		n, err := f.real.Write(p[:nBytes])
 		f.remaining = 0
 		if err != nil {
 			return n, err

@@ -418,6 +418,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
 	"Server.RegistrationRetryInterval": false,
+	"Server.SSRFProtection.AllowedCIDRs": false,
+	"Server.SSRFProtection.BlockedCIDRs": false,
+	"Server.SSRFProtection.Disabled": false,
+	"Server.SSRFProtection.SkipDefaultBlocks": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
 	"Server.TLSCACertificateDirectory": false,
@@ -755,6 +759,8 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
 	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
 	"Server.Modules": func(c *Config) []string { return c.Server.Modules },
+	"Server.SSRFProtection.AllowedCIDRs": func(c *Config) []string { return c.Server.SSRFProtection.AllowedCIDRs },
+	"Server.SSRFProtection.BlockedCIDRs": func(c *Config) []string { return c.Server.SSRFProtection.BlockedCIDRs },
 	"Server.UIAdminUsers": func(c *Config) []string { return c.Server.UIAdminUsers },
 	"Shoveler.OutputDestinations": func(c *Config) []string { return c.Shoveler.OutputDestinations },
 }
@@ -975,6 +981,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Server.EnablePprof": func(c *Config) bool { return c.Server.EnablePprof },
 	"Server.EnableUI": func(c *Config) bool { return c.Server.EnableUI },
 	"Server.HealthMonitoringPublic": func(c *Config) bool { return c.Server.HealthMonitoringPublic },
+	"Server.SSRFProtection.Disabled": func(c *Config) bool { return c.Server.SSRFProtection.Disabled },
+	"Server.SSRFProtection.SkipDefaultBlocks": func(c *Config) bool { return c.Server.SSRFProtection.SkipDefaultBlocks },
 	"Server.WebReadOnly": func(c *Config) bool { return c.Server.WebReadOnly },
 	"Shoveler.Enable": func(c *Config) bool { return c.Shoveler.Enable },
 	"Shoveler.VerifyHeader": func(c *Config) bool { return c.Shoveler.VerifyHeader },
@@ -1482,6 +1490,10 @@ var allParameterNames = []string{
 	"Server.IssuerUrl",
 	"Server.Modules",
 	"Server.RegistrationRetryInterval",
+	"Server.SSRFProtection.AllowedCIDRs",
+	"Server.SSRFProtection.BlockedCIDRs",
+	"Server.SSRFProtection.Disabled",
+	"Server.SSRFProtection.SkipDefaultBlocks",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
 	"Server.TLSCACertificateDirectory",
@@ -1764,6 +1776,8 @@ var (
 	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
 	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Server_SSRFProtection_AllowedCIDRs = StringSliceParam{"Server.SSRFProtection.AllowedCIDRs"}
+	Server_SSRFProtection_BlockedCIDRs = StringSliceParam{"Server.SSRFProtection.BlockedCIDRs"}
 	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
 )
@@ -1891,6 +1905,8 @@ var (
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
+	Server_SSRFProtection_Disabled = BoolParam{"Server.SSRFProtection.Disabled"}
+	Server_SSRFProtection_SkipDefaultBlocks = BoolParam{"Server.SSRFProtection.SkipDefaultBlocks"}
 	Server_WebReadOnly = BoolParam{"Server.WebReadOnly"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
@@ -2194,6 +2210,8 @@ func init() {
 		"Server.AdminGroups": Server_AdminGroups,
 		"Server.DirectorUrls": Server_DirectorUrls,
 		"Server.Modules": Server_Modules,
+		"Server.SSRFProtection.AllowedCIDRs": Server_SSRFProtection_AllowedCIDRs,
+		"Server.SSRFProtection.BlockedCIDRs": Server_SSRFProtection_BlockedCIDRs,
 		"Server.UIAdminUsers": Server_UIAdminUsers,
 		"Shoveler.OutputDestinations": Shoveler_OutputDestinations,
 		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
@@ -2312,6 +2330,8 @@ func init() {
 		"Server.EnablePprof": Server_EnablePprof,
 		"Server.EnableUI": Server_EnableUI,
 		"Server.HealthMonitoringPublic": Server_HealthMonitoringPublic,
+		"Server.SSRFProtection.Disabled": Server_SSRFProtection_Disabled,
+		"Server.SSRFProtection.SkipDefaultBlocks": Server_SSRFProtection_SkipDefaultBlocks,
 		"Server.WebReadOnly": Server_WebReadOnly,
 		"Shoveler.Enable": Shoveler_Enable,
 		"Shoveler.VerifyHeader": Shoveler_VerifyHeader,
