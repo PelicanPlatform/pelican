@@ -401,6 +401,7 @@ var pluginPackageMap = map[string]string{
 	"libXrdHTTPServer":  "xrootd-s3-http",
 	"libXrdOssGlobus":   "xrootd-s3-http",
 	"libXrdPurgeLotMan": "xrootd-lotman",
+	"libXrdN2NPrefix":   "xrdcl-pelican",
 }
 
 // pluginBaseName strips the extension from a plugin filename (e.g. "libXrdS3.so" -> "libXrdS3").
@@ -424,10 +425,8 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 	missingPlugins := []string{}
 
 	if isOrigin {
-		// libXrdHttpPelican is required when drop privileges is enabled
-		if xrdConfig.Server.DropPrivileges {
-			checkAndAppendMissing(&missingPlugins, "libXrdHttpPelican.so", false)
-		}
+		// libXrdHttpPelican is always required for origins
+		checkAndAppendMissing(&missingPlugins, "libXrdHttpPelican.so", false)
 
 		// libXrdMacaroons is needed when macaroons are enabled
 		if xrdConfig.Origin.EnableMacaroons {
@@ -456,6 +455,8 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 		case "globus":
 			checkAndAppendMissing(&missingPlugins, "libXrdHTTPServer.so", false)
 			checkAndAppendMissing(&missingPlugins, "libXrdOssGlobus.so", false)
+		case "xroot":
+			checkAndAppendMissing(&missingPlugins, "libXrdN2NPrefix.so", false)
 		}
 	} else {
 		// Cache-specific checks

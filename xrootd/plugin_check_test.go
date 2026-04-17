@@ -367,11 +367,8 @@ func TestCheckPluginExists(t *testing.T) {
 }
 
 func TestValidateRequiredPlugins(t *testing.T) {
-	t.Run("OriginWithDropPrivileges", func(t *testing.T) {
+	t.Run("OriginAlwaysRequiresHttpPelican", func(t *testing.T) {
 		xrdConfig := &XrootdConfig{
-			Server: ServerConfig{
-				DropPrivileges: true,
-			},
 			Origin: OriginConfig{
 				StorageType: "posix",
 			},
@@ -427,6 +424,19 @@ func TestValidateRequiredPlugins(t *testing.T) {
 		if err != nil {
 			assert.Contains(t, err.Error(), "libXrdHTTPServer.so")
 			assert.Contains(t, err.Error(), "libXrdOssGlobus.so")
+		}
+	})
+
+	t.Run("OriginWithXrootStorage", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType: "xroot",
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdN2NPrefix.so")
 		}
 	})
 
