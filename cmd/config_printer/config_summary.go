@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -33,8 +33,11 @@ func configSummary(cmd *cobra.Command, args []string) {
 
 	config.InitConfigDir(defaultConfig)
 
-	defaultConfigMap := initClientAndServerConfig(defaultConfig)
-	currentConfigMap := initClientAndServerConfig(viper.GetViper())
+	defaultConfigMap := initClientAndServerConfig(defaultConfig, ConfigLoadOptions{})
+	currentConfigMap := initClientAndServerConfig(viper.GetViper(), ConfigLoadOptions{
+		Service:       service,
+		WithDiscovery: withDiscovery,
+	})
 
 	// Use JSON format if either global --json flag is set or subcommand flag --format=json is specified
 	if jsonFlag, _ := cmd.Root().PersistentFlags().GetBool("json"); jsonFlag {

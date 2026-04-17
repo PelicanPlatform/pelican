@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -45,14 +46,22 @@ func stripAnsiCodes(input string) string {
 
 // Mock configuration setup
 func setupMockConfig(t *testing.T) error {
-	// Setting Non-default values, mimics what we'd get from config file
-	require.NoError(t, param.Logging_Level.Set("trace"))
-	require.NoError(t, param.Logging_Cache_Http.Set("info"))
-	require.NoError(t, param.Logging_Cache_Xrootd.Set("info"))
-	require.NoError(t, param.Logging_Origin_Http.Set("info"))
+	tmpDir := t.TempDir()
 
-	// Set default config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	// Write a mock config file with the values we want to test.
+	configContent := `
+Logging:
+  Level: trace
+  Cache:
+    Http: info
+    Xrootd: info
+  Origin:
+    Http: info
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "pelican.yaml"), []byte(configContent), 0644))
+
+	// Set ConfigBase so InitConfigInternal finds pelican.yaml in our temp dir.
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 
 	config.InitConfigInternal(log.InfoLevel)
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
@@ -196,7 +205,9 @@ func TestConfigSummary(t *testing.T) {
 
 	got := strings.TrimSpace(strings.ToLower(stripAnsiCodes(buf.String())))
 
-	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: trace`, `        http: info`}
+	expectedLines := []string{`logging:`, `    level: trace`, `    cache:`, `    origin:`}
+	// Sub-loggers explicitly set to "info" in the config file match the default
+	// and should NOT appear. Also, `debug: true` should not appear.
 	notExpectedLines := []string{`debug: true`}
 
 	for _, expected := range expectedLines {

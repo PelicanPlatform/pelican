@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/docs"
 )
 
@@ -38,7 +39,10 @@ type Match struct {
 }
 
 func configGet(cmd *cobra.Command, args []string) {
-	currentConfig := initClientAndServerConfig(viper.GetViper())
+	currentConfig := initClientAndServerConfig(viper.GetViper(), ConfigLoadOptions{
+		Service:       service,
+		WithDiscovery: withDiscovery,
+	})
 
 	configValues := make(map[string]string)
 	flattenConfig(currentConfig, "", configValues)
@@ -146,6 +150,24 @@ func configGet(cmd *cobra.Command, args []string) {
 
 	for _, match := range matches {
 		fmt.Printf("%s: %s\n", match.HighlightedKey, match.HighlightedValue)
+		if verbose {
+			if src, ok := config.GetSourceTracker().Get(strings.ToLower(match.OriginalKey)); ok {
+				switch src.Type {
+				case config.SourceConfigFile:
+					fmt.Printf("    # source: %s\n", src.Detail)
+				case config.SourceEnvVar:
+					fmt.Printf("    # source: env %s\n", src.Detail)
+				case config.SourceWebConfig:
+					fmt.Printf("    # source: web-config %s\n", src.Detail)
+				case config.SourceDefault:
+					fmt.Printf("    # source: default\n")
+				case config.SourceDynamic:
+					fmt.Printf("    # source: dynamic\n")
+				default:
+					fmt.Printf("    # source: %s\n", src.Type)
+				}
+			}
+		}
 	}
 
 	// Add an eye break before any other logs are printed.

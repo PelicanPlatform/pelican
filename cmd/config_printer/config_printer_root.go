@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -25,6 +25,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/docs"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
@@ -117,6 +119,9 @@ pelican config summary`,
 	includeHidden     bool
 	includeDeprecated bool
 	exactMatch        bool
+	withDiscovery     bool
+	verbose           bool
+	service           string
 )
 
 func init() {
@@ -125,6 +130,42 @@ func init() {
 	ConfigCmd.AddCommand(configManCmd)
 	ConfigCmd.AddCommand(configSummaryCmd)
 
+	// Persistent flags on the parent config command (shared by all subcommands)
+	ConfigCmd.PersistentFlags().BoolVar(&withDiscovery, "with-discovery", false,
+		"Enable federation discovery to resolve "+param.Federation_DirectorUrl.GetName()+", "+param.Federation_RegistryUrl.GetName()+", etc. "+
+			"Without this flag, no network calls are made.")
+	ConfigCmd.PersistentFlags().StringVarP(&service, "service", "s", "",
+		"Load config as if running the given service. Valid values: cache, origin, director, registry. "+
+			"Mutually exclusive with --config.")
+
+	// Validate --service value early, before any subcommand runs.
+	ConfigCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if service != "" {
+			sType, err := server_structs.ServerTypeFromString(service)
+			if err != nil {
+				return fmt.Errorf("unsupported service %q; valid values are: cache, origin, director, registry", service)
+			}
+			service = strings.ToLower(service) // normalize
+
+			switch sType {
+			case server_structs.CacheType, server_structs.OriginType,
+				server_structs.DirectorType, server_structs.RegistryType:
+				// supported — fall through
+			case server_structs.LocalCacheType, server_structs.BrokerType:
+				return fmt.Errorf("--service %q is not yet implemented", service)
+			}
+
+			// The --config and --service commands are mutually exclusive. However,
+			//  --service lives on ConfigCmd while --config lives on rootCmd,
+			// so cobra's MarkFlagsMutuallyExclusive (same-command only) can't be used.
+			// Handle it manually here.
+			if configFlag := cmd.Root().PersistentFlags().Lookup("config"); configFlag != nil && configFlag.Changed {
+				return fmt.Errorf("--service and --config are mutually exclusive")
+			}
+		}
+		return nil
+	}
+
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
 	configGetCmd.Flags().StringArrayVarP(&components, "module", "m", []string{},
@@ -132,6 +173,8 @@ func init() {
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
 	configGetCmd.Flags().BoolVar(&exactMatch, "exact-match", false, "Match configuration parameter names exactly instead of using substring matching")
+	configGetCmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
+		"Show the source of each configuration value (e.g. config file path, environment variable)")
 
 	configSummaryCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
