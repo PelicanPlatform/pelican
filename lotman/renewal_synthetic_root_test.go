@@ -54,7 +54,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 
 	// User's exact cache config.
 	require.NoError(t, param.Cache_HighWaterMark.Set("5g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("4g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("4g"))
 	require.NoError(t, param.Cache_FilesMaxSize.Set("3g"))
 
 	// Default lotman lifetimes/horizon (matches production).
