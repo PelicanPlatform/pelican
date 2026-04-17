@@ -53,6 +53,7 @@ var (
 func init() {
 	flagSet := putCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.String("dest-token", "", "Token file for the destination (overrides --token for writes)")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.Bool("dry-run", false, "Show what would be uploaded without actually uploading")
 	flagSet.String("checksum-algorithm", "", "Checksum algorithm to use for upload and validation")
@@ -254,7 +255,7 @@ func putMain(cmd *cobra.Command, args []string) {
 	var options []client.TransferOption
 
 	// Set the progress bars to the command line option
-	tokenLocation, _ := cmd.Flags().GetString("token")
+	tokenOpts := resolveTokenOptions(cmd)
 
 	// Add checksum options if requested
 	checksumAlgorithm, _ := cmd.Flags().GetString("checksum-algorithm")
@@ -364,7 +365,8 @@ func putMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	options = append(options, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithDryRun(dryRun))
+	options = append(options, client.WithCallback(pb.callback), client.WithDryRun(dryRun))
+	options = append(options, tokenOpts...)
 
 	finalResults := make([][]client.TransferResults, 0)
 

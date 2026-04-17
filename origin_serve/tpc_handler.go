@@ -84,7 +84,10 @@ func (pw *tpcProgressWriter) BytesPerSecond() int64 {
 	return pw.bytesPerSecond.Load()
 }
 
-// handleCopyTPC implements HTTP third-party copy (TPC) in "pull" mode.
+// handleCopyTPC implements HTTP third-party copy (TPC) in "pull" mode,
+// as described in the WLCG HTTP TPC specification:
+//
+//	https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc
 //
 // The client sends an HTTP COPY request to the destination origin with:
 //   - Source header: URL of the source object
@@ -390,14 +393,22 @@ var transferHeaderDenyList = map[string]bool{
 	"Upgrade":           true,
 }
 
+// maxTransferHeaders is the maximum number of TransferHeader* headers
+// that will be forwarded to the source GET request.  This prevents a
+// malicious or misconfigured client from inflating the outgoing request.
+const maxTransferHeaders = 50
+
 // forwardTransferHeaders scans inbound for headers whose name starts
 // with "TransferHeader" (case-insensitive) and copies them onto dst
 // with the prefix stripped.  For example, "TransferHeaderAuthorization:
 // Bearer X" becomes "Authorization: Bearer X" on dst.
 //
-// Headers in the deny-list are silently skipped.
+// Headers in the deny-list are silently skipped.  At most
+// maxTransferHeaders headers are forwarded; any beyond that limit are
+// silently dropped.
 func forwardTransferHeaders(inbound http.Header, dst *http.Request) {
 	prefixLen := len(transferHeaderPrefix)
+	forwarded := 0
 	for name, values := range inbound {
 		// http.Header keys are already in canonical form, but the
 		// prefix comparison needs to be case-insensitive because
@@ -418,11 +429,16 @@ func forwardTransferHeaders(inbound http.Header, dst *http.Request) {
 			log.Debugf("TPC: skipping denied TransferHeader override for %s", canonical)
 			continue
 		}
+		if forwarded >= maxTransferHeaders {
+			log.Warningf("TPC: reached maximum of %d forwarded TransferHeaders; dropping %s", maxTransferHeaders, canonical)
+			continue
+		}
 		// Override any existing header values on dst, but preserve
 		// all values provided on the inbound request.
 		dst.Header.Del(canonical)
 		for _, v := range values {
 			dst.Header.Add(canonical, v)
 		}
+		forwarded++
 	}
 }

@@ -86,6 +86,7 @@ func getTestToken(t *testing.T) (tokenFile *os.File, tkn string) {
 // scope. This is insufficient for COPY which requires storage.create.
 func getReadOnlyToken(t *testing.T) string {
 	t.Helper()
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -128,108 +129,126 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 	host := param.Server_Hostname.GetString()
 	port := strconv.Itoa(param.Server_WebPort.GetInt())
 
+	type tpcTestCase struct {
+		name string
+		// content is the data written to the source file.
+		content string
+		// copyOpts are passed to client.DoCopy.
+		copyOpts func(t *testing.T) []client.TransferOption
+		// seedVia controls how the source file is created:
+		// "file" writes directly to disk, "put" uploads via DoPut.
+		seedVia string
+		// expectErr, if true, means DoCopy should return an error.
+		expectErr bool
+		// verifyDest, if true, downloads the destination and compares content.
+		verifyDest bool
+		// verifyAbsent, if true, asserts the destination file was NOT created.
+		verifyAbsent bool
+	}
+
+	tests := []tpcTestCase{
+		{
+			name:    "CopyWithinExport",
+			content: "hello from the POSIXv2 TPC E2E test",
+			copyOpts: func(_ *testing.T) []client.TransferOption {
+				return []client.TransferOption{client.WithToken(tkn), client.WithSourceToken(tkn)}
+			},
+			seedVia:    "file",
+			verifyDest: true,
+		},
+		{
+			name:    "CopyFailsWithNoToken",
+			content: "secret",
+			copyOpts: func(_ *testing.T) []client.TransferOption {
+				return []client.TransferOption{client.WithAcquireToken(false)}
+			},
+			seedVia:   "file",
+			expectErr: true,
+		},
+		{
+			name:    "CopyFailsWithReadOnlyToken",
+			content: "readonly-content",
+			copyOpts: func(t *testing.T) []client.TransferOption {
+				readTkn := getReadOnlyToken(t)
+				return []client.TransferOption{
+					client.WithToken(readTkn), client.WithSourceToken(readTkn),
+					client.WithAcquireToken(false),
+				}
+			},
+			seedVia:      "file",
+			expectErr:    true,
+			verifyAbsent: true,
+		},
+		{
+			name:    "CopyFromPut",
+			content: "uploaded then copied via TPC",
+			copyOpts: func(_ *testing.T) []client.TransferOption {
+				return []client.TransferOption{client.WithToken(tkn), client.WithSourceToken(tkn)}
+			},
+			seedVia:    "put",
+			verifyDest: true,
+		},
+	}
+
 	for _, export := range fed.Exports {
-		t.Run("CopyWithinExport_"+export.FederationPrefix, func(t *testing.T) {
-			testContent := "hello from the POSIXv2 TPC E2E test"
+		for _, tc := range tests {
+			tc := tc
+			t.Run(tc.name+"_"+export.FederationPrefix, func(t *testing.T) {
+				subdir := fmt.Sprintf("tpc_%s", tc.name)
+				sourceURL := fmt.Sprintf("pelican://%s:%s%s/%s/source.txt", host, port, export.FederationPrefix, subdir)
+				destURL := fmt.Sprintf("pelican://%s:%s%s/%s/dest.txt", host, port, export.FederationPrefix, subdir)
 
-			// Seed a source file in the origin's storage directory
-			srcDir := filepath.Join(export.StoragePrefix, "tpc_e2e")
-			require.NoError(t, os.MkdirAll(srcDir, 0755))
-			srcFile := filepath.Join(srcDir, "source.txt")
-			require.NoError(t, os.WriteFile(srcFile, []byte(testContent), 0644))
-			test_utils.ChownToDaemon(t, srcDir, srcFile)
+				// Seed the source file.
+				switch tc.seedVia {
+				case "file":
+					srcDir := filepath.Join(export.StoragePrefix, subdir)
+					require.NoError(t, os.MkdirAll(srcDir, 0755))
+					srcFile := filepath.Join(srcDir, "source.txt")
+					require.NoError(t, os.WriteFile(srcFile, []byte(tc.content), 0644))
+					test_utils.ChownToDaemon(t, srcDir, srcFile)
+				case "put":
+					tmpFile, err := os.CreateTemp(t.TempDir(), "upload")
+					require.NoError(t, err)
+					_, err = tmpFile.WriteString(tc.content)
+					require.NoError(t, err)
+					tmpFile.Close()
+					_, err = client.DoPut(fed.Ctx, tmpFile.Name(), sourceURL, false, client.WithToken(tkn))
+					require.NoError(t, err)
+				default:
+					t.Fatalf("unknown seedVia %q", tc.seedVia)
+				}
 
-			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_e2e/source.txt", host, port, export.FederationPrefix)
-			destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_e2e/dest.txt", host, port, export.FederationPrefix)
+				// Execute the third-party copy.
+				opts := tc.copyOpts(t)
+				transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false, opts...)
+				if tc.expectErr {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+					require.Len(t, transferResults, 1)
+					assert.Equal(t, int64(len(tc.content)), transferResults[0].TransferredBytes)
+				}
 
-			// Execute the third-party copy
-			transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
-				client.WithToken(tkn), client.WithSourceToken(tkn))
-			require.NoError(t, err)
-			require.Len(t, transferResults, 1)
-			assert.Equal(t, int64(len(testContent)), transferResults[0].TransferredBytes)
+				// Verify the destination file contents via download.
+				if tc.verifyDest {
+					localDir := t.TempDir()
+					downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+					require.NoError(t, err)
+					require.Len(t, downloadResults, 1)
+					assert.Equal(t, int64(len(tc.content)), downloadResults[0].TransferredBytes)
 
-			// Verify the destination file by downloading it
-			localDir := t.TempDir()
-			downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
-			require.NoError(t, err)
-			require.Len(t, downloadResults, 1)
-			assert.Equal(t, int64(len(testContent)), downloadResults[0].TransferredBytes)
+					downloaded, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+					require.NoError(t, err)
+					assert.Equal(t, tc.content, string(downloaded))
+				}
 
-			downloaded, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
-			require.NoError(t, err)
-			assert.Equal(t, testContent, string(downloaded))
-		})
-
-		t.Run("CopyFailsWithNoToken_"+export.FederationPrefix, func(t *testing.T) {
-			// Seed a source file so the copy has something to read
-			noTokDir := filepath.Join(export.StoragePrefix, "tpc_notoken")
-			require.NoError(t, os.MkdirAll(noTokDir, 0755))
-			noTokFile := filepath.Join(noTokDir, "source.txt")
-			require.NoError(t, os.WriteFile(noTokFile, []byte("secret"), 0644))
-			test_utils.ChownToDaemon(t, noTokDir, noTokFile)
-
-			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_notoken/source.txt", host, port, export.FederationPrefix)
-			destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_notoken/dest.txt", host, port, export.FederationPrefix)
-
-			// DoCopy with no token (and auto-acquire disabled) should fail because the namespace requires auth
-			_, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false, client.WithAcquireToken(false))
-			require.Error(t, err)
-		})
-
-		t.Run("CopyFailsWithReadOnlyToken_"+export.FederationPrefix, func(t *testing.T) {
-			// Seed a source file so the copy has something to read
-			roDir := filepath.Join(export.StoragePrefix, "tpc_readonly")
-			require.NoError(t, os.MkdirAll(roDir, 0755))
-			roFile := filepath.Join(roDir, "source.txt")
-			require.NoError(t, os.WriteFile(roFile, []byte("readonly-content"), 0644))
-			test_utils.ChownToDaemon(t, roDir, roFile)
-
-			readTkn := getReadOnlyToken(t)
-			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_readonly/source.txt", host, port, export.FederationPrefix)
-			destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_readonly/dest.txt", host, port, export.FederationPrefix)
-
-			// A storage.read-only token should be rejected for COPY (requires storage.create)
-			_, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
-				client.WithToken(readTkn), client.WithSourceToken(readTkn), client.WithAcquireToken(false))
-			require.Error(t, err)
-
-			// Verify the destination was NOT created
-			_, statErr := os.Stat(filepath.Join(roDir, "dest.txt"))
-			assert.True(t, os.IsNotExist(statErr), "destination file should not exist after rejected COPY")
-		})
-
-		t.Run("CopyFromPut_"+export.FederationPrefix, func(t *testing.T) {
-			testContent := "uploaded then copied via TPC"
-
-			// Upload a file via DoPut first
-			tmpFile, err := os.CreateTemp(t.TempDir(), "upload")
-			require.NoError(t, err)
-			_, err = tmpFile.WriteString(testContent)
-			require.NoError(t, err)
-			tmpFile.Close()
-
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/put_then_copy/source.txt", host, port, export.FederationPrefix)
-			_, err = client.DoPut(fed.Ctx, tmpFile.Name(), uploadURL, false, client.WithToken(tkn))
-			require.NoError(t, err)
-
-			destURL := fmt.Sprintf("pelican://%s:%s%s/put_then_copy/dest.txt", host, port, export.FederationPrefix)
-
-			// Now TPC from the uploaded file to a new destination
-			copyResults, err := client.DoCopy(fed.Ctx, uploadURL, destURL, false,
-				client.WithToken(tkn), client.WithSourceToken(tkn))
-			require.NoError(t, err)
-			require.Len(t, copyResults, 1)
-			assert.Equal(t, int64(len(testContent)), copyResults[0].TransferredBytes)
-
-			// Download the copied file and verify contents
-			localDir := t.TempDir()
-			_, err = client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
-			require.NoError(t, err)
-
-			downloaded, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
-			require.NoError(t, err)
-			assert.Equal(t, testContent, string(downloaded))
-		})
+				// Verify the destination was NOT created (e.g. auth failure).
+				if tc.verifyAbsent {
+					destDir := filepath.Join(export.StoragePrefix, subdir)
+					_, statErr := os.Stat(filepath.Join(destDir, "dest.txt"))
+					assert.True(t, os.IsNotExist(statErr), "destination file should not exist after rejected COPY")
+				}
+			})
+		}
 	}
 }

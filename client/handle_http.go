@@ -375,10 +375,14 @@ type (
 	identTransferOptionCaches                  struct{}
 	identTransferOptionCallback                struct{}
 	identTransferOptionTokenLocation           struct{}
-	identTransferOptionAcquireToken            struct{}
-	identTransferOptionToken                   struct{}
-	identTransferOptionSourceTokenLocation     struct{}
-	identTransferOptionSourceToken             struct{}
+	identTransferOptionAcquireToken                struct{}
+	identTransferOptionSourceAcquireToken          struct{}
+	identTransferOptionDestinationAcquireToken     struct{}
+	identTransferOptionToken                       struct{}
+	identTransferOptionSourceTokenLocation         struct{}
+	identTransferOptionSourceToken                 struct{}
+	identTransferOptionDestinationTokenLocation    struct{}
+	identTransferOptionDestinationToken            struct{}
 	identTransferOptionSynchronize             struct{}
 	identTransferOptionCollectionsUrl          struct{}
 	identTransferOptionChecksums               struct{}
@@ -856,6 +860,20 @@ func WithSourceTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionSourceTokenLocation{}, location)
 }
 
+// WithDestinationToken provides a token for the destination server in a
+// third-party-copy transfer.  For get operations, this is a no-op; for put
+// operations it behaves identically to WithToken.
+func WithDestinationToken(token string) TransferOption {
+	return option.New(identTransferOptionDestinationToken{}, token)
+}
+
+// WithDestinationTokenLocation provides a token file for the destination
+// server in a third-party-copy transfer.  For get operations, this is a
+// no-op; for put operations it behaves identically to WithTokenLocation.
+func WithDestinationTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionDestinationTokenLocation{}, location)
+}
+
 // Create an option to specify the checksums to request for a given
 // transfer
 func WithRequestChecksums(types []ChecksumType) TransferOption {
@@ -874,6 +892,129 @@ func WithRequireChecksum() TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
+}
+
+// WithSourceAcquireToken controls automatic token acquisition for the source
+// side of a transfer.  For get operations this is equivalent to WithAcquireToken;
+// for put operations it is a no-op.
+func WithSourceAcquireToken(enable bool) TransferOption {
+	return option.New(identTransferOptionSourceAcquireToken{}, enable)
+}
+
+// WithDestinationAcquireToken controls automatic token acquisition for the
+// destination side of a transfer.  For put operations this is equivalent to
+// WithAcquireToken; for get operations it is a no-op.
+func WithDestinationAcquireToken(enable bool) TransferOption {
+	return option.New(identTransferOptionDestinationAcquireToken{}, enable)
+}
+
+// applyTokenOptions processes token-related transfer options and applies them
+// to the provided token generators with correct precedence: role-specific
+// options (WithSourceToken, WithDestinationToken, etc.) always override generic
+// options (WithToken, WithTokenLocation, WithAcquireToken) regardless of the
+// order they appear in the options slice.
+//
+// For a copy transfer, token is the destination token and srcToken is the
+// source token; both must be non-nil.  For a non-copy transfer, only token
+// is used (srcToken should be nil) and the upload flag determines whether
+// source or destination options apply.
+func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []TransferOption) {
+	isCopy := srcToken != nil
+
+	// First pass: apply generic options.
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionToken{}:
+			val := opt.Value().(string)
+			token.SetToken(val)
+			if isCopy {
+				srcToken.SetToken(val)
+			}
+		case identTransferOptionTokenLocation{}:
+			val := opt.Value().(string)
+			token.SetTokenLocation(val)
+			if isCopy {
+				srcToken.SetTokenLocation(val)
+			}
+		case identTransferOptionAcquireToken{}:
+			val := opt.Value().(bool)
+			token.EnableAcquire = val
+			if isCopy {
+				srcToken.EnableAcquire = val
+			}
+		}
+	}
+
+	// Second pass: apply role-specific options (these override generic).
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionSourceToken{}:
+			if isCopy {
+				srcToken.SetToken(opt.Value().(string))
+			} else if !upload {
+				token.SetToken(opt.Value().(string))
+			}
+		case identTransferOptionSourceTokenLocation{}:
+			if isCopy {
+				srcToken.SetTokenLocation(opt.Value().(string))
+			} else if !upload {
+				token.SetTokenLocation(opt.Value().(string))
+			}
+		case identTransferOptionSourceAcquireToken{}:
+			if isCopy {
+				srcToken.EnableAcquire = opt.Value().(bool)
+			} else if !upload {
+				token.EnableAcquire = opt.Value().(bool)
+			}
+		case identTransferOptionDestinationToken{}:
+			if isCopy {
+				token.SetToken(opt.Value().(string))
+			} else if upload {
+				token.SetToken(opt.Value().(string))
+			}
+		case identTransferOptionDestinationTokenLocation{}:
+			if isCopy {
+				token.SetTokenLocation(opt.Value().(string))
+			} else if upload {
+				token.SetTokenLocation(opt.Value().(string))
+			}
+		case identTransferOptionDestinationAcquireToken{}:
+			if isCopy {
+				token.EnableAcquire = opt.Value().(bool)
+			} else if upload {
+				token.EnableAcquire = opt.Value().(bool)
+			}
+		}
+	}
+}
+
+// applyJobOptions processes the transfer options that are shared across
+// NewTransferJob and NewCopyJob, writing them into the TransferJob.
+// Options that are specific to a single job type (Writer, Reader, InPlace,
+// ByteRange, ForcePrestageAPI) are left for the caller to handle.
+func applyJobOptions(tj *TransferJob, options []TransferOption) {
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionCaches{}:
+			tj.prefObjServers = opt.Value().([]*url.URL)
+		case identTransferOptionCallback{}:
+			tj.callback = opt.Value().(TransferCallbackFunc)
+		case identTransferOptionFedToken{}:
+			tj.fedToken = opt.Value().(TokenProvider)
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = opt.Value().(SyncLevel)
+		case identTransferOptionChecksums{}:
+			tj.requestedChecksums = opt.Value().([]ChecksumType)
+		case identTransferOptionRequireChecksum{}:
+			tj.requireChecksum = opt.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = opt.Value().(bool)
+		case identTransferOptionMetadataChannel{}:
+			tj.metadataChan = opt.Value().(chan<- TransferMetadata)
+		case identTransferOptionCacheEmbeddedClientMode{}:
+			tj.cacheMode = opt.Value().(bool)
+		}
+	}
 }
 
 // Create an option to specify the object synchronization level
@@ -1406,41 +1547,21 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
+	applyTokenOptions(tj.token, nil, upload, options)
+	applyJobOptions(tj, options)
+
+	// Handle options specific to direct (non-copy) transfers.
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionCaches{}:
-			tj.prefObjServers = option.Value().([]*url.URL)
-		case identTransferOptionCallback{}:
-			tj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			tj.token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			tj.token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			tj.token.SetToken(option.Value().(string))
-		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(TokenProvider)
-		case identTransferOptionSynchronize{}:
-			tj.syncLevel = option.Value().(SyncLevel)
-		case identTransferOptionChecksums{}:
-			tj.requestedChecksums = option.Value().([]ChecksumType)
-		case identTransferOptionRequireChecksum{}:
-			tj.requireChecksum = option.Value().(bool)
 		case identTransferOptionWriter{}:
 			tj.writer = option.Value().(io.WriteCloser)
 		case identTransferOptionReader{}:
 			tj.reader = option.Value().(io.ReadCloser)
 		case identTransferOptionInPlace{}:
 			tj.inPlace = option.Value().(bool)
-		case identTransferOptionDryRun{}:
-			tj.dryRun = option.Value().(bool)
 		case identTransferOptionByteRange{}:
 			br := option.Value().(ByteRange)
 			tj.byteRange = &br
-		case identTransferOptionMetadataChannel{}:
-			tj.metadataChan = option.Value().(chan<- TransferMetadata)
-		case identTransferOptionCacheEmbeddedClientMode{}:
-			tj.cacheMode = option.Value().(bool)
 		}
 	}
 
@@ -1586,22 +1707,12 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
+	applyTokenOptions(tj.token, nil, false, options)
+	applyJobOptions(tj, options)
+
+	// Handle the option specific to prestage transfers.
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionCaches{}:
-			tj.prefObjServers = option.Value().([]*url.URL)
-		case identTransferOptionCallback{}:
-			tj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			tj.token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			tj.token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			tj.token.SetToken(option.Value().(string))
-		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(TokenProvider)
-		case identTransferOptionSynchronize{}:
-			tj.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionForcePrestageAPI{}:
 			tj.forcePrestageAPI = option.Value().(bool)
 		}
@@ -1719,40 +1830,8 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
-	for _, option := range options {
-		switch option.Ident() {
-		case identTransferOptionCaches{}:
-			tj.prefObjServers = option.Value().([]*url.URL)
-		case identTransferOptionCallback{}:
-			tj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			tj.token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			acquire := option.Value().(bool)
-			tj.token.EnableAcquire = acquire
-			tj.srcToken.EnableAcquire = acquire
-		case identTransferOptionToken{}:
-			tj.token.SetToken(option.Value().(string))
-		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(TokenProvider)
-		case identTransferOptionSourceToken{}:
-			tj.srcToken.SetToken(option.Value().(string))
-		case identTransferOptionSourceTokenLocation{}:
-			tj.srcToken.SetTokenLocation(option.Value().(string))
-		case identTransferOptionSynchronize{}:
-			tj.syncLevel = option.Value().(SyncLevel)
-		case identTransferOptionChecksums{}:
-			tj.requestedChecksums = option.Value().([]ChecksumType)
-		case identTransferOptionRequireChecksum{}:
-			tj.requireChecksum = option.Value().(bool)
-		case identTransferOptionDryRun{}:
-			tj.dryRun = option.Value().(bool)
-		case identTransferOptionMetadataChannel{}:
-			tj.metadataChan = option.Value().(chan<- TransferMetadata)
-		case identTransferOptionCacheEmbeddedClientMode{}:
-			tj.cacheMode = option.Value().(bool)
-		}
-	}
+	applyTokenOptions(tj.token, tj.srcToken, false, options)
+	applyJobOptions(tj, options)
 
 	// Resolve the destination director information, using the cache when available.
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint

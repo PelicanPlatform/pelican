@@ -1315,7 +1315,6 @@ func TestTPCAuth(t *testing.T) {
 func TestTPCDirectRead(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 
 	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)

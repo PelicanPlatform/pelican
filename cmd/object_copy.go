@@ -61,6 +61,8 @@ func init() {
 	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.String("source-token", "", "Token file for the source (overrides --token for reads)")
+	flagSet.String("dest-token", "", "Token file for the destination (overrides --token for writes)")
 	flagSet.BoolP("recursive", "r", false, "Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
@@ -244,7 +246,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	pb := newProgressBar()
 	defer pb.shutdown()
 
-	tokenLocation, _ := cmd.Flags().GetString("token")
+	tokenOpts := resolveTokenOptions(cmd)
 
 	// Check if the program was executed from a terminal and does not specify a log location
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
@@ -293,12 +295,12 @@ func copyMain(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			newSrc, pErr := addQueryParam(src, "directread", "")
-			if pErr != nil {
-				log.Errorln("Failed to process --direct option:", pErr)
-				os.Exit(1)
+			if u.RawQuery != "" {
+				u.RawQuery += "&directread"
+			} else {
+				u.RawQuery = "directread"
 			}
-			source[i] = newSrc
+			source[i] = u.String()
 		}
 	}
 
@@ -328,7 +330,8 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
+		options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...)}, tokenOpts...)
+		_, result = client.DoCopy(ctx, src, dest, isRecursive, options...)
 		if result != nil {
 			lastSrc = src
 			break
