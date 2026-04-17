@@ -21,6 +21,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,8 +51,8 @@ func TestMonitorTPC(t *testing.T) {
 				"success: Created\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
-		err := monitorTPC(messages, body)
+		messages := make(chan tpcStatus, 3)
+		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
 		// Should get two progress updates + one done
@@ -73,8 +74,8 @@ func TestMonitorTPC(t *testing.T) {
 			"failure: Copy failed: no such file\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
-		err := monitorTPC(messages, body)
+		messages := make(chan tpcStatus, 1)
+		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
 		msg := <-messages
@@ -98,8 +99,8 @@ func TestMonitorTPC(t *testing.T) {
 				"success: Created\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
-		err := monitorTPC(messages, body)
+		messages := make(chan tpcStatus, 3)
+		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
 		msg1 := <-messages
@@ -119,8 +120,8 @@ func TestMonitorTPC(t *testing.T) {
 	t.Run("EmptyBody", func(t *testing.T) {
 		body := strings.NewReader("")
 
-		messages := make(chan tpcStatus, 10)
-		err := monitorTPC(messages, body)
+		messages := make(chan tpcStatus, 1)
+		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
 		msg := <-messages

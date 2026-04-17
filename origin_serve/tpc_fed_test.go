@@ -105,16 +105,6 @@ func getReadOnlyToken(t *testing.T) string {
 	return tkn
 }
 
-// chownToDaemon changes ownership of paths to the XRootD daemon user.
-func chownToDaemon(t *testing.T, paths ...string) {
-	t.Helper()
-	uinfo, err := config.GetDaemonUserInfo()
-	require.NoError(t, err)
-	for _, p := range paths {
-		require.NoError(t, os.Chown(p, uinfo.Uid, uinfo.Gid))
-	}
-}
-
 // TestTPCWithPOSIXv2 verifies that DoCopy (third-party copy) works end-to-end
 // against a POSIXv2 origin, exercising the TPC COPY handler.
 func TestTPCWithPOSIXv2(t *testing.T) {
@@ -122,6 +112,13 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, posixv2AuthCfg)
+
+	// Disable SSRF protection for federation tests where the origin
+	// connects to itself via a local hostname that resolves to a
+	// private/link-local address.  The SSRF dialer is thoroughly
+	// tested in config/ssrf_transport_test.go.
+	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+	config.ResetSSRFTransportForTest()
 
 	tokenFile, tkn := getTestToken(t)
 	defer os.Remove(tokenFile.Name())
@@ -140,7 +137,7 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 			require.NoError(t, os.MkdirAll(srcDir, 0755))
 			srcFile := filepath.Join(srcDir, "source.txt")
 			require.NoError(t, os.WriteFile(srcFile, []byte(testContent), 0644))
-			chownToDaemon(t, srcDir, srcFile)
+			test_utils.ChownToDaemon(t, srcDir, srcFile)
 
 			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_e2e/source.txt", host, port, export.FederationPrefix)
 			destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_e2e/dest.txt", host, port, export.FederationPrefix)
@@ -170,7 +167,7 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 			require.NoError(t, os.MkdirAll(noTokDir, 0755))
 			noTokFile := filepath.Join(noTokDir, "source.txt")
 			require.NoError(t, os.WriteFile(noTokFile, []byte("secret"), 0644))
-			chownToDaemon(t, noTokDir, noTokFile)
+			test_utils.ChownToDaemon(t, noTokDir, noTokFile)
 
 			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_notoken/source.txt", host, port, export.FederationPrefix)
 			destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_notoken/dest.txt", host, port, export.FederationPrefix)
@@ -186,7 +183,7 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 			require.NoError(t, os.MkdirAll(roDir, 0755))
 			roFile := filepath.Join(roDir, "source.txt")
 			require.NoError(t, os.WriteFile(roFile, []byte("readonly-content"), 0644))
-			chownToDaemon(t, roDir, roFile)
+			test_utils.ChownToDaemon(t, roDir, roFile)
 
 			readTkn := getReadOnlyToken(t)
 			sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_readonly/source.txt", host, port, export.FederationPrefix)
