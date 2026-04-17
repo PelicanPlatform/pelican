@@ -70,7 +70,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("50g"))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	if readConfig {
 		viper.SetConfigType("yaml")

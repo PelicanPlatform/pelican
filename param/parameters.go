@@ -122,7 +122,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.FilesNominalSize": false,
 	"Cache.HighWaterMark": false,
 	"Cache.LocalRoot": false,
-	"Cache.LowWatermark": false,
+	"Cache.LowWaterMark": false,
 	"Cache.MetaLocations": false,
 	"Cache.MinDirectorRefreshInterval": false,
 	"Cache.NamespaceLocation": false,
@@ -536,7 +536,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Cache.FilesNominalSize": func(c *Config) string { return c.Cache.FilesNominalSize },
 	"Cache.HighWaterMark": func(c *Config) string { return c.Cache.HighWaterMark },
 	"Cache.LocalRoot": func(c *Config) string { return c.Cache.LocalRoot },
-	"Cache.LowWatermark": func(c *Config) string { return c.Cache.LowWatermark },
+	"Cache.LowWaterMark": func(c *Config) string { return c.Cache.LowWaterMark },
 	"Cache.NamespaceLocation": func(c *Config) string { return c.Cache.NamespaceLocation },
 	"Cache.PSSOrigin": func(c *Config) string { return c.Cache.PSSOrigin },
 	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
@@ -1190,7 +1190,7 @@ var allParameterNames = []string{
 	"Cache.FilesNominalSize",
 	"Cache.HighWaterMark",
 	"Cache.LocalRoot",
-	"Cache.LowWatermark",
+	"Cache.LowWaterMark",
 	"Cache.MetaLocations",
 	"Cache.MinDirectorRefreshInterval",
 	"Cache.NamespaceLocation",
@@ -1577,7 +1577,7 @@ var (
 	Cache_FilesNominalSize = StringParam{"Cache.FilesNominalSize"}
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
-	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
+	Cache_LowWaterMark = StringParam{"Cache.LowWaterMark"}
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
 	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
@@ -2012,7 +2012,7 @@ func init() {
 		"Cache.FilesNominalSize": Cache_FilesNominalSize,
 		"Cache.HighWaterMark": Cache_HighWaterMark,
 		"Cache.LocalRoot": Cache_LocalRoot,
-		"Cache.LowWatermark": Cache_LowWatermark,
+		"Cache.LowWaterMark": Cache_LowWaterMark,
 		"Cache.NamespaceLocation": Cache_NamespaceLocation,
 		"Cache.PSSOrigin": Cache_PSSOrigin,
 		"Cache.RunLocation": Cache_RunLocation,

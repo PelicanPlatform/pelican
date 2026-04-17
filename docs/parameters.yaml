@@ -27,7 +27,7 @@
 # ── Parameter naming ──────────────────────────────────────────────────────
 #
 #   - Names use dot-separated CamelCase sections: <Component>.<Field>
-#     Examples: Server.Hostname, Origin.EnableCmsd, Cache.LowWatermark
+#     Examples: Server.Hostname, Origin.EnableCmsd, Cache.LowWaterMark
 #
 #   - Top-level params (no dot) are allowed for global settings:
 #     ConfigBase, RuntimeDir, Debug, TLSSkipVerify
@@ -504,7 +504,6 @@ name: Federation.DirectorUrl
 description: |+
   A URL indicating where a director service is hosted.
 type: url
-osdf_default: none
 default: none
 direct_access: false
 components: ["client", "origin", "cache", "registry"]
@@ -513,7 +512,6 @@ name: Federation.RegistryUrl
 description: |+
   A URL indicating where the namespace registry service is hosted.
 type: url
-osdf_default: none
 default: none
 direct_access: false
 components: ["client", "director", "origin", "cache"]
@@ -522,7 +520,6 @@ name: Federation.JwkUrl
 description: |+
   A URL indicating where the JWKS for the Federation is hosted.
 type: url
-osdf_default: none
 default: none
 direct_access: false
 components: ["*"]
@@ -2164,7 +2161,7 @@ type: int
 default: 8442
 components: ["cache"]
 ---
-name: Cache.LowWatermark
+name: Cache.LowWaterMark
 description: |+
   Whenever the cache initiates file purging, it will attempt to clean files until its cumulative disk
   usages reaches this value. Note that "cache disk usage" is calculated based on the cache's entire set of
