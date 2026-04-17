@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -168,8 +169,13 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	if err := o.validateAtomicUploadFilesystem(e); err != nil {
 		return err
 	}
-	if err := o.validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
-		return err
+	if param.Origin_Multiuser.GetBool() {
+		log.Infof("Skipping directory permission validation for export %q because multiuser mode is enabled "+
+			"(files are accessed as the requesting user, not the XRootD daemon user)", e.FederationPrefix)
+	} else {
+		if err := o.validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
+			return err
+		}
 	}
 
 	return nil
