@@ -440,7 +440,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	if defaultLWP == 0 {
 		switch cfg.Mode {
 		case CacheModeServer:
-			pct, abs, ok := parseCacheWaterMark(param.Cache_LowWatermark.GetString())
+			pct, abs, ok := parseCacheWaterMark(param.Cache_LowWaterMark.GetString())
 			if ok {
 				if pct > 0 {
 					defaultLWP = pct

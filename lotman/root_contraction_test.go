@@ -93,7 +93,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	// existing database -- this is the exact scenario the user hit.
 	require.NoError(t, param.Cache_FilesMaxSize.Set("5m"))
 	require.NoError(t, param.Cache_HighWaterMark.Set("5m"))
-	require.NoError(t, param.Cache_LowWatermark.Set("4m"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("4m"))
 
 	// Second boot against the SAME LotHome (do not run setupLotmanFromConf
 	// again -- that would generate a new tmp dir). Instead, drive

@@ -56,7 +56,7 @@ type Config struct {
 		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
-		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
+		LowWaterMark string `mapstructure:"lowwatermark" yaml:"LowWaterMark"`
 		MemoryCacheSize string `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
 		MinDirectorRefreshInterval time.Duration `mapstructure:"mindirectorrefreshinterval" yaml:"MinDirectorRefreshInterval"`
@@ -541,7 +541,7 @@ type configWithType struct {
 		FilesNominalSize struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
-		LowWatermark struct { Type string; Value string }
+		LowWaterMark struct { Type string; Value string }
 		MemoryCacheSize struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
 		MinDirectorRefreshInterval struct { Type string; Value time.Duration }

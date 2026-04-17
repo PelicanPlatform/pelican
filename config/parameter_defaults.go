@@ -79,8 +79,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Cache.HighWaterMark
 	v.SetDefault(param.Cache_HighWaterMark.GetName(), 95)
-	// Cache.LowWatermark
-	v.SetDefault(param.Cache_LowWatermark.GetName(), 90)
+	// Cache.LowWaterMark
+	v.SetDefault(param.Cache_LowWaterMark.GetName(), 90)
 	// Cache.MinDirectorRefreshInterval
 	v.SetDefault(param.Cache_MinDirectorRefreshInterval.GetName(), "15s")
 	// Cache.PermittedNamespaces
