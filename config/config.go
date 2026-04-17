@@ -1478,23 +1478,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
 
-	// Set defaults for Director and Registry URLs only if the Discovery URL is not set.
-	// This is necessary because, in Viper, there is currently no way to check if a value is coming
-	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
-	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
-	// checks if these values are empty. An empty value indicates that the URLs were not explicitly
-	// set, so values obtained through the discovery process should be used.
-	//
-	// If we set default values now, there would be no way for discoverFederationImpl to determine
-	// whether the values are defaults (and should be overridden) or were explicitly set by the user
-	// (and should not be overridden).
-	// A feature request to address this issue has already been submitted to the Viper repository by our team:
-	// https://github.com/spf13/viper/issues/1814
-	if !v.IsSet(param.Federation_DiscoveryUrl.GetName()) {
-		v.SetDefault("Federation.RegistryUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
-	}
-
 	return err
 }
 
@@ -1655,7 +1638,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {
-			return errors.New("Xrootd.RunLocation is set, but both modules are enabled. Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+			return errors.Errorf("%s is set, but both modules are enabled. Please set %s "+
+				"and %s or disable %s so the default location can be used.",
+				param.Xrootd_RunLocation.GetName(), param.Cache_RunLocation.GetName(), param.Origin_RunLocation.GetName(), param.Xrootd_RunLocation.GetName())
 		}
 	} else if param.Server_DropPrivileges.GetBool() {
 		puser, err := GetPelicanUser()
@@ -1734,11 +1719,11 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.OriginStorageHTTPS:
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
-				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an https backend", param.Origin_HttpServiceUrl.GetName())
 			}
 			_, err := url.Parse(httpSvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_HttpServiceUrl.GetName())
 			}
 		case server_structs.OriginStorageGlobus:
 			if !param.Server_EnableUI.GetBool() {
@@ -1746,7 +1731,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			}
 			pvd, err := GetOIDCProvider()
 			if err != nil || pvd != Globus {
-				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
+				log.Infof("Server OIDC provider is not Globus. Use %s instead", param.Origin_GlobusClientIDFile.GetName())
 			} else {
 				// OIDC provider is globus
 				break
@@ -1755,36 +1740,36 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			clientIDPath := param.Origin_GlobusClientIDFile.GetString()
 			clientSecretPath := param.Origin_GlobusClientSecretFile.GetString()
 			if clientIDPath == "" {
-				return errors.New("Origin.GlobusClientIDFile may not be empty with Globus storage backend ")
+				return errors.Errorf("%s may not be empty with Globus storage backend", param.Origin_GlobusClientIDFile.GetName())
 			}
 			_, err = os.Stat(clientIDPath)
 			if err != nil {
-				return errors.Wrap(err, "Origin.GlobusClientIDFile is not a valid filepath")
+				return errors.Wrapf(err, "%s is not a valid filepath", param.Origin_GlobusClientIDFile.GetName())
 			}
 			if clientSecretPath == "" {
-				return errors.New("Origin.GlobusClientSecretFile may not be empty with Globus storage backend ")
+				return errors.Errorf("%s may not be empty with Globus storage backend", param.Origin_GlobusClientSecretFile.GetName())
 			}
 			_, err = os.Stat(clientSecretPath)
 			if err != nil {
-				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
+				return errors.Wrapf(err, "%s is not a valid filepath", param.Origin_GlobusClientSecretFile.GetName())
 			}
 		case server_structs.OriginStorageXRoot:
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
-				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an xroot backend", param.Origin_XRootServiceUrl.GetName())
 			}
 			_, err := url.Parse(xrootSvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_XRootServiceUrl.GetName())
 			}
 		case server_structs.OriginStorageS3:
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
-				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
+				return errors.Errorf("%s may not be empty when the origin is configured with an s3 backend", param.Origin_S3ServiceUrl.GetName())
 			}
 			_, err := url.Parse(s3SvcUrl)
 			if err != nil {
-				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+				return errors.Wrapf(err, "unable to parse %s as a URL", param.Origin_S3ServiceUrl.GetName())
 			}
 		}
 
@@ -1805,18 +1790,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.CacheType) && !param.Cache_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Cache.Port is not set but the Cache module is enabled. Please set Cache.Port")
+		return errors.Errorf("the configuration %s is not set but the Cache module is enabled. Please set %s", param.Cache_Port.GetName(), param.Cache_Port.GetName())
 	}
 	if currentServers.IsEnabled(server_structs.OriginType) && !param.Origin_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled. Please set Origin.Port")
+		return errors.Errorf("the configuration %s is not set but the Origin module is enabled. Please set %s", param.Origin_Port.GetName(), param.Origin_Port.GetName())
 	}
 
-	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && param.Cache_Port.GetInt() == param.Origin_Port.GetInt() && param.Xrootd_Port.IsSet() {
-		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled. Please set both variables")
-	}
-
-	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetString(), param.Cache_LowWatermark.GetName(), false)
+	if param.Cache_LowWaterMark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
 		if err != nil {
 			return err
 		}
@@ -1834,13 +1815,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
 		// Must have high/low watermarks
 		if !param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.Errorf("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, then %s "+
-				"and %s must also be set", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
+			return errors.Errorf("if any of the parameters %s, %s or %s is set, then %s "+
+				"and %s must also be set", param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
 		}
 
 		// Further, if one is set, all three must be set
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() {
-			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, all three must be set")
+			return errors.Errorf("if any of the parameters %s, %s or %s is set, all three must be set",
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
 
 		var base, nominal, max float64
@@ -1856,9 +1838,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return err
 		}
 		if base >= nominal || nominal >= max {
-			return errors.Errorf("invalid Cache.FilesBaseSize/FilesNominalSize/FilesMaxSize values. The base size must be less than the "+
+			return errors.Errorf("invalid %s, %s and %s values. The base size must be less than the "+
 				"nominal size, and the nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
-				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
 		}
 
 		// File sizes must also be less than the low watermark, but that's not straightforward to check, especially when the cache spread across
@@ -1871,7 +1853,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// in the future.
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
 			!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.Errorf("If %s is true, the following Cache parameters must also be set: %s, %s, " +
+			return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, " +
 				"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
 				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
@@ -1894,14 +1876,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			}
 		}
 
-		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
+		viper.SetDefault(param.Federation_DirectorUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
 		if minStatRes <= 0 || maxStatRes <= 0 {
-			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+			return errors.Errorf("invalid %s or %s. These must be positive integers",
+				param.Director_MinStatResponse.GetName(), param.Director_MaxStatResponse.GetName())
 		}
 		if maxStatRes < minStatRes {
-			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+			return errors.Errorf("invalid %s and %s pair. The min must be less than the max.",
+				param.Director_MinStatResponse.GetName(), param.Director_MaxStatResponse.GetName())
 		}
 
 		switch s := (server_structs.SortType)(param.Director_CacheSortMethod.GetString()); s {
@@ -1912,23 +1896,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return err
 			}
 		default:
-			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of %q, %q, %q, or %q, but you configured %q.",
-				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
+			return errors.Errorf("invalid %s. Must be one of %q, %q, %q, or %q, but you configured %q.",
+				param.Director_CacheSortMethod.GetName(), server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s)
 		}
-	} else {
-		viper.SetDefault("Federation.DirectorUrl", "")
 	}
 
 	if currentServers.IsEnabled(server_structs.RegistryType) {
-		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
-	} else {
-		viper.SetDefault("Federation.RegistryUrl", "")
+		viper.SetDefault(param.Federation_RegistryUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 	}
 
 	if currentServers.IsEnabled(server_structs.BrokerType) {
-		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-	} else {
-		viper.SetDefault("Federation.BrokerURL", "")
+		viper.SetDefault(param.Federation_BrokerUrl.GetName(), param.Server_ExternalWebUrl.GetString())
 	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
@@ -1941,14 +1919,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}); err != nil {
 			return err
 		}
-		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
+		log.Warningf("Invalid %s or %s. Fallback to 5m for refresh interval and 1h for valid interval",
+			param.Monitoring_TokenRefreshInterval.GetName(), param.Monitoring_TokenExpiresIn.GetName())
 	}
 
 	if currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType) {
 		if param.Xrootd_ConfigFile.IsSet() {
 			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
 			if err != nil {
-				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
+				return fmt.Errorf("failed to open the file %s at %s: %v", param.Xrootd_ConfigFile.GetName(), param.Xrootd_ConfigFile.GetString(), err)
 			}
 		}
 	}
