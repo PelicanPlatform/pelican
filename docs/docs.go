@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -38,16 +38,18 @@ var (
 )
 
 type ParameterDoc struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description"`
-	Default     interface{} `yaml:"default"`
-	RootDefault interface{} `yaml:"root_default"`
-	OsdfDefault interface{} `yaml:"osdf_default"`
-	Type        string      `yaml:"type"`
-	Components  []string    `yaml:"components"`
-	Deprecated  bool        `yaml:"deprecated"`
-	ReplacedBy  interface{} `yaml:"replacedby"`
-	Hidden      bool        `yaml:"hidden"`
+	Name          string   `yaml:"name"`
+	Description   string   `yaml:"description"`
+	Default       any      `yaml:"default"`
+	RootDefault   any      `yaml:"root_default"`
+	OsdfDefault   any      `yaml:"osdf_default"`
+	ClientDefault any      `yaml:"client_default"`
+	ServerDefault any      `yaml:"server_default"`
+	Type          string   `yaml:"type"`
+	Components    []string `yaml:"components"`
+	Deprecated    bool     `yaml:"deprecated"`
+	ReplacedBy    any      `yaml:"replacedby"`
+	Hidden        bool     `yaml:"hidden"`
 }
 
 func init() {
