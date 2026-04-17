@@ -293,6 +293,9 @@ type Config struct {
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
+		MultiuserMinID int `mapstructure:"multiuserminid" yaml:"MultiuserMinID"`
+		MultiuserUmask int `mapstructure:"multiuserumask" yaml:"MultiuserUmask"`
+		MultiuserVarlinkSocketPath string `mapstructure:"multiuservarlinksocketpath" yaml:"MultiuserVarlinkSocketPath"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -330,6 +333,7 @@ type Config struct {
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
 		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile" yaml:"ScitokensNameMapFile"`
 		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths" yaml:"ScitokensRestrictedPaths"`
+		ScitokensUnauthenticatedUser string `mapstructure:"scitokensunauthenticateduser" yaml:"ScitokensUnauthenticatedUser"`
 		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim" yaml:"ScitokensUsernameClaim"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
@@ -743,6 +747,9 @@ type configWithType struct {
 		IssuerMode struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
+		MultiuserMinID struct { Type string; Value int }
+		MultiuserUmask struct { Type string; Value int }
+		MultiuserVarlinkSocketPath struct { Type string; Value string }
 		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
@@ -780,6 +787,7 @@ type configWithType struct {
 		ScitokensMapSubject struct { Type string; Value bool }
 		ScitokensNameMapFile struct { Type string; Value string }
 		ScitokensRestrictedPaths struct { Type string; Value []string }
+		ScitokensUnauthenticatedUser struct { Type string; Value string }
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }

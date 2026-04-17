@@ -332,6 +332,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.IssuerMode": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
+	"Origin.MultiuserMinID": false,
+	"Origin.MultiuserUmask": false,
+	"Origin.MultiuserVarlinkSocketPath": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
@@ -367,6 +370,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.ScitokensMapSubject": false,
 	"Origin.ScitokensNameMapFile": false,
 	"Origin.ScitokensRestrictedPaths": false,
+	"Origin.ScitokensUnauthenticatedUser": false,
 	"Origin.ScitokensUsernameClaim": false,
 	"Origin.SelfTest": false,
 	"Origin.SelfTestInterval": false,
@@ -619,6 +623,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
 	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
 	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
+	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
 	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
 	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
@@ -640,6 +645,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.ScitokensDefaultUser": func(c *Config) string { return c.Origin.ScitokensDefaultUser },
 	"Origin.ScitokensGroupsClaim": func(c *Config) string { return c.Origin.ScitokensGroupsClaim },
 	"Origin.ScitokensNameMapFile": func(c *Config) string { return c.Origin.ScitokensNameMapFile },
+	"Origin.ScitokensUnauthenticatedUser": func(c *Config) string { return c.Origin.ScitokensUnauthenticatedUser },
 	"Origin.ScitokensUsernameClaim": func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
 	"Origin.StoragePrefix": func(c *Config) string { return c.Origin.StoragePrefix },
 	"Origin.StorageType": func(c *Config) string { return c.Origin.StorageType },
@@ -812,6 +818,8 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Concurrency": func(c *Config) int { return c.Origin.Concurrency },
 	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
 	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
+	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
+	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
 	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
@@ -1388,6 +1396,9 @@ var allParameterNames = []string{
 	"Origin.IssuerMode",
 	"Origin.Mode",
 	"Origin.Multiuser",
+	"Origin.MultiuserMinID",
+	"Origin.MultiuserUmask",
+	"Origin.MultiuserVarlinkSocketPath",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
 	"Origin.RunLocation",
@@ -1423,6 +1434,7 @@ var allParameterNames = []string{
 	"Origin.ScitokensMapSubject",
 	"Origin.ScitokensNameMapFile",
 	"Origin.ScitokensRestrictedPaths",
+	"Origin.ScitokensUnauthenticatedUser",
 	"Origin.ScitokensUsernameClaim",
 	"Origin.SelfTest",
 	"Origin.SelfTestInterval",
@@ -1648,6 +1660,7 @@ var (
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
 	Origin_Mode = StringParam{"Origin.Mode"}
+	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
@@ -1669,6 +1682,7 @@ var (
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
 	Origin_ScitokensGroupsClaim = StringParam{"Origin.ScitokensGroupsClaim"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
+	Origin_ScitokensUnauthenticatedUser = StringParam{"Origin.ScitokensUnauthenticatedUser"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
@@ -1785,6 +1799,8 @@ var (
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
+	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
+	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
@@ -2077,6 +2093,7 @@ func init() {
 		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
 		"Origin.IssuerMode": Origin_IssuerMode,
 		"Origin.Mode": Origin_Mode,
+		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
 		"Origin.RunLocation": Origin_RunLocation,
 		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
@@ -2098,6 +2115,7 @@ func init() {
 		"Origin.ScitokensDefaultUser": Origin_ScitokensDefaultUser,
 		"Origin.ScitokensGroupsClaim": Origin_ScitokensGroupsClaim,
 		"Origin.ScitokensNameMapFile": Origin_ScitokensNameMapFile,
+		"Origin.ScitokensUnauthenticatedUser": Origin_ScitokensUnauthenticatedUser,
 		"Origin.ScitokensUsernameClaim": Origin_ScitokensUsernameClaim,
 		"Origin.StoragePrefix": Origin_StoragePrefix,
 		"Origin.StorageType": Origin_StorageType,
@@ -2208,6 +2226,8 @@ func init() {
 		"Origin.Concurrency": Origin_Concurrency,
 		"Origin.ConcurrencyDegradedThreshold": Origin_ConcurrencyDegradedThreshold,
 		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
+		"Origin.MultiuserMinID": Origin_MultiuserMinID,
+		"Origin.MultiuserUmask": Origin_MultiuserUmask,
 		"Origin.Port": Origin_Port,
 		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
 		"Origin.SSH.Port": Origin_SSH_Port,

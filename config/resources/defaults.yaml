@@ -95,8 +95,12 @@ Origin:
   DiskUsageCalculationInterval: 24h
   DiskUsageCalculationRateLimit: 1000
   Multiuser: false
+  MultiuserMinID: 1000
+  MultiuserUmask: -1
+  MultiuserVarlinkSocketPath: "/run/systemd/userdb/io.systemd.UserDatabase"
   EnableMacaroons: false
   EnableVoms: true
+  ScitokensUnauthenticatedUser: nobody
   IssuerMode: oa4mp
   SelfTestInterval: 15s
   SSH:

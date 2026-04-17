@@ -21,6 +21,7 @@
 package origin_serve
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -117,7 +118,7 @@ func setupE2ETestServer(t *testing.T) (*httptest.Server, string, func()) {
 	}
 
 	// Initialize handlers
-	err = InitializeHandlers(exports)
+	err = InitializeHandlers(t.Context(), exports)
 	require.NoError(t, err)
 
 	// Initialize auth config for the test (required even for public reads)
@@ -168,10 +169,10 @@ func TestMetricsEndToEnd(t *testing.T) {
 	metrics.StorageBytesRead.Reset()
 
 	// Get initial metric values
-	initialHTTPRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
-	initialHTTPBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET"))
-	initialStorageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
-	initialStorageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
+	initialHTTPRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
+	initialHTTPBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET", ""))
+	initialStorageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
+	initialStorageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", ""))
 
 	// Make GET request to download file
 	resp, err := http.Get(server.URL + "/test/test.txt")
@@ -185,17 +186,17 @@ func TestMetricsEndToEnd(t *testing.T) {
 	assert.Equal(t, "test content", string(body))
 
 	// Verify HTTP metrics were updated
-	httpRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
+	httpRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
 	assert.Greater(t, httpRequests, initialHTTPRequests, "HTTP request metric should increment")
 
-	httpBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET"))
+	httpBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET", ""))
 	assert.Greater(t, httpBytesOut, initialHTTPBytesOut, "HTTP bytes out metric should increment")
 
 	// Verify storage metrics were updated
-	storageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
+	storageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, storageReads, initialStorageReads, "Storage read metric should increment for backend=posixv2")
 
-	storageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
+	storageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", ""))
 	assert.GreaterOrEqual(t, storageBytes, initialStorageBytes+float64(len(body)), "Storage read bytes should track actual bytes read")
 
 	// Verify metrics are scrapable from /metrics endpoint
@@ -282,7 +283,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, InitializeHandlers(exports))
+	require.NoError(t, InitializeHandlers(context.Background(), exports))
 
 	ac := &authConfig{}
 	ac.exports.Store(&exports)
@@ -302,7 +303,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "Request without token should be rejected")
 
 	// The key assertion: Prometheus must have recorded this rejected request.
-	count := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "401"))
+	count := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "401", ""))
 	assert.Equal(t, float64(1), count,
 		"Auth-rejected requests must be counted in Prometheus metrics")
 }

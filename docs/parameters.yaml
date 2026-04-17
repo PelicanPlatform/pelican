@@ -1135,6 +1135,37 @@ root_default: true
 default: false
 components: ["origin"]
 ---
+name: Origin.MultiuserMinID
+description: |+
+  The minimum UID/GID the multiuser origin will switch to when performing filesystem operations on behalf of a user.
+  Any resolved user or group ID below this threshold is rejected, preventing accidental operations as root or other system accounts.
+  Set to 0 to disable the guard entirely (not recommended).
+type: int
+default: 1000
+components: ["origin"]
+---
+name: Origin.MultiuserUmask
+description: |+
+  The file-creation mask (umask) applied to the process at startup when multiuser mode is enabled.
+  This umask controls which permission bits are masked off from the requested mode for all filesystem operations.
+  The umask is set once when the multiuser filesystem is initialised and left in place for the lifetime of the process.
+  A value of -1 (the default) means the process inherits the umask from its parent and does not change it.
+  A value of 0 means the exact permissions requested by the caller are applied (no bits masked).
+  Specify the value in YAML octal notation (e.g. 0o0022 removes group-write and other-write).
+  Common values: -1 (inherit), 0 (no masking), 0o0022 (standard), 0o0077 (restrictive).
+type: int
+default: -1
+components: ["origin"]
+---
+name: Origin.MultiuserVarlinkSocketPath
+description: |+
+  The path to the systemd-userdbd varlink socket used by the multiuser origin for user/group lookups.
+  Only relevant when the identity lookup strategy selects systemd-userdbd (typically in non-CGO builds).
+type: string
+default: /run/systemd/userdb/io.systemd.UserDatabase
+hidden: true
+components: ["origin"]
+---
 name: Origin.EnableCmsd
 description: |+
   A bool indicating whether the origin should enable the `cmsd` daemon.
@@ -1330,6 +1361,16 @@ description: |+
   Set to 0 to disable automatic refresh.
 type: duration
 default: 1m
+components: ["origin"]
+---
+name: Origin.ScitokensUnauthenticatedUser
+description: |+
+  The username to use for requests that arrive without a valid token (unauthenticated requests).
+  Defaults to "nobody".
+  Set to the empty string to reject unauthenticated requests entirely.
+type: string
+default: nobody
+hidden: true
 components: ["origin"]
 ---
 name: Origin.TokenAudience

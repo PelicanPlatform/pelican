@@ -125,7 +125,10 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 
 	mapfilePath := param.Origin_ScitokensNameMapFile.GetString()
 
-	ac.userMapper = NewUserMapper(usernameClaim, groupsClaim, mapfilePath)
+	defaultUser := param.Origin_ScitokensDefaultUser.GetString()
+	unauthenticatedUser := param.Origin_ScitokensUnauthenticatedUser.GetString()
+
+	ac.userMapper = NewUserMapper(usernameClaim, groupsClaim, mapfilePath, defaultUser, unauthenticatedUser)
 
 	// Start periodic mapfile refresh if configured
 	refreshInterval := param.Origin_UserMapfileRefreshInterval.GetDuration()
@@ -378,6 +381,11 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 	// Extract user information from the token at cache time (only once)
 	// Use the UserMapper to map JWT claims to local users/groups
 	userInfo := ac.userMapper.MapTokenToUser(token)
+	if userInfo == nil {
+		// No mapfile rule matched and no default user configured; reject the token.
+		log.Warningln("Rejecting token: no mapfile rule matched and no default user configured")
+		return nil
+	}
 
 	info := cachedTokenInfo{
 		Scopes:   acls,
