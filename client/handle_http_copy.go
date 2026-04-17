@@ -63,8 +63,8 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 	if len(xfer.job.dirResp.ObjectServers) == 0 {
-		log.Errorln("No destination servers specified; cannot copy")
-		err = errors.New("no destination servers specified")
+		log.Errorln("No resolved destination servers available; cannot copy")
+		err = errors.New("no resolved destination servers available")
 		return
 	}
 	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
@@ -148,13 +148,17 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
 	resp, err := client.Do(req)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s", xfer.attempts[0].Url.String())
+		err = error_codes.NewContactError(
+			errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s", xfer.attempts[0].Url.String()),
+		)
 		log.Errorln(err)
 		return
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode), nil}
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode),
+			wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("source HEAD returned HTTP %d", resp.StatusCode))}
+		err = httpErr
 		return
 	}
 	totalSize = resp.ContentLength
@@ -219,7 +223,9 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 
 	if err != nil {
 		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
-		err = errors.Wrapf(err, "failed to execute the third-party-copy to %s", xfer.remoteURL.String())
+		err = error_codes.NewContactError(
+			errors.Wrapf(err, "failed to execute the third-party-copy to %s", xfer.remoteURL.String()),
+		)
 		return
 	}
 	defer resp.Body.Close()
@@ -229,26 +235,27 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		if err != nil {
 			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
 		} else {
+			statusErr := wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("destination COPY returned HTTP %d", resp.StatusCode))
 			if resp.StatusCode == http.StatusOK {
 				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination server does not have the TPC module loaded: %s",
 					resolvedDestUrl.String(), string(respBytes))
-				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination server does not have the TPC module loaded",
-					resolvedDestUrl.String())}
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination server does not have the TPC module loaded (HTTP 200 instead of 201)",
+					resolvedDestUrl.String()), Err: statusErr}
 			} else if resp.StatusCode > 200 && resp.StatusCode < 300 {
 				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination server may not support HTTP third-party-copy (ensure the TPC module is loaded): %s",
 					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
-					resp.StatusCode)}
+					resp.StatusCode), Err: statusErr}
 			} else {
 				log.Errorf("TPC COPY to %s failed (HTTP status %d): %s", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
-					resp.StatusCode)}
+					resp.StatusCode), Err: statusErr}
 			}
 		}
 		return
 	}
 
-	serverMessages := make(chan tpcStatus, 1)
+	serverMessages := make(chan tpcStatus, 10)
 
 	xfer.engine.egrp.Go(func() error { return monitorTPC(ctx, serverMessages, resp.Body) })
 
@@ -337,6 +344,9 @@ MessageHandler:
 
 // monitorTPC reads periodic updates from the HTTP TPC response body,
 // parses performance markers, and writes them to the channel.
+//
+// The performance marker format is defined by the WLCG HTTP TPC specification:
+//   https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc
 //
 // This is guaranteed to close the channel before exiting.
 func monitorTPC(ctx context.Context, messages chan tpcStatus, body io.Reader) error {

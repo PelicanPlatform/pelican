@@ -6,6 +6,13 @@ title: pelican object copy
 
 Copy a file to/from a Pelican federation
 
+The `pelican object copy` command uses HTTP third-party copy (TPC), as
+defined by the [WLCG HTTP-TPC specification](https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc),
+to transfer objects between origins without pulling data through the client.
+The client issues a WebDAV `COPY` request to the destination origin with a
+`Source` header pointing to the source, so the destination pulls the data
+directly from the source.
+
 ```
 pelican object copy {source ...} {destination} [flags]
 ```
