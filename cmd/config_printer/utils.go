@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -22,6 +22,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -33,14 +35,43 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// initClientAndServerConfig is used to initialize the values of a config instance.
-//
-// It takes a Viper instance, populates the client and server parameters, unmarshals it into
-// a config struct, and returns it.
-func initClientAndServerConfig(v *viper.Viper) *param.Config {
-	// To provide a cleaner output, we temporarily suppress excessive logging in `InitConfigInternal`.
-	// Note: InitConfigInternal operates on the *global* viper instance. Only invoke it when
-	// we are also operating on the global viper instance.
+// ConfigLoadOptions controls what config loading stages are included.
+type ConfigLoadOptions struct {
+	// Service selects which server context to simulate (e.g. "cache", "origin",
+	// "director", "registry"). When set, the config entrypoint is switched to
+	// /etc/pelican/pelican-{service}.yaml, falling back to /etc/pelican/pelican.yaml
+	// if the service-specific file does not exist.
+	//
+	// NOTE: If the service config file names in systemd/ are changed, this
+	// code must be updated to match.
+	Service string
+	// WithDiscovery triggers federation discovery to resolve Federation.DirectorUrl etc.
+	// Default false — no network calls.
+	WithDiscovery bool
+}
+
+// initClientAndServerConfig initializes configuration on the given viper instance and
+// returns the fully-resolved config struct, with explicit control over which loading
+// stages are performed.
+func initClientAndServerConfig(v *viper.Viper, opts ConfigLoadOptions) *param.Config {
+	// When a service is specified, point at /etc/pelican/pelican-{service}.yaml.
+	// If that file doesn't exist, fall back to /etc/pelican/pelican.yaml.
+	//
+	// Note that here we explicitly avoid using ${ConfigBase} because service config file installation
+	// should be independent of the user running the command.
+	if opts.Service != "" {
+		servicePath := filepath.Join("/etc", "pelican", fmt.Sprintf("pelican-%s.yaml", opts.Service))
+		if _, err := os.Stat(servicePath); err == nil {
+			viper.Set("config", servicePath)
+		} else {
+			fallback := filepath.Join("/etc", "pelican", "pelican.yaml")
+			log.Debugf("Service config %s not found, falling back to %s", servicePath, fallback)
+			viper.Set("config", fallback)
+		}
+	}
+
+	// Initialize base config (defaults + config files + env) on the global viper instance.
+	// Only invoke InitConfigInternal when operating on the global viper to avoid double-init.
 	if v == viper.GetViper() {
 		currentLevel := config.GetEffectiveLogLevel()
 		config.SetLogging(log.ErrorLevel)
@@ -55,7 +86,30 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 		log.Errorf("Error setting server defaults: %v", err)
 	}
 
+	// Load web-config.yaml overrides when operating on the global viper.
+	// The fresh defaultConfig viper (used by summary for the baseline) skips
+	// this since it should reflect pure defaults without runtime overrides.
+	// This must happen BEFORE ApplyLogLevelInheritance so that a web-config
+	// change to Logging.Level is visible to the inheritance logic.
 	if v == viper.GetViper() {
+		webConfigPath := param.Server_WebConfigFile.GetString()
+		if webConfigPath != "" {
+			if err := config.SetWebConfigOverride(v, webConfigPath); err != nil {
+				log.Debugf("Could not load web config overrides from %s: %v", webConfigPath, err)
+			}
+		}
+	}
+
+	// Apply log level inheritance: if the user explicitly set Logging.Level
+	// (via config file, env var, OR web-config), propagate it to sub-loggers
+	// not individually pinned. Only applies to the global viper since the
+	// source tracker is a global singleton tied to the global config loading.
+	if v == viper.GetViper() {
+		config.ApplyLogLevelInheritance(v)
+	}
+
+	// Optionally resolve federation metadata via discovery.
+	if opts.WithDiscovery && v == viper.GetViper() {
 		globalFedInfo, globalFedErr := config.GetFederation(context.Background())
 		if globalFedErr != nil {
 			log.Errorf("Error getting federation info: %v", globalFedErr)

@@ -19,6 +19,7 @@
 package server_structs
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -106,4 +107,25 @@ func (sType *ServerType) SetString(name string) bool {
 		return true
 	}
 	return false
+}
+
+// ServerTypeFromString parses a case-insensitive service name into the
+// corresponding ServerType constant, returning an error for unrecognized names.
+func ServerTypeFromString(name string) (ServerType, error) {
+	switch strings.ToLower(name) {
+	case "cache":
+		return CacheType, nil
+	case "localcache":
+		return LocalCacheType, nil
+	case "origin":
+		return OriginType, nil
+	case "director":
+		return DirectorType, nil
+	case "registry":
+		return RegistryType, nil
+	case "broker":
+		return BrokerType, nil
+	default:
+		return 0, fmt.Errorf("unrecognized server type %q", name)
+	}
 }
