@@ -272,13 +272,13 @@ type MetadataValue struct {
 }
 
 type GrantAclReq struct {
-	GroupID   string     `json:"group_id"`
+	GroupID   string     `json:"groupId"`
 	Role      string     `json:"role"`
-	ExpiresAt *time.Time `json:"expires_at"`
+	ExpiresAt *time.Time `json:"expiresAt"`
 }
 
 type RevokeAclReq struct {
-	GroupID string `json:"group_id"`
+	GroupID string `json:"groupId"`
 	Role    string `json:"role"`
 }
 
@@ -293,7 +293,7 @@ type RemoveCollectionMembersReq struct {
 type ListCollectionRes struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
-	OwnerID     string `json:"owner_id"`
+	OwnerID     string `json:"ownerId"`
 	Description string `json:"description"`
 	Visibility  string `json:"visibility"`
 	Namespace   string `json:"namespace"`
@@ -302,15 +302,15 @@ type ListCollectionRes struct {
 type GetCollectionRes struct {
 	ID          string                   `json:"id"`
 	Name        string                   `json:"name"`
-	OwnerID     string                   `json:"owner_id"`
+	OwnerID     string                   `json:"ownerId"`
 	Description string                   `json:"description"`
 	Visibility  string                   `json:"visibility"`
 	Namespace   string                   `json:"namespace"`
 	Members     []string                 `json:"members"`
 	ACLs        []database.CollectionACL `json:"acls"`
 	Metadata    map[string]string        `json:"metadata"`
-	CreatedAt   time.Time                `json:"created_at"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	CreatedAt   time.Time                `json:"createdAt"`
+	UpdatedAt   time.Time                `json:"updatedAt"`
 }
 
 func handleListCollections(ctx *gin.Context) {
