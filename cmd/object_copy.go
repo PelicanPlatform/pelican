@@ -43,7 +43,7 @@ var (
 
 	copyCmd = &cobra.Command{
 		Use:   "copy {source ...} {destination}",
-		Short: "Copy a file to/from a Pelican federation",
+		Short: "Copy a file to or from a Pelican federation or between two objects in a federation",
 		Run:   copyMain,
 		PreRun: func(cmd *cobra.Command, args []string) {
 			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
@@ -295,11 +295,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			if u.RawQuery != "" {
-				u.RawQuery += "&directread"
-			} else {
-				u.RawQuery = "directread"
-			}
+			q := u.Query()
+			q.Set("directread", "")
+			u.RawQuery = q.Encode()
 			source[i] = u.String()
 		}
 	}

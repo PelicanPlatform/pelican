@@ -124,7 +124,9 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 		return
 	}
 
-	// Validate the Source URL
+	// Validate the Source URL.
+	// Both http and https are accepted for compatibility with XRootD TPC implementations;
+	// SSRF protection is enforced by the SSRF transport (see config.GetSSRFHttpTransport).
 	sourceURL, err := url.Parse(sourceHeader)
 	if err != nil || (sourceURL.Scheme != "http" && sourceURL.Scheme != "https") {
 		c.String(http.StatusBadRequest, "Invalid Source URL: must be an http or https URL")

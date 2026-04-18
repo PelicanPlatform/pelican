@@ -290,7 +290,8 @@ type (
 		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
 		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
 		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
-		dirResp            server_structs.DirectorResponse
+		dirResp            server_structs.DirectorResponse // Director response for non-copy transfers (download, upload, prestage)
+		destDirResp        server_structs.DirectorResponse // Director response for the copy destination
 		directorUrl        string
 		token              *tokenGenerator
 		fedToken           TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
@@ -1850,7 +1851,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
 		return
 	}
-	tj.dirResp = dirResp
+	tj.destDirResp = dirResp
 	tj.token.DirResp = &dirResp
 
 	// Acquire token for the destination if needed
@@ -1867,7 +1868,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
 				return nil, err
 			}
-			tj.dirResp = dirResp
+			tj.destDirResp = dirResp
 			tj.token.DirResp = &dirResp
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
 				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
@@ -2258,7 +2259,7 @@ func buildUploadTransfers(job *clientTransferJob, packOption string) ([]transfer
 
 // buildCopyTransfers returns the source-server transfer attempts for a TPC copy job.
 func buildCopyTransfers(job *clientTransferJob) ([]transferAttemptDetails, error) {
-	sortedSrcServers, _, err := generateSortedObjServers(job.job.srcDirResp, nil)
+	sortedSrcServers, _, err := generateSortedObjServers(job.job.srcDirResp, job.job.prefObjServers)
 	if err != nil {
 		log.Errorln("Failed to get source servers for copy:", err)
 		return nil, err
@@ -2326,7 +2327,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	// For copy jobs, also build the source URL
 	var srcUrl *url.URL
 	if job.job.xferType == transferTypeCopy {
-		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme}
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
 	}
 
 	var transfers []transferAttemptDetails
@@ -2381,7 +2382,6 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		} else if job.job.xferType == transferTypeCopy {
 			// For copy, stat the SOURCE to see if it's a collection.
 			// If it is, walk the source directory listing and emit individual TPC copy jobs.
-			srcUrl := &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
 			var srcPelicanUrl *pelican_url.PelicanURL
 			srcPelicanUrl, err = pelican_url.Parse(srcUrl.String(), nil, nil)
 			if err != nil {
@@ -2504,11 +2504,12 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			}
 			var err error
 			var transferResults TransferResults
-			if file.file.xferType == transferTypeUpload {
+			switch file.file.xferType {
+			case transferTypeUpload:
 				transferResults, err = uploadObject(file.file)
-			} else if file.file.xferType == transferTypeCopy {
+			case transferTypeCopy:
 				transferResults, err = copyHTTP(file.file)
-			} else {
+			default:
 				transferResults, err = downloadObject(file.file)
 			}
 			transferResults.JobId = file.jobId

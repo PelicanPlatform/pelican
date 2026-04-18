@@ -62,12 +62,12 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		err = errors.New("no source URLs specified")
 		return
 	}
-	if len(xfer.job.dirResp.ObjectServers) == 0 {
-		log.Errorln("No resolved destination servers available; cannot copy")
-		err = errors.New("no resolved destination servers available")
+	if len(xfer.job.destDirResp.ObjectServers) == 0 {
+		log.Errorln("No destination origins resolved; cannot copy")
+		err = errors.New("no destination origins resolved by the director")
 		return
 	}
-	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
+	resolvedDestUrl := *xfer.job.destDirResp.ObjectServers[0]
 	resolvedDestUrl.Path = computeUploadDestPath(xfer.remoteURL.Path, resolvedDestUrl.Path)
 	resolvedDestUrl.RawQuery = xfer.remoteURL.RawQuery
 
@@ -123,7 +123,9 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	// HEAD request to get source size
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, xfer.attempts[0].Url.String(), nil)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to get size of the source object %s", xfer.attempts[0].Url.String())
+		err = error_codes.NewParameterError(
+			errors.Wrapf(err, "failed to create HEAD request for source object %s", xfer.attempts[0].Url.String()),
+		)
 		return
 	}
 
@@ -203,7 +205,9 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	// COPY request to the destination
 	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
 	if err != nil {
-		err = errors.Wrapf(err, "unable to create request for third-party-copy to %s", xfer.remoteURL.String())
+		err = error_codes.NewParameterError(
+			errors.Wrapf(err, "unable to create COPY request for third-party-copy to %s", xfer.remoteURL.String()),
+		)
 		return
 	}
 
@@ -222,7 +226,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	resp, err = client.Do(req)
 
 	if err != nil {
-		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
+		log.Errorf("failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
 		err = error_codes.NewContactError(
 			errors.Wrapf(err, "failed to execute the third-party-copy to %s", xfer.remoteURL.String()),
 		)
@@ -234,20 +238,24 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		respBytes, err = io.ReadAll(resp.Body)
 		if err != nil {
 			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
+			err = error_codes.NewContactError(
+				errors.Errorf("TPC COPY to %s failed (HTTP status %d); could not read response body", resolvedDestUrl.String(), resp.StatusCode),
+			)
 		} else {
 			statusErr := wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("destination COPY returned HTTP %d", resp.StatusCode))
 			if resp.StatusCode == http.StatusOK {
-				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination server does not have the TPC module loaded: %s",
+				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination origin does not have the TPC module loaded: %q",
 					resolvedDestUrl.String(), string(respBytes))
-				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination server does not have the TPC module loaded (HTTP 200 instead of 201)",
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination origin does not have the TPC module loaded (HTTP 200 instead of 201);"+
+					" for Pelican origins, ensure the origin has a POSIX-like backend that supports third-party copy",
 					resolvedDestUrl.String()), Err: statusErr}
 			} else if resp.StatusCode > 200 && resp.StatusCode < 300 {
-				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination server may not support HTTP third-party-copy (ensure the TPC module is loaded): %s",
+				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination origin may not support HTTP third-party-copy: %q",
 					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
 					resp.StatusCode), Err: statusErr}
 			} else {
-				log.Errorf("TPC COPY to %s failed (HTTP status %d): %s", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
+				log.Errorf("TPC COPY to %s failed (HTTP status %d): %q", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
 					resp.StatusCode), Err: statusErr}
 			}
@@ -255,7 +263,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 
-	serverMessages := make(chan tpcStatus, 10)
+	serverMessages := make(chan tpcStatus, 5)
 
 	xfer.engine.egrp.Go(func() error { return monitorTPC(ctx, serverMessages, resp.Body) })
 
@@ -347,6 +355,11 @@ MessageHandler:
 //
 // The performance marker format is defined by the WLCG HTTP TPC specification:
 //   https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc
+//
+// The performance marker approach (and naming) is inherited partly from the GridFTP
+// protocol.  Though it's not named as such in the WLCG page, the formatting for the
+// long-running activity is basically a SSE-style response (somewhat rare when the protocol
+// was developed but now more common).
 //
 // This is guaranteed to close the channel before exiting.
 func monitorTPC(ctx context.Context, messages chan tpcStatus, body io.Reader) error {
@@ -478,7 +491,7 @@ func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transf
 	// Create a destination WebDAV client for sync skip checks (stat destination)
 	var destClient *gowebdav.Client
 	if job.job.syncLevel != SyncNone {
-		destCollUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
+		destCollUrl := job.job.destDirResp.XPelNsHdr.CollectionsUrl
 		if destCollUrl == nil {
 			log.Warnln("Destination collections URL not found; sync skip checks will be disabled for TPC copy")
 		} else {
@@ -605,9 +618,10 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 			job:      job.job,
 			engine:   te,
 			remoteURL: &url.URL{
-				Scheme: job.job.remoteURL.Scheme,
-				Host:   job.job.remoteURL.Host,
-				Path:   destPath,
+				Scheme:   job.job.remoteURL.Scheme,
+				Host:     job.job.remoteURL.Host,
+				Path:     destPath,
+				RawQuery: job.job.remoteURL.RawQuery,
 			},
 			xferType: job.job.xferType,
 			token:    job.job.token,

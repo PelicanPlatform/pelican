@@ -36,7 +36,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -110,7 +109,6 @@ func getReadOnlyToken(t *testing.T) string {
 // against a POSIXv2 origin, exercising the TPC COPY handler.
 func TestTPCWithPOSIXv2(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, posixv2AuthCfg)
 

@@ -16,6 +16,7 @@ pelican object put {source ...} {destination} [flags]
       --async                       Run the transfer asynchronously through the client API server and return a job ID
       --checksum-algorithm string   Checksum algorithm to use for upload and validation
       --checksums string            Verify files against a checksums manifest. The format is ALGORITHM:FILENAME
+      --dest-token string           Token file for the destination (overrides --token for writes)
       --dry-run                     Show what would be uploaded without actually uploading
   -h, --help                        help for put
       --pack string                 Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value

@@ -23,6 +23,7 @@ pelican object get {source ...} {destination} [flags]
       --inplace                 Write files directly to destination (default: use temporary files)
       --pack string             Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value
   -r, --recursive               Recursively download a collection.  Forces methods to only be http to get the freshest collection contents
+      --source-token string     Token file for the source (overrides --token for reads)
   -t, --token string            Token file to use for transfer
       --transfer-stats string   A path to a file to write transfer statistics to
       --wait                    When used with --async, wait for the job to complete before returning

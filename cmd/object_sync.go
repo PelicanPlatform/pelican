@@ -55,16 +55,6 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	objectCmd.AddCommand(syncCmd)
 }
 
-// Returns true if the input is a url-like object that
-// pelican can consume.
-func isPelicanUrl(input string) bool {
-	u, err := url.Parse(input)
-	if err != nil || u.Scheme == "" {
-		return false
-	}
-	return pelican_url.IsPelicanScheme(u.Scheme)
-}
-
 func syncMain(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 
@@ -104,11 +94,11 @@ func syncMain(cmd *cobra.Command, args []string) {
 	dest := args[len(args)-1]
 	doDownload := false
 	doTPC := false
-	if isPelicanUrl(dest) {
-		if isPelicanUrl(sources[0]) {
+	if pelican_url.IsPelicanURL(dest) {
+		if pelican_url.IsPelicanURL(sources[0]) {
 			// Both source and destination are remote: third-party-copy sync
 			for _, src := range sources {
-				if !isPelicanUrl(src) {
+				if !pelican_url.IsPelicanURL(src) {
 					log.Errorln("When synchronizing between federation URLs, all sources must be pelican URLs:", src)
 					os.Exit(1)
 				}
@@ -117,7 +107,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 			doTPC = true
 		} else {
 			for _, src := range sources {
-				if isPelicanUrl(src) {
+				if pelican_url.IsPelicanURL(src) {
 					log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL from local files", src)
 					os.Exit(1)
 				}
@@ -125,12 +115,12 @@ func syncMain(cmd *cobra.Command, args []string) {
 			log.Debugln("Synchronizing to a Pelican data federation")
 		}
 	} else {
-		if !isPelicanUrl(sources[0]) {
+		if !pelican_url.IsPelicanURL(sources[0]) {
 			log.Errorln("Either the first or last argument must be a pelican:// or osdf://-style URL specifying a remote destination")
 			os.Exit(1)
 		}
 		for _, src := range sources {
-			if !isPelicanUrl(src) {
+			if !pelican_url.IsPelicanURL(src) {
 				log.Errorln("When synchronizing to a local directory, all sources must be pelican URLs:", src)
 				os.Exit(1)
 			}

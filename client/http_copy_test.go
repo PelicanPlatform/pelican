@@ -46,7 +46,7 @@ func TestMonitorTPC(t *testing.T) {
 				"success: Created\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
+		messages := make(chan tpcStatus, 3)
 		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
@@ -78,7 +78,7 @@ func TestMonitorTPC(t *testing.T) {
 			"failure: Copy failed: no such file\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
+		messages := make(chan tpcStatus, 2)
 		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
@@ -112,7 +112,7 @@ func TestMonitorTPC(t *testing.T) {
 				"success: Created\n",
 		)
 
-		messages := make(chan tpcStatus, 10)
+		messages := make(chan tpcStatus, 3)
 		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 
@@ -142,7 +142,7 @@ func TestMonitorTPC(t *testing.T) {
 	t.Run("EmptyBody", func(t *testing.T) {
 		body := strings.NewReader("")
 
-		messages := make(chan tpcStatus, 10)
+		messages := make(chan tpcStatus, 1)
 		err := monitorTPC(context.Background(), messages, body)
 		require.NoError(t, err)
 

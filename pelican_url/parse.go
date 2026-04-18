@@ -138,6 +138,15 @@ func IsPelicanScheme(scheme string) bool {
 	return false
 }
 
+// IsPelicanURL returns true if the input string is a URL with a known Pelican scheme.
+func IsPelicanURL(input string) bool {
+	u, err := url.Parse(input)
+	if err != nil || u.Scheme == "" {
+		return false
+	}
+	return IsPelicanScheme(u.Scheme)
+}
+
 // Given a scheme that may have an embedded token, normalize it to the base scheme.
 func normalizeScheme(scheme string) string {
 	return strings.Split(scheme, "+")[len(strings.Split(scheme, "+"))-1]

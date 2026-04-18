@@ -4,14 +4,7 @@ title: pelican object copy
 
 ## pelican object copy
 
-Copy a file to/from a Pelican federation
-
-The `pelican object copy` command uses HTTP third-party copy (TPC), as
-defined by the [WLCG HTTP-TPC specification](https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc),
-to transfer objects between origins without pulling data through the client.
-The client issues a WebDAV `COPY` request to the destination origin with a
-`Source` header pointing to the source, so the destination pulls the data
-directly from the source.
+Copy a file to or from a Pelican federation or between two objects in a federation
 
 ```
 pelican object copy {source ...} {destination} [flags]
@@ -20,16 +13,18 @@ pelican object copy {source ...} {destination} [flags]
 ### Options
 
 ```
-      --async            Run the transfer asynchronously through the client API server and return a job ID
-  -c, --cache string     A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
-                         the client should fallback to discovered caches if all preferred caches fail.
-      --caches string    A JSON file containing the list of caches
-      --direct           Read directly from an origin, bypassing any caches (same as '?directread' query)
-  -h, --help             help for copy
-      --methods string   Comma separated list of methods to try, in order (default "http")
-  -r, --recursive        Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents
-  -t, --token string     Token file to use for transfer
-      --wait             When used with --async, wait for the job to complete before returning
+      --async                 Run the transfer asynchronously through the client API server and return a job ID
+  -c, --cache string          A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+                              the client should fallback to discovered caches if all preferred caches fail.
+      --caches string         A JSON file containing the list of caches
+      --dest-token string     Token file for the destination (overrides --token for writes)
+      --direct                Read directly from an origin, bypassing any caches (same as '?directread' query)
+  -h, --help                  help for copy
+      --methods string        Comma separated list of methods to try, in order (default "http")
+  -r, --recursive             Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents
+      --source-token string   Token file for the source (overrides --token for reads)
+  -t, --token string          Token file to use for transfer
+      --wait                  When used with --async, wait for the job to complete before returning
 ```
 
 ### Options inherited from parent commands

@@ -84,19 +84,20 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	scopes = append(scopes, readScope)
 	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
 	tkn, err = tokenConfig.CreateToken()
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
 	tmpTok := filepath.Join(t.TempDir(), "token")
 	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
-	assert.NoError(t, err, "Error opening the temp token file")
+	require.NoError(t, err, "Error opening the temp token file")
 	_, err = tempToken.WriteString(tkn)
-	assert.NoError(t, err, "Error writing to temp token file")
+	require.NoError(t, err, "Error writing to temp token file")
 
 	return
 }
@@ -1366,7 +1367,6 @@ func TestTPCSyncSkip(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 
 	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
