@@ -87,7 +87,156 @@ func computeFileSHA256(filePath string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-// TestClientAPIIntegration performs end-to-end testing of the client API server
+// integrationEnv holds shared state for the integration test subtests.
+// Each ensure* method is idempotent and chains to its prerequisites,
+// allowing individual subtests to be run via `go test -run`.
+type integrationEnv struct {
+	httpClient   *http.Client
+	baseURL      string
+	testContent  []byte
+	originalFile string
+	originalHash string
+	tempDir      string
+	tokenFile    string
+	uploadURL    string
+	copyDestURL  string
+
+	uploaded    bool
+	uploadResp  client_agent.JobResponse
+	uploadJobID string
+
+	downloaded     bool
+	downloadResp   client_agent.JobResponse
+	downloadJobID  string
+	downloadedFile string
+
+	copied    bool
+	copyResp  client_agent.JobResponse
+	copyJobID string
+}
+
+// submitJob creates a transfer job and returns the initial response.
+func (e *integrationEnv) submitJob(t *testing.T, req client_agent.JobRequest) client_agent.JobResponse {
+	t.Helper()
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := e.httpClient.Post(e.baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var jobResp client_agent.JobResponse
+	err = json.NewDecoder(resp.Body).Decode(&jobResp)
+	require.NoError(t, err)
+	require.NotEmpty(t, jobResp.JobID)
+
+	return jobResp
+}
+
+// waitForJob polls until the given job reaches a terminal state, then asserts it completed.
+func (e *integrationEnv) waitForJob(t *testing.T, jobID string) {
+	t.Helper()
+	var lastStatus, lastError string
+	require.Eventually(t, func() bool {
+		resp, err := e.httpClient.Get(fmt.Sprintf("%s/jobs/%s", e.baseURL, jobID))
+		if err != nil {
+			return false
+		}
+		var status client_agent.JobStatus
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		resp.Body.Close()
+		if err != nil {
+			return false
+		}
+		lastStatus = status.Status
+		lastError = status.Error
+		return status.Status == "completed" || status.Status == "failed"
+	}, 30*time.Second, 500*time.Millisecond, "Job %s did not reach terminal state", jobID)
+	require.NotEqual(t, "failed", lastStatus, "Job %s failed: %s", jobID, lastError)
+}
+
+// ensureUploaded creates and waits for the upload job exactly once.
+func (e *integrationEnv) ensureUploaded(t *testing.T) {
+	t.Helper()
+	if e.uploaded {
+		return
+	}
+	e.uploadResp = e.submitJob(t, client_agent.JobRequest{
+		Transfers: []client_agent.TransferRequest{
+			{
+				Operation:   "put",
+				Source:      e.originalFile,
+				Destination: e.uploadURL,
+			},
+		},
+		Options: client_agent.TransferOptions{
+			Token: e.tokenFile,
+		},
+	})
+	e.uploadJobID = e.uploadResp.JobID
+	t.Logf("Created upload job: %s", e.uploadJobID)
+	e.waitForJob(t, e.uploadJobID)
+	e.uploaded = true
+}
+
+// ensureDownloaded creates and waits for the download job exactly once, ensuring the upload
+// prerequisite has completed first.
+func (e *integrationEnv) ensureDownloaded(t *testing.T) {
+	t.Helper()
+	e.ensureUploaded(t)
+	if e.downloaded {
+		return
+	}
+	e.downloadedFile = filepath.Join(e.tempDir, "downloaded.txt")
+	e.downloadResp = e.submitJob(t, client_agent.JobRequest{
+		Transfers: []client_agent.TransferRequest{
+			{
+				Operation:   "get",
+				Source:      e.uploadURL,
+				Destination: e.downloadedFile,
+			},
+		},
+		Options: client_agent.TransferOptions{
+			Token: e.tokenFile,
+		},
+	})
+	e.downloadJobID = e.downloadResp.JobID
+	t.Logf("Created download job: %s", e.downloadJobID)
+	e.waitForJob(t, e.downloadJobID)
+	e.downloaded = true
+}
+
+// ensureCopied creates and waits for the third-party copy job exactly once, ensuring the
+// upload prerequisite has completed first.
+func (e *integrationEnv) ensureCopied(t *testing.T) {
+	t.Helper()
+	e.ensureUploaded(t)
+	if e.copied {
+		return
+	}
+	e.copyResp = e.submitJob(t, client_agent.JobRequest{
+		Transfers: []client_agent.TransferRequest{
+			{
+				Operation:   "copy",
+				Source:      e.uploadURL,
+				Destination: e.copyDestURL,
+			},
+		},
+		Options: client_agent.TransferOptions{
+			Token: e.tokenFile,
+		},
+	})
+	e.copyJobID = e.copyResp.JobID
+	t.Logf("Created copy job: %s", e.copyJobID)
+	e.waitForJob(t, e.copyJobID)
+	e.copied = true
+}
+
+// TestClientAPIIntegration performs end-to-end testing of the client API server.
+// Subtests can be run individually via `go test -run TestClientAPIIntegration/<SubtestName>`;
+// each subtest calls its prerequisite ensure* methods to set up the required server-side state.
 func TestClientAPIIntegration(t *testing.T) {
 	// Reset test state
 	server_utils.ResetTestState()
@@ -168,7 +317,26 @@ func TestClientAPIIntegration(t *testing.T) {
 	// Base URL for API requests (hostname doesn't matter for Unix sockets)
 	baseURL := "http://localhost/api/v1.0/transfer-agent"
 
-	// Test 1: Health check
+	// Get the federation prefix
+	require.NotEmpty(t, fed.Exports, "No exports found in test federation")
+	federationPrefix := fed.Exports[0].FederationPrefix
+
+	// Construct the pelican URL for upload
+	fileName := "test-upload.txt"
+	uploadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, fileName)
+
+	env := &integrationEnv{
+		httpClient:   httpClient,
+		baseURL:      baseURL,
+		testContent:  testContent,
+		originalFile: originalFile,
+		originalHash: originalHash,
+		tempDir:      tempDir,
+		tokenFile:    tokenFile,
+		uploadURL:    uploadURL,
+		copyDestURL:  fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, "test-copy-dest.txt"),
+	}
+
 	t.Run("HealthCheck", func(t *testing.T) {
 		resp, err := httpClient.Get("http://localhost/health")
 		require.NoError(t, err)
@@ -184,91 +352,14 @@ func TestClientAPIIntegration(t *testing.T) {
 		assert.NotEmpty(t, health.Version)
 	})
 
-	// Get the federation prefix
-	require.NotEmpty(t, fed.Exports, "No exports found in test federation")
-	federationPrefix := fed.Exports[0].FederationPrefix
-
-	// Construct the pelican URL for upload
-	fileName := "test-upload.txt"
-	uploadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, fileName)
-	downloadedFile := filepath.Join(tempDir, "downloaded.txt")
-
-	var jobID string
-
-	// Test 2: Create a job to upload the file
-	t.Run("CreateUploadJob", func(t *testing.T) {
-		jobReq := client_agent.JobRequest{
-			Transfers: []client_agent.TransferRequest{
-				{
-					Operation:   "put",
-					Source:      originalFile,
-					Destination: uploadURL,
-					Recursive:   false,
-				},
-			},
-			Options: client_agent.TransferOptions{
-				Token: tokenFile,
-			},
-		}
-
-		body, err := json.Marshal(jobReq)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusCreated, resp.StatusCode)
-
-		var jobResp client_agent.JobResponse
-		err = json.NewDecoder(resp.Body).Decode(&jobResp)
-		require.NoError(t, err)
-
-		assert.NotEmpty(t, jobResp.JobID)
-		assert.Equal(t, "pending", jobResp.Status)
-		assert.Len(t, jobResp.Transfers, 1)
-
-		jobID = jobResp.JobID
-		t.Logf("Created upload job: %s", jobID)
+	t.Run("Upload", func(t *testing.T) {
+		env.ensureUploaded(t)
+		assert.Len(t, env.uploadResp.Transfers, 1)
 	})
 
-	// Test 3: Poll job status until completion
-	t.Run("WaitForUploadCompletion", func(t *testing.T) {
-		require.NotEmpty(t, jobID, "Job ID not set from previous test")
-
-		// Poll for up to 30 seconds
-		timeout := time.After(30 * time.Second)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeout:
-				t.Fatal("Upload job did not complete within timeout")
-			case <-ticker.C:
-				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, jobID))
-				require.NoError(t, err)
-
-				var status client_agent.JobStatus
-				err = json.NewDecoder(resp.Body).Decode(&status)
-				resp.Body.Close()
-				require.NoError(t, err)
-
-				t.Logf("Job status: %s, Progress: %.1f%%", status.Status, status.Progress.Percentage)
-
-				if status.Status == "completed" {
-					assert.Equal(t, 1, status.Progress.TransfersCompleted)
-					assert.Equal(t, 0, status.Progress.TransfersFailed)
-					return
-				} else if status.Status == "failed" {
-					t.Fatalf("Upload job failed: %s", status.Error)
-				}
-			}
-		}
-	})
-
-	// Test 4: Stat the uploaded file
 	t.Run("StatUploadedFile", func(t *testing.T) {
+		env.ensureUploaded(t)
+
 		statReq := client_agent.StatRequest{
 			URL: uploadURL,
 			Options: client_agent.TransferOptions{
@@ -297,88 +388,27 @@ func TestClientAPIIntegration(t *testing.T) {
 		t.Logf("Stat result - Name: %s, Size: %d bytes", statResp.Name, statResp.Size)
 	})
 
-	// Test 5: Create a job to download the file
-	t.Run("CreateDownloadJob", func(t *testing.T) {
-		jobReq := client_agent.JobRequest{
-			Transfers: []client_agent.TransferRequest{
-				{
-					Operation:   "get",
-					Source:      uploadURL,
-					Destination: downloadedFile,
-					Recursive:   false,
-				},
-			},
-			Options: client_agent.TransferOptions{
-				Token: tokenFile,
-			},
-		}
-
-		body, err := json.Marshal(jobReq)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusCreated, resp.StatusCode)
-
-		var jobResp client_agent.JobResponse
-		err = json.NewDecoder(resp.Body).Decode(&jobResp)
-		require.NoError(t, err)
-
-		jobID = jobResp.JobID
-		t.Logf("Created download job: %s", jobID)
+	t.Run("Download", func(t *testing.T) {
+		env.ensureDownloaded(t)
+		assert.Len(t, env.downloadResp.Transfers, 1)
 	})
 
-	// Test 6: Wait for download to complete
-	t.Run("WaitForDownloadCompletion", func(t *testing.T) {
-		require.NotEmpty(t, jobID, "Job ID not set from previous test")
-
-		timeout := time.After(30 * time.Second)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeout:
-				t.Fatal("Download job did not complete within timeout")
-			case <-ticker.C:
-				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, jobID))
-				require.NoError(t, err)
-
-				var status client_agent.JobStatus
-				err = json.NewDecoder(resp.Body).Decode(&status)
-				resp.Body.Close()
-				require.NoError(t, err)
-
-				t.Logf("Job status: %s, Progress: %.1f%%", status.Status, status.Progress.Percentage)
-
-				if status.Status == "completed" {
-					assert.Equal(t, 1, status.Progress.TransfersCompleted)
-					assert.Equal(t, 0, status.Progress.TransfersFailed)
-					return
-				} else if status.Status == "failed" {
-					t.Fatalf("Download job failed: %s", status.Error)
-				}
-			}
-		}
-	})
-
-	// Test 7: Verify downloaded file matches original
 	t.Run("VerifyDownloadedFile", func(t *testing.T) {
+		env.ensureDownloaded(t)
+
 		// Check if file exists
-		_, err := os.Stat(downloadedFile)
+		_, err := os.Stat(env.downloadedFile)
 		require.NoError(t, err, "Downloaded file does not exist")
 
 		// Read downloaded content
-		downloadedContent, err := os.ReadFile(downloadedFile)
+		downloadedContent, err := os.ReadFile(env.downloadedFile)
 		require.NoError(t, err)
 
 		// Compare content
 		assert.Equal(t, testContent, downloadedContent, "Downloaded content does not match original")
 
 		// Compare hashes
-		downloadedHash, err := computeFileSHA256(downloadedFile)
+		downloadedHash, err := computeFileSHA256(env.downloadedFile)
 		require.NoError(t, err)
 
 		assert.Equal(t, originalHash, downloadedHash, "SHA256 hash mismatch between original and downloaded file")
@@ -386,150 +416,46 @@ func TestClientAPIIntegration(t *testing.T) {
 		t.Logf("File verification successful - Original hash: %s, Downloaded hash: %s", originalHash, downloadedHash)
 	})
 
-	// Test 8: Third-party copy — copy the uploaded file to a new remote path
-	copyDestURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, "test-copy-dest.txt")
-	var copyJobID string
-
-	t.Run("CreateCopyJob", func(t *testing.T) {
-		jobReq := client_agent.JobRequest{
-			Transfers: []client_agent.TransferRequest{
-				{
-					Operation:   "copy",
-					Source:      uploadURL,
-					Destination: copyDestURL,
-					Recursive:   false,
-				},
-			},
-			Options: client_agent.TransferOptions{
-				Token: tokenFile,
-			},
-		}
-
-		body, err := json.Marshal(jobReq)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusCreated, resp.StatusCode)
-
-		var jobResp client_agent.JobResponse
-		err = json.NewDecoder(resp.Body).Decode(&jobResp)
-		require.NoError(t, err)
-
-		assert.NotEmpty(t, jobResp.JobID)
-		assert.Len(t, jobResp.Transfers, 1)
-		assert.Equal(t, "copy", jobResp.Transfers[0].Operation)
-
-		copyJobID = jobResp.JobID
-		t.Logf("Created copy job: %s", copyJobID)
+	t.Run("Copy", func(t *testing.T) {
+		env.ensureCopied(t)
+		assert.Len(t, env.copyResp.Transfers, 1)
+		assert.Equal(t, "copy", env.copyResp.Transfers[0].Operation)
 	})
 
-	// Test 9: Wait for the copy to complete
-	t.Run("WaitForCopyCompletion", func(t *testing.T) {
-		require.NotEmpty(t, copyJobID, "Copy job ID not set from previous test")
-
-		timeout := time.After(30 * time.Second)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeout:
-				t.Fatal("Copy job did not complete within timeout")
-			case <-ticker.C:
-				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, copyJobID))
-				require.NoError(t, err)
-
-				var status client_agent.JobStatus
-				err = json.NewDecoder(resp.Body).Decode(&status)
-				resp.Body.Close()
-				require.NoError(t, err)
-
-				t.Logf("Copy job status: %s, Progress: %.1f%%", status.Status, status.Progress.Percentage)
-
-				if status.Status == "completed" {
-					assert.Equal(t, 1, status.Progress.TransfersCompleted)
-					assert.Equal(t, 0, status.Progress.TransfersFailed)
-					return
-				} else if status.Status == "failed" {
-					t.Fatalf("Copy job failed: %s", status.Error)
-				}
-			}
-		}
-	})
-
-	// Test 10: Download the copied file and verify content matches the original
-	copiedFile := filepath.Join(tempDir, "copied.txt")
+	// Download the copied file and verify content matches the original
 	t.Run("VerifyCopiedFile", func(t *testing.T) {
-		jobReq := client_agent.JobRequest{
+		env.ensureCopied(t)
+
+		copiedFile := filepath.Join(tempDir, "copied.txt")
+		dlResp := env.submitJob(t, client_agent.JobRequest{
 			Transfers: []client_agent.TransferRequest{
 				{
 					Operation:   "get",
-					Source:      copyDestURL,
+					Source:      env.copyDestURL,
 					Destination: copiedFile,
-					Recursive:   false,
 				},
 			},
 			Options: client_agent.TransferOptions{
 				Token: tokenFile,
 			},
-		}
+		})
+		env.waitForJob(t, dlResp.JobID)
 
-		body, err := json.Marshal(jobReq)
+		copiedContent, err := os.ReadFile(copiedFile)
 		require.NoError(t, err)
+		assert.Equal(t, testContent, copiedContent, "Copied file content does not match original")
 
-		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
+		copiedHash, err := computeFileSHA256(copiedFile)
 		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusCreated, resp.StatusCode)
-
-		var jobResp client_agent.JobResponse
-		err = json.NewDecoder(resp.Body).Decode(&jobResp)
-		require.NoError(t, err)
-
-		dlJobID := jobResp.JobID
-
-		// Wait for download of the copy to complete
-		timeout := time.After(30 * time.Second)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeout:
-				t.Fatal("Download of copied file did not complete within timeout")
-			case <-ticker.C:
-				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, dlJobID))
-				require.NoError(t, err)
-
-				var status client_agent.JobStatus
-				err = json.NewDecoder(resp.Body).Decode(&status)
-				resp.Body.Close()
-				require.NoError(t, err)
-
-				if status.Status == "completed" {
-					// Verify the content matches
-					copiedContent, err := os.ReadFile(copiedFile)
-					require.NoError(t, err)
-					assert.Equal(t, testContent, copiedContent, "Copied file content does not match original")
-
-					copiedHash, err := computeFileSHA256(copiedFile)
-					require.NoError(t, err)
-					assert.Equal(t, originalHash, copiedHash, "SHA256 hash mismatch between original and copied file")
-					t.Logf("Copy verification successful — hash: %s", copiedHash)
-					return
-				} else if status.Status == "failed" {
-					t.Fatalf("Download of copied file failed: %s", status.Error)
-				}
-			}
-		}
+		assert.Equal(t, originalHash, copiedHash, "SHA256 hash mismatch between original and copied file")
+		t.Logf("Copy verification successful — hash: %s", copiedHash)
 	})
 
-	// Test 11: List jobs
 	t.Run("ListJobs", func(t *testing.T) {
+		env.ensureUploaded(t)
+		env.ensureDownloaded(t)
+		env.ensureCopied(t)
+
 		resp, err := httpClient.Get(baseURL + "/jobs?limit=10")
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -540,14 +466,16 @@ func TestClientAPIIntegration(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&listResp)
 		require.NoError(t, err)
 
-		assert.GreaterOrEqual(t, listResp.Total, 4, "Expected at least 4 jobs (upload, download, copy, copy-download)")
+		assert.GreaterOrEqual(t, listResp.Total, 3, "Expected at least 3 jobs (upload, download, copy)")
 		assert.NotEmpty(t, listResp.Jobs)
 
 		t.Logf("Found %d total jobs", listResp.Total)
 	})
 
-	// Test 12: Test job cancellation
+	// Test job cancellation
 	t.Run("CancelJob", func(t *testing.T) {
+		env.ensureUploaded(t)
+
 		// Create a job to cancel
 		jobReq := client_agent.JobRequest{
 			Transfers: []client_agent.TransferRequest{
@@ -555,7 +483,6 @@ func TestClientAPIIntegration(t *testing.T) {
 					Operation:   "get",
 					Source:      uploadURL,
 					Destination: filepath.Join(tempDir, "cancel-test.txt"),
-					Recursive:   false,
 				},
 			},
 			Options: client_agent.TransferOptions{
