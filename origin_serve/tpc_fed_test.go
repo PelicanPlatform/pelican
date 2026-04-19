@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,7 +41,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -111,6 +111,98 @@ func getReadOnlyToken(t *testing.T) string {
 	tkn, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	return tkn
+}
+
+// dumpFileToTestLog logs the contents of a file into the test output,
+// truncating from the beginning when the file is large.
+func dumpFileToTestLog(t *testing.T, filePath, label string) {
+	t.Helper()
+
+	contents, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Logf("Failed to read %s at %s: %v", label, filePath, err)
+		return
+	}
+
+	const maxBytes = 128 * 1024
+	if len(contents) > maxBytes {
+		contents = contents[len(contents)-maxBytes:]
+		t.Logf("%s is larger than %d bytes; showing the last %d bytes", label, maxBytes, maxBytes)
+	}
+
+	t.Logf("===== Begin %s (%s) =====\n%s\n===== End %s =====", label, filePath, string(contents), label)
+}
+
+// waitForURLStatusOrProcessExit polls an endpoint until it returns the expected
+// status code, while also checking whether the subprocess has exited unexpectedly.
+func waitForURLStatusOrProcessExit(
+	t *testing.T,
+	ctx context.Context,
+	url string,
+	expectedStatus int,
+	timeout time.Duration,
+	pollInterval time.Duration,
+	exitCh <-chan error,
+	origin2LogPath string,
+	name string,
+) error {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	client := &http.Client{
+		Transport: config.GetTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	lastStatus := 0
+	var lastErr error
+
+	for {
+		select {
+		case waitErr := <-exitCh:
+			dumpFileToTestLog(t, origin2LogPath, "origin2.log")
+			if waitErr != nil {
+				return fmt.Errorf("origin2 exited unexpectedly while waiting for %s: %w", name, waitErr)
+			}
+			return fmt.Errorf("origin2 exited while waiting for %s", name)
+		case <-ctx.Done():
+			dumpFileToTestLog(t, origin2LogPath, "origin2.log")
+			return fmt.Errorf("context cancelled while waiting for %s: %w", name, ctx.Err())
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				dumpFileToTestLog(t, origin2LogPath, "origin2.log")
+				if lastErr != nil {
+					return fmt.Errorf("timed out waiting for %s at %s; last error: %w", name, url, lastErr)
+				}
+				return fmt.Errorf("timed out waiting for %s at %s; last HTTP status: %d (expected %d)", name, url, lastStatus, expectedStatus)
+			}
+
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if reqErr != nil {
+				lastErr = reqErr
+				continue
+			}
+
+			resp, doErr := client.Do(req)
+			if doErr != nil {
+				lastErr = doErr
+				continue
+			}
+
+			lastStatus = resp.StatusCode
+			resp.Body.Close()
+			lastErr = nil
+
+			if resp.StatusCode == expectedStatus {
+				return nil
+			}
+		}
+	}
 }
 
 // TestTPCWithPOSIXv2 verifies that DoCopy (third-party copy) works end-to-end
@@ -333,6 +425,7 @@ func TestTPCCrossOrigin(t *testing.T) {
 	}
 
 	origin2FedPrefix := "/origin2/tpc-test"
+	origin2LogPath := filepath.Join(origin2Dir, "origin2.log")
 
 	// Write the config file for origin #2.
 	origin2ConfigFile := filepath.Join(origin2ConfigDir, "pelican.yaml")
@@ -373,42 +466,65 @@ Xrootd:
 `, discoveryURL, origin2IssuerKeysDir, origin2Port, caCertFile, caKeyFile, tlsCertFile, tlsKeyFile, host,
 		filepath.Join(origin2Dir, "origin.sqlite"),
 		origin2StorageDir, origin2FedPrefix,
-		filepath.Join(origin2Dir, "origin2.log"),
+		origin2LogPath,
 		origin2RuntimeDir,
 	)
 	require.NoError(t, os.WriteFile(origin2ConfigFile, []byte(origin2ConfigContent), 0644))
 
 	// Launch origin #2 as a subprocess.
 	ctx, cancel := context.WithCancel(fed.Ctx)
-	t.Cleanup(cancel)
 
 	cmd := exec.CommandContext(ctx, pelicanBinary, "origin", "serve", "--config", origin2ConfigFile)
 	cmd.Env = append(os.Environ(),
 		"PELICAN_CONFIGDIR="+origin2ConfigDir,
 	)
 
-	// Capture stderr for debugging.
+	// Capture stdout/stderr for debugging.
+	stdoutPipe, err := cmd.StdoutPipe()
+	require.NoError(t, err)
 	stderrPipe, err := cmd.StderrPipe()
 	require.NoError(t, err)
 
 	require.NoError(t, cmd.Start())
+	exitCh := make(chan error, 1)
+	go func() {
+		exitCh <- cmd.Wait()
+	}()
+
 	t.Cleanup(func() {
 		cancel()
-		_ = cmd.Wait()
+		select {
+		case <-exitCh:
+		case <-time.After(5 * time.Second):
+			t.Log("Timed out waiting for origin2 process to exit during cleanup")
+		}
 	})
 
-	// Log stderr in background for debugging.
+	// Log stdout/stderr in background for debugging.
+	go func() {
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			t.Logf("[origin2-stdout] %s", scanner.Text())
+		}
+	}()
+
 	go func() {
 		scanner := bufio.NewScanner(stderrPipe)
 		for scanner.Scan() {
-			t.Logf("[origin2] %s", scanner.Text())
+			t.Logf("[origin2-stderr] %s", scanner.Text())
 		}
 	}()
+
+	// Seed a source file on origin #2's storage.
+	sourceContent := "Hello from the independent second origin"
+	srcDir := filepath.Join(origin2StorageDir, "cross-origin")
+	require.NoError(t, os.MkdirAll(srcDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(sourceContent), 0644))
 
 	// Wait for origin #2 to become healthy.
 	origin2URL := fmt.Sprintf("https://%s:%d", host, origin2Port)
 	healthURL := origin2URL + "/api/v1.0/health"
-	err = server_utils.WaitUntilWorking(ctx, "GET", healthURL, "origin2", 200, false)
+	err = waitForURLStatusOrProcessExit(t, ctx, healthURL, http.StatusOK, 30*time.Second, 500*time.Millisecond, exitCh, origin2LogPath, "origin2 health")
 	require.NoError(t, err, "Origin #2 failed to become healthy")
 
 	// Poll the director until origin #2's namespace is resolvable.
@@ -416,16 +532,8 @@ Xrootd:
 	directorURL := param.Server_ExternalWebUrl.GetString()
 	testSourcePath := origin2FedPrefix + "/cross-origin/source.txt"
 	statURL := directorURL + "/api/v1.0/director/origin" + testSourcePath
-	require.Eventually(t, func() bool {
-		err := server_utils.WaitUntilWorking(ctx, "GET", statURL, "director", 307, false)
-		return err == nil
-	}, 30*time.Second, 500*time.Millisecond, "Origin #2 never appeared in director")
-
-	// Seed a source file on origin #2's storage.
-	sourceContent := "Hello from the independent second origin"
-	srcDir := filepath.Join(origin2StorageDir, "cross-origin")
-	require.NoError(t, os.MkdirAll(srcDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(sourceContent), 0644))
+	err = waitForURLStatusOrProcessExit(t, ctx, statURL, http.StatusTemporaryRedirect, 30*time.Second, 500*time.Millisecond, exitCh, origin2LogPath, "director registration of origin2")
+	require.NoError(t, err, "Origin #2 never appeared in director")
 
 	for _, export := range fed.Exports {
 		t.Run("CrossOriginTPC_"+export.FederationPrefix, func(t *testing.T) {
