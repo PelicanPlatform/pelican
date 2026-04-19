@@ -177,14 +177,14 @@ func TestAddQueryParam(t *testing.T) {
 			input:    "osdf:///pelicanplatform/test/hello-world.txt",
 			key:      "directread",
 			value:    "",
-			expected: "osdf:///pelicanplatform/test/hello-world.txt?directread=",
+			expected: "osdf:///pelicanplatform/test/hello-world.txt?directread",
 		},
 		{
 			name:     "Add directread to URL with existing query",
 			input:    "pelican://example.com/path?pack=auto",
 			key:      "directread",
 			value:    "",
-			expected: "pelican://example.com/path?directread=&pack=auto",
+			expected: "pelican://example.com/path?pack=auto&directread",
 		},
 		{
 			name:     "Add pack to simple URL",

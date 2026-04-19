@@ -48,10 +48,11 @@ import (
 )
 
 var (
-	backends           map[string]server_utils.OriginBackend
-	webdavHandlers     map[string]*webdav.Handler
-	exportPrefixMap    map[string]string // Maps federation prefix to storage prefix
-	handlersRegistered bool              // Tracks whether handlers have been registered
+	backends              map[string]server_utils.OriginBackend
+	webdavHandlers        map[string]*webdav.Handler
+	exportPrefixMap       map[string]string // Maps federation prefix to storage prefix
+	copyEnabledPrefixes   map[string]bool   // Set of federation prefixes that have the Copies capability
+	handlersRegistered    bool              // Tracks whether handlers have been registered
 )
 
 const (
@@ -186,6 +187,7 @@ func ResetHandlers() {
 	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
+	copyEnabledPrefixes = nil
 	handlersRegistered = false
 }
 
@@ -558,7 +560,8 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 
 	backends = make(map[string]server_utils.OriginBackend)
 	webdavHandlers = make(map[string]*webdav.Handler)
-	exportPrefixMap = make(map[string]string) // Initialize the global map
+	exportPrefixMap = make(map[string]string)
+	copyEnabledPrefixes = make(map[string]bool)
 
 	// Get optional rate limit for testing
 	readRateLimit := param.Origin_TransferRateLimit.GetByteRate()
@@ -642,6 +645,9 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 		backends[export.FederationPrefix] = backend
 		webdavHandlers[export.FederationPrefix] = handler
 		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
+		if export.Capabilities.Copies {
+			copyEnabledPrefixes[export.FederationPrefix] = true
+		}
 		log.Infof("Initialized WebDAV handler for %s -> %s (storage: %s)", export.FederationPrefix, export.StoragePrefix, storageType)
 	}
 
@@ -706,7 +712,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			req := server_utils.StashPelicanHeaders(c.Request)
 
 			if isTPCRequest(c.Request) {
-				handleCopyTPC(c, backend)
+				handleCopyTPC(c, backend, prefix)
 			} else if c.Request.Method == http.MethodHead {
 				// For HEAD requests, pass the original request to the WebDAV handler
 				// (it needs the full URL so its Prefix stripping works correctly).
@@ -734,7 +740,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		group.Handle("PROPFIND", "/*path", handleRequest)
 		group.Handle("PROPPATCH", "/*path", handleRequest)
 		group.Handle("MKCOL", "/*path", handleRequest)
-		group.Handle("COPY", "/*path", handleRequest)
+		if copyEnabledPrefixes[prefix] {
+			group.Handle("COPY", "/*path", handleRequest)
+		}
 		group.Handle("MOVE", "/*path", handleRequest)
 		group.Handle("LOCK", "/*path", handleRequest)
 		group.Handle("UNLOCK", "/*path", handleRequest)

@@ -129,6 +129,34 @@ func TestXrootDOriginConfig(t *testing.T) {
 		})
 	}
 
+	t.Run("TestOriginTPCEnabledByDefault", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		require.NoError(t, param.Origin_DisableCopies.Set(false))
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "http.exthandler xrdtpc libXrdHttpTPC.so")
+	})
+
+	t.Run("TestOriginTPCDisabledByConfig", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		require.NoError(t, param.Origin_DisableCopies.Set(true))
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.NotContains(t, string(content), "http.exthandler xrdtpc libXrdHttpTPC.so")
+	})
+
 	// Additional configuration tests
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
 		defer os.Unsetenv("XRDHOST")
@@ -179,6 +207,54 @@ func TestXrootDOriginConfig(t *testing.T) {
 		assert.False(t, xrdhostIsSet, "XRDHOST should only be set in OSDF mode")
 
 		server_utils.ResetTestState()
+	})
+}
+
+func TestShouldEnableTPC(t *testing.T) {
+	t.Run("DisabledGlobally", func(t *testing.T) {
+		exports := []server_utils.OriginExport{{
+			FederationPrefix: "/a",
+			Capabilities: server_structs.Capabilities{
+				Copies: true,
+			},
+		}}
+		assert.False(t, shouldEnableTPC(true, exports))
+	})
+
+	t.Run("NoCopiesEnabledInAnyExport", func(t *testing.T) {
+		exports := []server_utils.OriginExport{
+			{
+				FederationPrefix: "/a",
+				Capabilities: server_structs.Capabilities{
+					Copies: false,
+				},
+			},
+			{
+				FederationPrefix: "/b",
+				Capabilities: server_structs.Capabilities{
+					Copies: false,
+				},
+			},
+		}
+		assert.False(t, shouldEnableTPC(false, exports))
+	})
+
+	t.Run("AtLeastOneExportEnablesCopies", func(t *testing.T) {
+		exports := []server_utils.OriginExport{
+			{
+				FederationPrefix: "/a",
+				Capabilities: server_structs.Capabilities{
+					Copies: false,
+				},
+			},
+			{
+				FederationPrefix: "/b",
+				Capabilities: server_structs.Capabilities{
+					Copies: true,
+				},
+			},
+		}
+		assert.True(t, shouldEnableTPC(false, exports))
 	})
 }
 
