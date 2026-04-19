@@ -21,9 +21,13 @@
 package origin_serve_test
 
 import (
+	"bufio"
+	"context"
 	_ "embed"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -36,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -44,6 +49,9 @@ import (
 var (
 	//go:embed resources/posixv2-auth.yml
 	posixv2AuthCfg string
+
+	//go:embed resources/posix-auth.yml
+	posixAuthCfg string
 )
 
 // getTestToken generates a short-lived WLCG token with read, create, and modify
@@ -248,5 +256,262 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestTPCCrossOrigin verifies that TPC works when the source is an
+// independent origin with its own authentication and issuer keys.
+// A real second Pelican origin is launched as a subprocess and joins
+// the federation via its discovery URL.  This proves that:
+//   - The source token is correctly forwarded via TransferHeaderAuthorization
+//   - The destination token is independently verified
+//   - TPC works across trust boundaries (separate issuers)
+func TestTPCCrossOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Start the federation with origin #1 (the destination).
+	fed := fed_test_utils.NewFedTest(t, posixv2AuthCfg)
+
+	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+	config.ResetSSRFTransportForTest()
+
+	// Capture the federation's IssuerKeysDirectory BEFORE getTestToken
+	// overwrites it with a fresh temp dir (which generates a new key).
+	fedIssuerKeysDir := param.IssuerKeysDirectory.GetString()
+
+	// Generate a destination token signed by the federation's issuer.
+	_, destTkn := getTestToken(t)
+
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+	host := param.Server_Hostname.GetString()
+	port := strconv.Itoa(param.Server_WebPort.GetInt())
+
+	// Build the pelican binary for the second origin.
+	pelicanBinary := getPelicanBinary(t)
+
+	// Prepare directories and config for the second origin (source).
+	origin2Dir := t.TempDir()
+	origin2StorageDir := filepath.Join(origin2Dir, "storage")
+	require.NoError(t, os.MkdirAll(origin2StorageDir, 0755))
+	origin2ConfigDir := filepath.Join(origin2Dir, "config")
+	require.NoError(t, os.MkdirAll(origin2ConfigDir, 0755))
+	origin2RuntimeDir := filepath.Join(origin2Dir, "runtime")
+	require.NoError(t, os.MkdirAll(origin2RuntimeDir, 0755))
+
+	// Find a free port for origin #2.
+	ln, err := net.Listen("tcp", host+":0")
+	require.NoError(t, err)
+	origin2Port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	// Grab federation values from the running federation.
+	discoveryURL := param.Federation_DiscoveryUrl.GetString()
+	require.NotEmpty(t, discoveryURL, "Federation discovery URL should be set")
+	caCertFile := param.Server_TLSCACertificateFile.GetString()
+	require.NotEmpty(t, caCertFile, "TLS CA cert should be set")
+	caKeyFile := param.Server_TLSCAKey.GetString()
+	tlsCertFile := param.Server_TLSCertificateChain.GetString()
+	tlsKeyFile := param.Server_TLSKey.GetString()
+
+	// Copy the federation's issuer keys into origin #2's config dir so both
+	// origins present the same JWKS to the registry (avoiding "unable to verify
+	// you own the registered server" errors when the hostname is shared).
+	origin2IssuerKeysDir := filepath.Join(origin2ConfigDir, "issuer-keys")
+	require.NoError(t, os.MkdirAll(origin2IssuerKeysDir, 0700))
+	entries, err := os.ReadDir(fedIssuerKeysDir)
+	require.NoError(t, err, "Failed to read federation IssuerKeysDirectory %s", fedIssuerKeysDir)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		src := filepath.Join(fedIssuerKeysDir, e.Name())
+		dst := filepath.Join(origin2IssuerKeysDir, e.Name())
+		data, err := os.ReadFile(src)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(dst, data, 0600))
+	}
+
+	origin2FedPrefix := "/origin2/tpc-test"
+
+	// Write the config file for origin #2.
+	origin2ConfigFile := filepath.Join(origin2ConfigDir, "pelican.yaml")
+	origin2ConfigContent := fmt.Sprintf(`
+Federation:
+  DiscoveryUrl: %s
+
+IssuerKeysDirectory: %s
+
+Server:
+  WebPort: %d
+  TLSCACertificateFile: %s
+  TLSCAKey: %s
+  TLSCertificateChain: %s
+  TLSKey: %s
+  EnableUI: false
+  Hostname: %s
+
+Origin:
+  StorageType: posixv2
+  EnableDirectReads: true
+  EnableCmsd: false
+  EnableVoms: false
+  Port: 0
+  DbLocation: %s
+  Exports:
+    - StoragePrefix: %s
+      FederationPrefix: %s
+      Capabilities: ["PublicReads", "Reads", "Writes", "DirectReads", "Listings", "Copies"]
+
+Logging:
+  Level: debug
+  DisableProgressBars: true
+  LogLocation: %s
+
+Xrootd:
+  RunLocation: %s
+`, discoveryURL, origin2IssuerKeysDir, origin2Port, caCertFile, caKeyFile, tlsCertFile, tlsKeyFile, host,
+		filepath.Join(origin2Dir, "origin.sqlite"),
+		origin2StorageDir, origin2FedPrefix,
+		filepath.Join(origin2Dir, "origin2.log"),
+		origin2RuntimeDir,
+	)
+	require.NoError(t, os.WriteFile(origin2ConfigFile, []byte(origin2ConfigContent), 0644))
+
+	// Launch origin #2 as a subprocess.
+	ctx, cancel := context.WithCancel(fed.Ctx)
+	t.Cleanup(cancel)
+
+	cmd := exec.CommandContext(ctx, pelicanBinary, "origin", "serve", "--config", origin2ConfigFile)
+	cmd.Env = append(os.Environ(),
+		"PELICAN_CONFIGDIR="+origin2ConfigDir,
+	)
+
+	// Capture stderr for debugging.
+	stderrPipe, err := cmd.StderrPipe()
+	require.NoError(t, err)
+
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		cancel()
+		_ = cmd.Wait()
+	})
+
+	// Log stderr in background for debugging.
+	go func() {
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			t.Logf("[origin2] %s", scanner.Text())
+		}
+	}()
+
+	// Wait for origin #2 to become healthy.
+	origin2URL := fmt.Sprintf("https://%s:%d", host, origin2Port)
+	healthURL := origin2URL + "/api/v1.0/health"
+	err = server_utils.WaitUntilWorking(ctx, "GET", healthURL, "origin2", 200, false)
+	require.NoError(t, err, "Origin #2 failed to become healthy")
+
+	// Poll the director until origin #2's namespace is resolvable.
+	// This means the origin has registered and the director can redirect to it.
+	directorURL := param.Server_ExternalWebUrl.GetString()
+	testSourcePath := origin2FedPrefix + "/cross-origin/source.txt"
+	statURL := directorURL + "/api/v1.0/director/origin" + testSourcePath
+	require.Eventually(t, func() bool {
+		err := server_utils.WaitUntilWorking(ctx, "GET", statURL, "director", 307, false)
+		return err == nil
+	}, 30*time.Second, 500*time.Millisecond, "Origin #2 never appeared in director")
+
+	// Seed a source file on origin #2's storage.
+	sourceContent := "Hello from the independent second origin"
+	srcDir := filepath.Join(origin2StorageDir, "cross-origin")
+	require.NoError(t, os.MkdirAll(srcDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(sourceContent), 0644))
+
+	for _, export := range fed.Exports {
+		t.Run("CrossOriginTPC_"+export.FederationPrefix, func(t *testing.T) {
+			sourceURL := fmt.Sprintf("pelican://%s:%s%s/cross-origin/source.txt", host, port, origin2FedPrefix)
+			destURL := fmt.Sprintf("pelican://%s:%s%s/cross-origin/dest.txt", host, port, export.FederationPrefix)
+
+			// Create parent directory for the destination on origin #1.
+			destDir := filepath.Join(export.StoragePrefix, "cross-origin")
+			require.NoError(t, os.MkdirAll(destDir, 0755))
+			test_utils.ChownToDaemon(t, destDir)
+
+			// Execute the third-party copy across two independent origins.
+			// The dest token is a real WLCG JWT signed by the federation's issuer.
+			// The source token is acquired automatically from the director redirect.
+			transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
+				client.WithToken(destTkn),
+			)
+			require.NoError(t, err)
+			require.Len(t, transferResults, 1)
+			assert.Equal(t, int64(len(sourceContent)), transferResults[0].TransferredBytes)
+
+			// Verify the file was correctly written to the destination.
+			localDir := t.TempDir()
+			downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(destTkn))
+			require.NoError(t, err)
+			require.Len(t, downloadResults, 1)
+
+			downloaded, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+			require.NoError(t, err)
+			assert.Equal(t, sourceContent, string(downloaded))
+		})
+	}
+}
+
+// TestTPCWithXRootD verifies that TPC works against a POSIX (XRootD-based)
+// origin, exercising the XRootD TPC plugin (libXrdHttpTPC.so) rather than
+// the Go-native POSIXv2 handler.
+func TestTPCWithXRootD(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	fed := fed_test_utils.NewFedTest(t, posixAuthCfg)
+
+	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
+	config.ResetSSRFTransportForTest()
+
+	tokenFile, tkn := getTestToken(t)
+	defer os.Remove(tokenFile.Name())
+
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+	host := param.Server_Hostname.GetString()
+	port := strconv.Itoa(param.Server_WebPort.GetInt())
+
+	content := "hello from the XRootD TPC E2E test"
+
+	for _, export := range fed.Exports {
+		t.Run("XRootDTPC_"+export.FederationPrefix, func(t *testing.T) {
+			subdir := "tpc_xrootd"
+			sourceURL := fmt.Sprintf("pelican://%s:%s%s/%s/source.txt", host, port, export.FederationPrefix, subdir)
+			destURL := fmt.Sprintf("pelican://%s:%s%s/%s/dest.txt", host, port, export.FederationPrefix, subdir)
+
+			// Seed the source file directly on disk
+			srcDir := filepath.Join(export.StoragePrefix, subdir)
+			require.NoError(t, os.MkdirAll(srcDir, 0755))
+			srcFile := filepath.Join(srcDir, "source.txt")
+			require.NoError(t, os.WriteFile(srcFile, []byte(content), 0644))
+			test_utils.ChownToDaemon(t, srcDir, srcFile)
+
+			// Execute the third-party copy
+			transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
+				client.WithToken(tkn), client.WithSourceToken(tkn),
+			)
+			require.NoError(t, err)
+			require.Len(t, transferResults, 1)
+			assert.Equal(t, int64(len(content)), transferResults[0].TransferredBytes)
+
+			// Verify the destination file contents via download
+			localDir := t.TempDir()
+			downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+			require.NoError(t, err)
+			require.Len(t, downloadResults, 1)
+			assert.Equal(t, int64(len(content)), downloadResults[0].TransferredBytes)
+
+			downloaded, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+			require.NoError(t, err)
+			assert.Equal(t, content, string(downloaded))
+		})
 	}
 }

@@ -152,6 +152,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 				Writes:      export.Capabilities.Writes,
 				Listings:    export.Capabilities.Listings,
 				DirectReads: export.Capabilities.DirectReads,
+				Copies:      export.Capabilities.Copies,
 			},
 			Path:       export.FederationPrefix,
 			Generation: []server_structs.TokenGen{tokGen},
@@ -203,6 +204,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 			Writes:      param.Origin_EnableWrites.GetBool(),
 			DirectReads: param.Origin_EnableDirectReads.GetBool(),
 			Listings:    param.Origin_EnableListings.GetBool(),
+			Copies:      !param.Origin_DisableCopies.GetBool(),
 		},
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: prefixes,

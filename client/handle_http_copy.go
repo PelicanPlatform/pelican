@@ -113,9 +113,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		}
 	}()
 
-	client := http.Client{
-		Transport: config.GetTransport(),
-	}
+	client := config.GetClient()
 
 	ctx, cancel := context.WithCancel(xfer.ctx)
 	defer cancel()
@@ -138,14 +136,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	req.Header.Set("User-Agent", getUserAgent(xfer.project))
 	// If checksums were requested, add Want-Digest to the HEAD so we can compare after the COPY
 	if len(xfer.requestedChecksums) > 0 {
-		val := ""
-		for i, cksum := range xfer.requestedChecksums {
-			if i > 0 {
-				val += ","
-			}
-			val += HttpDigestFromChecksum(cksum)
-		}
-		req.Header.Set("Want-Digest", val)
+		req.Header.Set("Want-Digest", wantDigestValue(xfer.requestedChecksums))
 	}
 	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
 	resp, err := client.Do(req)
@@ -157,7 +148,9 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 	resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	// Go's http.Client follows redirects automatically, so 3XX codes
+	// won't appear here.  Reject anything other than 200 OK.
+	if resp.StatusCode != http.StatusOK {
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode),
 			wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("source HEAD returned HTTP %d", resp.StatusCode))}
 		err = httpErr
@@ -279,7 +272,14 @@ MessageHandler:
 				break MessageHandler
 			}
 			if msg.err != nil || msg.done {
-				err = msg.err
+				if msg.err != nil {
+					// Errors from monitorTPC are either a "failure:" message from the
+					// remote transfer server (opaque text, format varies by implementation)
+					// or an IO error reading the response body.  We classify both under
+					// the broad Transfer category; finer sub-classification can be added
+					// once we have more experience with the structure of server error messages.
+					err = error_codes.NewTransferError(msg.err)
+				}
 				break MessageHandler
 			}
 			downloaded = int64(msg.xferred)
@@ -331,10 +331,10 @@ MessageHandler:
 							log.Errorf("TPC checksum mismatch for %s: source %x != destination %x",
 								HttpDigestFromChecksum(srcCksum.Algorithm), srcCksum.Value, destCksum.Value)
 							if xfer.requireChecksum {
-								err = &ChecksumMismatchError{
+								err = error_codes.NewTransfer_ChecksumMismatchError(&ChecksumMismatchError{
 									Info:        srcCksum,
 									ServerValue: destCksum.Value,
-								}
+								})
 								return
 							}
 						} else {
@@ -354,7 +354,8 @@ MessageHandler:
 // parses performance markers, and writes them to the channel.
 //
 // The performance marker format is defined by the WLCG HTTP TPC specification:
-//   https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc
+//
+//	https://twiki.cern.ch/twiki/bin/view/LCG/HttpTpc
 //
 // The performance marker approach (and naming) is inherited partly from the GridFTP
 // protocol.  Though it's not named as such in the WLCG page, the formatting for the

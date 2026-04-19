@@ -102,6 +102,8 @@ type (
 		EnableVoms          bool
 		EnablePublicReads   bool
 		EnableListings      bool
+		DisableCopies       bool
+		EnableTPC           bool
 		EnableAtomicUploads bool
 		SelfTest            bool
 		MonitoringPrefix    string
@@ -1210,6 +1212,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 		}
 		xrdConfig.Origin.Exports = originExports
+		xrdConfig.Origin.EnableTPC = shouldEnableTPC(xrdConfig.Origin.DisableCopies, originExports)
 		xrdConfig.Origin.MonitoringPrefix = server_utils.MonitoringBaseNs
 
 		switch xrdConfig.Origin.StorageType {
@@ -1388,6 +1391,20 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	}
 
 	return configPath, nil
+}
+
+func shouldEnableTPC(disableCopies bool, exports []server_utils.OriginExport) bool {
+	if disableCopies {
+		return false
+	}
+
+	for _, export := range exports {
+		if export.Capabilities.Copies {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Set up xrootd monitoring
