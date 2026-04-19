@@ -377,25 +377,26 @@ func TestTPCCrossOrigin(t *testing.T) {
 	// registration would then fail compareJwks against the updated DB entry.
 	fedIssuerKeysDir := param.IssuerKeysDirectory.GetString()
 
-	// Generate a destination token signed by the federation's issuer.
-	// We create the token directly (without getTestToken) so that
-	// param.IssuerKeysDirectory is never changed for this test.
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	destTknCfg := token.NewWLCGToken()
-	destTknCfg.Lifetime = time.Minute
-	destTknCfg.Issuer = issuer
-	destTknCfg.Subject = "origin"
-	destTknCfg.AddAudienceAny()
-	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
-	require.NoError(t, err)
-	createScope, err := token_scopes.Wlcg_Storage_Create.Path("/")
-	require.NoError(t, err)
-	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
-	require.NoError(t, err)
-	destTknCfg.AddScopes(readScope, createScope, modScope)
-	destTkn, err := destTknCfg.CreateToken()
-	require.NoError(t, err)
+	newDestToken := func(t *testing.T) string {
+		t.Helper()
+		destTknCfg := token.NewWLCGToken()
+		destTknCfg.Lifetime = time.Minute
+		destTknCfg.Issuer = issuer
+		destTknCfg.Subject = "origin"
+		destTknCfg.AddAudienceAny()
+		readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
+		require.NoError(t, err)
+		createScope, err := token_scopes.Wlcg_Storage_Create.Path("/")
+		require.NoError(t, err)
+		modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
+		require.NoError(t, err)
+		destTknCfg.AddScopes(readScope, createScope, modScope)
+		destTkn, err := destTknCfg.CreateToken()
+		require.NoError(t, err)
+		return destTkn
+	}
 
 	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
@@ -560,6 +561,7 @@ Xrootd:
 
 	for _, export := range fed.Exports {
 		t.Run("CrossOriginTPC_"+export.FederationPrefix, func(t *testing.T) {
+			destTkn := newDestToken(t)
 			sourceURL := fmt.Sprintf("pelican://%s:%s%s/cross-origin/source.txt", host, port, origin2FedPrefix)
 			destURL := fmt.Sprintf("pelican://%s:%s%s/cross-origin/dest.txt", host, port, export.FederationPrefix)
 
