@@ -44,11 +44,11 @@ import (
 )
 
 var (
-	backends              map[string]server_utils.OriginBackend
-	webdavHandlers        map[string]*webdav.Handler
-	exportPrefixMap       map[string]string // Maps federation prefix to storage prefix
-	copyEnabledPrefixes   map[string]bool   // Set of federation prefixes that have the Copies capability
-	handlersRegistered    bool              // Tracks whether handlers have been registered
+	backends            map[string]server_utils.OriginBackend
+	webdavHandlers      map[string]*webdav.Handler
+	exportPrefixMap     map[string]string // Maps federation prefix to storage prefix
+	copyEnabledPrefixes map[string]bool   // Set of federation prefixes that have the Copies capability
+	handlersRegistered  bool              // Tracks whether handlers have been registered
 )
 
 const (
