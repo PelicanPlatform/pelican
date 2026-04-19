@@ -367,12 +367,35 @@ func TestTPCCrossOrigin(t *testing.T) {
 	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
 	config.ResetSSRFTransportForTest()
 
-	// Capture the federation's IssuerKeysDirectory BEFORE getTestToken
-	// overwrites it with a fresh temp dir (which generates a new key).
+	// Capture the federation's IssuerKeysDirectory before doing anything else.
+	// We must not call getTestToken here: it changes param.IssuerKeysDirectory
+	// to a new empty temp dir, and the background key-refresh goroutine
+	// (LaunchIssuerKeysDirRefresh) reads that param dynamically.  If the goroutine
+	// fires after getTestToken, it generates a brand-new key in the temp dir,
+	// stores it as issuerKeys.CurrentKey, and updates the registry DB with that
+	// new key.  Origin2 copies the *original* key from fedIssuerKeysDir, so its
+	// registration would then fail compareJwks against the updated DB entry.
 	fedIssuerKeysDir := param.IssuerKeysDirectory.GetString()
 
 	// Generate a destination token signed by the federation's issuer.
-	_, destTkn := getTestToken(t)
+	// We create the token directly (without getTestToken) so that
+	// param.IssuerKeysDirectory is never changed for this test.
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	destTknCfg := token.NewWLCGToken()
+	destTknCfg.Lifetime = time.Minute
+	destTknCfg.Issuer = issuer
+	destTknCfg.Subject = "origin"
+	destTknCfg.AddAudienceAny()
+	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
+	require.NoError(t, err)
+	createScope, err := token_scopes.Wlcg_Storage_Create.Path("/")
+	require.NoError(t, err)
+	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
+	require.NoError(t, err)
+	destTknCfg.AddScopes(readScope, createScope, modScope)
+	destTkn, err := destTknCfg.CreateToken()
+	require.NoError(t, err)
 
 	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
