@@ -372,33 +372,33 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                             = option.Interface
-	identTransferOptionCaches                  struct{}
-	identTransferOptionCallback                struct{}
-	identTransferOptionTokenLocation           struct{}
-	identTransferOptionAcquireToken                struct{}
-	identTransferOptionSourceAcquireToken          struct{}
-	identTransferOptionDestinationAcquireToken     struct{}
-	identTransferOptionToken                       struct{}
-	identTransferOptionSourceTokenLocation         struct{}
-	identTransferOptionSourceToken                 struct{}
-	identTransferOptionDestinationTokenLocation    struct{}
-	identTransferOptionDestinationToken            struct{}
-	identTransferOptionSynchronize             struct{}
-	identTransferOptionCollectionsUrl          struct{}
-	identTransferOptionChecksums               struct{}
-	identTransferOptionRequireChecksum         struct{}
-	identTransferOptionRecursive               struct{}
-	identTransferOptionDepth                   struct{}
-	identTransferOptionWriter                  struct{}
-	identTransferOptionReader                  struct{}
-	identTransferOptionInPlace                 struct{}
-	identTransferOptionDryRun                  struct{}
-	identTransferOptionForcePrestageAPI        struct{}
-	identTransferOptionByteRange               struct{}
-	identTransferOptionMetadataChannel         struct{}
-	identTransferOptionFedToken                struct{}
-	identTransferOptionCacheEmbeddedClientMode struct{}
+	TransferOption                              = option.Interface
+	identTransferOptionCaches                   struct{}
+	identTransferOptionCallback                 struct{}
+	identTransferOptionTokenLocation            struct{}
+	identTransferOptionAcquireToken             struct{}
+	identTransferOptionSourceAcquireToken       struct{}
+	identTransferOptionDestinationAcquireToken  struct{}
+	identTransferOptionToken                    struct{}
+	identTransferOptionSourceTokenLocation      struct{}
+	identTransferOptionSourceToken              struct{}
+	identTransferOptionDestinationTokenLocation struct{}
+	identTransferOptionDestinationToken         struct{}
+	identTransferOptionSynchronize              struct{}
+	identTransferOptionCollectionsUrl           struct{}
+	identTransferOptionChecksums                struct{}
+	identTransferOptionRequireChecksum          struct{}
+	identTransferOptionRecursive                struct{}
+	identTransferOptionDepth                    struct{}
+	identTransferOptionWriter                   struct{}
+	identTransferOptionReader                   struct{}
+	identTransferOptionInPlace                  struct{}
+	identTransferOptionDryRun                   struct{}
+	identTransferOptionForcePrestageAPI         struct{}
+	identTransferOptionByteRange                struct{}
+	identTransferOptionMetadataChannel          struct{}
+	identTransferOptionFedToken                 struct{}
+	identTransferOptionCacheEmbeddedClientMode  struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -522,6 +522,22 @@ func HttpDigestFromChecksum(checksumType ChecksumType) string {
 		return "sha"
 	}
 	return ""
+}
+
+// wantDigestValue builds the value for a Want-Digest header from a list
+// of checksum types.  If the list is empty, the default algorithm is used.
+func wantDigestValue(types []ChecksumType) string {
+	if len(types) == 0 {
+		return HttpDigestFromChecksum(AlgDefault)
+	}
+	val := ""
+	for i, cksum := range types {
+		if i > 0 {
+			val += ","
+		}
+		val += HttpDigestFromChecksum(cksum)
+	}
+	return val
 }
 
 // Convert a checksum value to a human-readable string matching the encoding
@@ -1835,16 +1851,30 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	applyJobOptions(tj, options)
 
 	// Resolve the destination director information, using the cache when available.
+	// First try COPY verb so the director filters to origins that support TPC.
+	// If the director doesn't know about COPY (old director) or no origins support
+	// it, fall back to PUT which matches the pre-TPC behavior.
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
 	var dirResp server_structs.DirectorResponse
+	destVerb := "COPY"
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyDestUrlRef := &copyDestUrl
 		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, http.MethodPut, "", false)
+			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+			if qErr != nil {
+				// Fall back to PUT if COPY is not supported by the director
+				destVerb = http.MethodPut
+				resp, qErr = getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+			}
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
 	} else {
-		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, "")
+		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
+		if err != nil {
+			// Fall back to PUT if COPY is not supported by the director
+			destVerb = http.MethodPut
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
+		}
 	}
 	if err != nil {
 		log.Errorln(err)
@@ -1862,7 +1892,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
@@ -2324,17 +2354,15 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
-	// For copy jobs, also build the source URL
+	// For copy jobs, we will also build the source URL
 	var srcUrl *url.URL
-	if job.job.xferType == transferTypeCopy {
-		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
-	}
 
 	var transfers []transferAttemptDetails
 	switch job.job.xferType {
 	case transferTypeUpload:
 		transfers, err = buildUploadTransfers(job, packOption)
 	case transferTypeCopy:
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
 		transfers, err = buildCopyTransfers(job)
 	default:
 		transfers, err = buildDownloadTransfers(job, packOption)
@@ -2931,9 +2959,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// NOT sent to the director.
 		if transfer.fedToken != nil {
 			if ft, ftErr := transfer.fedToken.Get(); ftErr == nil && ft != "" {
-				q := transferEndpointUrl.Query()
-				q.Set("access_token", ft)
-				transferEndpointUrl.RawQuery = q.Encode()
+				param := "access_token=" + url.QueryEscape(ft)
+				if transferEndpointUrl.RawQuery != "" {
+					transferEndpointUrl.RawQuery += "&" + param
+				} else {
+					transferEndpointUrl.RawQuery = param
+				}
 			}
 		}
 		transferUrls[idx] = transferEndpoint.Url
@@ -3180,20 +3211,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 	if val, found := searchJobAd(attrJobId); found {
 		request.Header.Set("X-Pelican-JobId", val)
 	}
-	if len(types) == 0 {
-		request.Header.Set("Want-Digest", HttpDigestFromChecksum(AlgDefault))
-	} else {
-		multiple := false
-		val := ""
-		for _, cksum := range types {
-			if multiple {
-				val += ","
-			}
-			val += HttpDigestFromChecksum(cksum)
-			multiple = true
-		}
-		request.Header.Set("Want-Digest", val)
-	}
+	request.Header.Set("Want-Digest", wantDigestValue(types))
 	client := config.GetClient()
 	response, err := client.Do(request)
 	if err != nil {

@@ -257,6 +257,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultChecksumTypes []string `mapstructure:"defaultchecksumtypes" yaml:"DefaultChecksumTypes"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		DisableCopies bool `mapstructure:"disablecopies" yaml:"DisableCopies"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
 		DiskUsageCalculationDelay time.Duration `mapstructure:"diskusagecalculationdelay" yaml:"DiskUsageCalculationDelay"`
 		DiskUsageCalculationInterval time.Duration `mapstructure:"diskusagecalculationinterval" yaml:"DiskUsageCalculationInterval"`
@@ -717,6 +718,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DefaultChecksumTypes struct { Type string; Value []string }
 		DirectorTest struct { Type string; Value bool }
+		DisableCopies struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
 		DiskUsageCalculationDelay struct { Type string; Value time.Duration }
 		DiskUsageCalculationInterval struct { Type string; Value time.Duration }

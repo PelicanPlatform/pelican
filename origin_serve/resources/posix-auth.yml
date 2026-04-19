@@ -1,6 +1,6 @@
-# POSIXv2 origin with authenticated reads and writes for TPC testing
+# POSIX (XRootD-based) origin with authenticated reads and writes for TPC testing
 Origin:
-  StorageType: "posixv2"
+  StorageType: "posix"
   EnableDirectReads: true
   Exports:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>

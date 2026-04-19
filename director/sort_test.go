@@ -333,12 +333,14 @@ func TestOriginSupportsVerb(t *testing.T) {
 				PublicReads: true,
 				Writes:      true,
 				Listings:    true,
+				Copies:      true,
 			},
 			serverCaps: server_structs.Capabilities{
 				Reads:       true,
 				PublicReads: true,
 				Writes:      true,
 				Listings:    true,
+				Copies:      true,
 			},
 			supportedVerbs: []string{
 				http.MethodGet,
@@ -346,6 +348,7 @@ func TestOriginSupportsVerb(t *testing.T) {
 				http.MethodPut,
 				http.MethodDelete,
 				"PROPFIND",
+				"COPY",
 			},
 		},
 		{
@@ -384,6 +387,26 @@ func TestOriginSupportsVerb(t *testing.T) {
 				http.MethodGet,
 				http.MethodHead,
 			},
+		},
+		{
+			name: "copies supported",
+			nsCaps: server_structs.Capabilities{
+				Copies: true,
+			},
+			serverCaps: server_structs.Capabilities{
+				Copies: true,
+			},
+			supportedVerbs: []string{
+				"COPY",
+			},
+		},
+		{
+			name: "copies only in namespace not server",
+			nsCaps: server_structs.Capabilities{
+				Copies: true,
+			},
+			serverCaps:     server_structs.Capabilities{},
+			supportedVerbs: []string{},
 		},
 	}
 

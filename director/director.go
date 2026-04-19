@@ -1040,7 +1040,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If this is a OPTIONS request, we should just return OK
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
-			c.Header("Allow", "HEAD,GET,PUT,PROPFIND,OPTIONS,POST")
+			c.Header("Allow", "HEAD,GET,PUT,PROPFIND,COPY,OPTIONS,POST")
 			c.Abort()
 			return
 		}
@@ -1052,8 +1052,8 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		// Regardless of the remainder of the settings, we currently handle PUT or DELETE as a query to the origin endpoint
-		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
+		// Regardless of the remainder of the settings, we currently handle PUT, DELETE, or COPY as a query to the origin endpoint
+		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete || c.Request.Method == "COPY" {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 			redirectToOrigin(c)
 			c.Abort()
@@ -1811,6 +1811,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.PUT("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
 		directorAPIV1.DELETE("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
 		directorAPIV1.Handle("PROPFIND", "/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.Handle("COPY", "/origin/*any", corsHeadersMiddleware, redirectToOrigin)
 
 		// Other API endpoints
 		directorAPIV1.GET("/directors", listDirectors)

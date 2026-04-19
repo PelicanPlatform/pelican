@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -84,6 +85,30 @@ func (pw *tpcProgressWriter) BytesPerSecond() int64 {
 	return pw.bytesPerSecond.Load()
 }
 
+// copyWithContext performs an io.Copy from src to dst, wrapping any
+// error with context indicating whether it was a read or write failure.
+func copyWithContext(dst io.Writer, src io.Reader) error {
+	buf := make([]byte, 32*1024)
+	for {
+		nr, readErr := src.Read(buf)
+		if nr > 0 {
+			nw, writeErr := dst.Write(buf[:nr])
+			if writeErr != nil {
+				return fmt.Errorf("write to destination failed: %w", writeErr)
+			}
+			if nw != nr {
+				return fmt.Errorf("write to destination failed: short write")
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return fmt.Errorf("read from source failed: %w", readErr)
+		}
+	}
+}
+
 // handleCopyTPC implements HTTP third-party copy (TPC) in "pull" mode,
 // as described in the WLCG HTTP TPC specification:
 //
@@ -117,7 +142,7 @@ func (pw *tpcProgressWriter) BytesPerSecond() int64 {
 // Or on failure:
 //
 //	failure: <error description>
-func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
+func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend, exportPrefix string) {
 	sourceHeader := c.GetHeader("Source")
 	if sourceHeader == "" {
 		c.String(http.StatusBadRequest, "Missing required Source header for third-party copy")
@@ -139,11 +164,24 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 		return
 	}
 
+	// Normalize and constrain the destination path to the active export prefix.
+	cleanDestPath := path.Clean("/" + strings.TrimPrefix(destPath, "/"))
+	cleanExportPrefix := path.Clean("/" + strings.TrimPrefix(exportPrefix, "/"))
+	if _, ok := exportPrefixMap[cleanExportPrefix]; !ok {
+		c.String(http.StatusBadRequest, "Invalid destination prefix")
+		return
+	}
+	fullDestPath := path.Clean(path.Join(cleanExportPrefix, strings.TrimPrefix(cleanDestPath, "/")))
+	if !hasPathPrefix(fullDestPath, cleanExportPrefix) {
+		c.String(http.StatusBadRequest, "Destination path is outside export prefix")
+		return
+	}
+
 	fields := log.Fields{
 		"component": "origin",
 		"method":    "COPY",
 		"source":    sourceHeader,
-		"dest":      destPath,
+		"dest":      cleanDestPath,
 		"client":    c.ClientIP(),
 	}
 	log.WithFields(fields).Info("Starting third-party copy")
@@ -192,7 +230,7 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 
 	// Open the destination file for writing via the backend's WebDAV filesystem
 	fs := backend.FileSystem()
-	destFile, err := fs.OpenFile(c.Request.Context(), destPath,
+	destFile, err := fs.OpenFile(c.Request.Context(), cleanDestPath,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		log.WithFields(fields).Errorf("Failed to open destination file: %v", err)
@@ -232,8 +270,7 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend) {
 	// terminating the goroutine.
 	done := make(chan error, 1)
 	go func() {
-		_, err := io.Copy(pw, getResp.Body)
-		done <- err
+		done <- copyWithContext(pw, getResp.Body)
 		close(done)
 	}()
 
@@ -305,10 +342,7 @@ Loop:
 				startBelowLimit = time.Time{}
 			}
 
-		case readErr := <-done:
-			if readErr != nil {
-				copyErr = fmt.Errorf("read from source failed: %w", readErr)
-			}
+		case copyErr = <-done:
 			break Loop
 
 		case <-ctx.Done():

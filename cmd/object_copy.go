@@ -295,9 +295,11 @@ func copyMain(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			q := u.Query()
-			q.Set("directread", "")
-			u.RawQuery = q.Encode()
+			if u.RawQuery != "" {
+				u.RawQuery += "&directread"
+			} else {
+				u.RawQuery = "directread"
+			}
 			source[i] = u.String()
 		}
 	}

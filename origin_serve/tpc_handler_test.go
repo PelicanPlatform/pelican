@@ -67,8 +67,9 @@ func newMockBackend(t *testing.T) *mockBackend {
 func setupTPCRouter(backend *mockBackend) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
+	exportPrefixMap = map[string]string{"/": ""}
 	engine.Handle("COPY", "/*path", func(c *gin.Context) {
-		handleCopyTPC(c, backend)
+		handleCopyTPC(c, backend, "/")
 	})
 	return engine
 }
@@ -138,6 +139,25 @@ func TestHandleCopyTPC(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "Missing required Source header")
+	})
+
+	t.Run("RejectsUnknownExportPrefix", func(t *testing.T) {
+		backend := newMockBackend(t)
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		exportPrefixMap = map[string]string{"/": ""}
+		router.Handle("COPY", "/*path", func(c *gin.Context) {
+			handleCopyTPC(c, backend, "/missing")
+		})
+
+		req := httptest.NewRequest("COPY", "/testfile.txt", nil)
+		req.Header.Set("Source", toLocalhostURL(srcServer.URL)+"/testfile.txt")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "Invalid destination prefix")
 	})
 
 	t.Run("InvalidSourceURL", func(t *testing.T) {

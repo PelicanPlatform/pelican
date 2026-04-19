@@ -356,8 +356,18 @@ func addQueryParam(rawURL string, key string, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	q := u.Query()
-	q.Set(key, value)
-	u.RawQuery = q.Encode()
+	if value == "" {
+		// Valueless flag parameter: append without "=" so the URL
+		// reads "?directread" instead of "?directread=".
+		if u.RawQuery != "" {
+			u.RawQuery += "&" + url.QueryEscape(key)
+		} else {
+			u.RawQuery = url.QueryEscape(key)
+		}
+	} else {
+		q := u.Query()
+		q.Set(key, value)
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), nil
 }

@@ -951,6 +951,16 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.DisableCopies
+description: |+
+  When false (the default), the origin supports HTTP third-party copy (TPC) and automatically enables the Copies capability for
+  every export that has the Writes capability.
+  Set to true to disable TPC support entirely, preventing the origin from accepting COPY requests.
+type: bool
+default: false
+hidden: true
+components: ["origin"]
+---
 name: Origin.EnableDirectReads
 description: |+
   A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.

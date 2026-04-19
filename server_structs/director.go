@@ -58,6 +58,7 @@ type (
 		Writes      bool `json:"Write"`
 		Listings    bool `json:"Listing"`
 		DirectReads bool `json:"FallBackRead"`
+		Copies      bool `json:"Copies"`
 	}
 
 	NamespaceAdV2 struct {

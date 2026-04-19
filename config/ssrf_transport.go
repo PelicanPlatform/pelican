@@ -92,14 +92,14 @@ var builtinBlockedCIDRs = []string{
 	"255.255.255.255/32", // Broadcast
 
 	// IPv6
-	"::1/128",      // Loopback
-	"::/128",       // Unspecified
-	"64:ff9b::/96", // IPv4/IPv6 translation (RFC 6052)
-	"100::/64",     // Discard (RFC 6666)
+	"::1/128",       // Loopback
+	"::/128",        // Unspecified
+	"64:ff9b::/96",  // IPv4/IPv6 translation (RFC 6052)
+	"100::/64",      // Discard (RFC 6666)
 	"2001:db8::/32", // Documentation (RFC 3849)
-	"fc00::/7",     // Unique local (RFC 4193)
-	"fe80::/10",    // Link-local (RFC 4291)
-	"ff00::/8",     // Multicast (RFC 4291)
+	"fc00::/7",      // Unique local (RFC 4193)
+	"fe80::/10",     // Link-local (RFC 4291)
+	"ff00::/8",      // Multicast (RFC 4291)
 }
 
 // mustParseCIDR is a helper that panics on invalid CIDR strings.
