@@ -85,6 +85,7 @@ func GetDeprecated() map[string][]string {
         "Origin.S3ServiceName": {"none"},
         "Registry.AdminUsers": {"Server.UIAdminUsers"},
         "Registry.DbLocation": {"Server.DbLocation"},
+        "Server.ReadOnly": {"Server.WebReadOnly"},
         "Server.TLSCertificate": {"Server.TLSCertificateChain"},
         "Xrootd.Port": {"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
@@ -417,6 +418,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerPort": false,
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
+	"Server.ReadOnly": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
@@ -975,6 +977,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Server.EnablePprof": func(c *Config) bool { return c.Server.EnablePprof },
 	"Server.EnableUI": func(c *Config) bool { return c.Server.EnableUI },
 	"Server.HealthMonitoringPublic": func(c *Config) bool { return c.Server.HealthMonitoringPublic },
+	"Server.ReadOnly": func(c *Config) bool { return c.Server.ReadOnly },
 	"Server.WebReadOnly": func(c *Config) bool { return c.Server.WebReadOnly },
 	"Shoveler.Enable": func(c *Config) bool { return c.Shoveler.Enable },
 	"Shoveler.VerifyHeader": func(c *Config) bool { return c.Shoveler.VerifyHeader },
@@ -1481,6 +1484,7 @@ var allParameterNames = []string{
 	"Server.IssuerPort",
 	"Server.IssuerUrl",
 	"Server.Modules",
+	"Server.ReadOnly",
 	"Server.RegistrationRetryInterval",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
@@ -1891,6 +1895,7 @@ var (
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
+	Server_ReadOnly = BoolParam{"Server.ReadOnly"}
 	Server_WebReadOnly = BoolParam{"Server.WebReadOnly"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
@@ -2312,6 +2317,7 @@ func init() {
 		"Server.EnablePprof": Server_EnablePprof,
 		"Server.EnableUI": Server_EnableUI,
 		"Server.HealthMonitoringPublic": Server_HealthMonitoringPublic,
+		"Server.ReadOnly": Server_ReadOnly,
 		"Server.WebReadOnly": Server_WebReadOnly,
 		"Shoveler.Enable": Shoveler_Enable,
 		"Shoveler.VerifyHeader": Shoveler_VerifyHeader,

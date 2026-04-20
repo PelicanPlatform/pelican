@@ -565,6 +565,28 @@ func TestDeprecationHandling(t *testing.T) {
 	assert.Equal(t, tlsCertPath, viper.GetString("Server.TLSCertificateChain"))
 }
 
+func TestReadOnlyDeprecationHandling(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	require.NoError(t, param.SetRaw("Server.ReadOnly", true))
+
+	var logBuffer bytes.Buffer
+	logrus.SetOutput(&logBuffer)
+	defer logrus.SetOutput(os.Stdout)
+
+	err := InitServer(context.Background(), server_structs.DirectorType)
+	require.NoError(t, err)
+
+	logContent := logBuffer.String()
+	expectedMessage := "The configuration key \\\"Server.ReadOnly\\\" is deprecated. Please use \\\"Server.WebReadOnly\\\" instead."
+	require.Contains(t, logContent, expectedMessage, "Expected message not found in the logs")
+
+	assert.True(t, param.Server_WebReadOnly.GetBool())
+}
+
 func TestEnabledServers(t *testing.T) {
 	ResetConfig()
 	t.Cleanup(func() {
