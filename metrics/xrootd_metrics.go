@@ -2430,32 +2430,30 @@ func handleXrdcurlstatsPacket(stats []byte) error {
 
 		if strings.HasPrefix(key, "http_") {
 			parts := strings.SplitN(key, "_", 4)
-			if len(parts) == 3 { // http_VERB_field
+			if len(parts) == 3 { // http_VERB_field (e.g. http_HEAD_started)
 				verb, field := parts[1], parts[2]
 				switch field {
 				case "started":
 					XrdclHTTPRequests.WithLabelValues(verb, "", "started").Add(incBy)
-				case "error":
-					XrdclHTTPRequests.WithLabelValues(verb, "", "error").Add(incBy)
-				case "timeout":
-					XrdclHTTPRequests.WithLabelValues(verb, "", "timeout").Add(incBy)
-				case "preheaderduration":
-					XrdclHTTPRequestDuration.WithLabelValues(verb, "", "preheader").Add(incBy)
 				}
-			} else if len(parts) == 4 { // http_VERB_STATUS_field
+			} else if len(parts) == 4 { // http_VERB_STATUS_field (e.g. http_HEAD_200_finished, http_HEAD_preheader_duration)
 				verb, status, field := parts[1], parts[2], parts[3]
 				switch field {
 				case "duration":
 					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "duration").Add(incBy)
-				case "pauseduration":
+				case "pause_duration":
 					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "pause_duration").Add(incBy)
 				case "bytes":
 					XrdclHTTPBytes.WithLabelValues(verb, status).Add(incBy)
+				case "error":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "error").Add(incBy)
 				case "finished":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "finished").Add(incBy)
-				case "servertimeout":
+				case "timeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "timeout").Add(incBy)
+				case "server_timeout":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "server_timeout").Add(incBy)
-				case "clienttimeout":
+				case "client_timeout":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "client_timeout").Add(incBy)
 				}
 			}
