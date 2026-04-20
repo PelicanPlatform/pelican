@@ -119,9 +119,27 @@ This section describes how to configure Grafana to have proper authentication cr
 
 ### Authenticated Prometheus
 
-By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https://jwt.io/introduction) to verify the user accessing the endpoint. It reads `Bearer <token>` from `Authorization` header during any HTTPS request to `/api/v1.0/prometheus` and its subpath. You need to create a JWT using the Pelican CLI and pass it to Grafana.
+By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https://jwt.io/introduction) to verify the user accessing the endpoint. It reads `Bearer <token>` from the `Authorization` header during any HTTPS request to `/api/v1.0/prometheus` and its subpath. You need to create a token using the Pelican CLI and pass it to Grafana.
 
-1. Run the following command
+1. **Generate a token** using one of the two methods below:
+
+    #### Using an API key (recommended)
+
+    API keys are persisted in the server database and can be set to never expire, making them ideal for long-running services like Grafana. Run the following command on the machine where your Pelican server is running:
+
+    * Replace `<server-web-url>` with the URL to your Pelican server Web UI. By default, it's `https://localhost:8444`.
+
+    * The `--expiration` flag accepts `never` (no expiration), a date like `2026-12-31` (midnight UTC), or a full RFC3339 timestamp like `2026-12-31T23:59:59Z`.
+
+    ```bash
+    $ pelican apikey generate --server <server-web-url> --scopes "monitoring.query" --name "Grafana monitoring" --expiration never
+
+    Key:  <your-api-key>
+    ```
+
+    #### Using a short-lived token
+
+    Alternatively, you can generate a short-lived token using `pelican origin token create`. This token is not stored on the server and will expire after the specified lifetime, requiring you to regenerate it periodically.
 
     * Replace `<server-web-url>` with the URL to your Pelican server Web UI. By default, it's `https://localhost:8444`.
 
@@ -133,13 +151,13 @@ By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https
     eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwiaWF0IjoxNzA5NjUwMjMyLCJleHAiOjE3NDExODYyMzIsImF1ZCI6Imh0dHBzOi8vZXhhbXBsZS5jb20iLCJzdWIiOiJncmFmYW5hIiwic2NvcGUiOiJtb25pdG9yaW5nLnF1ZXJ5Iiwid2xjZy52ZXIiOiIxLjAifQ.cK5QyYJinn3QCPa6YB10Wn37MEEKzt_kyDMR9meN1Ec
     ```
 
-2. Copy the generated token. Note that your token will be different from the example above.
+2. Copy the generated key or token. Note that your value will be different from the examples above.
 
-3. In the Grafana data source configuration page, go to the **Authentication** section, expand the **HTTP Headers** subsection, and click **Add header**
+3. In the Grafana data source configuration page, go to the **Authentication** section, expand the **HTTP Headers** subsection, and click **Add header**.
 
-4. Fill in `Authorization` for the **Header** field and `Bearer <token>` for the **Value** field with your generated token. Note that there is a whitespace between `Bearer` and your token.
+4. Fill in `Authorization` for the **Header** field and `Bearer <your-key-or-token>` for the **Value** field. Note that there is a whitespace between `Bearer` and your key/token.
 
-That's it! Now you can scroll to the bottom of the configuration page and click **Save & Test**. There should be green alert with a title **Successfully queried the Prometheus API.**
+Now you can scroll to the bottom of the configuration page and click **Save & Test**. There should be a green alert with a title **Successfully queried the Prometheus API.**
 
 ### Unauthenticated Prometheus
 
