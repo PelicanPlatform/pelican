@@ -52,8 +52,11 @@ Common scopes for API keys:
 
 The --expiration flag accepts the following formats:
   - 'never'                       Token does not expire
-  - RFC3339 timestamp             e.g. 2025-12-31T23:59:59Z
+  - RFC3339 in UTC                e.g. 2025-12-31T23:59:59Z
+  - RFC3339 with timezone offset  e.g. 2025-12-31T18:59:59-05:00
   - Date only (ISO 8601)          e.g. 2025-12-31 (interpreted as midnight UTC)
+
+Note: Use either 'Z' for UTC or a timezone offset like '-05:00', not both.
 
 Examples:
   # Generate an API key that never expires
@@ -62,8 +65,11 @@ Examples:
   # Generate an API key expiring on a specific date
   pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query,monitoring.scrape" --expiration 2025-12-31
 
-  # Generate an API key with a precise expiration
-  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T23:59:59Z`,
+  # Generate an API key with a precise expiration in UTC
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T23:59:59Z
+
+  # Generate an API key with a timezone offset
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T18:59:59-05:00`,
 		RunE: generateApiKey,
 	}
 
@@ -110,7 +116,7 @@ func parseExpiration(raw string) (string, error) {
 	if t, err := time.Parse("2006-01-02", raw); err == nil {
 		return t.UTC().Format(time.RFC3339), nil
 	}
-	return "", fmt.Errorf("expiration must be 'never', a date (e.g., 2025-12-31), or RFC3339 (e.g., 2025-12-31T23:59:59Z)")
+	return "", fmt.Errorf("expiration must be 'never', a date (e.g., 2025-12-31), or RFC3339 (e.g., 2025-12-31T23:59:59Z or 2025-12-31T18:59:59-05:00)")
 }
 
 func generateApiKey(cmd *cobra.Command, args []string) error {
