@@ -33,7 +33,8 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	// glebarez/sqlite wraps modernc.org/sqlite, whose DSN parser only honors `_pragma=name(value)` form.
+	// glebarez/sqlite (modernc.org/sqlite) requires pragmas in `_pragma=name(value)`
+	// form; the mattn-style `_name=value` shorthand is silently ignored.
 	dbName := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 
 	globalLogLevel := config.GetEffectiveLogLevel()
@@ -75,8 +76,8 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 	// a leaked transaction is immediately visible to its own caller instead of
 	// being deferred onto an unrelated code path, and the connection is reset
 	// cleanly by GORM's Transaction machinery on the next use. Readers are
-	// unaffected at our scale (this DB is metadata-sized) and _busy_timeout=5000
-	// continues to handle any transient contention with external processes.
+	// unaffected at our scale (this DB is metadata-sized) and the five-second busy
+	// timeout continues to handle any transient contention with external processes.
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to obtain underlying *sql.DB for %s", dbPath)
