@@ -3621,7 +3621,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err:  errors.New("connection refused"),
 		}
 
-		wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "")
+		wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "", "")
 		require.True(t, isProxyErr, "Should be identified as proxy error")
 		assert.Contains(t, modifiedProxyStr, "127.0.0.1:3128", "Should include proxy address in modifiedProxyStr")
 
@@ -3638,7 +3638,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err: errors.New("connection refused"),
 		}
 
-		_, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "")
+		_, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "", "")
 		require.True(t, isProxyErr, "Should be identified as proxy error")
 		assert.Empty(t, modifiedProxyStr, "Should be empty when no address")
 	})
@@ -3649,7 +3649,7 @@ func TestWrapDownloadError(t *testing.T) {
 			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
 
 		pde := &PermissionDeniedError{}
-		wrappedErr, isProxyErr, _ := wrapDownloadError(pde, transferEndpointURL, expiredJWT)
+		wrappedErr, isProxyErr, _ := wrapDownloadError(pde, transferEndpointURL, expiredJWT, "")
 		require.False(t, isProxyErr, "Should not be proxy error")
 
 		var pe *error_codes.PelicanError
@@ -3660,18 +3660,19 @@ func TestWrapDownloadError(t *testing.T) {
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
 		assert.True(t, wrappedPde.expired, "Token should be marked as expired")
-		assert.Contains(t, wrappedPde.message, "token expired", "Message should indicate token expired")
+		assert.Contains(t, wrappedPde.message, "token expired at", "Message should indicate token expired")
 	})
 
 	t.Run("permission_denied_error_no_token", func(t *testing.T) {
 		// When no token was sent (e.g., public namespace accessed via a cache that doesn't know about it),
 		// the error message should accurately reflect that no token was sent rather than claiming a parse error.
 		pde := &PermissionDeniedError{}
-		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "", "")
 
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
-		assert.Contains(t, wrappedPde.message, "no token was sent", "Message should indicate no token was sent")
+		// With no tokens at all, it should say "no token was provided"
+		assert.Contains(t, wrappedPde.message, "no token was provided", "Message should indicate no token")
 		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when no token was sent")
 		assert.True(t, wrappedPde.noToken, "noToken should be set when no token was sent")
 		assert.True(t, IsRetryable(wrappedErr), "Should be retryable so client can attempt token acquisition")
@@ -3679,7 +3680,7 @@ func TestWrapDownloadError(t *testing.T) {
 
 	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
 		pde := &PermissionDeniedError{}
-		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "invalid-jwt")
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "invalid-jwt", "")
 
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
@@ -3690,7 +3691,7 @@ func TestWrapDownloadError(t *testing.T) {
 
 	t.Run("connection_reset_error", func(t *testing.T) {
 		resetErr := syscall.ECONNRESET
-		wrappedErr, isProxyErr, _ := wrapDownloadError(resetErr, transferEndpointURL, "")
+		wrappedErr, isProxyErr, _ := wrapDownloadError(resetErr, transferEndpointURL, "", "")
 		require.False(t, isProxyErr, "Should not be proxy error")
 
 		var pe *error_codes.PelicanError
@@ -3701,7 +3702,7 @@ func TestWrapDownloadError(t *testing.T) {
 
 	t.Run("epipe_error", func(t *testing.T) {
 		pipeErr := syscall.EPIPE
-		wrappedErr, _, _ := wrapDownloadError(pipeErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(pipeErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3710,7 +3711,7 @@ func TestWrapDownloadError(t *testing.T) {
 
 	t.Run("allocate_memory_error", func(t *testing.T) {
 		allocErr := &allocateMemoryError{Err: errors.New("out of memory")}
-		wrappedErr, _, _ := wrapDownloadError(allocErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(allocErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3720,7 +3721,7 @@ func TestWrapDownloadError(t *testing.T) {
 
 	t.Run("invalid_chunk_length_error", func(t *testing.T) {
 		chunkErr := &InvalidByteInChunkLengthError{Err: errors.New("invalid byte in chunk length")}
-		wrappedErr, _, _ := wrapDownloadError(chunkErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(chunkErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3736,7 +3737,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err:  innerErr,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "", "")
 		// Should return the inner error directly since it's already a PelicanError
 		assert.Equal(t, innerErr, wrappedErr, "Should return inner error directly")
 	})
@@ -3749,7 +3750,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err:  &sce,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3764,7 +3765,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err:  genericErr,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3779,7 +3780,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err: &sce,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3793,7 +3794,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err: tlsErr,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3813,7 +3814,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err: urlErr,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3826,7 +3827,7 @@ func TestWrapDownloadError(t *testing.T) {
 			Err: errors.New("connection failed"),
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3843,7 +3844,7 @@ func TestWrapDownloadError(t *testing.T) {
 			IsTemporary: false,
 		}
 
-		wrappedErr, _, _ := wrapDownloadError(dnsErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(dnsErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3857,7 +3858,7 @@ func TestWrapDownloadError(t *testing.T) {
 		time.Sleep(time.Millisecond) // Ensure deadline is exceeded
 		deadlineErr := ctx.Err()
 
-		wrappedErr, _, _ := wrapDownloadError(deadlineErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(deadlineErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
@@ -3869,7 +3870,7 @@ func TestWrapDownloadError(t *testing.T) {
 		originalErr := errors.New("some error")
 		pe := error_codes.NewTransferError(originalErr)
 
-		wrappedErr, _, _ := wrapDownloadError(pe, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(pe, transferEndpointURL, "", "")
 
 		// Should return the error directly without double-wrapping
 		assert.Equal(t, pe, wrappedErr, "Should return PelicanError directly")
@@ -3878,7 +3879,7 @@ func TestWrapDownloadError(t *testing.T) {
 	t.Run("generic_unknown_error", func(t *testing.T) {
 		unknownErr := errors.New("some unknown error type")
 
-		wrappedErr, _, _ := wrapDownloadError(unknownErr, transferEndpointURL, "")
+		wrappedErr, _, _ := wrapDownloadError(unknownErr, transferEndpointURL, "", "")
 
 		var pe *error_codes.PelicanError
 		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")

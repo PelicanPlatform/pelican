@@ -37,3 +37,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
 	return errors.New("Cache module is not supported on Windows")
 }
+
+// triggerPersistentCacheFedTokenRetry is a no-op on Windows as persistent
+// cache is not supported.
+func triggerPersistentCacheFedTokenRetry(_ server_structs.XRootDServer) {}

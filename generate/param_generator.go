@@ -468,6 +468,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/byte_rate"
+	"github.com/spf13/viper"
 )
 
 type StringParam struct {
@@ -774,6 +775,12 @@ func (dP DurationParam) SetString(value string) error {
 
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viperUnmarshalKey(oP.name, rawVal)
+}
+
+// GetRaw returns the raw value from the configuration store without
+// any type coercion.  Returns nil when the key is unset.
+func (oP ObjectParam) GetRaw() interface{} {
+	return viper.Get(oP.name)
 }
 
 func (oP ObjectParam) GetName() string {

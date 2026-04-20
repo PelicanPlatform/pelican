@@ -1,0 +1,46 @@
+---
+title: pelican cache introspect disk usage
+---
+
+## pelican cache introspect disk-usage
+
+Compute actual disk usage by walking storage directories
+
+### Synopsis
+
+Walk all storage directories and sum the actual file sizes on disk.
+
+This is an EXPENSIVE operation that stats every file in the cache's
+storage directories. For large caches this may take significant time.
+
+Example:
+  pelican cache introspect disk-usage
+  pelican cache introspect disk-usage --json
+
+```
+pelican cache introspect disk-usage [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for disk-usage
+```
+
+### Options inherited from parent commands
+
+```
+      --cache-dir string    Override cache directory (default: from config)
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                Output in JSON format
+  -L, --log string          Specified log output file
+      --offline             Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.
+  -t, --token string        Path to admin token file (online mode only; auto-generated if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database

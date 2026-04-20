@@ -200,6 +200,13 @@ func CompareMetadata(ctx context.Context) (*MetadataDiscrepancy, error) {
 	// Get federation info from configs
 	localFedInfo, err := config.GetFederation(ctx)
 	if err != nil {
+		// If the error indicates no discovery URL was configured, disable comparison gracefully
+		if errors.Is(err, config.ErrNoDiscoveryEndpoint) {
+			result.Enabled = false
+			result.HasDiscrepancy = false
+			log.Debug("No discovery endpoint resolved; skipping metadata comparison")
+			return result, nil
+		}
 		return nil, errors.Wrap(err, "failed to get local federation info")
 	}
 

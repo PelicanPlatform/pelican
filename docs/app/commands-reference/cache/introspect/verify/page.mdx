@@ -1,0 +1,48 @@
+---
+title: pelican cache introspect verify
+---
+
+## pelican cache introspect verify
+
+Verify checksum of a cached object
+
+### Synopsis
+
+Trigger checksum verification for a cached object.
+
+This reads the entire object from disk, decrypts it, and verifies
+that stored checksums (if any) match the actual data.
+
+Example:
+  pelican cache introspect verify pelican://my-federation/data/file.dat
+  pelican cache introspect verify /data/file.dat --etag="abc123"
+
+```
+pelican cache introspect verify <object-url> [flags]
+```
+
+### Options
+
+```
+      --etag string       Specify ETag of the version to verify
+  -h, --help              help for verify
+      --instance string   Specify instance hash directly
+```
+
+### Options inherited from parent commands
+
+```
+      --cache-dir string    Override cache directory (default: from config)
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                Output in JSON format
+  -L, --log string          Specified log output file
+      --offline             Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.
+  -t, --token string        Path to admin token file (online mode only; auto-generated if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database
