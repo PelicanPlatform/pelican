@@ -44,8 +44,27 @@ var (
 	apiKeyGenerateCmd = &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a new API key for the server",
-		Long:  "Generate a new API key with specified scopes.",
-		RunE:  generateApiKey,
+		Long: `Generate a new API key with specified scopes.
+
+Common scopes for API keys:
+  monitoring.query    Query the server's Prometheus endpoints
+  monitoring.scrape   Scrape the server's /metrics endpoint
+
+The --expiration flag accepts the following formats:
+  - 'never'                       Token does not expire
+  - RFC3339 timestamp             e.g. 2025-12-31T23:59:59Z
+  - Date only (ISO 8601)          e.g. 2025-12-31 (interpreted as midnight UTC)
+
+Examples:
+  # Generate an API key that never expires
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration never
+
+  # Generate an API key expiring on a specific date
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query,monitoring.scrape" --expiration 2025-12-31
+
+  # Generate an API key with a precise expiration
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T23:59:59Z`,
+		RunE: generateApiKey,
 	}
 
 	apiKeyScopes     string
@@ -58,7 +77,7 @@ func init() {
 
 	apiKeyGenerateCmd.Flags().StringVar(&apiKeyScopes, "scopes", "", "Comma-separated list of scopes (e.g., monitoring.query,monitoring.scrape) (required)")
 	apiKeyGenerateCmd.Flags().StringVar(&apiKeyName, "name", "", "Name for the API key (defaults to cli-generated-{timestamp})")
-	apiKeyGenerateCmd.Flags().StringVar(&apiKeyExpiration, "expiration", "", "Expiration time in RFC3339 format")
+	apiKeyGenerateCmd.Flags().StringVar(&apiKeyExpiration, "expiration", "", "Expiration: 'never', a date (2025-12-31), or RFC3339 (2025-12-31T23:59:59Z) (required)")
 
 	// Mark scopes as required
 	err := apiKeyGenerateCmd.MarkFlagRequired("scopes")
@@ -70,6 +89,28 @@ func init() {
 	if err != nil {
 		log.Errorln("Failed to mark expiration flag as required:", err)
 	}
+}
+
+// parseExpiration validates and normalizes the expiration flag value.
+// It accepts "never", RFC3339 timestamps, or date-only strings (YYYY-MM-DD),
+// which are interpreted as midnight UTC on that date.
+// The returned string is either "never" or a valid RFC3339 timestamp.
+func parseExpiration(raw string) (string, error) {
+	if raw == "" {
+		return "", errors.New("--expiration flag is required")
+	}
+	if raw == "never" {
+		return "never", nil
+	}
+	// Try RFC3339 first
+	if _, err := time.Parse(time.RFC3339, raw); err == nil {
+		return raw, nil
+	}
+	// Try date-only (ISO 8601: YYYY-MM-DD), interpreted as midnight UTC
+	if t, err := time.Parse("2006-01-02", raw); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	return "", fmt.Errorf("expiration must be 'never', a date (e.g., 2025-12-31), or RFC3339 (e.g., 2025-12-31T23:59:59Z)")
 }
 
 func generateApiKey(cmd *cobra.Command, args []string) error {
@@ -101,15 +142,10 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 		name = fmt.Sprintf("cli-generated-%d", time.Now().Unix())
 	}
 
-	// Validate expiration format if provided
-	expiration := apiKeyExpiration
-	if expiration == "" {
-		return errors.New("--expiration flag is required")
-	}
-	// Try to parse as RFC3339 to validate format
-	_, err := time.Parse(time.RFC3339, expiration)
+	// Validate and normalize expiration
+	expiration, err := parseExpiration(apiKeyExpiration)
 	if err != nil {
-		return errors.Wrapf(err, "expiration must be in RFC3339 format (e.g., 2025-12-31T23:59:59Z) or 'never'")
+		return err
 	}
 
 	// Construct API URL
