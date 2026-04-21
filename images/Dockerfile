@@ -39,7 +39,6 @@
 ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
 ARG OSG_SERIES=25
-ARG OSG_REPO=release
 
 # For compiling custom/one-off releases of Pelican.
 # (We cannot supply a default value because GoReleaser will use it as-is.)
@@ -67,24 +66,40 @@ ARG TOMCAT_GID=10443
 #     When building RPMs from source, this may be any commit spec understood
 #     by 'git checkout'.
 #
+#   - Optionally, set '*_RELEASE' to the specific RPM "release" (i.e. build)
+#     when installing from repositories.  These options have no effect when
+#     building from source.
+#
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
+ARG LOTMAN_RELEASE=
+# ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.6.2
+ARG XRDCL_PELICAN_RELEASE=
+# ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
+ARG XROOTD_LOTMAN_RELEASE=
+# ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
 ARG XROOTD_S3_HTTP_VER=0.6.6
-# Installed from Koji if not building it from source.
+ARG XROOTD_S3_HTTP_RELEASE=
+# ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.11
-ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
+ARG XRDHTTP_PELICAN_RELEASE=
+# ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_MULTIUSER_SRC_BUILD=false
+ARG XROOTD_MULTIUSER_VER=2.2.1
+ARG XROOTD_MULTIUSER_RELEASE=
+# ARG XROOTD_MULTIUSER_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
 # For controlling the version of OA4MP that is installed.
 ARG OA4MP_VER=6.2.3
@@ -293,15 +308,14 @@ ARG XROOTD_USERNAME
 ARG XROOTD_UID
 ARG XROOTD_GID
 
-# We need to pin the install for many of the RPMs to "Koji" until all of
-# Pelican's patches are ingested into the OSG repositories.
+# Pin the version of XRootD to ensure consistency across all installations.
+# We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
 ARG XROOTD_VER="5.9.1"
 ARG XROOTD_RELEASE="1.4.osg${OSG_SERIES}.${BASE_OS}"
-ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
-# The packages from Koji need to be installed in a single dnf command in
+# The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
@@ -334,22 +348,15 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     xrootd-server-devel \
     "
 
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
-
-  package_urls=()
+  # Build pinned package names (NVR format) from XRootD version and release.
+  package_names=()
 
   for package in ${PACKAGES}; do
-    if [ "$package" = "xrootd-selinux" ]; then
-      package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.noarch.rpm)
-    else
-      package_urls+=(${KOJIHUB_BASE_URL}/${PKG_ARCH}/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.${PKG_ARCH}.rpm)
-    fi
+    package_names+=(${package}-${XROOTD_VER}-${XROOTD_RELEASE})
   done
-  dnf install -y "${package_urls[@]}"
+
+  # Install the pinned packages from osg-testing.
+  dnf install -y --enablerepo=osg-testing "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
@@ -380,6 +387,8 @@ ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
+ARG XROOTD_MULTIUSER_SRC_BUILD
+ARG XROOTD_MULTIUSER_VER
 
 WORKDIR /xrootd-build
 
@@ -449,11 +458,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   }
 
-  run_task  LOTMAN          PelicanPlatform  lotman
-  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
-  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
-  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+  run_task  LOTMAN            PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN     PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN   PelicanPlatform  xrdhttp-pelican
+  run_task  XROOTD_LOTMAN     PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP    PelicanPlatform  xrootd-s3-http
+  run_task  XROOTD_MULTIUSER  opensciencegrid  xrootd-multiuser
 ENDRUN
 
 #################################################################
@@ -467,19 +477,22 @@ FROM xrootd-software-init AS xrootd-software-base
 ARG TARGETARCH
 ARG LOTMAN_SRC_BUILD
 ARG LOTMAN_VER
+ARG LOTMAN_RELEASE
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
+ARG XRDCL_PELICAN_RELEASE
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
 ARG XRDHTTP_PELICAN_RELEASE
 ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
+ARG XROOTD_LOTMAN_RELEASE
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
-
-# If we didn't build it from source, install it from Koji instead.
-# Note the %ARCH% placeholders that need to be substituted.
-ARG XRDHTTP_PELICAN_KOJI_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrdhttp-pelican/${XRDHTTP_PELICAN_VER}/${XRDHTTP_PELICAN_RELEASE}/%ARCH%/xrdhttp-pelican-${XRDHTTP_PELICAN_VER}-${XRDHTTP_PELICAN_RELEASE}.%ARCH%.rpm"
+ARG XROOTD_S3_HTTP_RELEASE
+ARG XROOTD_MULTIUSER_SRC_BUILD
+ARG XROOTD_MULTIUSER_VER
+ARG XROOTD_MULTIUSER_RELEASE
 
 RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -487,14 +500,6 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
   set -eux
   set -o pipefail
-
-  dnf install -y xrootd-multiuser
-
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
 
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
@@ -506,23 +511,23 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
     local SRC_BUILD=${ARG}_SRC_BUILD
     local VER=${ARG}_VER
-    local KOJI_URL=${ARG}_KOJI_URL
+    local RELEASE=${ARG}_RELEASE
 
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
-    elif [ -n "${!KOJI_URL-}" ]; then
-      echo ${!KOJI_URL} | sed "s/%ARCH%/${PKG_ARCH}/g" | xargs \
-          dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing
+    elif [ -n "${!RELEASE-}" ]; then
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
     else
       dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
-  run_task  LOTMAN          PelicanPlatform  lotman
-  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
-  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
-  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+  run_task  LOTMAN           PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN    PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN  PelicanPlatform  xrdhttp-pelican
+  run_task  XROOTD_LOTMAN    PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP   PelicanPlatform  xrootd-s3-http
+  run_task  XROOTD_MULTIUSER opensciencegrid  xrootd-multiuser
 
   # Configure XRootD to use the Pelican plugin.
   rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
