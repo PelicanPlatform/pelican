@@ -172,10 +172,15 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 				}
 			}
 
-			// Extract oidc_sub claim
+			// Extract oidc_sub and oidc_iss claims
 			if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 				if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 					ctx.Set("OIDCSub", oidcSub)
+				}
+			}
+			if oidcIssIface, ok := parsed.Get("oidc_iss"); ok {
+				if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+					ctx.Set("OIDCIss", oidcIss)
 				}
 			}
 
@@ -503,6 +508,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -589,6 +595,7 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, userId, groups, isAdmin)
@@ -655,6 +662,7 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, userId, groups, isAdmin)
@@ -733,6 +741,7 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, userId, groups, isAdmin)
@@ -945,6 +954,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -1007,6 +1017,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -1128,6 +1139,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -1253,6 +1265,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -1332,6 +1345,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 

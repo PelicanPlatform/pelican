@@ -10,7 +10,7 @@
 UPDATE collection_acls SET group_id = 'user-' || (
     SELECT u.id FROM users u
     WHERE collection_acls.group_id = 'user-' || u.username
-    ORDER BY u.created_at ASC 
+    ORDER BY u.created_at ASC
     LIMIT 1
 )
 WHERE group_id LIKE 'user-%'
@@ -22,7 +22,7 @@ WHERE group_id LIKE 'user-%'
 UPDATE collection_acls SET granted_by = (
     SELECT u.id FROM users u
     WHERE collection_acls.granted_by = u.username
-    ORDER BY u.created_at ASC 
+    ORDER BY u.created_at ASC
     LIMIT 1
 )
 WHERE EXISTS (
@@ -33,7 +33,7 @@ WHERE EXISTS (
 UPDATE collections SET owner = (
     SELECT u.id FROM users u
     WHERE collections.owner = u.username
-    ORDER BY u.created_at ASC 
+    ORDER BY u.created_at ASC
     LIMIT 1
 )
 WHERE EXISTS (
