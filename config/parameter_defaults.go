@@ -83,8 +83,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_LowWaterMark.GetName(), 90)
 	// Cache.MinDirectorRefreshInterval
 	v.SetDefault(param.Cache_MinDirectorRefreshInterval.GetName(), "15s")
-	// Cache.PermittedNamespaces
-	v.SetDefault(param.Cache_PermittedNamespaces.GetName(), []string{})
 	// Cache.Port
 	v.SetDefault(param.Cache_Port.GetName(), 8442)
 	// Cache.RunLocation
@@ -184,8 +182,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.ClientAgent_MaxConcurrentJobs.GetName(), 5)
 	// ClientAgent.ProgressUpdateInterval
 	v.SetDefault(param.ClientAgent_ProgressUpdateInterval.GetName(), "5s")
-	// ConfigLocations
-	v.SetDefault(param.ConfigLocations.GetName(), []string{})
 	// Director.AdaptiveSortEWMATimeConstant
 	v.SetDefault(param.Director_AdaptiveSortEWMATimeConstant.GetName(), "5m")
 	// Director.AdaptiveSortTruncateConstant
@@ -198,8 +194,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Director_CachePresenceCapacity.GetName(), 2000)
 	// Director.CachePresenceTTL
 	v.SetDefault(param.Director_CachePresenceTTL.GetName(), "1m")
-	// Director.CacheResponseHostnames
-	v.SetDefault(param.Director_CacheResponseHostnames.GetName(), []string{})
 	// Director.CacheSortMethod
 	v.SetDefault(param.Director_CacheSortMethod.GetName(), "distance")
 	// Director.CachesPullFromCaches
@@ -220,8 +214,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Director_FedTokenLifetime.GetName(), "15m")
 	// Director.FilterCachesInErrorState
 	v.SetDefault(param.Director_FilterCachesInErrorState.GetName(), true)
-	// Director.FilteredServers
-	v.SetDefault(param.Director_FilteredServers.GetName(), []string{})
 	// Director.GeoIPLocation
 	if isRoot {
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -240,8 +232,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Director_MinStatResponse.GetName(), 1)
 	// Director.OriginCacheHealthTestInterval
 	v.SetDefault(param.Director_OriginCacheHealthTestInterval.GetName(), "15s")
-	// Director.OriginResponseHostnames
-	v.SetDefault(param.Director_OriginResponseHostnames.GetName(), []string{})
 	// Director.RegistryQueryInterval
 	v.SetDefault(param.Director_RegistryQueryInterval.GetName(), "1m")
 	// Director.StatConcurrencyLimit
@@ -274,8 +264,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_DynamicClientStaleTimeout.GetName(), "336h")
 	// Issuer.DynamicClientUnusedTimeout
 	v.SetDefault(param.Issuer_DynamicClientUnusedTimeout.GetName(), "1h")
-	// Issuer.GroupRequirements
-	v.SetDefault(param.Issuer_GroupRequirements.GetName(), []string{})
 	// Issuer.OIDCAuthenticationUserClaim
 	v.SetDefault(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "sub")
 	// Issuer.OIDCGroupClaim
@@ -290,12 +278,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_PublicClientID.GetName(), "pelican-public-client")
 	// Issuer.QDLLocation
 	v.SetDefault(param.Issuer_QDLLocation.GetName(), "/opt/qdl")
-	// Issuer.RedirectUris
-	if isRoot {
-		v.SetDefault(param.Issuer_RedirectUris.GetName(), []string{})
-	} else {
-		v.SetDefault(param.Issuer_RedirectUris.GetName(), []string{})
-	}
 	// Issuer.RefreshTokenGracePeriod
 	v.SetDefault(param.Issuer_RefreshTokenGracePeriod.GetName(), "5m")
 	// Issuer.ScitokensServerLocation
@@ -510,8 +492,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_EnableVoms.GetName(), true)
 	// Origin.EnableWrites
 	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
-	// Origin.ExportVolumes
-	v.SetDefault(param.Origin_ExportVolumes.GetName(), []string{})
 	// Origin.FedTokenLocation
 	{
 		val := "${ConfigBase}/origin-fed-token"
@@ -531,11 +511,13 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	// Origin.IssuerMode
 	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
 	// Origin.Multiuser
-	if isRoot {
-		v.SetDefault(param.Origin_Multiuser.GetName(), true)
-	} else {
-		v.SetDefault(param.Origin_Multiuser.GetName(), false)
-	}
+	v.SetDefault(param.Origin_Multiuser.GetName(), false)
+	// Origin.MultiuserMinID
+	v.SetDefault(param.Origin_MultiuserMinID.GetName(), 1000)
+	// Origin.MultiuserUmask
+	v.SetDefault(param.Origin_MultiuserUmask.GetName(), -1)
+	// Origin.MultiuserVarlinkSocketPath
+	v.SetDefault(param.Origin_MultiuserVarlinkSocketPath.GetName(), "/run/systemd/userdb/io.systemd.UserDatabase")
 	// Origin.Port
 	v.SetDefault(param.Origin_Port.GetName(), 8443)
 	// Origin.RunLocation
@@ -566,8 +548,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_SSH_MaxRetries.GetName(), 5)
 	// Origin.SSH.Port
 	v.SetDefault(param.Origin_SSH_Port.GetName(), 22)
-	// Origin.SSH.RemotePelicanBinaryOverrides
-	v.SetDefault(param.Origin_SSH_RemotePelicanBinaryOverrides.GetName(), []string{})
 	// Origin.SSH.SessionEstablishTimeout
 	v.SetDefault(param.Origin_SSH_SessionEstablishTimeout.GetName(), "5m")
 	// Origin.SSH.TunnelCallback
@@ -576,8 +556,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_ScitokensGroupsClaim.GetName(), "wlcg.groups")
 	// Origin.ScitokensMapSubject
 	v.SetDefault(param.Origin_ScitokensMapSubject.GetName(), false)
-	// Origin.ScitokensRestrictedPaths
-	v.SetDefault(param.Origin_ScitokensRestrictedPaths.GetName(), []string{})
+	// Origin.ScitokensUnauthenticatedUser
+	v.SetDefault(param.Origin_ScitokensUnauthenticatedUser.GetName(), "nobody")
 	// Origin.SelfTest
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
 	// Origin.SelfTestInterval
@@ -586,8 +566,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), "1h")
 	// Origin.StorageType
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
-	// Origin.SupportedChecksumTypes
-	v.SetDefault(param.Origin_SupportedChecksumTypes.GetName(), []string{})
 	// Origin.TransferRateLimit
 	v.SetDefault(param.Origin_TransferRateLimit.GetName(), "0")
 	// Origin.UploadTempLocation
@@ -633,8 +611,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Server.AdLifetime
 	v.SetDefault(param.Server_AdLifetime.GetName(), "10m")
-	// Server.AdminGroups
-	v.SetDefault(param.Server_AdminGroups.GetName(), []string{})
 	// Server.AdvertisementInterval
 	v.SetDefault(param.Server_AdvertisementInterval.GetName(), "1m")
 	// Server.DatabaseBackup.Frequency
@@ -661,8 +637,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 			v.SetDefault(param.Server_DbLocation.GetName(), val)
 		}
 	}
-	// Server.DirectorUrls
-	v.SetDefault(param.Server_DirectorUrls.GetName(), []string{})
 	// Server.DropPrivileges
 	v.SetDefault(param.Server_DropPrivileges.GetName(), false)
 	// Server.EnablePKCS11
@@ -673,8 +647,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_EnableUI.GetName(), true)
 	// Server.HealthMonitoringPublic
 	v.SetDefault(param.Server_HealthMonitoringPublic.GetName(), false)
-	// Server.Modules
-	v.SetDefault(param.Server_Modules.GetName(), []string{})
 	// Server.RegistrationRetryInterval
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
 	// Server.SessionSecretFile
@@ -715,8 +687,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 		v.SetDefault(param.Server_UIActivationCodeFile.GetName(), val)
 	}
-	// Server.UIAdminUsers
-	v.SetDefault(param.Server_UIAdminUsers.GetName(), []string{})
 	// Server.UILoginRateLimit
 	v.SetDefault(param.Server_UILoginRateLimit.GetName(), 1)
 	// Server.UIPasswordFile
@@ -770,8 +740,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Shoveler_Enable.GetName(), false)
 	// Shoveler.MessageQueueProtocol
 	v.SetDefault(param.Shoveler_MessageQueueProtocol.GetName(), "amqp")
-	// Shoveler.OutputDestinations
-	v.SetDefault(param.Shoveler_OutputDestinations.GetName(), []string{})
 	// Shoveler.PortHigher
 	v.SetDefault(param.Shoveler_PortHigher.GetName(), 9999)
 	// Shoveler.PortLower

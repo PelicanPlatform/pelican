@@ -394,9 +394,9 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		}
 
 		// Determine which tiers are present
-		hasRoot := pd.rootDefault != nil && !isNoneValue(pd.rootDefault.raw)
-		hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.osdfDefault.raw)
-		hasDef := pd.def != nil && !isNoneValue(pd.def.raw)
+		hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+		hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+		hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
 
 		if !hasDef && !hasRoot && !hasOsdf {
 			continue
@@ -461,7 +461,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 func ApplyClientDefaults(v *viper.Viper) {
 `)
 	for _, pd := range clientDefaults {
-		if isNoneValue(pd.clientDefault.raw) {
+		if isNoneValue(pd.pType, pd.clientDefault.raw) {
 			continue
 		}
 		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
@@ -475,7 +475,7 @@ func ApplyClientDefaults(v *viper.Viper) {
 func ApplyServerDefaults(v *viper.Viper) {
 `)
 	for _, pd := range serverDefaults {
-		if isNoneValue(pd.serverDefault.raw) {
+		if isNoneValue(pd.pType, pd.serverDefault.raw) {
 			continue
 		}
 		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
@@ -490,18 +490,55 @@ func ApplyServerDefaults(v *viper.Viper) {
 	}
 }
 
-// isNoneValue returns true if the raw YAML value represents "no default".
-// In parameters.yaml, "none" is the convention for params that have no
-// meaningful default (e.g. optional file paths, URLs that must be set by
-// the admin). GenDefaults skips emitting a v.SetDefault call for these
-// so that viper.IsSet returns false, allowing downstream code to
-// distinguish "not configured" from "configured to the default".
-func isNoneValue(v any) bool {
+// isNoneValue returns true if the raw YAML value represents "no default" for
+// the given parameter type. When this returns true, GenDefaults skips emitting
+// a v.SetDefault call, keeping viper.IsSet at false so downstream code can
+// distinguish "not configured" from "configured to the default value".
+//
+// The "none" sentinel for each parameters.yaml type is:
+//
+//	string / filename / url / duration / byterate
+//	    Canonical:  default: none   (YAML string "none")
+//	    Equivalent: default: ""     (empty YAML string)
+//	    Also caught: YAML null (~)  parses as nil
+//
+//	stringSlice
+//	    Canonical:  default: none   (YAML string "none")
+//	    Equivalent: default: []     (empty YAML sequence)
+//	    Also caught: YAML null (~)  parses as nil
+//
+//	int / bool / object
+//	    Canonical:  default: none   (YAML string "none")
+//	    Also caught: YAML null (~)  parses as nil
+//	    Note: 0 (int) and false (bool) are legitimate non-none default values,
+//	    so they are NOT treated as "no default".
+//
+// All types accept the string literal "none" (case-sensitive) as the
+// explicit sentinel so that parameters.yaml is self-documenting.
+func isNoneValue(pType string, v any) bool {
 	if v == nil {
 		return true
 	}
+	// The string "none" is accepted as the explicit sentinel for every type.
 	if s, ok := v.(string); ok {
-		return s == "none" || s == ""
+		if s == "none" {
+			return true
+		}
+		// For string-like types, an empty string also means "no default".
+		switch pType {
+		case "string", "filename", "url", "duration", "byterate":
+			return s == ""
+		}
+		return false
+	}
+	// For stringSlice, an empty YAML sequence means "no default".
+	// This keeps parity with the empty-string convention for scalar string types,
+	// and prevents emitting v.SetDefault(..., []string{}) which would make
+	// viper.IsSet return true and GetStringSlice return non-nil []string{}.
+	if pType == "stringSlice" {
+		if slice, ok := v.([]any); ok {
+			return len(slice) == 0
+		}
 	}
 	return false
 }
