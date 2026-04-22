@@ -75,25 +75,6 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		return nil, errors.Wrapf(err, "failed to open the database with path: %s", dbPath)
 	}
 
-	// SQLite permits at most one writer at a time. With database/sql's default of
-	// unbounded MaxOpenConns, any goroutine that leaks a transaction (leaves BEGIN
-	// without COMMIT/ROLLBACK) poisons one connection; the next caller to pull that
-	// connection from the pool fails with "cannot start a transaction within a
-	// transaction" and, because the driver still holds the DB handle, the hot
-	// rollback journal never clears -- the whole DB appears stuck.
-	//
-	// Pinning MaxOpenConns to 1 serializes writes through a single connection, so
-	// a leaked transaction is immediately visible to its own caller instead of
-	// being deferred onto an unrelated code path, and the connection is reset
-	// cleanly by GORM's Transaction machinery on the next use. Readers are
-	// unaffected at our scale (this DB is metadata-sized) and the five-second busy
-	// timeout continues to handle any transient contention with external processes.
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to obtain underlying *sql.DB for %s", dbPath)
-	}
-	sqlDB.SetMaxOpenConns(1)
-
 	return db, nil
 }
 
