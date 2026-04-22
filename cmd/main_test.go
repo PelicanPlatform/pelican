@@ -1,4 +1,4 @@
-//go:build client && server
+//go:build client || server
 
 /***************************************************************
  *
@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -34,8 +35,64 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
 )
+
+var (
+	// testPelicanBinary holds the path to the built pelican binary for tests
+	testPelicanBinary string
+	// testTempDir holds the temp directory for the test binary
+	testTempDir string
+	// buildOnce ensures we only build the binary once across all tests
+	buildOnce sync.Once
+	// buildErr stores any error from building the binary
+	buildErr error
+)
+
+// getPelicanBinary builds the pelican binary once and returns its path
+func getPelicanBinary(t *testing.T) string {
+	buildOnce.Do(func() {
+		binaryName := "pelican"
+		if runtime.GOOS == "windows" {
+			binaryName = "pelican.exe"
+		}
+		testPelicanBinary = filepath.Join(testTempDir, binaryName)
+
+		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, ".")
+		buildOutput, err := buildCmd.CombinedOutput()
+		if err != nil {
+			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
+		}
+	})
+
+	if buildErr != nil {
+		t.Fatalf("Failed to build pelican binary: %v", buildErr)
+	}
+
+	return testPelicanBinary
+}
+
+// TestMain handles test setup and cleanup
+func TestMain(m *testing.M) {
+	// Create temp directory for test binary
+	var err error
+	testTempDir, err = os.MkdirTemp("", "pelican-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run tests
+	code := m.Run()
+
+	// Cleanup: remove the temp directory and its contents
+	if testTempDir != "" {
+		os.RemoveAll(testTempDir)
+	}
+
+	os.Exit(code)
+}
 
 func TestHandleCLIVersionFlag(t *testing.T) {
 	// Save the current version to reset this variable
@@ -83,29 +140,29 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 			rootCmd.Long,
 		},
 		{
-			"no-flag-on-subcommand",
-			[]string{"pelican", "origin"},
-			originCmd.Short,
-		},
-		{
 			"flag-on-root-command",
 			[]string{"pelican", "--version"},
-			mockVersionOutput,
-		},
-		{
-			"flag-on-subcommand",
-			[]string{"pelican", "origin", "--version"},
-			mockVersionOutput,
-		},
-		{
-			"flag-on-second-layer-subcommand",
-			[]string{"pelican", "origin", "get", "--version"},
 			mockVersionOutput,
 		},
 		{
 			"other-flag-on-root-command",
 			[]string{"pelican", "--help"},
 			rootCmd.Long,
+		},
+		{
+			"no-flag-on-subcommand",
+			[]string{"pelican", "config"},
+			config_printer.ConfigCmd.Short,
+		},
+		{
+			"flag-on-subcommand",
+			[]string{"pelican", "config", "--version"},
+			mockVersionOutput,
+		},
+		{
+			"flag-on-second-layer-subcommand",
+			[]string{"pelican", "config", "get", "--version"},
+			mockVersionOutput,
 		},
 	}
 
