@@ -1221,7 +1221,6 @@ name: Origin.Multiuser
 description: |+
   A bool indicating whether an origin is "multiuser", ie whether the underlying XRootD instance must be configured in multi user mode.
 type: bool
-root_default: true
 default: false
 components: ["origin"]
 ---
