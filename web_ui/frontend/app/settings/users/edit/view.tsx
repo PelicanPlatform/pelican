@@ -47,7 +47,7 @@ const Page = () => {
           try {
             await alertOnError(
               async () => UserService.patch(userId, user),
-              'Error Creating New User',
+              'Error Editing User',
               dispatch,
               true
             );
