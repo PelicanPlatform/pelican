@@ -83,6 +83,12 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		}
 	}
 
+	// Ensure admin users exist in the database so their identifiers are "claimed"
+	// before any potential attacker can register them via OIDC login.
+	if err := EnsureAdminUsersExist(ServerDatabase); err != nil {
+		log.Warnf("Failed to ensure admin users exist: %v", err)
+	}
+
 	// Data migration - this block could be removed after the Registry upgrade is complete
 	if serverType == server_structs.RegistryType {
 		// Run data migration from old registry.sqlite to new pelican.sqlite
@@ -570,5 +576,50 @@ func SoftDeleteServerLocalMetadata(id string) error {
 		return gorm.ErrRecordNotFound
 	}
 
+	return nil
+}
+
+// EnsureAdminUsersExist pre-creates user records for configured admin identifiers
+// (Server.UIAdminUsers) so that their OIDC sub values are "claimed" in the database
+// before any attacker can register them. This closes the window where an admin who
+// hasn't logged in yet could have their identity hijacked.
+func EnsureAdminUsersExist(db *gorm.DB) error {
+	adminUsers := param.Server_UIAdminUsers.GetStringSlice()
+	if !param.Server_UIAdminUsers.IsSet() || len(adminUsers) == 0 {
+		return nil
+	}
+
+	// Determine the issuer for pre-created admin records.
+	// OIDC.Issuer defaults to "https://cilogon.org" in defaults.yaml,
+	// so GetString() will return a value even if not explicitly set.
+	issuer := param.OIDC_Issuer.GetString()
+	if issuer == "" {
+		log.Errorf("Cannot pre-create admin users: OIDC.Issuer is not configured")
+		return nil
+	}
+
+	for _, adminSub := range adminUsers {
+		if adminSub == "" || adminSub == "admin" {
+			continue // "admin" is the built-in password user, handled separately
+		}
+
+		// Check if a user with this sub+issuer already exists
+		var user User
+		err := db.Where("sub = ? AND issuer = ?", adminSub, issuer).First(&user).Error
+		if err == nil {
+			continue // Already exists
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.Wrapf(err, "failed to check for existing admin user '%s'", adminSub)
+		}
+
+		// Create placeholder admin user record
+		log.Infof("Pre-creating admin user record for sub='%s' (issuer: %s)", adminSub, issuer)
+		_, err = CreateUser(db, adminSub, adminSub, issuer)
+		if err != nil {
+			log.Errorf("Failed to pre-create admin user '%s': %v", adminSub, err)
+			// Continue with other admin users rather than failing entirely
+		}
+	}
 	return nil
 }

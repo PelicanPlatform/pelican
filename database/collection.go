@@ -618,7 +618,14 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	user := &User{}
 	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err == nil {
-		// User found, return existing user
+		// User found — refresh display name if OIDC provider returned a different one
+		if user.Username != username && username != "" {
+			err = db.Model(user).Update("username", username).Error
+			if err != nil {
+				return nil, err
+			}
+			user.Username = username
+		}
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
