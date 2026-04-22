@@ -39,7 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pelicanplatform/pelican/utils/registry_discovery"
+	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 var (
@@ -107,12 +107,12 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 // see if the entity is authorized to advertise an origin for the
 // namespace
 func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
-	issuerUrl, err := registry_discovery.GetNSIssuerURL(namespace)
+	issuerUrl, err := registry_jwks.GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get issuer for namespace "+namespace)
 	}
 
-	keyLoc, err := registry_discovery.GetJWKSURLFromIssuerURL(issuerUrl)
+	keyLoc, err := registry_jwks.GetJWKSURLFromIssuerURL(issuerUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get JWKS URL from the issuer URL at "+issuerUrl)
 	}

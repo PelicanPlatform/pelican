@@ -38,7 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pelicanplatform/pelican/utils/registry_discovery"
+	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 type clientResponseData struct {
@@ -252,7 +252,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// First we create a token for the registry to check that the deletion
 	// request is valid
 
-	issuerURL, err := registry_discovery.GetNSIssuerURL(prefix)
+	issuerURL, err := registry_jwks.GetNSIssuerURL(prefix)
 	if err != nil {
 		return errors.Wrap(err, "Failed to determine prefix's issuer/pubkey URL for creating deletion token")
 	}

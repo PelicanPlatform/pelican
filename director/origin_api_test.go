@@ -42,7 +42,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils/registry_discovery"
+	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
@@ -92,7 +92,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	require.NoError(t, err)
 	namespaceKeys.Set(ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks", kSet, ttlcache.DefaultTTL)
 
-	issuerUrl, err := registry_discovery.GetNSIssuerURL("/test-namespace")
+	issuerUrl, err := registry_jwks.GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
 
 	advTokenCfg := token.NewWLCGToken()
@@ -282,9 +282,9 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	LaunchTTLCache(ctx, egrp)
 
 	// Get the namespace issuer URL and JWKS URL
-	issuerUrl, err := registry_discovery.GetNSIssuerURL("/test-namespace")
+	issuerUrl, err := registry_jwks.GetNSIssuerURL("/test-namespace")
 	require.NoError(t, err)
-	keyLoc, err := registry_discovery.GetJWKSURLFromIssuerURL(issuerUrl)
+	keyLoc, err := registry_jwks.GetJWKSURLFromIssuerURL(issuerUrl)
 	require.NoError(t, err)
 
 	// Get the director URL from federation info for token audience
