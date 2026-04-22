@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package registry_discovery
+package registry_jwks
 
 import (
 	"context"
