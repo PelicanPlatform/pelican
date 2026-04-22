@@ -40,6 +40,11 @@ WHERE EXISTS (
     SELECT 1 FROM users u WHERE collections.owner = u.username
 );
 
+-- Drop the (username, issuer) unique constraint. Username is a mutable display
+-- name, not an identity key. The real identity uniqueness is (sub, issuer)
+-- which is enforced by idx_user_sub_issuer.
+DROP INDEX IF EXISTS idx_user_issuer;
+
 -- +goose StatementEnd
 
 -- +goose Down
