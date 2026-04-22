@@ -69,7 +69,7 @@ func TestParseOAuthState(t *testing.T) {
 }
 
 func TestOAuthStatePreservesNextURLWithLoginAttemptMarker(t *testing.T) {
-	nextURL := "/view/origin/globus/?foo=bar&" + loginAttemptQueryParam + "=true"
+	nextURL := "/view/origin/globus/?foo=bar&" + LoginAttemptQueryParam + "=true"
 
 	state := GenerateOAuthState(map[string]string{"nextUrl": nextURL})
 	parsed, err := ParseOAuthState(state)

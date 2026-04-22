@@ -82,7 +82,6 @@ const (
 	AdminRole              UserRole = "admin"
 	NonAdminRole           UserRole = "user"
 	LoginAttemptQueryParam          = "fromLogin"
-	loginAttemptQueryParam          = LoginAttemptQueryParam
 )
 
 // Periodically re-read the htpasswd file used for password-based authentication
@@ -726,10 +725,18 @@ func resetLoginHandler(ctx *gin.Context) {
 }
 
 func redirectToLogin(ctx *gin.Context, requestURI string) {
-	origPath := addLoginAttemptToNextURL(requestURI)
+	nextUrl, err := addLoginAttemptToNextURL(requestURI)
+	if err != nil {
+		log.Errorln("Failed to parse request URI for login redirect:", err)
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to construct login redirect URL",
+		})
+		return
+	}
 	redirUrl := url.URL{
 		Path:     oauthLoginPath,
-		RawQuery: "nextUrl=" + url.QueryEscape(origPath),
+		RawQuery: "nextUrl=" + url.QueryEscape(nextUrl),
 	}
 	ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
 	ctx.Abort()
@@ -842,15 +849,15 @@ func RegisterAuthEndpoints(ctx context.Context, routerGroup *gin.RouterGroup, eg
 	return nil
 }
 
-func addLoginAttemptToNextURL(requestURI string) string {
+func addLoginAttemptToNextURL(requestURI string) (string, error) {
 	parsedURL, err := url.ParseRequestURI(requestURI)
 	if err != nil {
-		return requestURI
+		return "", fmt.Errorf("failed to parse request URI %q: %w", requestURI, err)
 	}
 
 	query := parsedURL.Query()
-	query.Set(loginAttemptQueryParam, "true")
+	query.Set(LoginAttemptQueryParam, "true")
 	parsedURL.RawQuery = query.Encode()
 
-	return parsedURL.RequestURI()
+	return parsedURL.RequestURI(), nil
 }

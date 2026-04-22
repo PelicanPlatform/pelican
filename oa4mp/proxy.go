@@ -57,16 +57,14 @@ var (
 )
 
 func getTransport() http.RoundTripper {
-	// If a test has set a custom transport, use it
-	if transport != nil {
-		return transport
-	}
 	onceTransport.Do(func() {
+		// If a test has set a custom transport, use it
+		if transport != nil {
+			return
+		}
 		socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(),
 			"var", "http.sock")
 		transportConfig := config.GetTransport().Clone()
-		// When creating a new socket out to the remote server, ignore the actual
-		// requested address and return a Unix socket instead.
 		transportConfig.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", socketName)
 		}
@@ -447,8 +445,8 @@ func oa4mpProxy(ctx *gin.Context) {
 	} else {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
-	transport = getTransport()
-	resp, err := transport.RoundTrip(ctx.Request)
+	rt := getTransport()
+	resp, err := rt.RoundTrip(ctx.Request)
 	if err != nil {
 		log.Infoln("Failed to talk to OA4MP service:", err)
 		ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
