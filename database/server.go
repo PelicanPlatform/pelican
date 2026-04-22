@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"gorm.io/gorm/clause"
 
 	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -496,31 +496,22 @@ func UpsertServerLocalMetadata(metadata server_structs.ServerRegistration) error
 	now := time.Now()
 	serverType := serverTypeFromFlags(metadata.IsOrigin, metadata.IsCache)
 
-	// look for existing entry; use silent logger to suppress "record not found" log noise
-	var entry server_structs.ServerLocalMetadata
-	err := ServerDatabase.Session(&gorm.Session{
-		Logger: logger.Default.LogMode(logger.Silent),
-	}).Where("id = ?", metadata.ID).First(&entry).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// no existing row → insert
-		entry = server_structs.ServerLocalMetadata{
-			ID:        metadata.ID,
-			Name:      metadata.Name,
-			Type:      serverType,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		return ServerDatabase.Create(&entry).Error
+	entry := server_structs.ServerLocalMetadata{
+		ID:        metadata.ID,
+		Name:      metadata.Name,
+		Type:      serverType,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
-	if err != nil {
-		return err
-	}
-
-	// found → update existing entry
-	entry.UpdatedAt = now
-	entry.Name = metadata.Name
-	entry.Type = serverType
-	return ServerDatabase.Save(&entry).Error
+	// Use OnConflict to either create or update
+	return ServerDatabase.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"name":       metadata.Name,
+			"type":       serverType,
+			"updated_at": now,
+		}),
+	}).Create(&entry).Error
 }
 
 // Retrieve the server local metadata in use - lookup the entry whose UpdatedAt is the most recent

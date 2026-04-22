@@ -3291,6 +3291,7 @@ name: Server.DatabaseBackup.MaxCount
 description: |+
   The maximum number of database backup files to retain.
   When the number of backups exceeds this count, the oldest backups are removed.
+  Set to 0 to disable rotation and retain all backups indefinitely.
 type: int
 default: 10
 components: ["cache", "director", "origin", "registry"]

@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/client_agent/types"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 //go:embed migrations/*.sql
@@ -42,8 +43,7 @@ type Store struct {
 
 // NewStore creates a new Store instance and runs migrations
 func NewStore(dbPath string) (*Store, error) {
-	// Open SQLite database
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbutils.SQLiteDSN(dbPath))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open database")
 	}

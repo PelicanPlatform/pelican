@@ -30,6 +30,9 @@ ClientAgent:
 Server:
   AdLifetime: 10m
   AdvertisementInterval: 1m
+  DatabaseBackup:
+    Frequency: 24h
+    MaxCount: 10
   WebPort: 8444
   WebHost: "0.0.0.0"
   EnableUI: true
