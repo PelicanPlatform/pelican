@@ -33,6 +33,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
@@ -51,9 +52,7 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	// glebarez/sqlite (modernc.org/sqlite) requires pragmas in `_pragma=name(value)`
-	// form; the mattn-style `_name=value` shorthand is silently ignored.
-	dbName := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	dbName := dbutils.SQLiteDSN(dbPath)
 
 	globalLogLevel := config.GetEffectiveLogLevel()
 	var ormLevel logger.LogLevel

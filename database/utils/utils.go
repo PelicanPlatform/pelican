@@ -17,6 +17,18 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
+// SQLiteDSN builds a SQLite connection string with the project's standard
+// connection parameters. This centralizes DSN construction so callers don't
+// duplicate query parameters as ad-hoc string literals.
+func SQLiteDSN(dbPath string) string {
+	// Use repeated _pragma entries, as glebarez/sqlite (modernc.org/sqlite) requires.
+	// The mattn-style `_name=value` shorthand is silently ignored.
+	return dbPath + "?" +
+		"_pragma=busy_timeout(5000)&" +
+		"_pragma=journal_mode(WAL)&" +
+		"_pragma=foreign_keys(1)"
+}
+
 func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 	if dbPath == "" {
 		return nil, errors.New("SQLite database path is empty")
@@ -33,9 +45,7 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	// glebarez/sqlite (modernc.org/sqlite) requires pragmas in `_pragma=name(value)`
-	// form; the mattn-style `_name=value` shorthand is silently ignored.
-	dbName := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	dbName := SQLiteDSN(dbPath)
 
 	globalLogLevel := config.GetEffectiveLogLevel()
 	var ormLevel logger.LogLevel
