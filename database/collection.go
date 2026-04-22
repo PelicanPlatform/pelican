@@ -216,10 +216,10 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, namespa
 	return collection, nil
 }
 
-func ListCollections(db *gorm.DB, user string, groups []string) ([]Collection, error) {
+func ListCollections(db *gorm.DB, userId string, groups []string) ([]Collection, error) {
 	collections := []Collection{}
-	// Every user is part of their own user group, ensure this is in the slice
-	userGroup := "user-" + user
+	// Every user is part of their own personal group (keyed by user ID)
+	userGroup := "user-" + userId
 	if !slices.Contains(groups, userGroup) {
 		groups = append(groups, userGroup)
 	}
@@ -579,14 +579,14 @@ func DeleteCollection(db *gorm.DB, id string, owner string, groups []string, isA
 	})
 }
 
-func validateACL(collection *Collection, user string, groups []string, scope token_scopes.TokenScope) error {
+func validateACL(collection *Collection, userId string, groups []string, scope token_scopes.TokenScope) error {
 	roles, ok := ScopeToRole[scope]
 	if !ok {
 		return fmt.Errorf("invalid scope: %s", scope.String())
 	}
 
-	// Every user is part of their own user group, ensure this is in the slice
-	userGroup := "user-" + user
+	// Every user is part of their own personal group (keyed by user ID)
+	userGroup := "user-" + userId
 	if !slices.Contains(groups, userGroup) {
 		groups = append(groups, userGroup)
 	}
@@ -891,7 +891,7 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 			return ErrForbidden
 		}
 
-		personalGroup := "user-" + user.Username
+		personalGroup := "user-" + user.ID
 
 		// Remove any ACL entries referencing the user's personal group name.
 		if err := tx.Where("group_id = ?", personalGroup).Delete(&CollectionACL{}).Error; err != nil {

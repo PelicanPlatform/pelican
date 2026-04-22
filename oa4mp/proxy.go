@@ -260,7 +260,7 @@ func CalculateAllowedScopesWithRules(rules []*CompiledAuthz, user string, userId
 // The matched groups are groups that have ACLs on collections, which should be
 // included in the token's wlcg.groups claim for collection ACL checking.
 // GetUserCollectionScopes returns collection scopes and matched groups for a user.
-func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (scopes []string, matchedGroups []string, err error) {
+func GetUserCollectionScopes(db *gorm.DB, userId string, groupsList []string) (scopes []string, matchedGroups []string, err error) {
 	scopes = make([]string, 0)
 	matchedGroupSet := make(map[string]struct{})
 
@@ -272,7 +272,7 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (sco
 	// is handled at the database level based on ACLs and visibility.
 	scopes = append(scopes, token_scopes.Collection_Read.String()+":/")
 
-	userGroup := "user-" + user
+	userGroup := "user-" + userId
 	if !slices.Contains(groupsList, userGroup) {
 		groupsList = append(groupsList, userGroup)
 	}
@@ -377,7 +377,7 @@ func oa4mpProxy(ctx *gin.Context) {
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
 		allowedScopes, authzMatchedGroups := CalculateAllowedScopes(user, userId, groupsList)
-		userCollectionScopes, collectionMatchedGroups, err := GetUserCollectionScopes(database.ServerDatabase, user, groupsList)
+		userCollectionScopes, collectionMatchedGroups, err := GetUserCollectionScopes(database.ServerDatabase, userId, groupsList)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
