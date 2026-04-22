@@ -31,7 +31,8 @@ const makeGroupMemberService = (groupId: ApiID): PartialApiService => {
             },
           })
       );
-      return await response.json();
+      // Hacky because the API doesn't return the created group member, adding this for consistency with other POSTs
+      return groupMember as GroupMember;
     },
     delete: async (id) => {
       await fetchApi(

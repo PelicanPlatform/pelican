@@ -3,18 +3,30 @@ import {
   stringSort,
   dateSort,
   ClientTableImplementationProps,
+  CellComponentProps,
 } from '@/components/Table';
 import { ClientTableProps } from '@/components/Table/ClientTable';
-import { UserService, User } from '@/helpers/api';
+import { UserService, User, GroupMember } from '@/helpers/api';
 import makeDeleteCell from '@/components/Table/DeleteCell/makeDeleteCell';
 import makeEditCell from '@/components/Table/EditCell/makeEditCell';
+import DefaultCell from '@/components/Table/DefaultCell';
 
 const tableConfigGenerator = (mutate: () => void) => {
   return {
     username: { id: 'username', name: 'Username', sort: stringSort },
     sub: { id: 'sub', name: 'Sub', sort: stringSort },
     issuer: { id: 'issuer', name: 'Issuer', sort: stringSort },
-    createdAt: { id: 'createdAt', name: 'Created At', sort: dateSort },
+    createdAt: {
+      id: 'createdAt',
+      name: 'Created At',
+      sort: dateSort,
+      CellComponent: ({
+        value,
+        row,
+      }: CellComponentProps<User, 'createdAt'>) => (
+        <DefaultCell row={row} value={new Date(value).toLocaleString()} />
+      ),
+    },
     delete: {
       id: 'delete',
       name: 'Delete',

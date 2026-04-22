@@ -9,7 +9,7 @@ import {
   TableRow,
   TablePagination,
 } from '@mui/material';
-
+import { useEffect, useRef, useState } from 'react';
 import DefaultCell from './DefaultCell';
 import {
   ActionConfig,
@@ -33,7 +33,6 @@ export interface TableProps<R extends TableData> {
 
 const Table = <R extends TableData>(props: TableProps<R>) => {
   const { data, columns, sort, pagination } = props;
-
   return (
     <TableContainer>
       <MUITable>

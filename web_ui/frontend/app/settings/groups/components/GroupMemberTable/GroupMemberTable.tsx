@@ -3,10 +3,12 @@ import {
   stringSort,
   dateSort,
   ClientTableImplementationProps,
+  CellComponentProps,
 } from '@/components/Table';
 import { ClientTableProps } from '@/components/Table/ClientTable';
 import { ApiID, GroupMember, makeGroupMemberService } from '@/helpers/api';
 import makeDeleteCell from '@/components/Table/DeleteCell/makeDeleteCell';
+import DefaultCell from '@/components/Table/DefaultCell';
 
 const tableConfigGenerator = (mutate: () => void, groupId: ApiID) => {
   const groupMemberService = makeGroupMemberService(groupId);
@@ -18,7 +20,17 @@ const tableConfigGenerator = (mutate: () => void, groupId: ApiID) => {
       value: (gm) => gm.user.username,
       sort: stringSort,
     },
-    createdAt: { id: 'createdAt', name: 'Created At', sort: dateSort },
+    createdAt: {
+      id: 'createdAt',
+      name: 'Created At',
+      sort: dateSort,
+      CellComponent: ({
+        value,
+        row,
+      }: CellComponentProps<GroupMember, 'createdAt'>) => (
+        <DefaultCell row={row} value={new Date(value).toLocaleString()} />
+      ),
+    },
     createdBy: { id: 'createdBy', name: 'Created By', sort: stringSort },
     delete: {
       id: 'delete',
@@ -26,6 +38,9 @@ const tableConfigGenerator = (mutate: () => void, groupId: ApiID) => {
       CellComponent: makeDeleteCell<GroupMember>({
         mutate,
         handleDelete: (gm) => groupMemberService.delete(gm.userId),
+        confirmButtonProps: {
+          growDirection: 'left',
+        },
       }),
     },
   } as ClientTableProps<GroupMember>['columns'];

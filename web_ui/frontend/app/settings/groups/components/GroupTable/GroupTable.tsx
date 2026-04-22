@@ -1,3 +1,5 @@
+import { DateTime } from 'luxon';
+
 import {
   ClientTable,
   stringSort,
@@ -22,7 +24,7 @@ const tableConfig = {
     id: 'createdAt',
     name: 'Created At',
     sort: dateSort,
-    CellComponent: ({ value, row }: CellComponentProps<Group, 'createdBy'>) => (
+    CellComponent: ({ value, row }: CellComponentProps<Group, 'createdAt'>) => (
       <DefaultCell row={row} value={new Date(value).toLocaleString()} />
     ),
   },

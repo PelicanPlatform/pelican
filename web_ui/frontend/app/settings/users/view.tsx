@@ -21,12 +21,6 @@ const View = () => {
   const [search, setSearch] = useState<string>('');
   const searchedData = useFuse<User>(data || [], search);
 
-  const sortedData = (searchedData || []).sort(
-    (a, b) =>
-      DateTime.fromISO(b.createdAt).toMillis() -
-      DateTime.fromISO(a.createdAt).toMillis()
-  );
-
   return (
     <>
       <Box mb={1} display={'flex'} justifyContent={'space-between'}>
@@ -42,7 +36,7 @@ const View = () => {
           </Button>
         </Link>
       </Box>
-      <UserTable data={sortedData} mutate={mutate} />
+      <UserTable data={searchedData} mutate={mutate} />
     </>
   );
 };

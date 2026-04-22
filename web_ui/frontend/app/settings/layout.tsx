@@ -53,8 +53,9 @@ export default function RootLayout({
               <Grid
                 size={{
                   xs: 12,
-                  md: 8,
-                  lg: 6,
+                  md: 12,
+                  lg: 10,
+                  xl: 8,
                 }}
               >
                 <Box width={'100%'}>{children}</Box>
