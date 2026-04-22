@@ -410,7 +410,7 @@ type UserIdentity struct {
 // The function checks the following in order:
 //  1. If user == "admin" (built-in admin)
 //  2. If any of the user's groups match Server.AdminGroups
-//  3. If any of the user's identifiers (Username, ID, Sub) match Server.UIAdminUsers
+//  3. If any of the user's identifier (Sub) match Server.UIAdminUsers
 //
 // Note: If you have a custom list of admin identifiers to check, set Server.UIAdminUsers.
 // If you want to grant admin privileges based on group membership, set Server.AdminGroups.
@@ -433,17 +433,12 @@ func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
 		}
 	}
 
-	// Check admin users against all user identifiers
+	// Check admin users against the user's OIDC subject
 	adminList := param.Server_UIAdminUsers.GetStringSlice()
 	if param.Server_UIAdminUsers.IsSet() {
-		// Build list of all identifiers to check
-		identifiers := []string{identity.Username, identity.ID, identity.Sub}
-
 		for _, admin := range adminList {
-			for _, identifier := range identifiers {
-				if identifier != "" && identifier == admin {
-					return true, ""
-				}
+			if identity.Sub != "" && identity.Sub == admin {
+				return true, ""
 			}
 		}
 	}
