@@ -17,6 +17,13 @@ or OSDF). This is because the underlying cache mechanism, powered by [XRootD](ht
 an object's contents change at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object,
 it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
 
+### Collections
+A *collection* is a grouping of objects within a namespace, analogous to a directory on a filesystem.
+Collections may contain objects as well as other collections (called *subcollections*).
+Unlike directories, collections do not carry filesystem metadata such as owners or permissions.
+They exist purely as organizational structure within the federation's namespace.
+For example, in the object path `/pelicanplatform/test/hello-world.txt`, the paths `/pelicanplatform` and `/pelicanplatform/test` are both collections.
+
 ### Federations
 Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican
 federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer.
