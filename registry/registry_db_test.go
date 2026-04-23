@@ -68,6 +68,7 @@ func setupMockRegistryDB(t *testing.T) {
 		&server_structs.Service{},
 		&server_structs.Contact{},
 		&server_structs.Endpoint{},
+		&server_structs.Downtime{},
 		&database.User{},
 		&database.Group{},
 		&database.GroupMember{},
@@ -83,6 +84,7 @@ func resetMockRegistryDB(t *testing.T) {
 		"service":   &server_structs.Service{},
 		"contact":   &server_structs.Contact{},
 		"endpoint":  &server_structs.Endpoint{},
+		"downtimes": &server_structs.Downtime{},
 	}
 
 	for name, model := range tablesToClear {
