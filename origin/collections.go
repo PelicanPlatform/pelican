@@ -172,10 +172,15 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 				}
 			}
 
-			// Extract oidc_sub claim
+			// Extract oidc_sub and oidc_iss claims
 			if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 				if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 					ctx.Set("OIDCSub", oidcSub)
+				}
+			}
+			if oidcIssIface, ok := parsed.Get("oidc_iss"); ok {
+				if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+					ctx.Set("OIDCIss", oidcIss)
 				}
 			}
 
@@ -324,7 +329,7 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	_, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -332,7 +337,7 @@ func handleListCollections(ctx *gin.Context) {
 		})
 		return
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -340,7 +345,7 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	collections, err := database.ListCollections(database.ServerDatabase, user, groups)
+	collections, err := database.ListCollections(database.ServerDatabase, userId, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -418,14 +423,14 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, _, err := web_ui.GetUserGroups(ctx)
+	_, userId, _, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -442,7 +447,7 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, req.Namespace, visibility, req.Metadata)
+	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, userId, req.Namespace, visibility, req.Metadata)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -503,6 +508,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -524,7 +530,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		visPtr = &visibility
 	}
 
-	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr, isAdmin)
+	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), userId, groups, req.Name, req.Description, visPtr, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -569,7 +575,7 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -584,9 +590,15 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
+	})
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -630,7 +642,7 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -645,9 +657,15 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
+	})
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups, isAdmin)
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -703,7 +721,7 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		}
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -718,9 +736,15 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
+	})
 
-	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
+	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -754,14 +778,14 @@ func handleListCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	_, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -801,7 +825,7 @@ func handleListCollectionMembers(ctx *gin.Context) {
 		}
 	}
 
-	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), user, groups, since, limit)
+	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), userId, groups, since, limit)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -832,14 +856,14 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	_, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -847,7 +871,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups)
+	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), userId, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -930,10 +954,11 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
-	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value, isAdmin)
+	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), userId, groups, key, value, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -992,10 +1017,11 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
-	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, isAdmin)
+	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), userId, groups, key, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1025,14 +1051,14 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	_, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -1040,7 +1066,7 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
+	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), userId, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "collection not found"})
@@ -1113,10 +1139,11 @@ func handleDeleteCollection(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
-	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups, isAdmin)
+	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1146,14 +1173,14 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	_, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if user == "" {
+	if userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -1161,7 +1188,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user, groups)
+	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), userId, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1238,10 +1265,11 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
-	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
+	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), userId, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1317,10 +1345,11 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, isAdmin)
+	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), userId, groups, req.GroupID, role, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{

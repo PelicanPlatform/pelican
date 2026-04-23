@@ -295,6 +295,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	username := displayName
 
+	if username == "admin" {
+		log.Errorln("OIDC login rejected: username 'admin' is reserved by the system")
+		err = errors.New("username 'admin' is reserved; configure your identity provider to use a different name")
+		return
+	}
+
 	// Get the subject (sub) claim - this uniquely identifies the user at the identity provider
 	// For OIDC, this is the standard "sub" claim. For OAuth2 providers like GitHub, we may need
 	// to use a different claim (e.g., "id" for GitHub)

@@ -511,16 +511,21 @@ func TestServerHostRestart(t *testing.T) {
 func generateTestAdminUserToken(t *testing.T) string {
 	// Create token for admin user in test
 	tk := token.NewWLCGToken()
-	issuer := param.Server_ExternalWebUrl.GetString()
-	require.NotEmpty(t, issuer, "Server ExternalWebUrl must be set for tests")
-	tk.Issuer = issuer
+	serverIssuer := param.Server_ExternalWebUrl.GetString()
+	require.NotEmpty(t, serverIssuer, "Server ExternalWebUrl must be set for tests")
+	tk.Issuer = serverIssuer
 	tk.Subject = "admin-user"
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(param.Server_ExternalWebUrl.GetString())
+	tk.AddAudiences(serverIssuer)
 	tk.AddScopes(token_scopes.WebUi_Access)
-	// Add OIDC claims required by GetUserGroups
+	// oidc_iss must match OIDC.Issuer (the identity provider), not the Pelican server URL.
+	// CheckAdmin compares identity.Issuer against param.OIDC_Issuer to prevent (sub, issuer)
+	// collisions when an operator switches identity providers.
+	oidcIssuer := param.OIDC_Issuer.GetString()
 	tk.Claims = map[string]string{
-		"user_id": "admin-user",
+		"user_id":  "admin-user",
+		"oidc_sub": "admin-user",
+		"oidc_iss": oidcIssuer,
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
@@ -531,16 +536,19 @@ func generateTestAdminUserToken(t *testing.T) string {
 
 func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject string) string {
 	tk := token.NewWLCGToken()
-	issuer := param.Server_ExternalWebUrl.GetString()
-	require.NotEmpty(t, issuer, "Server ExternalWebUrl must be set for tests")
-	tk.Issuer = issuer
+	serverIssuer := param.Server_ExternalWebUrl.GetString()
+	require.NotEmpty(t, serverIssuer, "Server ExternalWebUrl must be set for tests")
+	tk.Issuer = serverIssuer
 	tk.Subject = subject
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(param.Server_ExternalWebUrl.GetString())
+	tk.AddAudiences(serverIssuer)
 	tk.AddScopes(scopes...)
-	// Add OIDC claims required by GetUserGroups
+	// oidc_iss must match OIDC.Issuer (the identity provider), not the Pelican server URL.
+	oidcIssuer := param.OIDC_Issuer.GetString()
 	tk.Claims = map[string]string{
-		"user_id": subject,
+		"user_id":  subject,
+		"oidc_sub": subject,
+		"oidc_iss": oidcIssuer,
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
@@ -1168,8 +1176,8 @@ func TestGroupManagementAPI(t *testing.T) {
 		userID := createUserResp["id"]
 		require.NotEmpty(t, userID)
 
-		// Create a collection ACL entry referencing the user's implicit personal group name
-		personalGroup := "user-" + username
+		// Create a collection ACL entry referencing the user's implicit personal group (keyed by user ID)
+		personalGroup := "user-" + userID
 		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "/test2", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{

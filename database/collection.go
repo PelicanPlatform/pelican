@@ -216,10 +216,10 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, namespa
 	return collection, nil
 }
 
-func ListCollections(db *gorm.DB, user string, groups []string) ([]Collection, error) {
+func ListCollections(db *gorm.DB, userId string, groups []string) ([]Collection, error) {
 	collections := []Collection{}
-	// Every user is part of their own user group, ensure this is in the slice
-	userGroup := "user-" + user
+	// Every user is part of their own personal group (keyed by user ID)
+	userGroup := "user-" + userId
 	if !slices.Contains(groups, userGroup) {
 		groups = append(groups, userGroup)
 	}
@@ -579,14 +579,14 @@ func DeleteCollection(db *gorm.DB, id string, owner string, groups []string, isA
 	})
 }
 
-func validateACL(collection *Collection, user string, groups []string, scope token_scopes.TokenScope) error {
+func validateACL(collection *Collection, userId string, groups []string, scope token_scopes.TokenScope) error {
 	roles, ok := ScopeToRole[scope]
 	if !ok {
 		return fmt.Errorf("invalid scope: %s", scope.String())
 	}
 
-	// Every user is part of their own user group, ensure this is in the slice
-	userGroup := "user-" + user
+	// Every user is part of their own personal group (keyed by user ID)
+	userGroup := "user-" + userId
 	if !slices.Contains(groups, userGroup) {
 		groups = append(groups, userGroup)
 	}
@@ -618,7 +618,14 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	user := &User{}
 	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err == nil {
-		// User found, return existing user
+		// User found — refresh display name if OIDC provider returned a different one
+		if user.Username != username && username != "" {
+			err = db.Model(user).Update("username", username).Error
+			if err != nil {
+				return nil, err
+			}
+			user.Username = username
+		}
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -884,7 +891,7 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 			return ErrForbidden
 		}
 
-		personalGroup := "user-" + user.Username
+		personalGroup := "user-" + user.ID
 
 		// Remove any ACL entries referencing the user's personal group name.
 		if err := tx.Where("group_id = ?", personalGroup).Delete(&CollectionACL{}).Error; err != nil {

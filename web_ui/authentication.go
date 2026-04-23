@@ -174,10 +174,15 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		}
 	}
 
-	// Extract oidc_sub claim for admin checks against UIAdminUsers
+	// Extract oidc_sub and oidc_iss for admin checks against UIAdminUsers
 	if oidcSubIface, ok := verified.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+	if oidcIssIface, ok := verified.Get("oidc_iss"); ok {
+		if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+			ctx.Set("OIDCIss", oidcIss)
 		}
 	}
 
@@ -281,11 +286,15 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 		return
 	}
 
-	// Extract oidc_sub claim (the OIDC subject identifier)
-	// This is set in context so admin checks can match against UIAdminUsers
+	// Extract oidc_sub and oidc_iss so admin checks can match against UIAdminUsers
 	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+	if oidcIssIface, ok := parsed.Get("oidc_iss"); ok {
+		if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+			ctx.Set("OIDCIss", oidcIss)
 		}
 	}
 
@@ -324,6 +333,7 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 		Username: loginCookieTokenCfg.Subject,
 		ID:       userRecord.ID,
 		Sub:      userRecord.Sub,
+		Issuer:   userRecord.Issuer,
 		Groups:   groups,
 	}
 	if isAdmin, _ := CheckAdmin(identity); isAdmin {
@@ -401,6 +411,7 @@ type UserIdentity struct {
 	Username string
 	ID       string
 	Sub      string // OIDC Subject
+	Issuer   string // OIDC Issuer (the "iss" claim from the identity provider)
 	Groups   []string
 }
 
@@ -410,9 +421,12 @@ type UserIdentity struct {
 // The function checks the following in order:
 //  1. If user == "admin" (built-in admin)
 //  2. If any of the user's groups match Server.AdminGroups
-//  3. If any of the user's identifiers (Username, ID, Sub) match Server.UIAdminUsers
+//  3. If the user's (Sub, Issuer) pair matches an entry in Server.UIAdminUsers and OIDC.Issuer
 //
-// Note: If you have a custom list of admin identifiers to check, set Server.UIAdminUsers.
+// Note: For OIDC users, both the subject claim and the issuer must be present and the issuer
+// must match the configured OIDC.Issuer. This prevents sub-claim collisions across identity
+// providers if the server ever switches issuers.
+// If you have a custom list of admin identifiers to check, set Server.UIAdminUsers.
 // If you want to grant admin privileges based on group membership, set Server.AdminGroups.
 func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
 	if identity.Username == "admin" {
@@ -433,18 +447,27 @@ func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
 		}
 	}
 
-	// Check admin users against all user identifiers
+	// Check admin users against the user's OIDC (sub, issuer) pair.
+	// Both must be present and the issuer must match the configured OIDC issuer to
+	// prevent a user from a different identity provider from gaining access if their
+	// sub happens to collide with a configured admin's sub.
 	adminList := param.Server_UIAdminUsers.GetStringSlice()
 	if param.Server_UIAdminUsers.IsSet() {
-		// Build list of all identifiers to check
-		identifiers := []string{identity.Username, identity.ID, identity.Sub}
-
+		configuredIssuer := param.OIDC_Issuer.GetString()
 		for _, admin := range adminList {
-			for _, identifier := range identifiers {
-				if identifier != "" && identifier == admin {
-					return true, ""
-				}
+			if identity.Sub == "" || identity.Issuer == "" {
+				continue
 			}
+			if identity.Sub != admin {
+				continue
+			}
+			// Sub matches — also verify the issuer matches the configured OIDC provider.
+			// We use GetString() (not IsSet()) so that the default issuer (cilogon.org)
+			// is enforced even when OIDC.Issuer is not explicitly set in config.
+			if configuredIssuer != "" && identity.Issuer != configuredIssuer {
+				continue
+			}
+			return true, ""
 		}
 	}
 
@@ -482,6 +505,7 @@ func AdminAuthHandler(ctx *gin.Context) {
 		Groups:   groups,
 		ID:       ctx.GetString("UserId"),
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 
 	isAdmin, msg := CheckAdmin(identity)
@@ -509,6 +533,7 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 			ID:       userId,
 			Groups:   groups,
 			Sub:      ctx.GetString("OIDCSub"),
+			Issuer:   ctx.GetString("OIDCIss"),
 		}
 
 		// User has valid cookie, check if admin
@@ -757,6 +782,7 @@ func whoamiHandler(ctx *gin.Context) {
 			ID:       userId,
 			Groups:   groups,
 			Sub:      ctx.GetString("OIDCSub"),
+			Issuer:   ctx.GetString("OIDCIss"),
 		}
 		isAdmin, _ := CheckAdmin(identity)
 		if isAdmin {
