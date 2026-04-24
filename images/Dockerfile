@@ -312,8 +312,8 @@ ARG XROOTD_GID
 # We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.1"
-ARG XROOTD_RELEASE="1.4.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.9.2"
+ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
