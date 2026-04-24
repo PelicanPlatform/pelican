@@ -13,7 +13,7 @@ name: Build and Test
 #
 #   - Pushes to main: We push only pelican-test and pelican-dev.
 #
-#   - Pushes to semver tags: We push pelican-test and all the "server" images.
+#   - Pushes to semver tags: We push pelican-test and all the release images.
 
 on:
   pull_request:
@@ -52,6 +52,7 @@ jobs:
       # values using "== 'true'" or "== 'false'".
       images-to-build: |
         [
+          "client",
           "cache",
           "director",
           "origin",
@@ -95,21 +96,21 @@ jobs:
           # because the credentials are not available.
 
           PUSH_DEVTEST=false
-          PUSH_SERVER=false
+          PUSH_RELEASE=false
 
           if [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_USER }}' ] \
              && [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}' ]
           then
             if ${IS_PRIMARY_GITHUB_REPO}; then
               # For the PelicanPlatform/pelican repo, we push test and
-              # dev images built off of 'main', and server images built
+              # dev images built off of 'main', and release images built
               # off of semver tags.
               PUSH_DEVTEST=${{ github.ref == 'refs/heads/main' }}
-              PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
+              PUSH_RELEASE=${{ startsWith(github.ref, 'refs/tags/') }}
             else
-              # For forks, we push only the server images.
+              # For forks, we push only the release images.
               PUSH_DEVTEST=false
-              PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
+              PUSH_RELEASE=${{ startsWith(github.ref, 'refs/tags/') }}
             fi
           fi
 
@@ -117,7 +118,8 @@ jobs:
           # sets into a JSON list.
 
           IMAGES=()
-          if ${PUSH_SERVER}; then
+          if ${PUSH_RELEASE}; then
+            IMAGES+=(client)
             IMAGES+=(cache director origin registry)
             IMAGES+=(osdf-cache osdf-director osdf-origin osdf-registry)
             IMAGES+=(pelican-test)  # for testing semver tags
@@ -136,7 +138,7 @@ jobs:
           # of the product via 'matrix.include'. The 'id' is for situations
           # where the slash in 'platform' is prohibited.
 
-          if ${PUSH_DEVTEST} || ${PUSH_SERVER}; then
+          if ${PUSH_DEVTEST} || ${PUSH_RELEASE}; then
             ARCHITECTURES='[ "amd64", "arm64" ]'
             PLATFORMS='[
               { "arch": "amd64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },

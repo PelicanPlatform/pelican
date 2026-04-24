@@ -190,9 +190,9 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   make goreleaser-config
 
   if ${IS_NONRELEASE_BUILD}; then
-    goreleaser build --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml
+    goreleaser build --id pelican --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml
   else
-    goreleaser build --id pelican-server --clean --single-target --config .goreleaser.generated.yml
+    goreleaser build --id pelican --id pelican-server --clean --single-target --config .goreleaser.generated.yml
   fi
 
   # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
@@ -670,6 +670,14 @@ RUN --mount=type=bind,source=oa4mp/resources,target=/context \
   chmod ug=rwX,o= ${ST_HOME}/var
   chgrp ${TOMCAT_USERNAME} ${ST_HOME}/var
 ENDRUN
+
+#################################################################
+# Pelican Client
+#################################################################
+FROM gcr.io/distroless/static-debian13:nonroot AS client
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
+ENTRYPOINT ["/bin/pelican"]
 
 #################################################################
 # Pelican Director and Registry (a.k.a. the Central Services)
