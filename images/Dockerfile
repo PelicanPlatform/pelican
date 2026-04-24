@@ -570,6 +570,9 @@ RUN --mount=type=bind,source=oa4mp/resources,target=/context \
   set -eux
   set -o pipefail
 
+  # Some XRootD multi-user setups require sssd-client.
+  dnf install -y sssd-client
+
   # OA4MP and Apache Tomcat both require a Java runtime.
   dnf install -y java-${JAVA_VER}-openjdk-headless
 
@@ -704,20 +707,7 @@ ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
-ARG TARGETPLATFORM
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  set -o pipefail
-
-  ln -s pelican-server /usr/local/sbin/osdf-server
-
-  # Some XRootD multi-user setups require sssd-client.
-  # The IDs here are chosen to match OSG's sssd sidecar containers.
-
-  groupadd -r -g 990 sssd
-  useradd -r -u 990 -g 990 -d / -s /sbin/nologin -c "System user for sssd" sssd
-  dnf install -y sssd-client
-ENDRUN
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
