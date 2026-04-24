@@ -1,5 +1,5 @@
 import { CapabilitiesChip, Dropdown, InformationSpan } from '@/components';
-import { Box, Grid } from '@mui/material';
+import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
 import { SinglePointMap } from '@/components/Map';
 import { ServerCapabilitiesTable } from '@/components/ServerCapabilitiesTable';
@@ -38,6 +38,15 @@ export const DirectorDropdown = ({
               name={'XRootD Health Test'}
               value={server.healthStatus}
             />
+            {server.disableDirectorTest && (
+              <Box sx={{ px: '6px', py: '2px' }}>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {server.type === 'Origin'
+                    ? 'Director tests are disabled. This is expected for non-POSIX origins (S3, Globus, etc.).'
+                    : 'Director tests are disabled. Cache health cannot be verified by the director.'}
+                </Typography>
+              </Box>
+            )}
             <InformationSpan name={'URL'} value={server.url} />
             <InformationSpan
               name={'Longitude'}
