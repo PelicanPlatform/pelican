@@ -128,6 +128,7 @@ type Config struct {
 		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval" yaml:"OriginCacheHealthTestInterval"`
 		OriginResponseHostnames []string `mapstructure:"originresponsehostnames" yaml:"OriginResponseHostnames"`
 		RegistryQueryInterval time.Duration `mapstructure:"registryqueryinterval" yaml:"RegistryQueryInterval"`
+		RequireDirectorTests bool `mapstructure:"requiredirectortests" yaml:"RequireDirectorTests"`
 		StatConcurrencyLimit int `mapstructure:"statconcurrencylimit" yaml:"StatConcurrencyLimit"`
 		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
@@ -578,6 +579,7 @@ type configWithType struct {
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
 		RegistryQueryInterval struct { Type string; Value time.Duration }
+		RequireDirectorTests struct { Type string; Value bool }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }

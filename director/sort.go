@@ -419,6 +419,13 @@ func cacheNotInErrorState() AdPredicate {
 	}
 }
 
+// If the federation requires director tests and the cache has disabled them, filter it out.
+func cacheDirectorTestEnabled() AdPredicate {
+	return func(ctx *gin.Context, ad copyAd) bool {
+		return !ad.ServerAd.DisableDirectorTest
+	}
+}
+
 // classifyAds is a generic helper to classify ads into groups in a single pass.
 // It first applies the common predicates (for example, topology, err state) to every ad.
 // Then, for each ad that passes the common check, it tests a list of group predicates.
@@ -499,6 +506,9 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	commonPredicates := []AdPredicate{cacheNotFromTopoIfPubReads()}
 	if param.Director_FilterCachesInErrorState.GetBool() {
 		commonPredicates = append(commonPredicates, cacheNotInErrorState())
+	}
+	if param.Director_RequireDirectorTests.GetBool() {
+		commonPredicates = append(commonPredicates, cacheDirectorTestEnabled())
 	}
 	supportedPredicates := []AdPredicate{cacheSupportsFeature(requiredFeatures)}
 	unknownPredicates := []AdPredicate{cacheMightSupportFeature(requiredFeatures)}

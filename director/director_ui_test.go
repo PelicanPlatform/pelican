@@ -27,9 +27,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -467,4 +469,104 @@ func TestGetNamespaces(t *testing.T) {
 			assert.Contains(t, got, ns, "Response data does not match expected")
 		}
 	})
+}
+
+func TestAdvertisementToServerResponse(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		resetHealthTests()
+	})
+
+	testCases := []struct {
+		name string
+		// setup is called before the test to configure viper; cleanup is handled via t.Cleanup
+		setup func(t *testing.T)
+		// If non-nil, seed a healthTestUtil entry keyed by the ad's URL before running
+		seedHealthUtil *healthTestUtil
+		ad             server_structs.ServerAd
+		expectedStatus HealthTestStatus
+	}{
+		{
+			name: "disabled-test-origin-returns-health-status-disabled",
+			ad: server_structs.ServerAd{
+				URL:                 url.URL{Host: "origin-s3.example.com", Scheme: "https"},
+				Type:                server_structs.OriginType.String(),
+				DisableDirectorTest: true,
+			},
+			expectedStatus: HealthStatusDisabled,
+		},
+		{
+			name: "enabled-test-server-returns-unknown-without-util",
+			ad: server_structs.ServerAd{
+				URL:                 url.URL{Host: "origin-normal.example.com", Scheme: "https"},
+				Type:                server_structs.OriginType.String(),
+				DisableDirectorTest: false,
+				FromTopology:        true, // suppress the debug log
+			},
+			expectedStatus: HealthStatusUnknown,
+		},
+		{
+			name: "server-with-ok-health-util",
+			seedHealthUtil: &healthTestUtil{
+				Status: HealthStatusOK,
+			},
+			ad: server_structs.ServerAd{
+				URL:  url.URL{Host: "cache-ok.example.com", Scheme: "https"},
+				Type: server_structs.CacheType.String(),
+			},
+			expectedStatus: HealthStatusOK,
+		},
+		{
+			name: "disabled-test-cache-shows-error-when-director-requires-tests",
+			setup: func(t *testing.T) {
+				config.ResetConfig()
+				t.Cleanup(config.ResetConfig)
+				viper.Set("Director.RequireDirectorTests", true)
+			},
+			ad: server_structs.ServerAd{
+				URL:                 url.URL{Host: "cache-no-test.example.com", Scheme: "https"},
+				Type:                server_structs.CacheType.String(),
+				DisableDirectorTest: true,
+			},
+			expectedStatus: HealthStatusError,
+		},
+		{
+			name: "disabled-test-origin-stays-disabled-when-director-requires-tests",
+			setup: func(t *testing.T) {
+				config.ResetConfig()
+				t.Cleanup(config.ResetConfig)
+				viper.Set("Director.RequireDirectorTests", true)
+			},
+			ad: server_structs.ServerAd{
+				URL:                 url.URL{Host: "origin-no-test.example.com", Scheme: "https"},
+				Type:                server_structs.OriginType.String(),
+				DisableDirectorTest: true,
+			},
+			expectedStatus: HealthStatusDisabled,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetHealthTests()
+
+			if tc.setup != nil {
+				tc.setup(t)
+			}
+
+			if tc.seedHealthUtil != nil {
+				healthTestUtilsMutex.Lock()
+				healthTestUtils[tc.ad.URL.String()] = tc.seedHealthUtil
+				healthTestUtilsMutex.Unlock()
+			}
+
+			tc.ad.Initialize("test-server")
+			ad := &server_structs.Advertisement{
+				ServerAd: tc.ad,
+			}
+
+			res := advertisementToServerResponse(ad)
+			assert.Equal(t, tc.expectedStatus, res.HealthStatus)
+		})
+	}
 }

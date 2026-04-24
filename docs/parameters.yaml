@@ -2479,6 +2479,17 @@ default: true
 hidden: true
 components: ["director"]
 ---
+name: Director.RequireDirectorTests
+description: |+
+  If true, the Director will filter out any caches that have disabled director health tests when deciding which caches
+  might fulfill a client request.
+  This allows federation operators to enforce that all caches in the federation participate in director health testing.
+  Caches that disable director tests will not receive any client traffic until they re-enable the tests.
+  Origins are not affected by this setting since disabling director tests is expected for non-POSIX backends (e.g., S3, Globus).
+type: bool
+default: false
+components: ["director"]
+---
 name: Director.AdaptiveSortEWMATimeConstant
 description: |+
   The time constant used for calculating alpha in the Director's EWMA smoothing of server status weights.
