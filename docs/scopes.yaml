@@ -82,6 +82,40 @@ issuedBy: ["*"]
 acceptedBy: ["*"]
 ---
 ############################
+#  Server Management Scopes #
+############################
+# These scopes are user-grantable: the management UI can assign them
+# directly to users or groups. They feed EffectiveScopes(user) which
+# CheckAdmin / CheckUserAdmin / CheckCollectionAdmin all consult.
+# The data-access scopes below (wlcg.*, scitokens.*) are intentionally
+# NOT user-grantable; they describe per-token capabilities for
+# bearer-token authorization on the data plane.
+name: server.web_admin
+description: >-
+  Full server-administration capability. Holders can manage every
+  user/group/collection/setting; equivalent to the historical "system
+  admin" role. Implies server.user_admin and server.collection_admin.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
+---
+name: server.user_admin
+description: >-
+  Manage non-admin users and unprivileged groups. Holders can create
+  users, mint password-set invites, and run the user-onboarding flows,
+  but cannot modify system-admin accounts.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
+---
+name: server.collection_admin
+description: >-
+  Create, modify, and delete collections and manage their ACLs.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
+---
+############################
 # Logging Management Scopes#
 ############################
 name: pelican.logging_modify

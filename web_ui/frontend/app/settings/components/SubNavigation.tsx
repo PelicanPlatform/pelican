@@ -6,6 +6,7 @@ import {
   ReactElement,
   useState,
 } from 'react';
+import useSWR from 'swr';
 import NavigationConfiguration from '@/app/navigation';
 import {
   StaticNavigationChildItemProps,
@@ -15,9 +16,22 @@ import Link from 'next/link';
 import { Box, Collapse } from '@mui/material';
 import { evaluateOrReturn } from '@/helpers/util';
 import { usePathname } from 'next/navigation';
+import { getUser } from '@/helpers/login';
 
+// SubNavigation is the admin Settings sidebar (General / API /
+// Groups / Users / AUP). Most entries are admin-only (the /settings
+// layout itself wraps in allowedRoles=['admin']), so when this
+// component is dropped on a non-admin-walled page like /groups/
+// — where group members are allowed — it would otherwise advertise
+// pages the caller can't actually use. Gate it on admin so only
+// admins see the sidebar; non-admins on /groups/ get the standard
+// chrome without the misleading sub-nav.
 const SubNavigation = () => {
   const pathname = usePathname();
+  const { data: who } = useSWR('getUser', getUser);
+  if (!who?.authenticated || who.role !== 'admin') {
+    return null;
+  }
   return (
     <Box>
       {NavigationConfiguration.settings.map((item) => (

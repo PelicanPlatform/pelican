@@ -2,6 +2,7 @@ import {
   Add,
   Api,
   AppRegistration,
+  Article,
   AssistantDirection,
   Block,
   Build,
@@ -34,14 +35,28 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Api />,
     },
     {
+      // Groups are server-wide (not origin-specific), so they live at a
+      // top-level /groups/ route — same as /settings/, /config/, etc.
+      // The Settings sidebar surfaces the link here purely for muscle
+      // memory; the canonical URL is /groups/.
       title: 'Groups',
-      href: '/settings/groups/',
+      href: '/groups/',
       icon: <Groups />,
     },
     {
       title: 'Users',
       href: '/settings/users/',
       icon: <Person />,
+    },
+    {
+      // System-admin-only: edit the Acceptable Use Policy that every
+      // user must accept. Server-side route is gated on AdminAuthHandler;
+      // non-admins who navigate here see a forbidden message from the
+      // page itself.
+      title: 'AUP',
+      href: '/settings/aup/',
+      icon: <Article />,
+      allowedRoles: ['admin'],
     },
   ],
   registry: [
@@ -96,8 +111,15 @@ const NavigationConfig: NavigationConfiguration = {
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
     { title: 'Collections', href: '/origin/collections/', icon: <FolderOpen /> },
-    { title: 'Groups', href: '/origin/groups/', icon: <Groups /> },
-    { title: 'Metrics', href: '/origin/metrics/', icon: <Equalizer /> },
+    // Groups are server-wide; the canonical URL is /groups/. Surfaced
+    // in the origin sidebar for muscle memory.
+    { title: 'Groups', href: '/groups/', icon: <Groups /> },
+    {
+      title: 'Metrics',
+      href: '/origin/metrics/',
+      icon: <Equalizer />,
+      allowedRoles: ['admin'],
+    },
     { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     {
       title: 'Globus Configurations',
@@ -105,9 +127,24 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Public />,
       allowedExportTypes: ['globus'],
     },
-    { title: 'Issuer', href: '/origin/issuer', icon: <Lock /> },
-    { title: 'Config', href: '/config/', icon: <Build /> },
-    { title: 'Settings', href: '/settings/', icon: <Settings /> },
+    {
+      title: 'Issuer',
+      href: '/origin/issuer',
+      icon: <Lock />,
+      allowedRoles: ['admin'],
+    },
+    {
+      title: 'Config',
+      href: '/config/',
+      icon: <Build />,
+      allowedRoles: ['admin'],
+    },
+    {
+      title: 'Settings',
+      href: '/settings/',
+      icon: <Settings />,
+      allowedRoles: ['admin'],
+    },
   ],
   director: [
     { title: 'Dashboard', href: '/director/', icon: <Dashboard /> },
@@ -134,10 +171,25 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
-    { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
+    {
+      title: 'Metrics',
+      href: '/cache/metrics/',
+      icon: <Equalizer />,
+      allowedRoles: ['admin'],
+    },
     { title: 'Downtime', href: '/cache/downtime/', icon: <CalendarMonth /> },
-    { title: 'Config', href: '/config/', icon: <Build /> },
-    { title: 'Settings', href: '/settings/', icon: <Settings /> },
+    {
+      title: 'Config',
+      href: '/config/',
+      icon: <Build />,
+      allowedRoles: ['admin'],
+    },
+    {
+      title: 'Settings',
+      href: '/settings/',
+      icon: <Settings />,
+      allowedRoles: ['admin'],
+    },
   ],
   shared: [
     { title: 'Origin', href: '/origin/', icon: <TripOrigin /> },
