@@ -28,8 +28,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, ButtonProps, Stack } from '@mui/material';
 
-export interface InlineConfirmButtonProps
-  extends Omit<ButtonProps, 'onClick'> {
+export interface InlineConfirmButtonProps extends Omit<ButtonProps, 'onClick'> {
   /** Fires on the SECOND click (the explicit "yes, do it" press). */
   onConfirm: () => void;
   /** Optional label for the confirmation button itself. Default: "Confirm". */
@@ -93,11 +92,7 @@ const InlineConfirmButton: React.FC<InlineConfirmButtonProps> = ({
     );
   }
   return (
-    <Button
-      {...buttonProps}
-      disabled={disabled}
-      onClick={() => setArmed(true)}
-    >
+    <Button {...buttonProps} disabled={disabled} onClick={() => setArmed(true)}>
       {children}
     </Button>
   );

@@ -20,6 +20,15 @@ export type {
   UserScopeGrant,
   GroupScopeGrant,
 } from './Scope';
+export { CollectionService } from './Collection';
+export type {
+  CollectionAcl,
+  CollectionAclGrant,
+  CollectionAclRole,
+  CollectionPost,
+  CollectionSummary,
+  CollectionVisibility,
+} from './Collection';
 export * from './types';
 
 /**

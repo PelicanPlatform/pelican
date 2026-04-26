@@ -39,14 +39,20 @@ const ViewBody: React.FC = () => {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   if (!id) {
-    return <Typography>This page must be opened with a `?id=…` query parameter.</Typography>;
+    return (
+      <Typography>
+        This page must be opened with a `?id=…` query parameter.
+      </Typography>
+    );
   }
   return <GroupPageClient id={id} />;
 };
 
 const Page = () => (
   <Suspense
-    fallback={<Skeleton variant='rectangular' width={'100%'} height={'600px'} />}
+    fallback={
+      <Skeleton variant='rectangular' width={'100%'} height={'600px'} />
+    }
   >
     <ViewBody />
   </Suspense>

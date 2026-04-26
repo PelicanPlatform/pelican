@@ -51,7 +51,12 @@ func mockAdminToken() (string, error) {
 	tokenCfg.Lifetime = time.Minute
 	tokenCfg.Subject = "admin"
 	tokenCfg.AddScopes(token_scopes.WebUi_Access)
-	tokenCfg.AddAudienceAny()
+	// The cookie path of GetUserGroups now pins the cookie to this
+	// server by requiring iss == aud == Server.ExternalWebUrl. The "any"
+	// WLCG audience (added by AddAudienceAny) does not satisfy that
+	// check; we have to add the concrete external URL explicitly. The
+	// test sets ExternalWebUrl to the same string we use for issuer.
+	tokenCfg.AddAudiences("https://mock-server.com")
 	// Add OIDC claims required by GetUserGroups
 	tokenCfg.Claims = map[string]string{
 		"user_id": "admin",

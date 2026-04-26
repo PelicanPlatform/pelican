@@ -71,8 +71,7 @@ const HealthIndicator = () => {
     },
     unavailable: {
       icon: <HelpOutline color={'disabled'} />,
-      label:
-        'Detailed status is restricted to administrators on this server',
+      label: 'Detailed status is restricted to administrators on this server',
     },
   }[state];
 
@@ -146,11 +145,7 @@ const NonAdminHome = () => {
               text={'Collections'}
               icon={<FolderOpen />}
             />
-            <QuickLink
-              href={'/groups/'}
-              text={'Groups'}
-              icon={<Groups />}
-            />
+            <QuickLink href={'/groups/'} text={'Groups'} icon={<Groups />} />
             <QuickLink
               href={'/origin/downtime/'}
               text={'Downtime'}

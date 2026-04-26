@@ -17,6 +17,10 @@ export type StaticNavigationBaseItemProps = {
   icon: ReactNode;
   showTitle?: boolean;
   allowedRoles?: User['role'][];
+  // anyScopes lets a nav item show for callers holding any of these
+  // effective scopes, in addition to allowedRoles. Either matching
+  // makes the item visible (logical OR with allowedRoles).
+  anyScopes?: string[];
   allowedExportTypes?: ExportRes['type'][];
 };
 

@@ -6,7 +6,7 @@ import { getUser } from '@/helpers/login';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User } from '@/index';
+import { hasScope, User } from '@/index';
 
 const Circle = ({ children }: { children: React.ReactNode }) => {
   return (
@@ -44,6 +44,12 @@ interface AuthenticatedContentProps {
   preloadChildren?: boolean;
   boxProps?: BoxProps;
   allowedRoles?: User['role'][];
+  // anyScopes lets a surface admit holders of EITHER any role in
+  // allowedRoles OR any scope in this list. Used so e.g.
+  // /settings/users/ can be reached by a non-system-admin who holds
+  // server.user_admin via group membership. If both allowedRoles and
+  // anyScopes are set, EITHER clears the gate (logical OR).
+  anyScopes?: string[];
   replace?: boolean;
   children: React.ReactNode;
 }
@@ -68,6 +74,7 @@ const AuthenticatedContent = ({
   children,
   boxProps,
   allowedRoles,
+  anyScopes,
 }: AuthenticatedContentProps) => {
   if (redirect && promptLogin) {
     throw new Error('redirect XOR promptLogin must be true');
@@ -94,9 +101,12 @@ const AuthenticatedContent = ({
   const allowed = useMemo(() => {
     if (!loggedIn) return false;
     if (needsAup) return false;
-    if (!allowedRoles) return true;
-    return !!data?.role && allowedRoles.includes(data.role);
-  }, [data, allowedRoles, loggedIn, needsAup]);
+    if (!allowedRoles && !anyScopes) return true;
+    const roleOk =
+      !!allowedRoles && !!data?.role && allowedRoles.includes(data.role);
+    const scopeOk = !!anyScopes && anyScopes.some((s) => hasScope(data, s));
+    return roleOk || scopeOk;
+  }, [data, allowedRoles, anyScopes, loggedIn, needsAup]);
 
   useEffect(() => {
     // Keep pathname as is since backend handles the redirect after logging in and needs the full path
@@ -132,7 +142,10 @@ const AuthenticatedContent = ({
     if (!loggedIn) return;
     if (!data?.requiresAup) return;
     // Don't bounce the AUP page back to itself.
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/aup')) {
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname.startsWith('/aup')
+    ) {
       return;
     }
     if (!pageUrl) return;

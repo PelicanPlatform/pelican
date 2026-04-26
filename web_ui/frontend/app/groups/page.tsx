@@ -470,9 +470,8 @@ const EmptyGroupList: React.FC<{
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 1 }}>
         Groups bundle users together so the system can grant access by
-        membership rather than per-user. You join one by redeeming an
-        invite link from whoever runs the group — typically a project
-        lead or admin.
+        membership rather than per-user. You join one by redeeming an invite
+        link from whoever runs the group — typically a project lead or admin.
       </Typography>
       <Typography variant='body2' color='text.secondary'>
         If you&rsquo;re expecting to be in a group, ask its owner or

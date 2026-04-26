@@ -19,13 +19,7 @@
 'use client';
 
 import React, { useContext } from 'react';
-import {
-  Box,
-  Breadcrumbs,
-  Skeleton,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { Box, Breadcrumbs, Skeleton, Stack, Typography } from '@mui/material';
 import Link from 'next/link';
 import useSWR from 'swr';
 
