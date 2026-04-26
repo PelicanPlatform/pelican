@@ -80,13 +80,23 @@ const AuthenticatedContent = ({
   });
   const [pageUrl, setPageUrl] = useState<string>('');
 
-  const authenticated = useMemo(() => {
-    if (data && allowedRoles) {
-      return data?.role && allowedRoles.includes(data?.role);
-    } else {
-      return !!data?.authenticated;
-    }
-  }, [data, allowedRoles]);
+  // Distinguish "not logged in" (redirecting to /login is correct) from
+  // "logged in but role mismatch" (redirecting to /login would just send the
+  // user back here after a successful login -> infinite loop). Render a clear
+  // "insufficient privileges" message in the latter case instead.
+  const loggedIn = !!data?.authenticated;
+  // requiresAup gates ALL protected content — even role-allowed users
+  // must accept first. Treated as a "not yet allowed" state so the
+  // children don't mount and fire RequireAUPCompliance-walled API
+  // calls during the moment between detection and the
+  // /aup-redirect useEffect below.
+  const needsAup = !!data?.requiresAup;
+  const allowed = useMemo(() => {
+    if (!loggedIn) return false;
+    if (needsAup) return false;
+    if (!allowedRoles) return true;
+    return !!data?.role && allowedRoles.includes(data.role);
+  }, [data, allowedRoles, loggedIn, needsAup]);
 
   useEffect(() => {
     // Keep pathname as is since backend handles the redirect after logging in and needs the full path
@@ -96,21 +106,47 @@ const AuthenticatedContent = ({
     setPageUrl(pathUrlEncoded);
   }, []);
 
-  // Redirect to login page if not authenticated and redirect is true
+  // Only redirect to login when the user isn't logged in at all. A wrong-role
+  // user is logged in; sending them back to /login would just bounce them
+  // here again on the next successful login.
   useEffect(() => {
-    if (!isValidating && !authenticated && redirect) {
+    if (!isValidating && !loggedIn && redirect) {
       router.replace('/login/?returnURL=' + pageUrl);
     }
-  }, [data, isValidating, authenticated, pageUrl, redirect, router]);
+  }, [data, isValidating, loggedIn, pageUrl, redirect, router]);
+
+  // AUP gate. When the server requires an AUP and the caller hasn't
+  // accepted the active version, route them to the acceptance page
+  // BEFORE the protected children mount. Without this, the children
+  // render and start hitting RequireAUPCompliance-walled APIs, which
+  // produce a stream of 403 alerts with no obvious way to reach the
+  // policy. After accepting, /aup uses the returnURL we passed it to
+  // come back here.
+  //
+  // We only act once we have a fresh `data` (no more validating) AND
+  // the caller is logged in — for not-logged-in users the login
+  // redirect above already handles them. We use replace, not push, so
+  // the gate doesn't pollute the back stack.
+  useEffect(() => {
+    if (isValidating) return;
+    if (!loggedIn) return;
+    if (!data?.requiresAup) return;
+    // Don't bounce the AUP page back to itself.
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/aup')) {
+      return;
+    }
+    if (!pageUrl) return;
+    router.replace(`/aup/?returnURL=${pageUrl}`);
+  }, [data, isValidating, loggedIn, pageUrl, router]);
 
   // If there was a error then print it to the screen
   if (error) {
     return <Circle>{error}</Circle>;
   }
 
-  // If we are authenticated or if we trust at first then show the content
-  if (authenticated || (trustThenValidate && (isLoading || isValidating))) {
-    return <Box {...boxProps}>{authenticated && children}</Box>;
+  // If we are allowed in, or if we trust at first while validating, show the content
+  if (allowed || (trustThenValidate && (isLoading || isValidating))) {
+    return <Box {...boxProps}>{allowed && children}</Box>;
   }
 
   // If we are loading then show a loader
@@ -133,15 +169,54 @@ const AuthenticatedContent = ({
     );
   }
 
-  // If we are not authenticated and we are prompted to login then show the login
-  if (!authenticated && promptLogin) {
+  // Logged in but the AUP gate is pending. Render a minimal
+  // placeholder while the redirect-effect above fires. Without this
+  // we'd fall through to the "Insufficient privileges" branch, which
+  // is misleading: the user hasn't been denied, they just haven't
+  // signed yet.
+  if (loggedIn && needsAup) {
+    return (
+      <Circle>
+        <Typography variant={'h5'} align={'center'}>
+          Acceptable Use Policy
+        </Typography>
+        <Typography variant={'subtitle1'} align={'center'}>
+          Redirecting to acceptance page…
+        </Typography>
+      </Circle>
+    );
+  }
+
+  // Logged in but lacking the required role: show a clear unauthorized
+  // message rather than redirecting (which would loop). This applies whether
+  // or not promptLogin/redirect are set.
+  if (loggedIn && !allowed) {
+    return (
+      <Circle>
+        <Typography variant={'h4'} align={'center'}>
+          Insufficient privileges
+        </Typography>
+        <Typography variant={'subtitle1'} align={'center'}>
+          Your account does not have access to this page.
+        </Typography>
+        <Box pt={4} display={'flex'} gap={1} justifyContent={'center'}>
+          <Link href={'/'}>
+            <Button variant={'contained'}>Home</Button>
+          </Link>
+        </Box>
+      </Circle>
+    );
+  }
+
+  // Not logged in and asked to prompt for login: render an inline login CTA.
+  if (!loggedIn && promptLogin) {
     return (
       <Circle>
         <Typography variant={'h4'} align={'center'}>
           Unauthorized
         </Typography>
         <Typography variant={'subtitle1'} align={'center'}>
-          Admin Privileges Required
+          Login required
         </Typography>
         <Box pt={4}>
           <Link href={`/login/?returnURL=${pageUrl}`}>

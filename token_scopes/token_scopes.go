@@ -36,6 +36,9 @@ const (
 	Pelican_DowntimeModify TokenScope = "pelican.downtime_modify"
 	Pelican_DowntimeDelete TokenScope = "pelican.downtime_delete"
 	WebUi_Access TokenScope = "web_ui.access"
+	Server_WebAdmin TokenScope = "server.web_admin"
+	Server_UserAdmin TokenScope = "server.user_admin"
+	Server_CollectionAdmin TokenScope = "server.collection_admin"
 	Pelican_LoggingModify TokenScope = "pelican.logging_modify"
 	Registry_EditRegistration TokenScope = "registry.edit_registration"
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
@@ -78,4 +81,69 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 	}
 
 	return TokenScope(s.String() + ":" + path), nil
+}
+
+// UserGrantableScopes is the set of scopes the server's management UI
+// is allowed to assign directly to a user or group. EffectiveScopes()
+// reads from user_scopes / group_scopes rows whose value is in this
+// list; anything outside of it is rejected at the API boundary so an
+// admin can't accidentally hand out a data-plane (wlcg/scitokens) or
+// inter-server scope through the user-management surface.
+//
+// Values come from docs/scopes.yaml entries with userGrantable: true.
+var UserGrantableScopes = []TokenScope{
+	Server_WebAdmin,
+	Server_UserAdmin,
+	Server_CollectionAdmin,
+}
+
+// IsUserGrantable reports whether the supplied scope can be granted to
+// users or groups via the management UI / API. Always false for
+// data-plane and inter-server scopes; only the entries in
+// UserGrantableScopes return true.
+func IsUserGrantable(s TokenScope) bool {
+	for _, ok := range UserGrantableScopes {
+		if ok == s {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeDescriptions carries the human-readable explanation pulled
+// from docs/scopes.yaml. Populated only for non-data-plane scopes
+// (the data scopes are documented elsewhere). Used by the management
+// UI to surface "what does this scope imply?" on the picker.
+var scopeDescriptions = map[TokenScope]string{
+	Pelican_Advertise: `For origin and cache to advertise itself to be registered at the director`,
+	Pelican_DirectorTestReport: `For the director to report test result of file transfer back to origins`,
+	Pelican_DirectorServiceDiscovery: `For director's Prometheus instance to discover available origins to scrape from`,
+	Pelican_NamespaceDelete: `For namespace client to delete a namespace from namespace registry`,
+	Pelican_DirectorAdvertise: `Permits a director service to advertise with another director in the federation`,
+	Pelican_DowntimeCreate: `Permits origin and cache to create downtimes at the registry`,
+	Pelican_DowntimeModify: `Permits origin and cache to modify existing downtimes at the registry`,
+	Pelican_DowntimeDelete: `Permits origin and cache to delete downtimes at the registry`,
+	WebUi_Access: `For user to access various server Web UI`,
+	Server_WebAdmin: `Full server-administration capability. Holders can manage every user/group/collection/setting; equivalent to the historical "system admin" role. Implies server.user_admin and server.collection_admin.`,
+	Server_UserAdmin: `Manage non-admin users and unprivileged groups. Holders can create users, mint password-set invites, and run the user-onboarding flows, but cannot modify system-admin accounts.`,
+	Server_CollectionAdmin: `Create, modify, and delete collections and manage their ACLs.`,
+	Pelican_LoggingModify: `Permits modification of server log levels at runtime`,
+	Registry_EditRegistration: `For origin admin to edit namespace registration at the registry`,
+	Monitoring_Scrape: `For server's Prometheus instance to scrape its Prometheus http data exporter at /metrics`,
+	Monitoring_Query: `For Web UI user and third-party tools to access server's Prometheus query engine endpoints at /api/v1.0/prometheus`,
+	Broker_Reverse: `Permits reversal requests sent to the broker by a cache.`,
+	Broker_Retrieve: `Permits retrieval of requests to an origin`,
+	Broker_Callback: `Permits callbacks from the origin to the cache in response to a reversal request`,
+	Localcache_Purge: `Permits invocation of the purge routine in a local cache`,
+	Collection_Create: `For creating a new collection`,
+	Collection_Read: `For getting/reading the contents of a collection`,
+	Collection_Modify: `For modifying the contents of a collection`,
+	Collection_Delete: `For deleting a collection`,
+}
+
+// Describe returns the human-readable description of the supplied
+// scope, or "" when none is available (data-plane scopes intentionally
+// have no entry — they're documented in the WLCG / scitokens specs).
+func (s TokenScope) Describe() string {
+	return scopeDescriptions[s]
 }

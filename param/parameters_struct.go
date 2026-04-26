@@ -357,6 +357,7 @@ type Config struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
 		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		Institutions any `mapstructure:"institutions" yaml:"Institutions"`
 		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
 		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
@@ -366,7 +367,9 @@ type Config struct {
 	} `mapstructure:"registry" yaml:"Registry"`
 	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
+		AUPCanonicalURL string `mapstructure:"aupcanonicalurl" yaml:"AUPCanonicalURL"`
 		AUPFile string `mapstructure:"aupfile" yaml:"AUPFile"`
+		AUPLastUpdated string `mapstructure:"auplastupdated" yaml:"AUPLastUpdated"`
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
@@ -818,6 +821,7 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
+		EnableOIDC struct { Type string; Value bool }
 		Institutions struct { Type string; Value any }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
@@ -827,7 +831,9 @@ type configWithType struct {
 	}
 	RuntimeDir struct { Type string; Value string }
 	Server struct {
+		AUPCanonicalURL struct { Type string; Value string }
 		AUPFile struct { Type string; Value string }
+		AUPLastUpdated struct { Type string; Value string }
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }

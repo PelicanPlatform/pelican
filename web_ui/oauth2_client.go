@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -218,6 +219,21 @@ func fetchGitHubOrganizations(accessToken string) ([]string, error) {
 	return groups, nil
 }
 
+// pickDisplayName returns a friendly label for the user from the IdP claims.
+// Display name is purely a UI concern (never used for authorization), so the
+// fallback list is biased toward the most human-readable claims first; if
+// nothing fires, returns the supplied fallback (typically the chosen username).
+func pickDisplayName(claims map[string]interface{}, fallback string) string {
+	for _, c := range []string{"name", "preferred_username", "given_name", "email"} {
+		if v, ok := claims[c]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return fallback
+}
+
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
 	groupFile := param.Issuer_GroupFile.GetString()
@@ -246,54 +262,81 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
 	}
+	// User-record concept reference (see comment on database.User):
+	//   - Username     : authorization identifier; admin-controlled after first
+	//                    login; bootstrapped here from the IdP claims.
+	//   - DisplayName  : human label; self-editable; chosen here for a friendly
+	//                    initial value but never used for authorization.
+	//   - Sub / Issuer : linked OIDC identity; never authoritative for authz.
+	//   - ID           : opaque internal primary key.
+	//
+	// The two values come from different claim lists because they answer
+	// different questions: "what stable handle do we authorize against" vs
+	// "what does this person want shown back to them in the UI?"
+
+	// --- Username derivation -------------------------------------------------
+	//
+	// Source order (first non-empty candidate wins; on collision with another
+	// account, walk to the next candidate):
+	//   1. Server.AutoEnrollUsernameClaims (operator-configured list), or the
+	//      historical heuristic when unset and the legacy single-claim setting
+	//      defaults to "sub".
+	//   2. Issuer.OIDCAuthenticationUserClaim (legacy single-claim setting)
+	//      appended last as the ultimate fallback.
 	userClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	if userClaim == "" {
 		userClaim = "sub"
 	}
-
-	// Build an ordered list of claims to try for a human-readable display name.
-	// When the configured claim is "sub" (the default), we first try the standard OIDC claims
-	// (see https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims) because "sub"
-	// often contains opaque identifiers like "http://cilogon.org/..." (Issue #3044).
-	// The configured userClaim is always the final fallback.
-	candidates := []string{userClaim}
-	if userClaim == "sub" {
-		candidates = append(
-			[]string{"preferred_username", "name", "nickname", "email"},
-			userClaim,
-		)
+	var usernameClaims []string
+	if cfg := param.Server_AutoEnrollUsernameClaims.GetStringSlice(); len(cfg) > 0 {
+		usernameClaims = append(usernameClaims, cfg...)
+	} else if userClaim == "sub" {
+		// Sub from e.g. CILogon often looks like an opaque URL (#3044), so the
+		// historical fallback walks the standard OIDC string claims first.
+		usernameClaims = []string{"preferred_username", "email", "nickname"}
+	}
+	if !slices.Contains(usernameClaims, userClaim) {
+		usernameClaims = append(usernameClaims, userClaim)
 	}
 
-	var displayName string
-	for _, c := range candidates {
-		if val, ok := claimsSource[c]; ok {
-			if strVal, ok := val.(string); ok && strVal != "" {
-				displayName = strVal
-				if c != userClaim {
-					log.Debugf("Found human-readable username from claim '%s': %s", c, displayName)
-				}
-				break
+	type usernameCandidate struct{ claim, value string }
+	var resolved []usernameCandidate
+	for _, c := range usernameClaims {
+		val, ok := claimsSource[c]
+		if !ok {
+			continue
+		}
+		strVal, ok := val.(string)
+		if !ok || strVal == "" {
+			continue
+		}
+		if param.Issuer_UserStripDomain.GetBool() {
+			if at := strings.LastIndex(strVal, "@"); at >= 0 {
+				strVal = strVal[:at]
 			}
 		}
+		if strVal == "" {
+			continue
+		}
+		resolved = append(resolved, usernameCandidate{c, strVal})
 	}
-
-	if displayName == "" {
-		log.Errorln("User info endpoint did not return a valid identity claim", userClaim)
+	if len(resolved) == 0 {
+		log.Errorln("User info endpoint did not return any usable identity claim from", usernameClaims)
 		err = errors.New("identity provider did not return an identity for logged-in user")
 		return
 	}
-	if param.Issuer_UserStripDomain.GetBool() {
-		lastAt := strings.LastIndex(displayName, "@")
-		if lastAt >= 0 {
-			displayName = displayName[:strings.LastIndex(displayName, "@")]
-		}
+	username := resolved[0].value
+	if resolved[0].claim != userClaim {
+		log.Debugf("Bootstrapping username from claim '%s': %s", resolved[0].claim, username)
 	}
-	if displayName == "" {
-		log.Errorf("'%s' field of user info response from auth provider is empty. Can't determine user identity", userClaim)
-		err = errors.New("identity provider returned an empty username")
-		return
-	}
-	username := displayName
+
+	// --- Display name derivation --------------------------------------------
+	//
+	// Display name is purely a human label and is updated to whatever the IdP
+	// reports on each login (so a user who renames themselves at the IdP gets
+	// a refreshed label here without an admin touch). Falls back to the
+	// chosen username when the IdP gives nothing friendly.
+	displayName := pickDisplayName(claimsSource, username)
 
 	// Get the subject (sub) claim - this uniquely identifies the user at the identity provider
 	// For OIDC, this is the standard "sub" claim. For OAuth2 providers like GitHub, we may need
@@ -381,8 +424,24 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		}
 	}
 
-	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
-	userRecord, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
+	// Bootstrap or link the user record. Two cases:
+	//   1. Identity (sub, issuer) already known → reuse the existing user; just
+	//      refresh the display name if the IdP now reports a friendlier label.
+	//      Username is *not* changed here — once an account exists, only an
+	//      admin may rename it.
+	//   2. New identity → create a fresh user. The chosen username comes from
+	//      the resolved candidate list; on a unique-constraint collision (some
+	//      other account already owns that username) we walk to the next
+	//      candidate. If every candidate collides we fall back to a
+	//      disambiguated form of the first candidate.
+	usernameCandidateValues := make([]string, len(resolved))
+	for i, c := range resolved {
+		usernameCandidateValues[i] = c.value
+	}
+	userRecord, err = database.LookupOrBootstrapUser(
+		database.ServerDatabase, sub, issuerClaimValue, displayName,
+		usernameCandidateValues,
+	)
 	if err != nil {
 		return nil, nil, err
 	}

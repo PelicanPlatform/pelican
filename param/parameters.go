@@ -390,6 +390,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.EnableOIDC": false,
 	"Registry.Institutions": false,
 	"Registry.InstitutionsUrl": false,
 	"Registry.InstitutionsUrlReloadMinutes": false,
@@ -397,7 +398,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.RequireKeyChaining": false,
 	"Registry.RequireOriginApproval": false,
 	"RuntimeDir": false,
+	"Server.AUPCanonicalURL": false,
 	"Server.AUPFile": false,
+	"Server.AUPLastUpdated": false,
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
@@ -665,7 +668,9 @@ var stringAccessors = map[string]func(*Config) string{
 	"Registry.DbLocation": func(c *Config) string { return c.Registry.DbLocation },
 	"Registry.InstitutionsUrl": func(c *Config) string { return c.Registry.InstitutionsUrl },
 	"RuntimeDir": func(c *Config) string { return c.RuntimeDir },
+	"Server.AUPCanonicalURL": func(c *Config) string { return c.Server.AUPCanonicalURL },
 	"Server.AUPFile": func(c *Config) string { return c.Server.AUPFile },
+	"Server.AUPLastUpdated": func(c *Config) string { return c.Server.AUPLastUpdated },
 	"Server.DatabaseBackup.Location": func(c *Config) string { return c.Server.DatabaseBackup.Location },
 	"Server.DbLocation": func(c *Config) string { return c.Server.DbLocation },
 	"Server.ExternalWebUrl": func(c *Config) string { return c.Server.ExternalWebUrl },
@@ -980,6 +985,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
 	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.EnableOIDC": func(c *Config) bool { return c.Registry.EnableOIDC },
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
 	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
@@ -1468,6 +1474,7 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.EnableOIDC",
 	"Registry.Institutions",
 	"Registry.InstitutionsUrl",
 	"Registry.InstitutionsUrlReloadMinutes",
@@ -1475,7 +1482,9 @@ var allParameterNames = []string{
 	"Registry.RequireKeyChaining",
 	"Registry.RequireOriginApproval",
 	"RuntimeDir",
+	"Server.AUPCanonicalURL",
 	"Server.AUPFile",
+	"Server.AUPLastUpdated",
 	"Server.AdLifetime",
 	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
@@ -1716,7 +1725,9 @@ var (
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	RuntimeDir = StringParam{"RuntimeDir"}
+	Server_AUPCanonicalURL = StringParam{"Server.AUPCanonicalURL"}
 	Server_AUPFile = StringParam{"Server.AUPFile"}
+	Server_AUPLastUpdated = StringParam{"Server.AUPLastUpdated"}
 	Server_DatabaseBackup_Location = StringParam{"Server.DatabaseBackup.Location"}
 	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
@@ -1910,6 +1921,7 @@ var (
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_EnableOIDC = BoolParam{"Registry.EnableOIDC"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
@@ -2156,7 +2168,9 @@ func init() {
 		"Registry.DbLocation": Registry_DbLocation,
 		"Registry.InstitutionsUrl": Registry_InstitutionsUrl,
 		"RuntimeDir": RuntimeDir,
+		"Server.AUPCanonicalURL": Server_AUPCanonicalURL,
 		"Server.AUPFile": Server_AUPFile,
+		"Server.AUPLastUpdated": Server_AUPLastUpdated,
 		"Server.DatabaseBackup.Location": Server_DatabaseBackup_Location,
 		"Server.DbLocation": Server_DbLocation,
 		"Server.ExternalWebUrl": Server_ExternalWebUrl,
@@ -2338,6 +2352,7 @@ func init() {
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
 		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.EnableOIDC": Registry_EnableOIDC,
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
 		"Registry.RequireOriginApproval": Registry_RequireOriginApproval,

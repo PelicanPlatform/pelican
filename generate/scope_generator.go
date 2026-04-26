@@ -33,6 +33,15 @@ import (
 type ScopeName struct {
 	Raw     string
 	Display string
+	// UserGrantable marks scopes that can be assigned directly to a
+	// user or group via the management UI (CheckAdmin et al consult
+	// these via EffectiveScopes). Data-plane scopes (wlcg.*,
+	// scitokens.*) and inter-server scopes are intentionally false.
+	UserGrantable bool
+	// Description is the human-readable explanation pulled from
+	// docs/scopes.yaml. Used to drive the management UI's scope
+	// picker so admins can see what they're granting.
+	Description string
 }
 
 var requiredScopeKeys = [3]string{"description", "issuedBy", "acceptedBy"}
@@ -107,6 +116,18 @@ func GenTokenScope() {
 		scopeNameInSnake := strings.ReplaceAll(camelScopeName, ".", "_")
 		r := []rune(scopeNameInSnake)
 		displayName := string(r)
+		userGrantable := false
+		if v, ok := entry["userGrantable"]; ok {
+			if b, ok := v.(bool); ok {
+				userGrantable = b
+			}
+		}
+		description := ""
+		if v, ok := entry["description"]; ok {
+			if s, ok := v.(string); ok {
+				description = strings.TrimSpace(s)
+			}
+		}
 		if strings.HasPrefix(scopeName, "wlcg") {
 			displayName = strings.TrimSuffix(displayName, ":")
 			wlcgScopes = append(wlcgScopes, ScopeName{Raw: strings.TrimPrefix(scopeName, "wlcg."), Display: displayName})
@@ -116,7 +137,12 @@ func GenTokenScope() {
 		} else if strings.HasPrefix(scopeName, "lot") {
 			lotmanScopes = append(lotmanScopes, ScopeName{Raw: scopeName, Display: displayName})
 		} else {
-			scopes = append(scopes, ScopeName{Raw: scopeName, Display: displayName})
+			scopes = append(scopes, ScopeName{
+				Raw:           scopeName,
+				Display:       displayName,
+				UserGrantable: userGrantable,
+				Description:   description,
+			})
 		}
 	}
 
@@ -207,5 +233,53 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 	}
 
 	return TokenScope(s.String() + ":" + path), nil
+}
+
+// UserGrantableScopes is the set of scopes the server's management UI
+// is allowed to assign directly to a user or group. EffectiveScopes()
+// reads from user_scopes / group_scopes rows whose value is in this
+// list; anything outside of it is rejected at the API boundary so an
+// admin can't accidentally hand out a data-plane (wlcg/scitokens) or
+// inter-server scope through the user-management surface.
+//
+// Values come from docs/scopes.yaml entries with userGrantable: true.
+var UserGrantableScopes = []TokenScope{
+	{{- range $idx, $scope := .Scopes}}
+	{{- if $scope.UserGrantable}}
+	{{$scope.Display}},
+	{{- end}}
+	{{- end}}
+}
+
+// IsUserGrantable reports whether the supplied scope can be granted to
+// users or groups via the management UI / API. Always false for
+// data-plane and inter-server scopes; only the entries in
+// UserGrantableScopes return true.
+func IsUserGrantable(s TokenScope) bool {
+	for _, ok := range UserGrantableScopes {
+		if ok == s {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeDescriptions carries the human-readable explanation pulled
+// from docs/scopes.yaml. Populated only for non-data-plane scopes
+// (the data scopes are documented elsewhere). Used by the management
+// UI to surface "what does this scope imply?" on the picker.
+var scopeDescriptions = map[TokenScope]string{
+	{{- range $idx, $scope := .Scopes}}
+	{{- if $scope.Description}}
+	{{$scope.Display}}: ` + "`{{$scope.Description}}`" + `,
+	{{- end}}
+	{{- end}}
+}
+
+// Describe returns the human-readable description of the supplied
+// scope, or "" when none is available (data-plane scopes intentionally
+// have no entry — they're documented in the WLCG / scitokens specs).
+func (s TokenScope) Describe() string {
+	return scopeDescriptions[s]
 }
 `))

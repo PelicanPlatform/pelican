@@ -43,8 +43,16 @@ func setupCollectionTestDB(t *testing.T) *gorm.DB {
 		&GroupMember{},
 		&GroupInviteLink{},
 		&UserIdentity{},
+		&AUPDocument{},
+		&UserScope{},
+		&GroupScope{},
 	)
 	require.NoError(t, err)
+	// userCredential is the only struct that exposes the password_hash
+	// column. After the User table exists, AutoMigrate the credential
+	// view so the column gets added — the User struct intentionally has
+	// no PasswordHash field, see database/credentials.go.
+	require.NoError(t, db.AutoMigrate(&userCredential{}))
 	err = db.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err)
 	return db
@@ -77,7 +85,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		token := "test-token-existing"
 		createTestInviteLink(t, db, "group-1", "admin", token, false, time.Now().Add(1*time.Hour))
 
-		err := RedeemGroupInviteLink(db, token, "user-1", "", "", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "user-1", "", "", "")
 		require.NoError(t, err)
 
 		// Verify user was added to group
@@ -95,7 +103,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		createTestInviteLink(t, db, "group-2", "admin", token, false, time.Now().Add(1*time.Hour))
 
 		// No user exists; provide sub+issuer for auto-creation
-		err := RedeemGroupInviteLink(db, token, "", "new-user-sub", "https://issuer.example.com", "newuser")
+		_, _, err := RedeemGroupInviteLink(db, token, "", "new-user-sub", "https://issuer.example.com", "newuser")
 		require.NoError(t, err)
 
 		// Verify user was created
@@ -118,7 +126,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		createTestInviteLink(t, db, "group-3", "admin", token, false, time.Now().Add(1*time.Hour))
 
 		// No username provided; should derive from sub
-		err := RedeemGroupInviteLink(db, token, "", "derived-sub", "https://issuer.example.com", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "", "derived-sub", "https://issuer.example.com", "")
 		require.NoError(t, err)
 
 		var user User
@@ -134,7 +142,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		token := "test-token-expired"
 		createTestInviteLink(t, db, "", "admin", token, false, time.Now().Add(-1*time.Hour))
 
-		err := RedeemGroupInviteLink(db, token, "user-exp", "", "", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "user-exp", "", "", "")
 		require.Error(t, err)
 		// Expired links shouldn't be found (WHERE clause filters them out)
 		assert.Contains(t, err.Error(), "not found")
@@ -153,11 +161,11 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		createTestInviteLink(t, db, "group-su", "admin", token, true, time.Now().Add(1*time.Hour))
 
 		// First redeem
-		err := RedeemGroupInviteLink(db, token, "user-su1", "", "", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "user-su1", "", "", "")
 		require.NoError(t, err)
 
 		// Second redeem should fail
-		err = RedeemGroupInviteLink(db, token, "user-su2", "", "", "")
+		_, _, err = RedeemGroupInviteLink(db, token, "user-su2", "", "", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already been redeemed")
 	})
@@ -167,7 +175,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		user := User{ID: "user-inv", Username: "dave", Sub: "dave-sub", Issuer: "https://issuer.example.com"}
 		require.NoError(t, db.Create(&user).Error)
 
-		err := RedeemGroupInviteLink(db, "nonexistent-token", "user-inv", "", "", "")
+		_, _, err := RedeemGroupInviteLink(db, "nonexistent-token", "user-inv", "", "", "")
 		require.Error(t, err)
 	})
 
@@ -180,7 +188,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		createTestInviteLink(t, db, "group-noid", "admin", token, false, time.Now().Add(1*time.Hour))
 
 		// No userID and no sub/issuer
-		err := RedeemGroupInviteLink(db, token, "", "", "", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "", "", "", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot be auto-created")
 	})
@@ -198,7 +206,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		createTestInviteLink(t, db, "group-ident", "admin", token, false, time.Now().Add(1*time.Hour))
 
 		// Provide sub/issuer that matches existing user's primary identity, but no userID
-		err := RedeemGroupInviteLink(db, token, "", "eve-oidc-sub", "https://issuer.example.com", "")
+		_, _, err := RedeemGroupInviteLink(db, token, "", "eve-oidc-sub", "https://issuer.example.com", "")
 		require.NoError(t, err)
 
 		// Verify user was added to the group

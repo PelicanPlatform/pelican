@@ -98,6 +98,23 @@ definitions:
         type: string
         default: ""
         description: The response message
+  SimpleApiResp:
+    type: object
+    description: >-
+      Generic response envelope used by many endpoints that don't have a
+      richer payload — mirrors the Go `server_structs.SimpleApiResp`
+      type. `status` is "success" or "error"; `msg` carries any
+      human-readable detail. (Same shape as ErrorModelV2; this name is
+      what the source code uses for the success-side cases.)
+    properties:
+      status:
+        type: string
+        enum:
+          - success
+          - error
+        example: "success"
+      msg:
+        type: string
   SuccessModel:
     type: object
     description: The successful response of a request
@@ -918,66 +935,126 @@ definitions:
         example: "Climate Research"
   Group:
     type: object
+    description: >-
+      A group is a set of users; membership is one of the inputs to
+      authorization. The four-concept user/group model (see
+      `docs/user-group-design.md`) gives every group BOTH a
+      machine-readable `name` (used in policy strings; admin-controlled)
+      and a human-readable `displayName` (UI label; owner-editable). Any
+      authorization-affecting UI should render BOTH.
     properties:
       id:
         type: string
-        description: Unique identifier for the group
+        description: Opaque internal primary key. Auto-generated, immutable, never used for authorization.
         example: "abc12345"
       name:
         type: string
-        description: Name of the group
+        description: >-
+          Machine-readable identifier. Used in admin lists, ACL grants,
+          and policy strings. Validated by ValidateIdentifier (allowed
+          characters A-Za-z0-9._@-, length 2-64; '/' explicitly banned).
+          **Editable only by system administrators.** Group owners and
+          group admins cannot rename a group.
         example: "research-team"
+      displayName:
+        type: string
+        description: >-
+          Human-readable label rendered in the UI. Owner-editable. UIs
+          that don't have a display name should fall back to `name`.
+        example: "Climate Research Team"
       description:
         type: string
-        description: Description of the group
+        description: Free-form description shown in the UI.
         example: "Team working on climate research"
-      created_by:
+      createdBy:
         type: string
-        description: User who created the group
-        example: "admin@example.com"
+        description: >-
+          User ID of whoever caused this record to exist. May be a real
+          user ID or the sentinel "unknown" for rows that predate the
+          audit fields.
+        example: "abc12345"
+      creatorAuthMethod:
+        type: string
+        description: How the creator was authenticated when minting the group.
+        enum:
+          - ""
+          - web-cookie
+          - api-token
+          - bearer-jwt
+        example: "web-cookie"
+      creatorAuthMethodId:
+        type: string
+        description: When creatorAuthMethod is "api-token", the 5-character API-token ID prefix; empty otherwise.
+        example: "AbCdE"
       ownerId:
         type: string
-        description: User ID of the group owner (can change owner, admin, and members)
+        description: User ID of the group owner (can transfer ownership, set admin, manage members).
         example: "abc12345"
       adminId:
         type: string
-        description: User or group ID of the group administrator (can manage members)
+        description: User or group ID delegated as group administrator (can manage members).
         example: "def67890"
       adminType:
         type: string
-        description: Whether adminId refers to a 'user' or a 'group'
+        description: Whether adminId refers to a 'user' or a 'group'.
         enum:
+          - ""
           - user
           - group
         example: "user"
       createdAt:
         type: string
         format: date-time
-        description: When the group was created
         example: "2024-01-15T10:30:00Z"
+      updatedAt:
+        type: string
+        format: date-time
       members:
         type: array
         items:
           $ref: "#/definitions/GroupMember"
-        description: List of group members
+        description: Group members (typically only populated by GET /groups/{id}, not by list endpoints).
+      ownerUser:
+        $ref: "#/definitions/UserCard"
+      adminUser:
+        $ref: "#/definitions/UserCard"
+      adminGroup:
+        $ref: "#/definitions/GroupCard"
+      createdByUser:
+        $ref: "#/definitions/UserCard"
   User:
     type: object
+    description: >-
+      Canonical user record. Per the four-concept model
+      (`docs/user-group-design.md`): `id` is opaque-internal,
+      `username` is the authorization handle (admin-controlled),
+      `displayName` is a human label (self-editable), and (`sub`,
+      `issuer`) is the *primary* linked OIDC identity (login linkage
+      only — never used for authorization). Additional identities live
+      in user_identities.
     properties:
       id:
         type: string
-        description: Unique identifier for the user
+        description: Opaque internal primary key. Immutable; never reused (deletes are soft).
       username:
         type: string
-        description: Username of the user
+        description: >-
+          Authorization handle. Validated by ValidateIdentifier.
+          Admin-only renames after first creation; on rename, if the
+          user is a local-issuer account, the primary `sub` is kept in
+          lockstep (otherwise password login would silently break).
       sub:
         type: string
-        description: The 'sub' claim from the user's OIDC token
+        description: >-
+          The 'sub' claim of the user's *primary* linked OIDC identity.
+          For local-issuer users this equals `username`. Used for login
+          linkage; never used for authorization.
       issuer:
         type: string
-        description: The 'iss' claim from the user's OIDC token
+        description: The 'iss' claim of the user's primary linked OIDC identity.
       status:
         type: string
-        description: User account status
+        description: User account status.
         enum:
           - active
           - inactive
@@ -985,22 +1062,62 @@ definitions:
       lastLoginAt:
         type: string
         format: date-time
-        description: Timestamp of the user's last login
+        description: Timestamp of the user's last login.
       displayName:
         type: string
-        description: Human-readable display name
+        description: Human-readable label. Self-editable via PATCH /me. Refreshed from the IdP on each OIDC login.
         example: "John Doe"
       aupVersion:
         type: string
-        description: Version of the AUP the user agreed to
+        description: Version of the AUP the user agreed to.
       aupAgreedAt:
         type: string
         format: date-time
-        description: Timestamp when the user agreed to the AUP
+        description: Timestamp when the user agreed to the AUP.
+      createdBy:
+        type: string
+        description: >-
+          User ID of whoever caused this record to exist, or one of the
+          sentinels "self-enrolled" (auto-created on first OIDC sign-in
+          or htpasswd login) or "unknown" (pre-audit-column rows).
+      creatorAuthMethod:
+        type: string
+        description: How the creator was authenticated when the row was inserted.
+        enum:
+          - ""
+          - web-cookie
+          - api-token
+          - bearer-jwt
+      creatorAuthMethodId:
+        type: string
+        description: When creatorAuthMethod is "api-token", the 5-character API-token ID prefix.
       createdAt:
         type: string
         format: date-time
-        description: When the user was created
+      updatedAt:
+        type: string
+        format: date-time
+  UserCard:
+    type: object
+    description: >-
+      Public-safe user summary used to render "Display Name (username)"
+      labels in places that don't need the full record and shouldn't
+      require user-listing privilege.
+    properties:
+      id:
+        type: string
+      username:
+        type: string
+      displayName:
+        type: string
+  GroupCard:
+    type: object
+    description: Public-safe group summary, analogous to UserCard.
+    properties:
+      id:
+        type: string
+      name:
+        type: string
   GroupMember:
     type: object
     properties:
@@ -1024,59 +1141,261 @@ definitions:
         example: "2024-01-15T10:30:00Z"
   GroupInviteLink:
     type: object
+    description: >-
+      Generalized invite link. The `kind` discriminator selects the
+      semantics: `group` invites add the redeeming caller to a group
+      (require authentication at redemption time), `password` invites
+      let the holder set the password for `targetUserId` without
+      authenticating (the token IS the credential — admins use this
+      to onboard local accounts without ever knowing the password).
+      `inviteToken` is the plaintext token; it is returned ONLY at
+      creation time, never on subsequent reads.
     properties:
       id:
         type: string
-        description: Unique identifier for the invite link
+      kind:
+        type: string
+        enum:
+          - group
+          - password
+        description: Discriminator; selects which fields are meaningful.
+        example: "group"
       groupId:
         type: string
-        description: ID of the group this invite link belongs to
-      inviteToken:
+        description: Set when `kind=group`; empty for `password` and for user-onboarding invites.
+      targetUserId:
         type: string
-        description: The random token used to redeem the invite
+        description: Set when `kind=password`; the user whose password the link will set.
       createdBy:
         type: string
-        description: User who created the invite link
+      authMethod:
+        type: string
+        description: How the *creator* was authenticated when minting this link.
+        enum:
+          - ""
+          - web-cookie
+          - api-token
+          - bearer-jwt
+      authMethodId:
+        type: string
+        description: When authMethod is "api-token", the 5-character API-token ID prefix.
       createdAt:
         type: string
         format: date-time
-        description: When the invite link was created
+      updatedAt:
+        type: string
+        format: date-time
       expiresAt:
         type: string
         format: date-time
-        description: When the invite link expires
       isSingleUse:
         type: boolean
-        description: Whether the invite link can only be used once
+        description: Always true for `password` kind; configurable for `group` kind.
       redeemedBy:
         type: string
-        description: User who redeemed the invite link (if single-use)
+        description: User ID that consumed the link (for password kind, the target user).
       redeemedAt:
         type: string
         format: date-time
-        description: When the invite link was redeemed
       revoked:
         type: boolean
-        description: Whether the invite link has been revoked
-  UserIdentity:
+  GroupInviteLinkCreated:
+    description: >-
+      Response shape for invite-link creation endpoints. Extends
+      GroupInviteLink with the plaintext `inviteToken`, which is
+      returned exactly once and is never recoverable later.
+    allOf:
+      - $ref: "#/definitions/GroupInviteLink"
+      - type: object
+        properties:
+          inviteToken:
+            type: string
+            description: Plaintext invite token. Shown only once at creation; not stored in cleartext.
+  InviteInfo:
     type: object
+    description: >-
+      Pre-redemption metadata returned by GET /invites/info. Lets the
+      redemption UI render the right form (password entry vs.
+      confirm-join-group) without consuming the token. Intentionally
+      omits creator, target user, and group name to avoid leaking
+      information beyond what the token-bearer already implicitly knows.
+    properties:
+      kind:
+        type: string
+        enum:
+          - group
+          - password
+      expiresAt:
+        type: string
+        format: date-time
+      isSingleUse:
+        type: boolean
+      groupId:
+        type: string
+        description: Present only when kind=group.
+  ScopeCatalogEntry:
+    type: object
+    description: >-
+      One entry in the user-grantable scope catalog returned by
+      GET /scopes. Drives the management UI's grant picker. Catalog
+      contents come from docs/scopes.yaml entries marked
+      `userGrantable: true`.
+    properties:
+      name:
+        type: string
+        description: Machine-readable scope name (e.g. "server.user_admin").
+      description:
+        type: string
+        description: Human-readable explanation. May be omitted for legacy entries that lack a description in scopes.yaml.
+  UserScopeGrant:
+    type: object
+    description: >-
+      One row in `user_scopes` — a scope granted directly to a single
+      user. Group-derived and config-derived scopes are NOT
+      represented here; for the full effective set, use GET /me/scopes
+      (self) or compute server-side via EffectiveScopes().
+    properties:
+      userId:
+        type: string
+      scope:
+        type: string
+      grantedBy:
+        type: string
+        description: User ID of the granter, or one of the audit sentinels (self-enrolled, unknown).
+      authMethod:
+        type: string
+        description: How the granter was authenticated when the grant was made.
+        enum: ["", "web-cookie", "api-token", "bearer-jwt"]
+      authMethodId:
+        type: string
+        description: Auth-method-specific identifier (e.g. API-token short ID); omitted for web-cookie sessions.
+      grantedAt:
+        type: string
+        format: date-time
+  GroupScopeGrant:
+    type: object
+    description: >-
+      One row in `group_scopes` — a scope granted to a group. Every
+      member of the group (DB row member or OIDC-asserted via
+      wlcg.groups) inherits the scope through EffectiveScopes.
+    properties:
+      groupId:
+        type: string
+      scope:
+        type: string
+      grantedBy:
+        type: string
+      authMethod:
+        type: string
+        enum: ["", "web-cookie", "api-token", "bearer-jwt"]
+      authMethodId:
+        type: string
+      grantedAt:
+        type: string
+        format: date-time
+  AUPDocumentResp:
+    type: object
+    description: >-
+      The shape returned by GET /aup and GET /aup/{version}. Carries
+      the active or historical AUP plus enough context for the UI to
+      render the standard footer ("This text was last updated on ...
+      and can be found at ...").
+    properties:
+      content:
+        type: string
+        description: Markdown body of the AUP.
+      version:
+        type: string
+        description: 16-char SHA-256 prefix of the content. Identifies which text a user signed.
+      source:
+        type: string
+        description: >-
+          Where the active text came from. `db` = operator-edited via
+          /settings/aup; `operator` = file at Server.AUPFile;
+          `default` = embedded Pelican default; `none` only ever
+          appears as a placeholder when AUP enforcement is disabled
+          (in which case the endpoint returns 404 instead).
+        enum: [db, operator, default, none]
+      lastUpdated:
+        type: string
+        description: Optional human-readable revision date for the rendered footer.
+      canonicalUrl:
+        type: string
+        description: Optional canonical URL for the policy (Server.AUPCanonicalURL).
+      editable:
+        type: boolean
+        description: True when the active copy is operator-edited (source=db) and therefore live-editable through PUT /aup.
+  AUPDocument:
+    type: object
+    description: >-
+      One row in `aup_documents` (the persisted version history
+      returned by GET /aup/versions). Append-only — edits create new
+      rows rather than mutating existing ones.
     properties:
       id:
         type: string
-        description: Unique identifier for the identity record
-      userId:
+      version:
         type: string
-        description: ID of the user this identity belongs to
-      sub:
+        description: Content hash; matches users.aup_version when this row is the one a user accepted.
+      content:
         type: string
-        description: The 'sub' claim from the identity provider
-      issuer:
+      createdBy:
         type: string
-        description: The 'iss' claim from the identity provider
+        description: User ID of the admin who saved this version, or the audit sentinel for migration-time seeds.
+      authMethod:
+        type: string
+        enum: ["", "web-cookie", "api-token", "bearer-jwt"]
+      authMethodId:
+        type: string
+      lastUpdated:
+        type: string
+        description: Operator-supplied date label for the rendered footer.
+      isActive:
+        type: boolean
+        description: True for exactly one row at any time — the version users are currently being asked to accept.
       createdAt:
         type: string
         format: date-time
-        description: When the identity was associated
+  UserIdentity:
+    type: object
+    description: >-
+      Secondary OIDC identity for a user. The user's *primary* identity
+      lives on the User row itself (User.sub + User.issuer); this table
+      holds *additional* identities the user has linked. A user may have
+      at most one identity per issuer in total (primary + secondaries),
+      enforced by an in-table unique index plus a cross-table check
+      against User.issuer.
+    properties:
+      id:
+        type: string
+      userId:
+        type: string
+      sub:
+        type: string
+      issuer:
+        type: string
+      createdAt:
+        type: string
+        format: date-time
+      updatedAt:
+        type: string
+        format: date-time
+  Me:
+    description: >-
+      The calling user's own record (returned by GET /me). Identical
+      shape to User; the distinction is that /me/* endpoints always
+      address the caller and are accessible without admin privileges.
+    allOf:
+      - $ref: "#/definitions/User"
+  MePatch:
+    type: object
+    description: >-
+      Body for PATCH /me. Only displayName is self-editable. Username,
+      sub, issuer, and the user_identities are admin-only and go
+      through the corresponding /users endpoints instead.
+    properties:
+      displayName:
+        type: string
   CreateCollectionRequest:
     type: object
     required:
@@ -1194,14 +1513,23 @@ definitions:
         example: "read"
   CreateGroupRequest:
     type: object
+    required:
+      - name
     properties:
       name:
         type: string
-        description: Name of the group
+        description: >-
+          Machine-readable group identifier. Validated by ValidateIdentifier
+          (allowed characters A-Za-z0-9._@-, length 2-64; '/' explicitly
+          banned). Cannot start with the reserved 'user-' prefix.
         example: "research-team"
+      displayName:
+        type: string
+        description: Human-readable label shown in the UI. Optional; falls back to `name` when empty.
+        example: "Climate Research Team"
       description:
         type: string
-        description: Description of the group
+        description: Description of the group.
         example: "Team working on climate research"
   AddGroupMemberRequest:
     type: object
@@ -1520,7 +1848,17 @@ tags:
   - name: collections
     description: APIs for managing collections of objects
   - name: groups
-    description: APIs for managing user groups
+    description: Admin APIs for managing groups (list, create, update, delete, ownership, members, invite links)
+  - name: users
+    description: Admin APIs for managing user accounts (list, create, update, delete, identities, password invites)
+  - name: me
+    description: Self-service APIs scoped to the calling user (no :id in the path; the target is always the caller)
+  - name: invites
+    description: Public invite-link redemption APIs (no authentication; the token is the credential)
+  - name: scopes
+    description: First-class user/group scope grants (server.web_admin, server.user_admin, server.collection_admin) and the catalog of user-grantable scopes
+  - name: aup
+    description: Acceptable Use Policy — public reads (current and versioned), admin edit, and persisted version history
   - name: issuer-admin
     description: Admin APIs for managing the embedded OIDC issuer clients and token exchange
 paths:
@@ -4236,7 +4574,12 @@ paths:
       tags:
         - groups
       summary: Update an existing group
-      description: "`Authentication Required`"
+      description: >-
+        `Authentication Required`. Authorization is split per the design
+        contract: `name` (the machine-readable identifier used in policy
+        strings) may be changed **only by a system administrator** —
+        owners and group-admins attempting it get 403. `displayName` and
+        `description` are owner-editable.
       consumes:
         - application/json
       produces:
@@ -4256,15 +4599,18 @@ paths:
             properties:
               name:
                 type: string
-                description: New name of the group
+                description: New machine-readable name. Validated by ValidateIdentifier; admin-only.
+              displayName:
+                type: string
+                description: New human-readable display name. Owner-editable.
               description:
                 type: string
-                description: New description of the group
+                description: New description.
       responses:
         "204":
           description: Group updated successfully
         "400":
-          description: Bad request (invalid fields or reserved group name prefix)
+          description: Bad request (invalid identifier, invalid display name, or reserved group name prefix)
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
@@ -4272,7 +4618,7 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "403":
-          description: Forbidden - only group creator can update the group
+          description: Forbidden - non-system-admin attempted to change `name`, or caller is not owner/admin
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "404":
@@ -4525,7 +4871,10 @@ paths:
       tags:
         - groups
       summary: Create an invite link for a group
-      description: "`Authentication Required`. Only the group owner or admin can create invite links."
+      description: >-
+        `Authentication Required`. Only the group owner or admin can
+        create invite links. The plaintext token is in `inviteToken` of
+        the response and is shown only once.
       consumes:
         - application/json
       produces:
@@ -4545,16 +4894,21 @@ paths:
             properties:
               isSingleUse:
                 type: boolean
-                description: Whether the invite link can only be used once
+                description: Whether the invite link can only be used once.
                 default: false
-              expiresInHours:
-                type: integer
-                description: Number of hours before the link expires (default 168 = 7 days)
+              expiresIn:
+                type: string
+                description: >-
+                  Optional Go-duration string (e.g. "168h", "7d"). When
+                  empty, the server's configured default
+                  (`Server.GroupInviteLinkExpiration`, 168h fallback)
+                  is used.
+                example: "168h"
       responses:
         "201":
-          description: Invite link created successfully
+          description: Invite link created successfully. `inviteToken` is shown only once.
           schema:
-            $ref: "#/definitions/GroupInviteLink"
+            $ref: "#/definitions/GroupInviteLinkCreated"
         "400":
           description: Bad request
           schema:
@@ -4613,6 +4967,326 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/scopes:
+    get:
+      tags:
+        - scopes
+      summary: List a group's direct scope grants
+      description: >-
+        `Authentication Required`. Returns the rows in `group_scopes`
+        for the target group. Anyone who can see the group can read
+        the list (mirrors the visibility rules in CanSeeGroup).
+        Granting/revoking is system-admin-only — see POST/DELETE.
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/GroupScopeGrant"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - scopes
+      summary: Grant a scope to a group (system admin only)
+      description: >-
+        `Admin privilege Required` (system admin specifically — NOT
+        user-admin). Granting a management scope to a group
+        transitively grants it to every member of the group, so the
+        boundary has to be tight: only system admins may make this
+        change. The `scope` value must be in the user-grantable
+        catalog returned by GET `/scopes`. Idempotent.
+      consumes:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - scope
+            properties:
+              scope:
+                type: string
+                description: Machine-readable scope name from GET /scopes
+      responses:
+        "204":
+          description: Scope granted
+        "400":
+          description: Missing or non-grantable scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden — system admin required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/scopes/{scope}:
+    delete:
+      tags:
+        - scopes
+      summary: Revoke a scope grant from a group (system admin only)
+      description: >-
+        `Admin privilege Required` (system admin). Removes the named
+        row from `group_scopes`; the scope is no longer transitively
+        inherited by group members.
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - name: scope
+          in: path
+          description: Scope name to revoke (URL-encoded)
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Scope revoked
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden — system admin required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Scope was not granted to this group
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /scopes:
+    get:
+      tags:
+        - scopes
+      summary: List the user-grantable scope catalog
+      description: >-
+        `Authentication Required`. Returns every scope that may be
+        assigned to a user or group via the management API, with the
+        human-readable description sourced from docs/scopes.yaml.
+        Drives the management UI's grant picker so admins know what
+        each scope implies. Data-plane (wlcg.*, scitokens.*) and
+        inter-server scopes are intentionally absent.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/ScopeCatalogEntry"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me/scopes:
+    get:
+      tags:
+        - scopes
+      summary: Return the calling user's effective scopes
+      description: >-
+        `Authentication Required`. Returns the union of every scope
+        the caller holds: direct user_scopes grants, scopes inherited
+        from group membership (DB and OIDC-asserted), and scopes
+        derived from the legacy config (Server.UIAdminUsers,
+        Server.AdminGroups, etc.). The `server.web_admin → server.user_admin
+        / server.collection_admin` implication is applied. Useful so
+        the UI can hide management surfaces the caller can't drive
+        without per-component round-trips.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: string
+              description: Scope name
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /aup:
+    get:
+      tags:
+        - aup
+      summary: Read the active Acceptable Use Policy
+      description: >-
+        Public (no authentication). Returns the active AUP — the
+        operator-edited copy from `aup_documents` if one exists,
+        otherwise the file at Server.AUPFile, otherwise the
+        Pelican-shipped default in web_ui/resources/default_aup.md.
+        Returns 404 when the operator has explicitly disabled AUP
+        enforcement (`Server.AUPFile = "none"`).
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/AUPDocumentResp"
+        "404":
+          description: No AUP is configured on this server
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Failed to read configured AUP file
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    put:
+      tags:
+        - aup
+      summary: Save a new AUP version and flip it to active (admin)
+      description: >-
+        `Admin privilege Required` (system admin). Stores the
+        supplied Markdown body as a new row in `aup_documents` and
+        atomically marks it as the active version. The previously
+        active row is preserved (the table is append-only) so users
+        can still look up the exact text they signed. The new
+        version's hash becomes `users.aup_version` for compliance
+        comparisons; every user's recorded acceptance is invalidated
+        immediately, forcing them through the AUP workflow on next
+        page load.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - content
+            properties:
+              content:
+                type: string
+                description: Full Markdown body of the new AUP
+              lastUpdated:
+                type: string
+                description: Optional human-readable date for the rendered footer
+      responses:
+        "200":
+          description: New AUP saved and active
+          schema:
+            $ref: "#/definitions/AUPDocumentResp"
+        "400":
+          description: Empty content / bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden — system admin required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /aup/{version}:
+    get:
+      tags:
+        - aup
+      summary: Read a specific AUP version
+      description: >-
+        Public (no authentication). When `version` matches the
+        currently-active hash, returns the active AUP. Otherwise
+        consults `aup_documents` history; matching rows return the
+        original text so users can audit exactly what they signed.
+        Returns 404 when the version is neither current nor in
+        history; operators wanting a long-term external archive
+        should publish past texts at `Server.AUPCanonicalURL`.
+      produces:
+        - application/json
+      parameters:
+        - name: version
+          in: path
+          required: true
+          type: string
+          description: The 16-char SHA-256 prefix of the AUP content
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/AUPDocumentResp"
+        "404":
+          description: That version is not stored on this server
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /aup/versions:
+    get:
+      tags:
+        - aup
+      summary: List every AUP version ever stored (admin)
+      description: >-
+        `Admin privilege Required` (system admin). Returns every row
+        in `aup_documents` newest-first. Powers the admin "AUP
+        history" view and incident-response work where the operator
+        needs to know exactly what users signed.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/AUPDocument"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden — system admin required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /invites/redeem:
     post:
       tags:
@@ -4653,6 +5327,97 @@ paths:
           description: Invite link not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /invites/info:
+    get:
+      tags:
+        - invites
+      summary: Probe an invite token without consuming it
+      description: >-
+        Returns minimal metadata about an invite link (kind, expiration,
+        single-use flag, and `groupId` when applicable) so the
+        redemption UI can render the right form (password entry vs.
+        confirm-join-group). NO authentication; the token in the query
+        string IS the credential. The response intentionally omits the
+        creator, target user, and group name — anything beyond what the
+        token-bearer can already infer from the URL they were given.
+
+        404 covers all "this is not redeemable" cases (unknown token,
+        expired, revoked, already used) without distinguishing them, so
+        an attacker cannot enumerate valid tokens.
+      produces:
+        - application/json
+      parameters:
+        - name: token
+          in: query
+          description: The plaintext invite token.
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Live invite link
+          schema:
+            $ref: "#/definitions/InviteInfo"
+        "400":
+          description: token query parameter missing
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite not found, expired, revoked, or already used
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /invites/redeem/password:
+    post:
+      tags:
+        - invites
+      summary: Redeem a password-set invite (no authentication)
+      description: >-
+        Sets the password for the user the invite link was minted for.
+        NO authentication on this endpoint by design — possession of
+        the (single-use, time-bounded) token IS the credential. This
+        is the "click the link in the email to set your password" flow;
+        it lets administrators onboard local accounts without ever
+        knowing the chosen password.
+
+
+        Server enforces a minimum password length of 8. The link is
+        single-use by construction (see CreatePasswordInviteLink); a
+        successful redemption marks it consumed so it cannot rotate
+        the password later.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: The token + chosen password
+          required: true
+          schema:
+            type: object
+            required:
+              - token
+              - password
+            properties:
+              token:
+                type: string
+                description: Plaintext invite token from the link.
+              password:
+                type: string
+                format: password
+                description: New password (>= 8 characters).
+      responses:
+        "200":
+          description: Password set; user can now log in.
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+        "400":
+          description: Bad request (missing fields, password too short, or wrong invite kind)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite not found, expired, or already used
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /invites/onboarding:
     post:
       tags:
@@ -4680,9 +5445,9 @@ paths:
                 description: Expiration duration (e.g. '168h', '24h')
       responses:
         "201":
-          description: Invite link created successfully. The inviteToken field is shown only once.
+          description: Invite link created successfully. `inviteToken` is shown only once.
           schema:
-            $ref: "#/definitions/GroupInviteLink"
+            $ref: "#/definitions/GroupInviteLinkCreated"
         "400":
           description: Bad request
           schema:
@@ -4698,9 +5463,9 @@ paths:
   /users:
     get:
       tags:
-        - groups
+        - users
       summary: List all users
-      description: "`Authentication Required`"
+      description: "`Admin privilege Required`. Returns every user record (including soft-delete-eligible state, which is filtered server-side)."
       produces:
         - application/json
       responses:
@@ -4720,9 +5485,22 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
-        - groups
+        - users
       summary: Create a new user
-      description: "`Authentication Required`"
+      description: >-
+        `Admin privilege Required`. Two flavors, decided by whether `sub`/`issuer` are
+        provided:
+
+
+        * **Local user** (omit `sub`/`issuer`): created without a
+          password. Admins do NOT set passwords directly — to enable
+          login for the new account, follow up with
+          `POST /users/{id}/password-invite` and hand the invite link
+          to the user.
+
+        * **External (OIDC) user** (provide `sub` and `issuer`):
+          links the user record to an external identity provider for
+          login.
       consumes:
         - application/json
       produces:
@@ -4736,37 +5514,42 @@ paths:
             type: object
             required:
               - username
-              - sub
-              - issuer
             properties:
               username:
                 type: string
-                description: Username of the user
+                description: >-
+                  Machine-readable username. Validated by ValidateIdentifier
+                  (allowed characters A-Za-z0-9._@-, length 2-64; '/' banned).
                 example: "johndoe"
+              displayName:
+                type: string
+                description: Optional human-readable label.
+                example: "John Doe"
               sub:
                 type: string
-                description: The 'sub' claim from the user's OIDC token
+                description: >-
+                  External (OIDC) flavor only. The 'sub' claim from the
+                  user's IdP. Must be supplied together with `issuer`.
                 example: "http://cilogon.org/serverA/users/12345"
               issuer:
                 type: string
-                description: The 'iss' claim from the user's OIDC token
+                description: External (OIDC) flavor only. The 'iss' claim from the user's IdP.
                 example: "https://cilogon.org"
       responses:
         "201":
-          description: User created successfully
+          description: User created successfully. Returns the full user record.
           schema:
-            type: object
-            properties:
-              id:
-                type: string
-                description: The unique ID of the created user
-                example: "abc12345"
+            $ref: "#/definitions/User"
         "400":
-          description: Bad request (missing fields or user already exists)
+          description: Bad request (invalid identifier, conflict, or missing fields)
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -4776,9 +5559,9 @@ paths:
   /users/{id}:
     get:
       tags:
-        - groups
+        - users
       summary: Get a user by ID
-      description: "`Authentication Required`"
+      description: "`Admin privilege Required`. For self-access use `GET /me` instead."
       produces:
         - application/json
       parameters:
@@ -4806,9 +5589,14 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     patch:
       tags:
-        - groups
+        - users
       summary: Update an existing user
-      description: "`Authentication Required`"
+      description: >-
+        `Admin privilege Required`. Only `username` and `displayName`
+        are mutable here. The user's primary OIDC identity (`sub`,
+        `issuer`) is managed via `/users/{id}/identities`, never inline
+        — and a username rename of a local-issuer account also rotates
+        the primary `sub` so password login keeps working.
       consumes:
         - application/json
       produces:
@@ -4821,25 +5609,22 @@ paths:
           type: string
         - in: body
           name: user
-          description: Fields to update on the user
+          description: At least one of `username` or `displayName` must be set.
           required: true
           schema:
             type: object
             properties:
               username:
                 type: string
-                description: New username of the user
-              sub:
+                description: New machine-readable username. Validated by ValidateIdentifier.
+              displayName:
                 type: string
-                description: New 'sub' claim for the user
-              issuer:
-                type: string
-                description: New 'iss' claim for the user
+                description: New human-readable display name.
       responses:
         "204":
           description: User updated successfully
         "400":
-          description: Bad request (invalid fields or uniqueness violation)
+          description: Bad request (no field set, invalid identifier, or uniqueness violation)
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
@@ -4856,9 +5641,13 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     delete:
       tags:
-        - groups
-      summary: Delete a user
-      description: "`Authentication Required`. Only the user themselves or an admin can delete the user."
+        - users
+      summary: Delete a user (soft delete)
+      description: >-
+        `Admin privilege Required`. Soft-deletes the row (sets
+        `deleted_at`) so historical references — group memberships,
+        ACL grants — remain resolvable. The user's group memberships
+        are explicitly dropped at the same time.
       produces:
         - application/json
       parameters:
@@ -4889,9 +5678,13 @@ paths:
   /users/{id}/status:
     put:
       tags:
-        - groups
-      summary: Update user status and display name
-      description: "`Authentication Required`. Update a user's status (active/inactive) and display name."
+        - users
+      summary: Update user status (active/inactive)
+      description: >-
+        `Admin privilege Required`. Toggles a user's account status —
+        purely an authorization concern. Display name (a human-only
+        field) used to ride along here; it now goes through PATCH
+        `/users/{id}` (admin) or PATCH `/me` (self).
       consumes:
         - application/json
       produces:
@@ -4904,23 +5697,23 @@ paths:
           type: string
         - in: body
           name: body
-          description: Status and display name fields to update
+          description: Status to set
           required: true
           schema:
             type: object
+            required:
+              - status
             properties:
               status:
                 type: string
                 enum:
                   - active
                   - inactive
-              displayName:
-                type: string
       responses:
         "204":
           description: User status updated successfully
         "400":
-          description: Bad request
+          description: Bad request (missing status or invalid value)
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
@@ -4934,9 +5727,11 @@ paths:
   /users/{id}/aup:
     post:
       tags:
-        - groups
-      summary: Record AUP agreement
-      description: "`Authentication Required`. Record that a user agreed to a specific version of the Acceptable Use Policy."
+        - users
+      summary: Record AUP agreement (admin)
+      description: >-
+        `Admin privilege Required`. Record that a user agreed to a
+        specific AUP version. Self-service equivalent: POST `/me/aup`.
       consumes:
         - application/json
       produces:
@@ -4974,12 +5769,203 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - users
+      summary: Clear a user's recorded AUP acceptance (admin)
+      description: >-
+        `Admin privilege Required`. Wipe a user's recorded AUP
+        acceptance so their next page load routes them through the
+        AUP-acceptance workflow before they can use the server. Use
+        this to force one user back through the workflow without
+        rotating the active AUP itself (which would re-prompt every
+        user). User-administrators (server.user_admin) cannot clear a
+        system admin's acceptance.
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Acceptance cleared
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller cannot clear this user's acceptance (e.g. user-admin trying to clear a system admin)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/password:
+    delete:
+      tags:
+        - users
+      summary: Clear a user's local password (admin)
+      description: >-
+        `Admin privilege Required`. Wipe the bcrypt hash for the
+        target user, disabling username/password login for that
+        account. The admin never learns the previous password —
+        clearing is the only direct password-touching admin action.
+        To re-enable password login, mint a fresh password-set invite
+        via POST `/users/{id}/password-invite` and have the user
+        redeem it. User-administrators cannot clear a system admin's
+        password.
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Password cleared
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller cannot clear this user's password (e.g. user-admin clearing a system admin)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/scopes:
+    get:
+      tags:
+        - scopes
+      summary: List a user's direct scope grants (admin)
+      description: >-
+        `Admin privilege Required`. Returns the rows in `user_scopes`
+        for the target user — i.e. only scopes granted directly to
+        them through the management API. Group-derived and config-
+        derived scopes are evaluated live (see EffectiveScopes) and
+        are NOT included; for the full effective set, use GET
+        `/me/scopes` for self.
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/UserScopeGrant"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - scopes
+      summary: Grant a scope to a user (admin)
+      description: >-
+        `Admin privilege Required`. Adds a row to `user_scopes`. The
+        `scope` value MUST be in the user-grantable catalog returned
+        by GET `/scopes`; data-plane (wlcg.*, scitokens.*) and
+        inter-server scopes are rejected at the boundary. Idempotent:
+        granting the same scope twice is a no-op.
+      consumes:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - scope
+            properties:
+              scope:
+                type: string
+                description: Machine-readable scope name from GET /scopes
+      responses:
+        "204":
+          description: Scope granted
+        "400":
+          description: Missing or non-grantable scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/scopes/{scope}:
+    delete:
+      tags:
+        - scopes
+      summary: Revoke a direct scope grant from a user (admin)
+      description: >-
+        `Admin privilege Required`. Removes the named row from
+        `user_scopes`. Has no effect on scopes the user inherits via
+        group membership or config — those are revoked elsewhere
+        (group_scopes endpoint or by editing the corresponding param).
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - name: scope
+          in: path
+          description: Scope name to revoke (URL-encoded)
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Scope revoked
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Scope was not directly granted to this user
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /users/{id}/identities:
     get:
       tags:
-        - groups
-      summary: List user identities
-      description: "`Authentication Required`. List all OAuth2/OIDC identities associated with a user."
+        - users
+      summary: List user secondary identities (admin)
+      description: >-
+        `Admin privilege Required`. Returns the user's *secondary* OIDC
+        identities (rows in user_identities). The user's *primary*
+        identity is on the User row itself; read it via GET /users/{id}.
+        Self-service equivalent: GET `/me/identities`.
       produces:
         - application/json
       parameters:
@@ -5005,9 +5991,13 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
-        - groups
-      summary: Add an identity to a user
-      description: "`Authentication Required`. Associate a new OAuth2/OIDC identity with a user."
+        - users
+      summary: Add a secondary identity to a user (admin)
+      description: >-
+        `Admin privilege Required`. Associate a new OAuth2/OIDC identity
+        with a user. Rejected if the new identity is at the same issuer
+        as the user's primary identity (each user may have at most one
+        identity per issuer).
       consumes:
         - application/json
       produces:
@@ -5058,9 +6048,13 @@ paths:
   /users/{id}/identities/{identityId}:
     delete:
       tags:
-        - groups
-      summary: Remove an identity from a user
-      description: "`Authentication Required`. Disassociate an OAuth2/OIDC identity from a user."
+        - users
+      summary: Remove a secondary identity from a user (admin)
+      description: >-
+        `Admin privilege Required`. Removes a row from user_identities.
+        The user's primary identity (on the User row) is not removable
+        through this endpoint. Self-service equivalent for the same
+        record class: DELETE `/me/identities/{id}`.
       produces:
         - application/json
       parameters:
@@ -5083,6 +6077,327 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Identity not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/password-invite:
+    post:
+      tags:
+        - users
+      summary: Mint a single-use password-set invite for a user
+      description: >-
+        `Admin privilege Required`. Generates a single-use,
+        time-bounded link the holder can follow to set the user's
+        password. The plaintext token is in the response's `inviteToken`
+        field and is shown ONLY once — it is stored only as a bcrypt
+        hash on the server.
+
+
+        Admins do NOT set passwords directly — the user picks their own
+        when they redeem the link, so the admin never sees it.
+
+
+        User administrators may mint these for non-system-admin users;
+        only system admins may mint them for other system admins.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user the invite will set the password for
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: Optional invite settings.
+          required: false
+          schema:
+            type: object
+            properties:
+              expiresIn:
+                type: string
+                description: >-
+                  Optional Go-duration string (e.g. "168h", "24h").
+                  Defaults to `Server.GroupInviteLinkExpiration` (168h
+                  fallback).
+                example: "24h"
+      responses:
+        "201":
+          description: Invite created. `inviteToken` is shown only once.
+          schema:
+            $ref: "#/definitions/GroupInviteLinkCreated"
+        "400":
+          description: Bad request (invalid expiresIn duration)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin or user-admin privilege required (and user-admin cannot target system admins)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/password-invites:
+    get:
+      tags:
+        - users
+      summary: List password-set invites targeting a user
+      description: >-
+        `Admin privilege Required`. Returns every password invite — live
+        and historical — that targets this user, so an admin can see
+        e.g. "this user has 2 outstanding setup links and 1 has already
+        been used" before minting another. Plaintext tokens are NOT
+        included (only available at creation time).
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/GroupInviteLink"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me:
+    get:
+      tags:
+        - me
+      summary: Get the calling user's own record
+      description: "`Authentication Required`."
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/Me"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    patch:
+      tags:
+        - me
+      summary: Update the calling user's own record
+      description: >-
+        `Authentication Required`. Only `displayName` is self-editable
+        per the design contract. Username changes go through the
+        admin endpoint PATCH `/users/{id}`; identity (sub/issuer)
+        changes go through `/identities`.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/MePatch"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          description: Bad request (invalid display name)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  # /me/password is intentionally NOT exposed: per the user/group
+  # design contract, passwords are set ONLY via admin-issued
+  # password-set invites the user redeems through
+  # /invites/redeem/password. A self-service password setter would let
+  # an OIDC-only user persist a password and keep accessing the system
+  # after the IdP relationship was severed.
+  /me/aup:
+    post:
+      tags:
+        - me
+      summary: Record the calling user's AUP agreement
+      description: "`Authentication Required`. Marks the caller as having agreed to the supplied AUP version."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - version
+            properties:
+              version:
+                type: string
+                description: AUP version string (typically a hash from GET /aup).
+      responses:
+        "204":
+          description: Agreement recorded
+        "400":
+          description: Missing version
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me/groups:
+    get:
+      tags:
+        - me
+      summary: List groups the calling user is a member of
+      description: >-
+        `Authentication Required`. Self-service equivalent of
+        `GET /groups` for non-admin users — returns only groups the
+        caller can see (member, owner, or admin).
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Group"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me/groups/{id}:
+    delete:
+      tags:
+        - me
+      summary: Leave a group
+      description: >-
+        `Authentication Required`. Removes the calling user's membership
+        in the group. The group's owner cannot leave their own group
+        (transfer ownership first); a 403 is returned in that case.
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: Group ID to leave
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Membership removed
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller is the group's owner; transfer ownership before leaving
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Caller is not a member of that group (or group does not exist)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me/identities:
+    get:
+      tags:
+        - me
+      summary: List the calling user's secondary OIDC identities
+      description: >-
+        `Authentication Required`. Returns the caller's *secondary*
+        identities (rows in user_identities). The caller's *primary*
+        identity is on the User row itself and is exposed via GET /me;
+        the split matches the contract that secondaries are
+        self-unlinkable but primaries are admin-managed.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/UserIdentity"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /me/identities/{id}:
+    delete:
+      tags:
+        - me
+      summary: Self-unlink a secondary OIDC identity
+      description: >-
+        `Authentication Required`. Removes one of the caller's
+        secondary identities. The caller's primary identity (on the
+        User row) cannot be unlinked here — admins handle primary
+        changes. 404 covers both "no such identity" and "identity
+        belongs to a different user" without distinguishing them, so
+        users can't probe the existence of other users' identities.
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: UserIdentity ID to remove
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Identity unlinked
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Identity not found, or not owned by the caller
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

@@ -253,6 +253,37 @@ func checkPublicCollectionAccess(ctx *gin.Context, collectionID string, parsed j
 	return true
 }
 
+// namespaceWithinExport reports whether the supplied namespace path
+// is contained within at least one of the origin's exported prefixes.
+// "Within" means either an exact match OR a strict path-descendant —
+// e.g. an export of `/org/foo` accepts a collection rooted at
+// `/org/foo`, `/org/foo/projectA`, or `/org/foo/team/2026`, but
+// rejects `/org/foobar` (the next character after the prefix MUST
+// be a `/` separator). The empty namespace and any path that
+// doesn't begin with `/` are rejected, matching the same path-shape
+// invariant ACL enforcement uses elsewhere in this file.
+//
+// Pulled out of the handler so unit tests can exercise the
+// boundary cases without spinning up a Gin engine.
+func namespaceWithinExport(ns string, exports []server_utils.OriginExport) bool {
+	if ns == "" || !strings.HasPrefix(ns, "/") {
+		return false
+	}
+	for _, export := range exports {
+		prefix := export.FederationPrefix
+		if prefix == "" {
+			continue
+		}
+		if ns == prefix {
+			return true
+		}
+		if strings.HasPrefix(ns, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 type CreateCollectionReq struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
@@ -393,7 +424,15 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	// Validate that the namespace is one that this origin exports
+	// Validate that the namespace is *within* an exported prefix.
+	// Collections aren't limited to top-level exports — operators
+	// regularly want a collection rooted at a sub-path of a larger
+	// namespace (e.g. an export of `/org/foo` with one collection at
+	// `/org/foo/projectA` and another at `/org/foo/projectB/2026`).
+	// We accept the request when the requested namespace equals OR is
+	// a strict path-descendant of any exported prefix; the
+	// "next character is /" guard prevents `/org/foo` from matching
+	// `/org/foobar`.
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		log.Errorf("Failed to get origin exports: %v", err)
@@ -403,17 +442,10 @@ func handleCreateCollection(ctx *gin.Context) {
 		})
 		return
 	}
-	validNamespace := false
-	for _, export := range exports {
-		if export.FederationPrefix == req.Namespace {
-			validNamespace = true
-			break
-		}
-	}
-	if !validNamespace {
+	if !namespaceWithinExport(req.Namespace, exports) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Namespace '%s' is not a valid export for this origin", req.Namespace),
+			Msg:    fmt.Sprintf("Namespace '%s' is not within a prefix exported by this origin", req.Namespace),
 		})
 		return
 	}

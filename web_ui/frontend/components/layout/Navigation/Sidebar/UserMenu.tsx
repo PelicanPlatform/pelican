@@ -115,6 +115,14 @@ const UserMenu = ({ menuOptions }: { menuOptions?: Partial<MenuProps> }) => {
         {user.role !== 'admin' ? (
           <MenuItem disabled={true}>User</MenuItem>
         ) : null}
+        <MenuItem
+          onClick={() => {
+            setMenuOpen(false);
+            router.push('/profile/');
+          }}
+        >
+          Profile
+        </MenuItem>
         <MenuItem onClick={handleLogout}>Logout</MenuItem>
       </Menu>
       {error && <StatusSnackBar message={error} severity={'error'} />}
