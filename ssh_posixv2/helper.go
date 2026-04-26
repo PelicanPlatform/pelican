@@ -174,14 +174,17 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 		return errors.Wrap(err, "failed to write newline to helper stdin")
 	}
 
-	// Create errgroup for managing helper goroutines
-	egrp, egrpCtx := errgroup.WithContext(ctx)
+	// Create errgroup for managing helper goroutines. We layer a separate
+	// cancellable context on top of the caller's so StopHelper can actively
+	// wake ticker-driven goroutines (runPongMonitor / runStdinKeepalive)
+	// without waiting for their next tick. Without this, the SIGKILL
+	// fallback path nils helperIO while those goroutines are still ticking
+	// and they panic on the stale field deref.
+	cancelCtx, cancel := context.WithCancel(ctx)
+	egrp, egrpCtx := errgroup.WithContext(cancelCtx)
 	c.helperErrgroup = egrp
 	c.helperCtx = egrpCtx
-	c.helperCancel = func() {
-		// Signal shutdown via stdin before cancelling context
-		_ = c.sendShutdownMessage()
-	}
+	c.helperCancel = cancel
 
 	// Goroutine: Read helper stdout for pong responses
 	egrp.Go(func() error {
@@ -240,6 +243,14 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 // readHelperStdout reads and processes stdout messages from the helper.
 // It parses JSON messages for pong responses and ready notifications.
 func (c *SSHConnection) readHelperStdout(ctx context.Context) error {
+	// Snapshot helperIO once. StopHelper nils c.helperIO during teardown;
+	// holding our own pointer keeps the underlying struct reachable for
+	// the rest of this goroutine's life and avoids a nil-deref race.
+	helperIO := c.helperIO
+	if helperIO == nil {
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -247,9 +258,9 @@ func (c *SSHConnection) readHelperStdout(ctx context.Context) error {
 		default:
 		}
 
-		c.helperIO.stdoutMu.Lock()
-		line, err := c.helperIO.stdoutReader.ReadBytes('\n')
-		c.helperIO.stdoutMu.Unlock()
+		helperIO.stdoutMu.Lock()
+		line, err := helperIO.stdoutReader.ReadBytes('\n')
+		helperIO.stdoutMu.Unlock()
 
 		if err != nil {
 			if err == io.EOF {
@@ -274,19 +285,19 @@ func (c *SSHConnection) readHelperStdout(ctx context.Context) error {
 		switch msg.Type {
 		case "ready":
 			sshLog.Info("Helper process is ready")
-			c.helperIO.helperReady.Store(true)
-			c.helperIO.lastPong.Store(time.Now())
+			helperIO.helperReady.Store(true)
+			helperIO.lastPong.Store(time.Now())
 
 		case "listening":
 			if msg.SocketPath != "" {
 				sshLog.Infof("Helper listening on unix socket %s (direct-listen mode)", msg.SocketPath)
-				c.helperIO.helperSocketPath.Store(msg.SocketPath)
+				helperIO.helperSocketPath.Store(msg.SocketPath)
 			}
 
 		case "pong":
-			c.helperIO.lastPong.Store(time.Now())
+			helperIO.lastPong.Store(time.Now())
 			if msg.Uptime != "" {
-				c.helperIO.helperUptime.Store(msg.Uptime)
+				helperIO.helperUptime.Store(msg.Uptime)
 			}
 			sshLog.Debugf("Received pong from helper (uptime: %s)", msg.Uptime)
 
@@ -420,19 +431,27 @@ func (c *SSHConnection) runStdinKeepalive(ctx context.Context) error {
 
 // sendPing sends a ping message to the helper via stdin
 func (c *SSHConnection) sendPing() error {
+	// Snapshot helperIO so a concurrent StopHelper that nils it (or its
+	// stdin) can't turn this into a nil deref. sendShutdownMessage uses
+	// the same pattern.
+	helperIO := c.helperIO
+	if helperIO == nil || helperIO.stdin == nil {
+		return errors.New("helper IO not initialized")
+	}
+
 	msg := StdinMessage{Type: "ping"}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
-	c.helperIO.stdinMu.Lock()
-	defer c.helperIO.stdinMu.Unlock()
+	helperIO.stdinMu.Lock()
+	defer helperIO.stdinMu.Unlock()
 
-	if _, err := c.helperIO.stdin.Write(data); err != nil {
+	if _, err := helperIO.stdin.Write(data); err != nil {
 		return err
 	}
-	if _, err := c.helperIO.stdin.Write([]byte("\n")); err != nil {
+	if _, err := helperIO.stdin.Write([]byte("\n")); err != nil {
 		return err
 	}
 	return nil
@@ -470,6 +489,15 @@ func (c *SSHConnection) runPongMonitor(ctx context.Context) error {
 		timeout = c.helperConfig.KeepaliveTimeout
 	}
 
+	// Snapshot helperIO once: StopHelper sets c.helperIO = nil during
+	// teardown, and a nil deref on c.helperIO.lastPong here is the panic
+	// reported in #3363. Holding our own pointer keeps the atomic.Value
+	// reachable for the rest of the goroutine's life.
+	helperIO := c.helperIO
+	if helperIO == nil {
+		return nil
+	}
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -478,7 +506,14 @@ func (c *SSHConnection) runPongMonitor(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			lastPong := c.helperIO.lastPong.Load().(time.Time)
+			v := helperIO.lastPong.Load()
+			lastPong, ok := v.(time.Time)
+			if !ok {
+				// Never Stored (shouldn't happen — StartHelper Stores
+				// time.Now() before launching this goroutine — but treat
+				// as "just received" rather than panic).
+				continue
+			}
 			if time.Since(lastPong) > timeout {
 				sshLog.Warnf("Helper keepalive timeout exceeded (last pong: %v ago, timeout: %v)",
 					time.Since(lastPong), timeout)
@@ -562,11 +597,28 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 			}
 			c.session.Close()
 
+			// Cancel the helper context too, so ticker-driven goroutines
+			// (runPongMonitor / runStdinKeepalive) wake up immediately
+			// instead of waiting for their next tick.
+			if c.helperCancel != nil {
+				c.helperCancel()
+			}
+
 			select {
 			case <-done:
 				sshLog.Info("Helper process stopped after SIGKILL")
 			case <-time.After(5 * time.Second):
-				sshLog.Warn("Helper errgroup did not finish after SIGKILL, forcing cleanup")
+				// Last-resort wait so we don't nil helperIO out from
+				// under still-running goroutines and trigger nil-deref
+				// panics. Goroutines now snapshot helperIO and tolerate
+				// it being nil, but giving them a final chance to exit
+				// cleanly avoids spurious "stdin closed" errors in logs.
+				sshLog.Warn("Helper errgroup did not finish after SIGKILL; waiting briefly before forcing cleanup")
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					sshLog.Warn("Helper errgroup did not finish; goroutines may leak")
+				}
 			}
 		}
 	}
@@ -578,6 +630,12 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 
 	if c.session != nil {
 		c.session.Close()
+	}
+	// Cancel the helper context if it hasn't been already, so anything
+	// still running notices we're shutting down.
+	if c.helperCancel != nil {
+		c.helperCancel()
+		c.helperCancel = nil
 	}
 	c.session = nil
 	c.helperIO = nil
@@ -620,7 +678,12 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if c.client == nil {
+			// Snapshot c.client once so a concurrent Close() that nils it
+			// can't turn a non-nil check into a nil-deref on SendRequest
+			// below. SendRequest on an already-closed *ssh.Client returns
+			// an error rather than panicking, so a stale snapshot is safe.
+			client := c.client
+			if client == nil {
 				continue
 			}
 
@@ -635,7 +698,7 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 
 			// Send a keepalive request
 			// The "keepalive@openssh.com" request is a standard SSH keepalive
-			_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)
+			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
 			if err != nil {
 				sshLog.Warnf("SSH keepalive failed: %v", err)
 				// Don't immediately close - let the timeout handle it
@@ -651,14 +714,18 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 // GetHelperStatus queries the helper for its status using the stdin/stdout protocol.
 // This does not require the helper to listen on any TCP port.
 func (c *SSHConnection) GetHelperStatus(ctx context.Context) (*HelperStatus, error) {
-	if c.session == nil || c.helperIO == nil {
+	// Snapshot helperIO once so a concurrent StopHelper that nils it
+	// can't turn the field reads below into a nil-deref or surface a
+	// type-assertion panic on a nil interface from Load().
+	helperIO := c.helperIO
+	if c.session == nil || helperIO == nil {
 		return &HelperStatus{
 			State:   HelperStateNotStarted,
 			Message: "Helper not started",
 		}, nil
 	}
 
-	if !c.helperIO.helperReady.Load() {
+	if !helperIO.helperReady.Load() {
 		return &HelperStatus{
 			State:   HelperStateStarting,
 			Message: "Helper starting",
@@ -666,7 +733,17 @@ func (c *SSHConnection) GetHelperStatus(ctx context.Context) (*HelperStatus, err
 	}
 
 	// Check if we've received a recent pong
-	lastPong := c.helperIO.lastPong.Load().(time.Time)
+	v := helperIO.lastPong.Load()
+	lastPong, ok := v.(time.Time)
+	if !ok {
+		// Should not happen — StartHelper Stores time.Now() before
+		// returning — but treat the absence as "starting" rather than
+		// panic.
+		return &HelperStatus{
+			State:   HelperStateStarting,
+			Message: "Helper starting",
+		}, nil
+	}
 	timeout := DefaultKeepaliveTimeout
 	if c.helperConfig != nil && c.helperConfig.KeepaliveTimeout > 0 {
 		timeout = c.helperConfig.KeepaliveTimeout
@@ -679,7 +756,7 @@ func (c *SSHConnection) GetHelperStatus(ctx context.Context) (*HelperStatus, err
 		}, nil
 	}
 
-	uptime := c.helperIO.helperUptime.Load().(string)
+	uptime, _ := helperIO.helperUptime.Load().(string)
 	return &HelperStatus{
 		State:   HelperStateRunning,
 		Uptime:  uptime,
