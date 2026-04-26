@@ -421,10 +421,10 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		return "", errors.Wrap(err, "Failed to generate token")
 	}
 
-	// Get/assign the kid, needed for verification by the client
+	// Get/assign the KID, needed for verification by the client
 	err = jwk.AssignKeyID(key)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
+		return "", errors.Wrap(err, "Failed to assign KID to the token")
 	}
 
 	log.Debugln("Signing token with key id:", key.KeyID())

@@ -433,10 +433,16 @@ func TestCreateTokenWithKeyTypes(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, tokStr)
 
-		// Verify the token was signed with ES256
+		// Verify the token was signed with ES256 and the issuer is correct
 		tok, err := jwt.ParseString(tokStr, jwt.WithVerify(false))
 		require.NoError(t, err)
 		assert.Equal(t, "https://test-issuer.example.com", tok.Issuer())
+
+		// Verify the signature with the EC public key
+		pubKey, err := ecKey.PublicKey()
+		require.NoError(t, err)
+		_, err = jwt.ParseString(tokStr, jwt.WithKey(jwa.ES256, pubKey))
+		require.NoError(t, err)
 	})
 
 	t.Run("rsa-key-signs-with-RS256", func(t *testing.T) {
