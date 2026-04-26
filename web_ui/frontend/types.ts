@@ -147,17 +147,49 @@ export type UserPatch = Partial<Omit<User, 'createdAt'>>;
 
 export type AdminType = 'user' | 'group';
 
-export interface Group {
+// UserCard / GroupCard mirror the backend's database.UserCard / GroupCard:
+// the minimum needed to render an identity ("Display Name (username)")
+// without pulling the full record or requiring user-listing privilege.
+export interface UserCard {
+  id: string;
+  username: string;
+  displayName: string;
+}
+export interface GroupCard {
   id: string;
   name: string;
+}
+
+export interface Group {
+  id: string;
+  // Machine-readable identifier; admin-only renames. Used in policy
+  // strings (admin-group lists, ACL grants) so it must be a stable
+  // restricted-character handle.
+  name: string;
+  // Human-readable label; owner-editable. UIs that surface a group
+  // anywhere it might affect authorization decisions (transfer
+  // ownership, add to ACL) should render BOTH "displayName (name)" so
+  // admins are not acting on an ambiguous label alone.
+  displayName: string;
   description: string;
-  members: User[];
+  // The backend serializes Group.Members as a list of GroupMember rows
+  // (membership + nested User), NOT a list of bare Users. UIs must
+  // dereference `.user` for the actual identity. The previous typing
+  // here as `User[]` was wrong and silently produced "(unset)" labels
+  // because `member.username` was always undefined on the wrapper.
+  members: GroupMember[];
   createdBy: string;
   ownerId: string;
   adminId: string;
   adminType: AdminType;
   createdAt: string;
   updatedAt: string;
+  // Resolved server-side; absent if the referenced user/group no longer
+  // exists. The UI falls back to the raw id in that case.
+  ownerUser?: UserCard;
+  adminUser?: UserCard;
+  adminGroup?: GroupCard;
+  createdByUser?: UserCard;
 }
 
 export type GroupPost = Omit<
@@ -189,6 +221,13 @@ export interface GroupInviteLink {
   redeemedBy: string;
   redeemedAt: string | null;
   revoked: boolean;
+  /** Public short identifier — first few chars of the plaintext token.
+   * Safe to display in admin UIs and logs; not a credential. */
+  tokenPrefix: string;
+  /** Optional: when the row was redeemed, the resolved user-card for
+   * that user. Backed by the InviteLinkView wrapper in groups.go;
+   * lets the UI render a UserPill instead of the raw redeemedBy ID. */
+  redeemedByUser?: UserCard;
 }
 
 export interface GroupInviteLinkCreated extends GroupInviteLink {

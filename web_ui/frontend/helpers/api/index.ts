@@ -5,6 +5,21 @@
 export { UserService } from './User';
 export { GroupService } from './Group';
 export { makeGroupMemberService } from './GroupMember';
+export { MeService } from './Me';
+export type { Me, MePatch, MyGroup } from './Me';
+export { InviteService } from './Invite';
+export type {
+  InviteKind,
+  InviteInfo,
+  InviteLinkBase,
+  InviteLinkCreated,
+} from './Invite';
+export { ScopeService } from './Scope';
+export type {
+  ScopeCatalogEntry,
+  UserScopeGrant,
+  GroupScopeGrant,
+} from './Scope';
 export * from './types';
 
 /**

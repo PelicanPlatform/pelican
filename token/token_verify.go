@@ -166,21 +166,16 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
+	// Federation-issued tokens authenticate the *federation*, not a
+	// local user. The Subject claim is exposed for callers that need
+	// it (e.g. ownership of a registered namespace), but we deliberately
+	// do NOT propagate user_id, oidc_sub, or wlcg.groups into the gin
+	// context here — those are user-identity claims and their meaning
+	// belongs to the local server's issuer. A federation IdP could let
+	// a user self-assert any of those values; trusting them as if they
+	// came from a login cookie would let the federation impersonate
+	// arbitrary local users. See the contract on extractUserFromBearerToken.
 	c.Set("User", parsed.Subject())
-
-	// Also extract and set userId if present in the token
-	if userIdIface, ok := parsed.Get("user_id"); ok {
-		if userId, ok := userIdIface.(string); ok && userId != "" {
-			c.Set("UserId", userId)
-		}
-	}
-
-	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
-	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
-		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
-			c.Set("OIDCSub", oidcSub)
-		}
-	}
 
 	return nil
 }
@@ -221,14 +216,20 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 
 	c.Set("User", parsed.Subject())
 
-	// Also extract and set userId if present in the token
+	// user_id and oidc_sub are user-identity claims. They are safe to
+	// extract HERE because checkLocalIssuer has already verified that
+	// the token was signed by the local server's key AND its issuer
+	// claim equals Server.ExternalWebUrl — i.e. *we* minted this token
+	// and we control what we put in those claims. The same extraction
+	// is forbidden in checkFederationIssuer / checkRegisteredServer
+	// because external issuers can be coerced into setting arbitrary
+	// non-standard claims. See web_ui/authentication.go:extractUserFromBearerToken
+	// for the analogous contract on the cookie/bearer path.
 	if userIdIface, ok := parsed.Get("user_id"); ok {
 		if userId, ok := userIdIface.(string); ok && userId != "" {
 			c.Set("UserId", userId)
 		}
 	}
-
-	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
 	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			c.Set("OIDCSub", oidcSub)

@@ -19,6 +19,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import useSWR from 'swr';
 import {
   Box,
   Grid,
@@ -33,9 +34,12 @@ import StatusBox from '@/components/StatusBox';
 import { DataExportTable } from '@/components/DataExportTable';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import ServerName from '@/components/ServerName';
 import { getErrorMessage } from '@/helpers/util';
+import { getUser } from '@/helpers/login';
+import NonAdminHome from './NonAdminHome';
 
-export default function Home() {
+const AdminHome = () => {
   const [copied, setCopied] = useState(false);
 
   const handleClick = async (e: React.MouseEvent) => {
@@ -55,61 +59,64 @@ export default function Home() {
   };
 
   return (
-    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
-      <Box width={'100%'}>
-        <Grid container spacing={2}>
-          <Grid
-            size={{
-              xs: 12,
-              lg: 6,
-            }}
-          >
-            <Typography variant='h4' mb={2}>
-              Status
-            </Typography>
-            <StatusBox />
-          </Grid>
-          <Grid
-            size={{
-              xs: 12,
-              lg: 6,
-            }}
-          >
-            <Box
-              display={'flex'}
-              flexDirection={'row'}
-              justifyContent={'space-between'}
-              alignItems={'center'}
-            >
-              <Typography variant={'h4'} component={'h2'} mb={2}>
-                Data Exports
-              </Typography>
-              <Tooltip title={'Copy Pelican public key'}>
-                {copied ? (
-                  <IconButton color='success'>
-                    <CheckCircle />
-                  </IconButton>
-                ) : (
-                  <IconButton onClick={handleClick}>
-                    <Key />
-                  </IconButton>
-                )}
-              </Tooltip>
-            </Box>
-            <Suspense fallback={<Skeleton />}>
-              <DataExportTable />
-            </Suspense>
-          </Grid>
-          <Grid
-            size={{
-              xs: 12,
-              lg: 6,
-            }}
-          >
-            <FederationOverview />
-          </Grid>
+    <Box width={'100%'}>
+      <ServerName defaultName={'Origin'} />
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Typography variant='h4' mb={2}>
+            Status
+          </Typography>
+          <StatusBox />
         </Grid>
-      </Box>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Box
+            display={'flex'}
+            flexDirection={'row'}
+            justifyContent={'space-between'}
+            alignItems={'center'}
+          >
+            <Typography variant={'h4'} component={'h2'} mb={2}>
+              Data Exports
+            </Typography>
+            <Tooltip title={'Copy Pelican public key'}>
+              {copied ? (
+                <IconButton color='success'>
+                  <CheckCircle />
+                </IconButton>
+              ) : (
+                <IconButton onClick={handleClick}>
+                  <Key />
+                </IconButton>
+              )}
+            </Tooltip>
+          </Box>
+          <Suspense fallback={<Skeleton />}>
+            <DataExportTable />
+          </Suspense>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <FederationOverview />
+        </Grid>
+      </Grid>
+    </Box>
+  );
+};
+
+export default function Home() {
+  const { data: user, isLoading } = useSWR('getUser', getUser);
+
+  // Redirect anonymous users to /login; show role-appropriate content for
+  // logged-in users (admins get the full dashboard, others get a simplified
+  // landing page rather than an "Insufficient privileges" wall).
+  return (
+    <AuthenticatedContent redirect={true}>
+      {isLoading || !user ? (
+        <Skeleton variant={'rounded'} height={'80vh'} width={'100%'} />
+      ) : user.role === 'admin' ? (
+        <AdminHome />
+      ) : (
+        <NonAdminHome />
+      )}
     </AuthenticatedContent>
   );
 }

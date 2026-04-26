@@ -2814,6 +2814,21 @@ components: ["registry"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
 ---
+name: Registry.EnableOIDC
+description: |+
+  Indicate whether the registry should configure OAuth2/OIDC client APIs so
+  users can log in to the registry admin website via a third-party identity
+  provider (e.g. CILogon). When false the registry can still be operated
+  with local username/password accounts via the Pelican user/group scheme;
+  the OIDC routes and OAuth client setup are simply not initialized.
+
+  Historically the registry forced OIDC on regardless of this flag; setting
+  this to true preserves that behavior. Mirrors `Origin.EnableOIDC` /
+  `Cache.EnableOIDC` / `Director.EnableOIDC`.
+type: bool
+default: false
+components: ["registry"]
+---
 name: Registry.RequireKeyChaining
 description: |+
   Specifies whether namespaces requesting registration must possess a key matching any already-registered super/sub namespaces. For
@@ -3379,10 +3394,30 @@ components: ["origin", "registry"]
 name: Server.AUPFile
 description: |+
   Path to a Markdown-formatted Acceptable Use Policy (AUP) file.
-  When set, users must agree to this AUP before their account is activated.
+  When unset, Pelican serves a built-in default AUP that operators
+  should review and replace with their own. Set to "none" to disable
+  the AUP requirement entirely.
   The file's content hash is used as the AUP version for tracking.
 type: filename
-default: none
+default: ""
+components: ["origin", "registry"]
+---
+name: Server.AUPLastUpdated
+description: |+
+  Human-readable date the active AUP was last revised, e.g. "3 April 2026".
+  Rendered as a footer on the AUP page so users know how current the
+  policy text is. Optional; when unset no date footer is shown.
+type: string
+default: ""
+components: ["origin", "registry"]
+---
+name: Server.AUPCanonicalURL
+description: |+
+  Public URL where the canonical (latest) AUP can be found, e.g.
+  "https://osg-htc.org/end-user-aup". Rendered alongside the AUP
+  text as a permanent reference. Optional.
+type: url
+default: ""
 components: ["origin", "registry"]
 ---
 name: Server.AutoEnrollUsernameClaims

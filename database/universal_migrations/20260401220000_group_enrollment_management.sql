@@ -8,7 +8,12 @@
 ALTER TABLE groups ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE groups ADD COLUMN admin_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE groups ADD COLUMN admin_type TEXT NOT NULL DEFAULT '';
-ALTER TABLE groups ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
+-- SQLite < 3.35.0 rejects CURRENT_TIMESTAMP as the default for ALTER TABLE
+-- ADD COLUMN ("non-constant default"). Use a constant epoch sentinel and
+-- backfill below; the GORM model auto-populates UpdatedAt on every write,
+-- so the default is only a fallback for raw-SQL inserts.
+ALTER TABLE groups ADD COLUMN updated_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00';
+UPDATE groups SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = '1970-01-01 00:00:00';
 
 -- Backfill owner_id from created_by for existing groups.
 UPDATE groups SET owner_id = created_by WHERE owner_id = '';
@@ -21,7 +26,9 @@ ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
 -- Add AUP (Acceptable Use Policy) tracking fields.
 ALTER TABLE users ADD COLUMN aup_version TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN aup_agreed_at DATETIME;
-ALTER TABLE users ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
+-- See note above on the constant default.
+ALTER TABLE users ADD COLUMN updated_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00';
+UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = '1970-01-01 00:00:00';
 
 -- Create group_invite_links table for invite link management.
 -- invite_token stores the bcrypt hash of the token; the plaintext is returned only once at creation.
