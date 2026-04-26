@@ -175,10 +175,9 @@ const AUPSection: React.FC<{
         )}
       </Box>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Clearing this user's acceptance forces them through the AUP
-        workflow on their next page load. Use this when you need to
-        re-prompt a single user without rotating the policy version
-        (which would re-prompt everyone).
+        Clearing this user's acceptance forces them through the AUP workflow on
+        their next page load. Use this when you need to re-prompt a single user
+        without rotating the policy version (which would re-prompt everyone).
       </Typography>
       <InlineConfirmButton
         variant='outlined'
@@ -388,9 +387,9 @@ const ScopesSection: React.FC<{ userId: string }> = ({ userId }) => {
         Scopes
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Direct grants on this user. The user may inherit additional
-        scopes via group membership or the legacy config (Server.UIAdminUsers,
-        etc.); those are evaluated live and don't appear here.
+        Direct grants on this user. The user may inherit additional scopes via
+        group membership or the legacy config (Server.UIAdminUsers, etc.); those
+        are evaluated live and don't appear here.
       </Typography>
       {!grants || grants.length === 0 ? (
         <Typography variant='body2' color='text.secondary' fontStyle='italic'>
@@ -418,7 +417,9 @@ const ScopesSection: React.FC<{ userId: string }> = ({ userId }) => {
                   label={g.scope}
                   variant='outlined'
                   onDelete={
-                    busy === `revoke:${g.scope}` ? undefined : () => revoke(g.scope)
+                    busy === `revoke:${g.scope}`
+                      ? undefined
+                      : () => revoke(g.scope)
                   }
                   disabled={busy === `revoke:${g.scope}`}
                   sx={{ fontFamily: 'monospace' }}
@@ -445,14 +446,14 @@ const ScopesSection: React.FC<{ userId: string }> = ({ userId }) => {
           renderOption={(props, option) => {
             // Strip key out of the spread; React requires it as a
             // direct prop on the JSX element, not via {...props}.
-            const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
+            const { key, ...liProps } =
+              props as React.HTMLAttributes<HTMLLIElement> & {
+                key?: React.Key;
+              };
             return (
               <li key={key} {...liProps}>
                 <Box>
-                  <Typography
-                    variant='body2'
-                    sx={{ fontFamily: 'monospace' }}
-                  >
+                  <Typography variant='body2' sx={{ fontFamily: 'monospace' }}>
                     {option.name}
                   </Typography>
                   {option.description && (
@@ -545,8 +546,8 @@ const IdentitiesSection: React.FC<{ userId: string }> = ({ userId }) => {
         Linked identities
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Secondary OIDC identities the user has linked. The primary
-        identity (shown above on the form) is not unlinkable from here.
+        Secondary OIDC identities the user has linked. The primary identity
+        (shown above on the form) is not unlinkable from here.
       </Typography>
       {!identities || identities.length === 0 ? (
         <Typography variant='body2' color='text.secondary' fontStyle='italic'>
@@ -693,11 +694,7 @@ const PasswordInviteSection: React.FC<{ userId: string }> = ({ userId }) => {
       )}
 
       <Stack direction='row' spacing={1} alignItems='center' sx={{ mb: 2 }}>
-        <Button
-          variant='contained'
-          onClick={generate}
-          disabled={busy}
-        >
+        <Button variant='contained' onClick={generate} disabled={busy}>
           Generate password-set invite
         </Button>
         {live.length > 0 && !created && (
@@ -741,7 +738,12 @@ const PasswordInviteHistory: React.FC<{ invites: InviteLinkBase[] }> = ({
             display='flex'
             justifyContent='space-between'
             alignItems='center'
-            sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+            sx={{
+              p: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+            }}
           >
             <Box>
               <Box display='flex' alignItems='center' gap={1}>

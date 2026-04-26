@@ -43,8 +43,8 @@ func TestValidateIdentifier(t *testing.T) {
 		// banned characters — '/' is the most important
 		{"alice/admin", false},
 		{`alice\admin`, false},
-		{"alice admin", false},   // whitespace
-		{"alice\tadmin", false},  // tab
+		{"alice admin", false},  // whitespace
+		{"alice\tadmin", false}, // tab
 		{"alice:admin", false},
 		{"alice;admin", false},
 		{"alice,admin", false},
@@ -52,12 +52,12 @@ func TestValidateIdentifier(t *testing.T) {
 
 		// length / structure
 		{"", false},
-		{"a", false},                          // too short (length floor of 2)
-		{strings.Repeat("a", 65), false},      // too long
-		{".alice", false},                     // leading punctuation
-		{"-alice", false},                     // leading dash
-		{"_alice", false},                     // leading underscore
-		{"alice..bob", false},                 // path-traversal pattern
+		{"a", false},                     // too short (length floor of 2)
+		{strings.Repeat("a", 65), false}, // too long
+		{".alice", false},                // leading punctuation
+		{"-alice", false},                // leading dash
+		{"_alice", false},                // leading underscore
+		{"alice..bob", false},            // path-traversal pattern
 	}
 	for _, tc := range cases {
 		err := ValidateIdentifier(tc.name)
@@ -178,7 +178,7 @@ func TestSanitizeIdentifierAlwaysValidates(t *testing.T) {
 		"<script>alert(1)</script>",
 		"\x00\x01alice",
 		"​alice", // zero-width space
-		"-_-",         // only punctuation
+		"-_-",    // only punctuation
 		strings.Repeat(".", 200),
 		strings.Repeat("/", 200),
 	}

@@ -218,6 +218,139 @@ func handleListMyIdentities(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, identities)
 }
 
+// UpdateMyPasswordReq is the body for PUT /me/password — a password
+// rotation. Both fields are required: the caller proves they hold
+// the current credential before being allowed to set a new one (a
+// stolen cookie alone shouldn't be enough to lock the rightful
+// owner out).
+type UpdateMyPasswordReq struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+// PUT /me/password — rotate the caller's local password.
+//
+// Per the user/group design contract, this endpoint MUST NOT create a
+// password where none was set: an OIDC-only user who could quietly
+// add a local password would keep accessing the system after the IdP
+// relationship was severed. So we require the row already have a
+// non-empty password_hash AND we verify the supplied currentPassword
+// against it before writing the new hash. Callers without an
+// existing password get 403 with a hint to redeem an admin-issued
+// password-set invite (which is the only way to *create* one).
+//
+// Self-clear lives at DELETE /me/password.
+func handleUpdateMyPassword(ctx *gin.Context) {
+	id := callerID(ctx)
+	if id == "" {
+		return
+	}
+	var req UpdateMyPasswordReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "currentPassword and newPassword are required",
+		})
+		return
+	}
+
+	// Reload from the DB so the HasPassword check reflects the latest
+	// state — not a stale value carried on the cookie.
+	user, err := database.GetUserByID(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "user not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to load user: %v", err),
+		})
+		return
+	}
+	if !user.HasPassword {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "no local password is set; ask an administrator for a password-set invite to enable password login",
+		})
+		return
+	}
+
+	// Verify the current password against the stored bcrypt hash.
+	// VerifyUserPassword returns ErrInvalidPassword for any failure
+	// mode (no row, empty hash, mismatch, inactive) without
+	// distinguishing — same posture as the login flow.
+	if _, err := database.VerifyUserPassword(database.ServerDatabase, user.Username, req.CurrentPassword, user.Issuer); err != nil {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "current password is incorrect",
+		})
+		return
+	}
+
+	if err := database.SetUserPassword(database.ServerDatabase, id, req.NewPassword); err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to update password: %v", err),
+		})
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+// DELETE /me/password — clear the caller's local password (disable
+// password login for their own account). Same "must already be set"
+// guard as the rotate endpoint, so this is only ever a removal
+// operation, never a no-op-with-side-effects on a credential-less
+// account. After clearing, only OIDC login (or an admin-minted
+// password-set invite) can reauthenticate the user.
+func handleClearMyPassword(ctx *gin.Context) {
+	id := callerID(ctx)
+	if id == "" {
+		return
+	}
+	user, err := database.GetUserByID(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "user not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to load user: %v", err),
+		})
+		return
+	}
+	if !user.HasPassword {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "no local password is set",
+		})
+		return
+	}
+	if err := database.SetUserPassword(database.ServerDatabase, id, ""); err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to clear password: %v", err),
+		})
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
 // DELETE /me/identities/:id — self-unlink a *secondary* identity. The
 // caller's primary identity (on the User row) cannot be unlinked here;
 // removing it would either lock the user out (local accounts) or break

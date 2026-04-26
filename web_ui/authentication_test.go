@@ -924,6 +924,175 @@ func TestAdminAuthHandler(t *testing.T) {
 	}
 }
 
+// TestUserAdminAuthHandler pins the route gate's contract: a caller
+// holding EITHER server.web_admin or server.user_admin clears the
+// door, anyone else gets 403. This is the gate that the user-report
+// "added a group with server.user_admin scope, gave the user no
+// powers" was tripping on — the route used to use AdminAuthHandler
+// (web_admin only) and a user-admin would 403 before any handler
+// could even read the request.
+//
+// Group-membership-derived scope grants need a backing DB, so we
+// migrate user/group/group_scopes/group_members and seed both kinds
+// of grants (direct and via membership). Config-derived grants
+// (Server.UIAdminUsers etc.) don't need a DB and are covered too.
+func TestUserAdminAuthHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	gin.SetMode(gin.TestMode)
+
+	// Helper: a fresh DB for each subtest with the tables
+	// EffectiveScopes touches. Restored afterwards.
+	setupDB := func(t *testing.T) {
+		t.Helper()
+		prev := database.ServerDatabase
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		require.NoError(t, err)
+		require.NoError(t, db.AutoMigrate(
+			&database.User{},
+			&database.Group{},
+			&database.GroupMember{},
+			&database.UserScope{},
+			&database.GroupScope{},
+		))
+		database.ServerDatabase = db
+		t.Cleanup(func() { database.ServerDatabase = prev })
+	}
+
+	cases := []struct {
+		name         string
+		setup        func(t *testing.T, ctx *gin.Context)
+		expectedCode int
+		expectedMsg  string
+	}{
+		{
+			name: "unauthenticated caller blocked",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				ctx.Set("User", "")
+			},
+			expectedCode: http.StatusUnauthorized,
+			expectedMsg:  "Login required to view this page",
+		},
+		{
+			name: "config-derived web_admin clears the gate",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
+				ctx.Set("User", "alice")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "config-derived user_admin clears the gate",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				require.NoError(t, param.Server_UserAdminUsers.Set([]string{"bob"}))
+				ctx.Set("User", "bob")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "DB-granted user_admin via direct user_scopes clears the gate",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				setupDB(t)
+				require.NoError(t, database.ServerDatabase.Create(&database.User{
+					ID:       "u-carol",
+					Username: "carol",
+					Sub:      "carol",
+					Issuer:   "https://example.com",
+					Status:   database.UserStatusActive,
+				}).Error)
+				require.NoError(t, database.GrantUserScope(
+					database.ServerDatabase, "u-carol",
+					token_scopes.Server_UserAdmin, database.CreatorSelf(),
+				))
+				ctx.Set("User", "carol")
+				ctx.Set("UserId", "u-carol")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "DB-granted user_admin via group membership clears the gate",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				setupDB(t)
+				// This is the exact path the user reported was broken:
+				// a group carries server.user_admin and a member of
+				// the group calls a user-admin-walled route.
+				require.NoError(t, database.ServerDatabase.Create(&database.User{
+					ID:       "u-dan",
+					Username: "dan",
+					Sub:      "dan",
+					Issuer:   "https://example.com",
+					Status:   database.UserStatusActive,
+				}).Error)
+				require.NoError(t, database.ServerDatabase.Create(&database.Group{
+					ID:        "g-priv",
+					Name:      "privileged",
+					CreatedBy: database.CreatorSelfEnrolled,
+				}).Error)
+				require.NoError(t, database.ServerDatabase.Create(&database.GroupMember{
+					GroupID: "g-priv",
+					UserID:  "u-dan",
+				}).Error)
+				require.NoError(t, database.GrantGroupScope(
+					database.ServerDatabase, "g-priv",
+					token_scopes.Server_UserAdmin, database.CreatorSelf(),
+				))
+				ctx.Set("User", "dan")
+				ctx.Set("UserId", "u-dan")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "ordinary user with no management scopes is blocked",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				setupDB(t)
+				require.NoError(t, database.ServerDatabase.Create(&database.User{
+					ID:       "u-eve",
+					Username: "eve",
+					Sub:      "eve",
+					Issuer:   "https://example.com",
+					Status:   database.UserStatusActive,
+				}).Error)
+				ctx.Set("User", "eve")
+				ctx.Set("UserId", "u-eve")
+			},
+			expectedCode: http.StatusForbidden,
+			expectedMsg:  "user administrator permission",
+		},
+		{
+			name: "config-derived collection_admin alone is NOT user_admin",
+			setup: func(t *testing.T, ctx *gin.Context) {
+				// collection_admin is a sibling scope, not a parent —
+				// only web_admin implies user_admin. A pure
+				// collection-admin must be refused at this gate.
+				require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{"frank"}))
+				ctx.Set("User", "frank")
+			},
+			expectedCode: http.StatusForbidden,
+			expectedMsg:  "user administrator permission",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			router := gin.Default()
+			router.GET("/test",
+				func(ctx *gin.Context) { tc.setup(t, ctx) },
+				UserAdminAuthHandler,
+				func(ctx *gin.Context) { ctx.AbortWithStatus(http.StatusOK) },
+			)
+			req, err := http.NewRequest("GET", "/test", nil)
+			require.NoError(t, err)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.expectedCode, w.Code, "body: %s", w.Body.String())
+			if tc.expectedMsg != "" {
+				assert.Contains(t, w.Body.String(), tc.expectedMsg)
+			}
+			server_utils.ResetTestState()
+		})
+	}
+}
+
 // setupUserStatusTestDB attaches a fresh in-memory SQLite to
 // database.ServerDatabase and migrates the user table. The cleanup
 // restores whatever DB was attached before so the broader test suite

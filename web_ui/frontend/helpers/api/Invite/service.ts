@@ -8,7 +8,7 @@ import { fetchApi } from '@/helpers/api';
 // require the caller to be authenticated (we need a user to add to the
 // group), password invites do not (the token IS the credential).
 
-export type InviteKind = 'group' | 'password';
+export type InviteKind = 'group' | 'password' | 'collection_ownership';
 
 export interface InviteInfo {
   kind: InviteKind;
@@ -20,6 +20,13 @@ export interface InviteInfo {
   groupName?: string;
   /** Optional human label for group-kind invites. */
   groupDisplayName?: string;
+  /** Slug + name + namespace for collection-ownership invites —
+   * drive the "Accept ownership of <X> (<namespace>)?" confirmation
+   * page. The namespace is what the recipient is actually claiming
+   * authority over, so it MUST be visible at confirm time. */
+  collectionId?: string;
+  collectionName?: string;
+  collectionNamespace?: string;
 }
 
 export interface InviteLinkBase {
@@ -84,6 +91,29 @@ const InviteService = {
           headers: { 'Content-Type': 'application/json' },
         })
     );
+  },
+
+  // Owner/admin: mint a group-join invite link for `groupId`. Recipients
+  // who already have an account are added to the group on redeem; new
+  // users go through the standard OIDC/login bootstrap first. Use
+  // isSingleUse=true for one-shot invites tied to a specific person and
+  // false for "share with the team" links.
+  createGroupInvite: async (
+    groupId: string,
+    opts: { isSingleUse?: boolean; expiresIn?: string } = {}
+  ): Promise<InviteLinkCreated> => {
+    const r = await fetchApi(
+      async () =>
+        await secureFetch(`${API_V1_BASE_URL}/groups/${groupId}/invites`, {
+          method: 'POST',
+          body: JSON.stringify({
+            isSingleUse: opts.isSingleUse ?? false,
+            expiresIn: opts.expiresIn ?? '',
+          }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+    );
+    return await r.json();
   },
 
   // Admin-only: mint a single-use password-set invite for `userId`.

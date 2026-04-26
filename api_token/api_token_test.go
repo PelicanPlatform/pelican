@@ -78,10 +78,10 @@ func TestIntersectWithUserScopes(t *testing.T) {
 			}
 		})
 		caps := []string{
-			token_scopes.Server_WebAdmin.String(),       // creator no longer has — drop
-			token_scopes.Server_UserAdmin.String(),      // creator no longer has — drop
+			token_scopes.Server_WebAdmin.String(),        // creator no longer has — drop
+			token_scopes.Server_UserAdmin.String(),       // creator no longer has — drop
 			token_scopes.Server_CollectionAdmin.String(), // still has — keep
-			token_scopes.WebUi_Access.String(),          // not user-grantable — keep
+			token_scopes.WebUi_Access.String(),           // not user-grantable — keep
 		}
 		got := intersectWithUserScopes(caps, "u-alice")
 		want := []string{

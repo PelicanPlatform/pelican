@@ -28,11 +28,13 @@ const NavigationConfig: NavigationConfiguration = {
       title: 'General',
       href: '/settings/',
       icon: <Settings />,
+      allowedRoles: ['admin'],
     },
     {
       title: 'API',
       href: '/settings/api/',
       icon: <Api />,
+      allowedRoles: ['admin'],
     },
     {
       // Groups are server-wide (not origin-specific), so they live at a
@@ -44,9 +46,16 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Groups />,
     },
     {
+      // Reachable by system admins AND user-admins (server.user_admin,
+      // possibly granted via group membership). The page's per-row
+      // edit/delete affordances stay gated by IsSystemAdminUserID at
+      // the API layer, so a user-admin can list and manage non-admin
+      // accounts but can't escalate against an existing admin.
       title: 'Users',
       href: '/settings/users/',
       icon: <Person />,
+      allowedRoles: ['admin'],
+      anyScopes: ['server.user_admin'],
     },
     {
       // System-admin-only: edit the Acceptable Use Policy that every
@@ -110,10 +119,19 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
-    { title: 'Collections', href: '/origin/collections/', icon: <FolderOpen /> },
+    {
+      title: 'Collections',
+      href: '/origin/collections/',
+      icon: <FolderOpen />,
+    },
     // Groups are server-wide; the canonical URL is /groups/. Surfaced
     // in the origin sidebar for muscle memory.
     { title: 'Groups', href: '/groups/', icon: <Groups /> },
+    // The owned-collections page joins "collections I own" with
+    // "groups wired to those collections" — a unified ownership view
+    // called for in ticket #3298. Visible to any logged-in user;
+    // the page itself is empty when the caller owns nothing.
+    { title: 'My collections', href: '/origin/owned/', icon: <Person /> },
     {
       title: 'Metrics',
       href: '/origin/metrics/',

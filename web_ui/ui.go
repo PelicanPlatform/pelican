@@ -733,12 +733,21 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// possession of the (single-use, time-bounded) token IS the
 	// credential, so admins never have to know the user's password.
 	routerGroup.POST("/invites/redeem/password", handleRedeemPasswordInvite)
+	// Ownership-transfer redemption — separate from /redeem so the
+	// authenticated-but-no-AUP-required posture is unambiguous: the
+	// redeemer is asserting "yes, transfer this collection to me",
+	// which doesn't itself require AUP acceptance (collection ownership
+	// doesn't grant management-policy authority — those gates run on
+	// the API surface itself, not on the act of being an owner).
+	routerGroup.POST("/invites/redeem/collection-ownership", AuthHandler, handleRedeemCollectionOwnershipInvite)
 	// Public-info probe so the redemption UI can render the right form
 	// without consuming the link.
 	routerGroup.GET("/invites/info", handleGetInviteInfo)
 	// User-onboarding invite link (no group; requires user admin privileges).
 	// User-admin actions touch policy state, so the AUP must be signed.
-	routerGroup.POST("/invites/onboarding", AuthHandler, RequireAUPCompliance, handleCreateUserOnboardingInvite)
+	// Gated by UserAdminAuthHandler so a holder of server.user_admin (not
+	// just server.web_admin) can mint onboarding links.
+	routerGroup.POST("/invites/onboarding", AuthHandler, RequireAUPCompliance, UserAdminAuthHandler, handleCreateUserOnboardingInvite)
 
 	// AUP endpoint (public read, no auth required). The bare /aup path
 	// always serves the *currently active* policy. /aup/:version is the
@@ -763,12 +772,19 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		aupAdminGroup.GET("/versions", handleListAUPVersions)
 	}
 
-	// /users/* is administrator-only. Self-service for ordinary users lives
-	// under /me/* (see below); per-route admin gating used to be implicit via
-	// individual handlers but several were missing the check, so the gate is
-	// now applied here at the router level. Admins also have to be
-	// AUP-compliant — there is no exemption from the policy for any role.
-	userRouterGroup := routerGroup.Group("/users", AuthHandler, RequireAUPCompliance, AdminAuthHandler)
+	// /users/* is gated by UserAdminAuthHandler — accepts holders of either
+	// server.web_admin OR server.user_admin. Per-target guards inside the
+	// handlers (IsSystemAdminUserID) prevent a user-admin from acting on a
+	// system-admin account. Self-service for ordinary users lives under
+	// /me/* (see below). Even admins must be AUP-compliant.
+	//
+	// Two sub-routes are walled tighter (AdminAuthHandler — system admin
+	// only): granting/revoking a scope and adding/removing a linked OIDC
+	// identity. Both are elevation paths: a user-admin who could grant a
+	// scope to themselves would self-elevate, and one who could link an
+	// arbitrary OIDC sub to a system admin's account would hand admin
+	// access to whoever holds that sub.
+	userRouterGroup := routerGroup.Group("/users", AuthHandler, RequireAUPCompliance, UserAdminAuthHandler)
 	{
 		userRouterGroup.GET("", handleListUsers)
 		userRouterGroup.POST("", handleAddUser)
@@ -794,12 +810,19 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		// Only direct user_scopes rows live here; the full effective set
 		// (which folds in group memberships and config) is read via
 		// GET /me/scopes for self or computed inline by Check* helpers.
+		// Listing is open to user-admins, but mutating (grant/revoke)
+		// is system-admin-only — granting yourself a scope is exactly
+		// the elevation we're guarding against.
 		userRouterGroup.GET("/:id/scopes", handleListUserScopes)
-		userRouterGroup.POST("/:id/scopes", handleGrantUserScope)
-		userRouterGroup.DELETE("/:id/scopes/:scope", handleRevokeUserScope)
+		userRouterGroup.POST("/:id/scopes", AdminAuthHandler, handleGrantUserScope)
+		userRouterGroup.DELETE("/:id/scopes/:scope", AdminAuthHandler, handleRevokeUserScope)
+		// Linked-identity management is system-admin-only: a user-admin
+		// who could attach an arbitrary OIDC sub to another account
+		// (especially a system admin's) would hand admin access to
+		// whoever owns that sub at the IdP.
 		userRouterGroup.GET("/:id/identities", handleListUserIdentities)
-		userRouterGroup.POST("/:id/identities", handleAddUserIdentity)
-		userRouterGroup.DELETE("/:id/identities/:identityId", handleDeleteUserIdentity)
+		userRouterGroup.POST("/:id/identities", AdminAuthHandler, handleAddUserIdentity)
+		userRouterGroup.DELETE("/:id/identities/:identityId", AdminAuthHandler, handleDeleteUserIdentity)
 	}
 
 	// Self-service endpoints for any authenticated user. These never accept a
@@ -820,11 +843,15 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	meRouterGroup := routerGroup.Group("/me", AuthHandler, RequireAUPCompliance)
 	{
 		meRouterGroup.PATCH("", handleUpdateMe)
-		// No PUT /me/password by design. Per the user/group design contract,
-		// passwords are set ONLY via admin-issued password-invite redemption
-		// (see /invites/redeem/password). A self-service password setter
-		// would let an OIDC-only user persist a password and keep accessing
-		// the system after the IdP relationship is severed.
+		// /me/password is "manage what's already set". The handlers
+		// refuse to operate on an account with no password, so an
+		// OIDC-only user can't quietly grow a local password that
+		// would outlive the IdP relationship — the only way to
+		// *create* one is admin-issued password-invite redemption
+		// (see /invites/redeem/password). PUT is rotate (current +
+		// new); DELETE is clear (turns off local-password login).
+		meRouterGroup.PUT("/password", handleUpdateMyPassword)
+		meRouterGroup.DELETE("/password", handleClearMyPassword)
 		meRouterGroup.GET("/groups", handleListMyGroups)
 		meRouterGroup.DELETE("/groups/:id", handleLeaveMyGroup)
 		// Self-service identity management. Read returns the caller's

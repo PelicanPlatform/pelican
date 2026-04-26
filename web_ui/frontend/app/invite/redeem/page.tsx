@@ -35,6 +35,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getErrorMessage } from '@/helpers/util';
 import { InviteInfo, InviteService } from '@/helpers/api';
+import CollectionService from '@/helpers/api/Collection/service';
 
 // The redemption page handles two invite kinds:
 //
@@ -132,8 +133,8 @@ const RedeemRouter: React.FC = () => {
               Redeem invite
             </Typography>
             <Typography variant='body2' color='text.secondary'>
-              Paste your invite token below. If you arrived from an invite
-              URL the token is already filled in.
+              Paste your invite token below. If you arrived from an invite URL
+              the token is already filled in.
             </Typography>
           </Box>
           {probeError && <Alert severity='error'>{probeError}</Alert>}
@@ -167,6 +168,9 @@ const RedeemRouter: React.FC = () => {
 
   if (info.kind === 'password') {
     return <PasswordRedeem token={token} />;
+  }
+  if (info.kind === 'collection_ownership') {
+    return <CollectionOwnershipRedeem token={token} info={info} />;
   }
   return <GroupRedeem token={token} info={info} />;
 };
@@ -235,8 +239,8 @@ const PasswordRedeem: React.FC<{ token: string }> = ({ token }) => {
       <Stack spacing={2}>
         <Typography variant='h4'>Set your password</Typography>
         <Typography variant='body2' color='text.secondary'>
-          Pick a password of at least 8 characters. The administrator who
-          sent you this link does not see it.
+          Pick a password of at least 8 characters. The administrator who sent
+          you this link does not see it.
         </Typography>
         {error && <Alert severity='error'>{error}</Alert>}
         <TextField
@@ -339,7 +343,10 @@ const GroupRedeem: React.FC<{ token: string; info: InviteInfo }> = ({
             profile.
           </Alert>
           <Box display='flex' gap={1}>
-            <Button variant='contained' onClick={() => router.push('/profile/')}>
+            <Button
+              variant='contained'
+              onClick={() => router.push('/profile/')}
+            >
               Go to profile
             </Button>
             <Button variant='text' onClick={() => router.push('/')}>
@@ -383,6 +390,126 @@ const GroupRedeem: React.FC<{ token: string; info: InviteInfo }> = ({
             </Button>
             <Button variant='contained' onClick={submit} disabled={submitting}>
               {submitting ? 'Joining…' : 'Accept invite'}
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    </AuthenticatedContent>
+  );
+};
+
+// ============================================================================
+// Collection-ownership kind: redeemer must be authenticated. On accept,
+// Collection.OwnerID transfers from the previous owner to the
+// authenticated caller. Single-use is enforced server-side, so a
+// successful redemption invalidates the link.
+// ============================================================================
+
+const CollectionOwnershipRedeem: React.FC<{
+  token: string;
+  info: InviteInfo;
+}> = ({ token, info }) => {
+  const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const collectionLabel =
+    info.collectionName?.trim() || info.collectionId || 'an unnamed collection';
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await CollectionService.redeemOwnershipInvite(token);
+      setDone(true);
+    } catch (err) {
+      let message = 'Failed to redeem invite';
+      if (err instanceof Response) {
+        try {
+          message = await getErrorMessage(err);
+        } catch {
+          /* default */
+        }
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <Paper variant='outlined' sx={{ p: 4 }}>
+        <Stack spacing={2}>
+          <Typography variant='h4'>Ownership transferred</Typography>
+          <Alert severity='success'>
+            You are now the owner of <strong>{collectionLabel}</strong>
+            {info.collectionNamespace && (
+              <>
+                {' '}
+                (<code>{info.collectionNamespace}</code>)
+              </>
+            )}
+            .
+          </Alert>
+          <Box display='flex' gap={1}>
+            <Button
+              variant='contained'
+              onClick={() => {
+                if (info.collectionId) {
+                  router.push(
+                    `/origin/collections/edit/?id=${encodeURIComponent(info.collectionId)}`
+                  );
+                } else {
+                  router.push('/origin/collections/');
+                }
+              }}
+            >
+              Manage collection
+            </Button>
+            <Button variant='text' onClick={() => router.push('/')}>
+              Home
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    );
+  }
+
+  return (
+    <AuthenticatedContent redirect>
+      <Paper variant='outlined' sx={{ p: 4 }}>
+        <Stack spacing={2}>
+          <Typography variant='h4'>Accept collection ownership</Typography>
+          <Typography variant='body1'>
+            Accepting will make you the owner of{' '}
+            <Box component='span' sx={{ fontWeight: 600 }}>
+              {collectionLabel}
+            </Box>
+            {info.collectionNamespace && (
+              <>
+                {' '}
+                rooted at{' '}
+                <Box
+                  component='span'
+                  sx={{ fontFamily: 'monospace', fontWeight: 600 }}
+                >
+                  {info.collectionNamespace}
+                </Box>
+              </>
+            )}
+            .
+          </Typography>
+          {error && <Alert severity='error'>{error}</Alert>}
+          <Box display='flex' justifyContent='flex-end' gap={1}>
+            <Button onClick={() => router.push('/')} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button variant='contained' onClick={submit} disabled={submitting}>
+              {submitting ? 'Accepting…' : 'Accept ownership'}
             </Button>
           </Box>
         </Stack>

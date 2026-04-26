@@ -88,7 +88,9 @@ const UserForm: React.FC<UserFormProps> = ({
               size='small'
               onChange={(_, v) => v && setKind(v)}
             >
-              <ToggleButton value='local'>Local (username + password)</ToggleButton>
+              <ToggleButton value='local'>
+                Local (username + password)
+              </ToggleButton>
               <ToggleButton value='oidc'>External (OIDC)</ToggleButton>
             </ToggleButtonGroup>
             <FormHelperText sx={{ mt: 0.5 }}>

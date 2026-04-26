@@ -123,7 +123,12 @@ const InviteLinksPanel: React.FC<InviteLinksPanelProps> = ({ groupId }) => {
 
   return (
     <Box>
-      <Box display='flex' alignItems='center' justifyContent='space-between' mb={1}>
+      <Box
+        display='flex'
+        alignItems='center'
+        justifyContent='space-between'
+        mb={1}
+      >
         <Typography variant='subtitle1'>Invite links</Typography>
         <IconButton size='small' onClick={refresh} title='Refresh'>
           <Refresh fontSize='small' />
@@ -131,18 +136,19 @@ const InviteLinksPanel: React.FC<InviteLinksPanelProps> = ({ groupId }) => {
       </Box>
 
       {generatedToken && (
-        <Box
-          mb={2}
-          p={1.5}
-          sx={{ bgcolor: 'success.light', borderRadius: 1 }}
-        >
+        <Box mb={2} p={1.5} sx={{ bgcolor: 'success.light', borderRadius: 1 }}>
           <Typography variant='body2' fontWeight={600} mb={1}>
             New invite link (copy now — won&apos;t be shown again):
           </Typography>
-          <Typography variant='caption' color='text.secondary' mb={1} display='block'>
-            Send this URL to whoever should join the group. The page on
-            the other end requires them to be logged in (any identity)
-            and adds them on accept.
+          <Typography
+            variant='caption'
+            color='text.secondary'
+            mb={1}
+            display='block'
+          >
+            Send this URL to whoever should join the group. The page on the
+            other end requires them to be logged in (any identity) and adds them
+            on accept.
           </Typography>
           {/*
             We send the *full URL* — not the bare token. The token alone
@@ -234,7 +240,12 @@ const InviteLinksPanel: React.FC<InviteLinksPanelProps> = ({ groupId }) => {
             >
               <ListItemText
                 primary={
-                  <Box display='flex' alignItems='center' gap={1} flexWrap='wrap'>
+                  <Box
+                    display='flex'
+                    alignItems='center'
+                    gap={1}
+                    flexWrap='wrap'
+                  >
                     {/*
                       tokenPrefix is the public short ID — first few chars
                       of the plaintext token. Showing it here lets admins
@@ -274,10 +285,7 @@ const InviteLinksPanel: React.FC<InviteLinksPanelProps> = ({ groupId }) => {
                       gap={0.5}
                     >
                       <span>Redeemed by</span>
-                      <UserPill
-                        card={l.redeemedByUser}
-                        id={l.redeemedBy}
-                      />
+                      <UserPill card={l.redeemedByUser} id={l.redeemedBy} />
                     </Box>
                   ) : (
                     'Active'

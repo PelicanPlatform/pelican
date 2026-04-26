@@ -39,6 +39,14 @@ import (
 // API token IDs are the 5-character prefix of the `<id>.<secret>` token
 // format (see api_token.ApiTokenRegex). Web-cookie sessions don't have a
 // stable session id today, so AuthMethodID stays empty for that case.
+// CaptureAuthMethod is the exported counterpart to captureAuthMethod
+// for callers in sibling packages (e.g. origin/collections.go) that
+// need to record the same audit fields when minting their own
+// records (ownership-invite links, etc.). It just delegates.
+func CaptureAuthMethod(ctx *gin.Context) (database.AuthMethod, string) {
+	return captureAuthMethod(ctx)
+}
+
 func captureAuthMethod(ctx *gin.Context) (database.AuthMethod, string) {
 	if header := ctx.Request.Header.Get("Authorization"); header != "" {
 		tok := strings.TrimPrefix(header, "Bearer ")

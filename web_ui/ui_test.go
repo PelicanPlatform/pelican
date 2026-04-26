@@ -1208,7 +1208,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// Create a collection ACL entry referencing the group name (not group ID)
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "/test", database.VisibilityPrivate)
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "owner-user", "/test", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,
@@ -1272,7 +1272,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		// Create a collection ACL entry referencing the user's implicit personal group name
 		personalGroup := "user-" + username
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "/test2", database.VisibilityPrivate)
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "owner-user2", "/test2", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,

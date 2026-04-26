@@ -192,9 +192,8 @@ const Body: React.FC = () => {
       <Stack spacing={3}>
         {gating && authed && (
           <Alert severity='info'>
-            You must accept the Acceptable Use Policy below before
-            continuing. After accepting, you'll be returned to where
-            you were headed.
+            You must accept the Acceptable Use Policy below before continuing.
+            After accepting, you'll be returned to where you were headed.
           </Alert>
         )}
         <Box display='flex' alignItems='center' gap={1}>
@@ -267,11 +266,7 @@ const Body: React.FC = () => {
 
         {doc && authed && (
           <Box display='flex' justifyContent='flex-end'>
-            <Button
-              variant='contained'
-              onClick={agree}
-              disabled={agreeing}
-            >
+            <Button variant='contained' onClick={agree} disabled={agreeing}>
               {agreeing ? 'Recording…' : 'I agree'}
             </Button>
           </Box>

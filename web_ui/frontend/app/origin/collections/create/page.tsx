@@ -53,14 +53,20 @@ const Page = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [namespace, setNamespace] = useState('');
-  const [visibility, setVisibility] = useState<'private' | 'public'>(
-    'private'
-  );
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
 
-  // Group autocomplete for ACLs
+  // Group autocomplete for the new collection.
+  //
+  // Read / Write groups become CollectionACL rows on the new collection.
+  // Admin group is set on Collection.AdminID — its members can manage
+  // members, ACLs, and the collection's metadata, but cannot transfer
+  // ownership or delete the collection (those stay owner-only). The
+  // owner is always the calling user (the backend records User.ID at
+  // create time); there's no "owner group" anymore — that role moved
+  // to the admin-group field.
   const [readGroupId, setReadGroupId] = useState('');
   const [writeGroupId, setWriteGroupId] = useState('');
-  const [ownerGroupId, setOwnerGroupId] = useState('');
+  const [adminGroupId, setAdminGroupId] = useState('');
 
   // Inline group creation dialog
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
@@ -72,10 +78,7 @@ const Page = () => {
   const [inviteLink, setInviteLink] = useState('');
   const [showInviteDialog, setShowInviteDialog] = useState(false);
 
-  const {
-    data: groups,
-    mutate: mutateGroups,
-  } = useApiSWR<Group[]>(
+  const { data: groups, mutate: mutateGroups } = useApiSWR<Group[]>(
     'Could not fetch groups',
     '/api/v1.0/groups',
     async () => {
@@ -105,7 +108,7 @@ const Page = () => {
       if (response?.ok) {
         const created = await response.json();
         await mutateGroups();
-        setOwnerGroupId(created.id);
+        setAdminGroupId(created.id);
         setNewGroupName('');
         setNewGroupDescription('');
         setCreateGroupOpen(false);
@@ -172,28 +175,42 @@ const Page = () => {
       const collection = await response.json();
       const collectionId = collection.id;
 
-      // 2. Grant ACLs if groups were selected
+      // 2. Read / Write groups become ACL rows. Admin group is set on
+      // the collection itself via PATCH (Collection.AdminID); its
+      // members can manage members, ACLs, and the collection's
+      // metadata — but ownership transfer and deletion stay
+      // owner-only. ACL `owner` role is no longer accepted by the
+      // backend for new grants, so this page never grants it.
       const aclPromises = [];
       if (readGroupId) {
-        aclPromises.push(
-          grantAcl(collectionId, readGroupId, 'read', dispatch)
-        );
+        aclPromises.push(grantAcl(collectionId, readGroupId, 'read', dispatch));
       }
       if (writeGroupId) {
         aclPromises.push(
           grantAcl(collectionId, writeGroupId, 'write', dispatch)
         );
       }
-      if (ownerGroupId) {
-        aclPromises.push(
-          grantAcl(collectionId, ownerGroupId, 'owner', dispatch)
-        );
-      }
       await Promise.all(aclPromises);
 
-      // If an owner group was selected, offer to generate an invite link
-      if (ownerGroupId) {
-        await handleGenerateInviteLink(ownerGroupId);
+      if (adminGroupId) {
+        await alertOnError(
+          async () =>
+            fetchApi(async () =>
+              fetch(`/api/v1.0/origin_ui/collections/${collectionId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ adminId: adminGroupId }),
+              })
+            ),
+          'Error setting admin group',
+          dispatch
+        );
+      }
+
+      // If an admin group was selected, offer to generate a join
+      // invite link for it (so the operator can hand it out without
+      // an extra trip to the group page).
+      if (adminGroupId) {
+        await handleGenerateInviteLink(adminGroupId);
       } else {
         router.push('/origin/collections');
       }
@@ -210,7 +227,11 @@ const Page = () => {
   }));
 
   return (
-    <AuthenticatedContent redirect={true} allowedRoles={['admin', 'user']}>
+    <AuthenticatedContent
+      redirect={true}
+      allowedRoles={['admin']}
+      anyScopes={['server.collection_admin']}
+    >
       <Box width={'100%'} maxWidth={600}>
         <Breadcrumbs aria-label={'breadcrumb'} sx={{ mb: 2 }}>
           <Link href='/origin/collections'>Collections</Link>
@@ -263,11 +284,13 @@ const Page = () => {
           </FormControl>
 
           <Typography variant='h6' mb={1}>
-            Group ACLs (Optional)
+            Groups (Optional)
           </Typography>
           <Typography variant='body2' color='text.secondary' mb={2}>
-            Assign existing groups as readers, writers, or owners. You can also
-            set these later.
+            You are the owner of this collection. Optionally also pick an admin
+            group whose members can fully manage it, plus reader / writer groups
+            for finer-grained access. All of these can be edited later from the
+            collection&apos;s page.
           </Typography>
 
           <Box display='flex' justifyContent='flex-end' mb={2}>
@@ -300,13 +323,15 @@ const Page = () => {
           />
           <Autocomplete
             options={groupOptions}
-            value={
-              groupOptions.find((o) => o.id === ownerGroupId) || null
-            }
+            value={groupOptions.find((o) => o.id === adminGroupId) || null}
             renderInput={(params) => (
-              <TextField {...params} label='Owner Group' />
+              <TextField
+                {...params}
+                label='Admin Group'
+                helperText='Members can manage members, ACLs, and the collection’s metadata. Transferring ownership and deletion stay owner-only.'
+              />
             )}
-            onChange={(_e, val) => setOwnerGroupId(val?.id || '')}
+            onChange={(_e, val) => setAdminGroupId(val?.id || '')}
             sx={{ mb: 3 }}
             isOptionEqualToValue={(option, value) => option.id === value.id}
           />
@@ -378,8 +403,9 @@ const Page = () => {
         <DialogTitle>Collection Created</DialogTitle>
         <DialogContent>
           <Typography mb={2}>
-            Your collection has been created. Share this invite link with group
-            members so they can join the owner group:
+            Your collection has been created. Share this invite link with the
+            people who should join the admin group — they&apos;ll get full
+            management authority on the collection:
           </Typography>
           <TextField
             value={inviteLink}

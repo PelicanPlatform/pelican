@@ -127,6 +127,20 @@ func TestCollectionsAPI(t *testing.T) {
 	}))
 
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
+	// The cookie path on POST /collections / GET /collections (admin
+	// list) now requires server.web_admin or server.collection_admin
+	// in the caller's effective scope set — without this, every
+	// logged-in user could create or list every collection. Bearer
+	// API tokens with explicit collection.create still pass through
+	// (covered separately below). The two test subjects that drive
+	// the "cookie create" path become collection admins so the
+	// existing scenarios (lifecycle, ACL flows) keep exercising the
+	// happy path; tests that target the rejection case
+	// (e.g. unprivileged caller forbidden) get added explicitly.
+	require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{
+		"test-user",
+		"test-user-owner",
+	}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -201,6 +215,356 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
+	})
+
+	t.Run("unprivileged-cookie-cannot-create-collection", func(t *testing.T) {
+		// Pins the security contract: a logged-in user without
+		// server.web_admin or server.collection_admin must not be
+		// able to create a collection through the web UI cookie path.
+		// Before this gate existed, every cookie carried web_ui.access
+		// and the verify path fell through to "authenticated → ok".
+		createReq := CreateCollectionReq{
+			Name:        "rogue-create",
+			Description: "should be refused",
+			Namespace:   "/test1",
+			Visibility:  "public",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		// "rogue-user" is in NEITHER Server.UIAdminUsers nor
+		// Server.CollectionAdminUsers in this suite's setup; they
+		// have web_ui.access on the cookie (every authenticated user
+		// does) but no management scope.
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "rogue-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: token})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusForbidden, recorder.Code,
+			"a cookie without collection_admin must be refused at the create gate (body: %s)",
+			recorder.Body.String())
+		assert.Contains(t, recorder.Body.String(), "server.collection_admin",
+			"the rejection message should name the missing scope so the admin understands why")
+	})
+
+	t.Run("explicit-bearer-collection-create-bypasses-cookie-gate", func(t *testing.T) {
+		// Pins the dual contract: even though the cookie path
+		// requires server.collection_admin, an API client presenting
+		// a bearer token with EXPLICIT collection.create scope still
+		// works — that's the OA4MP / device-flow path. The bearer
+		// token here carries collection.create directly, with no
+		// web_ui.access fallback, so the new gate's
+		// hasExplicitBearerCollectionScope branch must accept it.
+		createReq := CreateCollectionReq{
+			Name:        "via-bearer-create",
+			Description: "should be accepted",
+			Namespace:   "/test1",
+			Visibility:  "public",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		// The subject is a non-admin user — what authorizes the
+		// request is the explicit collection.create scope on the
+		// bearer token, not the user's role.
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.Collection_Create}, "bearer-create-subject")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusCreated, recorder.Code,
+			"a bearer token with explicit collection.create must still authorize (body: %s)",
+			recorder.Body.String())
+	})
+
+	t.Run("admin-group-grants-full-management-authority", func(t *testing.T) {
+		// Pins the new ownership-model contract: setting
+		// Collection.AdminID gives every member of that group
+		// management authority on the collection — they can patch
+		// metadata, grant/revoke ACLs, and manage the admin group
+		// itself, all without needing an explicit ACL row. They
+		// CANNOT transfer ownership or delete the collection — those
+		// stay owner-exclusive (covered by the negative-control
+		// assertions at the end of this subtest plus the dedicated
+		// write-acl-cannot-transfer-ownership test below).
+		//
+		// Setup: collection-admin creates a private collection;
+		// system admin creates a group; the admin-id is set on the
+		// collection.
+		colReq := CreateCollectionReq{
+			Name:       "admin-group-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, err := json.Marshal(colReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		ownerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user-owner")
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"setup: collection create must succeed (body: %s)", recorder.Body.String())
+		var colResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
+		probeID := colResp["id"]
+		require.NotEmpty(t, probeID)
+
+		// Create the admin group as a system admin (system-admin
+		// gating is what /groups POST requires).
+		groupName := "admin-probe-group"
+		grpReq := map[string]string{"name": groupName}
+		body, err = json.Marshal(grpReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+		adminToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"setup: admin group create (body: %s)", recorder.Body.String())
+		var grpResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&grpResp))
+		groupID := grpResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Owner sets adminId on the collection.
+		patchReq := UpdateCollectionReq{AdminID: &groupID}
+		body, err = json.Marshal(patchReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code,
+			"setup: PATCH adminId (body: %s)", recorder.Body.String())
+
+		// A member of the admin group (asserted via wlcg.groups on
+		// the cookie) — NO ACL row, NO collection_admin scope —
+		// must be able to PATCH the collection.
+		groupMemberToken := generateToken(t,
+			[]token_scopes.TokenScope{token_scopes.WebUi_Access},
+			"admin-group-member", groupName)
+		updateName := "renamed-by-admin-group"
+		updateReq := UpdateCollectionReq{Name: &updateName}
+		body, err = json.Marshal(updateReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: groupMemberToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code,
+			"a member of the admin group must be able to PATCH the collection without any other authority (body: %s)",
+			recorder.Body.String())
+
+		// Negative control: a user NOT in the admin group, with no
+		// ACL and no admin scope, must still 404.
+		rogueToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "outsider")
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: rogueToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"a non-member without an ACL must still be refused (body: %s)",
+			recorder.Body.String())
+
+		// Same admin-group member must NOT be able to transfer
+		// ownership or delete the collection. Those two operations
+		// stay owner-only — otherwise an admin-group member could
+		// seize or destroy the collection out from under the
+		// rightful owner. Build on the setup above (probe is owned
+		// by test-user-owner, admin-group-member is in the admin
+		// group via groupName).
+		stolenOwner := "admin-group-member-stealing"
+		patchOwner := UpdateCollectionReq{OwnerID: &stolenOwner}
+		body, err = json.Marshal(patchOwner)
+		require.NoError(t, err)
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: groupMemberToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"an admin-group member must NOT be able to transfer ownership (body: %s)",
+			recorder.Body.String())
+
+		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+probeID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: groupMemberToken})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"an admin-group member must NOT be able to delete the collection (body: %s)",
+			recorder.Body.String())
+	})
+
+	t.Run("write-acl-cannot-transfer-ownership", func(t *testing.T) {
+		// Per the ownership-model rewrite, transferring ownership and
+		// re-assigning the admin group are restricted to existing
+		// owner / admin-group / collection_admin. A holder of a
+		// write ACL — who can normally modify the collection's name
+		// or description — must NOT be able to PATCH ownerId or
+		// adminId. The DB layer re-gates those two fields above the
+		// generic Modify check.
+		colReq := CreateCollectionReq{
+			Name:       "transfer-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, err := json.Marshal(colReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		ownerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user-owner")
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, "body: %s", recorder.Body.String())
+		var colResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
+		probeID := colResp["id"]
+
+		// Grant a write ACL to a group, then try to PATCH ownerId
+		// from a member of that group. The PATCH must fail (403/404
+		// — current handler returns 404 for the ErrForbidden path).
+		writeGroup := "write-only-group"
+		grpReq := map[string]string{"name": writeGroup}
+		body, err = json.Marshal(grpReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+		adminToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, "body: %s", recorder.Body.String())
+
+		grant := map[string]string{"groupId": writeGroup, "role": "write"}
+		body, err = json.Marshal(grant)
+		require.NoError(t, err)
+		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections/"+probeID+"/acl", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code, "body: %s", recorder.Body.String())
+
+		stolenOwner := "attacker-user-id"
+		patch := UpdateCollectionReq{OwnerID: &stolenOwner}
+		body, err = json.Marshal(patch)
+		require.NoError(t, err)
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(body))
+		require.NoError(t, err)
+		writeToken := generateToken(t,
+			[]token_scopes.TokenScope{token_scopes.WebUi_Access},
+			"write-only-user", writeGroup)
+		req.AddCookie(&http.Cookie{Name: "login", Value: writeToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"a write-ACL holder must NOT be able to PATCH ownerId (body: %s)",
+			recorder.Body.String())
+	})
+
+	t.Run("admin-cookie-sees-other-users-private-collection", func(t *testing.T) {
+		// Pins the global-visibility contract: a system admin /
+		// collection admin sees every collection in the list, even
+		// ones for which they hold no read ACL. Before this bypass,
+		// an admin investigating a report couldn't see the collection
+		// causing trouble unless they also had ACL — which made
+		// admin-as-investigator unworkable.
+		//
+		// Step 1: collection-admin "test-user-owner" creates a
+		// PRIVATE collection (no public read; only its
+		// owner-user-group ACL, which only test-user-owner is in).
+		createReq := CreateCollectionReq{
+			Name:       "admin-visibility-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		ownerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user-owner")
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"setup: owner must be able to create the probe collection (body: %s)",
+			recorder.Body.String())
+		var createResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createResp))
+		probeID := createResp["id"]
+		require.NotEmpty(t, probeID)
+
+		// Step 2: a system admin (Server.UIAdminUsers) lists
+		// collections via cookie. Without the admin bypass, the
+		// listing only contains collections the admin's user-group
+		// has a read ACL on — i.e. nothing — so the probe is
+		// invisible. With the bypass, the probe shows up.
+		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections", nil)
+		require.NoError(t, err)
+		adminToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code,
+			"admin list call must succeed (body: %s)", recorder.Body.String())
+		var listResp []map[string]interface{}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&listResp))
+		seenIDs := make([]string, 0, len(listResp))
+		for _, c := range listResp {
+			if id, ok := c["id"].(string); ok {
+				seenIDs = append(seenIDs, id)
+			}
+		}
+		assert.Contains(t, seenIDs, probeID,
+			"a system admin must see other users' private collections in the listing — that's the whole point of the admin visibility bypass")
+
+		// Step 3: same admin opens the collection page directly.
+		// GetCollection's admin bypass mirrors the list bypass.
+		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+probeID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusOK, recorder.Code,
+			"admin GET /collections/:id on a private collection must succeed (body: %s)",
+			recorder.Body.String())
+
+		// Step 4 (negative control): a non-admin, non-ACL user gets
+		// 404 on the same probe — the bypass must not leak to
+		// ordinary users.
+		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+probeID, nil)
+		require.NoError(t, err)
+		// "rogue-user" is in no admin list and no group with ACL on
+		// the probe.
+		rogueToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "rogue-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: rogueToken})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"a non-admin without an ACL must still get 404 on a private collection — admin bypass is for admins only")
 	})
 
 	t.Run("create-collection-with-invalid-visibility", func(t *testing.T) {
@@ -294,7 +658,7 @@ func TestCollectionsAPI(t *testing.T) {
 		var resp map[string]string
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&resp))
 		require.NotEmpty(t, resp["id"])
-		col, err := database.GetCollection(database.ServerDatabase, resp["id"], "test-user", nil)
+		col, err := database.GetCollection(database.ServerDatabase, resp["id"], "test-user", "", nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, "/test1/projectA", col.Namespace)
 	})
@@ -587,17 +951,23 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
 
-		// 9. Grant owner access to the group
-		grantAclReq = map[string]string{"group_id": groupID, "role": "owner"}
-		body, err = json.Marshal(grantAclReq)
+		// 9. Make the group the collection's admin group. With the
+		//    ownership-model rewrite, the AclRoleOwner ACL is gone;
+		//    "this group has day-to-day management authority" is now
+		//    expressed by setting Collection.AdminID. Members of the
+		//    admin group can manage members and ACLs and edit the
+		//    collection — but transferring ownership and deleting are
+		//    owner-exclusive (see steps 11/12 below).
+		patchReq := UpdateCollectionReq{AdminID: &groupID}
+		body, err = json.Marshal(patchReq)
 		require.NoError(t, err)
-		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections/"+collectionID+"/acl", bytes.NewReader(body))
+		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+collectionID, bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: createToken}) // The owner grants the ACL
+		req.AddCookie(&http.Cookie{Name: "login", Value: createToken}) // The owner sets adminId
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
+		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH adminId, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 10. A user not in the group cannot delete the collection
 		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
@@ -607,13 +977,30 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNotFound, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 
-		// 11. A user in the group can delete the collection
+		// 11. An admin-group member CANNOT delete the collection.
+		//     Deletion is owner-exclusive — admin-group members
+		//     stop short of "destroy the collection out from under
+		//     the rightful owner" (the security report that
+		//     produced this gate). They get the same 404 a non-
+		//     member would.
 		groupOwnerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete}, "group-user-owner", groupName)
 		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: groupOwnerToken})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
+		assert.Equal(t, http.StatusNotFound, recorder.Code,
+			"admin-group members must NOT be able to delete the collection (body: %s)",
+			recorder.Body.String())
+
+		// 12. The actual owner CAN delete the collection.
+		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: createToken}) // owner
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code,
+			"the owner must be able to delete their collection (body: %s)",
+			recorder.Body.String())
 	})
 }

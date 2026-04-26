@@ -192,21 +192,26 @@ func handleListGroups(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(UserIdentity{
+	identity := UserIdentity{
 		Username: user,
 		ID:       userId,
 		Groups:   callerGroups,
 		Sub:      ctx.GetString("OIDCSub"),
-	})
+	}
+	isAdmin, _ := CheckAdmin(identity)
+	isUserAdmin, _ := CheckUserAdmin(identity)
 
-	// System admins see every group; everyone else sees the union of:
-	// groups they own/admin/are a member of in the DB AND any groups the
-	// caller's login cookie asserts membership of (wlcg.groups, sourced
-	// from the OIDC IdP or htpasswd bootstrap). The latter are filtered
-	// to groups that actually exist in the DB so non-existent names
-	// asserted by the IdP don't pollute the listing.
+	// System admins AND user admins see every group; everyone else
+	// sees the union of: groups they own/admin/are a member of in the
+	// DB AND any groups the caller's login cookie asserts membership
+	// of (wlcg.groups, sourced from the OIDC IdP or htpasswd bootstrap).
+	// The latter are filtered to groups that actually exist in the DB
+	// so non-existent names asserted by the IdP don't pollute the
+	// listing. user_admin is included because the design contract
+	// puts "manage non-admin users and unprivileged groups" under the
+	// user_admin scope — they need to see what exists to manage it.
 	var groups []database.Group
-	if isAdmin {
+	if isAdmin || isUserAdmin {
 		groups, err = database.ListGroups(database.ServerDatabase)
 	} else {
 		groups, err = database.ListGroupsVisibleToUser(database.ServerDatabase, userId, callerGroups)
@@ -947,8 +952,33 @@ func handleUpdateUser(ctx *gin.Context) {
 		return
 	}
 
-	// Authorization is enforced at the route level (AdminAuthHandler on
-	// /users/*). Self-service equivalents live under /me/*.
+	// Route-level UserAdminAuthHandler clears either web_admin or
+	// user_admin. Per the design contract, a user-admin must NOT be
+	// able to rename or relabel a system admin (otherwise they could
+	// kick a system admin off their own account by renaming them out
+	// of Server.UIAdminUsers). System admins keep full access.
+	user, userId, groups, idErr := GetUserGroups(ctx)
+	if idErr != nil || userId == "" || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify caller",
+		})
+		return
+	}
+	identity := UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isSystemAdmin, _ := CheckAdmin(identity)
+	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user administrators cannot modify system admin accounts",
+		})
+		return
+	}
 
 	// Ensure the user exists so we can return 404 for unknown IDs.
 	if _, err := database.GetUserByID(database.ServerDatabase, id); err != nil {
@@ -1594,6 +1624,68 @@ func handleRedeemGroupInviteLink(ctx *gin.Context) {
 		resp["message"] = "Invite redeemed; your account is now active."
 	}
 	ctx.JSON(http.StatusOK, resp)
+}
+
+// handleRedeemCollectionOwnershipInvite consumes a single-use
+// ownership-transfer invite link, swapping the collection's
+// OwnerID / Owner fields to the authenticated caller. Single-use is
+// enforced inside the DB helper; the redeem path here just maps the
+// caller's identity to the redeemer and translates errors. The
+// caller MUST be authenticated — anonymous redemption would let
+// link-holders make ANYBODY the owner; we record the caller's
+// User.ID specifically so the audit trail names a real account.
+func handleRedeemCollectionOwnershipInvite(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	var req RedeemInviteLinkReq
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Token == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "invite token is required",
+		})
+		return
+	}
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user",
+		})
+		return
+	}
+	collectionID, prevOwner, err := database.RedeemCollectionOwnershipInviteLink(database.ServerDatabase, req.Token, userId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "invite link not found",
+			})
+		} else {
+			log.Warningf("Failed to redeem ownership invite link: %v", err)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to redeem invite link",
+			})
+		}
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":          server_structs.RespOK,
+		"message":         "Ownership transferred to you.",
+		"collectionId":    collectionID,
+		"previousOwnerId": prevOwner,
+	})
 }
 
 // --- User Status / AUP Handlers ---

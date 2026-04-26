@@ -47,23 +47,23 @@ import (
 // UserScope is one row in the user_scopes table — a scope granted
 // directly to a single user.
 type UserScope struct {
-	UserID       string             `gorm:"primaryKey" json:"userId"`
+	UserID       string                  `gorm:"primaryKey" json:"userId"`
 	Scope        token_scopes.TokenScope `gorm:"primaryKey;column:scope" json:"scope"`
-	GrantedBy    string             `gorm:"not null;default:'unknown'" json:"grantedBy"`
-	AuthMethod   AuthMethod         `gorm:"not null;default:''" json:"authMethod"`
-	AuthMethodID string             `gorm:"not null;default:''" json:"authMethodId,omitempty"`
-	GrantedAt    time.Time          `gorm:"not null;default:CURRENT_TIMESTAMP" json:"grantedAt"`
+	GrantedBy    string                  `gorm:"not null;default:'unknown'" json:"grantedBy"`
+	AuthMethod   AuthMethod              `gorm:"not null;default:''" json:"authMethod"`
+	AuthMethodID string                  `gorm:"not null;default:''" json:"authMethodId,omitempty"`
+	GrantedAt    time.Time               `gorm:"not null;default:CURRENT_TIMESTAMP" json:"grantedAt"`
 }
 
 // GroupScope is one row in the group_scopes table — a scope granted
 // to all members of a group.
 type GroupScope struct {
-	GroupID      string             `gorm:"primaryKey" json:"groupId"`
+	GroupID      string                  `gorm:"primaryKey" json:"groupId"`
 	Scope        token_scopes.TokenScope `gorm:"primaryKey;column:scope" json:"scope"`
-	GrantedBy    string             `gorm:"not null;default:'unknown'" json:"grantedBy"`
-	AuthMethod   AuthMethod         `gorm:"not null;default:''" json:"authMethod"`
-	AuthMethodID string             `gorm:"not null;default:''" json:"authMethodId,omitempty"`
-	GrantedAt    time.Time          `gorm:"not null;default:CURRENT_TIMESTAMP" json:"grantedAt"`
+	GrantedBy    string                  `gorm:"not null;default:'unknown'" json:"grantedBy"`
+	AuthMethod   AuthMethod              `gorm:"not null;default:''" json:"authMethod"`
+	AuthMethodID string                  `gorm:"not null;default:''" json:"authMethodId,omitempty"`
+	GrantedAt    time.Time               `gorm:"not null;default:CURRENT_TIMESTAMP" json:"grantedAt"`
 }
 
 // ErrUngrantableScope is returned by GrantUserScope / GrantGroupScope

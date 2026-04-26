@@ -138,9 +138,8 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
   // these fetches share the same cache entries as the profile page and
   // the user-menu — no extra round-trips per group card on the list.
   const { data: me } = useSWR<Me | undefined>('me', () => MeService.get());
-  const { data: myGroups } = useSWR<MyGroup[] | undefined>(
-    'me/groups',
-    () => MeService.getGroups()
+  const { data: myGroups } = useSWR<MyGroup[] | undefined>('me/groups', () =>
+    MeService.getGroups()
   );
   const { data: whoami } = useSWR('getUser', getUser);
 
@@ -256,10 +255,7 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
               The backend route already accepts the action — we're
               just exposing it. */}
           {role === 'admin' && (
-            <AddMemberButton
-              group={group}
-              onChanged={onChanged}
-            />
+            <AddMemberButton group={group} onChanged={onChanged} />
           )}
         </Box>
         {!group.members || group.members.length === 0 ? (
@@ -393,10 +389,9 @@ const RemoveMemberButton: React.FC<{
         const ok = await alertOnError(
           async () =>
             fetchApi(async () =>
-              fetch(
-                `/api/v1.0/groups/${groupId}/members/${userId}`,
-                { method: 'DELETE' }
-              )
+              fetch(`/api/v1.0/groups/${groupId}/members/${userId}`, {
+                method: 'DELETE',
+              })
             ),
           'Failed to remove member',
           dispatch
@@ -516,10 +511,9 @@ const GroupScopesSection: React.FC<{ groupId: string }> = ({ groupId }) => {
         Scopes
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Direct grants on this group. Every member of the group
-        (database row member or OIDC-asserted) inherits these
-        scopes via EffectiveScopes. Revoking removes the grant for
-        all members at once.
+        Direct grants on this group. Every member of the group (database row
+        member or OIDC-asserted) inherits these scopes via EffectiveScopes.
+        Revoking removes the grant for all members at once.
       </Typography>
       {!grants || grants.length === 0 ? (
         <Typography variant='body2' color='text.secondary' fontStyle='italic'>
@@ -547,7 +541,9 @@ const GroupScopesSection: React.FC<{ groupId: string }> = ({ groupId }) => {
                   label={g.scope}
                   variant='outlined'
                   onDelete={
-                    busy === `revoke:${g.scope}` ? undefined : () => revoke(g.scope)
+                    busy === `revoke:${g.scope}`
+                      ? undefined
+                      : () => revoke(g.scope)
                   }
                   disabled={busy === `revoke:${g.scope}`}
                   sx={{ fontFamily: 'monospace' }}
@@ -569,14 +565,14 @@ const GroupScopesSection: React.FC<{ groupId: string }> = ({ groupId }) => {
           noOptionsText='Every catalog scope is already granted to this group.'
           renderOption={(props, option) => {
             // React requires `key` as a real prop, not via spread.
-            const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
+            const { key, ...liProps } =
+              props as React.HTMLAttributes<HTMLLIElement> & {
+                key?: React.Key;
+              };
             return (
               <li key={key} {...liProps}>
                 <Box>
-                  <Typography
-                    variant='body2'
-                    sx={{ fontFamily: 'monospace' }}
-                  >
+                  <Typography variant='body2' sx={{ fontFamily: 'monospace' }}>
                     {option.name}
                   </Typography>
                   {option.description && (
@@ -741,8 +737,8 @@ const AddMemberDialog: React.FC<{
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
           Pick any user on this server to add directly to{' '}
-          <strong>{group.name}</strong>. Use this when you need to
-          conscript a user without going through an invite link.
+          <strong>{group.name}</strong>. Use this when you need to conscript a
+          user without going through an invite link.
         </DialogContentText>
         {loadError && users && users.length === 0 && (
           <DialogContentText color='error' sx={{ mb: 2 }}>
@@ -762,11 +758,7 @@ const AddMemberDialog: React.FC<{
               : 'Every user is already in this group.'
           }
           renderInput={(params) => (
-            <TextField
-              {...params}
-              autoFocus
-              placeholder='Search for a user'
-            />
+            <TextField {...params} autoFocus placeholder='Search for a user' />
           )}
         />
       </DialogContent>

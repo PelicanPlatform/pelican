@@ -66,8 +66,22 @@ type (
 		Authenticated bool     `json:"authenticated"`
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
-		RequiresAUP   bool     `json:"requires_aup,omitempty"`
-		AUPVersion    string   `json:"aup_version,omitempty"`
+		// DisplayName is the human label from the User row (if any).
+		// Surfaced here so the navbar's user menu can render it
+		// without a second /me round-trip on every page mount.
+		// Empty when the row has no display name set.
+		DisplayName string `json:"displayName,omitempty"`
+		// Scopes is the caller's effective user-grantable scope set
+		// (DB user_scopes ∪ DB group_scopes via membership ∪
+		// config-derived grants ∪ web_admin implications). Used by
+		// the frontend to gate UI surfaces below the granularity of
+		// Role: e.g. /settings/users/ is reachable by anyone with
+		// server.user_admin (which is a subset of server.web_admin),
+		// and the navbar toggles its visibility off scopes rather
+		// than role membership. Empty for unauthenticated callers.
+		Scopes      []string `json:"scopes,omitempty"`
+		RequiresAUP bool     `json:"requires_aup,omitempty"`
+		AUPVersion  string   `json:"aup_version,omitempty"`
 	}
 
 	OIDCEnabledServerRes struct {
@@ -644,6 +658,55 @@ func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
 	return isAdmin
 }
 
+// UserAdminAuthHandler accepts callers whose effective scope set
+// contains EITHER server.web_admin OR server.user_admin. It is the
+// route-level gate for the /api/v1.0/users/* surface and the
+// onboarding-invite endpoint: surfaces a system administrator must be
+// able to use, and which a "user administrator" (per the design
+// contract: manage non-admin users and unprivileged groups) is also
+// expected to use. Per-target guards inside the handlers (notably
+// IsSystemAdminUserID) prevent a user-admin from acting on a
+// system-admin account; this gate just decides who clears the door.
+//
+// Cascade behind AuthHandler (cookie/bearer parsing must have run
+// first so the identity is in context).
+func UserAdminAuthHandler(ctx *gin.Context) {
+	user := ctx.GetString("User")
+	if user == "" {
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Login required to view this page",
+			})
+		return
+	}
+	var groups []string
+	if v, exists := ctx.Get("Groups"); exists {
+		if s, ok := v.([]string); ok {
+			groups = s
+		}
+	}
+	identity := UserIdentity{
+		Username: user,
+		Groups:   groups,
+		ID:       ctx.GetString("UserId"),
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	if isAdmin, _ := CheckAdmin(identity); isAdmin {
+		ctx.Next()
+		return
+	}
+	if isUserAdmin, _ := CheckUserAdmin(identity); isUserAdmin {
+		ctx.Next()
+		return
+	}
+	ctx.AbortWithStatusJSON(http.StatusForbidden,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You do not have user administrator permission",
+		})
+}
+
 // AdminAuthHandler checks the admin status of a logged-in user. This middleware
 // should be cascaded behind the [web_ui.AuthHandler]
 func AdminAuthHandler(ctx *gin.Context) {
@@ -998,14 +1061,34 @@ func whoamiHandler(ctx *gin.Context) {
 			res.Role = NonAdminRole
 		}
 
+		// Effective user-grantable scopes (DB grants + config-derived +
+		// implications) — used by the frontend to gate /settings/users
+		// for user-admins, render scope chips on the profile page, etc.
+		effective := EffectiveScopesForIdentity(identity)
+		if len(effective) > 0 {
+			res.Scopes = make([]string, 0, len(effective))
+			for _, s := range effective {
+				res.Scopes = append(res.Scopes, s.String())
+			}
+		}
+
+		// Pull the User row once per call. We use it for two things:
+		// the optional DisplayName (surfaced for the navbar's user
+		// menu) and the AUP-version comparison below. The cookie's
+		// audience+issuer were verified upstream so the row's
+		// authority is not a security check — just a label lookup.
+		var userRecord *database.User
+		if rec, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
+			userRecord = rec
+			res.DisplayName = rec.DisplayName
+		}
+
 		// Check AUP compliance. resolveAUP centralizes the operator-file
 		// vs. embedded-default vs. "none" logic — see web_ui/aup.go.
-		if doc, _ := resolveAUP(); doc != nil {
-			if userRecord, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
-				if userRecord.AUPVersion != doc.Version {
-					res.RequiresAUP = true
-					res.AUPVersion = doc.Version
-				}
+		if doc, _ := resolveAUP(); doc != nil && userRecord != nil {
+			if userRecord.AUPVersion != doc.Version {
+				res.RequiresAUP = true
+				res.AUPVersion = doc.Version
 			}
 		}
 

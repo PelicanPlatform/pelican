@@ -42,6 +42,7 @@ import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { Me, MeService, MyGroup } from '@/helpers/api';
+import ScopeService, { ScopeCatalogEntry } from '@/helpers/api/Scope/service';
 import { UserIdentity } from '@/types';
 
 // Min visible "Saving..." duration so it doesn't flash by on fast responses.
@@ -105,6 +106,28 @@ const ProfileContent = () => {
     )
   );
 
+  // The two scope sources: the caller's effective set and the catalog
+  // (descriptions, sourced from docs/scopes.yaml). We join them in
+  // ScopesCard so each chip can carry its description as a tooltip.
+  const { data: myScopes, isLoading: myScopesLoading } = useSWR<
+    string[] | undefined
+  >('me/scopes', () =>
+    alertOnError(
+      ScopeService.myEffective,
+      'Failed to load your effective scopes',
+      dispatch
+    )
+  );
+  const { data: catalog, isLoading: catalogLoading } = useSWR<
+    ScopeCatalogEntry[] | undefined
+  >('scopes', () =>
+    alertOnError(
+      ScopeService.catalog,
+      'Failed to load the scope catalog',
+      dispatch
+    )
+  );
+
   return (
     <Stack spacing={3} sx={{ maxWidth: 760 }}>
       <Typography variant='h4'>Your account</Typography>
@@ -113,6 +136,13 @@ const ProfileContent = () => {
         <Skeleton variant='rounded' height={260} />
       ) : (
         <AccountCard me={me} onUpdated={mutateMe} />
+      )}
+
+      <Typography variant='h5'>Effective scopes</Typography>
+      {myScopesLoading || catalogLoading ? (
+        <Skeleton variant='rounded' height={80} />
+      ) : (
+        <ScopesCard scopes={myScopes ?? []} catalog={catalog ?? []} />
       )}
 
       <Typography variant='h5'>Linked identities</Typography>
@@ -133,6 +163,65 @@ const ProfileContent = () => {
         <GroupList groups={groups} onChanged={mutateGroups} />
       )}
     </Stack>
+  );
+};
+
+// ScopesCard renders the caller's effective scope set. Names come from
+// /me/scopes; descriptions are joined in from /scopes (the catalog).
+// The catalog is the source of truth for what each scope *means*; if
+// a scope name appears in the effective set without a catalog entry,
+// we surface the bare name so a future server-only scope still shows
+// rather than disappearing.
+const ScopesCard: React.FC<{
+  scopes: string[];
+  catalog: ScopeCatalogEntry[];
+}> = ({ scopes, catalog }) => {
+  if (scopes.length === 0) {
+    return (
+      <Paper variant='outlined' sx={{ p: 3 }}>
+        <Typography variant='body2' color='text.secondary'>
+          You have no management scopes. This is expected for ordinary users —
+          scopes are server-administration capabilities, granted per-user or
+          per-group by an administrator.
+        </Typography>
+      </Paper>
+    );
+  }
+  const descByName = new Map(catalog.map((c) => [c.name, c.description]));
+  return (
+    <Paper variant='outlined' sx={{ p: 3 }}>
+      <Typography variant='body2' color='text.secondary' mb={2}>
+        Capabilities your account currently holds. The set is the union of
+        scopes granted directly to you, scopes inherited from any group you
+        belong to, and any configuration-derived grants.
+      </Typography>
+      <Stack spacing={1.5}>
+        {scopes.map((name) => {
+          const description = descByName.get(name);
+          return (
+            <Box key={name}>
+              <Tooltip title={description ?? ''} placement='right'>
+                <Chip
+                  label={name}
+                  size='small'
+                  sx={{ fontFamily: 'monospace' }}
+                />
+              </Tooltip>
+              {description && (
+                <Typography
+                  variant='caption'
+                  color='text.secondary'
+                  display='block'
+                  sx={{ mt: 0.5 }}
+                >
+                  {description}
+                </Typography>
+              )}
+            </Box>
+          );
+        })}
+      </Stack>
+    </Paper>
   );
 };
 
@@ -199,7 +288,7 @@ const AccountCard: React.FC<{
           </Button>
         </Box>
         <Divider />
-        <PasswordIndicator me={me} />
+        <PasswordSection me={me} onChanged={onUpdated} />
       </Stack>
     </Paper>
   );
@@ -227,31 +316,223 @@ const ReadOnlyField: React.FC<{
   </Box>
 );
 
-// PasswordIndicator is a read-only status row: it shows whether the
-// account has a local password and explains how to (re)set it. The
-// page no longer offers a self-service form for setting one — per the
-// design contract, passwords are only set via an admin-issued
-// password-invite link the user redeems, so OIDC-only accounts can't
-// silently grow a password that outlives the IdP relationship.
-const PasswordIndicator: React.FC<{ me: Me }> = ({ me }) => (
-  <Box>
-    <Box display='flex' alignItems='center' gap={1} mb={1}>
-      <Typography variant='h6' sx={{ flexGrow: 0 }}>
-        Local password
-      </Typography>
-      {me.hasPassword ? (
-        <Chip size='small' color='success' label='set' />
-      ) : (
-        <Chip size='small' label='not set' />
+// PasswordSection lets the caller manage a password they ALREADY have:
+// rotate (PUT /me/password with current+new) or clear (DELETE
+// /me/password). It does NOT offer a "create password" form — per the
+// design contract, the only way to set an initial password is to
+// redeem an admin-issued password-invite, so an OIDC-only account
+// can't silently grow a password that outlives the IdP relationship.
+// When me.hasPassword is false the section is read-only and explains
+// the route to enable password login.
+const PasswordSection: React.FC<{
+  me: Me;
+  onChanged: () => Promise<Me | undefined> | void;
+}> = ({ me, onChanged }) => {
+  const dispatch = useContext(AlertDispatchContext);
+  type Mode = 'idle' | 'rotate' | 'confirmClear';
+  const [mode, setMode] = useState<Mode>('idle');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => {
+    setMode('idle');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+  };
+
+  const submitRotate = async () => {
+    if (newPassword !== confirmPassword) {
+      dispatch({
+        type: 'openAlert',
+        payload: {
+          onClose: () => dispatch({ type: 'closeAlert' }),
+          message: 'New password and confirmation do not match',
+          alertProps: { severity: 'warning' },
+          autoHideDuration: 4000,
+        },
+      });
+      return;
+    }
+    if (newPassword.length < 8) {
+      dispatch({
+        type: 'openAlert',
+        payload: {
+          onClose: () => dispatch({ type: 'closeAlert' }),
+          message: 'New password must be at least 8 characters',
+          alertProps: { severity: 'warning' },
+          autoHideDuration: 4000,
+        },
+      });
+      return;
+    }
+    setBusy(true);
+    const ok = await alertOnError(
+      () => MeService.updatePassword(currentPassword, newPassword),
+      'Failed to update password',
+      dispatch
+    );
+    setBusy(false);
+    if (ok !== undefined) {
+      dispatch({
+        type: 'openAlert',
+        payload: {
+          onClose: () => dispatch({ type: 'closeAlert' }),
+          message: 'Password updated',
+          alertProps: { severity: 'success' },
+          autoHideDuration: 3000,
+        },
+      });
+      reset();
+      await onChanged();
+    }
+  };
+
+  const submitClear = async () => {
+    setBusy(true);
+    const ok = await alertOnError(
+      MeService.clearPassword,
+      'Failed to clear password',
+      dispatch
+    );
+    setBusy(false);
+    if (ok !== undefined) {
+      dispatch({
+        type: 'openAlert',
+        payload: {
+          onClose: () => dispatch({ type: 'closeAlert' }),
+          message:
+            'Password cleared. You can no longer log in with username + password until an administrator issues a new password-set link.',
+          alertProps: { severity: 'success' },
+          autoHideDuration: 6000,
+        },
+      });
+      reset();
+      await onChanged();
+    }
+  };
+
+  return (
+    <Box>
+      <Box display='flex' alignItems='center' gap={1} mb={1}>
+        <Typography variant='h6' sx={{ flexGrow: 0 }}>
+          Local password
+        </Typography>
+        {me.hasPassword ? (
+          <Chip size='small' color='success' label='set' />
+        ) : (
+          <Chip size='small' label='not set' />
+        )}
+      </Box>
+      {!me.hasPassword && (
+        <Typography variant='body2' color='text.secondary'>
+          No local password is set. To enable username + password login, ask an
+          administrator for a password-set link. (Self-service creation is
+          intentionally not offered — see the user-account design contract.)
+        </Typography>
+      )}
+      {me.hasPassword && mode === 'idle' && (
+        <>
+          <Typography variant='body2' color='text.secondary' mb={1.5}>
+            You can log in with your username and password. Rotate it here, or
+            remove it to disable username+password login on this account.
+          </Typography>
+          <Stack direction='row' spacing={1}>
+            <Button
+              size='small'
+              variant='outlined'
+              onClick={() => setMode('rotate')}
+            >
+              Reset password
+            </Button>
+            <Button
+              size='small'
+              variant='outlined'
+              color='warning'
+              onClick={() => setMode('confirmClear')}
+            >
+              Remove password
+            </Button>
+          </Stack>
+        </>
+      )}
+      {me.hasPassword && mode === 'rotate' && (
+        <Stack spacing={1.5}>
+          <TextField
+            label='Current password'
+            type='password'
+            size='small'
+            autoComplete='current-password'
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            disabled={busy}
+            fullWidth
+          />
+          <TextField
+            label='New password'
+            type='password'
+            size='small'
+            autoComplete='new-password'
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            disabled={busy}
+            fullWidth
+          />
+          <TextField
+            label='Confirm new password'
+            type='password'
+            size='small'
+            autoComplete='new-password'
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            disabled={busy}
+            fullWidth
+          />
+          <Stack direction='row' spacing={1} justifyContent='flex-end'>
+            <Button size='small' onClick={reset} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              size='small'
+              variant='contained'
+              onClick={submitRotate}
+              disabled={
+                busy || !currentPassword || !newPassword || !confirmPassword
+              }
+            >
+              {busy ? 'Saving...' : 'Save new password'}
+            </Button>
+          </Stack>
+        </Stack>
+      )}
+      {me.hasPassword && mode === 'confirmClear' && (
+        <Stack spacing={1.5}>
+          <Typography variant='body2'>
+            Remove your local password? You will no longer be able to log in
+            with username + password until an administrator issues a new
+            password-set link. Linked OIDC identities (if any) keep working.
+          </Typography>
+          <Stack direction='row' spacing={1} justifyContent='flex-end'>
+            <Button size='small' onClick={reset} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              size='small'
+              variant='contained'
+              color='warning'
+              onClick={submitClear}
+              disabled={busy}
+            >
+              {busy ? 'Removing...' : 'Confirm remove'}
+            </Button>
+          </Stack>
+        </Stack>
       )}
     </Box>
-    <Typography variant='body2' color='text.secondary'>
-      {me.hasPassword
-        ? 'You can log in with your username and password. To rotate it, ask an administrator to issue a password-set link.'
-        : 'No local password is set. To enable username + password login, ask an administrator for a password-set link.'}
-    </Typography>
-  </Box>
-);
+  );
+};
 
 // IdentitiesCard renders the user's primary OIDC identity (if it isn't
 // the internal one — see isInternalIdentity for the rationale) plus
@@ -272,8 +553,8 @@ const IdentitiesCard: React.FC<{
     return (
       <Paper variant='outlined' sx={{ p: 3 }}>
         <Typography variant='body2' color='text.secondary'>
-          No external identities are linked to your account. Sign in via
-          OIDC to link one.
+          No external identities are linked to your account. Sign in via OIDC to
+          link one.
         </Typography>
       </Paper>
     );
@@ -282,13 +563,7 @@ const IdentitiesCard: React.FC<{
   return (
     <Paper variant='outlined'>
       <Stack divider={<Divider />}>
-        {showPrimary && (
-          <IdentityRow
-            sub={me.sub}
-            issuer={me.issuer}
-            primary
-          />
-        )}
+        {showPrimary && <IdentityRow sub={me.sub} issuer={me.issuer} primary />}
         {identities.map((id) => (
           <IdentityRow
             key={id.id}
@@ -461,10 +736,7 @@ const GroupList: React.FC<{
                       style={{ display: 'inline-flex' }}
                       aria-label={`Open ${g.name}`}
                     >
-                      <OpenInNewIcon
-                        fontSize='inherit'
-                        color='action'
-                      />
+                      <OpenInNewIcon fontSize='inherit' color='action' />
                     </Link>
                   </Tooltip>
                 </Box>
