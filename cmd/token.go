@@ -163,6 +163,10 @@ func init() {
 	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
 	tokenCreateCmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
 		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
+	tokenCreateCmd.Flags().String("kid", "", "Override the JWS key ID ('kid' header) stamped on the token. Pelican normally "+
+		"auto-detects the right KID by matching the local signing key against the issuer's published JWKS, so this flag "+
+		"is only needed when auto-detection cannot reach the issuer (e.g. air-gapped) or when you need to force a "+
+		"specific KID for testing.")
 }
 
 func splitClaim(claim string) (string, string, error) {
@@ -179,50 +183,68 @@ func splitClaim(claim string) (string, string, error) {
 	return key, val, nil
 }
 
-// Given some issuer and a set of KIDs, determine whether the issuer's JWKS contains a key with a matching KID
-func issuerMatchesKey(issuer string, kidSet map[string]struct{}) (bool, error) {
-	remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer)
-	if err != nil {
-		return false, err
-	}
-
-	for kid := range kidSet {
-		if _, ok := (*remoteJWKS).LookupKeyID(kid); ok {
-			log.Debugf("Found matching key ID %s in JWKS from issuer %s", kid, issuer)
-			return true, nil
+// findMatchingRemoteKey reports the first key in `remote` whose public-key
+// material matches any key in `local`. The comparison uses the RFC 7638 JWK
+// thumbprint (via jwk.Equal), so it is robust to issuers that publish keys
+// under a KID that differs from the SHA256 thumbprint Pelican computes
+// locally (e.g. short OAuth2-issuer KIDs like "c2a5"). String-based KID
+// comparison would miss such matches, especially with externally-supplied
+// RSA keys.
+//
+// Returning the matched remote key (rather than just a bool) lets callers
+// pick up whatever KID the issuer assigned to it, so the resulting JWT can
+// be stamped with a KID the issuer's verifiers will recognize.
+func findMatchingRemoteKey(remote, local jwk.Set) jwk.Key {
+	ctx := context.Background()
+	localIt := local.Keys(ctx)
+	for localIt.Next(ctx) {
+		localKey := localIt.Pair().Value.(jwk.Key)
+		remoteIt := remote.Keys(ctx)
+		for remoteIt.Next(ctx) {
+			remoteKey := remoteIt.Pair().Value.(jwk.Key)
+			if jwk.Equal(localKey, remoteKey) {
+				log.Debugf("Local key with KID %s matches remote key with KID %s by thumbprint", localKey.KeyID(), remoteKey.KeyID())
+				return remoteKey
+			}
 		}
 	}
-
-	return false, nil
+	return nil
 }
 
-// Given a Pelican resource and a set of KIDs, discover issuers from the Director
-// and return the first whose JWKS contains a key matching one of the input KIDs
+// Given some issuer and the set of locally-known public keys, determine whether
+// the issuer's JWKS contains a key with the same public key material. Returns
+// the matched remote key (or nil) so callers can adopt its KID.
+func issuerMatchesKey(issuer string, localKeys jwk.Set) (jwk.Key, error) {
+	remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer)
+	if err != nil {
+		return nil, err
+	}
+	return findMatchingRemoteKey(*remoteJWKS, localKeys), nil
+}
+
+// Given a Pelican resource and the set of locally-known public keys, discover
+// issuers from the Director and return the first whose JWKS contains a key
+// matching the signing key by public key material. The matched remote key is
+// returned alongside so callers can adopt the issuer-assigned KID.
 //
-// This is use to handle multi-issuer namespaces where it may not be obvious to the user
-// which issuer aligns with their signing key.
-func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]struct{}) (string, error) {
+// This is used to handle multi-issuer namespaces where it may not be obvious
+// to the user which issuer aligns with their signing key.
+func getIssuer(directorInfo server_structs.DirectorResponse, localKeys jwk.Set) (string, jwk.Key, error) {
 	if len(directorInfo.XPelAuthHdr.Issuers) == 0 {
-		return "", errors.Errorf("no issuers found for %s in the Director response", directorInfo.XPelNsHdr.Namespace)
+		return "", nil, errors.Errorf("no issuers found for %s in the Director response", directorInfo.XPelNsHdr.Namespace)
 	}
 
-	// Comb through the JWKS from each issuer to find which matches the signing key
 	for _, issuer := range directorInfo.XPelAuthHdr.Issuers {
 		remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer.String())
 		if err != nil {
 			log.Warningf("Unable to get JWKS from issuer URL %s: %v; skipping", issuer, err)
 			continue
 		}
-		it := (*remoteJWKS).Keys(context.Background())
-		for it.Next(context.Background()) {
-			key := it.Pair().Value.(jwk.Key)
-			if _, ok := kidSet[key.KeyID()]; ok {
-				log.Debugf("Found matching key ID %s in JWKS from issuer %s", key.KeyID(), issuer.String())
-				return issuer.String(), nil
-			}
-
-			log.Debugf("Key ID %s from issuer %s does not match any of the locally-provided signing keys: %v", key.KeyID(), issuer.String(), kidSet)
+		if matched := findMatchingRemoteKey(*remoteJWKS, localKeys); matched != nil {
+			log.Debugf("Found matching key in JWKS from issuer %s", issuer.String())
+			return issuer.String(), matched, nil
 		}
+		log.Debugf("None of the keys from issuer %s match any of the locally-provided signing keys", issuer.String())
 	}
 
 	combineUrls := func(urls []*url.URL) string {
@@ -233,7 +255,7 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 		return strings.Join(combined, ", ")
 	}
 
-	return "", errors.Errorf("none of the issuers discovered at the director match your signing key; issuers that were checked: %s",
+	return "", nil, errors.Errorf("none of the issuers discovered at the director match your signing key; issuers that were checked: %s",
 		combineUrls(directorInfo.XPelAuthHdr.Issuers))
 }
 
@@ -338,7 +360,8 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 	log.Debugf("Using path %s for token scopes", sPath)
 
-	// Load the key and create a set of KIDs; we'll later check it against any issuers we may discover/be provided
+	// Load the local public JWKS so we can match it against any issuers we may
+	// discover or be provided.
 	var myJWKS jwk.Set
 	keyPath, err := cmd.Flags().GetString("private-key")
 	if err != nil {
@@ -357,32 +380,56 @@ func createToken(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	kidSet := make(map[string]struct{}, myJWKS.Len())
-	it := myJWKS.Keys(context.Background())
-	for it.Next(context.Background()) {
-		key := it.Pair().Value.(jwk.Key)
-		kidSet[key.KeyID()] = struct{}{}
+	kidOverride, err := cmd.Flags().GetString("kid")
+	if err != nil {
+		return errors.Wrap(err, "unable to get kid flag")
+	}
+	if kidOverride != "" && myJWKS.Len() != 1 {
+		return errors.Errorf("--kid override requires exactly one signing key, but %d are loaded; "+
+			"re-run with --private-key pointing at a single key file", myJWKS.Len())
 	}
 
+	// matchedRemoteKey, when non-nil, is the issuer-published key that matched
+	// our signing key by thumbprint. We use its KID for auto-detection, but
+	// only when --kid was not explicitly supplied.
+	var matchedRemoteKey jwk.Key
 	if issuer == "" {
 		// If no issuer is provided, try to discover it from the info we previously obtained
 		// from the Director
-		issuer, err = getIssuer(directorInfo, kidSet)
+		issuer, matchedRemoteKey, err = getIssuer(directorInfo, myJWKS)
 		if err != nil {
 			return errors.Wrapf(err, "unable to determine issuer for resource %s; you may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
 		}
 	} else {
 		// If an issuer is provided, check whether it matches the signing key
-		matches, err := issuerMatchesKey(issuer, kidSet)
+		matchedRemoteKey, err = issuerMatchesKey(issuer, myJWKS)
 		if err != nil {
 			log.Errorf("unable to fetch public JWKS from provided issuer %s, using anyway: %v; ", issuer, err)
-		} else if !matches {
+		} else if matchedRemoteKey == nil {
 			// If the user-provided issuer does not match the signing key, we should warn the user
 			// but still allow them to use it -- maybe they're creating tokens before the infrastructure is set up
 			log.Errorf("provided issuer %s does not match the signing key; using anyway", issuer)
 		}
 	}
 	tokenConfig.Issuer = issuer
+
+	// Determine the effective KID to stamp on the JWT. Precedence:
+	//  1. --kid: an explicit user override always wins. Auto-detection from
+	//     the matched remote key is suppressed entirely so the user can be
+	//     certain that whatever they passed is what ends up on the JWT.
+	//  2. The KID the issuer assigned to the matched key, when one was
+	//     found. This means users don't have to learn about --kid for the
+	//     common case where an OAuth2 issuer publishes RSA keys with short
+	//     KIDs like "c2a5".
+	//  3. Otherwise, leave it for AssignKeyID (thumbprint).
+	var effectiveKid string
+	switch {
+	case kidOverride != "":
+		effectiveKid = kidOverride
+	case matchedRemoteKey != nil && matchedRemoteKey.KeyID() != "":
+		effectiveKid = matchedRemoteKey.KeyID()
+		log.Debugf("Auto-detected KID %q from issuer's JWKS for the matched signing key", effectiveKid)
+	}
 
 	// Add token scopes for object manipulation
 	read, _ := cmd.Flags().GetBool("read")
@@ -465,7 +512,27 @@ func createToken(cmd *cobra.Command, args []string) error {
 		tokenConfig.Claims = claims
 	}
 
-	tok, err := tokenConfig.CreateToken(keyPath)
+	var tok string
+	if effectiveKid == "" {
+		tok, err = tokenConfig.CreateToken(keyPath)
+	} else {
+		// Load the private key directly so we can stamp the resolved KID onto
+		// the JWS header. CreateTokenWithKey's internal AssignKeyID is a no-op
+		// when the KID is already set, so this sticks.
+		var signingKey jwk.Key
+		if keyPath == "" {
+			signingKey, err = config.GetIssuerPrivateJWK()
+		} else {
+			signingKey, err = config.GetIssuerPrivateJWK(keyPath)
+		}
+		if err != nil {
+			return errors.Wrap(err, "Failed to load signing key")
+		}
+		if err := signingKey.Set(jwk.KeyIDKey, effectiveKid); err != nil {
+			return errors.Wrap(err, "failed to apply KID to signing key")
+		}
+		tok, err = tokenConfig.CreateTokenWithKey(signingKey)
+	}
 	if err != nil {
 		return errors.Wrap(err, "unable to create token")
 	}

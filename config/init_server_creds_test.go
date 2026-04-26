@@ -420,6 +420,9 @@ func TestGenerateCertNoSpuriousCAKey(t *testing.T) {
 }
 
 func TestSigningAlgorithmForJWK(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(ResetConfig)
+
 	t.Run("ec-p256-key", func(t *testing.T) {
 		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		require.NoError(t, err)
@@ -488,6 +491,9 @@ func TestSigningAlgorithmForJWK(t *testing.T) {
 }
 
 func TestLoadSinglePEMAlgorithm(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(ResetConfig)
+
 	t.Run("ecdsa-key-gets-ES256", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyFile := filepath.Join(tempDir, "ec.pem")
