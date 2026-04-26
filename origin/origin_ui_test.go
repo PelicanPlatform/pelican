@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -53,6 +54,24 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 	}
 	tok, err := tk.CreateToken()
 	require.NoError(t, err, "Failed to create token")
+
+	// AuthHandler revalidates the user record on every cookie read;
+	// without a backing User row the cookie 401s with "Your account
+	// has been deactivated" before the handler under test even runs.
+	// Idempotent: the OnConflict-DoNothing means tests minting many
+	// tokens for the same subject only get one row.
+	if database.ServerDatabase != nil {
+		_, aupVersion, _ := web_ui.CurrentAUPVersion()
+		require.NoError(t, database.ServerDatabase.Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&database.User{
+				ID:         subject,
+				Username:   subject,
+				Sub:        subject,
+				Issuer:     "https://example.com",
+				Status:     database.UserStatusActive,
+				AUPVersion: aupVersion,
+			}).Error)
+	}
 
 	return tok
 }
@@ -223,6 +242,108 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
+	})
+
+	// The following block of subtests pins the contract that
+	// collections are NOT limited to the top-level federation
+	// prefix of an export — they may live anywhere within an
+	// exported namespace tree. Per ticket #3298 ("the faculty member
+	// will get a new collection or namespace prefix that is
+	// associated with a group owned by the faculty"), operators want
+	// a single export of, say, /test1 to host a fleet of collections
+	// at /test1/projectA, /test1/projectB/2026, etc., without having
+	// to declare each as its own export. The standalone helper has
+	// dense unit coverage in collections_namespace_test.go; these
+	// tests exercise the same boundary through the live HTTP handler.
+
+	// makeCreateRequest is a tiny helper so each sub-namespace case
+	// stays focused on the assertion (status code) rather than on
+	// JSON+HTTP boilerplate.
+	makeCreateRequest := func(t *testing.T, name, namespace string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(CreateCollectionReq{
+			Name:        name,
+			Description: "subset-namespace test",
+			Namespace:   namespace,
+			Visibility:  "public",
+		})
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		token := generateToken(t, []token_scopes.TokenScope{
+			token_scopes.WebUi_Access,
+			token_scopes.Collection_Create,
+		}, "test-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: token})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	t.Run("create-collection-at-immediate-sub-namespace", func(t *testing.T) {
+		// /test1 is exported; /test1/projectA is one path-segment
+		// deep — the most common "I want a collection inside a
+		// shared export" shape.
+		r := makeCreateRequest(t, "test-sub-immediate", "/test1/projectA")
+		assert.Equal(t, http.StatusCreated, r.Code,
+			"a collection rooted one segment below an exported prefix must be accepted (body: %s)", r.Body.String())
+
+		// Round-trip the namespace to confirm the row stored the
+		// requested sub-path verbatim, not a normalized version.
+		var resp map[string]string
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&resp))
+		require.NotEmpty(t, resp["id"])
+		col, err := database.GetCollection(database.ServerDatabase, resp["id"], "test-user", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "/test1/projectA", col.Namespace)
+	})
+
+	t.Run("create-collection-at-deep-sub-namespace", func(t *testing.T) {
+		// Operators may want a deeper tree (per-team, per-year, ...)
+		// inside a single export. There is no depth limit by design.
+		r := makeCreateRequest(t, "test-sub-deep", "/test1/team/2026/data")
+		assert.Equal(t, http.StatusCreated, r.Code,
+			"deeper sub-paths under an export must be accepted (body: %s)", r.Body.String())
+	})
+
+	t.Run("create-collections-at-sibling-sub-namespaces", func(t *testing.T) {
+		// Two collections at distinct sub-paths of the same export
+		// must both succeed — there's nothing about the first one
+		// that forecloses the second.
+		r1 := makeCreateRequest(t, "test-sub-sibling-A", "/test1/siblingA")
+		assert.Equal(t, http.StatusCreated, r1.Code,
+			"first sibling collection should be accepted (body: %s)", r1.Body.String())
+		r2 := makeCreateRequest(t, "test-sub-sibling-B", "/test1/siblingB")
+		assert.Equal(t, http.StatusCreated, r2.Code,
+			"second sibling collection at a different sub-path of the same export must also be accepted (body: %s)", r2.Body.String())
+	})
+
+	t.Run("create-collection-under-second-export", func(t *testing.T) {
+		// The fixture ships two exports (/test1 and /test2). Each
+		// gets its own sub-namespace acceptance independently.
+		r := makeCreateRequest(t, "test-second-export-sub", "/test2/run3")
+		assert.Equal(t, http.StatusCreated, r.Code,
+			"a sub-path of the second export must be accepted regardless of state under the first (body: %s)", r.Body.String())
+	})
+
+	t.Run("create-collection-rejected-when-prefix-is-just-a-string-prefix", func(t *testing.T) {
+		// `/test1xxx` shares a string prefix with `/test1` but is
+		// NOT a path-descendant of it (no `/` separator after the
+		// matched portion). Acceptance here would let an operator
+		// trivially escape the boundary of an exported namespace.
+		r := makeCreateRequest(t, "test-prefix-lookalike", "/test1xxx")
+		assert.Equal(t, http.StatusBadRequest, r.Code,
+			"a non-descendant lookalike must be rejected even though it shares a string prefix (body: %s)", r.Body.String())
+	})
+
+	t.Run("create-collection-rejected-when-namespace-is-relative", func(t *testing.T) {
+		// The ACL layer expects absolute paths; defensively reject
+		// at the create boundary so we don't store a row that would
+		// fail every subsequent member-URL check.
+		r := makeCreateRequest(t, "test-relative-namespace", "test1/projectA")
+		assert.Equal(t, http.StatusBadRequest, r.Code,
+			"a relative namespace (no leading /) must be rejected (body: %s)", r.Body.String())
 	})
 
 	t.Run("create-collection-without-permission", func(t *testing.T) {

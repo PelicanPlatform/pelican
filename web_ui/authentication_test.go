@@ -64,10 +64,20 @@ func migrateTestDB(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for group members table")
 	err = database.ServerDatabase.AutoMigrate(&database.User{})
 	require.NoError(t, err, "Failed to migrate DB for users table")
+	// User struct intentionally has no PasswordHash field; this helper
+	// adds the password_hash column so password-based login tests work.
+	require.NoError(t, database.AutoMigrateCredentialsForTests(database.ServerDatabase),
+		"Failed to migrate DB for user credentials column")
 	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
 	require.NoError(t, err, "Failed to migrate DB for group invite links table")
 	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
 	require.NoError(t, err, "Failed to migrate DB for user identities table")
+	err = database.ServerDatabase.AutoMigrate(&database.AUPDocument{})
+	require.NoError(t, err, "Failed to migrate DB for AUP documents table")
+	err = database.ServerDatabase.AutoMigrate(&database.UserScope{})
+	require.NoError(t, err, "Failed to migrate DB for user_scopes table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupScope{})
+	require.NoError(t, err, "Failed to migrate DB for group_scopes table")
 }
 
 func TestWaitUntilLogin(t *testing.T) {
@@ -284,6 +294,16 @@ func TestPasswordResetAPI(t *testing.T) {
 		tok, err := loginCookieTokenCfg.CreateToken()
 		require.NoError(t, err)
 
+		// AuthHandler now revalidates the user record on every cookie
+		// read; without a backing User row, the cookie 401s before
+		// reaching the AdminAuthHandler that this subtest is meant
+		// to exercise.
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID: "user", Username: "user", Sub: "user",
+			Issuer: param.Server_ExternalWebUrl.GetString(),
+			Status: database.UserStatusActive,
+		}).Error)
+
 		reqReset.AddCookie(&http.Cookie{
 			Name:  "login",
 			Value: tok,
@@ -494,13 +514,21 @@ func TestWhoamiAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 
-		expectedRes := WhoAmIRes{Authenticated: true, Role: "user", User: "user"}
-		resStr, err := json.Marshal(expectedRes)
-		require.NoError(t, err)
+		// The whoami response also reports AUP-acceptance state (see
+		// the embedded default AUP in web_ui/aup.go). For this test the
+		// user hasn't yet signed; assert the core fields directly and
+		// ignore the optional aup_version / requires_aup details.
+		expectedRes := WhoAmIRes{Authenticated: true, Role: "user", User: "user", RequiresAUP: true}
+		var actual WhoAmIRes
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &actual))
 
 		//Check for http response code 200
 		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
-		assert.JSONEq(t, string(resStr), recorder.Body.String())
+		assert.Equal(t, expectedRes.Authenticated, actual.Authenticated)
+		assert.Equal(t, expectedRes.Role, actual.Role)
+		assert.Equal(t, expectedRes.User, actual.User)
+		assert.Equal(t, expectedRes.RequiresAUP, actual.RequiresAUP)
+		assert.NotEmpty(t, actual.AUPVersion)
 		assert.NotZero(t, recorder.Header().Get("X-CSRF-Token"))
 	})
 	//Invoked without valid cookie, should return there is no logged-in user
@@ -659,42 +687,48 @@ func TestCheckAdmin(t *testing.T) {
 			expectedAdmin: false,
 			expectedMsg:   "You don't have permission to perform this action",
 		},
-		// Test cases for ID-based admin matching (#3050)
+		// CheckAdmin matches the *Username* against Server.UIAdminUsers
+		// only — never the opaque internal ID and never the OIDC Sub.
+		// Per the user/group design contract, Username is the sole
+		// authorization handle; ID is internal-only and Sub is a
+		// third-party-controlled OIDC subject claim. Each of the four
+		// test cases below would have granted admin under the old
+		// permissive matcher; under the current contract they MUST not.
 		{
-			name:          "user-matched-by-id",
+			name:          "id-matches-admin-list-must-not-elevate",
 			user:          "user1",
 			id:            "internal-id-123",
 			adminUsers:    []string{"internal-id-123"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "user-matched-by-sub",
+			name:          "sub-matches-admin-list-must-not-elevate",
 			user:          "user1",
 			sub:           "http://cilogon.org/serverA/users/12345",
 			adminUsers:    []string{"http://cilogon.org/serverA/users/12345"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "user-matched-by-id-not-username",
+			name:          "id-matches-but-username-does-not",
 			user:          "user1",
 			id:            "internal-id-456",
 			adminUsers:    []string{"internal-id-456", "other-admin"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "user-matched-by-sub-not-username",
+			name:          "sub-matches-but-username-does-not",
 			user:          "user1",
 			sub:           "oidc-sub-789",
 			adminUsers:    []string{"oidc-sub-789"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
 			name:          "empty-id-and-sub-no-false-positive",
@@ -727,14 +761,21 @@ func TestCheckAdmin(t *testing.T) {
 			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "username-changed-but-id-still-matches",
+			// Renaming a user doesn't preserve admin status via the
+			// stable internal ID — the admin list is a list of
+			// usernames. After a rename, the admin entry must be
+			// updated to the new username, or the admin loses their
+			// privilege. This is intentional: ID-based matching would
+			// silently re-grant admin if a malicious actor could pin
+			// an ID matching an entry on the admin list.
+			name:          "rename-does-not-preserve-admin-via-id",
 			user:          "new-display-name",
 			id:            "stable-id-001",
 			sub:           "oidc-sub-001",
 			adminUsers:    []string{"stable-id-001"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 	}
 
@@ -883,6 +924,102 @@ func TestAdminAuthHandler(t *testing.T) {
 	}
 }
 
+// setupUserStatusTestDB attaches a fresh in-memory SQLite to
+// database.ServerDatabase and migrates the user table. The cleanup
+// restores whatever DB was attached before so the broader test suite
+// stays happy. We use this minimal setup (no full config.InitServer)
+// because userRecordIsActive only touches the User row.
+func setupUserStatusTestDB(t *testing.T) {
+	t.Helper()
+	prev := database.ServerDatabase
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	// User is the row userRecordIsActive looks up; the rest are
+	// here because DeleteUser (used in the soft-delete subtest)
+	// also cleans up CollectionACL rows referencing the user's
+	// personal-group name and GroupMember rows referencing the
+	// user.
+	require.NoError(t, db.AutoMigrate(
+		&database.User{},
+		&database.GroupMember{},
+		&database.CollectionACL{},
+	))
+	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
+	database.ServerDatabase = db
+	t.Cleanup(func() { database.ServerDatabase = prev })
+}
+
+// TestUserRecordIsActive pins the contract that AuthHandler's
+// per-request validation:
+//   - returns true for an active user record,
+//   - returns false when the user has been soft-deleted (DeletedAt
+//     set; GORM's default scope filters them out),
+//   - returns false when the user is marked inactive,
+//   - fails OPEN when the lookup hits an unrelated DB error or
+//     ServerDatabase is nil (otherwise a transient hiccup would
+//     lock every user out).
+func TestUserRecordIsActive(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("nil ServerDatabase fails open", func(t *testing.T) {
+		prev := database.ServerDatabase
+		database.ServerDatabase = nil
+		t.Cleanup(func() { database.ServerDatabase = prev })
+		assert.True(t, userRecordIsActive("anything"),
+			"with no DB, we cannot prove the user is revoked — must fail open")
+	})
+
+	t.Run("active user passes", func(t *testing.T) {
+		setupUserStatusTestDB(t)
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID:       "user-active",
+			Username: "alice",
+			Sub:      "alice",
+			Issuer:   "https://example.com",
+			Status:   database.UserStatusActive,
+		}).Error)
+		assert.True(t, userRecordIsActive("user-active"),
+			"a real, active row is what authenticated users hit on every request")
+	})
+
+	t.Run("inactive user is revoked", func(t *testing.T) {
+		setupUserStatusTestDB(t)
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID:       "user-inactive",
+			Username: "bob",
+			Sub:      "bob",
+			Issuer:   "https://example.com",
+			Status:   database.UserStatusInactive,
+		}).Error)
+		assert.False(t, userRecordIsActive("user-inactive"),
+			"a row with status=inactive must be treated as revoked, even though it still exists in the DB")
+	})
+
+	t.Run("soft-deleted user is revoked", func(t *testing.T) {
+		setupUserStatusTestDB(t)
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID:       "user-deleted",
+			Username: "carol",
+			Sub:      "carol",
+			Issuer:   "https://example.com",
+			Status:   database.UserStatusActive,
+		}).Error)
+		// Soft-delete via the public deletion path (admin self-driven
+		// is the easiest path that doesn't require a separate
+		// requestor); GORM marks DeletedAt and the default scope
+		// hides the row from subsequent reads.
+		require.NoError(t, database.DeleteUser(database.ServerDatabase, "user-deleted", "user-deleted", false))
+		assert.False(t, userRecordIsActive("user-deleted"),
+			"a soft-deleted user must lose authority on the next cookie read; not at the next 16h cookie expiration")
+	})
+
+	t.Run("unknown user ID is revoked", func(t *testing.T) {
+		setupUserStatusTestDB(t)
+		assert.False(t, userRecordIsActive("user-never-existed"),
+			"a cookie referring to a user ID that doesn't exist must not be honored")
+	})
+}
+
 func TestLogoutAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -969,8 +1106,34 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})
-	t.Run("registry-included-by-default", func(t *testing.T) {
+	// All four module types — including the registry — are now gated by
+	// their own EnableOIDC flag. The registry no longer forces OIDC on
+	// unconditionally; per the user/group design contract, a registry
+	// can run with only local username/password accounts.
+	t.Run("none-by-default", func(t *testing.T) {
 		server_utils.ResetTestState()
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
+	t.Run("registry-included-only-if-flag-is-on", func(t *testing.T) {
+		server_utils.ResetTestState()
+		require.NoError(t, param.Registry_EnableOIDC.Set(true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -993,7 +1156,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
 		require.NoError(t, param.Origin_EnableOIDC.Set(true))
-		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"origin"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
 
@@ -1015,7 +1178,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
 		require.NoError(t, param.Cache_EnableOIDC.Set(true))
-		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"cache"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
 
@@ -1037,7 +1200,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
 		require.NoError(t, param.Director_EnableOIDC.Set(true))
-		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
 
@@ -1056,8 +1219,9 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 		assert.Equal(t, expected, getResult)
 	})
 
-	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
+	t.Run("all-modules-included-when-all-flags-on", func(t *testing.T) {
 		server_utils.ResetTestState()
+		require.NoError(t, param.Registry_EnableOIDC.Set(true))
 		require.NoError(t, param.Origin_EnableOIDC.Set(true))
 		require.NoError(t, param.Cache_EnableOIDC.Set(true))
 		require.NoError(t, param.Director_EnableOIDC.Set(true))
