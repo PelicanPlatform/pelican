@@ -35,6 +35,31 @@ type (
 	}
 )
 
+// handleExportPrefixes returns just the FederationPrefix list for the
+// origin's configured exports — no storage paths, S3 credentials,
+// Globus IDs, or registry edit-URL tokens. The prefixes are already
+// advertised to the federation, so leaking them to authenticated
+// callers reveals nothing new; the slim response shape lets us gate
+// this on AuthHandler alone (rather than AdminAuthHandler) so the
+// collection-onboarding form's prefix dropdown works for callers who
+// hold server.collection_admin without holding server.web_admin.
+func handleExportPrefixes(ctx *gin.Context) {
+	exports, err := server_utils.GetOriginExports()
+	if err != nil {
+		log.Errorf("Failed to get the origin exports: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server encountered error when getting the origin exports: " + err.Error(),
+		})
+		return
+	}
+	prefixes := make([]string, 0, len(exports))
+	for _, e := range exports {
+		prefixes = append(prefixes, e.FederationPrefix)
+	}
+	ctx.JSON(http.StatusOK, gin.H{"prefixes": prefixes})
+}
+
 func handleExports(ctx *gin.Context) {
 	st := param.Origin_StorageType.GetString()
 	storageType, err := server_structs.ParseOriginStorageType(st)

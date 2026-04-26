@@ -97,16 +97,14 @@ const Page = () => {
       </Breadcrumbs>
       <SettingHeader title={'Add User'} />
 
-      {!created && (
-        <UserForm onSubmit={onCreate} isSubmitting={isSubmitting} />
-      )}
+      {!created && <UserForm onSubmit={onCreate} isSubmitting={isSubmitting} />}
 
       {created && !invite && (
         <Box>
           <Alert severity='success' sx={{ mb: 2 }}>
             Created <strong>{created.username}</strong>. Generate a password-set
-            invite below and hand the link to the user; they will pick their
-            own password (admins do not see it).
+            invite below and hand the link to the user; they will pick their own
+            password (admins do not see it).
           </Alert>
           <Stack direction='row' spacing={1}>
             <Button
@@ -125,8 +123,8 @@ const Page = () => {
         <Box>
           <Alert severity='success' sx={{ mb: 2 }}>
             Hand this URL to the user. It is shown <strong>only once</strong>,
-            expires {new Date(invite.expiresAt).toLocaleString()}, and can
-            only be used once.
+            expires {new Date(invite.expiresAt).toLocaleString()}, and can only
+            be used once.
           </Alert>
           <Stack direction='row' spacing={1} alignItems='center' sx={{ mb: 2 }}>
             <TextField

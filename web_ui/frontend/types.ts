@@ -141,7 +141,14 @@ export interface User {
 
 export type UserPost = Omit<
   User,
-  'id' | 'createdAt' | 'updatedAt' | 'status' | 'lastLoginAt' | 'displayName' | 'aupVersion' | 'aupAgreedAt'
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'status'
+  | 'lastLoginAt'
+  | 'displayName'
+  | 'aupVersion'
+  | 'aupAgreedAt'
 >;
 
 export type UserPatch = Partial<Omit<User, 'createdAt'>>;
@@ -195,7 +202,13 @@ export interface Group {
 
 export type GroupPost = Omit<
   Group,
-  'members' | 'createdBy' | 'createdAt' | 'updatedAt' | 'ownerId' | 'adminId' | 'adminType'
+  | 'members'
+  | 'createdBy'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'ownerId'
+  | 'adminId'
+  | 'adminType'
 >;
 
 export interface GroupMember {
@@ -250,7 +263,10 @@ export interface UserIdentity {
   updatedAt: string;
 }
 
-export type UserIdentityPost = Omit<UserIdentity, 'id' | 'userId' | 'createdAt'>;
+export type UserIdentityPost = Omit<
+  UserIdentity,
+  'id' | 'userId' | 'createdAt'
+>;
 
 export interface WellKnownConfiguration {
   director_endpoint: string;

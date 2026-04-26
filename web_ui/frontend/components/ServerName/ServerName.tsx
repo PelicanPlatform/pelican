@@ -9,10 +9,7 @@ interface ServerNameProps {
 }
 
 const ServerName = ({ defaultName }: ServerNameProps) => {
-  const {
-    data: metadata,
-    isLoading,
-  } = useApiSWR<ServerLocalMetadata>(
+  const { data: metadata, isLoading } = useApiSWR<ServerLocalMetadata>(
     'Failed to fetch server name',
     '/api/v1.0/server/localMetadata',
     async () => await fetch('/api/v1.0/server/localMetadata'),

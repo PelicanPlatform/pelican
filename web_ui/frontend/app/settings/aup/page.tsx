@@ -86,16 +86,10 @@ const AUPSourceChip: React.FC<{ source: AUPDocumentResp['source'] }> = ({
   switch (source) {
     case 'db':
       return (
-        <Chip
-          size='small'
-          color='success'
-          label='Edited via UI (active)'
-        />
+        <Chip size='small' color='success' label='Edited via UI (active)' />
       );
     case 'operator':
-      return (
-        <Chip size='small' color='info' label='From Server.AUPFile' />
-      );
+      return <Chip size='small' color='info' label='From Server.AUPFile' />;
     case 'default':
       return (
         <Chip
@@ -134,9 +128,9 @@ const Editor: React.FC = () => {
   const [draftLastUpdated, setDraftLastUpdated] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const dirty = doc !== null && (
-    draft !== doc.content || draftLastUpdated !== (doc.lastUpdated ?? '')
-  );
+  const dirty =
+    doc !== null &&
+    (draft !== doc.content || draftLastUpdated !== (doc.lastUpdated ?? ''));
 
   const reload = async () => {
     setLoading(true);
@@ -146,7 +140,9 @@ const Editor: React.FC = () => {
       if (r.status === 404) {
         // Server.AUPFile = "none" — disabled. No editor.
         setDoc(null);
-        setError('AUP enforcement is disabled on this server (Server.AUPFile = "none").');
+        setError(
+          'AUP enforcement is disabled on this server (Server.AUPFile = "none").'
+        );
         return;
       }
       if (!r.ok) {
@@ -242,10 +238,10 @@ const Editor: React.FC = () => {
             Acceptable Use Policy
           </Typography>
           <Typography variant='body2' color='text.secondary'>
-            Edit the Markdown source on the left; the rendered preview
-            on the right updates as you type. Saving installs the new
-            text as the active policy and forces every user on the
-            server to re-accept on their next visit.
+            Edit the Markdown source on the left; the rendered preview on the
+            right updates as you type. Saving installs the new text as the
+            active policy and forces every user on the server to re-accept on
+            their next visit.
           </Typography>
         </Box>
 
@@ -279,9 +275,9 @@ const Editor: React.FC = () => {
                   {doc.source === 'default'
                     ? 'Pelican-shipped default'
                     : 'file at Server.AUPFile'}
-                  . Saving here will store an operator-edited copy in
-                  the database; that copy will then take precedence
-                  over the file/default until removed.
+                  . Saving here will store an operator-edited copy in the
+                  database; that copy will then take precedence over the
+                  file/default until removed.
                 </Alert>
               )}
             </Stack>
@@ -359,17 +355,13 @@ const Editor: React.FC = () => {
               </Typography>
               {history.length === 0 ? (
                 <Typography color='text.secondary'>
-                  No edits yet — the active version above is the
-                  current source-of-truth.
+                  No edits yet — the active version above is the current
+                  source-of-truth.
                 </Typography>
               ) : (
                 <Stack spacing={1.5}>
                   {history.map((row) => (
-                    <Paper
-                      key={row.id}
-                      variant='outlined'
-                      sx={{ p: 1.5 }}
-                    >
+                    <Paper key={row.id} variant='outlined' sx={{ p: 1.5 }}>
                       <Stack
                         direction='row'
                         spacing={1}
@@ -383,15 +375,11 @@ const Editor: React.FC = () => {
                           label={row.version}
                         />
                         {row.isActive && (
-                          <Chip
-                            size='small'
-                            color='success'
-                            label='active'
-                          />
+                          <Chip size='small' color='success' label='active' />
                         )}
                         <Typography variant='body2' color='text.secondary'>
-                          Saved {new Date(row.createdAt).toLocaleString()}{' '}
-                          by {row.createdBy}
+                          Saved {new Date(row.createdAt).toLocaleString()} by{' '}
+                          {row.createdBy}
                         </Typography>
                         <Box flexGrow={1} />
                         <Button

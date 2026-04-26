@@ -97,10 +97,7 @@ const UserService = {
     );
     return await r.json();
   },
-  unlinkIdentity: async (
-    userId: string,
-    identityId: string
-  ): Promise<void> => {
+  unlinkIdentity: async (userId: string, identityId: string): Promise<void> => {
     await fetchApi(
       async () =>
         await secureFetch(

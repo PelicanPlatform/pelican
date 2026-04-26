@@ -20,9 +20,43 @@ const MeService = {
         })
     );
   },
-  // No setPassword on the self-service surface by design: passwords are
-  // only set via an admin-issued password-invite the user redeems through
-  // /invites/redeem/password. See the user/group design contract.
+  // /me/password endpoints exist ONLY for "manage what's already set":
+  // updatePassword rotates an existing password (caller must supply
+  // the current one), clearPassword turns local-password login off.
+  // There is no self-service "create" — that path stays admin-only
+  // via password-invite redemption so an OIDC-only user can't grow a
+  // password that outlives the IdP relationship.
+  updatePassword: async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<void> => {
+    await fetchApi(
+      async () =>
+        await secureFetch(`${API_V1_BASE_URL}/me/password`, {
+          method: 'PUT',
+          body: JSON.stringify({ currentPassword, newPassword }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+    );
+  },
+  clearPassword: async (): Promise<void> => {
+    await fetchApi(
+      async () =>
+        await secureFetch(`${API_V1_BASE_URL}/me/password`, {
+          method: 'DELETE',
+        })
+    );
+  },
+  // The caller's effective scope set (DB user_scopes ∪ DB group_scopes
+  // via membership ∪ config-derived grants ∪ web_admin implications).
+  // Returned as scope-name strings; the catalog at /scopes pairs each
+  // name with a human-readable description for display.
+  getScopes: async (): Promise<string[]> => {
+    const response = await fetchApi(() =>
+      fetch(`${API_V1_BASE_URL}/me/scopes`)
+    );
+    return await response.json();
+  },
   recordAUP: async (version: string): Promise<void> => {
     await fetchApi(
       async () =>
@@ -51,18 +85,15 @@ const MeService = {
   // is on the User row itself (returned by get()); secondaries are the
   // ones the user can self-unlink.
   getIdentities: async (): Promise<UserIdentity[]> => {
-    const r = await fetchApi(() =>
-      fetch(`${API_V1_BASE_URL}/me/identities`)
-    );
+    const r = await fetchApi(() => fetch(`${API_V1_BASE_URL}/me/identities`));
     return await r.json();
   },
   unlinkIdentity: async (identityId: string): Promise<void> => {
     await fetchApi(
       async () =>
-        await secureFetch(
-          `${API_V1_BASE_URL}/me/identities/${identityId}`,
-          { method: 'DELETE' }
-        )
+        await secureFetch(`${API_V1_BASE_URL}/me/identities/${identityId}`, {
+          method: 'DELETE',
+        })
     );
   },
 };

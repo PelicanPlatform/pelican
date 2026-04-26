@@ -183,6 +183,16 @@ type inviteInfoResp struct {
 	GroupID          string              `json:"groupId,omitempty"`
 	GroupName        string              `json:"groupName,omitempty"`
 	GroupDisplayName string              `json:"groupDisplayName,omitempty"`
+	// CollectionID + CollectionName + CollectionNamespace are
+	// populated when Kind == InviteKindCollectionOwnership. The
+	// namespace (path prefix) is the load-bearing detail —
+	// "accept ownership of gamma" doesn't tell the redeemer
+	// whether they're claiming /research/dataset-A or /test/foo;
+	// always render the namespace alongside the friendly name on
+	// the confirm page.
+	CollectionID        string `json:"collectionId,omitempty"`
+	CollectionName      string `json:"collectionName,omitempty"`
+	CollectionNamespace string `json:"collectionNamespace,omitempty"`
 }
 
 // handleGetInviteInfo lets the redemption UI peek at a token *without*
@@ -231,6 +241,18 @@ func handleGetInviteInfo(ctx *gin.Context) {
 		}
 		if grp, lookupErr := database.GetGroupWithMembers(database.ServerDatabase, link.GroupID); lookupErr == nil {
 			resp.GroupDisplayName = grp.DisplayName
+		}
+	}
+	if link.Kind == database.InviteKindCollectionOwnership && link.CollectionID != "" {
+		// Resolve the collection's name + namespace so the confirm
+		// page can say "Accept ownership of <name> (<namespace>)?".
+		// Errors are non-fatal — the page still renders with the
+		// bare ID.
+		var coll database.Collection
+		if err := database.ServerDatabase.Select("id", "name", "namespace").Where("id = ?", link.CollectionID).First(&coll).Error; err == nil {
+			resp.CollectionID = coll.ID
+			resp.CollectionName = coll.Name
+			resp.CollectionNamespace = coll.Namespace
 		}
 	}
 	ctx.JSON(http.StatusOK, resp)

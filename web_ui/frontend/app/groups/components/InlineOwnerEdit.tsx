@@ -127,7 +127,11 @@ const InlineOwnerEdit: React.FC<InlineOwnerEditProps> = ({
     .map((m) => m.user);
 
   return (
-    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems='flex-start'>
+    <Stack
+      direction={{ xs: 'column', sm: 'row' }}
+      spacing={1}
+      alignItems='flex-start'
+    >
       <Typography variant='body2' color='text.secondary' sx={{ pt: 1 }}>
         Transfer to:
       </Typography>

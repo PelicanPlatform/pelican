@@ -43,7 +43,7 @@ import (
 // caller outside this file can construct or hold one.
 //
 // The PasswordHash gorm tags match the production migration
-// (20260424180000_add_user_password_hash.sql): NOT NULL DEFAULT '',
+// (20260424180000_add_user_password_hash.sql): NOT NULL DEFAULT ”,
 // so AutoMigrate-driven test setups produce the same shape as a
 // goose-migrated database.
 type userCredential struct {
@@ -163,29 +163,4 @@ func userHasPassword(tx *gorm.DB, userID string) (bool, error) {
 		return false, err
 	}
 	return hp, nil
-}
-
-// usersWithPassword returns the subset of supplied user IDs that have a
-// non-empty password_hash. Batching avoids an N+1 when the caller is
-// hydrating HasPassword for a list of users (admin user table, group
-// member preloads). Same security property as userHasPassword: the hash
-// itself is never read into Go memory.
-func usersWithPassword(tx *gorm.DB, ids []string) (map[string]bool, error) {
-	out := make(map[string]bool, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	var rows []struct {
-		ID string
-	}
-	if err := tx.Table("users").
-		Select("id").
-		Where("id IN ? AND password_hash <> ''", ids).
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		out[r.ID] = true
-	}
-	return out, nil
 }
