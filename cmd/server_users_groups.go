@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -925,6 +926,208 @@ var serverUserIdentityRemoveCmd = &cobra.Command{
 	},
 }
 
+// ===== User scope commands =====
+//
+// User-level scope grants are management-plane only (Server.WebAdmin and
+// friends). The DB layer rejects any scope outside
+// token_scopes.UserGrantableScopes, so a misconfigured client cannot
+// inject a data-plane scope through this surface.
+
+var serverUserScopeCmd = &cobra.Command{
+	Use:   "scope",
+	Short: "Manage scope grants on a user",
+}
+
+var serverUserScopeListCmd = &cobra.Command{
+	Use:   "list <user-id>",
+	Short: "List scopes directly granted to a user",
+	Long: `List the scopes directly granted to a user. This does NOT include
+scopes the user inherits via group membership or via server config; for
+the full effective set inspect /api/v1.0/me/scopes for that user.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		respBody, err := makeGroupAPICall("GET", "/api/v1.0/users/"+args[0]+"/scopes", nil)
+		if err != nil {
+			return err
+		}
+		if outputJSON {
+			fmt.Println(string(respBody))
+			return nil
+		}
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(respBody, &rows); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		if len(rows) == 0 {
+			fmt.Println("No directly-granted scopes")
+			return nil
+		}
+		fmt.Printf("Found %d scope grant(s):\n\n", len(rows))
+		for _, r := range rows {
+			fmt.Printf("Scope:      %v\n", r["scope"])
+			fmt.Printf("Granted By: %v\n", r["grantedBy"])
+			fmt.Printf("Granted At: %v\n", r["grantedAt"])
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
+var serverUserScopeGrantCmd = &cobra.Command{
+	Use:   "grant <user-id>",
+	Short: "Grant a scope to a user",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		scope, _ := cmd.Flags().GetString("scope")
+		if scope == "" {
+			return errors.New("--scope is required")
+		}
+		_, err := makeGroupAPICall("POST", "/api/v1.0/users/"+args[0]+"/scopes", map[string]string{"scope": scope})
+		if err != nil {
+			return err
+		}
+		fmt.Println("Scope granted successfully")
+		return nil
+	},
+}
+
+var serverUserScopeRevokeCmd = &cobra.Command{
+	Use:   "revoke <user-id> <scope>",
+	Short: "Revoke a directly-granted scope from a user",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// The route is DELETE /users/:id/scopes/:scope. Scopes contain
+		// colons (e.g. "server.web_admin"), which are valid path
+		// characters but worth path-escaping defensively.
+		_, err := makeGroupAPICall("DELETE", "/api/v1.0/users/"+args[0]+"/scopes/"+url.PathEscape(args[1]), nil)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Scope revoked successfully")
+		return nil
+	},
+}
+
+// ===== User AUP commands =====
+
+var serverUserAUPCmd = &cobra.Command{
+	Use:   "aup",
+	Short: "Manage a user's AUP acceptance record",
+}
+
+var serverUserAUPRecordCmd = &cobra.Command{
+	Use:   "record <user-id>",
+	Short: "Record AUP acceptance on behalf of a user",
+	Long: `Record acceptance of the AUP for a user. Normally users sign the AUP
+themselves through /me/aup; this command is the admin escape hatch (e.g.
+for migrating an existing acceptance from another system).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		version, _ := cmd.Flags().GetString("version")
+		if version == "" {
+			return errors.New("--version is required (the AUP version string the user is being recorded as accepting)")
+		}
+		_, err := makeGroupAPICall("POST", "/api/v1.0/users/"+args[0]+"/aup", map[string]string{"version": version})
+		if err != nil {
+			return err
+		}
+		fmt.Println("AUP acceptance recorded successfully")
+		return nil
+	},
+}
+
+var serverUserAUPClearCmd = &cobra.Command{
+	Use:   "clear <user-id>",
+	Short: "Clear a user's AUP acceptance, forcing them to re-sign",
+	Long: `Wipe a user's recorded AUP acceptance. The user will be redirected
+through the AUP-signing flow on their next AUP-gated request. Distinct
+from rotating the active AUP itself, which forces every user on the
+server to re-accept.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := makeGroupAPICall("DELETE", "/api/v1.0/users/"+args[0]+"/aup", nil)
+		if err != nil {
+			return err
+		}
+		fmt.Println("AUP acceptance cleared")
+		return nil
+	},
+}
+
+// ===== Group scope commands =====
+//
+// Group-level scope grants are propagated to every member of the group
+// at token-mint time. Same management-only allowlist as user scopes.
+
+var serverGroupScopeCmd = &cobra.Command{
+	Use:   "scope",
+	Short: "Manage scope grants on a group",
+}
+
+var serverGroupScopeListCmd = &cobra.Command{
+	Use:   "list <group-id>",
+	Short: "List scopes granted to a group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		respBody, err := makeGroupAPICall("GET", "/api/v1.0/groups/"+args[0]+"/scopes", nil)
+		if err != nil {
+			return err
+		}
+		if outputJSON {
+			fmt.Println(string(respBody))
+			return nil
+		}
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(respBody, &rows); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		if len(rows) == 0 {
+			fmt.Println("No scope grants on this group")
+			return nil
+		}
+		fmt.Printf("Found %d scope grant(s):\n\n", len(rows))
+		for _, r := range rows {
+			fmt.Printf("Scope:      %v\n", r["scope"])
+			fmt.Printf("Granted By: %v\n", r["grantedBy"])
+			fmt.Printf("Granted At: %v\n", r["grantedAt"])
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
+var serverGroupScopeGrantCmd = &cobra.Command{
+	Use:   "grant <group-id>",
+	Short: "Grant a scope to a group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		scope, _ := cmd.Flags().GetString("scope")
+		if scope == "" {
+			return errors.New("--scope is required")
+		}
+		_, err := makeGroupAPICall("POST", "/api/v1.0/groups/"+args[0]+"/scopes", map[string]string{"scope": scope})
+		if err != nil {
+			return err
+		}
+		fmt.Println("Scope granted successfully")
+		return nil
+	},
+}
+
+var serverGroupScopeRevokeCmd = &cobra.Command{
+	Use:   "revoke <group-id> <scope>",
+	Short: "Revoke a scope grant from a group",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := makeGroupAPICall("DELETE", "/api/v1.0/groups/"+args[0]+"/scopes/"+url.PathEscape(args[1]), nil)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Scope revoked successfully")
+		return nil
+	},
+}
+
 func init() {
 	// Group commands
 	serverGroupCreateCmd.Flags().String("name", "", "Name of the group (required)")
@@ -962,6 +1165,16 @@ func init() {
 	serverUserIdentityAddCmd.Flags().String("sub", "", "OIDC subject claim (required)")
 	serverUserIdentityAddCmd.Flags().String("issuer", "", "OIDC issuer URL (required)")
 
+	// Scope grant flags. The route accepts any token_scopes string and
+	// the DB layer enforces the user-grantable allowlist, so we keep
+	// the flag a free-form string rather than mirroring the allowlist
+	// in the CLI.
+	serverUserScopeGrantCmd.Flags().String("scope", "", "Scope to grant (e.g. 'server.user_admin'); must be in token_scopes.UserGrantableScopes")
+	serverGroupScopeGrantCmd.Flags().String("scope", "", "Scope to grant (e.g. 'server.user_admin'); must be in token_scopes.UserGrantableScopes")
+
+	// AUP record flag.
+	serverUserAUPRecordCmd.Flags().String("version", "", "AUP version string the user is being recorded as accepting (required)")
+
 	// Register group subcommands
 	serverGroupCmd.AddCommand(serverGroupListCmd)
 	serverGroupCmd.AddCommand(serverGroupGetCmd)
@@ -973,11 +1186,16 @@ func init() {
 	serverGroupCmd.AddCommand(serverGroupMembersListCmd)
 	serverGroupCmd.AddCommand(serverGroupSetOwnershipCmd)
 	serverGroupCmd.AddCommand(serverGroupInviteCmd)
+	serverGroupCmd.AddCommand(serverGroupScopeCmd)
 
 	serverGroupInviteCmd.AddCommand(serverGroupInviteCreateCmd)
 	serverGroupInviteCmd.AddCommand(serverGroupInviteListCmd)
 	serverGroupInviteCmd.AddCommand(serverGroupInviteRevokeCmd)
 	serverGroupInviteCmd.AddCommand(serverGroupInviteRedeemCmd)
+
+	serverGroupScopeCmd.AddCommand(serverGroupScopeListCmd)
+	serverGroupScopeCmd.AddCommand(serverGroupScopeGrantCmd)
+	serverGroupScopeCmd.AddCommand(serverGroupScopeRevokeCmd)
 
 	// Register user subcommands
 	serverUserCmd.AddCommand(serverUserListCmd)
@@ -991,10 +1209,19 @@ func init() {
 	serverUserCmd.AddCommand(serverUserClearPasswordCmd)
 	serverUserCmd.AddCommand(serverUserStatusCmd)
 	serverUserCmd.AddCommand(serverUserIdentityCmd)
+	serverUserCmd.AddCommand(serverUserScopeCmd)
+	serverUserCmd.AddCommand(serverUserAUPCmd)
 
 	serverUserIdentityCmd.AddCommand(serverUserIdentityListCmd)
 	serverUserIdentityCmd.AddCommand(serverUserIdentityAddCmd)
 	serverUserIdentityCmd.AddCommand(serverUserIdentityRemoveCmd)
+
+	serverUserScopeCmd.AddCommand(serverUserScopeListCmd)
+	serverUserScopeCmd.AddCommand(serverUserScopeGrantCmd)
+	serverUserScopeCmd.AddCommand(serverUserScopeRevokeCmd)
+
+	serverUserAUPCmd.AddCommand(serverUserAUPRecordCmd)
+	serverUserAUPCmd.AddCommand(serverUserAUPClearCmd)
 
 	// Per the user/group design contract, users and groups can live on
 	// any Pelican component (origin, cache, registry, director). Attach

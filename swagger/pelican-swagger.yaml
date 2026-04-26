@@ -1216,15 +1216,17 @@ definitions:
     description: >-
       Pre-redemption metadata returned by GET /invites/info. Lets the
       redemption UI render the right form (password entry vs.
-      confirm-join-group) without consuming the token. Intentionally
-      omits creator, target user, and group name to avoid leaking
-      information beyond what the token-bearer already implicitly knows.
+      confirm-join-group vs. accept-collection-ownership) without
+      consuming the token. Intentionally omits creator and target user
+      to avoid leaking information beyond what the token-bearer already
+      implicitly knows.
     properties:
       kind:
         type: string
         enum:
           - group
           - password
+          - collection_ownership
       expiresAt:
         type: string
         format: date-time
@@ -1233,6 +1235,21 @@ definitions:
       groupId:
         type: string
         description: Present only when kind=group.
+      groupName:
+        type: string
+        description: Resolved group name for kind=group. Drives the "join group X?" confirmation.
+      groupDisplayName:
+        type: string
+        description: Optional human label for kind=group.
+      collectionId:
+        type: string
+        description: Present only when kind=collection_ownership.
+      collectionName:
+        type: string
+        description: Friendly name for kind=collection_ownership.
+      collectionNamespace:
+        type: string
+        description: Path prefix the collection is rooted at (e.g. "/research/dataset-A"). Shown in the redemption UI so the recipient sees what they're claiming.
   ScopeCatalogEntry:
     type: object
     description: >-
@@ -3546,6 +3563,46 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/exports/prefixes:
+    get:
+      summary: Slim FederationPrefix list — namespaces the origin exports
+      description: >-
+        `Authentication Required`. Returns just the
+        `FederationPrefix` of each configured export, with no storage
+        paths, S3 credentials, Globus IDs, or registry edit-URL
+        tokens. Reachable by any authenticated caller — the prefixes
+        themselves are advertised to the registry, so listing them
+        leaks nothing the federation can't already see.
+
+
+        Drives the collection-onboarding form's prefix dropdown so a
+        collection-admin (who isn't a system admin and so can't reach
+        the full /origin_ui/exports response) can still pick an
+        exported prefix. Callers who need the full export details
+        (storage, credentials) should use /origin_ui/exports.
+      tags:
+        - "origin_ui"
+      produces:
+        - "application/json"
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              prefixes:
+                type: array
+                items:
+                  type: string
+                description: FederationPrefix strings, in declaration order.
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Error fetching the origin exports
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /origin_ui/globus/exports:
     get:
       tags:
@@ -4479,6 +4536,114 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/candidate-owners:
+    get:
+      tags:
+        - "origin_ui"
+      summary: Candidate users for an ownership transfer on this collection
+      description: >-
+        `Authentication Required`. Returns the union of (current
+        owner, admin-group members, ACL-group members) for the named
+        collection, as `UserCard` rows ({id, username, displayName}).
+        Drives the owner-picker on the collection edit page when the
+        caller does NOT hold `server.user_admin` (and so can't list
+        every user via /users). Callers with `server.user_admin`
+        should prefer /users for a global picker.
+
+
+        Reuses /origin_ui/collections/{id}'s authorization: callers
+        who can read the collection can read the candidate list; non-
+        readers get 404 (matching the rest of the surface's leak
+        posture).
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          required: true
+          type: string
+          description: Collection ID (slug).
+      responses:
+        "200":
+          description: Candidate users
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/UserCard"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found, or caller cannot read it.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/ownership-invites:
+    post:
+      tags:
+        - "origin_ui"
+      summary: Mint a single-use ownership-transfer invite
+      description: >-
+        `Authentication Required`. Mints a single-use invite link
+        that, when redeemed by an authenticated user, transfers
+        Collection.OwnerID (and the legacy Collection.Owner username)
+        from the current owner to the redeemer. Issued only to the
+        current owner or to holders of `server.collection_admin` /
+        `server.web_admin` — admin-group members CANNOT mint
+        ownership invites (handing out an invite is morally identical
+        to transferring ownership, so it stays owner-exclusive).
+
+
+        Single-use is forced server-side; no client toggle. Default
+        expiration is 7 days; supply `expiresIn` (a Go duration
+        string) to override.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          required: true
+          type: string
+          description: Collection ID (slug).
+        - in: body
+          name: body
+          required: false
+          schema:
+            type: object
+            properties:
+              expiresIn:
+                type: string
+                description: Go duration string ("168h" = 7 days). Defaults to 7d.
+      responses:
+        "201":
+          description: Invite minted; the plaintext token is shown ONCE here.
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+              inviteToken:
+                type: string
+                description: Plaintext token. Shown only on creation.
+              expiresAt:
+                type: string
+                format: date-time
+              isSingleUse:
+                type: boolean
+        "400":
+          description: Invalid expiresIn duration.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found, or caller is not the owner / collection-admin.
           schema:
             $ref: "#/definitions/ErrorModelV2"
 
@@ -5418,6 +5583,68 @@ paths:
           description: Invite not found, expired, or already used
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /invites/redeem/collection-ownership:
+    post:
+      tags:
+        - invites
+      summary: Redeem a collection-ownership invite
+      description: >-
+        `Authentication Required`. Consumes a single-use ownership-
+        transfer invite — the authenticated caller becomes the new
+        owner of the referenced collection (Collection.OwnerID +
+        Collection.Owner are atomically updated; the invite is marked
+        redeemed in the same transaction). The previous owner loses
+        ownership at the same moment; ACL grants and admin-group
+        settings are unchanged.
+
+
+        The caller must be authenticated — anonymous redemption would
+        let link-holders make ANYBODY the owner. Ordinary user
+        accounts (existing or self-enrolled via OIDC on first login)
+        are accepted; brand-new local-password users need to be
+        onboarded separately first (admin-issued password-set invite).
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - token
+            properties:
+              token:
+                type: string
+                description: Plaintext invite token from the link.
+      responses:
+        "200":
+          description: Ownership transferred to the calling user.
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+              message:
+                type: string
+              collectionId:
+                type: string
+              previousOwnerId:
+                type: string
+        "400":
+          description: Token missing, expired, revoked, already used, or wrong kind.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite link not found.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /invites/onboarding:
     post:
       tags:
@@ -6244,12 +6471,92 @@ paths:
           description: User not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
-  # /me/password is intentionally NOT exposed: per the user/group
-  # design contract, passwords are set ONLY via admin-issued
-  # password-set invites the user redeems through
-  # /invites/redeem/password. A self-service password setter would let
-  # an OIDC-only user persist a password and keep accessing the system
-  # after the IdP relationship was severed.
+  /me/password:
+    put:
+      tags:
+        - me
+      summary: Rotate the calling user's local password
+      description: >-
+        `Authentication Required`. Rotates the caller's existing local
+        password. The caller must supply their `currentPassword` to
+        prove possession of the credential before being allowed to set
+        a new one (a stolen cookie alone shouldn't be enough to lock
+        the rightful owner out).
+
+
+        Per the user/group design contract this endpoint MUST NOT
+        create a password where none was set: an OIDC-only user who
+        could quietly add a local password would keep accessing the
+        system after the IdP relationship was severed. So we require
+        the user row to already have a non-empty password_hash before
+        accepting a rotation. Callers without an existing password get
+        403 with a hint to redeem an admin-issued password-set invite.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - currentPassword
+              - newPassword
+            properties:
+              currentPassword:
+                type: string
+                format: password
+              newPassword:
+                type: string
+                format: password
+      responses:
+        "204":
+          description: Password rotated.
+        "400":
+          description: Missing currentPassword or newPassword.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: No local password is set, or the supplied currentPassword is wrong.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - me
+      summary: Clear the calling user's local password
+      description: >-
+        `Authentication Required`. Clears the caller's local
+        password — disables username+password login on their own
+        account. After this, only OIDC login (or an admin-minted
+        password-set invite) can reauthenticate the user. Same
+        "must already be set" guard as the rotate endpoint, so the
+        operation is always a removal — never a no-op-with-side-effects
+        on a credential-less account.
+      responses:
+        "204":
+          description: Password cleared.
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: No local password is set.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /me/aup:
     post:
       tags:
