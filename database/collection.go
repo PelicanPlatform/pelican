@@ -225,7 +225,7 @@ func (u *User) HasLocalPassword() bool {
 //
 // This adds one extra round-trip per loaded User. Acceptable for the
 // admin-side surfaces this powers; if hot lists become a problem,
-// batch the lookup with a single "id IN ? AND password_hash <> ''"
+// batch the lookup with a single "id IN ? AND password_hash <> ”"
 // query.
 func (u *User) AfterFind(tx *gorm.DB) error {
 	if u.ID == "" {
