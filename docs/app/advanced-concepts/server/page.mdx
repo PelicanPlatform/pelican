@@ -19,7 +19,7 @@ When a Pelican origin or other service is started, the server automatically gene
 To generate a private/public key pair, run the following command:
 
 ```bash copy
-pelican key create
+pelican-server key create
 ```
 
 Resulting in public and private keys generated under the current working directory:
@@ -34,13 +34,13 @@ You can change the location of the generated keys by passing in arguments `priva
 
 
 ```bash copy
-pelican key create --private-key /tmp/foo --public-key /tmp/bar
+pelican-server key create --private-key /tmp/foo --public-key /tmp/bar
 ```
 
 You can also use this command to derive the public key of an existing private key:
 
 ```bash copy
-pelican key create --private-key /path/to/existing/private/key
+pelican-server key create --private-key /path/to/existing/private/key
 ```
 
 To configure a Pelican server to use the newly-generated *private key*, move it into the directory specified by the `IssuerKeysDirectory` parameter in the configuration `yaml` file:
@@ -83,10 +83,10 @@ g+NY6qklGz4ZjVlrRgTDT9hk5EShRANCAAT0giQYTPJbLB5wGwiKysmwf79eoxqX
 
 By default, Pelican's administrator web interface requires a username/password to be setup to access.  This password can be enabled by a one-time passcode the server writes into the log file.  However, by pre-generating the credential, Pelican server administrators can skip the initial setup and automate installation.
 
-The `pelican generate` command generates the [htpasswd](https://httpd.apache.org/docs/2.4/programs/htpasswd.html)-formatted password file for storing the web interface administrator login password. To generate a password file, run:
+The `pelican-server generate` command generates the [htpasswd](https://httpd.apache.org/docs/2.4/programs/htpasswd.html)-formatted password file for storing the web interface administrator login password. To generate a password file, run:
 
 ```bash copy
-pelican generate password
+pelican-server generate password
 ```
 
 and Pelican will prompt you to enter and confirm the password:
@@ -101,7 +101,7 @@ Successfully generated the admin password file at: /path/to/server-web-passwd
 You can change the location of the generated htpasswd file by the `-o` or `--output` argument. You can also provide the file that contains your password through the `-p` or `--password` argument.
 
 ```bash copy
-pelican generate password -o /path/to/generated-htpasswd-file -p /path/to/password
+pelican-server generate password -o /path/to/generated-htpasswd-file -p /path/to/password
 ```
 
 The generated htpasswd file can then be passed to the Pelican server via `Server.UIPasswordFile` configuration parameter.
@@ -146,7 +146,7 @@ Pelican scans the above directory every 60 seconds to detect newly added or remo
 
 With support for Multiple Keys, Pelican allows the administrator to replace private keys at anytime. Follow these steps to replace an existing key:
 
-1. Generate a new private/public keypair by using the `pelican key create` command, see details [here](#namespace-private-key).
+1. Generate a new private/public keypair by using the `pelican-server key create` command, see details [here](#namespace-private-key).
 2. Ensure that the Pelican server is running. Copy the new private key file to [IssuerKeysDirectory](#multiple-keys).
 3. Visit your federation's Registry in your browser (you can find it in your Pelican server's web interface) and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
 4. Remove the old private key from [IssuerKeysDirectory](#multiple-keys)
@@ -227,7 +227,7 @@ p11proxy: accepted connection ...
 You can also run Pelican with verbose p11-kit debugging to see detailed RPC activity:
 
 ```bash copy
-P11_KIT_DEBUG=rpc pelican origin serve
+P11_KIT_DEBUG=rpc pelican-server origin serve
 ```
 
 This will produce detailed output showing the PKCS#11 communication:
