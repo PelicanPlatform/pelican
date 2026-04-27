@@ -38,12 +38,17 @@ var cliDispatchHook func(execName string, args []string) (bool, error)
 // after Execute() returns an error (e.g., origin config help text).
 var cliExecErrorHook func(err error)
 
-//go:generate go run -tags client,server . generate-docs
+//go:generate go run -tags client . generate-docs docs/app/commands-reference/pelican
+//go:generate go run -tags server . generate-docs docs/app/commands-reference/pelican-server
 func main() {
 	logging.SetupLogBuffering()
 	defer logging.FlushLogs(false)
 	if len(os.Args) > 1 && os.Args[1] == "generate-docs" {
-		err := generateCLIDocs("docs/app/commands-reference")
+		outputDir := "docs/app/commands-reference"
+		if len(os.Args) > 2 {
+			outputDir = os.Args[2]
+		}
+		err := generateCLIDocs(outputDir)
 		if err != nil {
 			os.Exit(1)
 		}

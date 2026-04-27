@@ -43,16 +43,25 @@ func generateCLIDocs(outputDir string) error {
 		return err
 	}
 
-	docPathRoot := filepath.Base(outputDir)
+	// Override rootCmd.Use so Cobra names generated files correctly (e.g.
+	// "pelican-server_origin_serve.md" rather than a temp-binary path).
+	rootCmd.Use = docBinaryName
+
+	// docPathRoot is the site-relative path used in generated hyperlinks.
+	// Strip the leading "docs/app/" prefix so that e.g.
+	// "docs/app/commands-reference/pelican" becomes
+	// "commands-reference/pelican".
+	docPathRoot := strings.TrimPrefix(filepath.ToSlash(outputDir), "docs/app/")
 
 	// Generate a markdown file per command, with custom file names and content wrapper
 	linkHandler := func(name string) string {
-		// Cobra passes names like "pelican_serve.md"; strip root prefix but keep underscores so we can group by tokens
+		// Cobra passes names like "pelican-server_origin_serve.md"; strip the
+		// binary-name prefix so only the subcommand path remains.
 		base := strings.TrimSuffix(name, filepath.Ext(name))
-		if base == "pelican" {
+		if base == docBinaryName {
 			base = ""
 		} else {
-			base = strings.TrimPrefix(base, "pelican_")
+			base = strings.TrimPrefix(base, docBinaryName+"_")
 		}
 		path := strings.ReplaceAll(base, "_", "/")
 		// Must be an absolute path from the site root
@@ -140,7 +149,7 @@ func enforceAppRouterLayout(dir string) error {
 		base := strings.TrimSuffix(name, ".mdx")
 		// Build nested path from underscore-delimited tokens
 		segments := strings.Split(base, "_")
-		if len(segments) > 0 && segments[0] == "pelican" {
+		if len(segments) > 0 && segments[0] == docBinaryName {
 			segments = segments[1:]
 		}
 		// Create nested directory path
@@ -238,7 +247,7 @@ func generateMetaFiles(dir string) error {
 				return err
 			}
 
-			commandPrefix := "pelican"
+			commandPrefix := docBinaryName
 			if relPath != "." {
 				commandPrefix += " " + strings.ReplaceAll(relPath, string(filepath.Separator), " ")
 			}
