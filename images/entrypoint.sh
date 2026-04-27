@@ -41,7 +41,7 @@ shift
 # grab whatever arg is passed to container run command
 # and use it to launch the corresponding pelican daemon
 # (eg running the container with the arg director serve will
-# launch the ./pelican director serve daemon)
+# launch the ./pelican-server director serve daemon)
 if [ $# -ne 0 ]; then
     case "$program_selector" in
         pelican)

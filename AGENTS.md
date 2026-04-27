@@ -315,10 +315,10 @@ API endpoints are documented using OpenAPI V2.0. The specification is generated 
 
 ```bash
 # Run a local federation ("federation in a box")
-pelican serve --module director,registry,origin,cache
+pelican-server serve --module director,registry,origin,cache
 
 # Serve an origin
-pelican origin serve -f https://director.example.com -v /tmp/stash/:/test
+pelican-server origin serve -f https://director.example.com -v /tmp/stash/:/test
 
 # Download an object
 pelican object get /test/file ./local-file
