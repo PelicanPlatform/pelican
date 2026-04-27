@@ -494,7 +494,7 @@ This section covers starting the server, finishing setup through your browser, a
 
 Once your Origin's configuration is set, you can serve it immediately with
 ```bash
-pelican origin serve
+pelican-server origin serve
 ```
 
 <Callout type="info">
@@ -505,7 +505,7 @@ This assumes you understand the basics of `systemd` and is only recommended for 
 When you do this, Pelican will read the config file and apply it to your Origin. The first time the Origin is started, you will see something that looks like the following:
 
 ```console
-$ pelican origin serve
+$ pelican-server origin serve
 
 Pelican admin interface is not initialized
 To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
