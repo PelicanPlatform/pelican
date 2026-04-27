@@ -21,6 +21,7 @@ package issuer
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ory/fosite"
@@ -553,6 +554,7 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	if hasRefreshGrant {
 		for _, s := range grantedScopes {
 			if s == "offline_access" {
+				ar.GetSession().SetExpiresAt(fosite.RefreshToken, time.Now().Add(provider.config.RefreshTokenLifespan))
 				rt, rtSig, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
 				if rtErr != nil {
 					log.WithError(rtErr).Warn("Embedded issuer: failed to generate token-exchange refresh token")
