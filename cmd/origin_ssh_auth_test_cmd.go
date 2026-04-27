@@ -59,37 +59,37 @@ The known_hosts file defaults to ~/.ssh/known_hosts.
 
 Example:
   # Test with default settings (uses SSH agent or default keys)
-  pelican origin ssh-auth test storage.example.com
+  pelican-server origin ssh-auth test storage.example.com
 
   # Test with explicit username
-  pelican origin ssh-auth test pelican@storage.example.com
+  pelican-server origin ssh-auth test pelican@storage.example.com
 
   # Test with specific private key
-  pelican origin ssh-auth test pelican@storage.example.com --private-key ~/.ssh/id_rsa
+  pelican-server origin ssh-auth test pelican@storage.example.com --private-key ~/.ssh/id_rsa
 
   # Test with password authentication
-  pelican origin ssh-auth test pelican@storage.example.com \
+  pelican-server origin ssh-auth test pelican@storage.example.com \
       --password-file /path/to/password.txt
 
   # Test with keyboard-interactive authentication only (disable agent/keys)
-  pelican origin ssh-auth test pelican@storage.example.com \
+  pelican-server origin ssh-auth test pelican@storage.example.com \
       --auth-methods keyboard-interactive
 
   # Test with specific auth methods in order
-  pelican origin ssh-auth test pelican@storage.example.com \
+  pelican-server origin ssh-auth test pelican@storage.example.com \
       --auth-methods agent,keyboard-interactive
 
   # Connect through a jump host (ProxyJump)
-  pelican origin ssh-auth test internal-server -J bastion.example.com
+  pelican-server origin ssh-auth test internal-server -J bastion.example.com
 
   # Connect through a jump host with explicit user
-  pelican origin ssh-auth test pelican@internal-server -J admin@bastion.example.com
+  pelican-server origin ssh-auth test pelican@internal-server -J admin@bastion.example.com
 
   # Chained jump hosts
-  pelican origin ssh-auth test pelican@internal-server -J jump1.example.com,jump2.example.com
+  pelican-server origin ssh-auth test pelican@internal-server -J jump1.example.com,jump2.example.com
 
   # Quick connectivity test without starting the helper
-  pelican origin ssh-auth test pelican@storage.example.com --connect-only
+  pelican-server origin ssh-auth test pelican@storage.example.com --connect-only
 `,
 	Args:         cobra.ExactArgs(1),
 	RunE:         runSSHAuthTest,

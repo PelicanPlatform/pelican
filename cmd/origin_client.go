@@ -68,7 +68,7 @@ Accepted values (comma-separated):
   urn:ietf:params:oauth:grant-type:token-exchange
 
 Example — create a token-exchange client:
-  pelican origin issuer client create --server https://my-origin:8447 \
+  pelican-server origin issuer client create --server https://my-origin:8447 \
     --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token"`,
 		RunE: issuerClientCreateRun,
 	}
@@ -87,7 +87,7 @@ Example — create a token-exchange client:
 Only the flags you provide are changed; omitted fields are left unchanged.
 
 Example — add token-exchange grant and narrow scopes:
-  pelican origin issuer client update --server https://my-origin:8447 \
+  pelican-server origin issuer client update --server https://my-origin:8447 \
     --id <client-id> \
     --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token" \
     --scopes "openid,storage.read:/"`,
