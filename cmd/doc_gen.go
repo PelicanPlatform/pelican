@@ -26,10 +26,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra/doc"
 )
+
+// angleTagRe matches bare angle-bracket identifiers that MDX would interpret as
+// JSX tags (e.g. <client-id>, <path>, <pelican-url>).
+var angleTagRe = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9_-]*)>`)
 
 // generateCLIDocs creates per-command docs under the given directory. If the path
 // is relative, it is resolved against the repository root (directory containing go.mod).
@@ -292,6 +297,11 @@ func postProcessMdxFiles(dir string) error {
 			// Ensure single newline at EOF
 			fullContent = strings.TrimRight(fullContent, "\n") + "\n"
 
+			// Escape bare angle-bracket identifiers in prose sections so
+			// MDX does not try to parse them as JSX tags. Code fences are
+			// left untouched.
+			fullContent = escapeMdxAngleBrackets(fullContent)
+
 			if string(content) != fullContent {
 				info, err := d.Info()
 				if err != nil {
@@ -304,4 +314,25 @@ func postProcessMdxFiles(dir string) error {
 		}
 		return nil
 	})
+}
+
+// escapeMdxAngleBrackets replaces bare angle-bracket identifiers (e.g. <path>,
+// <client-id>) with HTML entities so that MDX/JSX parsers do not interpret them
+// as JSX tags. Lines inside code fences (delimited by ```) are left unchanged
+// because their content is rendered literally by the markdown renderer.
+func escapeMdxAngleBrackets(content string) string {
+	lines := strings.Split(content, "\n")
+	inCodeFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = !inCodeFence
+			// Don't modify the fence delimiter line itself.
+			continue
+		}
+		if !inCodeFence {
+			lines[i] = angleTagRe.ReplaceAllString(line, "&lt;$1&gt;")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
