@@ -289,6 +289,7 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
     procps \
     psmisc \
     python3-pip \
+    sqlite \
     tini \
     unzip
 ENDRUN
