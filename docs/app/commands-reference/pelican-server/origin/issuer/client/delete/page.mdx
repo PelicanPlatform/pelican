@@ -1,0 +1,36 @@
+---
+title: pelican server origin issuer client delete
+---
+
+## pelican-server origin issuer client delete
+
+Delete an OIDC client
+
+```
+pelican-server origin issuer client delete [flags]
+```
+
+### Options
+
+```
+  -h, --help        help for delete
+      --id string   Client ID to delete (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --namespace string    Federation namespace prefix for the issuer (e.g. /data/analysis) (required)
+      --server string       Web URL of the Pelican origin server (e.g. https://my-origin:8447)
+      --token string        Path to a file containing an admin token (optional; generated automatically if omitted)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin issuer client](/commands-reference/pelican-server/origin/issuer/client/)	 - Manage OIDC clients for the origin's embedded issuer

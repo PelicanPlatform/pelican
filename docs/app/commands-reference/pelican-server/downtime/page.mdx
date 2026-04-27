@@ -1,0 +1,40 @@
+---
+title: pelican server downtime
+---
+
+## pelican-server downtime
+
+Manage server's own downtime periods
+
+### Synopsis
+
+Provide commands to list, create, update, and delete scheduled downtime periods
+for Pelican servers (Origins/Caches). These commands interact with the server's
+administrative API endpoint.
+
+### Options
+
+```
+  -h, --help            help for downtime
+  -s, --server string   Web URL of the Pelican server (e.g. https://my-origin.com:8447)
+  -t, --token string    Path to the admin token file
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server](/commands-reference/pelican-server/)	 - Interact with data federations
+* [pelican-server downtime create](/commands-reference/pelican-server/downtime/create/)	 - Create a new downtime period for the server
+* [pelican-server downtime delete](/commands-reference/pelican-server/downtime/delete/)	 - Delete a downtime period
+* [pelican-server downtime list](/commands-reference/pelican-server/downtime/list/)	 - List server's scheduled downtime periods
+* [pelican-server downtime update](/commands-reference/pelican-server/downtime/update/)	 - Update an existing downtime period
