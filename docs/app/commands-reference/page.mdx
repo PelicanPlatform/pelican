@@ -1,46 +1,46 @@
 ---
-title: pelican
+title: Commands Reference
 ---
 
-## pelican
+## Commands Reference
 
-Interact with data federations
+Pelican is distributed as two separate executables:
 
-### Synopsis
+| Binary | Purpose |
+|---|---|
+| `pelican` | Client-side tools — transfer data, manage credentials, submit jobs |
+| `pelican-server` | Server-side tools — run origins, caches, directors, and registries |
 
-The pelican software allows one to build and interact
-with data federations, enabling the sharing of objects and collections
-across multiple dataset providers.
+Both binaries share a common set of commands (`config`, `credentials`, `namespace`, `token`).
 
-### Options
+---
 
-```
-      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
-  -d, --debug               Enable debug log messages
-  -f, --federation string   Pelican federation to utilize
-  -h, --help                help for pelican
-      --json                output results in JSON format
-  -L, --log string          Specified log output file
-      --version             Print the version and exit
-```
+### pelican — client binary
 
-### SEE ALSO
+The `pelican` binary is for users who need to **access data** from a federation or manage client-side credentials.
 
-* [pelican apikey](/commands-reference/apikey/)	 - Manage API keys for server operations
-* [pelican cache](/commands-reference/cache/)	 - Operate a Pelican cache service
-* [pelican client-agent](/commands-reference/client-agent/)	 - Manage the Pelican client agent server
-* [pelican config](/commands-reference/config/)	 - View and search for configuration parameters
-* [pelican credentials](/commands-reference/credentials/)	 - Interact with the credential configuration file
-* [pelican director](/commands-reference/director/)	 - Launch a Pelican Director
-* [pelican downtime](/commands-reference/downtime/)	 - Manage server's own downtime periods
-* [pelican generate](/commands-reference/generate/)	 - Generate credentials for Pelican server
-* [pelican job](/commands-reference/job/)	 - Manage asynchronous transfer jobs
-* [pelican key](/commands-reference/key/)	 - Manage Pelican issuer keys
-* [pelican namespace](/commands-reference/namespace/)	 - Work with namespaces
-* [pelican object](/commands-reference/object/)	 - Interact with objects in the federation
-* [pelican origin](/commands-reference/origin/)	 - Operate a Pelican origin service
-* [pelican plugin](/commands-reference/plugin/)	 - Plugin management for HTCSS
-* [pelican rclone](/commands-reference/rclone/)	 - Commands for integrating Pelican with rclone
-* [pelican registry](/commands-reference/registry/)	 - Interact with a Pelican registry service
-* [pelican server](/commands-reference/server/)	 - Manage server operations
-* [pelican token](/commands-reference/token/)	 - Interact with tokens used to interact with objects in Pelican
+[Browse the pelican command reference →](/commands-reference/pelican/)
+
+Key subcommands:
+
+* [`pelican object`](/commands-reference/pelican/object/) — get, put, copy, and delete objects
+* [`pelican job`](/commands-reference/pelican/job/) — manage asynchronous transfer jobs
+* [`pelican plugin`](/commands-reference/pelican/plugin/) — HTCSS plugin integration
+* [`pelican rclone`](/commands-reference/pelican/rclone/) — rclone integration
+
+---
+
+### pelican-server — server binary
+
+The `pelican-server` binary is for operators who need to **run federation services**.
+
+[Browse the pelican-server command reference →](/commands-reference/pelican-server/)
+
+Key subcommands:
+
+* [`pelican-server origin`](/commands-reference/pelican-server/origin/) — run an origin service
+* [`pelican-server cache`](/commands-reference/pelican-server/cache/) — run a cache service
+* [`pelican-server director`](/commands-reference/pelican-server/director/) — run a director service
+* [`pelican-server registry`](/commands-reference/pelican-server/registry/) — run a registry service
+* [`pelican-server key`](/commands-reference/pelican-server/key/) — manage issuer keys
+* [`pelican-server generate`](/commands-reference/pelican-server/generate/) — generate server credentials

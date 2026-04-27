@@ -1,0 +1,52 @@
+---
+title: pelican server origin issuer client create
+---
+
+## pelican-server origin issuer client create
+
+Create a new OIDC client
+
+### Synopsis
+
+Create a new OIDC client on the origin's embedded issuer.
+
+The --grant-types flag controls which OAuth2 flows the client can use.
+Accepted values (comma-separated):
+  authorization_code
+  refresh_token
+  urn:ietf:params:oauth:grant-type:device_code
+  urn:ietf:params:oauth:grant-type:token-exchange
+
+Example — create a token-exchange client:
+  pelican-server origin issuer client create --server https://my-origin:8447 \
+    --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token"
+
+```
+pelican-server origin issuer client create [flags]
+```
+
+### Options
+
+```
+      --grant-types string   Comma-separated list of grant types (required)
+  -h, --help                 help for create
+      --scopes string        Comma-separated list of scopes (optional; defaults to common WLCG scopes)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --namespace string    Federation namespace prefix for the issuer (e.g. /data/analysis) (required)
+      --server string       Web URL of the Pelican origin server (e.g. https://my-origin:8447)
+      --token string        Path to a file containing an admin token (optional; generated automatically if omitted)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin issuer client](/commands-reference/pelican-server/origin/issuer/client/)	 - Manage OIDC clients for the origin's embedded issuer

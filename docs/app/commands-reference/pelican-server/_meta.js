@@ -1,0 +1,15 @@
+export default {
+    "apikey": "pelican-server apikey",
+    "cache": "pelican-server cache",
+    "config": "pelican-server config",
+    "credentials": "pelican-server credentials",
+    "director": "pelican-server director",
+    "downtime": "pelican-server downtime",
+    "generate": "pelican-server generate",
+    "key": "pelican-server key",
+    "namespace": "pelican-server namespace",
+    "origin": "pelican-server origin",
+    "registry": "pelican-server registry",
+    "server": "pelican-server server",
+    "token": "pelican-server token",
+}
