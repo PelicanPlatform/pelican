@@ -27,7 +27,7 @@ $ pelican object get /test/query1 ./
 To launch a Pelican origin, run the following:
 
 ```
-pelican origin serve -f https://director.example.com -v /tmp/stash/:/test
+pelican-server origin serve -f https://director.example.com -v /tmp/stash/:/test
 ```
 
 ## Running an OSDF origin or client

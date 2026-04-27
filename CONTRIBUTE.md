@@ -339,7 +339,7 @@ $ hostname
 To start "federation in a box", run the following command instead:
 
 ```bash
-./pelican serve --module director,registry,origin,cache
+./pelican-server serve --module director,registry,origin,cache
 ```
 
 This will spin up a fully functional Pelican local federation for you.

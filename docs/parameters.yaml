@@ -3096,7 +3096,7 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.Modules
 description: |+
-  A list of modules to enable when running pelican in `pelican serve` mode.
+  A list of modules to enable when running pelican in `pelican-server serve` mode.
 type: stringSlice
 default: []
 hidden: true
