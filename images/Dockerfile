@@ -682,6 +682,7 @@ ENDRUN
 FROM pelican-software-base AS central-services-base
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 
 FROM central-services-base AS director
@@ -691,7 +692,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
 
 FROM director AS osdf-director
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "director"]
 CMD ["serve"]
 
@@ -700,7 +702,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican-server", "registry"]
 CMD ["serve"]
 
 FROM registry AS osdf-registry
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "registry"]
 CMD ["serve"]
 
@@ -710,12 +713,14 @@ CMD ["serve"]
 FROM origin-software-base AS origin
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
@@ -725,12 +730,14 @@ CMD ["serve"]
 FROM xrootd-software-base AS cache
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "cache"]
 CMD ["serve"]
 
 FROM cache AS osdf-cache
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
