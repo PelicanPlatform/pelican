@@ -20,12 +20,12 @@ pass arbitrary values with --raw-scope.
 
   Flag        WLCG profile (default)    SciTokens2 profile (--profile scitokens2)
   ----        ----------------------    -----------------------------------------
-  --read      storage.read:<path>       read:<path>
-  --write     storage.create:<path>     write:<path>
-  --modify    storage.modify:<path>     write:<path>
-  --stage     storage.stage:<path>      write:<path>
+  --read      storage.read:&lt;path&gt;       read:&lt;path&gt;
+  --write     storage.create:&lt;path&gt;     write:&lt;path&gt;
+  --modify    storage.modify:&lt;path&gt;     write:&lt;path&gt;
+  --stage     storage.stage:&lt;path&gt;      write:&lt;path&gt;
 
-The <path> in each scope is the object path with the namespace prefix stripped.
+The &lt;path&gt; in each scope is the object path with the namespace prefix stripped.
 Use --scope-path to override it, or --raw-scope to supply scopes verbatim, e.g.:
 
     --raw-scope "storage.read:/ storage.create:/uploads"
