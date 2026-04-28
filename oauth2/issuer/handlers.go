@@ -874,6 +874,7 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	if hasRefreshGrant {
 		for _, s := range request.GetGrantedScopes() {
 			if s == "offline_access" {
+				ar.GetSession().SetExpiresAt(fosite.RefreshToken, time.Now().Add(provider.config.RefreshTokenLifespan))
 				refreshToken, refreshSignature, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
 				if rtErr != nil {
 					log.WithError(rtErr).Warn("Embedded issuer: failed to generate device code refresh token")
