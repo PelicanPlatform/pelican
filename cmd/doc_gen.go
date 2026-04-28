@@ -273,10 +273,49 @@ func postProcessMdxFiles(dir string) error {
 				return nil
 			}
 
-			// Trim trailing spaces on each line
+			// Trim trailing spaces on each line and escape MDX-reserved characters
+			// outside of code blocks and YAML frontmatter.
 			lines := strings.Split(string(content), "\n")
+			inFrontmatter := false
+			frontmatterDone := false
+			inCodeBlock := false
 			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+
+				// Detect YAML frontmatter delimiters (---) at the very start of the file.
+				if i == 0 && trimmed == "---" {
+					inFrontmatter = true
+					lines[i] = strings.TrimRight(line, " \t")
+					continue
+				}
+				if inFrontmatter {
+					if trimmed == "---" {
+						inFrontmatter = false
+						frontmatterDone = true
+					}
+					lines[i] = strings.TrimRight(line, " \t")
+					continue
+				}
+				if !frontmatterDone {
+					lines[i] = strings.TrimRight(line, " \t")
+					continue
+				}
+
+				// Track fenced code blocks.
+				if strings.HasPrefix(trimmed, "```") {
+					inCodeBlock = !inCodeBlock
+					lines[i] = strings.TrimRight(line, " \t")
+					continue
+				}
+
 				lines[i] = strings.TrimRight(line, " \t")
+
+				// Escape '<' characters that MDX would interpret as JSX/HTML tag
+				// openers (i.e. '<' followed by a letter, '/', or '!') so that
+				// placeholder text like <client-id> does not cause parse errors.
+				if !inCodeBlock {
+					lines[i] = escapeMDXAngleBrackets(lines[i])
+				}
 			}
 			fullContent := strings.Join(lines, "\n")
 
@@ -295,4 +334,30 @@ func postProcessMdxFiles(dir string) error {
 		}
 		return nil
 	})
+}
+
+// escapeMDXAngleBrackets replaces '<' characters that would be interpreted by
+// MDX as JSX/HTML tag openers with the HTML entity "&lt;".  Only '<' followed
+// by an ASCII letter, '/', or '!' is replaced; other occurrences (e.g. numeric
+// comparisons such as "a < 5") are left untouched.  The ASCII-only check is
+// intentional: CLI flag names and HTML tag names that appear in generated docs
+// are always ASCII.
+func escapeMDXAngleBrackets(line string) string {
+	if !strings.ContainsRune(line, '<') {
+		return line
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if ch == '<' && i+1 < len(line) {
+			next := line[i+1]
+			if (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || next == '/' || next == '!' {
+				b.WriteString("&lt;")
+				continue
+			}
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
 }
