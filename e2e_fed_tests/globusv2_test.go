@@ -223,12 +223,12 @@ func TestGlobusv2Origin(t *testing.T) {
 	require.NoError(t, os.WriteFile(clientSecretFile, []byte("test-globus-client-secret"), 0600))
 
 	// Configure Globus hidden params to point at mock servers
-	require.NoError(t, param.Set(param.Origin_GlobusIssuerURL.GetName(), oidcURL))
-	require.NoError(t, param.Set(param.Origin_GlobusTransferAPIBaseUrl.GetName(), transferAPIBaseURL))
-	require.NoError(t, param.Set(param.Origin_GlobusClientIDFile.GetName(), clientIDFile))
-	require.NoError(t, param.Set(param.Origin_GlobusClientSecretFile.GetName(), clientSecretFile))
+	require.NoError(t, param.Set(param.Origin_GlobusIssuerURL, oidcURL))
+	require.NoError(t, param.Set(param.Origin_GlobusTransferAPIBaseUrl, transferAPIBaseURL))
+	require.NoError(t, param.Set(param.Origin_GlobusClientIDFile, clientIDFile))
+	require.NoError(t, param.Set(param.Origin_GlobusClientSecretFile, clientSecretFile))
 	// Set a short refresh interval so we can verify token refresh in the test
-	require.NoError(t, param.Set(param.Origin_Globusv2TokenRefreshInterval.GetName(), "2s"))
+	require.NoError(t, param.Set(param.Origin_Globusv2TokenRefreshInterval, "2s"))
 
 	originConfig := globusv2OriginConfig(testCollectionID, "Mock Test Collection")
 
