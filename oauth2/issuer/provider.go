@@ -365,10 +365,8 @@ func (s *WLCGSession) GetExtraClaims() map[string]interface{} {
 // DefaultOIDCSession creates a new WLCG-compliant OIDC session with both
 // JWT access token claims and ID token claims.
 //
-// The 1-hour ExpiresAt values here are initial placeholders; fosite overrides
-// them with the actual AccessTokenLifespan / IDTokenLifespan from the provider
-// config when the token is issued.  The device-code path explicitly calls
-// SetExpiresAt before token generation for the same reason.
+// The 1-hour ExpiresAt values here are initial placeholders that are always
+// overridden with the configured lifespan before a token is issued.
 func DefaultOIDCSession(subject string, issuer string, groups []string, scopes []string) *WLCGSession {
 	now := time.Now()
 	extra := map[string]interface{}{}

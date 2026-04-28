@@ -507,7 +507,7 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	}
 
 	session := DefaultOIDCSession(subject, issuerURL, groups, grantedScopes)
-	session.SetExpiresAt(fosite.AccessToken, session.JWTClaims.ExpiresAt)
+	session.SetExpiresAt(fosite.AccessToken, time.Now().Add(provider.config.AccessTokenLifespan))
 	ar := fosite.NewAccessRequest(session)
 	ar.Client = client
 	ar.GrantedScope = grantedScopes
