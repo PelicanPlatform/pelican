@@ -794,7 +794,7 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 	sessionData, _ := json.Marshal(request.GetSession())
 
 	// Derive expiration from the session's token-type-specific expiry when
-	// available, so that refresh tokens honour RefreshTokenLifespan (7d)
+	// available, so that refresh tokens honour RefreshTokenLifespan
 	// instead of always using a 1h default.
 	var expiresAt time.Time
 	switch table {

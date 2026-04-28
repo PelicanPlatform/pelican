@@ -205,13 +205,16 @@ var runtimeConfigurableMap = map[string]bool{
 	"Federation.TopologyReloadInterval": false,
 	"Federation.TopologyUrl": false,
 	"GeoIPOverrides": false,
+	"Issuer.AccessTokenLifetime": false,
 	"Issuer.AuthenticationSource": false,
+	"Issuer.AuthorizationCodeLifetime": false,
 	"Issuer.AuthorizationTemplates": false,
 	"Issuer.DynamicClientStaleTimeout": false,
 	"Issuer.DynamicClientUnusedTimeout": false,
 	"Issuer.GroupFile": false,
 	"Issuer.GroupRequirements": false,
 	"Issuer.GroupSource": false,
+	"Issuer.IDTokenLifetime": false,
 	"Issuer.IssuerClaimValue": false,
 	"Issuer.OIDCAuthenticationRequirements": false,
 	"Issuer.OIDCAuthenticationUserClaim": false,
@@ -223,6 +226,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.QDLLocation": false,
 	"Issuer.RedirectUris": false,
 	"Issuer.RefreshTokenGracePeriod": false,
+	"Issuer.RefreshTokenLifetime": false,
 	"Issuer.ScitokensServerLocation": false,
 	"Issuer.TomcatLocation": false,
 	"Issuer.UserStripDomain": false,
@@ -1052,9 +1056,13 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Director.RegistryQueryInterval": func(c *Config) time.Duration { return c.Director.RegistryQueryInterval },
 	"Director.StatTimeout": func(c *Config) time.Duration { return c.Director.StatTimeout },
 	"Federation.TopologyReloadInterval": func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
+	"Issuer.AccessTokenLifetime": func(c *Config) time.Duration { return c.Issuer.AccessTokenLifetime },
+	"Issuer.AuthorizationCodeLifetime": func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifetime },
 	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
 	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
+	"Issuer.IDTokenLifetime": func(c *Config) time.Duration { return c.Issuer.IDTokenLifetime },
 	"Issuer.RefreshTokenGracePeriod": func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
+	"Issuer.RefreshTokenLifetime": func(c *Config) time.Duration { return c.Issuer.RefreshTokenLifetime },
 	"LocalCache.DefaultMaxAge": func(c *Config) time.Duration { return c.LocalCache.DefaultMaxAge },
 	"LocalCache.PrefetchTimeout": func(c *Config) time.Duration { return c.LocalCache.PrefetchTimeout },
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
@@ -1286,13 +1294,16 @@ var allParameterNames = []string{
 	"Federation.TopologyReloadInterval",
 	"Federation.TopologyUrl",
 	"GeoIPOverrides",
+	"Issuer.AccessTokenLifetime",
 	"Issuer.AuthenticationSource",
+	"Issuer.AuthorizationCodeLifetime",
 	"Issuer.AuthorizationTemplates",
 	"Issuer.DynamicClientStaleTimeout",
 	"Issuer.DynamicClientUnusedTimeout",
 	"Issuer.GroupFile",
 	"Issuer.GroupRequirements",
 	"Issuer.GroupSource",
+	"Issuer.IDTokenLifetime",
 	"Issuer.IssuerClaimValue",
 	"Issuer.OIDCAuthenticationRequirements",
 	"Issuer.OIDCAuthenticationUserClaim",
@@ -1304,6 +1315,7 @@ var allParameterNames = []string{
 	"Issuer.QDLLocation",
 	"Issuer.RedirectUris",
 	"Issuer.RefreshTokenGracePeriod",
+	"Issuer.RefreshTokenLifetime",
 	"Issuer.ScitokensServerLocation",
 	"Issuer.TomcatLocation",
 	"Issuer.UserStripDomain",
@@ -1957,9 +1969,13 @@ var (
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	Issuer_AccessTokenLifetime = DurationParam{"Issuer.AccessTokenLifetime"}
+	Issuer_AuthorizationCodeLifetime = DurationParam{"Issuer.AuthorizationCodeLifetime"}
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
+	Issuer_IDTokenLifetime = DurationParam{"Issuer.IDTokenLifetime"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	Issuer_RefreshTokenLifetime = DurationParam{"Issuer.RefreshTokenLifetime"}
 	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
 	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
@@ -2384,9 +2400,13 @@ func init() {
 		"Director.RegistryQueryInterval": Director_RegistryQueryInterval,
 		"Director.StatTimeout": Director_StatTimeout,
 		"Federation.TopologyReloadInterval": Federation_TopologyReloadInterval,
+		"Issuer.AccessTokenLifetime": Issuer_AccessTokenLifetime,
+		"Issuer.AuthorizationCodeLifetime": Issuer_AuthorizationCodeLifetime,
 		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
 		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
+		"Issuer.IDTokenLifetime": Issuer_IDTokenLifetime,
 		"Issuer.RefreshTokenGracePeriod": Issuer_RefreshTokenGracePeriod,
+		"Issuer.RefreshTokenLifetime": Issuer_RefreshTokenLifetime,
 		"LocalCache.DefaultMaxAge": LocalCache_DefaultMaxAge,
 		"LocalCache.PrefetchTimeout": LocalCache_PrefetchTimeout,
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
