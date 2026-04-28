@@ -19,6 +19,7 @@
 package origin_serve
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -762,9 +763,15 @@ func (f *httpsWriteFile) Write(p []byte) (int, error) {
 }
 
 func (f *httpsWriteFile) Close() error {
+	// NOTE: This file buffers the entire upload in memory before issuing
+	// the PUT. For multi-gigabyte writes that is a memory bomb / DoS vector
+	// in production -- a real fix should stream via io.Pipe and a chunked
+	// PUT (or use a different write file for large transfers). We skirt
+	// double-copying the buffer here, but the underlying memory profile
+	// is still bounded only by client behavior.
 	f.mu.Lock()
-	data := make([]byte, len(f.buf))
-	copy(data, f.buf)
+	data := f.buf
+	f.buf = nil // hand ownership to the request body; subsequent Writes are forbidden post-Close
 	f.mu.Unlock()
 
 	urlStr := f.fs.upstreamURL(f.name)
@@ -772,7 +779,12 @@ func (f *httpsWriteFile) Close() error {
 		"Content-Length": fmt.Sprintf("%d", len(data)),
 	}
 
-	resp, err := f.fs.doRequest(f.ctx, http.MethodPut, urlStr, strings.NewReader(string(data)), headers)
+	doPut := func() (*http.Response, error) {
+		// bytes.NewReader avoids the []byte->string->Reader copy chain.
+		return f.fs.doRequest(f.ctx, http.MethodPut, urlStr, bytes.NewReader(data), headers)
+	}
+
+	resp, err := doPut()
 	if err != nil {
 		return err
 	}
@@ -797,7 +809,7 @@ func (f *httpsWriteFile) Close() error {
 		}
 
 		// Retry the PUT after creating parent directories.
-		retryResp, retryErr := f.fs.doRequest(f.ctx, http.MethodPut, urlStr, strings.NewReader(string(data)), headers)
+		retryResp, retryErr := doPut()
 		if retryErr != nil {
 			return retryErr
 		}

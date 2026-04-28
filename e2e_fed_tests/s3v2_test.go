@@ -300,9 +300,9 @@ func TestS3v2MemOriginOverwrite(t *testing.T) {
 	localTmpDir := t.TempDir()
 
 	// Enable client-side overwrites so the second PUT doesn't fail with FileAlreadyExists
-	require.NoError(t, param.Set(param.Client_EnableOverwrites.GetName(), true))
+	require.NoError(t, param.Set(param.Client_EnableOverwrites, true))
 	defer func() {
-		require.NoError(t, param.Set(param.Client_EnableOverwrites.GetName(), false))
+		require.NoError(t, param.Set(param.Client_EnableOverwrites, false))
 	}()
 
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/overwrite.txt",
@@ -479,9 +479,9 @@ Director:
 
 	t.Run("Overwrite", func(t *testing.T) {
 		// Enable client-side overwrites so the second PUT doesn't fail with FileAlreadyExists
-		require.NoError(t, param.Set(param.Client_EnableOverwrites.GetName(), true))
+		require.NoError(t, param.Set(param.Client_EnableOverwrites, true))
 		defer func() {
-			require.NoError(t, param.Set(param.Client_EnableOverwrites.GetName(), false))
+			require.NoError(t, param.Set(param.Client_EnableOverwrites, false))
 		}()
 
 		uploadURL := fmt.Sprintf("pelican://%s:%d/test/overwrite_minio.txt",

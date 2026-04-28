@@ -746,11 +746,21 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// the backend with ".." intact, potentially escaping
 			// the storage root.
 			newPath := path.Clean(wildcardPath)
+			// path.Clean("") == "." and path.Clean("/") == "/"; collapse the
+			// degenerate "." back to "/" so the URL we hand the WebDAV
+			// handler stays well-formed.
+			if newPath == "." {
+				newPath = "/"
+			}
 
-			// Create a shallow copy of the request and modify its URL
+			// Create a shallow copy of the request and modify its URL.
+			// The WebDAV handler's stripPrefix relies on URL.Path still
+			// starting with handler.Prefix (= routePrefix), so put the
+			// route prefix back on. Keeping the prefix here also keeps
+			// PROPFIND href values aligned with the public URL.
 			modifiedReq := c.Request.Clone(c.Request.Context())
 			modifiedURL := *c.Request.URL
-			modifiedURL.Path = newPath
+			modifiedURL.Path = routePrefix + newPath
 			modifiedReq.URL = &modifiedURL
 
 			// Stash client tracing headers (X-Pelican-JobId,
