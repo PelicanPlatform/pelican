@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -28,29 +28,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 )
-
-type mockLauncher struct{}
-
-func (m *mockLauncher) Name() string                                             { return "mock" }
-func (m *mockLauncher) Launch(ctx context.Context) (context.Context, int, error) { return ctx, 0, nil }
-func (m *mockLauncher) KillFunc() func(pid int, sig int) error {
-	return func(pid int, sig int) error { return nil }
-}
 
 func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
 	restartInfos = []restartInfo{
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: true, pids: []int{10}},
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{20}},
+		{isCache: true, pids: []int{10}},
+		{isCache: false, pids: []int{20}},
 	}
 	t.Cleanup(func() { restartInfos = nil })
 
 	restartCalled := make(chan []int, 1)
-	restartXrootdFn = func(ctx context.Context, oldPids []int) ([]int, error) {
+	expectedServerCtx := context.Background()
+	restartXrootdFn = func(ctx context.Context, serverCtx context.Context, oldPids []int) ([]int, error) {
+		// Ensure that the callback forwards the long-lived server context
+		require.Equal(t, expectedServerCtx, serverCtx)
 		if oldPids == nil {
 			oldPids = collectTrackedPIDs(restartInfos)
 		}
@@ -62,7 +56,7 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 	require.NoError(t, param.Logging_Origin_Cms.Set("info"))
 	require.NoError(t, param.Logging_Cache_Pfc.Set("info"))
 
-	RegisterXrootdLoggingCallback()
+	RegisterXrootdLoggingCallback(expectedServerCtx)
 
 	require.NoError(t, param.Logging_Cache_Pfc.Set("debug"))
 
@@ -82,18 +76,18 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 func TestXrootdLoggingCallbackIgnoresNonXrootdLogging(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
-	restartInfos = []restartInfo{{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{30}}}
+	restartInfos = []restartInfo{{isCache: false, pids: []int{30}}}
 	t.Cleanup(func() { restartInfos = nil })
 
 	restartCalled := make(chan struct{}, 1)
-	restartXrootdFn = func(ctx context.Context, oldPids []int) ([]int, error) {
+	restartXrootdFn = func(ctx context.Context, serverCtx context.Context, oldPids []int) ([]int, error) {
 		restartCalled <- struct{}{}
 		return []int{333}, nil
 	}
 	t.Cleanup(func() { restartXrootdFn = RestartXrootd })
 
 	require.NoError(t, param.Logging_Level.Set("info"))
-	RegisterXrootdLoggingCallback()
+	RegisterXrootdLoggingCallback(context.Background())
 
 	require.NoError(t, param.Logging_Level.Set("debug"))
 

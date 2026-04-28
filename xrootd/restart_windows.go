@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -22,7 +22,6 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -30,20 +29,14 @@ import (
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // Windows stub - restart not implemented on Windows
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+func StoreRestartInfo(pids []int, launch func(launchers []daemon.Launcher) ([]int, error), server server_structs.XRootDServer, cache bool, cmsd bool, priv bool) {
 	// No-op on Windows
 }
 
 // RestartXrootd gracefully restarts the XRootD server processes
 // Windows stub - restart not implemented on Windows
-func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error) {
+func RestartXrootd(opCtx context.Context, serverCtx context.Context, oldPids []int) (newPids []int, err error) {
 	return nil, errors.New("XRootD restart is not supported on Windows")
-}
-
-// RestartServer is a helper function that restarts XRootD and updates the server's PIDs
-// Windows stub - restart not implemented on Windows
-func RestartServer(ctx context.Context, server server_structs.XRootDServer) error {
-	return errors.New("XRootD restart is not supported on Windows")
 }
 
 // ResetRestartState clears restart tracking and callbacks for tests.

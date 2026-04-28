@@ -121,7 +121,7 @@ func TestXRootDRestart(t *testing.T) {
 	var restartErr error
 
 	go func() {
-		newPids, restartErr = xrootd.RestartXrootd(ft.Ctx, oldPids)
+		newPids, restartErr = xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
 		close(restartDone)
 	}()
 
@@ -192,7 +192,7 @@ func TestXRootDRestartConcurrent(t *testing.T) {
 	done := make(chan error, 2)
 
 	go func() {
-		_, err := xrootd.RestartXrootd(ft.Ctx, oldPids)
+		_, err := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
 		done <- err
 	}()
 
@@ -200,7 +200,7 @@ func TestXRootDRestartConcurrent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	go func() {
-		_, err := xrootd.RestartXrootd(ft.Ctx, oldPids)
+		_, err := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
 		done <- err
 	}()
 

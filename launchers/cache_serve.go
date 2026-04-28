@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
@@ -176,11 +177,15 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	cacheServer.SetPids(pids)
 
 	// Store restart information after PIDs are known
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, true, useCMSD, privileged)
+	launch := func(ls []daemon.Launcher) ([]int, error) {
+		return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
+	}
+	xrootd.SetRestartAdvertiseFn(launcher_utils.Advertise)
+	xrootd.StoreRestartInfo(pids, launch, cacheServer, true, useCMSD, privileged)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
-	xrootd.RegisterXrootdLoggingCallback()
+	xrootd.RegisterXrootdLoggingCallback(ctx)
 
 	if param.Cache_EnableEvictionMonitoring.GetBool() {
 		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
