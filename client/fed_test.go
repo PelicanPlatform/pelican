@@ -84,19 +84,20 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	scopes = append(scopes, readScope)
 	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
 	tkn, err = tokenConfig.CreateToken()
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
 	tmpTok := filepath.Join(t.TempDir(), "token")
 	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
-	assert.NoError(t, err, "Error opening the temp token file")
+	require.NoError(t, err, "Error opening the temp token file")
 	_, err = tempToken.WriteString(tkn)
-	assert.NoError(t, err, "Error writing to temp token file")
+	require.NoError(t, err, "Error writing to temp token file")
 
 	return
 }
@@ -1202,4 +1203,238 @@ func TestPrestageWithAPI(t *testing.T) {
 		require.NoError(t, result.results[0].Error, "Prestage with forced API failed: %v", result.results[0].Error)
 		t.Logf("Prestage with forced API succeeded")
 	}
+}
+
+// TestTPCPublicRead tests third-party-copy between origins using a public namespace.
+// This verifies that "pelican object copy" can move data from one remote path
+// to another on the same origin via the HTTP COPY verb.
+func TestTPCPublicRead(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+
+	for _, export := range fed.Exports {
+		testFileContent := "test file content for TPC"
+		// Drop the testFileContent into the origin directory
+		srcDir := filepath.Join(export.StoragePrefix, "tpc_test")
+		require.NoError(t, os.MkdirAll(srcDir, os.FileMode(0755)))
+		err := os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(testFileContent), 0644)
+		require.NoError(t, err)
+		test_utils.ChownToDaemon(t, srcDir, filepath.Join(srcDir, "source.txt"))
+
+		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+		sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_test/source.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+		destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_test/dest.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+
+		// Get a token for the write side (destination needs write access)
+		tempToken, tkn := getTempToken(t)
+		defer tempToken.Close()
+		defer os.Remove(tempToken.Name())
+
+		// Perform a third-party-copy from source to dest
+		transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
+			client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		require.Len(t, transferResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+
+		// Verify the copied file exists by downloading it
+		localDir := t.TempDir()
+		downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, downloadResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), downloadResults[0].TransferredBytes)
+
+		// Read the downloaded file and verify content
+		downloadedContent, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent, string(downloadedContent))
+	}
+}
+
+// TestTPCAuth tests third-party-copy between origins with authenticated access.
+func TestTPCAuth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Create a token with read+write permissions
+	tempToken, tkn := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+	for _, export := range fed.Exports {
+		testFileContent := "authenticated TPC test content"
+
+		// First upload a file using DoPut so we have a source
+		tempFile, err := os.CreateTemp(t.TempDir(), "tpc_auth_test")
+		require.NoError(t, err)
+		_, err = tempFile.WriteString(testFileContent)
+		require.NoError(t, err)
+		tempFile.Close()
+
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/tpc_auth/source.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+		destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_auth/dest.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+
+		_, err = client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tkn))
+		require.NoError(t, err)
+
+		// Now do a TPC from source to dest
+		transferResults, err := client.DoCopy(fed.Ctx, uploadURL, destURL, false,
+			client.WithToken(tkn), client.WithSourceToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, transferResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+
+		// Verify the copied file by downloading it
+		localDir := t.TempDir()
+		downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, downloadResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), downloadResults[0].TransferredBytes)
+
+		downloadedContent, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent, string(downloadedContent))
+	}
+}
+
+// TestTPCDirectRead tests that third-party-copy works when the source URL
+// includes the ?directread query parameter.  This ensures the TPC pull reads
+// directly from the origin rather than going through a cache.
+func TestTPCDirectRead(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+
+	export := fed.Exports[0]
+	testFileContent := "directread TPC test payload"
+
+	// Drop a source file into the origin storage
+	srcDir := filepath.Join(export.StoragePrefix, "tpc_direct")
+	require.NoError(t, os.MkdirAll(srcDir, os.FileMode(0755)))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "src.txt"), []byte(testFileContent), 0644))
+	test_utils.ChownToDaemon(t, srcDir, filepath.Join(srcDir, "src.txt"))
+
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+	host := fmt.Sprintf("%s:%s", param.Server_Hostname.GetString(),
+		strconv.Itoa(param.Server_WebPort.GetInt()))
+
+	// Source URL with ?directread — forces the director to route to the origin.
+	sourceURL := fmt.Sprintf("pelican://%s%s/tpc_direct/src.txt?directread", host, export.FederationPrefix)
+	destURL := fmt.Sprintf("pelican://%s%s/tpc_direct/dst.txt", host, export.FederationPrefix)
+
+	tempToken, tkn := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+
+	// Perform a TPC with directread on the source side.
+	transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
+		client.WithTokenLocation(tempToken.Name()))
+	require.NoError(t, err)
+	require.Len(t, transferResults, 1)
+	assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+
+	// Download the destination file locally to verify correctness.
+	localDir := t.TempDir()
+	downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+	require.NoError(t, err)
+	require.Len(t, downloadResults, 1)
+
+	downloadedContent, err := os.ReadFile(filepath.Join(localDir, "dst.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, testFileContent, string(downloadedContent))
+}
+
+// TestTPCSyncSkip tests that a second TPC sync skips objects that already exist
+// at the destination. It uploads a directory, TPC-copies it, adds a new file,
+// then TPC-copies again with SyncExist. Only the new file should be transferred.
+func TestTPCSyncSkip(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	server_utils.ResetTestState()
+
+	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	export := fed.Exports[0]
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+
+	tempToken, tkn := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+
+	host := fmt.Sprintf("%s:%s", param.Server_Hostname.GetString(),
+		strconv.Itoa(param.Server_WebPort.GetInt()))
+	srcBase := fmt.Sprintf("pelican://%s%s/tpc_sync_skip/src", host, export.FederationPrefix)
+	destBase := fmt.Sprintf("pelican://%s%s/tpc_sync_skip/dst", host, export.FederationPrefix)
+
+	// Upload two files into the source directory
+	tmpDir := t.TempDir()
+	innerDir := filepath.Join(tmpDir, "inner")
+	require.NoError(t, os.MkdirAll(innerDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("alpha"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(innerDir, "b.txt"), []byte("bravo"), 0644))
+
+	_, err := client.DoPut(fed.Ctx, tmpDir, srcBase, true, client.WithToken(tkn))
+	require.NoError(t, err)
+
+	// First TPC copy: should copy both files
+	results1, err := client.DoCopy(fed.Ctx, srcBase, destBase, true,
+		client.WithToken(tkn), client.WithSourceToken(tkn),
+		client.WithSynchronize(client.SyncExist))
+	require.NoError(t, err)
+	require.Len(t, results1, 2, "First TPC sync should transfer 2 files")
+
+	// Verify both files arrived
+	dlDir := t.TempDir()
+	_, err = client.DoGet(fed.Ctx, destBase, dlDir, true, client.WithToken(tkn))
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(dlDir, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "alpha", string(got))
+	got, err = os.ReadFile(filepath.Join(dlDir, "inner", "b.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "bravo", string(got))
+
+	// Now add a third file to the source
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "c.txt"), []byte("charlie"), 0644))
+	_, err = client.DoPut(fed.Ctx, filepath.Join(tmpDir, "c.txt"),
+		srcBase+"/c.txt", false, client.WithToken(tkn))
+	require.NoError(t, err)
+
+	// Second TPC copy with SyncExist: should only copy the new file
+	results2, err := client.DoCopy(fed.Ctx, srcBase, destBase, true,
+		client.WithToken(tkn), client.WithSourceToken(tkn),
+		client.WithSynchronize(client.SyncExist))
+	require.NoError(t, err)
+	require.Len(t, results2, 1, "Second TPC sync should only transfer the new file")
+
+	// Verify all three files are at the destination
+	dlDir2 := t.TempDir()
+	_, err = client.DoGet(fed.Ctx, destBase, dlDir2, true, client.WithToken(tkn))
+	require.NoError(t, err)
+	got, err = os.ReadFile(filepath.Join(dlDir2, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "alpha", string(got))
+	got, err = os.ReadFile(filepath.Join(dlDir2, "inner", "b.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "bravo", string(got))
+	got, err = os.ReadFile(filepath.Join(dlDir2, "c.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "charlie", string(got))
 }

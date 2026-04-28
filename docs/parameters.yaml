@@ -951,6 +951,16 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.DisableCopies
+description: |+
+  When false (the default), the origin supports HTTP third-party copy (TPC) and automatically enables the Copies capability for
+  every export that has the Writes capability.
+  Set to true to disable TPC support entirely, preventing the origin from accepting COPY requests.
+type: bool
+default: false
+hidden: true
+components: ["origin"]
+---
 name: Origin.EnableDirectReads
 description: |+
   A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.
@@ -3303,6 +3313,55 @@ type: bool
 default: false
 components: ["cache", "origin"]
 hidden: true
+---
+name: Server.SSRFProtection.Disabled
+description: |+
+  Disable SSRF (Server-Side Request Forgery) protection for server-initiated outbound HTTP requests.
+  By default (false), the SSRF-resistant transport blocks connections to non-publicly-routable IP
+  addresses (RFC 1918 private ranges, loopback, link-local, CGN, multicast, etc.).
+  This protects against attacks where a malicious user tricks a server into making requests to internal
+  services.
+  The SSRF-resistant transport is used in security-sensitive contexts such as HTTP third-party copy (TPC),
+  where the server fetches data from a user-supplied URL.
+  Administrators can fine-tune the policy with Server.SSRFProtection.AllowedCIDRs and
+  Server.SSRFProtection.BlockedCIDRs.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Server.SSRFProtection.SkipDefaultBlocks
+description: |+
+  Skip adding the built-in list of non-publicly-routable CIDR ranges to the block list.
+  By default (false), connections to RFC 1918 private ranges, loopback, link-local, CGN, multicast,
+  and other non-public ranges are blocked.
+  Set to true if you want to manage the block list entirely via Server.SSRFProtection.BlockedCIDRs
+  without any default blocks.
+  Note that Server.SSRFProtection.Disabled must also be false for any blocking to take effect.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Server.SSRFProtection.AllowedCIDRs
+description: |+
+  A list of CIDR ranges that should be reachable even though they fall inside a normally-blocked
+  (non-public) range.
+  For example, if your origin needs to pull from a source on a private network, you can add
+  that network here.
+  Each entry must be a valid CIDR notation (e.g. "10.0.0.0/24" or "fd00::/64").
+  Invalid entries are logged as warnings and ignored.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Server.SSRFProtection.BlockedCIDRs
+description: |+
+  A list of additional CIDR ranges to block beyond the built-in non-public ranges.
+  Use this to block specific public IP ranges that your server should never connect to.
+  Each entry must be a valid CIDR notation (e.g. "93.184.216.0/24").
+  Invalid entries are logged as warnings and ignored.
+type: stringSlice
+default: []
+components: ["origin"]
 ---
 ################################
 #   Issuer's Configurations    #

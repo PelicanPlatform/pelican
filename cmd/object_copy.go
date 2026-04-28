@@ -23,6 +23,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -43,7 +45,7 @@ var (
 
 	copyCmd = &cobra.Command{
 		Use:   "copy {source ...} {destination}",
-		Short: "Copy a file to/from a Pelican federation",
+		Short: "Copy a file to or from a Pelican federation or between two objects in a federation",
 		Run:   copyMain,
 		PreRun: func(cmd *cobra.Command, args []string) {
 			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
@@ -61,6 +63,8 @@ func init() {
 	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.String("source-token", "", "Token file for the source (overrides --token for reads)")
+	flagSet.String("dest-token", "", "Token file for the destination (overrides --token for writes)")
 	flagSet.BoolP("recursive", "r", false, "Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
@@ -84,6 +88,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	} else {
 		flagSet.String("caches", "", "A JSON file containing the list of caches")
 		flagSet.String("methods", "http", "Comma separated list of methods to try, in order")
+		flagSet.Bool("direct", false, "Read directly from an origin, bypassing any caches (same as '?directread' query)")
 		flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
 		flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
 		objectCmd.AddCommand(copyCmd)
@@ -243,7 +248,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	pb := newProgressBar()
 	defer pb.shutdown()
 
-	tokenLocation, _ := cmd.Flags().GetString("token")
+	tokenOpts := resolveTokenOptions(cmd)
 
 	// Check if the program was executed from a terminal and does not specify a log location
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
@@ -269,6 +274,37 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
+
+	// Handle --direct flag by appending the directread query parameter to each source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		for i, src := range source {
+			u, pErr := url.Parse(src)
+			if pErr != nil {
+				log.Errorln("Failed to parse URL:", pErr)
+				os.Exit(1)
+			}
+
+			// --direct is only meaningful for pelican/osdf URLs
+			if !pelican_url.IsPelicanScheme(u.Scheme) {
+				log.Warnln("--direct flag is ignored for non-pelican source:", src)
+				continue
+			}
+
+			// Check for conflicting prefercached parameter
+			if u.Query().Has("prefercached") {
+				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
+				os.Exit(1)
+			}
+
+			if u.RawQuery != "" {
+				u.RawQuery += "&directread"
+			} else {
+				u.RawQuery = "directread"
+			}
+			source[i] = u.String()
+		}
+	}
 
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
@@ -296,7 +332,8 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
+		options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...)}, tokenOpts...)
+		_, result = client.DoCopy(ctx, src, dest, isRecursive, options...)
 		if result != nil {
 			lastSrc = src
 			break

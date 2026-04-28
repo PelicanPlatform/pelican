@@ -34,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -82,6 +83,33 @@ func getPreferredCaches() ([]*url.URL, error) {
 	}
 
 	return caches, nil
+}
+
+// resolveTokenOptions reads the --token, --source-token, and --dest-token
+// flags from cmd and returns the appropriate client.TransferOption slice.
+//
+// Precedence: --source-token / --dest-token override --token for their
+// respective role.  --token is the fallback used when neither role-specific
+// flag is set.
+func resolveTokenOptions(cmd *cobra.Command) []client.TransferOption {
+	var opts []client.TransferOption
+
+	// Generic --token (fallback for both source and destination)
+	if tokenLocation, _ := cmd.Flags().GetString("token"); tokenLocation != "" {
+		opts = append(opts, client.WithTokenLocation(tokenLocation))
+	}
+
+	// --source-token overrides --token for reads / source side
+	if srcToken, _ := cmd.Flags().GetString("source-token"); srcToken != "" {
+		opts = append(opts, client.WithSourceTokenLocation(srcToken))
+	}
+
+	// --dest-token overrides --token for writes / destination side
+	if destToken, _ := cmd.Flags().GetString("dest-token"); destToken != "" {
+		opts = append(opts, client.WithDestinationTokenLocation(destToken))
+	}
+
+	return opts
 }
 
 func handleIncorrectPassword(err error, actionMessage string) bool {

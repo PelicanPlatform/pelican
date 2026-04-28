@@ -35,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -120,7 +121,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 		// Create transfers for each source prefix
 		transfers := make([]client_agent.TransferRequest, len(args))
 		for i, src := range args {
-			if !isPelicanUrl(src) {
+			if !pelican_url.IsPelicanURL(src) {
 				log.Errorln("Provided URL is not a valid Pelican URL:", src)
 				os.Exit(1)
 			}
@@ -230,7 +231,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	for _, src := range args {
-		if !isPelicanUrl(src) {
+		if !pelican_url.IsPelicanURL(src) {
 			log.Errorln("Provided URL is not a valid Pelican URL:", src)
 			os.Exit(1)
 		}

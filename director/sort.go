@@ -311,6 +311,8 @@ func originSupportsVerb(verb string) AdPredicate {
 			}
 			// Default to listing for other Depth values
 			return ad.ServerAd.Caps.Listings && ad.NamespaceAd.Caps.Listings
+		case "COPY":
+			return ad.ServerAd.Caps.Copies && ad.NamespaceAd.Caps.Copies
 		default:
 			return false
 		}

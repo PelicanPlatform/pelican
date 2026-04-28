@@ -257,6 +257,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultChecksumTypes []string `mapstructure:"defaultchecksumtypes" yaml:"DefaultChecksumTypes"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		DisableCopies bool `mapstructure:"disablecopies" yaml:"DisableCopies"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
 		DiskUsageCalculationDelay time.Duration `mapstructure:"diskusagecalculationdelay" yaml:"DiskUsageCalculationDelay"`
 		DiskUsageCalculationInterval time.Duration `mapstructure:"diskusagecalculationinterval" yaml:"DiskUsageCalculationInterval"`
@@ -389,6 +390,12 @@ type Config struct {
 		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
 		Modules []string `mapstructure:"modules" yaml:"Modules"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
+		SSRFProtection struct {
+			AllowedCIDRs []string `mapstructure:"allowedcidrs" yaml:"AllowedCIDRs"`
+			BlockedCIDRs []string `mapstructure:"blockedcidrs" yaml:"BlockedCIDRs"`
+			Disabled bool `mapstructure:"disabled" yaml:"Disabled"`
+			SkipDefaultBlocks bool `mapstructure:"skipdefaultblocks" yaml:"SkipDefaultBlocks"`
+		} `mapstructure:"ssrfprotection" yaml:"SSRFProtection"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile" yaml:"SessionSecretFile"`
 		StartupTimeout time.Duration `mapstructure:"startuptimeout" yaml:"StartupTimeout"`
 		TLSCACertificateDirectory string `mapstructure:"tlscacertificatedirectory" yaml:"TLSCACertificateDirectory"`
@@ -711,6 +718,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DefaultChecksumTypes struct { Type string; Value []string }
 		DirectorTest struct { Type string; Value bool }
+		DisableCopies struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
 		DiskUsageCalculationDelay struct { Type string; Value time.Duration }
 		DiskUsageCalculationInterval struct { Type string; Value time.Duration }
@@ -843,6 +851,12 @@ type configWithType struct {
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
+		SSRFProtection struct {
+			AllowedCIDRs struct { Type string; Value []string }
+			BlockedCIDRs struct { Type string; Value []string }
+			Disabled struct { Type string; Value bool }
+			SkipDefaultBlocks struct { Type string; Value bool }
+		}
 		SessionSecretFile struct { Type string; Value string }
 		StartupTimeout struct { Type string; Value time.Duration }
 		TLSCACertificateDirectory struct { Type string; Value string }

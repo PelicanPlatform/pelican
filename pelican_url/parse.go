@@ -126,8 +126,9 @@ func AllowUnknownQueryParams(d bool) ParseOption {
 	}
 }
 
-// Check whether the provided scheme is one Peliacan understands
-func schemeUnderstood(scheme string) bool {
+// IsPelicanScheme returns true if the given URL scheme (or scheme+token combo)
+// represents a known Pelican federation scheme (pelican, osdf, stash).
+func IsPelicanScheme(scheme string) bool {
 	for _, validScheme := range ValidSchemes {
 		// HTCondor may prepend token+ to the scheme, so we need to allow that
 		if scheme == validScheme || strings.HasSuffix(scheme, "+"+validScheme) {
@@ -135,6 +136,15 @@ func schemeUnderstood(scheme string) bool {
 		}
 	}
 	return false
+}
+
+// IsPelicanURL returns true if the input string is a URL with a known Pelican scheme.
+func IsPelicanURL(input string) bool {
+	u, err := url.Parse(input)
+	if err != nil || u.Scheme == "" {
+		return false
+	}
+	return IsPelicanScheme(u.Scheme)
 }
 
 // Given a scheme that may have an embedded token, normalize it to the base scheme.
@@ -231,7 +241,7 @@ func Parse(rawUrl string, parseOpts []ParseOption, discoveryOpts []DiscoveryOpti
 	// if the user has configured Federation.DiscoveryUrl/DirectorUrl in their config or run the client with `-f <discovery-url>`.
 	// However, the object paths should be combined with the discovery URL to form a complete URL _before_ trying to
 	// parse it as a PelicanURL. This allows URL parsing to be ambivalent about config.
-	if !schemeUnderstood(parsedUrl.Scheme) {
+	if !IsPelicanScheme(parsedUrl.Scheme) {
 		return nil, &SchemeError{Scheme: parsedUrl.Scheme}
 	}
 

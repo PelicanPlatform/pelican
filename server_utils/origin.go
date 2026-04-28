@@ -135,6 +135,8 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 				exportCaps.DirectReads = true
 			case "Reads":
 				exportCaps.Reads = true
+			case "Copies":
+				exportCaps.Copies = true
 			default:
 				return nil, errors.Errorf("unknown capability %v", cap)
 			}
@@ -240,6 +242,7 @@ func (b *BaseOrigin) populateOriginCaps() {
 		Listings:    param.Origin_EnableListings.GetBool(),
 		Reads:       param.Origin_EnableReads.GetBool() || pubReads,
 		DirectReads: param.Origin_EnableDirectReads.GetBool(),
+		Copies:      !param.Origin_DisableCopies.GetBool() && param.Origin_EnableWrites.GetBool(),
 	}
 
 }
@@ -492,6 +495,12 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 			return
 		}
 
+		// Auto-enable the Copies capability for exports that support Writes,
+		// unless the administrator has explicitly disabled this behavior.
+		if e.Capabilities.Writes && !e.Capabilities.Copies && !param.Origin_DisableCopies.GetBool() {
+			e.Capabilities.Copies = true
+		}
+
 		if e.Capabilities.PublicReads {
 			publicReadsFound = true
 		} else if e.Capabilities.Reads {
@@ -559,6 +568,9 @@ func (b *BaseOrigin) mapSingleExportIfNeeded(o Origin) {
 	}
 	if err := param.Origin_EnableDirectReads.Set(export.Capabilities.DirectReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableDirectReads.GetName(), err)
+	}
+	if err := param.Origin_DisableCopies.Set(!export.Capabilities.Copies); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_DisableCopies.GetName(), err)
 	}
 
 	// invoke the incoming origin's mapSingleExtra method

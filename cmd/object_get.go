@@ -54,6 +54,7 @@ func init() {
 	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.String("source-token", "", "Token file for the source (overrides --token for reads)")
 	flagSet.BoolP("recursive", "r", false, "Recursively download a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
 	flagSet.Bool("dry-run", false, "Show what would be downloaded without actually downloading")
@@ -202,7 +203,7 @@ func getMain(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	tokenLocation, _ := cmd.Flags().GetString("token")
+	tokenOpts := resolveTokenOptions(cmd)
 	inPlace, _ := cmd.Flags().GetBool("inplace")
 
 	pb := newProgressBar()
@@ -257,12 +258,12 @@ func getMain(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			newSrc, err := addQueryParam(src, "directread", "")
-			if err != nil {
-				log.Errorln("Failed to process --direct option:", err)
-				os.Exit(1)
+			if u.RawQuery != "" {
+				u.RawQuery += "&directread"
+			} else {
+				u.RawQuery = "directread"
 			}
-			source[i] = newSrc
+			source[i] = u.String()
 		}
 	}
 
@@ -297,11 +298,11 @@ func getMain(cmd *cobra.Command, args []string) {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		options := []client.TransferOption{
 			client.WithCallback(pb.callback),
-			client.WithTokenLocation(tokenLocation),
 			client.WithCaches(caches...),
 			client.WithInPlace(inPlace),
 			client.WithDryRun(dryRun),
 		}
+		options = append(options, tokenOpts...)
 		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
 		if err != nil {
 			attemptErr = err
@@ -357,8 +358,18 @@ func addQueryParam(rawURL string, key string, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	q := u.Query()
-	q.Set(key, value)
-	u.RawQuery = q.Encode()
+	if value == "" {
+		// Valueless flag parameter: append without "=" so the URL
+		// reads "?directread" instead of "?directread=".
+		if u.RawQuery != "" {
+			u.RawQuery += "&" + url.QueryEscape(key)
+		} else {
+			u.RawQuery = url.QueryEscape(key)
+		}
+	} else {
+		q := u.Query()
+		q.Set(key, value)
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), nil
 }

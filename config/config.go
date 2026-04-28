@@ -1486,6 +1486,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
 	v.SetDefault(param.Origin_EnableListings.GetName(), true)
 	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
+	v.SetDefault(param.Origin_DisableCopies.GetName(), false)
 	v.SetDefault(param.Origin_EnableAtomicUploads.GetName(), false)
 
 	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(v.GetString(param.Cache_RunLocation.GetName()), "xrootd.stats"))
@@ -2256,6 +2257,9 @@ func ResetConfig() {
 	onceTransport = sync.Once{}
 	transport = nil
 	basicTransport = nil
+
+	// Clear cached SSRF transport object
+	ResetSSRFTransportForTest()
 
 	// Clear the instance ID information for generated server ads
 	server_structs.Reset()

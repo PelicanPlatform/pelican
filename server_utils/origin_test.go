@@ -396,6 +396,7 @@ func TestGetExports(t *testing.T) {
 				Listings:    true,
 				Reads:       true,
 				DirectReads: true,
+				Copies:      true,
 			},
 			IssuerUrls: []string{defaultIssuerUrl},
 		}
@@ -409,6 +410,7 @@ func TestGetExports(t *testing.T) {
 				Listings:    false,
 				Reads:       false,
 				DirectReads: false,
+				Copies:      true,
 			},
 			IssuerUrls: []string{defaultIssuerUrl},
 		}
@@ -631,6 +633,7 @@ func TestGetExports(t *testing.T) {
 				Listings:    false,
 				Reads:       true,
 				DirectReads: true,
+				Copies:      true,
 			},
 			IssuerUrls: []string{defaultIssuerUrl},
 		}

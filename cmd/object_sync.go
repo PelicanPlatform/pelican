@@ -23,7 +23,6 @@ package main
 import (
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -33,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -53,39 +53,8 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
 	flagSet.Bool("dry-run", false, "Show what would be synchronized without actually modifying the destination")
+	flagSet.Bool("direct", false, "Read directly from an origin, bypassing any caches (same as '?directread' query)")
 	objectCmd.AddCommand(syncCmd)
-}
-
-func getLastScheme(scheme string) string {
-	idx := strings.LastIndex(scheme, "+")
-	if idx == -1 {
-		return scheme
-	}
-	return scheme[idx+1:]
-}
-
-// Returns true if the input is a url-like object that
-// pelican can consume.
-//
-// Schemes we understand are "osdf", "pelican",
-// "foo+osdf", or "foo+pelican" where "foo" is some arbitrary
-// prefix not containing a "/"
-func isPelicanUrl(input string) bool {
-	prefix, _, found := strings.Cut(input, "://")
-	if !found {
-		return false
-	}
-	if strings.Contains(prefix, "/") {
-		return false
-	}
-	scheme := getLastScheme(prefix)
-	if scheme != "pelican" && scheme != "osdf" {
-		return false
-	}
-	if _, err := url.Parse(input); err != nil {
-		return false
-	}
-	return true
 }
 
 func syncMain(cmd *cobra.Command, args []string) {
@@ -126,27 +95,68 @@ func syncMain(cmd *cobra.Command, args []string) {
 	sources := args[:len(args)-1]
 	dest := args[len(args)-1]
 	doDownload := false
-	if isPelicanUrl(dest) {
-		for _, src := range sources {
-			if isPelicanUrl(src) {
-				log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL", src)
-				os.Exit(1)
+	doTPC := false
+	if pelican_url.IsPelicanURL(dest) {
+		if pelican_url.IsPelicanURL(sources[0]) {
+			// Both source and destination are remote: third-party-copy sync
+			for _, src := range sources {
+				if !pelican_url.IsPelicanURL(src) {
+					log.Errorln("When synchronizing between federation URLs, all sources must be pelican URLs:", src)
+					os.Exit(1)
+				}
 			}
+			log.Debugln("Synchronizing between Pelican data federation endpoints (third-party-copy)")
+			doTPC = true
+		} else {
+			for _, src := range sources {
+				if pelican_url.IsPelicanURL(src) {
+					log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL from local files", src)
+					os.Exit(1)
+				}
+			}
+			log.Debugln("Synchronizing to a Pelican data federation")
 		}
-		log.Debugln("Synchronizing to a Pelican data federation")
 	} else {
-		if !isPelicanUrl(sources[0]) {
+		if !pelican_url.IsPelicanURL(sources[0]) {
 			log.Errorln("Either the first or last argument must be a pelican:// or osdf://-style URL specifying a remote destination")
 			os.Exit(1)
 		}
 		for _, src := range sources {
-			if !isPelicanUrl(src) {
+			if !pelican_url.IsPelicanURL(src) {
 				log.Errorln("When synchronizing to a local directory, all sources must be pelican URLs:", src)
 				os.Exit(1)
 			}
 		}
 		log.Debugln("Synchronizing from a Pelican data federation")
 		doDownload = true
+	}
+
+	// Handle --direct flag by appending the directread query parameter to each remote source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		if doDownload || doTPC {
+			for i, src := range sources {
+				// Check for conflicting prefercached parameter
+				u, pErr := url.Parse(src)
+				if pErr != nil {
+					log.Errorln("Failed to parse URL:", pErr)
+					os.Exit(1)
+				}
+				if u.Query().Has("prefercached") {
+					log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
+					os.Exit(1)
+				}
+
+				newSrc, pErr := addQueryParam(src, "directread", "")
+				if pErr != nil {
+					log.Errorln("Failed to process --direct option:", pErr)
+					os.Exit(1)
+				}
+				sources[i] = newSrc
+			}
+		} else {
+			log.Warningln("The --direct flag is ignored for upload syncs (local to remote)")
+		}
 	}
 
 	log.Debugln("Sources:", sources)
@@ -174,7 +184,21 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	if doDownload {
+	if doTPC {
+		for _, src := range sources {
+			options := []client.TransferOption{
+				client.WithCallback(pb.callback),
+				client.WithTokenLocation(tokenLocation),
+				client.WithSynchronize(client.SyncSize),
+				client.WithCaches(caches...),
+				client.WithDryRun(dryRun),
+			}
+			if _, err = client.DoCopy(ctx, src, dest, true, options...); err != nil {
+				lastSrc = src
+				break
+			}
+		}
+	} else if doDownload {
 		for _, src := range sources {
 			options := []client.TransferOption{
 				client.WithCallback(pb.callback),

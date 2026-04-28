@@ -242,6 +242,8 @@ type (
 		job                *TransferJob
 		callback           TransferCallbackFunc
 		remoteURL          *url.URL
+		srcURL             *url.URL        // When a copy job, this is the source URL to use
+		srcToken           *tokenGenerator // When a copy job, the source token to use
 		localPath          string
 		token              *tokenGenerator
 		fedToken           TokenProvider // Federation token; added as access_token query param on origin URLs
@@ -282,10 +284,14 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
-		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
-		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
-		prefObjServers     []*url.URL // holds any client-requested caches/origins
-		dirResp            server_structs.DirectorResponse
+		dryRun             bool                            // Enable dry-run mode to display what would be transferred without actually doing it
+		srcURL             *url.URL                        // When a copy job, this is the source URL
+		srcDirResp         server_structs.DirectorResponse // When a copy job, this represents the source directory information
+		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
+		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
+		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
+		dirResp            server_structs.DirectorResponse // Director response for non-copy transfers (download, upload, prestage)
+		destDirResp        server_structs.DirectorResponse // Director response for the copy destination
 		directorUrl        string
 		token              *tokenGenerator
 		fedToken           TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
@@ -366,27 +372,33 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                             = option.Interface
-	identTransferOptionCaches                  struct{}
-	identTransferOptionCallback                struct{}
-	identTransferOptionTokenLocation           struct{}
-	identTransferOptionAcquireToken            struct{}
-	identTransferOptionToken                   struct{}
-	identTransferOptionSynchronize             struct{}
-	identTransferOptionCollectionsUrl          struct{}
-	identTransferOptionChecksums               struct{}
-	identTransferOptionRequireChecksum         struct{}
-	identTransferOptionRecursive               struct{}
-	identTransferOptionDepth                   struct{}
-	identTransferOptionWriter                  struct{}
-	identTransferOptionReader                  struct{}
-	identTransferOptionInPlace                 struct{}
-	identTransferOptionDryRun                  struct{}
-	identTransferOptionForcePrestageAPI        struct{}
-	identTransferOptionByteRange               struct{}
-	identTransferOptionMetadataChannel         struct{}
-	identTransferOptionFedToken                struct{}
-	identTransferOptionCacheEmbeddedClientMode struct{}
+	TransferOption                              = option.Interface
+	identTransferOptionCaches                   struct{}
+	identTransferOptionCallback                 struct{}
+	identTransferOptionTokenLocation            struct{}
+	identTransferOptionAcquireToken             struct{}
+	identTransferOptionSourceAcquireToken       struct{}
+	identTransferOptionDestinationAcquireToken  struct{}
+	identTransferOptionToken                    struct{}
+	identTransferOptionSourceTokenLocation      struct{}
+	identTransferOptionSourceToken              struct{}
+	identTransferOptionDestinationTokenLocation struct{}
+	identTransferOptionDestinationToken         struct{}
+	identTransferOptionSynchronize              struct{}
+	identTransferOptionCollectionsUrl           struct{}
+	identTransferOptionChecksums                struct{}
+	identTransferOptionRequireChecksum          struct{}
+	identTransferOptionRecursive                struct{}
+	identTransferOptionDepth                    struct{}
+	identTransferOptionWriter                   struct{}
+	identTransferOptionReader                   struct{}
+	identTransferOptionInPlace                  struct{}
+	identTransferOptionDryRun                   struct{}
+	identTransferOptionForcePrestageAPI         struct{}
+	identTransferOptionByteRange                struct{}
+	identTransferOptionMetadataChannel          struct{}
+	identTransferOptionFedToken                 struct{}
+	identTransferOptionCacheEmbeddedClientMode  struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -448,6 +460,7 @@ const (
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
+	transferTypeCopy                         // Transfer copies objects between origins
 )
 
 var (
@@ -509,6 +522,22 @@ func HttpDigestFromChecksum(checksumType ChecksumType) string {
 		return "sha"
 	}
 	return ""
+}
+
+// wantDigestValue builds the value for a Want-Digest header from a list
+// of checksum types.  If the list is empty, the default algorithm is used.
+func wantDigestValue(types []ChecksumType) string {
+	if len(types) == 0 {
+		return HttpDigestFromChecksum(AlgDefault)
+	}
+	val := ""
+	for i, cksum := range types {
+		if i > 0 {
+			val += ","
+		}
+		val += HttpDigestFromChecksum(cksum)
+	}
+	return val
 }
 
 // Convert a checksum value to a human-readable string matching the encoding
@@ -838,6 +867,30 @@ func WithFedToken(provider TokenProvider) TransferOption {
 	return option.New(identTransferOptionFedToken{}, provider)
 }
 
+// Create an option to provide a source token for a third-party-copy transfer
+func WithSourceToken(token string) TransferOption {
+	return option.New(identTransferOptionSourceToken{}, token)
+}
+
+// Create an option to provide a source token location for a third-party-copy transfer
+func WithSourceTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionSourceTokenLocation{}, location)
+}
+
+// WithDestinationToken provides a token for the destination server in a
+// third-party-copy transfer.  For get operations, this is a no-op; for put
+// operations it behaves identically to WithToken.
+func WithDestinationToken(token string) TransferOption {
+	return option.New(identTransferOptionDestinationToken{}, token)
+}
+
+// WithDestinationTokenLocation provides a token file for the destination
+// server in a third-party-copy transfer.  For get operations, this is a
+// no-op; for put operations it behaves identically to WithTokenLocation.
+func WithDestinationTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionDestinationTokenLocation{}, location)
+}
+
 // Create an option to specify the checksums to request for a given
 // transfer
 func WithRequestChecksums(types []ChecksumType) TransferOption {
@@ -856,6 +909,129 @@ func WithRequireChecksum() TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
+}
+
+// WithSourceAcquireToken controls automatic token acquisition for the source
+// side of a transfer.  For get operations this is equivalent to WithAcquireToken;
+// for put operations it is a no-op.
+func WithSourceAcquireToken(enable bool) TransferOption {
+	return option.New(identTransferOptionSourceAcquireToken{}, enable)
+}
+
+// WithDestinationAcquireToken controls automatic token acquisition for the
+// destination side of a transfer.  For put operations this is equivalent to
+// WithAcquireToken; for get operations it is a no-op.
+func WithDestinationAcquireToken(enable bool) TransferOption {
+	return option.New(identTransferOptionDestinationAcquireToken{}, enable)
+}
+
+// applyTokenOptions processes token-related transfer options and applies them
+// to the provided token generators with correct precedence: role-specific
+// options (WithSourceToken, WithDestinationToken, etc.) always override generic
+// options (WithToken, WithTokenLocation, WithAcquireToken) regardless of the
+// order they appear in the options slice.
+//
+// For a copy transfer, token is the destination token and srcToken is the
+// source token; both must be non-nil.  For a non-copy transfer, only token
+// is used (srcToken should be nil) and the upload flag determines whether
+// source or destination options apply.
+func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []TransferOption) {
+	isCopy := srcToken != nil
+
+	// First pass: apply generic options.
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionToken{}:
+			val := opt.Value().(string)
+			token.SetToken(val)
+			if isCopy {
+				srcToken.SetToken(val)
+			}
+		case identTransferOptionTokenLocation{}:
+			val := opt.Value().(string)
+			token.SetTokenLocation(val)
+			if isCopy {
+				srcToken.SetTokenLocation(val)
+			}
+		case identTransferOptionAcquireToken{}:
+			val := opt.Value().(bool)
+			token.EnableAcquire = val
+			if isCopy {
+				srcToken.EnableAcquire = val
+			}
+		}
+	}
+
+	// Second pass: apply role-specific options (these override generic).
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionSourceToken{}:
+			if isCopy {
+				srcToken.SetToken(opt.Value().(string))
+			} else if !upload {
+				token.SetToken(opt.Value().(string))
+			}
+		case identTransferOptionSourceTokenLocation{}:
+			if isCopy {
+				srcToken.SetTokenLocation(opt.Value().(string))
+			} else if !upload {
+				token.SetTokenLocation(opt.Value().(string))
+			}
+		case identTransferOptionSourceAcquireToken{}:
+			if isCopy {
+				srcToken.EnableAcquire = opt.Value().(bool)
+			} else if !upload {
+				token.EnableAcquire = opt.Value().(bool)
+			}
+		case identTransferOptionDestinationToken{}:
+			if isCopy {
+				token.SetToken(opt.Value().(string))
+			} else if upload {
+				token.SetToken(opt.Value().(string))
+			}
+		case identTransferOptionDestinationTokenLocation{}:
+			if isCopy {
+				token.SetTokenLocation(opt.Value().(string))
+			} else if upload {
+				token.SetTokenLocation(opt.Value().(string))
+			}
+		case identTransferOptionDestinationAcquireToken{}:
+			if isCopy {
+				token.EnableAcquire = opt.Value().(bool)
+			} else if upload {
+				token.EnableAcquire = opt.Value().(bool)
+			}
+		}
+	}
+}
+
+// applyJobOptions processes the transfer options that are shared across
+// NewTransferJob and NewCopyJob, writing them into the TransferJob.
+// Options that are specific to a single job type (Writer, Reader, InPlace,
+// ByteRange, ForcePrestageAPI) are left for the caller to handle.
+func applyJobOptions(tj *TransferJob, options []TransferOption) {
+	for _, opt := range options {
+		switch opt.Ident() {
+		case identTransferOptionCaches{}:
+			tj.prefObjServers = opt.Value().([]*url.URL)
+		case identTransferOptionCallback{}:
+			tj.callback = opt.Value().(TransferCallbackFunc)
+		case identTransferOptionFedToken{}:
+			tj.fedToken = opt.Value().(TokenProvider)
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = opt.Value().(SyncLevel)
+		case identTransferOptionChecksums{}:
+			tj.requestedChecksums = opt.Value().([]ChecksumType)
+		case identTransferOptionRequireChecksum{}:
+			tj.requireChecksum = opt.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = opt.Value().(bool)
+		case identTransferOptionMetadataChannel{}:
+			tj.metadataChan = opt.Value().(chan<- TransferMetadata)
+		case identTransferOptionCacheEmbeddedClientMode{}:
+			tj.cacheMode = opt.Value().(bool)
+		}
+	}
 }
 
 // Create an option to specify the object synchronization level
@@ -1388,41 +1564,21 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
+	applyTokenOptions(tj.token, nil, upload, options)
+	applyJobOptions(tj, options)
+
+	// Handle options specific to direct (non-copy) transfers.
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionCaches{}:
-			tj.prefObjServers = option.Value().([]*url.URL)
-		case identTransferOptionCallback{}:
-			tj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			tj.token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			tj.token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			tj.token.SetToken(option.Value().(string))
-		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(TokenProvider)
-		case identTransferOptionSynchronize{}:
-			tj.syncLevel = option.Value().(SyncLevel)
-		case identTransferOptionChecksums{}:
-			tj.requestedChecksums = option.Value().([]ChecksumType)
-		case identTransferOptionRequireChecksum{}:
-			tj.requireChecksum = option.Value().(bool)
 		case identTransferOptionWriter{}:
 			tj.writer = option.Value().(io.WriteCloser)
 		case identTransferOptionReader{}:
 			tj.reader = option.Value().(io.ReadCloser)
 		case identTransferOptionInPlace{}:
 			tj.inPlace = option.Value().(bool)
-		case identTransferOptionDryRun{}:
-			tj.dryRun = option.Value().(bool)
 		case identTransferOptionByteRange{}:
 			br := option.Value().(ByteRange)
 			tj.byteRange = &br
-		case identTransferOptionMetadataChannel{}:
-			tj.metadataChan = option.Value().(chan<- TransferMetadata)
-		case identTransferOptionCacheEmbeddedClientMode{}:
-			tj.cacheMode = option.Value().(bool)
 		}
 	}
 
@@ -1568,22 +1724,12 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
+	applyTokenOptions(tj.token, nil, false, options)
+	applyJobOptions(tj, options)
+
+	// Handle the option specific to prestage transfers.
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionCaches{}:
-			tj.prefObjServers = option.Value().([]*url.URL)
-		case identTransferOptionCallback{}:
-			tj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			tj.token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			tj.token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			tj.token.SetToken(option.Value().(string))
-		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(TokenProvider)
-		case identTransferOptionSynchronize{}:
-			tj.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionForcePrestageAPI{}:
 			tj.forcePrestageAPI = option.Value().(bool)
 		}
@@ -1634,6 +1780,175 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	log.Debugf("Created new prestage job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
+	return
+}
+
+// Create a new third-party copy job for the client.
+//
+// This creates a transfer that uses the HTTP COPY verb to instruct the
+// destination server to pull data directly from the source, without the
+// client acting as an intermediary.
+//
+// The returned object can be further customized as desired.
+// This function does not "submit" the job for execution.
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	destPUrl, err := ParseRemoteAsPUrl(ctx, dest.String())
+	if err != nil {
+		return
+	}
+
+	srcPUrl, err := ParseRemoteAsPUrl(ctx, src.String())
+	if err != nil {
+		return
+	}
+
+	// Check for recursive query parameter in source or destination URLs
+	if _, exists := srcPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+	if _, exists := destPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
+	project, _ := searchJobAd(attrProjectName)
+	copyDestUrl := *destPUrl
+	copySrcUrl := *srcPUrl
+	tj = &TransferJob{
+		prefObjServers: tc.prefObjServers,
+		recursive:      recursive,
+		remoteURL:      &copyDestUrl,
+		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		dryRun:         tc.dryRun,
+		syncLevel:      tc.syncLevel,
+		xferType:       transferTypeCopy,
+		uuid:           id,
+		project:        project,
+		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
+	}
+	tj.fedToken = tc.fedToken
+	tj.cacheMode = tc.cacheMode
+	tj.srcURL = src
+	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
+	if tc.token != "" {
+		tj.token.SetToken(tc.token)
+		tj.srcToken.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		tj.token.SetTokenLocation(tc.tokenLocation)
+		tj.srcToken.SetTokenLocation(tc.tokenLocation)
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
+
+	applyTokenOptions(tj.token, tj.srcToken, false, options)
+	applyJobOptions(tj, options)
+
+	// Resolve the destination director information, using the cache when available.
+	// First try COPY verb so the director filters to origins that support TPC.
+	// If the director doesn't know about COPY (old director) or no origins support
+	// it, fall back to PUT which matches the pre-TPC behavior.
+	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
+	var dirResp server_structs.DirectorResponse
+	destVerb := "COPY"
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copyDestUrlRef := &copyDestUrl
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+			if qErr != nil {
+				// Fall back to PUT if COPY is not supported by the director
+				destVerb = http.MethodPut
+				resp, qErr = getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+			}
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
+		if err != nil {
+			// Fall back to PUT if COPY is not supported by the director
+			destVerb = http.MethodPut
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
+		}
+	}
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+		return
+	}
+	tj.destDirResp = dirResp
+	tj.token.DirResp = &dirResp
+
+	// Acquire token for the destination if needed
+	if dirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.token.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy destination")
+			return nil, err
+		}
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+				return nil, err
+			}
+			tj.destDirResp = dirResp
+			tj.token.DirResp = &dirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+			}
+		}
+	}
+
+	// Resolve the source director information, using the cache when available.
+	var srcDirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copySrcUrlRef := &copySrcUrl
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
+	}
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+		return
+	}
+	tj.srcDirResp = srcDirResp
+	tj.srcToken.DirResp = &srcDirResp
+
+	if srcDirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.srcToken.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy source")
+			return nil, err
+		}
+		if contents != "" {
+			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+				return nil, err
+			}
+			tj.srcDirResp = srcDirResp
+			tj.srcToken.DirResp = &srcDirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+			}
+		}
+	} else {
+		tj.srcToken = nil
+	}
+
+	log.Debugf("Created new copy job, ID %s client %s, from %s to %s", tj.uuid.String(), tc.id.String(), src.String(), dest.String())
 	return
 }
 
@@ -1961,6 +2276,66 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServ
 
 // Take a transfer job and produce one or more transfer file requests.
 // The transfer file requests are sent to be processed via the engine
+// buildUploadTransfers returns the transfer attempt for an upload job.
+func buildUploadTransfers(job *clientTransferJob, packOption string) ([]transferAttemptDetails, error) {
+	if len(job.job.dirResp.ObjectServers) == 0 {
+		return nil, errors.New("No origins found for upload")
+	}
+	return []transferAttemptDetails{{
+		Url:        job.job.dirResp.ObjectServers[0],
+		PackOption: packOption,
+	}}, nil
+}
+
+// buildCopyTransfers returns the source-server transfer attempts for a TPC copy job.
+func buildCopyTransfers(job *clientTransferJob) ([]transferAttemptDetails, error) {
+	sortedSrcServers, _, err := generateSortedObjServers(job.job.srcDirResp, job.job.prefObjServers)
+	if err != nil {
+		log.Errorln("Failed to get source servers for copy:", err)
+		return nil, err
+	}
+	var transfers []transferAttemptDetails
+	for _, srcServer := range sortedSrcServers {
+		srcServerUrl := *srcServer
+		srcServerUrl.Path = path.Clean(job.job.srcURL.Path)
+		copiedUrl := srcServerUrl
+		transfers = append(transfers, transferAttemptDetails{
+			Url: &copiedUrl,
+		})
+	}
+	if len(transfers) == 0 {
+		return nil, errors.New("no source servers found for copy")
+	}
+	return transfers, nil
+}
+
+// buildDownloadTransfers returns the transfer attempts for a download or prestage job.
+func buildDownloadTransfers(job *clientTransferJob, packOption string) ([]transferAttemptDetails, error) {
+	sortedServers, nPreferred, err := generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
+	if err != nil {
+		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
+	}
+	var sortedServerStrings []string
+	for _, serverUrl := range sortedServers {
+		sortedServerStrings = append(sortedServerStrings, serverUrl.String())
+	}
+
+	// Make sure we only try as many object servers as we have
+	objectServersToTry := ObjectServersToTry
+	if objectServersToTry > len(sortedServers) {
+		objectServersToTry = len(sortedServers)
+	}
+	log.Debugf("Trying the first %d object servers", objectServersToTry)
+	transfers := getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
+
+	if len(transfers) > 0 {
+		log.Traceln("First transfer in list:", transfers[0].Url)
+	} else {
+		return nil, errors.New("No transfers possible as no object servers were found")
+	}
+	return transfers, nil
+}
+
 func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -1979,42 +2354,21 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
+	// For copy jobs, we will also build the source URL
+	var srcUrl *url.URL
+
 	var transfers []transferAttemptDetails
-	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
-		if len(job.job.dirResp.ObjectServers) == 0 {
-			err = errors.New("No origins found for upload")
-			return
-		}
-		transfers = append(transfers, transferAttemptDetails{
-			Url:        job.job.dirResp.ObjectServers[0],
-			PackOption: packOption,
-		})
-	} else {
-		var sortedServers []*url.URL
-		var nPreferred int
-		sortedServers, nPreferred, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
-		if err != nil {
-			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
-		}
-		var sortedServerStrings []string
-		for _, serverUrl := range sortedServers {
-			sortedServerStrings = append(sortedServerStrings, serverUrl.String())
-		}
-
-		// Make sure we only try as many object servers as we have
-		objectServersToTry := ObjectServersToTry
-		if objectServersToTry > len(sortedServers) {
-			objectServersToTry = len(sortedServers)
-		}
-		log.Debugf("Trying the first %d object servers", objectServersToTry)
-		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
-
-		if len(transfers) > 0 {
-			log.Traceln("First transfer in list:", transfers[0].Url)
-		} else {
-			err = errors.New("No transfers possible as no object servers were found")
-			return
-		}
+	switch job.job.xferType {
+	case transferTypeUpload:
+		transfers, err = buildUploadTransfers(job, packOption)
+	case transferTypeCopy:
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
+		transfers, err = buildCopyTransfers(job)
+	default:
+		transfers, err = buildDownloadTransfers(job, packOption)
+	}
+	if err != nil {
+		return
 	}
 
 	// Ensure all transfer URLs have the proper path set (except for unix:// URLs)
@@ -2053,6 +2407,22 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			if statInfo.IsCollection {
 				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
 			}
+		} else if job.job.xferType == transferTypeCopy {
+			// For copy, stat the SOURCE to see if it's a collection.
+			// If it is, walk the source directory listing and emit individual TPC copy jobs.
+			var srcPelicanUrl *pelican_url.PelicanURL
+			srcPelicanUrl, err = pelican_url.Parse(srcUrl.String(), nil, nil)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse source URL for recursive copy")
+			}
+			var statInfo FileInfo
+			if statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil); err != nil {
+				return errors.Wrap(err, "failed to stat source path for recursive copy")
+			}
+
+			if statInfo.IsCollection {
+				return te.walkDirCopy(job, transfers, te.files, srcUrl)
+			}
 		}
 		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
 	} else if job.job.xferType == transferTypePrestage {
@@ -2089,6 +2459,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			job:                job.job,
 			engine:             te,
 			remoteURL:          remoteUrl,
+			srcURL:             srcUrl,
+			srcToken:           job.job.srcToken,
 			requestedChecksums: job.job.requestedChecksums,
 			requireChecksum:    job.job.requireChecksum,
 			packOption:         packOption,
@@ -2160,9 +2532,12 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			}
 			var err error
 			var transferResults TransferResults
-			if file.file.xferType == transferTypeUpload {
+			switch file.file.xferType {
+			case transferTypeUpload:
 				transferResults, err = uploadObject(file.file)
-			} else {
+			case transferTypeCopy:
+				transferResults, err = copyHTTP(file.file)
+			default:
 				transferResults, err = downloadObject(file.file)
 			}
 			transferResults.JobId = file.jobId
@@ -2584,9 +2959,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// NOT sent to the director.
 		if transfer.fedToken != nil {
 			if ft, ftErr := transfer.fedToken.Get(); ftErr == nil && ft != "" {
-				q := transferEndpointUrl.Query()
-				q.Set("access_token", ft)
-				transferEndpointUrl.RawQuery = q.Encode()
+				param := "access_token=" + url.QueryEscape(ft)
+				if transferEndpointUrl.RawQuery != "" {
+					transferEndpointUrl.RawQuery += "&" + param
+				} else {
+					transferEndpointUrl.RawQuery = param
+				}
 			}
 		}
 		transferUrls[idx] = transferEndpoint.Url
@@ -2833,20 +3211,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 	if val, found := searchJobAd(attrJobId); found {
 		request.Header.Set("X-Pelican-JobId", val)
 	}
-	if len(types) == 0 {
-		request.Header.Set("Want-Digest", HttpDigestFromChecksum(AlgDefault))
-	} else {
-		multiple := false
-		val := ""
-		for _, cksum := range types {
-			if multiple {
-				val += ","
-			}
-			val += HttpDigestFromChecksum(cksum)
-			multiple = true
-		}
-		request.Header.Set("Want-Digest", val)
-	}
+	request.Header.Set("Want-Digest", wantDigestValue(types))
 	client := config.GetClient()
 	response, err := client.Do(request)
 	if err != nil {
@@ -2862,11 +3227,23 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		err = &sce
 		return
 	}
-	ctr := 0
-	var val string
-	for _, val = range response.Header.Values("Digest") {
+	result = parseDigestHeader(response.Header, fields)
+	if len(result) == 0 {
+		log.WithFields(fields).Debugln("Server returned no checksum information")
+	}
+	return
+}
+
+// parseDigestHeader parses RFC 3230 Digest response headers and returns
+// the parsed checksum values.  It accepts multiple Digest header values
+// and comma-separated entries within a single value.
+// The optional fields parameter provides structured logging context.
+func parseDigestHeader(header http.Header, fields log.Fields) (result []ChecksumInfo) {
+	if fields == nil {
+		fields = log.Fields{}
+	}
+	for _, val := range header.Values("Digest") {
 		for _, entry := range strings.Split(val, ",") {
-			ctr++
 			info := strings.SplitN(entry, "=", 2)
 			if len(info) != 2 {
 				continue
@@ -2877,7 +3254,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				log.WithFields(fields).Warningln("Unknown checksum algorithm:", info[0])
 				continue
 			}
-			val := make([]byte, 32)
+			buf := make([]byte, 32)
 			switch info[0] {
 			case "crc32c":
 				// XRootD has a bug where crc32c is base64 encoded instead (per the spec)
@@ -2886,8 +3263,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// See: https://github.com/xrootd/xrootd/issues/2456
 				if len(info[1]) == 8 && info[1][6] == 0x3d && info[1][7] == 0x3d {
 					decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-					if _, err := decoder.Read(val); err == nil {
-						checksumInfo.Value = val[:4]
+					if _, err := decoder.Read(buf); err == nil {
+						checksumInfo.Value = buf[:4]
 						break
 					} else {
 						log.WithFields(fields).Errorf("Failed to parse base64-encoded checksum value (%s): %s", info[1], err)
@@ -2911,11 +3288,11 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// are hex-encoded and should accept leading 0's.  Once parsed, store the
 				// corresponding bytes in network order (big-endian) in our byte array.
 				if intVal, err := strconv.ParseInt(info[1], 16, 64); err == nil {
-					val[0] = byte((intVal >> 24) & 0xff)
-					val[1] = byte((intVal >> 16) & 0xff)
-					val[2] = byte((intVal >> 8) & 0xff)
-					val[3] = byte(intVal & 0xff)
-					checksumInfo.Value = val[:4]
+					buf[0] = byte((intVal >> 24) & 0xff)
+					buf[1] = byte((intVal >> 16) & 0xff)
+					buf[2] = byte((intVal >> 8) & 0xff)
+					buf[3] = byte(intVal & 0xff)
+					checksumInfo.Value = buf[:4]
 				} else {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
@@ -2924,22 +3301,19 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				fallthrough
 			case "sha":
 				decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-				if count, err := decoder.Read(val); err != nil {
+				if count, err := decoder.Read(buf); err != nil {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
 				} else {
-					val = val[:count]
+					buf = buf[:count]
 				}
-				checksumInfo.Value = val
+				checksumInfo.Value = buf
 			default:
 				log.WithFields(fields).Warningf("Unknown checksum algorithm: %s", info[0])
 				continue
 			}
 			result = append(result, checksumInfo)
 		}
-	}
-	if ctr == 0 {
-		log.WithFields(fields).Debugln("Server returned no checksum information")
 	}
 	return
 }
