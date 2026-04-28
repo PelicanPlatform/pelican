@@ -124,6 +124,21 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 
 	// If per-export S3 credentials were provided, set them in the environment
 	// so the gocloud AWS credential chain picks them up.
+	//
+	// FIXME(deploy): this mutates global process environment, which has two
+	// real-world consequences in production:
+	//   1. With multiple S3 backends configured against different accounts,
+	//      whichever export is initialized last "wins" -- subsequent SDK
+	//      calls (including from other backends, presigners, debug hooks,
+	//      and any subprocess we spawn) see the last-set credentials.
+	//   2. Because os.Setenv writes to the global env, it leaks into any
+	//      child process inheriting our env (notably the xrootd workers in
+	//      mixed deployments).
+	// The proper fix is to construct an *s3.Client with explicit
+	// aws.Credentials and call s3blob.OpenBucket(ctx, client, bucket, opts)
+	// directly instead of going through blob.OpenBucket(URL). Until then,
+	// per-export AccessKey/SecretKey is only safe when one S3 export is
+	// configured per origin process.
 	if opts.AccessKey != "" && opts.SecretKey != "" {
 		os.Setenv("AWS_ACCESS_KEY_ID", opts.AccessKey)
 		os.Setenv("AWS_SECRET_ACCESS_KEY", opts.SecretKey)
@@ -303,18 +318,54 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 }
 
 // RemoveAll implements webdav.FileSystem.
+//
+// Per the webdav.FileSystem contract this must remove `name` and, if it is a
+// directory, everything underneath it. The previous implementation only
+// deleted the named object plus its directory marker, leaving children
+// orphaned. We list the prefix and delete every key, then remove the marker.
+//
+// Listing is paginated so memory stays bounded for large directories. Each
+// delete is best-effort -- a partial failure returns the first error but
+// continues so we don't strand half a tree.
 func (fs *blobFileSystem) RemoveAll(ctx context.Context, name string) error {
 	key := blobKey(name)
 
-	// Try deleting as a plain object first.
+	// First try a plain-object delete (handles non-directory paths).
 	err := fs.bucket.Delete(ctx, key)
 	if err != nil && !isNotFound(err) {
 		return err
 	}
 
-	// Also try the directory marker.
+	// Recursively delete anything under the directory prefix. Note we
+	// intentionally don't pass a Delimiter here -- we want every descendant.
+	dirPrefix := key
+	if dirPrefix != "" && !strings.HasSuffix(dirPrefix, "/") {
+		dirPrefix += "/"
+	}
+	iter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix})
+	var firstErr error
+	for {
+		obj, listErr := iter.Next(ctx)
+		if listErr == io.EOF {
+			break
+		}
+		if listErr != nil {
+			if firstErr == nil {
+				firstErr = listErr
+			}
+			break
+		}
+		if delErr := fs.bucket.Delete(ctx, obj.Key); delErr != nil && !isNotFound(delErr) {
+			if firstErr == nil {
+				firstErr = delErr
+			}
+		}
+	}
+
+	// Finally, the directory marker (some providers return it as a child of
+	// the prefix above and some don't, so this is belt-and-suspenders).
 	_ = fs.bucket.Delete(ctx, key+"/")
-	return nil
+	return firstErr
 }
 
 // Rename implements webdav.FileSystem.
