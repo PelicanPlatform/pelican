@@ -21,12 +21,14 @@ package origin
 import (
 	"context"
 	"io"
+	stdlog "log"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -148,7 +150,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 	}
 	// Start routine which receives the reverse listener and then launches
 	// a simple proxying HTTPS server for that connection
-	egrp.Go(func() (err error) {
+	egrp.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
@@ -169,16 +171,29 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 					"remote_addr": listener.Addr().String(),
 				}
 				log.WithFields(logFields).Debug("Origin received broker reverse connection")
+				// Surface the http.Server's internal errors (TLS handshake
+				// failures, malformed requests, etc.) through logrus so we
+				// can diagnose flaky broker tunnel connections. Without this,
+				// the http.Server logs to os.Stderr which gets swallowed in
+				// the test harness, leaving us blind when the tunnel's TLS
+				// handshake silently times out (a challenge during TestBrokerApi
+				// flakiness).
+				srvLogger := stdlog.New(log.StandardLogger().WriterLevel(log.WarnLevel), "broker-server: ", 0)
 				srv := http.Server{
-					Handler: http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
+					Handler:           http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
+					ErrorLog:          srvLogger,
+					ReadHeaderTimeout: 30 * time.Second,
 				}
 				metrics.PelicanBrokerConnections.WithLabelValues("origin").Inc()
+				// Use a local err so concurrent broker connections don't
+				// race on a shared named return; the data race detector
+				// flagged this in TestBrokerApi.
 				go func(fields log.Fields) {
 					// A one-shot listener should do a single "accept" then shutdown.
 					log.WithFields(fields).Debug("Origin starting to serve broker reverse connection")
-					err = srv.Serve(listener)
-					if !errors.Is(err, net.ErrClosed) {
-						log.WithFields(fields).WithError(err).Error("Failed to serve reverse connection")
+					serveErr := srv.Serve(listener)
+					if !errors.Is(serveErr, net.ErrClosed) {
+						log.WithFields(fields).WithError(serveErr).Error("Failed to serve reverse connection")
 					}
 				}(logFields)
 			}
