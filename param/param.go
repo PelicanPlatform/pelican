@@ -19,10 +19,12 @@
 package param
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 
@@ -219,6 +221,47 @@ func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
+// intToTimeDurationRejectHookFunc returns a DecodeHookFunc that rejects bare
+// integers and floats for time.Duration fields. Users must include a unit suffix
+// (e.g., "10s", "5m", "1h"); without one, a bare number would be silently
+// interpreted as nanoseconds due to WeaklyTypedInput.
+//
+// Values already typed as time.Duration (e.g., from param.Set or viper.SetDefault
+// with a time.Duration argument) are passed through unchanged.
+func intToTimeDurationRejectHookFunc() mapstructure.DecodeHookFunc {
+	durationType := reflect.TypeOf(time.Duration(0))
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
+		if t != durationType {
+			return data, nil
+		}
+		// Allow time.Duration → time.Duration (programmatic values set via
+		// param.Set, viper.Set, or viper.SetDefault with a time.Duration).
+		if f == durationType {
+			return data, nil
+		}
+		switch f.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64:
+			return nil, fmt.Errorf("duration value must include a unit suffix "+
+				"(e.g., \"10s\", \"5m\", \"1h\"); got bare number: %v", data)
+		}
+		return data, nil
+	}
+}
+
+// buildDecodeHookFunc returns the standard composed decode hook used for all
+// mapstructure decoders in this package. Centralizing it here ensures that all
+// three decoder sites (DecodeConfig, getOrCreateConfig, MultiSet) stay in sync.
+func buildDecodeHookFunc() mapstructure.DecodeHookFunc {
+	return mapstructure.ComposeDecodeHookFunc(
+		intToTimeDurationRejectHookFunc(),
+		mapstructure.StringToTimeDurationHookFunc(),
+		stringToSliceHookFunc(),
+		stringToByteRateHookFunc(),
+	)
+}
+
 // DecodeConfig decodes the provided viper instance into a new Config struct.
 //
 // Unlike UnmarshalConfig/Refresh, this does NOT update the global atomic cache.
@@ -235,11 +278,7 @@ func DecodeConfig(v *viper.Viper) (*Config, error) {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},
@@ -424,11 +463,7 @@ func getOrCreateConfig() *Config {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},
@@ -488,11 +523,7 @@ func MultiSet(keyValues map[string]any) error {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},

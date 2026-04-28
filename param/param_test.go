@@ -943,7 +943,159 @@ func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
 	assert.NotNil(t, config)
 }
 
-// TestConcurrentObjectParamUnmarshal verifies that ObjectParam.Unmarshal()
+// TestIntToTimeDurationRejectHookFunc verifies that bare integers and floats
+// are rejected for time.Duration fields, while strings with unit suffixes and
+// existing time.Duration values are accepted.
+func TestIntToTimeDurationRejectHookFunc(t *testing.T) {
+	durationType := reflect.TypeOf(time.Duration(0))
+	intType := reflect.TypeOf(int(0))
+	int64Type := reflect.TypeOf(int64(0))
+	float64Type := reflect.TypeOf(float64(0))
+	stringType := reflect.TypeOf("")
+
+	hook := intToTimeDurationRejectHookFunc()
+	fn := hook.(func(f reflect.Type, t reflect.Type, data any) (any, error))
+
+	t.Run("bare-int-rejected", func(t *testing.T) {
+		_, err := fn(intType, durationType, 600)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-int64-rejected", func(t *testing.T) {
+		_, err := fn(int64Type, durationType, int64(600))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-float64-rejected", func(t *testing.T) {
+		_, err := fn(float64Type, durationType, 600.0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("time-duration-allowed", func(t *testing.T) {
+		result, err := fn(durationType, durationType, 10*time.Minute)
+		require.NoError(t, err)
+		assert.Equal(t, 10*time.Minute, result)
+	})
+
+	t.Run("string-passed-through", func(t *testing.T) {
+		// Strings are handled by StringToTimeDurationHookFunc; this hook passes them through.
+		result, err := fn(stringType, durationType, "10m")
+		require.NoError(t, err)
+		assert.Equal(t, "10m", result)
+	})
+
+	t.Run("non-duration-target-unaffected", func(t *testing.T) {
+		// Hook must not interfere with int → int conversions.
+		result, err := fn(intType, intType, 42)
+		require.NoError(t, err)
+		assert.Equal(t, 42, result)
+	})
+}
+
+// TestDurationDecoding verifies end-to-end YAML parsing behavior for
+// time.Duration configuration fields.
+func TestDurationDecoding(t *testing.T) {
+	t.Run("string-with-unit-suffix-accepted", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 10m
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+		assert.Equal(t, 10*time.Minute, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("bare-integer-rejected", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 600
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		_, err := DecodeConfig(v)
+		require.Error(t, err, "bare integer should be rejected for a duration field")
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-float-rejected", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 600.0
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		_, err := DecodeConfig(v)
+		require.Error(t, err, "bare float should be rejected for a duration field")
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("time-duration-via-viper-set-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		v := viper.New()
+		v.Set("Cache.SelfTestInterval", 5*time.Minute)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Minute, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("time-duration-via-unmarshalconfig-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		viper.Set("Cache.SelfTestInterval", 15*time.Second)
+
+		cfg, err := UnmarshalConfig()
+		require.NoError(t, err)
+		assert.Equal(t, 15*time.Second, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("time-duration-via-multiset-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		err := MultiSet(map[string]any{
+			"Cache.SelfTestInterval": 30 * time.Second,
+		})
+		require.NoError(t, err)
+
+		cfg, err := GetUnmarshaledConfig()
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Second, cfg.Cache.SelfTestInterval)
+	})
+}
+
 // doesn't race with concurrent viper writes.
 func TestConcurrentObjectParamUnmarshal(t *testing.T) {
 	require.NoError(t, Reset())
