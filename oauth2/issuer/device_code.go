@@ -77,7 +77,7 @@ func (h *DeviceCodeHandler) HandleDeviceAuthorizationRequest(ctx context.Context
 	request.RequestedScope = scopes
 	request.GrantedScope = scopes
 
-	expiresIn := 10 * time.Minute
+	expiresIn := h.config.AuthorizeCodeLifespan
 	expiresAt := time.Now().Add(expiresIn)
 
 	if err := h.storage.CreateDeviceCodeSession(ctx, deviceCode, userCode, request, expiresAt); err != nil {

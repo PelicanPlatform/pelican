@@ -205,13 +205,16 @@ var runtimeConfigurableMap = map[string]bool{
 	"Federation.TopologyReloadInterval": false,
 	"Federation.TopologyUrl": false,
 	"GeoIPOverrides": false,
+	"Issuer.AccessTokenLifespan": false,
 	"Issuer.AuthenticationSource": false,
+	"Issuer.AuthorizationCodeLifespan": false,
 	"Issuer.AuthorizationTemplates": false,
 	"Issuer.DynamicClientStaleTimeout": false,
 	"Issuer.DynamicClientUnusedTimeout": false,
 	"Issuer.GroupFile": false,
 	"Issuer.GroupRequirements": false,
 	"Issuer.GroupSource": false,
+	"Issuer.IDTokenLifespan": false,
 	"Issuer.IssuerClaimValue": false,
 	"Issuer.OIDCAuthenticationRequirements": false,
 	"Issuer.OIDCAuthenticationUserClaim": false,
@@ -223,6 +226,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.QDLLocation": false,
 	"Issuer.RedirectUris": false,
 	"Issuer.RefreshTokenGracePeriod": false,
+	"Issuer.RefreshTokenLifespan": false,
 	"Issuer.ScitokensServerLocation": false,
 	"Issuer.TomcatLocation": false,
 	"Issuer.UserStripDomain": false,
@@ -1037,9 +1041,13 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Director.RegistryQueryInterval": func(c *Config) time.Duration { return c.Director.RegistryQueryInterval },
 	"Director.StatTimeout": func(c *Config) time.Duration { return c.Director.StatTimeout },
 	"Federation.TopologyReloadInterval": func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
+	"Issuer.AccessTokenLifespan": func(c *Config) time.Duration { return c.Issuer.AccessTokenLifespan },
+	"Issuer.AuthorizationCodeLifespan": func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifespan },
 	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
 	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
+	"Issuer.IDTokenLifespan": func(c *Config) time.Duration { return c.Issuer.IDTokenLifespan },
 	"Issuer.RefreshTokenGracePeriod": func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
+	"Issuer.RefreshTokenLifespan": func(c *Config) time.Duration { return c.Issuer.RefreshTokenLifespan },
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
@@ -1269,13 +1277,16 @@ var allParameterNames = []string{
 	"Federation.TopologyReloadInterval",
 	"Federation.TopologyUrl",
 	"GeoIPOverrides",
+	"Issuer.AccessTokenLifespan",
 	"Issuer.AuthenticationSource",
+	"Issuer.AuthorizationCodeLifespan",
 	"Issuer.AuthorizationTemplates",
 	"Issuer.DynamicClientStaleTimeout",
 	"Issuer.DynamicClientUnusedTimeout",
 	"Issuer.GroupFile",
 	"Issuer.GroupRequirements",
 	"Issuer.GroupSource",
+	"Issuer.IDTokenLifespan",
 	"Issuer.IssuerClaimValue",
 	"Issuer.OIDCAuthenticationRequirements",
 	"Issuer.OIDCAuthenticationUserClaim",
@@ -1287,6 +1298,7 @@ var allParameterNames = []string{
 	"Issuer.QDLLocation",
 	"Issuer.RedirectUris",
 	"Issuer.RefreshTokenGracePeriod",
+	"Issuer.RefreshTokenLifespan",
 	"Issuer.ScitokensServerLocation",
 	"Issuer.TomcatLocation",
 	"Issuer.UserStripDomain",
@@ -1925,9 +1937,13 @@ var (
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	Issuer_AccessTokenLifespan = DurationParam{"Issuer.AccessTokenLifespan"}
+	Issuer_AuthorizationCodeLifespan = DurationParam{"Issuer.AuthorizationCodeLifespan"}
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
+	Issuer_IDTokenLifespan = DurationParam{"Issuer.IDTokenLifespan"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	Issuer_RefreshTokenLifespan = DurationParam{"Issuer.RefreshTokenLifespan"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
@@ -2343,9 +2359,13 @@ func init() {
 		"Director.RegistryQueryInterval": Director_RegistryQueryInterval,
 		"Director.StatTimeout": Director_StatTimeout,
 		"Federation.TopologyReloadInterval": Federation_TopologyReloadInterval,
+		"Issuer.AccessTokenLifespan": Issuer_AccessTokenLifespan,
+		"Issuer.AuthorizationCodeLifespan": Issuer_AuthorizationCodeLifespan,
 		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
 		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
+		"Issuer.IDTokenLifespan": Issuer_IDTokenLifespan,
 		"Issuer.RefreshTokenGracePeriod": Issuer_RefreshTokenGracePeriod,
+		"Issuer.RefreshTokenLifespan": Issuer_RefreshTokenLifespan,
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,

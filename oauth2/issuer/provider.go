@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // hkdfPurposeIDPHMAC is the HKDF info string used to derive the HMAC
@@ -88,11 +89,32 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 
 	tokenURL := issuerURL + "/token"
 
+	// Read token lifespans from config. The zero-checks guard against unit
+	// tests that call NewOIDCProvider directly without initializing viper
+	// via InitConfigInternal (which is the only place defaults.yaml is
+	// loaded); in those environments GetDuration returns 0.
+	accessTokenLifespan := param.Issuer_AccessTokenLifespan.GetDuration()
+	if accessTokenLifespan == 0 {
+		accessTokenLifespan = 1 * time.Hour
+	}
+	refreshTokenLifespan := param.Issuer_RefreshTokenLifespan.GetDuration()
+	if refreshTokenLifespan == 0 {
+		refreshTokenLifespan = 7 * 24 * time.Hour
+	}
+	authorizeCodeLifespan := param.Issuer_AuthorizationCodeLifespan.GetDuration()
+	if authorizeCodeLifespan == 0 {
+		authorizeCodeLifespan = 10 * time.Minute
+	}
+	idTokenLifespan := param.Issuer_IDTokenLifespan.GetDuration()
+	if idTokenLifespan == 0 {
+		idTokenLifespan = time.Hour
+	}
+
 	fositeConfig := &fosite.Config{
-		AccessTokenLifespan:         time.Hour,
-		RefreshTokenLifespan:        7 * 24 * time.Hour,
-		AuthorizeCodeLifespan:       10 * time.Minute,
-		IDTokenLifespan:             time.Hour,
+		AccessTokenLifespan:         accessTokenLifespan,
+		RefreshTokenLifespan:        refreshTokenLifespan,
+		AuthorizeCodeLifespan:       authorizeCodeLifespan,
+		IDTokenLifespan:             idTokenLifespan,
 		TokenURL:                    tokenURL,
 		AccessTokenIssuer:           issuerURL,
 		ScopeStrategy:               sciTokensScopeStrategy,
