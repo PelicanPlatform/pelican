@@ -70,6 +70,16 @@ type (
 		// This prevents the HTTP transport's background TLS reader from consuming
 		// data that we need after hijacking the connection.
 		blockReads atomic.Bool
+		// inFlight tracks Read calls currently inside the underlying
+		// TCPConn.Read syscall. Setting blockReads + SetReadDeadline only
+		// interrupts the syscall asynchronously, so the background goroutine
+		// can still be mid-Read when we move on to send close_notify and start
+		// the next TLS handshake on the same socket. If it surfaces holding a
+		// byte from the cache's ClientHello, that byte is lost when the
+		// persistConn is torn down and the new handshake hangs (TestBrokerApi
+		// flake / GH issue #3066). The WaitGroup lets the foreground waiter
+		// park until those Reads have actually returned.
+		inFlight sync.WaitGroup
 	}
 
 	// A listener that reverses an existing, connected TCP socket.  One can
@@ -116,7 +126,16 @@ func (hj *hijackConn) Close() error {
 // Read checks if reads are blocked before delegating to the underlying connection.
 // When blockReads is set, it returns a timeout error to stop the HTTP transport's
 // background TLS reader from consuming data we need after hijacking.
+//
+// We bracket the call with the inFlight WaitGroup so the foreground goroutine
+// in doCallback can wait for any in-flight read to fully return before tearing
+// down the persistConn. Otherwise the background reader can surface holding a
+// freshly-arrived byte (e.g. the cache's ClientHello sent after we send
+// close_notify) and that byte is lost when the persistConn is closed, causing
+// the next TLS handshake on the same socket to stall.
 func (hj *hijackConn) Read(b []byte) (n int, err error) {
+	hj.inFlight.Add(1)
+	defer hj.inFlight.Done()
 	if hj.blockReads.Load() {
 		return 0, os.ErrDeadlineExceeded
 	}
@@ -476,8 +495,13 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	// Create a copy of the default transport; instead of using the existing connection pool,
-	// we will use a custom connection pool where we can hijack connections
+	// we will use a custom connection pool where we can hijack connections.
+	// We must also disable HTTP/2: hijacking only works on HTTP/1.1, and if
+	// the cache (server) advertises h2 via ALPN, the cloned transport would
+	// otherwise switch to HTTP/2 here and Hijack would silently fail later.
+	// ConnectToService disables HTTP/2 the same way for the same reason.
 	tr := config.GetTransport().Clone()
+	tr.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	hijackConnList := make([]*hijackConn, 0)
 	hijackConnMutex := sync.Mutex{}
 	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -492,7 +516,7 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 		}
 		// Take the connection and stash it onto our list.  After the client has shutdown, we will
 		// steal the last TCP connection
-		hj := &hijackConn{tcpConn, tcpConn, atomic.Bool{}}
+		hj := &hijackConn{TCPConn: tcpConn, realConn: tcpConn}
 		hijackConnMutex.Lock()
 		hijackConnList = append(hijackConnList, hj)
 		hijackConnMutex.Unlock()
@@ -563,6 +587,30 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 		}
 	}
 	hijackConnMutex.Unlock()
+
+	// Drain any in-flight read on the hijacked connection. SetReadDeadline
+	// only interrupts the syscall asynchronously, so the persistConn's
+	// readLoop might still be in the middle of a Read at this point. We
+	// must wait for it to actually return before sending close_notify and
+	// starting the next TLS handshake on the same socket -- otherwise the
+	// in-flight Read can swallow the cache's ClientHello and hang the new
+	// handshake (TestBrokerApi flake / #3363).
+	//
+	// blockReads is already true at this point, so any Read started after
+	// this returns immediately without entering the syscall, which keeps
+	// the WaitGroup-Add-from-zero rule benign.
+	if lastHj != nil {
+		drained := make(chan struct{})
+		go func() {
+			lastHj.inFlight.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+		case <-time.After(2 * time.Second):
+			log.WithFields(logFields).Warn("Timed out waiting for in-flight reads on the hijacked connection to drain; proceeding anyway")
+		}
+	}
 
 	// Send the "close notify" packet to the cache
 	client.CloseIdleConnections()
