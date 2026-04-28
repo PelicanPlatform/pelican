@@ -191,17 +191,23 @@ func extractTokens(r *http.Request) []string {
 
 // getActionFromMethod determines the token scope action from HTTP method.
 //
-// Scope hierarchy (least to most privileged):
+// Scopes by mutation effect:
 //   - read:   no mutation (GET, HEAD, OPTIONS, PROPFIND)
-//   - create: mutation without data loss (PUT, POST, MKCOL, LOCK, UNLOCK, PROPPATCH)
-//   - modify: mutation that may cause data loss (DELETE, COPY, MOVE, and any unknown method)
+//   - create: mutation without data loss -- adds new state but does not
+//     destroy existing data (PUT, POST, MKCOL, LOCK, UNLOCK, PROPPATCH,
+//     and COPY: COPY only adds a resource at the destination; RFC 4918's
+//     Overwrite header would make it destructive but Pelican does not
+//     currently honor it, so today's COPY is purely additive. Promote
+//     to modify if we ever wire up overwrite-aware COPY.)
+//   - modify: mutation that may cause data loss (DELETE, MOVE, and any
+//     unknown method)
 func getActionFromMethod(method string) token_scopes.TokenScope {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, "PROPFIND":
 		return token_scopes.Wlcg_Storage_Read
-	case http.MethodPut, http.MethodPost, "MKCOL", "LOCK", "UNLOCK", "PROPPATCH":
+	case http.MethodPut, http.MethodPost, "MKCOL", "LOCK", "UNLOCK", "PROPPATCH", "COPY":
 		return token_scopes.Wlcg_Storage_Create
-	case http.MethodDelete, "COPY", "MOVE":
+	case http.MethodDelete, "MOVE":
 		return token_scopes.Wlcg_Storage_Modify
 	default:
 		// Unknown methods default to the most restrictive scope

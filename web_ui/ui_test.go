@@ -1257,3 +1257,55 @@ func TestReadOnlyMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 	})
 }
+
+// TestIsSafeRedirectURL exercises the open-redirect guard used by the
+// OAuth login flow. Anything that could send a user to a third-party
+// host on success must be rejected; only same-origin relative paths
+// are allowed.
+func TestIsSafeRedirectURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		safe bool
+	}{
+		// Allowed: relative paths (same-origin).
+		{name: "absolute-path", url: "/view/dashboard", safe: true},
+		{name: "absolute-path-with-query", url: "/view/dashboard?next=foo", safe: true},
+		{name: "absolute-path-with-fragment", url: "/view/dashboard#section", safe: true},
+		{name: "absolute-path-root", url: "/", safe: true},
+		{name: "relative-path", url: "view/dashboard", safe: true},
+		{name: "relative-path-with-dotdot", url: "../etc/passwd", safe: true}, // weird but same-origin
+
+		// Rejected: anything that could redirect off-host.
+		{name: "empty", url: "", safe: false},
+		{name: "https-absolute", url: "https://evil.com/login", safe: false},
+		{name: "http-absolute", url: "http://evil.com/login", safe: false},
+		{name: "scheme-relative", url: "//evil.com/login", safe: false},
+		{name: "scheme-relative-with-tab", url: "//\tevil.com/login", safe: false},
+		{name: "javascript-uri", url: "javascript:alert(1)", safe: false},
+		{name: "data-uri", url: "data:text/html,<script>alert(1)</script>", safe: false},
+		{name: "ftp-absolute", url: "ftp://evil.com/", safe: false},
+
+		// Backslash variants -- some browsers treat \ as a path separator,
+		// so /\evil.com or \\evil.com can become //evil.com after the
+		// browser's own normalization.
+		{name: "leading-backslash", url: `\\evil.com/login`, safe: false},
+		{name: "slash-backslash", url: `/\evil.com/login`, safe: false},
+
+		// Whitespace / control chars: Go's url.Parse rejects these in the
+		// scheme position, so they would otherwise fall through to the
+		// safe-by-empty-host path. Belt-and-suspenders: also reject if the
+		// raw URL begins with whitespace, which would mask a leading "//".
+		{name: "leading-space", url: " //evil.com/login", safe: false},
+		{name: "leading-tab", url: "\t//evil.com/login", safe: false},
+		{name: "leading-newline", url: "\n//evil.com/login", safe: false},
+		{name: "leading-cr", url: "\r//evil.com/login", safe: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSafeRedirectURL(tt.url)
+			assert.Equal(t, tt.safe, got, "url=%q", tt.url)
+		})
+	}
+}

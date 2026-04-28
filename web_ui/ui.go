@@ -73,16 +73,44 @@ const notFoundFilePath = "frontend/out/404/index.html"
 
 // isSafeRedirectURL checks whether a redirect target is a relative
 // path (no scheme or host), preventing open-redirect attacks.
+//
+// We reject anything that:
+//   - is empty
+//   - has any leading whitespace (some browsers strip control chars
+//     before parsing the URL, so " //evil.com" can become "//evil.com"
+//     and turn into a same-protocol cross-origin redirect)
+//   - has a scheme (https://, javascript:, data:)
+//   - has a host (parsed.Host != "")
+//   - is a protocol-relative URL ("//evil.com")
+//   - starts with a backslash, which some browsers treat as a path
+//     separator and combine with a following slash to land on a host
 func isSafeRedirectURL(rawURL string) bool {
 	if rawURL == "" {
+		return false
+	}
+	// Strip nothing -- but reject if there is anything to strip. A leading
+	// control character (space, tab, newline, etc.) is a strong signal
+	// that something is trying to bypass the parser.
+	if rawURL != strings.TrimLeft(rawURL, " \t\r\n\v\f") {
+		return false
+	}
+	// "//host/path" is a protocol-relative URL; some parsers/browsers
+	// resolve it against the current scheme, which lets an attacker
+	// redirect to a same-protocol foreign host.
+	if strings.HasPrefix(rawURL, "//") {
+		return false
+	}
+	// Backslashes can be normalized to slashes by some browsers and turn
+	// "/\evil.com" into "//evil.com".
+	if strings.HasPrefix(rawURL, `\`) || strings.HasPrefix(rawURL, `/\`) {
 		return false
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return false
 	}
-	// Reject absolute URLs (scheme or host set) and protocol-relative URLs (//evil.com)
-	return parsed.Scheme == "" && parsed.Host == "" && !strings.HasPrefix(rawURL, "//")
+	// Reject absolute URLs (scheme or host set).
+	return parsed.Scheme == "" && parsed.Host == ""
 }
 
 type CreateApiTokenReq struct {
