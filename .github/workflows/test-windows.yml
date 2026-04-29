@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-${{ matrix.binary_name }}-${{ runner.os }}
           path: junit-${{ matrix.binary_name }}.xml
@@ -95,7 +95,7 @@ jobs:
         run: ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: latest
