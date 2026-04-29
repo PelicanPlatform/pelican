@@ -21,7 +21,7 @@ set -ex
 # Mac OS X instance in GitHub.
 #
 
-brew install minio ninja coreutils
+brew install ninja coreutils
 
 # Attempted fix to install xrootd-s3-http, which relies on a dependency (nlohmann-json)
 # that requires cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
