@@ -1096,6 +1096,7 @@ func TestDurationDecoding(t *testing.T) {
 	})
 }
 
+// TestConcurrentObjectParamUnmarshal verifies that ObjectParam.Unmarshal()
 // doesn't race with concurrent viper writes.
 func TestConcurrentObjectParamUnmarshal(t *testing.T) {
 	require.NoError(t, Reset())
