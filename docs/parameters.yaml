@@ -1634,6 +1634,7 @@ description: |+
   When Origin.StorageType is set to "ssh", this parameter is required.
 type: string
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.Port
@@ -1641,6 +1642,7 @@ description: |+
   The SSH port to connect to on the remote server.
 type: int
 default: 22
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.User
@@ -1648,6 +1650,7 @@ description: |+
   The SSH username to use for authentication.
 type: string
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.AuthMethods
@@ -1662,6 +1665,7 @@ description: |+
   If not specified, defaults to trying: publickey, agent, keyboard-interactive, password
 type: stringSlice
 default: ["publickey", "agent", "keyboard-interactive", "password"]
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.PasswordFile
@@ -1672,6 +1676,7 @@ description: |+
   Used when "password" is in the AuthMethods list.
 type: filename
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.PrivateKeyFile
@@ -1681,6 +1686,7 @@ description: |+
   Supports RSA, ECDSA, and Ed25519 keys.
 type: filename
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.PrivateKeyPassphraseFile
@@ -1690,6 +1696,7 @@ description: |+
   Only needed if the private key is encrypted.
 type: filename
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.KnownHostsFile
@@ -1699,6 +1706,7 @@ description: |+
   The remote host must be present in this file for the connection to succeed (unless Origin.SSH.AutoAddHostKey is true).
 type: filename
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.AutoAddHostKey
@@ -1709,6 +1717,7 @@ description: |+
   Set to true only in test/development environments where the risk is acceptable.
 type: bool
 default: false
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.PelicanBinaryPath
@@ -1718,6 +1727,7 @@ description: |+
   This must be compatible with the remote host's OS and architecture.
 type: filename
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.RemotePelicanBinaryDir
@@ -1740,6 +1750,7 @@ description: |+
   The platform is detected by running "uname -s" and "uname -m" on the remote host.
 type: stringSlice
 default: []
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.MaxRetries
@@ -1748,6 +1759,7 @@ description: |+
   After exceeding this limit, the origin will fail to start.
 type: int
 default: 5
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.ConnectTimeout
@@ -1755,6 +1767,7 @@ description: |+
   Timeout for establishing the SSH connection.
 type: duration
 default: 30s
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.KeepaliveInterval
@@ -1762,6 +1775,7 @@ description: |+
   How often to send SSH keepalive packets to verify the connection is still alive.
 type: duration
 default: 5s
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.KeepaliveTimeout
@@ -1771,6 +1785,7 @@ description: |+
   Both the SSH connection and the HTTP connection to the helper are monitored.
 type: duration
 default: 20s
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.ChallengeTimeout
@@ -1780,6 +1795,7 @@ description: |+
   The overall authentication timeout is controlled by Origin.SSH.ConnectTimeout.
 type: duration
 default: 1m
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.ProxyJump
@@ -1790,6 +1806,7 @@ description: |+
   This allows connecting to a remote host through one or more intermediate hosts.
 type: string
 default: none
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.SessionEstablishTimeout
@@ -1801,6 +1818,7 @@ description: |+
   This is an end-to-end timeout that bounds all session establishment operations.
 type: duration
 default: 5m
+hidden: true
 components: ["origin"]
 ---
 name: Origin.SSH.TunnelCallback
@@ -1817,6 +1835,7 @@ description: |+
   origin's external URL.
 type: bool
 default: false
+hidden: true
 components: ["origin"]
 ---
 ############################

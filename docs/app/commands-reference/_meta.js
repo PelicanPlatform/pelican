@@ -13,7 +13,7 @@ export default {
     "object": "pelican object",
     "origin": "pelican origin",
     "plugin": "pelican plugin",
-    "rclone": "pelican rclone",
+    // "rclone": "pelican rclone", // hidden: rclone integration not yet functional
     "registry": "pelican registry",
     "server": "pelican server",
     "token": "pelican token",
