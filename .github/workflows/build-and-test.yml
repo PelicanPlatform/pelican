@@ -256,7 +256,7 @@ jobs:
 
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -287,25 +287,25 @@ jobs:
       # The new attempt will automatically use its own, fresh caches.
 
       - name: Create a cache for Docker Buildx
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/.base-buildx-cache
           key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Create a cache for the GitHub workspace
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -320,7 +320,7 @@ jobs:
       # these layers multiple times over.
 
       - name: Build and push origin
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           file: ./images/Dockerfile
           target: origin
@@ -366,7 +366,7 @@ jobs:
     steps:
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -376,27 +376,27 @@ jobs:
             type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest-${{ matrix.arch }}
 
       - name: Restore the cache for Docker Buildx
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/.base-buildx-cache
           key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true  # don't let cache-image-layers be for naught
 
       - name: Restore the cache for the GitHub workspace
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true  # don't let cache-image-layers be for naught
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -404,7 +404,7 @@ jobs:
 
       - name: Build and push image
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           file: ./images/Dockerfile
           target: ${{ matrix.image }}
@@ -428,7 +428,7 @@ jobs:
 
       - name: Upload digest
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.image }}-${{ matrix.id }}
           path: ${{ runner.temp }}/digests/*
@@ -450,7 +450,7 @@ jobs:
     steps:
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -460,7 +460,7 @@ jobs:
             type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest
 
       - name: Log in to OSG Harbor
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
