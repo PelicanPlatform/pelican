@@ -769,14 +769,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   dnf install -y condor
   rpm -e --nodeps pelican pelican-osdf-compat
 
-  # Install the MinIO server and client for S3 tests.
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
-  dnf install -y https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
-
   # Add some normal user accounts for testing.
   # The inspiration for their names: https://en.wikipedia.org/wiki/Alice_and_Bob#Cast_of_characters.
   for name in alice bob carol dave; do
