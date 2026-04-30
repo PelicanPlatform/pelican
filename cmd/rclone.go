@@ -26,9 +26,8 @@ import (
 
 var (
 	rcloneCmd = &cobra.Command{
-		Use:    "rclone",
-		Hidden: true,
-		Short:  "Commands for integrating Pelican with rclone",
+		Use:   "rclone",
+		Short: "Commands for integrating Pelican with rclone",
 		Long: `The rclone subcommands help integrate Pelican with the rclone tool
 for syncing files to and from Pelican federations.
 
