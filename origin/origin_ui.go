@@ -21,6 +21,7 @@ package origin
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/pelicanplatform/pelican/origin_serve"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -35,6 +36,9 @@ func RegisterOriginWebAPI(routerGroup *gin.RouterGroup) error {
 	if err := RegisterGlobusAPI(globusAPIGroup); err != nil {
 		return err
 	}
+
+	// V2-origin metadata-publish queue admin (no-op when disabled).
+	origin_serve.RegisterMetadataAdminAPI(routerGroup, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
 	return nil
 }

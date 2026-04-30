@@ -65,6 +65,7 @@ func init() {
 	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
 	flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
 	flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
+	flagSet.String("metadata-file", "", "Path to a JSON file whose top-level keys are forwarded to the origin's metadata-publish endpoint via the X-Pelican-Object-Metadata header. Values must be string, number, or boolean. The keys 'path', 'size', 'etag', and 'created_at' are reserved and will be rejected.")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -362,6 +363,18 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
+
+	// Optional uploader-supplied metadata file: parse early so we
+	// fail before kicking off any network I/O if the JSON is bad or
+	// uses reserved keys.
+	if metadataFile, _ := cmd.Flags().GetString("metadata-file"); metadataFile != "" {
+		fields, err := client.LoadObjectMetadataFile(metadataFile)
+		if err != nil {
+			log.Errorln("Failed to load --metadata-file:", err)
+			os.Exit(1)
+		}
+		options = append(options, client.WithObjectMetadata(fields))
+	}
 
 	var result error
 	lastSrc := ""

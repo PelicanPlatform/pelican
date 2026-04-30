@@ -89,6 +89,12 @@ func GenTokenScope() {
 	wlcgScopes := make([]ScopeName, 0)
 	scitokensScopes := make([]ScopeName, 0)
 	lotmanScopes := make([]ScopeName, 0)
+	// Top-level scopes that, in addition to wlcg/scitokens, accept a path
+	// suffix (eg "pelican.metadata:/foo"). Keep this list small.
+	pathableTopLevel := map[string]bool{
+		"pelican.metadata": true,
+	}
+	pathableScopes := make([]ScopeName, 0)
 
 	for i := 0; i < len(values); i++ {
 		entry := values[i].(map[string]any)
@@ -117,6 +123,9 @@ func GenTokenScope() {
 			lotmanScopes = append(lotmanScopes, ScopeName{Raw: scopeName, Display: displayName})
 		} else {
 			scopes = append(scopes, ScopeName{Raw: scopeName, Display: displayName})
+			if pathableTopLevel[scopeName] {
+				pathableScopes = append(pathableScopes, ScopeName{Raw: scopeName, Display: displayName})
+			}
 		}
 	}
 
@@ -132,11 +141,13 @@ func GenTokenScope() {
 		WlcgScopes      []ScopeName
 		ScitokensScopes []ScopeName
 		LotmanScopes    []ScopeName
+		PathableScopes  []ScopeName
 	}{
 		Scopes:          scopes,
 		WlcgScopes:      wlcgScopes,
 		ScitokensScopes: scitokensScopes,
 		LotmanScopes:    lotmanScopes,
+		PathableScopes:  pathableScopes,
 	})
 
 	if err != nil {
@@ -202,8 +213,9 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 	// Only some of the token scopes can be assigned a path. This list might grow in the future.
 	if !(
 		{{- range $idx, $scope := .WlcgScopes -}}s == {{$scope.Display}} || {{end}}
-		{{- range $idx, $scope := .ScitokensScopes -}}s == {{$scope.Display}} || {{end}}false) { // final "false" is a hack so we don't have to post process the template we generate from
-		return "", errors.New("cannot assign path to non-wlcg or non-scitokens2 token scope")
+		{{- range $idx, $scope := .ScitokensScopes -}}s == {{$scope.Display}} || {{end}}
+		{{- range $idx, $scope := .PathableScopes -}}s == {{$scope.Display}} || {{end}}false) { // final "false" is a hack so we don't have to post process the template we generate from
+		return "", errors.New("cannot assign path to a non-pathable token scope")
 	}
 
 	return TokenScope(s.String() + ":" + path), nil

@@ -35,6 +35,7 @@ const (
 	Pelican_DowntimeCreate TokenScope = "pelican.downtime_create"
 	Pelican_DowntimeModify TokenScope = "pelican.downtime_modify"
 	Pelican_DowntimeDelete TokenScope = "pelican.downtime_delete"
+	Pelican_Metadata TokenScope = "pelican.metadata"
 	WebUi_Access TokenScope = "web_ui.access"
 	Pelican_LoggingModify TokenScope = "pelican.logging_modify"
 	Registry_EditRegistration TokenScope = "registry.edit_registration"
@@ -74,8 +75,8 @@ func (s TokenScope) String() string {
 // Interface that allows us to assign a path to some token scopes, such as "storage.read:/foo/bar"
 func (s TokenScope) Path(path string) (TokenScope, error) {
 	// Only some of the token scopes can be assigned a path. This list might grow in the future.
-	if !(s == Wlcg_Storage_Read || s == Wlcg_Storage_Create || s == Wlcg_Storage_Modify || s == Wlcg_Storage_Stage || s == Scitokens_Read || s == Scitokens_Write || false) { // final "false" is a hack so we don't have to post process the template we generate from
-		return "", errors.New("cannot assign path to non-wlcg or non-scitokens2 token scope")
+	if !(s == Wlcg_Storage_Read || s == Wlcg_Storage_Create || s == Wlcg_Storage_Modify || s == Wlcg_Storage_Stage || s == Scitokens_Read || s == Scitokens_Write || s == Pelican_Metadata || false) { // final "false" is a hack so we don't have to post process the template we generate from
+		return "", errors.New("cannot assign path to a non-pathable token scope")
 	}
 
 	return TokenScope(s.String() + ":" + path), nil

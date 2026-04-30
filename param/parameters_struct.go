@@ -325,6 +325,19 @@ type Config struct {
 		HttpAuthTokenPassthrough bool `mapstructure:"httpauthtokenpassthrough" yaml:"HttpAuthTokenPassthrough"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
+		Metadata struct {
+			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+			Endpoint string `mapstructure:"endpoint" yaml:"Endpoint"`
+			ErrorAfter time.Duration `mapstructure:"errorafter" yaml:"ErrorAfter"`
+			MaxBackoff time.Duration `mapstructure:"maxbackoff" yaml:"MaxBackoff"`
+			MaxInflight int `mapstructure:"maxinflight" yaml:"MaxInflight"`
+			MinBackoff time.Duration `mapstructure:"minbackoff" yaml:"MinBackoff"`
+			Mode string `mapstructure:"mode" yaml:"Mode"`
+			RatePerSecond int `mapstructure:"ratepersecond" yaml:"RatePerSecond"`
+			RequestTimeout time.Duration `mapstructure:"requesttimeout" yaml:"RequestTimeout"`
+			TokenLifetime time.Duration `mapstructure:"tokenlifetime" yaml:"TokenLifetime"`
+			WarnAfter time.Duration `mapstructure:"warnafter" yaml:"WarnAfter"`
+		} `mapstructure:"metadata" yaml:"Metadata"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		MultiuserMinID int `mapstructure:"multiuserminid" yaml:"MultiuserMinID"`
@@ -333,6 +346,12 @@ type Config struct {
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		ObjectProviderURL string `mapstructure:"objectproviderurl" yaml:"ObjectProviderURL"`
 		Port int `mapstructure:"port" yaml:"Port"`
+		Posc struct {
+			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+			FileTimeout time.Duration `mapstructure:"filetimeout" yaml:"FileTimeout"`
+			KeepaliveInterval time.Duration `mapstructure:"keepaliveinterval" yaml:"KeepaliveInterval"`
+			Prefix string `mapstructure:"prefix" yaml:"Prefix"`
+		} `mapstructure:"posc" yaml:"Posc"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
 		S3Bucket string `mapstructure:"s3bucket" yaml:"S3Bucket"`
@@ -821,6 +840,19 @@ type configWithType struct {
 		HttpAuthTokenPassthrough struct { Type string; Value bool }
 		HttpServiceUrl struct { Type string; Value string }
 		IssuerMode struct { Type string; Value string }
+		Metadata struct {
+			Enabled struct { Type string; Value bool }
+			Endpoint struct { Type string; Value string }
+			ErrorAfter struct { Type string; Value time.Duration }
+			MaxBackoff struct { Type string; Value time.Duration }
+			MaxInflight struct { Type string; Value int }
+			MinBackoff struct { Type string; Value time.Duration }
+			Mode struct { Type string; Value string }
+			RatePerSecond struct { Type string; Value int }
+			RequestTimeout struct { Type string; Value time.Duration }
+			TokenLifetime struct { Type string; Value time.Duration }
+			WarnAfter struct { Type string; Value time.Duration }
+		}
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		MultiuserMinID struct { Type string; Value int }
@@ -829,6 +861,12 @@ type configWithType struct {
 		NamespacePrefix struct { Type string; Value string }
 		ObjectProviderURL struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		Posc struct {
+			Enabled struct { Type string; Value bool }
+			FileTimeout struct { Type string; Value time.Duration }
+			KeepaliveInterval struct { Type string; Value time.Duration }
+			Prefix struct { Type string; Value string }
+		}
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }

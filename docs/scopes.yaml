@@ -72,6 +72,14 @@ description: >-
 issuedBy: ["origin", "cache"]
 acceptedBy: ["registry"]
 ---
+name: pelican.metadata
+description: >-
+  Permits an origin to publish object-commit events to a configured external metadata endpoint.
+  This scope must also possess a path to be valid, eg `pelican.metadata:/foo`, where the path is
+  the federation prefix of the namespace whose object the event describes.
+issuedBy: ["origin"]
+acceptedBy: ["*"]
+---
 ############################
 #      Web UI Scopes       #
 ############################
