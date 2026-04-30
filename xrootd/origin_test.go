@@ -154,6 +154,15 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
+	// Pin Origin.TokenAudience to its current value before launching xrootd.
+	// xrootd writes the current Origin.TokenAudience into scitokens.cfg at
+	// daemon-start time. With lazy resolution of derived defaults, the
+	// audience would otherwise drift to "https://hostname:<realPort>"
+	// the moment portStartCallback updates Origin.Port — leaving xrootd's
+	// scitokens.cfg pinned to the pre-callback audience and breaking
+	// `aud` claim verification on tokens minted by the test.
+	require.NoError(t, param.Origin_TokenAudience.Set(param.Origin_TokenAudience.GetString()))
+
 	portStartCallback := func(port int) {
 		require.NoError(t, param.Origin_Port.Set(port))
 		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {

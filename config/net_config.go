@@ -37,10 +37,17 @@ func UpdateConfigFromListener(ln net.Listener) {
 		addr := ln.Addr()
 		tcpAddr, ok := addr.(*net.TCPAddr)
 		if ok {
+			// Capture the pre-update Server.ExternalWebUrl BEFORE mutating
+			// Server.WebPort. Setting WebPort triggers ResolveDerivedDefaults
+			// (via MultiSet), which re-resolves the ${Server.WebPort} template
+			// in Server.ExternalWebUrl. We need the OLD URL to detect which
+			// Federation.* keys still mirror it (they were defaulted from
+			// Server.ExternalWebUrl in InitServer using the stale port-0
+			// value); the new URL is what we substitute in.
+			serverUrlStr := param.Server_ExternalWebUrl.GetString()
 			if err := param.Server_WebPort.Set(tcpAddr.Port); err != nil {
 				log.WithError(err).Warn("Failed to update Server.WebPort from listener")
 			}
-			serverUrlStr := param.Server_ExternalWebUrl.GetString()
 			serverUrl, err := url.Parse(serverUrlStr)
 			if err == nil {
 				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
