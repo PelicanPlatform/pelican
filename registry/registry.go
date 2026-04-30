@@ -445,6 +445,15 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		ns.CustomFields["server_id"] = data.ServerID // Pass the server ID to the CustomFields map, to fit in the registration workflow
 	}
 
+	// Tag logging namespace registrations so the auto-approval logic and API filters
+	// can identify them without parsing the prefix string.
+	if strings.HasPrefix(data.Prefix, server_structs.LoggingNamespacePrefix+"/") {
+		if ns.CustomFields == nil {
+			ns.CustomFields = make(map[string]interface{})
+		}
+		ns.CustomFields[server_structs.RegistrationTypeKey] = server_structs.LoggingRegistrationType
+	}
+
 	err = AddRegistration(&ns)
 	if err != nil {
 		// Check if it's a server ID conflict error
