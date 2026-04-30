@@ -261,13 +261,21 @@ func GenDefaults() {
 	}
 	for _, pd := range allParams {
 		deps := pd.allDeps()
-		// Only count deps on non-seed params (seeds are set externally)
+		// Only count deps on non-seed params (seeds are set externally).
+		// Validate that every ${X} reference resolves to a known param or
+		// seed. A typo or rename in parameters.yaml would otherwise silently
+		// produce a default with the placeholder unresolved at runtime; we
+		// turn that into a build error so developers can't ship it.
 		count := 0
 		for dep := range deps {
-			if !seedParams[dep] {
-				adj[dep] = append(adj[dep], pd.name)
-				count++
+			if seedParams[dep] {
+				continue
 			}
+			if _, ok := byName[dep]; !ok {
+				panic(fmt.Sprintf("parameter %q references unknown parameter ${%s}; check docs/parameters.yaml", pd.name, dep))
+			}
+			adj[dep] = append(adj[dep], pd.name)
+			count++
 		}
 		inDegree[pd.name] = count
 	}
@@ -441,7 +449,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 					buf.WriteString("\t} else if isRoot {\n")
 				}
 				writeSetDefault(&buf, pd, pd.rootDefault, "\t\t")
-				first = false
 			}
 			if hasDef {
 				buf.WriteString("\t} else {\n")
@@ -453,6 +460,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		}
 	}
 
+	// Re-resolve every templated default now that all bases (including
+	// dependents on isRoot/isOSDF tiers above) have been registered, so
+	// values like Server.ExternalWebUrl become "https://hostname:8444"
+	// instead of remaining the raw "https://${Server.Hostname}:${Server.WebPort}"
+	// template that would otherwise leak to direct viper.GetString callers.
+	buf.WriteString("\n\tparam.ResolveDerivedDefaults(v)\n")
 	buf.WriteString("}\n\n")
 
 	// Generate ApplyClientDefaults
@@ -467,6 +480,7 @@ func ApplyClientDefaults(v *viper.Viper) {
 		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
 		writeSetDefault(&buf, pd, pd.clientDefault, "\t")
 	}
+	buf.WriteString("\n\tparam.ResolveDerivedDefaults(v)\n")
 	buf.WriteString("}\n\n")
 
 	// Generate ApplyServerDefaults
@@ -481,12 +495,110 @@ func ApplyServerDefaults(v *viper.Viper) {
 		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
 		writeSetDefault(&buf, pd, pd.serverDefault, "\t")
 	}
+	buf.WriteString("\n\tparam.ResolveDerivedDefaults(v)\n")
 	buf.WriteString("}\n")
 
 	// Write the file
 	outPath, _ := filepath.Abs("../config/parameter_defaults.go")
 	if err := os.WriteFile(outPath, buf.Bytes(), 0644); err != nil {
 		panic(fmt.Errorf("failed to write parameter_defaults.go: %w", err))
+	}
+
+	// Generate the companion file in the param package that records the
+	// topological order in which derived defaults must be resolved. Keeping
+	// the order separate from the templates (which are registered at runtime
+	// by SetParameterDefaults / ApplyClientDefaults / ApplyServerDefaults)
+	// lets the registry support tier overrides while still guaranteeing
+	// dependency-correct resolution.
+	writeDerivedOrderFile(byName, sorted)
+}
+
+// writeRegisterDerived emits a param.RegisterDerivedDefault(...) call that
+// records the lazy template (already passed to v.SetDefault on the previous
+// line) into the runtime registry. The valVar argument names the local
+// variable (e.g. "tmpl") that holds the raw template string or slice.
+func writeRegisterDerived(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, indent string, valVar string, isSlice bool) {
+	paramVar := fmt.Sprintf("param.%s.GetName()", pd.varName)
+	fmt.Fprintf(buf, "%sparam.RegisterDerivedDefault(%s, param.DerivedTemplate{\n", indent, paramVar)
+	if isSlice {
+		fmt.Fprintf(buf, "%s\tTemplateSlice: %s,\n", indent, valVar)
+	} else {
+		fmt.Fprintf(buf, "%s\tTemplate: %s,\n", indent, valVar)
+	}
+	if len(tier.envRefs) > 0 {
+		fmt.Fprintf(buf, "%s\tEnvRefs: []string{", indent)
+		for i, env := range tier.envRefs {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			fmt.Fprintf(buf, "%q", env)
+		}
+		buf.WriteString("},\n")
+	}
+	fmt.Fprintf(buf, "%s})\n", indent)
+}
+
+// writeDerivedOrderFile emits param/derived_defaults_gen.go, a tiny generated
+// file that populates param.derivedOrder with the topologically-sorted list
+// of every parameter whose YAML default contains ${...} placeholder
+// references in any tier. param.ResolveDerivedDefaults walks this slice at
+// runtime to substitute templates in dependency order.
+//
+// We collect the union of templated names across all tiers (def, root,
+// osdf, client, server) so that whichever tier ends up active at runtime,
+// its name appears in the order. The emitted slice preserves the topological
+// order computed by Kahn's algorithm in GenDefaults.
+func writeDerivedOrderFile(byName map[string]*paramDefault, sorted []string) {
+	templated := make(map[string]bool)
+	for _, pd := range byName {
+		for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault, pd.clientDefault, pd.serverDefault} {
+			if t != nil && len(t.paramRefs) > 0 {
+				templated[pd.name] = true
+				break
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(`// Code generated by go generate; DO NOT EDIT.
+/***************************************************************
+ *
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package param
+
+// derivedOrder lists every parameter whose YAML default contains a
+// ${Param.Name} placeholder, in topological dependency order. The hand-
+// written ResolveDerivedDefaults function walks this slice and re-substitutes
+// each entry's currently-registered template against viper. Generated by
+// 'cd generate && go run .' from docs/parameters.yaml.
+func init() {
+	derivedOrder = []string{
+`)
+	for _, name := range sorted {
+		if templated[name] {
+			fmt.Fprintf(&buf, "\t\t%q,\n", name)
+		}
+	}
+	buf.WriteString("\t}\n}\n")
+
+	outPath, _ := filepath.Abs("../param/derived_defaults_gen.go")
+	if err := os.WriteFile(outPath, buf.Bytes(), 0644); err != nil {
+		panic(fmt.Errorf("failed to write derived_defaults_gen.go: %w", err))
 	}
 }
 
@@ -575,21 +687,46 @@ func isNoneValue(pType string, v any) bool {
 func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, indent string) {
 	paramVar := fmt.Sprintf("param.%s.GetName()", pd.varName)
 
-	// Check if we need string interpolation
+	// Check if we need string interpolation.
+	//
+	// We split interpolation into two cases:
+	//   - hasParamRefs: the template references other config parameters via
+	//     ${Foo.Bar}. These must be resolved LAZILY (at every viper mutation)
+	//     because the referenced params may change after defaults are set
+	//     (e.g. tests setting Server.WebPort=0, the OS later picking 45000).
+	//     We emit the raw template into v.SetDefault and register it with
+	//     param.RegisterDerivedDefault so param.ResolveDerivedDefaults can
+	//     re-substitute on every mutation.
+	//   - hasEnvRefs only (no paramRefs): the template references environment
+	//     variables, which are static for the lifetime of the process, so
+	//     eager substitution at default-set time is correct and avoids a
+	//     runtime os.Getenv call on every Resolve pass.
 	hasParamRefs := len(tier.paramRefs) > 0
 	hasEnvRefs := len(tier.envRefs) > 0
-	needsInterp := hasParamRefs || hasEnvRefs
+	envOnly := hasEnvRefs && !hasParamRefs
 
 	switch raw := tier.raw.(type) {
 	case string:
-		if needsInterp {
+		if hasParamRefs {
+			// Lazy template path. Emit:
+			//   {
+			//       tmpl := "https://${Server.Hostname}:${Server.WebPort}"
+			//       v.SetDefault(param.X.GetName(), tmpl)
+			//       param.RegisterDerivedDefault(param.X.GetName(),
+			//           param.DerivedTemplate{Template: tmpl, EnvRefs: []string{...}})
+			//   }
+			// param.ResolveDerivedDefaults (called at the end of the enclosing
+			// function) walks the registry in topological order and replaces
+			// the raw template with substituted values, leaving v.IsSet false
+			// so the user can still override.
+			fmt.Fprintf(buf, "%s{\n", indent)
+			fmt.Fprintf(buf, "%s\ttmpl := %q\n", indent, raw)
+			fmt.Fprintf(buf, "%s\tv.SetDefault(%s, tmpl)\n", indent, paramVar)
+			writeRegisterDerived(buf, pd, tier, indent+"\t", "tmpl", false)
+			fmt.Fprintf(buf, "%s}\n", indent)
+		} else if envOnly {
 			fmt.Fprintf(buf, "%s{\n", indent)
 			fmt.Fprintf(buf, "%s\tval := %q\n", indent, raw)
-			for _, ref := range tier.paramRefs {
-				refVar := strings.ReplaceAll(ref, ".", "_")
-				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"${%s}\", v.GetString(%s.GetName()))\n",
-					indent, ref, "param."+refVar)
-			}
 			for _, env := range tier.envRefs {
 				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"$%s\", os.Getenv(%q))\n",
 					indent, env, env)
@@ -611,8 +748,21 @@ func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, ind
 			fmt.Fprintf(buf, "%sv.SetDefault(%s, %v)\n", indent, paramVar, raw)
 		}
 	case []any:
-		// String slice — check if interpolation is needed
-		if needsInterp {
+		// String slice — same lazy-vs-eager split as the string case above.
+		if hasParamRefs {
+			fmt.Fprintf(buf, "%s{\n", indent)
+			fmt.Fprintf(buf, "%s\ttmpl := []string{", indent)
+			for i, elem := range raw {
+				if i > 0 {
+					buf.WriteString(", ")
+				}
+				fmt.Fprintf(buf, "%q", fmt.Sprint(elem))
+			}
+			buf.WriteString("}\n")
+			fmt.Fprintf(buf, "%s\tv.SetDefault(%s, tmpl)\n", indent, paramVar)
+			writeRegisterDerived(buf, pd, tier, indent+"\t", "tmpl", true)
+			fmt.Fprintf(buf, "%s}\n", indent)
+		} else if envOnly {
 			fmt.Fprintf(buf, "%s{\n", indent)
 			fmt.Fprintf(buf, "%s\tvals := []string{", indent)
 			for i, elem := range raw {
@@ -623,11 +773,6 @@ func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, ind
 			}
 			buf.WriteString("}\n")
 			fmt.Fprintf(buf, "%s\tfor i, val := range vals {\n", indent)
-			for _, ref := range tier.paramRefs {
-				refVar := strings.ReplaceAll(ref, ".", "_")
-				fmt.Fprintf(buf, "%s\t\tval = strings.ReplaceAll(val, \"${%s}\", v.GetString(%s.GetName()))\n",
-					indent, ref, "param."+refVar)
-			}
 			for _, env := range tier.envRefs {
 				fmt.Fprintf(buf, "%s\t\tval = strings.ReplaceAll(val, \"$%s\", os.Getenv(%q))\n",
 					indent, env, env)

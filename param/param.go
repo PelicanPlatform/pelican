@@ -38,6 +38,16 @@ var (
 	callbacks   map[string]ConfigCallback
 	callbackMux sync.RWMutex
 	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
+
+	// explicitSetHook lets the config package (or any other) register a
+	// function that is invoked whenever MultiSet is called, so that source
+	// trackers can record "user set this key at runtime". The atomic
+	// pointer pattern keeps reads lock-free; SetExplicitSetHook installs
+	// or replaces the hook. Using a function pointer (rather than a
+	// callback registry like ConfigCallback) keeps the hook synchronous,
+	// which is required for the deprecation-warning logic to see the
+	// updated source before it inspects the SourceTracker.
+	explicitSetHook atomic.Pointer[func(map[string]any)]
 )
 
 // ConfigCallback is a function that is called when configuration changes.
@@ -223,6 +233,10 @@ func DecodeConfig(v *viper.Viper) (*Config, error) {
 		return nil, errors.New("nil viper instance")
 	}
 	BindAllParameters(v)
+	// Re-resolve derived defaults before snapshotting. Any path that reaches
+	// DecodeConfig (Refresh, UnmarshalConfig, decodeAndStoreConfig) wants
+	// the freshest substituted values.
+	ResolveDerivedDefaults(v)
 	newConfig := new(Config)
 	settings := v.AllSettings()
 	mergeKnownKeyOverrides(settings, v)
@@ -477,6 +491,34 @@ func MultiSet(keyValues map[string]any) error {
 		viper.Set(key, value)
 	}
 
+	// Mark every explicitly-set key as user-pinned so the lazy
+	// derived-defaults resolver will never overwrite it on a future
+	// pass. This is the canonical "I know what I'm doing" channel:
+	// without it, a same-valued Set would be indistinguishable from
+	// "still the resolver's value to update" and the next dependency
+	// change would clobber the user's value.
+	pinNames := make([]string, 0, len(keyValues))
+	for key := range keyValues {
+		pinNames = append(pinNames, key)
+	}
+	MarkUserPinned(pinNames...)
+
+	// Notify any registered "explicit set" hook so external trackers (e.g.
+	// the config package's SourceTracker) can record provenance for keys
+	// modified at runtime via param.Set / param.MultiSet. Done outside the
+	// derivedMu / configMutex critical sections of the hook function but
+	// while we hold configMutex, since hooks should be cheap and fully
+	// synchronous to keep test ordering deterministic.
+	if hook := explicitSetHook.Load(); hook != nil {
+		(*hook)(keyValues)
+	}
+
+	// Re-resolve any derived defaults (e.g. ${Server.Hostname}-templated
+	// URLs) against the freshly-mutated viper state. Must run BEFORE the
+	// decode below so the resolved values land in the cached Config struct
+	// the param accessors read from.
+	ResolveDerivedDefaults(viper.GetViper())
+
 	// Create new config from updated viper
 	newConfig := new(Config)
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
@@ -519,6 +561,15 @@ func Reset() error {
 	// Reset viper
 	viper.Reset()
 
+	// Wipe the derived-defaults registry too. Templates are re-registered
+	// when SetParameterDefaults runs against the fresh viper instance, but
+	// any stale lastResolved snapshots from a previous test would otherwise
+	// confuse override detection (a fresh "" value would look like the
+	// "user's override" of an old resolved string).
+	derivedMu.Lock()
+	derivedTemplates = map[string]*derivedState{}
+	derivedMu.Unlock()
+
 	// Clear the config
 	viperConfig.Store(nil)
 	return nil
@@ -541,6 +592,25 @@ func ClearCallbacks() {
 	callbackMux.Lock()
 	defer callbackMux.Unlock()
 	callbacks = make(map[string]ConfigCallback)
+}
+
+// SetExplicitSetHook installs a function that MultiSet (and therefore Set
+// and SetRaw) will call synchronously with the key/value map every time
+// values are written via param.* APIs. Pass nil to clear the hook. The
+// hook is invoked while configMutex is held, so it MUST NOT call back
+// into param.MultiSet / Set / SetRaw or it will deadlock.
+//
+// This exists primarily so the config package's SourceTracker can record
+// runtime overrides; without it, the tracker only sees defaults and
+// values loaded from config files / env vars, which would make
+// deprecation-warning logic misclassify keys set via param.Set as
+// untouched defaults.
+func SetExplicitSetHook(fn func(map[string]any)) {
+	if fn == nil {
+		explicitSetHook.Store(nil)
+		return
+	}
+	explicitSetHook.Store(&fn)
 }
 
 // invokeCallbacks calls all registered callbacks with the old and new configuration.

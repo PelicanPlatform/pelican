@@ -73,9 +73,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_ExportLocation.GetName(), "/")
 	// Cache.FedTokenLocation
 	{
-		val := "${ConfigBase}/cache-fed-token"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Cache_FedTokenLocation.GetName(), val)
+		tmpl := "${ConfigBase}/cache-fed-token"
+		v.SetDefault(param.Cache_FedTokenLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_FedTokenLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Cache.HighWaterMark
 	v.SetDefault(param.Cache_HighWaterMark.GetName(), 95)
@@ -97,9 +99,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Cache.ClientStatisticsLocation
 	{
-		val := "${Cache.RunLocation}/xrootd.stats"
-		val = strings.ReplaceAll(val, "${Cache.RunLocation}", v.GetString(param.Cache_RunLocation.GetName()))
-		v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), val)
+		tmpl := "${Cache.RunLocation}/xrootd.stats"
+		v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_ClientStatisticsLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Cache.SelfTest
 	v.SetDefault(param.Cache_SelfTest.GetName(), true)
@@ -119,34 +123,35 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Cache.DataLocations
 	{
-		vals := []string{"${Cache.StorageLocation}/data"}
-		for i, val := range vals {
-			val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
-			vals[i] = val
-		}
-		v.SetDefault(param.Cache_DataLocations.GetName(), vals)
+		tmpl := []string{"${Cache.StorageLocation}/data"}
+		v.SetDefault(param.Cache_DataLocations.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_DataLocations.GetName(), param.DerivedTemplate{
+			TemplateSlice: tmpl,
+		})
 	}
 	// Cache.MetaLocations
 	{
-		vals := []string{"${Cache.StorageLocation}/meta"}
-		for i, val := range vals {
-			val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
-			vals[i] = val
-		}
-		v.SetDefault(param.Cache_MetaLocations.GetName(), vals)
+		tmpl := []string{"${Cache.StorageLocation}/meta"}
+		v.SetDefault(param.Cache_MetaLocations.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_MetaLocations.GetName(), param.DerivedTemplate{
+			TemplateSlice: tmpl,
+		})
 	}
 	// Cache.NamespaceLocation
 	{
-		val := "${Cache.StorageLocation}/namespace"
-		val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), val)
+		tmpl := "${Cache.StorageLocation}/namespace"
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_NamespaceLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Cache.Url
 	{
-		val := "https://${Server.Hostname}:${Cache.Port}"
-		val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
-		val = strings.ReplaceAll(val, "${Cache.Port}", v.GetString(param.Cache_Port.GetName()))
-		v.SetDefault(param.Cache_Url.GetName(), val)
+		tmpl := "https://${Server.Hostname}:${Cache.Port}"
+		v.SetDefault(param.Cache_Url.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Cache_Url.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Cache.XRootDPrefix
 	v.SetDefault(param.Cache_XRootDPrefix.GetName(), "cache")
@@ -219,9 +224,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 	} else {
 		{
-			val := "${ConfigBase}/maxmind/GeoLite2-city.mmdb"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Director_GeoIPLocation.GetName(), val)
+			tmpl := "${ConfigBase}/maxmind/GeoLite2-city.mmdb"
+			v.SetDefault(param.Director_GeoIPLocation.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Director_GeoIPLocation.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Director.MaxStatResponse
@@ -288,9 +295,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_UserStripDomain.GetName(), false)
 	// IssuerKeysDirectory
 	{
-		val := "${ConfigBase}/issuer-keys"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.IssuerKeysDirectory.GetName(), val)
+		tmpl := "${ConfigBase}/issuer-keys"
+		v.SetDefault(param.IssuerKeysDirectory.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.IssuerKeysDirectory.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// LocalCache.HighWaterMarkPercentage
 	v.SetDefault(param.LocalCache_HighWaterMarkPercentage.GetName(), 95)
@@ -308,17 +317,21 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// LocalCache.DataLocation
 	{
-		val := "${LocalCache.RunLocation}/cache"
-		val = strings.ReplaceAll(val, "${LocalCache.RunLocation}", v.GetString(param.LocalCache_RunLocation.GetName()))
-		v.SetDefault(param.LocalCache_DataLocation.GetName(), val)
+		tmpl := "${LocalCache.RunLocation}/cache"
+		v.SetDefault(param.LocalCache_DataLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.LocalCache_DataLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// LocalCache.Size
 	v.SetDefault(param.LocalCache_Size.GetName(), 0)
 	// LocalCache.Socket
 	{
-		val := "${LocalCache.RunLocation}/cache.sock"
-		val = strings.ReplaceAll(val, "${LocalCache.RunLocation}", v.GetString(param.LocalCache_RunLocation.GetName()))
-		v.SetDefault(param.LocalCache_Socket.GetName(), val)
+		tmpl := "${LocalCache.RunLocation}/cache.sock"
+		v.SetDefault(param.LocalCache_Socket.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.LocalCache_Socket.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Logging.Cache.Http
 	v.SetDefault(param.Logging_Cache_Http.GetName(), "error")
@@ -369,9 +382,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/lotman")
 	} else {
 		{
-			val := "${ConfigBase}"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Lotman_LotHome.GetName(), val)
+			tmpl := "${ConfigBase}"
+			v.SetDefault(param.Lotman_LotHome.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Lotman_LotHome.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Monitoring.AggregatePrefixes
@@ -381,9 +396,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
 	} else {
 		{
-			val := "${ConfigBase}/monitoring/data"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Monitoring_DataLocation.GetName(), val)
+			tmpl := "${ConfigBase}/monitoring/data"
+			v.SetDefault(param.Monitoring_DataLocation.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Monitoring_DataLocation.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Monitoring.DataRetention
@@ -422,15 +439,19 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/authorize")
 	// OIDC.ClientIDFile
 	{
-		val := "${ConfigBase}/oidc-client-id"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.OIDC_ClientIDFile.GetName(), val)
+		tmpl := "${ConfigBase}/oidc-client-id"
+		v.SetDefault(param.OIDC_ClientIDFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.OIDC_ClientIDFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// OIDC.ClientSecretFile
 	{
-		val := "${ConfigBase}/oidc-client-secret"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.OIDC_ClientSecretFile.GetName(), val)
+		tmpl := "${ConfigBase}/oidc-client-secret"
+		v.SetDefault(param.OIDC_ClientSecretFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.OIDC_ClientSecretFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// OIDC.DeviceAuthEndpoint
 	v.SetDefault(param.OIDC_DeviceAuthEndpoint.GetName(), "https://cilogon.org/oauth2/device_authorization")
@@ -449,9 +470,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
 	} else {
 		{
-			val := "${ConfigBase}/origin.sqlite"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Origin_DbLocation.GetName(), val)
+			tmpl := "${ConfigBase}/origin.sqlite"
+			v.SetDefault(param.Origin_DbLocation.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Origin_DbLocation.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Origin.DefaultChecksumTypes
@@ -494,9 +517,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
 	// Origin.FedTokenLocation
 	{
-		val := "${ConfigBase}/origin-fed-token"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Origin_FedTokenLocation.GetName(), val)
+		tmpl := "${ConfigBase}/origin-fed-token"
+		v.SetDefault(param.Origin_FedTokenLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Origin_FedTokenLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Origin.GlobusConfigLocation
 	if isRoot {
@@ -570,22 +595,27 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_TransferRateLimit.GetName(), "0")
 	// Origin.UploadTempLocation
 	{
-		val := "${Origin.RunLocation}/in-progress"
-		val = strings.ReplaceAll(val, "${Origin.RunLocation}", v.GetString(param.Origin_RunLocation.GetName()))
-		v.SetDefault(param.Origin_UploadTempLocation.GetName(), val)
+		tmpl := "${Origin.RunLocation}/in-progress"
+		v.SetDefault(param.Origin_UploadTempLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Origin_UploadTempLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Origin.Url
 	{
-		val := "https://${Server.Hostname}:${Origin.Port}"
-		val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
-		val = strings.ReplaceAll(val, "${Origin.Port}", v.GetString(param.Origin_Port.GetName()))
-		v.SetDefault(param.Origin_Url.GetName(), val)
+		tmpl := "https://${Server.Hostname}:${Origin.Port}"
+		v.SetDefault(param.Origin_Url.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Origin_Url.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Origin.TokenAudience
 	{
-		val := "${Origin.Url}"
-		val = strings.ReplaceAll(val, "${Origin.Url}", v.GetString(param.Origin_Url.GetName()))
-		v.SetDefault(param.Origin_TokenAudience.GetName(), val)
+		tmpl := "${Origin.Url}"
+		v.SetDefault(param.Origin_TokenAudience.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Origin_TokenAudience.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Origin.UserMapfileRefreshInterval
 	v.SetDefault(param.Origin_UserMapfileRefreshInterval.GetName(), "1m")
@@ -620,9 +650,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), "/var/lib/pelican/backups")
 	} else {
 		{
-			val := "${ConfigBase}/backups"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), val)
+			tmpl := "${ConfigBase}/backups"
+			v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Server_DatabaseBackup_Location.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Server.DatabaseBackup.MaxCount
@@ -632,9 +664,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Server_DbLocation.GetName(), "/var/lib/pelican/pelican.sqlite")
 	} else {
 		{
-			val := "${ConfigBase}/pelican.sqlite"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Server_DbLocation.GetName(), val)
+			tmpl := "${ConfigBase}/pelican.sqlite"
+			v.SetDefault(param.Server_DbLocation.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Server_DbLocation.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Server.DropPrivileges
@@ -651,57 +685,73 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
 	// Server.SessionSecretFile
 	{
-		val := "${ConfigBase}/session-secret"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_SessionSecretFile.GetName(), val)
+		tmpl := "${ConfigBase}/session-secret"
+		v.SetDefault(param.Server_SessionSecretFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_SessionSecretFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.StartupTimeout
 	v.SetDefault(param.Server_StartupTimeout.GetName(), "10s")
 	// Server.TLSCACertificateFile
 	{
-		val := "${ConfigBase}/certificates/tlsca.pem"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_TLSCACertificateFile.GetName(), val)
+		tmpl := "${ConfigBase}/certificates/tlsca.pem"
+		v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_TLSCACertificateFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.TLSCAKey
 	{
-		val := "${ConfigBase}/certificates/tlsca.key"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_TLSCAKey.GetName(), val)
+		tmpl := "${ConfigBase}/certificates/tlsca.key"
+		v.SetDefault(param.Server_TLSCAKey.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_TLSCAKey.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.TLSCertificateChain
 	{
-		val := "${ConfigBase}/certificates/tls.crt"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_TLSCertificateChain.GetName(), val)
+		tmpl := "${ConfigBase}/certificates/tls.crt"
+		v.SetDefault(param.Server_TLSCertificateChain.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_TLSCertificateChain.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.TLSKey
 	{
-		val := "${ConfigBase}/certificates/tls.key"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_TLSKey.GetName(), val)
+		tmpl := "${ConfigBase}/certificates/tls.key"
+		v.SetDefault(param.Server_TLSKey.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_TLSKey.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.UIActivationCodeFile
 	{
-		val := "${ConfigBase}/server-web-activation-code"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_UIActivationCodeFile.GetName(), val)
+		tmpl := "${ConfigBase}/server-web-activation-code"
+		v.SetDefault(param.Server_UIActivationCodeFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_UIActivationCodeFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.UILoginRateLimit
 	v.SetDefault(param.Server_UILoginRateLimit.GetName(), 1)
 	// Server.UIPasswordFile
 	{
-		val := "${ConfigBase}/server-web-passwd"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_UIPasswordFile.GetName(), val)
+		tmpl := "${ConfigBase}/server-web-passwd"
+		v.SetDefault(param.Server_UIPasswordFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_UIPasswordFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.UnprivilegedUser
 	v.SetDefault(param.Server_UnprivilegedUser.GetName(), "pelican")
 	// Server.WebConfigFile
 	{
-		val := "${ConfigBase}/web-config.yaml"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Server_WebConfigFile.GetName(), val)
+		tmpl := "${ConfigBase}/web-config.yaml"
+		v.SetDefault(param.Server_WebConfigFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_WebConfigFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.WebHost
 	v.SetDefault(param.Server_WebHost.GetName(), "0.0.0.0")
@@ -709,22 +759,27 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_WebPort.GetName(), 8444)
 	// Server.ExternalWebUrl
 	{
-		val := "https://${Server.Hostname}:${Server.WebPort}"
-		val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
-		val = strings.ReplaceAll(val, "${Server.WebPort}", v.GetString(param.Server_WebPort.GetName()))
-		v.SetDefault(param.Server_ExternalWebUrl.GetName(), val)
+		tmpl := "https://${Server.Hostname}:${Server.WebPort}"
+		v.SetDefault(param.Server_ExternalWebUrl.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Server_ExternalWebUrl.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Director.AdvertiseUrl
 	{
-		val := "${Server.ExternalWebUrl}"
-		val = strings.ReplaceAll(val, "${Server.ExternalWebUrl}", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault(param.Director_AdvertiseUrl.GetName(), val)
+		tmpl := "${Server.ExternalWebUrl}"
+		v.SetDefault(param.Director_AdvertiseUrl.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Director_AdvertiseUrl.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Issuer.IssuerClaimValue
 	{
-		val := "${Server.ExternalWebUrl}"
-		val = strings.ReplaceAll(val, "${Server.ExternalWebUrl}", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault(param.Issuer_IssuerClaimValue.GetName(), val)
+		tmpl := "${Server.ExternalWebUrl}"
+		v.SetDefault(param.Issuer_IssuerClaimValue.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Issuer_IssuerClaimValue.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Server.WebReadOnly
 	v.SetDefault(param.Server_WebReadOnly.GetName(), false)
@@ -732,9 +787,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Shoveler_AMQPExchange.GetName(), "shoveled-xrd")
 	// Shoveler.AMQPTokenLocation
 	{
-		val := "${ConfigBase}/shoveler-token"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), val)
+		tmpl := "${ConfigBase}/shoveler-token"
+		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Shoveler_AMQPTokenLocation.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Shoveler.Enable
 	v.SetDefault(param.Shoveler_Enable.GetName(), false)
@@ -749,9 +806,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
 	} else {
 		{
-			val := "${ConfigBase}/shoveler/queue"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Shoveler_QueueDirectory.GetName(), val)
+			tmpl := "${ConfigBase}/shoveler/queue"
+			v.SetDefault(param.Shoveler_QueueDirectory.GetName(), tmpl)
+			param.RegisterDerivedDefault(param.Shoveler_QueueDirectory.GetName(), param.DerivedTemplate{
+				Template: tmpl,
+			})
 		}
 	}
 	// Shoveler.VerifyHeader
@@ -790,9 +849,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Xrootd_AuthRefreshInterval.GetName(), "5m")
 	// Xrootd.Authfile
 	{
-		val := "${ConfigBase}/xrootd/authfile"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Xrootd_Authfile.GetName(), val)
+		tmpl := "${ConfigBase}/xrootd/authfile"
+		v.SetDefault(param.Xrootd_Authfile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Xrootd_Authfile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Xrootd.AutoShutdownEnabled
 	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
@@ -810,9 +871,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
 	// Xrootd.MacaroonsKeyFile
 	{
-		val := "${ConfigBase}/macaroons-secret"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), val)
+		tmpl := "${ConfigBase}/macaroons-secret"
+		v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Xrootd_MacaroonsKeyFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Xrootd.ManagerHost
 	if isOSDF {
@@ -826,23 +889,29 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Xrootd_MaxThreads.GetName(), 20000)
 	// Xrootd.RobotsTxtFile
 	{
-		val := "${ConfigBase}/robots.txt"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Xrootd_RobotsTxtFile.GetName(), val)
+		tmpl := "${ConfigBase}/robots.txt"
+		v.SetDefault(param.Xrootd_RobotsTxtFile.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Xrootd_RobotsTxtFile.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Xrootd.ScitokensConfig
 	{
-		val := "${ConfigBase}/xrootd/scitokens.cfg"
-		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-		v.SetDefault(param.Xrootd_ScitokensConfig.GetName(), val)
+		tmpl := "${ConfigBase}/xrootd/scitokens.cfg"
+		v.SetDefault(param.Xrootd_ScitokensConfig.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Xrootd_ScitokensConfig.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Xrootd.ShutdownTimeout
 	v.SetDefault(param.Xrootd_ShutdownTimeout.GetName(), "1m")
 	// Xrootd.Sitename
 	{
-		val := "${Server.Hostname}"
-		val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
-		v.SetDefault(param.Xrootd_Sitename.GetName(), val)
+		tmpl := "${Server.Hostname}"
+		v.SetDefault(param.Xrootd_Sitename.GetName(), tmpl)
+		param.RegisterDerivedDefault(param.Xrootd_Sitename.GetName(), param.DerivedTemplate{
+			Template: tmpl,
+		})
 	}
 	// Xrootd.SummaryMonitoringHost
 	if isOSDF {
@@ -850,6 +919,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Xrootd.SummaryMonitoringPort
 	v.SetDefault(param.Xrootd_SummaryMonitoringPort.GetName(), 9931)
+
+	param.ResolveDerivedDefaults(v)
 }
 
 // ApplyClientDefaults overrides base defaults with client-specific values.
@@ -857,6 +928,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 func ApplyClientDefaults(v *viper.Viper) {
 	// Logging.Level
 	v.SetDefault(param.Logging_Level.GetName(), "warn")
+
+	param.ResolveDerivedDefaults(v)
 }
 
 // ApplyServerDefaults overrides base defaults with server-specific values.
@@ -864,4 +937,6 @@ func ApplyClientDefaults(v *viper.Viper) {
 func ApplyServerDefaults(v *viper.Viper) {
 	// Logging.Level
 	v.SetDefault(param.Logging_Level.GetName(), "info")
+
+	param.ResolveDerivedDefaults(v)
 }

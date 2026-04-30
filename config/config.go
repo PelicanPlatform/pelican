@@ -1051,8 +1051,13 @@ func initConfigInternalImpl(logLevel log.Level) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Source tracking: snapshot before config file merge so we can diff after.
+	// Note: we intentionally do NOT call st.Reset() here. ResetConfig() (called
+	// from tests) already wipes the tracker, and any param.* writes that occur
+	// between ResetConfig and InitConfigInternal — for example tests that
+	// pre-populate keys via param.Set — must survive into the deprecation-
+	// handling stage so handleDeprecatedConfig can correctly identify
+	// user-set replacements vs. pure defaults.
 	st := GetSourceTracker()
-	st.Reset()
 
 	// Record all keys currently in viper as defaults. Later stages (config
 	// file merges, env var binding) will overwrite relevant entries via the

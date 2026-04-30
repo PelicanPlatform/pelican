@@ -174,3 +174,18 @@ func (st *SourceTracker) RecordDefaultKeys(v *viper.Viper) {
 		}
 	}
 }
+
+// init wires the SourceTracker into param.MultiSet so that any key written
+// via param.Set / param.MultiSet / param.SetRaw at runtime is recorded as
+// SourceDynamic. Without this, the tracker would only see defaults and
+// values loaded from config files / env vars, and the deprecation-warning
+// logic in handleDeprecatedConfig (which queries the tracker to decide
+// whether the user explicitly set a replacement key) would misclassify
+// programmatic overrides as "still the default".
+func init() {
+	param.SetExplicitSetHook(func(kv map[string]any) {
+		for k := range kv {
+			globalSourceTracker.Record(strings.ToLower(k), ConfigSource{Type: SourceDynamic})
+		}
+	})
+}
