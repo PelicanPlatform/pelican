@@ -185,7 +185,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 	t.Run("no-redirect-to-login-with-db-initialized", func(t *testing.T) {
 		// We let the frontend to handle unauthorized user (if the password is initialized)
 		setupTestAuthDB(t)
-		t.Cleanup(cleanupAuthDB)
+		t.Cleanup(server_utils.ResetTestState)
 
 		r := httptest.NewRecorder()
 		// This route is not in ui.go/adminAccessPages, so we will pass the admin check and return 200
@@ -209,18 +209,13 @@ func TestHandleWebUIAuth(t *testing.T) {
 		route.ServeHTTP(r, req)
 
 		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
-
-		authDB.Store(nil)
 	})
 
 	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
 		server_utils.ResetTestState()
 		// We let the frontend to handle unauthorized user (if the password is initialized)
 		setupTestAuthDB(t)
-		t.Cleanup(func() {
-			cleanupAuthDB()
-			server_utils.ResetTestState()
-		})
+		t.Cleanup(server_utils.ResetTestState)
 
 		tmpDir := t.TempDir()
 		issuerDirectory := filepath.Join(tmpDir, "issuer-keys")
@@ -277,13 +272,11 @@ func TestHandleWebUIAuth(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
 		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
-
-		authDB.Store(nil)
 	})
 
 	t.Run("init-page-redirect-to-root-with-db-initialized", func(t *testing.T) {
 		setupTestAuthDB(t)
-		t.Cleanup(cleanupAuthDB)
+		t.Cleanup(server_utils.ResetTestState)
 
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
@@ -298,8 +291,6 @@ func TestHandleWebUIAuth(t *testing.T) {
 		route.ServeHTTP(r, req)
 
 		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
-
-		authDB.Store(nil)
 	})
 
 	t.Run("skip-check-on-non-html-file", func(t *testing.T) {
@@ -315,7 +306,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 	t.Run("pass-check-on-director", func(t *testing.T) {
 		setupTestAuthDB(t)
-		t.Cleanup(cleanupAuthDB)
+		t.Cleanup(server_utils.ResetTestState)
 
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/director/index.html", nil)
@@ -328,7 +319,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 	t.Run("pass-check-on-registry", func(t *testing.T) {
 		setupTestAuthDB(t)
-		t.Cleanup(cleanupAuthDB)
+		t.Cleanup(server_utils.ResetTestState)
 
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/registry/index.html", nil)
@@ -337,6 +328,90 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		assert.Equal(t, 200, r.Result().StatusCode)
 		assert.Equal(t, "", r.Result().Header.Get("Location"))
+	})
+}
+
+func TestShouldSkipActivationFlow(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("false-without-db-or-admins", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		assert.False(t, shouldSkipActivationFlow())
+	})
+
+	t.Run("true-with-authdb-set", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(func() {
+			cleanupAuthDB()
+			server_utils.ResetTestState()
+		})
+		assert.True(t, shouldSkipActivationFlow())
+	})
+
+	t.Run("true-with-admin-users-configured", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin@example.com"}))
+		assert.True(t, shouldSkipActivationFlow())
+	})
+
+	t.Run("true-with-admin-groups-configured", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		require.NoError(t, param.Server_AdminGroups.Set([]string{"admins"}))
+		assert.True(t, shouldSkipActivationFlow())
+	})
+
+	t.Run("false-with-empty-admin-slices", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
+		require.NoError(t, param.Server_AdminGroups.Set([]string{}))
+		assert.False(t, shouldSkipActivationFlow())
+	})
+
+	t.Run("latch-caches-result", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		// First call should return false (no admins, no authDB).
+		assert.False(t, hasConfiguredAdmins())
+		// Setting admins after the latch fires must not change the result.
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin@example.com"}))
+		assert.False(t, hasConfiguredAdmins(), "latch should have cached the initial false result")
+	})
+}
+
+func TestHandleWebUIAuthWithConfiguredAdmins(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	route := gin.New()
+	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
+
+	t.Run("no-redirect-to-init-when-admins-configured", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin@example.com"}))
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/test.html", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+		assert.Empty(t, r.Result().Header.Get("Location"))
+	})
+
+	t.Run("init-page-redirects-to-root-when-admins-configured", func(t *testing.T) {
+		cleanupAuthDB()
+		t.Cleanup(server_utils.ResetTestState)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin@example.com"}))
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
 	})
 }
 

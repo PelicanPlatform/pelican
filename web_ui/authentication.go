@@ -555,6 +555,13 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 func loginHandler(ctx *gin.Context) {
 	db := authDB.Load()
 	if db == nil {
+		if hasConfiguredAdmins() {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Password login is not available",
+			})
+			return
+		}
 		newPath := path.Join(ctx.Request.URL.Path, "..", "initLogin")
 		initUrl := ctx.Request.URL
 		initUrl.Path = newPath
@@ -634,6 +641,13 @@ func loginHandler(ctx *gin.Context) {
 
 // Handle initial code-based login for admin
 func initLoginHandler(ctx *gin.Context) {
+	if hasConfiguredAdmins() {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Activation code login is not available",
+		})
+		return
+	}
 	db := authDB.Load()
 	if db != nil {
 		ctx.JSON(400,

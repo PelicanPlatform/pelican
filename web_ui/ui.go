@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -316,7 +317,6 @@ func handleWebUIRedirect(ctx *gin.Context) {
 
 func handleWebUIAuth(ctx *gin.Context) {
 	requestPath := ctx.Param("requestPath")
-	db := authDB.Load()
 	user, userId, groups, err := GetUserGroups(ctx)
 
 	// Skip auth check for static files other than html pages
@@ -325,9 +325,10 @@ func handleWebUIAuth(ctx *gin.Context) {
 		return
 	}
 
-	// Handle initialization. If db is nill, then redirect user to the initialization page
+	// Handle initialization.
+	// If the web UI is not yet initialized, redirect to the initialization page.
 	if strings.HasPrefix(requestPath, "/initialization") {
-		if db != nil { // Password initialized, redirect away from the init page
+		if shouldSkipActivationFlow() {
 			ctx.Redirect(http.StatusFound, "/view/")
 			ctx.Abort()
 			return
@@ -335,7 +336,7 @@ func handleWebUIAuth(ctx *gin.Context) {
 			ctx.Next()
 			return
 		}
-	} else if db == nil { // For all other paths, if the password is not initialized
+	} else if !shouldSkipActivationFlow() {
 		ctx.Redirect(http.StatusFound, "/view/initialization/code/")
 		ctx.Abort()
 		return
@@ -764,10 +765,40 @@ func configureMetrics(engine *gin.Engine) error {
 	return nil
 }
 
+// hasConfiguredAdmins reports whether at least one admin identity
+// is configured via Server.UIAdminUsers or Server.AdminGroups.
+// The result is computed once and cached: admin configuration is a
+// startup-time decision, and caching prevents live Viper state from
+// affecting the activation-flow gate mid-run.
+var (
+	configuredAdminsOnce sync.Once
+	configuredAdminsVal  bool
+)
+
+func hasConfiguredAdmins() bool {
+	configuredAdminsOnce.Do(func() {
+		configuredAdminsVal = len(param.Server_UIAdminUsers.GetStringSlice()) > 0 ||
+			len(param.Server_AdminGroups.GetStringSlice()) > 0
+	})
+	return configuredAdminsVal
+}
+
+// shouldSkipActivationFlow reports whether the one-time activation-code
+// flow should be skipped. It returns true if the htpasswd file has been
+// bootstrapped or if at least one admin identity has been configured
+// (meaning an admin can log in without completing the activation flow).
+func shouldSkipActivationFlow() bool {
+	return authDB.Load() != nil || hasConfiguredAdmins()
+}
+
 // Send the one-time code for initial web UI login to stdout and periodically
 // re-generate one-time code if user hasn't finished setup
 func waitUntilLogin(ctx context.Context) error {
-	if authDB.Load() != nil {
+	activationFile := param.Server_UIActivationCodeFile.GetString()
+
+	if shouldSkipActivationFlow() {
+		// Remove any stale activation file left from a previous run.
+		_ = os.Remove(activationFile)
 		return nil
 	}
 	sigs := make(chan os.Signal, 1)
@@ -780,7 +811,6 @@ func waitUntilLogin(ctx context.Context) error {
 		isTTY = true
 		fmt.Printf("\n\n\n\n")
 	}
-	activationFile := param.Server_UIActivationCodeFile.GetString()
 
 	defer func() {
 		if err := os.Remove(activationFile); err != nil {
@@ -822,7 +852,7 @@ func waitUntilLogin(ctx context.Context) error {
 			default:
 				time.Sleep(100 * time.Millisecond)
 			}
-			if authDB.Load() != nil {
+			if shouldSkipActivationFlow() {
 				return nil
 			}
 		}
