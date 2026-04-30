@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -361,4 +362,75 @@ func TestSetFedTok(t *testing.T) {
 			assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 		})
 	}
+}
+
+func TestValidateLogExportsConfig(t *testing.T) {
+	t.Run("no-op when disabled", func(t *testing.T) {
+		t.Cleanup(ResetTestState)
+		// Logging.LogExports.Enabled defaults to false; no other config needed.
+		err := ValidateLogExportsConfig()
+		require.NoError(t, err)
+	})
+
+	t.Run("error when enabled but LogLocation is empty", func(t *testing.T) {
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		// Logging.LogLocation defaults to empty string.
+		err := ValidateLogExportsConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Logging.LogLocation")
+	})
+
+	t.Run("error when enabled but LogLocation is /dev/null", func(t *testing.T) {
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		require.NoError(t, param.Logging_LogLocation.Set("/dev/null"))
+		err := ValidateLogExportsConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Logging.LogLocation")
+	})
+
+	t.Run("warning when enabled and LogLocation set but IssuerKeysDirectory empty", func(t *testing.T) {
+		t.Cleanup(ResetTestState)
+		hook := test.NewGlobal()
+		defer hook.Reset()
+
+		logFile := filepath.Join(t.TempDir(), "pelican.log")
+		f, err := os.Create(logFile)
+		require.NoError(t, err)
+		f.Close()
+
+		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		require.NoError(t, param.Logging_LogLocation.Set(logFile))
+		// IssuerKeysDirectory is empty (default).
+
+		err = ValidateLogExportsConfig()
+		require.NoError(t, err)
+
+		found := false
+		for _, entry := range hook.Entries {
+			if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "IssuerKeysDirectory") {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected a warning about IssuerKeysDirectory not being configured")
+	})
+
+	t.Run("success when enabled with real LogLocation and IssuerKeysDirectory", func(t *testing.T) {
+		t.Cleanup(ResetTestState)
+
+		tmpDir := t.TempDir()
+		logFile := filepath.Join(tmpDir, "pelican.log")
+		f, err := os.Create(logFile)
+		require.NoError(t, err)
+		f.Close()
+
+		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		require.NoError(t, param.Logging_LogLocation.Set(logFile))
+		require.NoError(t, param.IssuerKeysDirectory.Set(tmpDir))
+
+		err = ValidateLogExportsConfig()
+		require.NoError(t, err)
+	})
 }
