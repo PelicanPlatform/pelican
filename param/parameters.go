@@ -246,6 +246,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
 	"Logging.Level": true,
+	"Logging.LogExports.AllowFederationAdmin": false,
+	"Logging.LogExports.Enabled": false,
 	"Logging.LogLocation": false,
 	"Logging.Origin.Cms": true,
 	"Logging.Origin.Http": true,
@@ -390,6 +392,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.EnableAutoLoggingRegistration": false,
 	"Registry.Institutions": false,
 	"Registry.InstitutionsUrl": false,
 	"Registry.InstitutionsUrlReloadMinutes": false,
@@ -942,6 +945,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Logging.LogExports.AllowFederationAdmin": func(c *Config) bool { return c.Logging.LogExports.AllowFederationAdmin },
+	"Logging.LogExports.Enabled": func(c *Config) bool { return c.Logging.LogExports.Enabled },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
@@ -969,6 +974,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
 	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.EnableAutoLoggingRegistration": func(c *Config) bool { return c.Registry.EnableAutoLoggingRegistration },
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
 	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
@@ -1312,6 +1318,8 @@ var allParameterNames = []string{
 	"Logging.Client.ProgressInterval",
 	"Logging.DisableProgressBars",
 	"Logging.Level",
+	"Logging.LogExports.AllowFederationAdmin",
+	"Logging.LogExports.Enabled",
 	"Logging.LogLocation",
 	"Logging.Origin.Cms",
 	"Logging.Origin.Http",
@@ -1456,6 +1464,7 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.EnableAutoLoggingRegistration",
 	"Registry.Institutions",
 	"Registry.InstitutionsUrl",
 	"Registry.InstitutionsUrlReloadMinutes",
@@ -1860,6 +1869,8 @@ var (
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Logging_LogExports_AllowFederationAdmin = BoolParam{"Logging.LogExports.AllowFederationAdmin"}
+	Logging_LogExports_Enabled = BoolParam{"Logging.LogExports.Enabled"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
@@ -1887,6 +1898,7 @@ var (
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_EnableAutoLoggingRegistration = BoolParam{"Registry.EnableAutoLoggingRegistration"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
@@ -2282,6 +2294,8 @@ func init() {
 		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Logging.LogExports.AllowFederationAdmin": Logging_LogExports_AllowFederationAdmin,
+		"Logging.LogExports.Enabled": Logging_LogExports_Enabled,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
@@ -2309,6 +2323,7 @@ func init() {
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
 		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.EnableAutoLoggingRegistration": Registry_EnableAutoLoggingRegistration,
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
 		"Registry.RequireOriginApproval": Registry_RequireOriginApproval,
