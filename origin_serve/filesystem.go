@@ -563,7 +563,11 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 	return afs.fs.Rename(oldPath, newPath)
 }
 
-// Stat implements webdav.FileSystem
+// Stat implements webdav.FileSystem.
+//
+// The returned FileInfo is wrapped by withBackendETag so the metadata
+// publish path can ask it for an ETag without baking a particular
+// convention into the publisher. See backend_etag.go.
 func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	defer trackOperation(operationMetrics{
 		total:         metrics.StorageStatsTotal,
@@ -576,7 +580,11 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 	if err != nil {
 		return nil, err
 	}
-	return afs.fs.Stat(fullPath)
+	info, err := afs.fs.Stat(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	return withBackendETag(info), nil
 }
 
 // fullPath converts a WebDAV path to a full filesystem path, refusing any that
@@ -676,7 +684,12 @@ func (af *aferoFile) Readdir(count int) ([]os.FileInfo, error) {
 	return result, nil
 }
 
-// Stat implements webdav.File
+// Stat implements webdav.File. Wraps with a backend-aware ETag (see
+// aferoFileSystem.Stat).
 func (af *aferoFile) Stat() (os.FileInfo, error) {
-	return af.File.Stat()
+	info, err := af.File.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return withBackendETag(info), nil
 }

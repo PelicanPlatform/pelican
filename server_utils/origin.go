@@ -67,6 +67,20 @@ type (
 		// When set, these override the global Issuer.AuthorizationTemplates
 		// for this export's namespace.
 		AuthorizationTemplates []interface{} `json:"authorizationTemplates,omitempty" mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+
+		// Metadata holds per-export overrides for the object-commit publisher.
+		// When unset, the origin-wide Origin.Metadata.* settings apply.
+		Metadata *OriginExportMetadata `json:"metadata,omitempty" mapstructure:"metadata" yaml:"Metadata"`
+	}
+
+	// OriginExportMetadata is the per-export override block for Origin.Metadata.*
+	// settings that are namespace-scoped (endpoint, mode, on/off). Concurrency
+	// and rate-limit knobs remain origin-wide because they describe shared
+	// resources (worker pool, token bucket).
+	OriginExportMetadata struct {
+		Enabled  *bool  `json:"enabled,omitempty" mapstructure:"enabled" yaml:"Enabled"`
+		Endpoint string `json:"endpoint,omitempty" mapstructure:"endpoint" yaml:"Endpoint"`
+		Mode     string `json:"mode,omitempty" mapstructure:"mode" yaml:"Mode"`
 	}
 )
 

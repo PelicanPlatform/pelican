@@ -283,6 +283,11 @@ type (
 		// worker is done with this file.
 		schedFirstByte func()
 		schedDone      func()
+		// objectMetadata is the optional uploader-supplied custom-
+		// fields map. When non-empty, the upload PUT is decorated
+		// with an X-Pelican-Object-Metadata header carrying the SFV
+		// rendering of these fields.
+		objectMetadata map[string]any
 	}
 
 	// A representation of a "transfer job".  The job
@@ -329,6 +334,10 @@ type (
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
+		// objectMetadata is the optional client-supplied
+		// X-Pelican-Object-Metadata field-set propagated to all
+		// child transferFiles for upload jobs.
+		objectMetadata map[string]any
 	}
 
 	// A TransferJob associated with a client's request
@@ -433,6 +442,7 @@ type (
 	identTransferOptionNonInteractive           struct{}
 	identTransferOptionStatUploadDestination    struct{}
 	identTransferOptionRejectCollections        struct{}
+	identTransferOptionObjectMetadata           struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -1140,6 +1150,19 @@ func WithRequestChecksums(types []ChecksumType) TransferOption {
 // Indicate that checksum verification is required
 func WithRequireChecksum() TransferOption {
 	return option.New(identTransferOptionRequireChecksum{}, true)
+}
+
+// WithObjectMetadata attaches a map of uploader-supplied fields to an
+// upload job. When non-empty, the resulting PUT carries an
+// X-Pelican-Object-Metadata header whose value is the RFC 9651
+// Structured Fields rendering of the map (see object_metadata.go).
+//
+// Values must be scalars: string, bool, int / int64, or float64. The
+// keys "path", "size", "etag", and "created_at" are reserved by the
+// origin and refused at validation time. The map is propagated to
+// every transferFile produced by a recursive upload.
+func WithObjectMetadata(fields map[string]any) TransferOption {
+	return option.New(identTransferOptionObjectMetadata{}, fields)
 }
 
 // Create an option to specify the token acquisition logic
@@ -1939,6 +1962,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			// recursive job is asking for the collection, so a per-job
 			// override cannot refuse one.
 			tj.rejectCollections = option.Value().(bool) && !recursive
+		case identTransferOptionObjectMetadata{}:
+			tj.objectMetadata = option.Value().(map[string]any)
 		}
 	}
 
@@ -2907,6 +2932,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			reader:             job.job.reader,
 			byteRange:          job.job.byteRange,
 			metadataChan:       job.job.metadataChan,
+			objectMetadata:     job.job.objectMetadata,
 		},
 	})
 	if submitErr != nil {
@@ -5042,6 +5068,22 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
 	if result, found := getJobId(putContext); found {
 		request.Header.Set("X-Pelican-JobId", result)
+	}
+	// If the caller supplied uploader metadata, render it into the
+	// origin-side X-Pelican-Object-Metadata Structured Fields
+	// header. We've already validated values during option parsing
+	// (see WithObjectMetadata + LoadObjectMetadataFile), so an
+	// error here means a programmer bug, not a user-input problem.
+	if len(transfer.objectMetadata) > 0 {
+		hdrVal, hdrErr := BuildObjectMetadataHeader(transfer.objectMetadata)
+		if hdrErr != nil {
+			log.Errorln("Failed to render X-Pelican-Object-Metadata header:", hdrErr)
+			transferResult.Error = hdrErr
+			return transferResult, hdrErr
+		}
+		if hdrVal != "" {
+			request.Header.Set(ObjectMetadataHeaderName, hdrVal)
+		}
 	}
 	var lastKnownWritten int64
 	uploadStart := time.Now()
