@@ -392,6 +392,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Logging_Client_DisableProgressBars.GetName(), false)
 	// Logging.Client.ProgressInterval
 	v.SetDefault(param.Logging_Client_ProgressInterval.GetName(), "1m")
+	// Logging.LogExports.AllowFederationAdmin
+	v.SetDefault(param.Logging_LogExports_AllowFederationAdmin.GetName(), false)
+	// Logging.LogExports.Enabled
+	v.SetDefault(param.Logging_LogExports_Enabled.GetName(), false)
 	// Logging.Origin.Cms
 	v.SetDefault(param.Logging_Origin_Cms.GetName(), "error")
 	// Logging.Origin.Http
@@ -699,6 +703,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_XRootDPrefix.GetName(), "origin")
 	// Plugin.DirectorDecisionPercentage
 	v.SetDefault(param.Plugin_DirectorDecisionPercentage.GetName(), 20)
+	// Registry.EnableAutoLoggingRegistration
+	v.SetDefault(param.Registry_EnableAutoLoggingRegistration.GetName(), false)
 	// Registry.EnableOIDC
 	v.SetDefault(param.Registry_EnableOIDC.GetName(), false)
 	// Registry.InactiveRegistrationCleanupInterval

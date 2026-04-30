@@ -278,6 +278,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
 	"Logging.Level": true,
+	"Logging.LogExports.AllowFederationAdmin": false,
+	"Logging.LogExports.Enabled": false,
 	"Logging.LogLocation": false,
 	"Logging.Origin.Cms": true,
 	"Logging.Origin.Http": true,
@@ -457,6 +459,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.EnableAutoLoggingRegistration": false,
 	"Registry.EnableOIDC": false,
 	"Registry.InactiveRegistrationCleanupInterval": false,
 	"Registry.InactiveRegistrationTimeout": false,
@@ -1079,6 +1082,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Logging.LogExports.AllowFederationAdmin": func(c *Config) bool { return c.Logging.LogExports.AllowFederationAdmin },
+	"Logging.LogExports.Enabled": func(c *Config) bool { return c.Logging.LogExports.Enabled },
 	"Logging.Rotation.Disable": func(c *Config) bool { return c.Logging.Rotation.Disable },
 	"Logging.Rotation.DisableCompress": func(c *Config) bool { return c.Logging.Rotation.DisableCompress },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
@@ -1113,6 +1118,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
 	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.EnableAutoLoggingRegistration": func(c *Config) bool { return c.Registry.EnableAutoLoggingRegistration },
 	"Registry.EnableOIDC": func(c *Config) bool { return c.Registry.EnableOIDC },
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
@@ -1520,6 +1526,8 @@ var allParameterNames = []string{
 	"Logging.Client.ProgressInterval",
 	"Logging.DisableProgressBars",
 	"Logging.Level",
+	"Logging.LogExports.AllowFederationAdmin",
+	"Logging.LogExports.Enabled",
 	"Logging.LogLocation",
 	"Logging.Origin.Cms",
 	"Logging.Origin.Http",
@@ -1699,6 +1707,7 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.EnableAutoLoggingRegistration",
 	"Registry.EnableOIDC",
 	"Registry.InactiveRegistrationCleanupInterval",
 	"Registry.InactiveRegistrationTimeout",
@@ -2173,6 +2182,8 @@ var (
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Logging_LogExports_AllowFederationAdmin = BoolParam{"Logging.LogExports.AllowFederationAdmin"}
+	Logging_LogExports_Enabled = BoolParam{"Logging.LogExports.Enabled"}
 	Logging_Rotation_Disable = BoolParam{"Logging.Rotation.Disable"}
 	Logging_Rotation_DisableCompress = BoolParam{"Logging.Rotation.DisableCompress"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
@@ -2207,6 +2218,7 @@ var (
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_EnableAutoLoggingRegistration = BoolParam{"Registry.EnableAutoLoggingRegistration"}
 	Registry_EnableOIDC = BoolParam{"Registry.EnableOIDC"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
@@ -2681,6 +2693,8 @@ func init() {
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Logging.LogExports.AllowFederationAdmin": Logging_LogExports_AllowFederationAdmin,
+		"Logging.LogExports.Enabled": Logging_LogExports_Enabled,
 		"Logging.Rotation.Disable": Logging_Rotation_Disable,
 		"Logging.Rotation.DisableCompress": Logging_Rotation_DisableCompress,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
@@ -2715,6 +2729,7 @@ func init() {
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
 		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.EnableAutoLoggingRegistration": Registry_EnableAutoLoggingRegistration,
 		"Registry.EnableOIDC": Registry_EnableOIDC,
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
