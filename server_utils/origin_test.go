@@ -88,6 +88,9 @@ var (
 	//go:embed resources/globus-origins/multi-export-valid.yml
 	globusMultiExport string
 
+	//go:embed resources/globus-origins/multi-export-invalid.yml
+	globusMultiExportInvalid string
+
 	//go:embed resources/xroot-origins/single-export-valid.yml
 	xrootSingleExportValid string
 
@@ -613,9 +616,47 @@ func TestGetExports(t *testing.T) {
 		assert.Equal(t, "Pelican >> Globus!", viper.GetString("Origin.GlobusCollectionName"))
 	})
 
+	t.Run("testMultiExportValidGlobus", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, globusMultiExport, false)
+
+		expectedExport1 := OriginExport{
+			FederationPrefix:     "/first/namespace",
+			StoragePrefix:        "/foo",
+			GlobusCollectionID:   "abc123",
+			GlobusCollectionName: "Pelican >> Globus!",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+			IssuerUrls: []string{defaultIssuerUrl},
+		}
+
+		expectedExport2 := OriginExport{
+			FederationPrefix:     "/second/namespace",
+			StoragePrefix:        "/bar",
+			GlobusCollectionID:   "abc123",
+			GlobusCollectionName: "Pelican >> Globus!",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
+		assert.Equal(t, expectedExport2, exports[1])
+	})
+
 	t.Run("testMultiExportInvalidGlobus", func(t *testing.T) {
 		defer ResetTestState()
-		_ = setup(t, globusMultiExport, true)
+		_ = setup(t, globusMultiExportInvalid, true)
 	})
 
 	t.Run("testSingleExportValidXRoot", func(t *testing.T) {

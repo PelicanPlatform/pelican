@@ -53,6 +53,19 @@ func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error
 		return errors.Errorf("GlobusCollectionName is required for export '%s'", e.FederationPrefix)
 	}
 
+	// All exports must share the same Globus collection — the origin plugin only supports a single
+	// collection exposed via multiple path mappings.
+	if len(o.Exports) > 0 && e != &o.Exports[0] {
+		if e.GlobusCollectionID != o.Exports[0].GlobusCollectionID {
+			return errors.Errorf("all exports must use the same GlobusCollectionID; export '%s' has '%s' but the first export has '%s'",
+				e.FederationPrefix, e.GlobusCollectionID, o.Exports[0].GlobusCollectionID)
+		}
+		if e.GlobusCollectionName != o.Exports[0].GlobusCollectionName {
+			return errors.Errorf("all exports must use the same GlobusCollectionName; export '%s' has '%s' but the first export has '%s'",
+				e.FederationPrefix, e.GlobusCollectionName, o.Exports[0].GlobusCollectionName)
+		}
+	}
+
 	if viper.GetString(param.OIDC_Issuer.GetName()) != "globus" {
 		clientIDFile := param.Origin_GlobusClientIDFile.GetString()
 		if clientIDFile == "" {

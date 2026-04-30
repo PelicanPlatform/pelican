@@ -123,6 +123,7 @@ type (
 
 		// Globus specific options
 		GlobusTransferTokenFile string
+		GlobusBackend           *origin.GlobusBackendConfig
 
 		Exports []server_utils.OriginExport
 	}
@@ -1185,31 +1186,18 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			if xrdConfig.Origin.FederationPrefix == "" {
 				xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
 			}
-		case "globus":
-			xrdConfig.Origin.StorageType = "globus"
-			// Set activeOnly to false so that we can use the inactive ones as placeholders
-			globusExports := origin.GetGlobusExportsValues(false)
-			// If there's no activated Globus collection, then set the Http config to empty
-			if len(globusExports) == 0 {
-				// If there's no export, we fail the start
-				return "", errors.New("failed to configure XRootD: no Globus collection exported")
-			} else if len(globusExports) > 0 {
-				if globusExports[0].HttpsServer == "" {
-					// FIXME: Once the xrd-http plugin allows the empty server URL, remove this line
-					// For now, put a placeholder here to allow XRootD start without error
-					xrdConfig.Origin.HttpServiceUrl = "https://pelicanplatform.org"
-				} else {
-					xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
+			case "globus":
+				xrdConfig.Origin.StorageType = "globus"
+				globusBackend, err := origin.GetGlobusBackendConfig(originExports)
+				if err != nil {
+					return "", errors.Wrap(err, "failed to configure XRootD Globus backend")
 				}
-				xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
-
-				if globusExports[0].Status == origin.GlobusActivated {
-					xrdConfig.Origin.HttpAuthTokenFile = globusExports[0].TokenFile
-					xrdConfig.Origin.GlobusTransferTokenFile = globusExports[0].TransferTokenFile
+				xrdConfig.Origin.GlobusBackend = globusBackend
+				if globusBackend == nil || len(globusBackend.Exports) == 0 {
+					return "", errors.New("failed to configure XRootD: no Globus collection exported")
 				}
 			}
 		}
-	}
 
 	// Map out xrootd logs
 	err = mapXrootdLogLevels(&xrdConfig)
