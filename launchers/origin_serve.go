@@ -83,6 +83,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
+	if err := server_utils.ValidateLogExportsConfig(); err != nil {
+		return nil, errors.Wrap(err, "invalid log-export configuration")
+	}
+
 	// Initialize PKCS#11 helper after the defaults are set up
 	initPKCS11(ctx, modules)
 
