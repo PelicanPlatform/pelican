@@ -133,7 +133,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: latest
+          version: "~> v2"
           args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
 
       - name: Copy the pelican binaries for the end-to-end tests
