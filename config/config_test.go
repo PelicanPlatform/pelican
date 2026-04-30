@@ -506,6 +506,38 @@ func TestExtraCfg(t *testing.T) {
 		assert.Equal(t, "bar", viper.GetString("otherVal"))
 	})
 
+	t.Run("test-backup-files-ignored", func(t *testing.T) {
+		// Verify that editor/package-manager backup files in a ConfigLocations
+		// directory are silently ignored. Only .yaml/.yml files should be read.
+		ResetConfig()
+		dir1 := t.TempDir()
+		setupConfigLocations(t, []string{dir1})
+
+		// The valid YAML file sets the expected value.
+		err := os.WriteFile(filepath.Join(dir1, "config.yaml"), []byte("TestVal: correct"), 0644)
+		require.NoError(t, err)
+
+		// Each backup variant carries a conflicting value that must NOT be loaded.
+		backupFiles := map[string]string{
+			"config.yaml~":       "TestVal: from-tilde",
+			"config.yaml.bak":    "TestVal: from-bak",
+			"config.rpmsave":     "TestVal: from-rpmsave",
+			"config.rpmnew":      "TestVal: from-rpmnew",
+			"config.dpkg-old":    "TestVal: from-dpkg-old",
+			"config.dpkg-dist":   "TestVal: from-dpkg-dist",
+			"config.cfsave":      "TestVal: from-cfsave",
+			"config.noextension": "TestVal: from-noext",
+		}
+		for name, content := range backupFiles {
+			err = os.WriteFile(filepath.Join(dir1, name), []byte(content), 0644)
+			require.NoError(t, err)
+		}
+
+		err = handleContinuedCfg()
+		assert.NoError(t, err)
+		assert.Equal(t, "correct", viper.GetString("TestVal"), "backup files must not override the YAML config")
+	})
+
 	t.Run("test-bad-directory", func(t *testing.T) {
 		ResetConfig()
 		continueDir := t.TempDir()
