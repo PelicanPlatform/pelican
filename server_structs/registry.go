@@ -109,6 +109,20 @@ const (
 	RegApproved RegistrationStatus = "Approved"
 	RegDenied   RegistrationStatus = "Denied"
 	RegUnknown  RegistrationStatus = "Unknown"
+
+	// RegistrationTypeKey is the key used in Registration.CustomFields to indicate the
+	// registration type.  It is set on namespace registrations that differ from the
+	// default data-namespace type.
+	RegistrationTypeKey = "type"
+
+	// LoggingRegistrationType is the CustomFields["type"] value written when an Origin or
+	// Cache auto-registers its logging namespace (/pelican/logging/{Server.ID}).
+	// Using the CustomFields map avoids any DB schema migration.
+	LoggingRegistrationType = "logging"
+
+	// LoggingNamespacePrefix is the path prefix shared by all logging namespace registrations.
+	// Each server's logging namespace is LoggingNamespacePrefix + "/" + Server.ID.
+	LoggingNamespacePrefix = "/pelican/logging"
 )
 
 func (rs RegistrationStatus) String() string {
@@ -134,6 +148,20 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 
 func (Registration) TableName() string {
 	return "registrations"
+}
+
+// IsLoggingNamespace reports whether reg is a logging namespace registration,
+// i.e. one whose CustomFields map contains {"type": "logging"}.
+func (reg *Registration) IsLoggingNamespace() bool {
+	if reg.CustomFields == nil {
+		return false
+	}
+	v, ok := reg.CustomFields[RegistrationTypeKey]
+	if !ok {
+		return false
+	}
+	s, ok := v.(string)
+	return ok && s == LoggingRegistrationType
 }
 
 func IsValidRegStatus(s string) bool {
