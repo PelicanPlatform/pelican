@@ -688,3 +688,72 @@ func TestServerWithMultipleServices(t *testing.T) {
 		assert.True(t, server2.IsCache, "Server2 should be marked as cache")
 	})
 }
+
+// TestLoggingNamespaceAutoApprovalCondition verifies that getServerByID correctly returns
+// the registration status of the parent origin, which is the key input to the auto-approval
+// logic in keySignChallengeCommit.
+func TestLoggingNamespaceAutoApprovalCondition(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("ApprovedOriginEnablesAutoApproval", func(t *testing.T) {
+		ns := server_structs.Registration{
+			Prefix: "/origins/auto-approve-test.edu",
+			Pubkey: "pubkey-auto",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "AutoApproveOrigin",
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&ns))
+
+		// Look up the server as keySignChallengeCommit would
+		server, err := getServerByRegistrationID(ns.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, server.ID)
+
+		// Simulate the auto-approval condition
+		serverReg, err := getServerByID(server.ID)
+		require.NoError(t, err)
+		require.NotNil(t, serverReg)
+
+		hasApprovedRegistration := false
+		for _, reg := range serverReg.Registration {
+			if reg.AdminMetadata.Status == server_structs.RegApproved {
+				hasApprovedRegistration = true
+				break
+			}
+		}
+		assert.True(t, hasApprovedRegistration, "Origin with RegApproved should enable logging namespace auto-approval")
+	})
+
+	t.Run("PendingOriginDoesNotEnableAutoApproval", func(t *testing.T) {
+		ns := server_structs.Registration{
+			Prefix: "/origins/pending-logging-test.edu",
+			Pubkey: "pubkey-pending",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "PendingOrigin",
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&ns))
+
+		server, err := getServerByRegistrationID(ns.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, server.ID)
+
+		serverReg, err := getServerByID(server.ID)
+		require.NoError(t, err)
+		require.NotNil(t, serverReg)
+
+		hasApprovedRegistration := false
+		for _, reg := range serverReg.Registration {
+			if reg.AdminMetadata.Status == server_structs.RegApproved {
+				hasApprovedRegistration = true
+				break
+			}
+		}
+		assert.False(t, hasApprovedRegistration, "Pending origin should not enable logging namespace auto-approval")
+	})
+}

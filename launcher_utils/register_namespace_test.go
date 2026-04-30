@@ -29,6 +29,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -330,4 +331,24 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
+}
+func TestRegisterLoggingNamespaceWithRetry_NoopWhenDisabled(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	}()
+
+	// Logging.LogExports.Enabled is false by default.
+	// The function must return nil immediately without touching the network or
+	// adding any goroutines to the errgroup.
+	goroutinesBefore := runtime.NumGoroutine()
+	err := RegisterLoggingNamespaceWithRetry(ctx, egrp)
+	require.NoError(t, err, "RegisterLoggingNamespaceWithRetry should be a no-op when LogExports.Enabled is false")
+	require.Equal(t, goroutinesBefore, runtime.NumGoroutine(), "no goroutines should have been launched")
 }
