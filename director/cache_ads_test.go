@@ -282,6 +282,55 @@ func TestRecordAd(t *testing.T) {
 		_, ok := healthTestUtils[mockUrl.String()]
 		assert.True(t, ok)
 	})
+
+	t.Run("disabled-director-test-cleans-up-stale-health-utils", func(t *testing.T) {
+		t.Cleanup(func() {
+			resetHealthTests()
+			shutdownStatUtils()
+			serverAds.DeleteAll()
+		})
+		resetHealthTests()
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+
+		mockUrl := url.URL{Scheme: "https", Host: "origin-s3.example.com"}
+
+		// Simulate a pre-existing health test entry (as if tests were previously enabled)
+		healthTestUtilsMutex.Lock()
+		errgrp, errgrpCtx := errgroup.WithContext(context.Background())
+		_, cancel := context.WithCancel(errgrpCtx)
+		healthTestUtils[mockUrl.String()] = &healthTestUtil{
+			Cancel:        cancel,
+			ErrGrp:        errgrp,
+			ErrGrpContext: errgrpCtx,
+			Status:        HealthStatusError,
+		}
+		healthTestUtilsMutex.Unlock()
+
+		// Verify the stale entry exists
+		healthTestUtilsMutex.RLock()
+		_, ok := healthTestUtils[mockUrl.String()]
+		healthTestUtilsMutex.RUnlock()
+		require.True(t, ok, "stale healthTestUtil entry should exist before recordAd")
+
+		// Now register with DisableDirectorTest=true
+		serverAd := server_structs.ServerAd{
+			URL:                 mockUrl,
+			WebURL:              mockUrl,
+			FromTopology:        false,
+			DisableDirectorTest: true,
+			Type:                server_structs.OriginType.String(),
+		}
+		serverAd.Initialize("TEST_S3_ORIGIN")
+		emptyNS := []server_structs.NamespaceAdV2{}
+		recordAd(context.Background(), serverAd, &emptyNS)
+
+		// The stale health test entry should have been cleaned up
+		healthTestUtilsMutex.RLock()
+		_, ok = healthTestUtils[mockUrl.String()]
+		healthTestUtilsMutex.RUnlock()
+		assert.False(t, ok, "stale healthTestUtil entry should be removed when DisableDirectorTest is true")
+	})
 }
 
 func TestGetRawStatusWeight(t *testing.T) {

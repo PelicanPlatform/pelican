@@ -95,6 +95,10 @@ func (s *Store) runMigrations() error {
 // Close closes the database connection
 func (s *Store) Close() error {
 	if s.db != nil {
+		// Checkpoint and truncate the WAL before closing so that the -wal and -shm
+		// sidecar files are removed. Without this, os.RemoveAll (e.g. t.TempDir cleanup)
+		// fails because those files are still present on disk.
+		_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		return s.db.Close()
 	}
 	return nil

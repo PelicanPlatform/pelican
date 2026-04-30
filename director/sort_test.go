@@ -884,6 +884,39 @@ func TestCacheNotInErrorState(t *testing.T) {
 	}
 }
 
+func TestCacheDirectorTestEnabled(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	testCases := []struct {
+		name                string
+		disableDirectorTest bool
+		expected            bool
+	}{
+		{
+			name:                "Cache with director tests enabled is included",
+			disableDirectorTest: false,
+			expected:            true,
+		},
+		{
+			name:                "Cache with director tests disabled is excluded",
+			disableDirectorTest: true,
+			expected:            false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ad := copyAd{
+				ServerAd: server_structs.ServerAd{
+					DisableDirectorTest: tc.disableDirectorTest,
+				},
+			}
+
+			ctx := &gin.Context{}
+			assert.Equal(t, tc.expected, cacheDirectorTestEnabled()(ctx, ad))
+		})
+	}
+}
+
 func TestFilterCaches(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 

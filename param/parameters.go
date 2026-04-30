@@ -189,6 +189,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Director.OriginCacheHealthTestInterval": false,
 	"Director.OriginResponseHostnames": false,
 	"Director.RegistryQueryInterval": false,
+	"Director.RequireDirectorTests": false,
 	"Director.StatConcurrencyLimit": false,
 	"Director.StatTimeout": false,
 	"Director.SupportContactEmail": false,
@@ -937,6 +938,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Director.EnableOIDC": func(c *Config) bool { return c.Director.EnableOIDC },
 	"Director.EnableStat": func(c *Config) bool { return c.Director.EnableStat },
 	"Director.FilterCachesInErrorState": func(c *Config) bool { return c.Director.FilterCachesInErrorState },
+	"Director.RequireDirectorTests": func(c *Config) bool { return c.Director.RequireDirectorTests },
 	"DisableHttpProxy": func(c *Config) bool { return c.DisableHttpProxy },
 	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
 	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
@@ -1255,6 +1257,7 @@ var allParameterNames = []string{
 	"Director.OriginCacheHealthTestInterval",
 	"Director.OriginResponseHostnames",
 	"Director.RegistryQueryInterval",
+	"Director.RequireDirectorTests",
 	"Director.StatConcurrencyLimit",
 	"Director.StatTimeout",
 	"Director.SupportContactEmail",
@@ -1855,6 +1858,7 @@ var (
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
 	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
+	Director_RequireDirectorTests = BoolParam{"Director.RequireDirectorTests"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
@@ -2277,6 +2281,7 @@ func init() {
 		"Director.EnableOIDC": Director_EnableOIDC,
 		"Director.EnableStat": Director_EnableStat,
 		"Director.FilterCachesInErrorState": Director_FilterCachesInErrorState,
+		"Director.RequireDirectorTests": Director_RequireDirectorTests,
 		"DisableHttpProxy": DisableHttpProxy,
 		"DisableProxyFallback": DisableProxyFallback,
 		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,

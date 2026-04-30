@@ -358,8 +358,21 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	}
 
 	if ad.DisableDirectorTest {
-		log.Debugf("%s server %s at %s has DisableDirectorTest set. Skip health test for this server.", ad.Type, ad.Name, ad.URL.String())
-		return
+		log.Debugf("%s.DirectorTest is set to false for %s server %s at %s. Skipping health tests.", ad.Type, ad.Type, ad.Name, ad.URL.String())
+		// Clean up any stale health test utilities from a previous registration
+		// where tests may have been enabled. This ensures advertisementToServerResponse()
+		// correctly reports HealthStatusDisabled instead of using a stale status.
+		func() {
+			healthTestUtilsMutex.Lock()
+			defer healthTestUtilsMutex.Unlock()
+			if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
+				if existingUtil.Cancel != nil {
+					existingUtil.Cancel()
+				}
+				delete(healthTestUtils, ad.URL.String())
+			}
+		}()
+		return sAd
 	}
 
 	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered

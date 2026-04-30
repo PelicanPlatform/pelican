@@ -245,7 +245,13 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		healthStatus = healthUtil.Status
 	} else {
 		if ad.DisableDirectorTest {
-			healthStatus = HealthStatusDisabled
+			// If the federation requires director tests and this cache has disabled them,
+			// surface that as an error so the director UI flags it red.
+			if param.Director_RequireDirectorTests.GetBool() && ad.Type == server_structs.CacheType.String() {
+				healthStatus = HealthStatusError
+			} else {
+				healthStatus = HealthStatusDisabled
+			}
 		} else {
 			if !ad.FromTopology {
 				log.Debugf("advertisementToServerResponse: healthTestUtils not found for server at %s", ad.URL.String())
