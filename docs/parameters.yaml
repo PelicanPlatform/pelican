@@ -434,6 +434,26 @@ default: error
 components: ["cache"]
 runtime_configurable: true
 ---
+name: Logging.LogExports.Enabled
+description: |+
+  When true, this server exports its logs via the Pelican logging namespace (`/pelican/logging/{Server.ID}`).
+  Clients with the appropriate token can retrieve log entries as virtual time-bucketed objects.
+  Requires `Logging.LogLocation` to be set to a real file path (not empty or `/dev/null`).
+  Defaults to false — log export is opt-in.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Logging.LogExports.AllowFederationAdmin
+description: |+
+  When true, the federation issuer URL is added as an authorized issuer for this server's logging namespace,
+  allowing federation administrators to read logs from this server using a federation-issued token.
+  Has no effect when `Logging.LogExports.Enabled` is false.
+  Defaults to false.
+type: bool
+default: false
+components: ["origin"]
+---
 ############################
 # Federation-Level Configs #
 ############################
@@ -2932,6 +2952,18 @@ description: |+
 type: bool
 default: false
 osdf_default: true
+components: ["registry"]
+---
+name: Registry.EnableAutoLoggingRegistration
+description: |+
+  When true, the Registry automatically approves logging namespace registrations (`/pelican/logging/{Server.ID}`)
+  submitted by Origins or Caches whose main server registration is already approved.
+  If the server registration is still pending at the time the logging namespace is submitted,
+  approval is deferred until the server is approved.
+  This is a federation-level gate distinct from `Logging.LogExports.Enabled` on each individual server.
+  Defaults to false.
+type: bool
+default: false
 components: ["registry"]
 ---
 ############################

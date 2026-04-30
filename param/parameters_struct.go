@@ -197,6 +197,10 @@ type Config struct {
 		} `mapstructure:"client" yaml:"Client"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
 		Level string `mapstructure:"level" yaml:"Level"`
+		LogExports struct {
+			AllowFederationAdmin bool `mapstructure:"allowfederationadmin" yaml:"AllowFederationAdmin"`
+			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+		} `mapstructure:"logexports" yaml:"LogExports"`
 		LogLocation string `mapstructure:"loglocation" yaml:"LogLocation"`
 		Origin struct {
 			Cms string `mapstructure:"cms" yaml:"Cms"`
@@ -357,6 +361,7 @@ type Config struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
 		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		EnableAutoLoggingRegistration bool `mapstructure:"enableautologgingregistration" yaml:"EnableAutoLoggingRegistration"`
 		Institutions any `mapstructure:"institutions" yaml:"Institutions"`
 		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
 		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
@@ -652,6 +657,10 @@ type configWithType struct {
 		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
+		LogExports struct {
+			AllowFederationAdmin struct { Type string; Value bool }
+			Enabled struct { Type string; Value bool }
+		}
 		LogLocation struct { Type string; Value string }
 		Origin struct {
 			Cms struct { Type string; Value string }
@@ -812,6 +821,7 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
+		EnableAutoLoggingRegistration struct { Type string; Value bool }
 		Institutions struct { Type string; Value any }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
