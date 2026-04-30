@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry/registry_client"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -265,6 +266,27 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 }
 
 // Register the namespace. If failed, retry every 10s (default)
+// RegisterLoggingNamespaceWithRetry registers the logging namespace /pelican/logging/{Server.ID}
+// for the origin server. It is a no-op when Logging.LogExports.Enabled is false.
+// Must be called after the origin prefix has been successfully registered so that GetServerMetadata
+// can retrieve the assigned Server.ID from the registry.
+func RegisterLoggingNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
+	if !param.Logging_LogExports_Enabled.GetBool() {
+		return nil
+	}
+	metadata, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
+	if err != nil {
+		return errors.Wrap(err, "failed to get server metadata for logging namespace registration")
+	}
+	if metadata.ID == "" {
+		log.Warning("Server ID is empty; cannot register logging namespace. Log export will be unavailable until the server is restarted.")
+		return nil
+	}
+	loggingPrefix := server_structs.LoggingNamespacePrefix + "/" + metadata.ID
+	log.Debugf("Registering logging namespace %s", loggingPrefix)
+	return RegisterNamespaceWithRetry(ctx, egrp, loggingPrefix)
+}
+
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {
