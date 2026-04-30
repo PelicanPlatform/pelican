@@ -2002,6 +2002,136 @@ default: false
 components: ["origin"]
 ---
 ############################
+#  Origin POSC settings    #
+############################
+name: Origin.Posc.Enabled
+description: |+
+  When true, the V2 (POSIXv2) origin uses Persist On Successful Close (POSC) semantics: an
+  uploaded object is staged at a hidden in-progress filename until its handle is successfully
+  closed, at which point it is renamed atomically into place. Failed/abandoned uploads are
+  collected by a background expiry thread. POSC is independent of the metadata-publish feature.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Posc.Prefix
+description: |+
+  Path (relative to the export's StoragePrefix) under which POSC stages in-progress uploads.
+  Must be on the same filesystem as the export so the final rename is atomic. Default
+  ".pelican-posc" creates a hidden directory inside the export root that is invisible to clients.
+type: string
+default: ".pelican-posc"
+components: ["origin"]
+---
+name: Origin.Posc.FileTimeout
+description: |+
+  How long an in-progress POSC file may go without being touched before the background expiry
+  thread removes it. Active uploads keep their temp file alive via Origin.Posc.KeepaliveInterval.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Posc.KeepaliveInterval
+description: |+
+  How often the keepaliver thread updates the mtime of an active in-progress POSC file. Should be
+  smaller than Origin.Posc.FileTimeout.
+type: duration
+default: 19m
+components: ["origin"]
+---
+############################
+# Origin Metadata settings #
+############################
+name: Origin.Metadata.Enabled
+description: |+
+  Master switch for the V2 origin's object-commit metadata publisher. When true, the origin
+  posts a JSON event to Origin.Metadata.Endpoint after each successful upload close. The publish
+  is authenticated with a JWT signed by the origin's issuer key carrying the pelican.metadata
+  scope. Per-export overrides may further restrict or redirect the publishing.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.Endpoint
+description: |+
+  URL the origin POSTs object-commit events to when Origin.Metadata.Enabled is true. May be
+  overridden per-export via Origin.Exports[].Metadata.Endpoint.
+type: url
+default: ""
+components: ["origin"]
+---
+name: Origin.Metadata.Mode
+description: |+
+  Either "transactional" or "eventual". In transactional mode, the close blocks on the first
+  publish attempt; if it fails, the upload returns 5xx and the object is best-effort removed.
+  In eventual mode (the default), the close returns 2xx as soon as the publish row is durably
+  enqueued and a background worker drains the queue with retries and jitter. Per-export
+  overridable via Origin.Exports[].Metadata.Mode.
+type: string
+default: "eventual"
+components: ["origin"]
+---
+name: Origin.Metadata.RequestTimeout
+description: |+
+  Per-attempt HTTP timeout when posting to the metadata endpoint.
+type: duration
+default: 10s
+components: ["origin"]
+---
+name: Origin.Metadata.TokenLifetime
+description: |+
+  Lifetime of the JWT minted by the origin to authenticate to the metadata endpoint.
+type: duration
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.MinBackoff
+description: |+
+  Initial retry backoff in eventually-consistent mode. The actual sleep is uniformly jittered
+  in the range [0, computed].
+type: duration
+default: 30s
+components: ["origin"]
+---
+name: Origin.Metadata.MaxBackoff
+description: |+
+  Maximum retry backoff in eventually-consistent mode.
+type: duration
+default: 30m
+components: ["origin"]
+---
+name: Origin.Metadata.MaxInflight
+description: |+
+  Number of concurrent worker goroutines draining the metadata publish queue. Origin-wide.
+type: int
+default: 4
+components: ["origin"]
+---
+name: Origin.Metadata.RatePerSecond
+description: |+
+  Token-bucket rate limit (events per second) shared across all worker goroutines.
+type: int
+default: 10
+components: ["origin"]
+---
+name: Origin.Metadata.WarnAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "warning".
+type: duration
+default: 4h
+components: ["origin"]
+---
+name: Origin.Metadata.ErrorAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "error". An origin in error state continues to
+  accept uploads.
+type: duration
+default: 24h
+components: ["origin"]
+---
+############################
 #   Local cache configs    #
 ############################
 name: LocalCache.RunLocation

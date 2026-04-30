@@ -81,6 +81,7 @@ require (
 	github.com/dgraph-io/ristretto v1.0.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
+	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-stomp/stomp/v3 v3.0.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
@@ -241,7 +242,7 @@ require (
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.32.0
-	golang.org/x/time v0.8.0
+	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.69 // indirect

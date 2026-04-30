@@ -55,6 +55,13 @@ var (
 	exportPrefixMap     map[string]string // Maps federation prefix to storage prefix
 	copyEnabledPrefixes map[string]bool   // Set of federation prefixes that have the Copies capability
 	handlersRegistered  bool              // Tracks whether handlers have been registered
+	// poscFilesystems holds the per-export POSC layer so it can be shut
+	// down via ResetHandlers in tests and via cancellation in production.
+	poscFilesystems map[string]*poscFileSystem
+
+	// metadataCtl is the singleton metadata-publish controller.
+	// nil when Origin.Metadata.Enabled is false.
+	metadataCtl *metadataController
 )
 
 const (
@@ -186,6 +193,14 @@ func init() {
 
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
+	for _, p := range poscFilesystems {
+		p.Stop()
+	}
+	poscFilesystems = nil
+	if metadataCtl != nil {
+		metadataCtl.Stop()
+		metadataCtl = nil
+	}
 	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
@@ -564,6 +579,48 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string)
 	copyEnabledPrefixes = make(map[string]bool)
+	poscFilesystems = make(map[string]*poscFileSystem)
+
+	// preMultiuserFs maps a federation prefix to the wrapped
+	// FileSystem captured *before* the multiuser layer wraps it. The
+	// metadata-publish worker uses this for its skip-if-deleted Stat
+	// because the worker runs in goroutines without any user identity
+	// on its context — Stat'ing through the multiuser layer there
+	// would either fail or run as the wrong identity.
+	preMultiuserFs := make(map[string]webdav.FileSystem)
+
+	// If the metadata-publish feature is enabled (origin-wide or
+	// any export turns it on), construct the controller now. The
+	// controller is shared across exports; per-export endpoint /
+	// mode overrides are resolved per event.
+	if shouldEnableMetadataController(exports) {
+		opts := metadataControllerOptions{
+			OriginEnabled:  param.Origin_Metadata_Enabled.GetBool(),
+			OriginEndpoint: param.Origin_Metadata_Endpoint.GetString(),
+			OriginMode:     PublishMode(param.Origin_Metadata_Mode.GetString()),
+			Exports:        exports,
+			RequestTimeout: param.Origin_Metadata_RequestTimeout.GetDuration(),
+			TokenLifetime:  param.Origin_Metadata_TokenLifetime.GetDuration(),
+			MinBackoff:     param.Origin_Metadata_MinBackoff.GetDuration(),
+			MaxBackoff:     param.Origin_Metadata_MaxBackoff.GetDuration(),
+			MaxInflight:    param.Origin_Metadata_MaxInflight.GetInt(),
+			RatePerSecond:  param.Origin_Metadata_RatePerSecond.GetInt(),
+			WarnAfter:      param.Origin_Metadata_WarnAfter.GetDuration(),
+			ErrorAfter:     param.Origin_Metadata_ErrorAfter.GetDuration(),
+			// preMultiuserFs is populated below in the per-export
+			// loop; the closure captures the map by reference so
+			// late-arriving entries are visible at call time.
+			FilesystemForExists: func(namespace string) webdav.FileSystem {
+				if fs, ok := preMultiuserFs[namespace]; ok {
+					return fs
+				}
+				return nil
+			},
+		}
+		metadataCtl = newMetadataController(opts)
+		metadataCtl.Start(ctx)
+		log.Infof("metadata publishing enabled (mode=%s)", param.Origin_Metadata_Mode.GetString())
+	}
 
 	// Get optional rate limit for testing
 	readRateLimit := param.Origin_TransferRateLimit.GetByteRate()
@@ -610,6 +667,44 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 
 			autoFs := newAutoCreateDirFs(localFs)
 			var fs webdav.FileSystem = newAferoFileSystem(autoFs, "", logger)
+
+			// Wrap with POSC layer if enabled. POSC sits between the
+			// (optional) multiuser layer and the base aferoFileSystem so
+			// that staged temp files inherit the authenticated user's
+			// uid/gid and so that the expiry goroutine — which runs
+			// without a request context — bypasses multiuser entirely.
+			poscEnabled := param.Origin_Posc_Enabled.GetBool()
+			if poscEnabled {
+				poscPrefix := param.Origin_Posc_Prefix.GetString()
+				poscTimeout := param.Origin_Posc_FileTimeout.GetDuration()
+				poscKA := param.Origin_Posc_KeepaliveInterval.GetDuration()
+				posc := newPoscFileSystem(ctx, fs, poscPrefix, poscTimeout, poscKA)
+				// Hand POSC a direct afero.Fs handle so the
+				// keepalive goroutine can Chtimes — webdav.FileSystem
+				// has no utimes-equivalent.
+				posc.SetTouchFS(autoFs)
+				posc.SetMetricsHooks(poscMetricsHooks(export.FederationPrefix))
+				if metadataCtl != nil {
+					posc.SetCloseHook(metadataCtl.CommitEventFromCloseHook(export.FederationPrefix))
+				}
+				poscFilesystems[export.FederationPrefix] = posc
+				fs = posc
+				log.Infof("POSC enabled for %s (prefix=%s, fileTimeout=%s, keepalive=%s)",
+					export.FederationPrefix, poscPrefix, poscTimeout, poscKA)
+			} else if metadataCtl != nil {
+				// Metadata publishing is enabled but POSC is not.
+				// Use a thin close-notify wrapper so the publish hook
+				// still fires only on a successful Close().
+				fs = newCloseNotifyFs(fs, metadataCtl.CommitEventFromCloseHook(export.FederationPrefix))
+				log.Infof("Metadata-on-close enabled for %s (without POSC)", export.FederationPrefix)
+			}
+
+			// Capture the pre-multiuser FileSystem for the metadata
+			// worker's skip-if-deleted check. It must be the layer
+			// just below multiuser so the worker (which has no user
+			// identity on its goroutine context) can Stat without
+			// triggering setuid/setgid.
+			preMultiuserFs[export.FederationPrefix] = fs
 
 			// Wrap with multiuser filesystem if configured
 			if param.Origin_Multiuser.GetBool() {
@@ -712,6 +807,10 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// X-Pelican-Timeout) in the request context so backends
 			// that forward requests can propagate them.
 			req := server_utils.StashPelicanHeaders(c.Request)
+
+			// Parse the optional X-Pelican-Object-Metadata header so
+			// the close hook can inline custom fields into the webhook.
+			req = extractObjectMetadataFromRequest(req)
 
 			if isTPCRequest(c.Request) {
 				handleCopyTPC(c, backend, prefix)
