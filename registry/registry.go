@@ -38,6 +38,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -452,6 +453,28 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			ns.CustomFields = make(map[string]interface{})
 		}
 		ns.CustomFields[server_structs.RegistrationTypeKey] = server_structs.LoggingRegistrationType
+
+		// Auto-approve logging namespaces when the associated origin is already approved and
+		// auto-registration is enabled. The server ID is the suffix after the logging prefix.
+		if param.Registry_EnableAutoLoggingRegistration.GetBool() {
+			serverID := strings.TrimPrefix(data.Prefix, server_structs.LoggingNamespacePrefix+"/")
+			if serverID != "" {
+				serverReg, err := getServerByID(serverID)
+				if err != nil {
+					log.Errorf("Failed to look up server by ID %q for logging namespace auto-approval: %v", serverID, err)
+				} else if serverReg != nil {
+					for _, reg := range serverReg.Registration {
+						if reg.AdminMetadata.Status == server_structs.RegApproved {
+							ns.AdminMetadata.Status = server_structs.RegApproved
+							ns.AdminMetadata.ApproverID = "system"
+							ns.AdminMetadata.ApprovedAt = time.Now()
+							log.Debugf("Auto-approving logging namespace %s because origin server %s is approved", data.Prefix, serverID)
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
 	err = AddRegistration(&ns)
