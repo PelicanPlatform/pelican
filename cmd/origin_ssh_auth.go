@@ -34,8 +34,9 @@ import (
 )
 
 var sshAuthCmd = &cobra.Command{
-	Use:   "ssh-auth",
-	Short: "SSH authentication tools for the SSH backend",
+	Use:    "ssh-auth",
+	Hidden: true,
+	Short:  "SSH authentication tools for the SSH backend",
 	Long: `Tools for SSH backend authentication and testing.
 
 Sub-commands:
