@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -70,6 +72,64 @@ var (
 	//go:embed resources/public-test-origin.yml
 	publicTestOrigin string
 )
+
+// Test that the configured percentage for requesting the Director's decision
+// information results in a corresponding fraction of transfers including
+// DeveloperData.DirectorDecision.
+//
+// This exercises the real production path in runPluginWorker that conditionally
+// applies client.WithDirectorDebug(...) based on Plugin.DirectorDecisionPercentage.
+func TestShouldRequestDirectorDecisionProbability(t *testing.T) {
+	// shouldRequestDirectorDecision uses the package-global RNG. Seed it so the
+	// behavior is deterministic and stable across runs.
+	rand.Seed(1)
+	t.Cleanup(func() { rand.Seed(time.Now().UnixNano()) })
+
+	t.Run("EdgeCases", func(t *testing.T) {
+		assert.False(t, shouldRequestDirectorDecision(-1))
+		assert.False(t, shouldRequestDirectorDecision(0))
+		assert.True(t, shouldRequestDirectorDecision(100))
+		assert.True(t, shouldRequestDirectorDecision(101))
+	})
+
+	t.Run("ProbabilityWithinDelta", func(t *testing.T) {
+		type tc struct {
+			pct int
+			n   int
+		}
+		cases := []tc{
+			{pct: 1, n: 200000},
+			{pct: 10, n: 100000},
+			{pct: 33, n: 100000},
+			{pct: 50, n: 80000},
+			{pct: 90, n: 100000},
+			{pct: 99, n: 200000},
+		}
+
+		for _, c := range cases {
+			t.Run(fmt.Sprintf("pct=%d", c.pct), func(t *testing.T) {
+				var hits int
+				for i := 0; i < c.n; i++ {
+					if shouldRequestDirectorDecision(c.pct) {
+						hits++
+					}
+				}
+
+				observed := float64(hits) / float64(c.n)
+				expected := float64(c.pct) / 100.0
+
+				// Binomial proportion std dev: sqrt(p(1-p)/n). Use a generous 6-sigma
+				// band + small constant to avoid pathological failures at extremes.
+				sigma := math.Sqrt(expected * (1.0 - expected) / float64(c.n))
+				delta := 6.0*sigma + 0.002
+
+				assert.InDelta(t, expected, observed, delta,
+					"observed rate %g should be within %g of expected %g (hits=%d n=%d)",
+					observed, delta, expected, hits, c.n)
+			})
+		}
+	})
+}
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
 func TestReadMultiTransfer(t *testing.T) {
