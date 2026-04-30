@@ -34,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -910,7 +911,26 @@ func deleteNamespace(ctx *gin.Context) {
 }
 
 func listServersHandler(ctx *gin.Context) {
-	servers, err := listServers()
+	nameQuery := ctx.Query("name")
+	var (
+		servers []server_structs.ServerRegistration
+		err     error
+	)
+	if nameQuery != "" {
+		server, lookupErr := getServerByName(nameQuery)
+		if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			log.Error(lookupErr)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to list servers"})
+			return
+		}
+		if server != nil {
+			servers = []server_structs.ServerRegistration{*server}
+		}
+	} else {
+		servers, err = listServers()
+	}
 	if err != nil {
 		log.Error(err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
