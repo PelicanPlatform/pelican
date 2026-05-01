@@ -357,6 +357,8 @@ type Config struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
 		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		InactiveRegistrationCleanupInterval time.Duration `mapstructure:"inactiveregistrationcleanupinterval" yaml:"InactiveRegistrationCleanupInterval"`
+		InactiveRegistrationTimeout time.Duration `mapstructure:"inactiveregistrationtimeout" yaml:"InactiveRegistrationTimeout"`
 		Institutions any `mapstructure:"institutions" yaml:"Institutions"`
 		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
 		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
@@ -812,6 +814,8 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
+		InactiveRegistrationCleanupInterval struct { Type string; Value time.Duration }
+		InactiveRegistrationTimeout struct { Type string; Value time.Duration }
 		Institutions struct { Type string; Value any }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }

@@ -1289,6 +1289,11 @@ func getServerByPrefixHandler(ctx *gin.Context) {
 		return
 	}
 
+	// Refresh servers.last_seen so the cleanup goroutine knows this server is still active.
+	if err := updateServerLastSeen(server.ID); err != nil {
+		log.Warningf("Failed to update last_seen for server %s (prefix %s): %v", server.ID, prefix, err)
+	}
+
 	ctx.JSON(http.StatusOK, server)
 }
 

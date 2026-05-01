@@ -149,6 +149,9 @@ type Server struct {
 	Note      string    `json:"note"`
 	CreatedAt time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	// LastSeen is updated when a server polls its metadata via GET .../registry/server/<prefix>
+	// (i.e. each advertisement cycle). Used by the inactive registration cleanup job.
+	LastSeen time.Time `json:"last_seen" post:"exclude" gorm:"column:last_seen"`
 }
 
 // Service maps a server to its registration
@@ -216,6 +219,7 @@ type ServerRegistration struct {
 	Note      string    `json:"note"`
 	CreatedAt time.Time `json:"-" post:"exclude"`
 	UpdatedAt time.Time `json:"-" post:"exclude"`
+	LastSeen  time.Time `json:"-" post:"exclude"`
 
 	// Registration list
 	Registration []Registration `json:"registration"`

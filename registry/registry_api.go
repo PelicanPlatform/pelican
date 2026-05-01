@@ -56,6 +56,33 @@ func updateOSDFInstitutionCountMetric() error {
 	return nil
 }
 
+// LaunchInactiveRegistrationCleanup starts a goroutine that periodically finds servers whose
+// last_seen (updated on metadata polling) is older than Registry.InactiveRegistrationTimeout,
+// deletes all registrations linked to those servers via services, then deletes the server rows.
+func LaunchInactiveRegistrationCleanup(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(param.Registry_InactiveRegistrationCleanupInterval.GetDuration())
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				timeout := param.Registry_InactiveRegistrationTimeout.GetDuration()
+				cutoff := time.Now().UTC().Add(-timeout)
+				nRegs, nServers, err := deleteStaleServerRegistrations(cutoff)
+				if err != nil {
+					log.Warningf("Failed to clean up stale server registrations: %v", err)
+					continue
+				}
+				if nRegs > 0 || nServers > 0 {
+					log.Infof("Inactive registration cleanup: removed %d pending registration(s) across %d server(s) that had no activity for more than %s", nRegs, nServers, timeout)
+				}
+			}
+		}
+	})
+}
+
 func LaunchRegistryMetrics(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		ticker := time.NewTicker(time.Second * 15)

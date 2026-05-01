@@ -2953,6 +2953,22 @@ default: false
 osdf_default: true
 components: ["registry"]
 ---
+name: Registry.InactiveRegistrationTimeout
+description: |+
+  The duration after which a server row is considered stale if its metadata has not been polled.
+  The registry updates servers.last_seen every time a server polls its metadata. The cleanup goroutine
+  deletes every registration linked to stale servers (including the server itself).
+type: duration
+default: 20m
+components: ["registry"]
+---
+name: Registry.InactiveRegistrationCleanupInterval
+description: |+
+  How often the registry runs the inactive server registration cleanup job.
+type: duration
+default: 5m
+components: ["registry"]
+---
 ############################
 #   Server-level configs   #
 ############################

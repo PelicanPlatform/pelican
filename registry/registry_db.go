@@ -239,6 +239,7 @@ func buildServerRegistration(server server_structs.Server, services []server_str
 		Note:      server.Note,
 		CreatedAt: server.CreatedAt,
 		UpdatedAt: server.UpdatedAt,
+		LastSeen:  server.LastSeen,
 	}
 
 	for _, service := range services {
@@ -303,6 +304,7 @@ func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegist
 		Note:      service.Server.Note,
 		CreatedAt: service.Server.CreatedAt,
 		UpdatedAt: service.Server.UpdatedAt,
+		LastSeen:  service.Server.LastSeen,
 	}
 
 	for _, svc := range allServices {
@@ -674,7 +676,9 @@ func AddRegistration(ns *server_structs.Registration) error {
 				if isCache {
 					existingServer.IsCache = true
 				}
-				existingServer.UpdatedAt = time.Now()
+				now := time.Now().UTC()
+				existingServer.UpdatedAt = now
+				existingServer.LastSeen = now
 
 				if err := tx.Save(&existingServer).Error; err != nil {
 					return errors.Wrapf(err, "failed to update server service(s): %s", ns.AdminMetadata.SiteName)
@@ -692,6 +696,57 @@ func AddRegistration(ns *server_structs.Registration) error {
 
 		return nil
 	})
+}
+
+// updateServerLastSeen sets servers.last_seen = now (UTC). Called from getServerByPrefixHandler
+// when a server polls its metadata (e.g. each advertisement cycle).
+func updateServerLastSeen(serverID string) error {
+	if serverID == "" {
+		return errors.New("server ID is required to update last_seen")
+	}
+	result := database.ServerDatabase.Model(&server_structs.Server{}).
+		Where("id = ?", serverID).
+		Update("last_seen", time.Now().UTC())
+	if result.Error != nil {
+		return errors.Wrapf(result.Error, "failed to update last_seen for server %q", serverID)
+	}
+	return nil
+}
+
+// deleteStaleServerRegistrations uses listServers to find servers whose last_seen
+// is older than cutoff and whose every registration is still Pending, then removes
+// each one via deleteServerByID. Servers with any non-Pending registration are
+// skipped; standalone namespace registrations (no servers row) are untouched.
+func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int64, err error) {
+	servers, err := listServers()
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "failed to list servers for stale cleanup")
+	}
+
+	for _, srv := range servers {
+		if srv.LastSeen.IsZero() || !srv.LastSeen.Before(cutoff) {
+			continue
+		}
+
+		allPending := true
+		for _, reg := range srv.Registration {
+			if reg.AdminMetadata.Status != server_structs.RegPending {
+				allPending = false
+				break
+			}
+		}
+		if !allPending {
+			continue
+		}
+
+		if err := deleteServerByID(srv.ID); err != nil {
+			log.Warningf("Failed to delete stale server %s (%s): %v", srv.ID, srv.Name, err)
+			continue
+		}
+		regsDeleted += int64(len(srv.Registration))
+		serversDeleted++
+	}
+	return regsDeleted, serversDeleted, nil
 }
 
 func updateRegistration(ns *server_structs.Registration) error {
@@ -866,17 +921,21 @@ func deleteRegistrationByPrefix(prefix string) error {
 }
 
 func deleteServerByID(id string) error {
+	// Fetch registrations before opening the transaction. getServerByID uses the
+	// global database.ServerDatabase rather than a tx-scoped connection; calling it
+	// inside the Transaction callback would require a second connection from the pool,
+	// which deadlocks on a single-connection SQLite pool (common in tests).
+	serverRegistration, err := getServerByID(id)
+	if err != nil {
+		return errors.Wrap(err, "failed to get server by ID")
+	}
+
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
-		serverRegistration, err := getServerByID(id)
-		if err != nil {
-			return errors.Wrap(err, "failed to get server by ID")
-		}
 		// Because of the foreign key constraints applied on the DB,
-		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically
-		err = tx.Delete(&server_structs.Server{}, id).Error
-		if err != nil {
+		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically.
+		if err := tx.Where("id = ?", id).Delete(&server_structs.Server{}).Error; err != nil {
 			return errors.Wrap(err, "failed to delete server")
 		}
 		// Delete all registrations corresponding to the server separately
