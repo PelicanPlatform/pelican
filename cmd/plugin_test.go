@@ -30,7 +30,6 @@ import (
 	"io"
 	"io/fs"
 	"math"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,16 +79,15 @@ var (
 // This exercises the real production path in runPluginWorker that conditionally
 // applies client.WithDirectorDebug(...) based on Plugin.DirectorDecisionPercentage.
 func TestShouldRequestDirectorDecisionProbability(t *testing.T) {
-	// shouldRequestDirectorDecision uses the package-global RNG. Seed it so the
-	// behavior is deterministic and stable across runs.
-	rand.Seed(1)
-	t.Cleanup(func() { rand.Seed(time.Now().UnixNano()) })
-
 	t.Run("EdgeCases", func(t *testing.T) {
-		assert.False(t, shouldRequestDirectorDecision(-1))
-		assert.False(t, shouldRequestDirectorDecision(0))
-		assert.True(t, shouldRequestDirectorDecision(100))
-		assert.True(t, shouldRequestDirectorDecision(101))
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(-1))
+		assert.False(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(0))
+		assert.False(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(100))
+		assert.True(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(101))
+		assert.True(t, shouldRequestDirectorDecision())
 	})
 
 	t.Run("ProbabilityWithinDelta", func(t *testing.T) {
@@ -97,20 +95,19 @@ func TestShouldRequestDirectorDecisionProbability(t *testing.T) {
 			pct int
 			n   int
 		}
-		cases := []tc{
-			{pct: 1, n: 200000},
-			{pct: 10, n: 100000},
-			{pct: 33, n: 100000},
-			{pct: 50, n: 80000},
-			{pct: 90, n: 100000},
-			{pct: 99, n: 200000},
-		}
+		// Use a large, constant n so this test is extremely unlikely to fail while
+		// still running quickly. With a 6-sigma tolerance, the false-fail rate is
+		// on the order of 1e-9 per case for a true binomial process.
+		const n = 1_000_000
+		cases := []tc{{pct: 1, n: n}, {pct: 10, n: n}, {pct: 33, n: n}, {pct: 50, n: n}, {pct: 90, n: n}, {pct: 99, n: n}}
 
 		for _, c := range cases {
 			t.Run(fmt.Sprintf("pct=%d", c.pct), func(t *testing.T) {
+				require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(c.pct))
+
 				var hits int
 				for i := 0; i < c.n; i++ {
-					if shouldRequestDirectorDecision(c.pct) {
+					if shouldRequestDirectorDecision() {
 						hits++
 					}
 				}

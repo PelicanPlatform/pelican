@@ -77,7 +77,8 @@ const (
 	Retryable     = 11
 )
 
-func shouldRequestDirectorDecision(pct int) bool {
+func shouldRequestDirectorDecision() bool {
+	pct := param.Plugin_DirectorDecisionPercentage.GetInt()
 	if pct <= 0 {
 		return false
 	}
@@ -500,7 +501,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			urlCopy := *(pUrl.GetRawUrl())
 			jobCtx := context.Background()
-			if shouldRequestDirectorDecision(param.Plugin_DirectorDecisionPercentage.GetInt()) {
+			if shouldRequestDirectorDecision() {
 				jobCtx = client.WithDirectorDebug(jobCtx)
 			}
 			tj, err = tc.NewTransferJob(jobCtx, &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
