@@ -817,3 +817,34 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 		return doLoadMonitoring(ctx)
 	})
 }
+
+// ValidateLogExportsConfig checks that the Logging.LogExports configuration is internally
+// consistent.  It must be called during server startup (after viper is fully initialised)
+// for any server component that supports log exports (currently Origins and Caches).
+//
+// Rules enforced:
+//   - If Logging.LogExports.Enabled is false the function is a no-op.
+//   - Logging.LogLocation must be set to a real file path (not empty and not "/dev/null"),
+//     because the virtual-object handler reads that file to assemble log responses.
+//   - If IssuerKeysDirectory is empty the server will not be able to auto-generate access
+//     tokens for the logging namespace; a warning is emitted but startup is not blocked.
+func ValidateLogExportsConfig() error {
+	if !param.Logging_LogExports_Enabled.GetBool() {
+		return nil
+	}
+
+	logLocation := param.Logging_LogLocation.GetString()
+	if logLocation == "" || logLocation == "/dev/null" {
+		return errors.New(
+			"Logging.LogExports.Enabled is true but Logging.LogLocation is not set to a real file path; " +
+				"set Logging.LogLocation to enable log export",
+		)
+	}
+
+	if param.IssuerKeysDirectory.GetString() == "" {
+		log.Warn("Logging.LogExports.Enabled is true but IssuerKeysDirectory is not configured; " +
+			"the server will not be able to auto-generate access tokens for the logging namespace")
+	}
+
+	return nil
+}
