@@ -17,6 +17,7 @@ If anything doesn't make sense, or doesn't work when you run it, please open a [
 - [Getting Started](#getting-started)
   - [Issues](#issues)
   - [Pull Requests](#pull-requests)
+    - [Documentation Requirements](#documentation-requirements)
   - [Pull Requests that Modify Pelican's Dependencies](#pull-requests-that-modify-pelicans-dependencies)
 - [Development Environment Setup](#development-environment-setup)
 - [Code Quality Tools](#code-quality-tools)
@@ -80,9 +81,24 @@ PRs to our software are always welcome and can be a quick way to get your fix or
 - Only fix/add the functionality in question **OR** address wide-spread whitespace/style issues, not both.
 - Add unit or integration tests for fixed or changed functionality (if a test suite already exists).
 - Address a single concern in the least number of changed lines as possible.
-- Include documentation in the repo under the [docs](./docs/) folder.
+- Include documentation in the repo under the [docs](./docs/) folder (see [Documentation Requirements](#documentation-requirements) below).
 
 For changes that address core functionality or would require breaking changes (e.g. a major release), it's best to open an Issue to discuss your proposal first. This is not required but can save time creating and reviewing changes.
+
+#### Documentation Requirements
+
+Every PR is expected to ship with corresponding documentation updates so that user-facing behavior, configuration, and features stay discoverable. To make this expectation actionable, we enforce it via a CI check (see [`.github/workflows/enforce-docs-updates.yml`](./.github/workflows/enforce-docs-updates.yml)) that runs on every PR.
+
+The check passes when **either** of the following is true:
+
+1. The PR modifies at least one file under [`docs/app/`](./docs/app/), excluding:
+   - anything under `docs/app/commands-reference/` (auto-generated CLI reference, not a substitute for real documentation), and
+   - any `_meta.js` file (navigation/index scaffolding only).
+1. The PR carries the `no-docs-required` label.
+
+When you open a PR, take a moment to assess honestly whether your change needs documentation. If the answer is "no" — for example, a small bug fix, an internal-only refactor, a CI tweak, or a test-only change — apply the `no-docs-required` label and the check will pass. The label is intentionally cheap to apply; the friction exists so that the assessment is a deliberate step rather than an oversight.
+
+The check re-runs automatically when the label is added or removed, so you do not need to push a new commit just to flip the status.
 
 After you open the PR, it is required that at least one core contributor reviews and approves your changes. We monitor and triage new PRs and assign reviewers based on the scope of the PR. If your open PR is not reviewed after a week since it's open, please ping any of the core contributors as a reminder.
 
