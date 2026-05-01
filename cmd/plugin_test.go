@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -70,6 +71,62 @@ var (
 	//go:embed resources/public-test-origin.yml
 	publicTestOrigin string
 )
+
+// Test that the configured percentage for requesting the Director's decision
+// information results in a corresponding fraction of transfers including
+// DeveloperData.DirectorDecision.
+//
+// This exercises the real production path in runPluginWorker that conditionally
+// applies client.WithDirectorDebug(...) based on Plugin.DirectorDecisionPercentage.
+func TestShouldRequestDirectorDecisionProbability(t *testing.T) {
+	t.Run("EdgeCases", func(t *testing.T) {
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(-1))
+		assert.False(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(0))
+		assert.False(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(100))
+		assert.True(t, shouldRequestDirectorDecision())
+		require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(101))
+		assert.True(t, shouldRequestDirectorDecision())
+	})
+
+	t.Run("ProbabilityWithinDelta", func(t *testing.T) {
+		type tc struct {
+			pct int
+			n   int
+		}
+		// Use a large, constant n so this test is extremely unlikely to fail while
+		// still running quickly. With a 6-sigma tolerance, the false-fail rate is
+		// on the order of 1e-9 per case for a true binomial process.
+		const n = 1_000_000
+		cases := []tc{{pct: 1, n: n}, {pct: 10, n: n}, {pct: 33, n: n}, {pct: 50, n: n}, {pct: 90, n: n}, {pct: 99, n: n}}
+
+		for _, c := range cases {
+			t.Run(fmt.Sprintf("pct=%d", c.pct), func(t *testing.T) {
+				require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(c.pct))
+
+				var hits int
+				for i := 0; i < c.n; i++ {
+					if shouldRequestDirectorDecision() {
+						hits++
+					}
+				}
+
+				observed := float64(hits) / float64(c.n)
+				expected := float64(c.pct) / 100.0
+
+				// Binomial proportion std dev: sqrt(p(1-p)/n). Use a generous 6-sigma
+				// band + small constant to avoid pathological failures at extremes.
+				sigma := math.Sqrt(expected * (1.0 - expected) / float64(c.n))
+				delta := 6.0*sigma + 0.002
+
+				assert.InDelta(t, expected, observed, delta,
+					"observed rate %g should be within %g of expected %g (hits=%d n=%d)",
+					observed, delta, expected, hits, c.n)
+			})
+		}
+	})
+}
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
 func TestReadMultiTransfer(t *testing.T) {

@@ -75,6 +75,18 @@ const (
 	Retryable     = 11
 )
 
+func shouldRequestDirectorDecision() bool {
+	pct := param.Plugin_DirectorDecisionPercentage.GetInt()
+	if pct <= 0 {
+		return false
+	}
+	if pct >= 100 {
+		return true
+	}
+	// We use [0,100) so pct=1 means ~1% and pct=99 means ~99%.
+	return rand.Intn(100) < pct
+}
+
 func init() {
 	// Define the file transfer plugin command
 	xferCmd := &cobra.Command{
@@ -485,7 +497,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			urlCopy := *(pUrl.GetRawUrl())
 			jobCtx := context.Background()
-			if pct := param.Plugin_DirectorDecisionPercentage.GetInt(); pct > 0 && rand.Intn(100) < pct {
+			if shouldRequestDirectorDecision() {
 				jobCtx = client.WithDirectorDebug(jobCtx)
 			}
 			tj, err = tc.NewTransferJob(jobCtx, &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))

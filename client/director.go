@@ -125,7 +125,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		}
 
 		forceDebug, _ := ctx.Value(directorDebugCtxKey{}).(bool)
-		if log.IsLevelEnabled(log.DebugLevel) || forceDebug {
+		if config.GetEffectiveLogLevel() >= log.DebugLevel || forceDebug {
 			req.Header.Set("X-Pelican-Debug", "true")
 		}
 
