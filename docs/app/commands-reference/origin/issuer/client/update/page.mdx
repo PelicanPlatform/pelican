@@ -14,7 +14,7 @@ Only the flags you provide are changed; omitted fields are left unchanged.
 
 Example — add token-exchange grant and narrow scopes:
   pelican origin issuer client update --server https://my-origin:8447 \
-    --id <client-id> \
+    --id &lt;client-id&gt; \
     --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token" \
     --scopes "openid,storage.read:/"
 

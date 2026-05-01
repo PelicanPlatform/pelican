@@ -6,10 +6,40 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
+
+// angleTagRe matches bare angle-bracket identifiers that MDX would interpret as
+// JSX tags (e.g. <client-id>, <path>, <pelican-url>).
+var angleTagRe = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9_-]*)>`)
+
+// hiddenFromDocs lists command paths (relative to the docs root, using forward
+// slashes) whose generated documentation pages should remain on disk and
+// remain reachable by direct URL, but should not be discoverable via the
+// site's navigation. Use this for features that are not yet ready for general
+// use but where targeted users (e.g., bug-fix testers) still need a link to
+// the docs.
+//
+// Effects of inclusion:
+//   - The on-disk page.mdx files for the command (and its subcommands) are
+//     still generated, so links like /commands-reference/<cmd>/ continue to
+//     resolve and can be shared directly. This works even when the cobra
+//     command itself is marked Hidden (so it doesn't appear in `pelican -h`):
+//     during doc generation we temporarily flip Hidden off so cobra's
+//     generator descends into the command and emits all its pages.
+//   - The corresponding entry is omitted from the parent's _meta.js sidebar.
+//   - The corresponding "SEE ALSO" bullet line is stripped from the parent
+//     command's page.mdx so the page does not advertise the hidden command.
+var hiddenFromDocs = map[string]bool{
+	// rclone integration is not yet functional.
+	"rclone": true,
+	// SSH origin backend is not yet functional.
+	"origin/ssh-auth": true,
+}
 
 // generateCLIDocs creates per-command docs under the given directory. If the path
 // is relative, it is resolved against the repository root (directory containing go.mod).
@@ -54,6 +84,13 @@ func generateCLIDocs(outputDir string) error {
 		return fmt.Sprintf("---\ntitle: %s\n---\n\n", title)
 	}
 
+	// Cobra's doc generator skips commands whose Hidden field is true (and,
+	// transitively, all of their subcommands). For features in hiddenFromDocs
+	// we still want the pages generated so testers can reach them via direct
+	// URLs, so temporarily un-hide them for the duration of generation.
+	restoreHidden := temporarilyUnhideForDocs(rootCmd)
+	defer restoreHidden()
+
 	// Cobra writes files directly to the destination directory (with .md extension)
 	if err := doc.GenMarkdownTreeCustom(rootCmd, resolvedDir, filePrepender, linkHandler); err != nil {
 		return err
@@ -73,7 +110,7 @@ func generateCLIDocs(outputDir string) error {
 		return err
 	}
 
-	if err := postProcessMdxFiles(resolvedDir); err != nil {
+	if err := postProcessMdxFiles(resolvedDir, docPathRoot); err != nil {
 		return err
 	}
 
@@ -205,9 +242,10 @@ func generateMetaFiles(dir string) error {
 
 		var subdirs []string
 		for _, entry := range entries {
-			if entry.IsDir() {
-				subdirs = append(subdirs, entry.Name())
+			if !entry.IsDir() {
+				continue
 			}
+			subdirs = append(subdirs, entry.Name())
 		}
 
 		if len(subdirs) > 0 {
@@ -225,8 +263,18 @@ func generateMetaFiles(dir string) error {
 
 			content := "export default {\n"
 			for _, subdir := range subdirs {
-				title := commandPrefix + " " + subdir
-				content += fmt.Sprintf("    \"%s\": \"%s\",\n", subdir, title)
+				relEntry, err := filepath.Rel(dir, filepath.Join(path, subdir))
+				if err != nil {
+					return err
+				}
+				if hiddenFromDocs[filepath.ToSlash(relEntry)] {
+					// Nextra 4: { display: 'hidden' } keeps the page reachable
+					// by direct URL but removes it from the sidebar navigation.
+					content += fmt.Sprintf("    \"%s\": { display: 'hidden' },\n", subdir)
+				} else {
+					title := commandPrefix + " " + subdir
+					content += fmt.Sprintf("    \"%s\": \"%s\",\n", subdir, title)
+				}
 			}
 			content += "}\n"
 
@@ -238,7 +286,14 @@ func generateMetaFiles(dir string) error {
 	})
 }
 
-func postProcessMdxFiles(dir string) error {
+func postProcessMdxFiles(dir string, docPathRoot string) error {
+	// Build the set of doc-root-relative URL paths whose SEE ALSO references
+	// should be stripped from generated page.mdx files.
+	hiddenURLs := make(map[string]bool, len(hiddenFromDocs))
+	for relPath := range hiddenFromDocs {
+		hiddenURLs[fmt.Sprintf("/%s/%s/", docPathRoot, relPath)] = true
+	}
+
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -253,15 +308,26 @@ func postProcessMdxFiles(dir string) error {
 				return nil
 			}
 
-			// Trim trailing spaces on each line
+			// Trim trailing spaces on each line, and drop SEE ALSO bullets that
+			// reference hidden-from-docs commands.
 			lines := strings.Split(string(content), "\n")
-			for i, line := range lines {
-				lines[i] = strings.TrimRight(line, " \t")
+			filtered := make([]string, 0, len(lines))
+			for _, line := range lines {
+				trimmed := strings.TrimRight(line, " \t")
+				if isHiddenSeeAlsoLine(trimmed, hiddenURLs) {
+					continue
+				}
+				filtered = append(filtered, trimmed)
 			}
-			fullContent := strings.Join(lines, "\n")
+			fullContent := strings.Join(filtered, "\n")
 
 			// Ensure single newline at EOF
 			fullContent = strings.TrimRight(fullContent, "\n") + "\n"
+
+			// Escape bare angle-bracket identifiers in prose sections so
+			// MDX does not try to parse them as JSX tags. Code fences are
+			// left untouched.
+			fullContent = escapeMdxAngleBrackets(fullContent)
 
 			if string(content) != fullContent {
 				info, err := d.Info()
@@ -275,4 +341,85 @@ func postProcessMdxFiles(dir string) error {
 		}
 		return nil
 	})
+}
+
+// escapeMdxAngleBrackets replaces bare angle-bracket identifiers (e.g. <path>,
+// <client-id>) with HTML entities so that MDX/JSX parsers do not interpret them
+// as JSX tags. Lines inside code fences (delimited by ```) are left unchanged
+// because their content is rendered literally by the markdown renderer.
+func escapeMdxAngleBrackets(content string) string {
+	lines := strings.Split(content, "\n")
+	inCodeFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = !inCodeFence
+			// Don't modify the fence delimiter line itself.
+			continue
+		}
+		if !inCodeFence {
+			lines[i] = angleTagRe.ReplaceAllString(line, "&lt;$1&gt;")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isHiddenSeeAlsoLine reports whether the given line is a generated SEE ALSO
+// bullet referencing one of the hidden-from-docs URL paths.
+func isHiddenSeeAlsoLine(line string, hiddenURLs map[string]bool) bool {
+	if !strings.HasPrefix(line, "* [") {
+		return false
+	}
+	open := strings.Index(line, "](")
+	if open < 0 {
+		return false
+	}
+	rest := line[open+2:]
+	close := strings.Index(rest, ")")
+	if close < 0 {
+		return false
+	}
+	url := rest[:close]
+	return hiddenURLs[url]
+}
+
+// temporarilyUnhideForDocs flips Hidden=false on the cobra commands whose
+// docs-relative paths appear in hiddenFromDocs, so cobra's documentation
+// generator emits pages for them and their subcommands. The returned function
+// restores the original Hidden value on each affected command.
+func temporarilyUnhideForDocs(root *cobra.Command) func() {
+	var toRestore []*cobra.Command
+	for relPath := range hiddenFromDocs {
+		c := findCommandByPath(root, relPath)
+		if c != nil && c.Hidden {
+			c.Hidden = false
+			toRestore = append(toRestore, c)
+		}
+	}
+	return func() {
+		for _, c := range toRestore {
+			c.Hidden = true
+		}
+	}
+}
+
+// findCommandByPath walks the command tree under root following the given
+// slash-separated path of command names. Returns nil if any segment is not
+// found.
+func findCommandByPath(root *cobra.Command, path string) *cobra.Command {
+	cur := root
+	for _, seg := range strings.Split(path, "/") {
+		var next *cobra.Command
+		for _, child := range cur.Commands() {
+			if child.Name() == seg {
+				next = child
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		cur = next
+	}
+	return cur
 }
