@@ -324,6 +324,11 @@ func postProcessMdxFiles(dir string, docPathRoot string) error {
 			// Ensure single newline at EOF
 			fullContent = strings.TrimRight(fullContent, "\n") + "\n"
 
+			// Escape bare angle-bracket identifiers in prose sections so
+			// MDX does not try to parse them as JSX tags. Code fences are
+			// left untouched.
+			fullContent = escapeMdxAngleBrackets(fullContent)
+
 			if string(content) != fullContent {
 				info, err := d.Info()
 				if err != nil {
