@@ -139,7 +139,7 @@ type (
 		EnableVoms                 bool
 		Port                       int
 		HighWaterMark              string
-		LowWatermark               string
+		LowWaterMark               string
 		FilesBaseSize              string
 		FilesNominalSize           string
 		FilesMaxSize               string
@@ -1136,9 +1136,9 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
 			}
 		}
-		if num, err := strconv.Atoi(xrdConfig.Cache.LowWatermark); err == nil {
+		if num, err := strconv.Atoi(xrdConfig.Cache.LowWaterMark); err == nil {
 			if num <= 100 && num > 0 {
-				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+				xrdConfig.Cache.LowWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
 			}
 		}
 

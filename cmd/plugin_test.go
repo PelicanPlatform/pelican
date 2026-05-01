@@ -222,7 +222,7 @@ func (f *FedTest) Spinup() {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(f.T, err)
 
-	require.NoError(f.T, param.ConfigDir.Set(tmpPath))
+	require.NoError(f.T, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
 	require.NoError(f.T, param.RuntimeDir.Set(tmpPath))
 
@@ -1726,7 +1726,7 @@ func TestTransferError404(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1826,7 +1826,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -2005,7 +2005,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 

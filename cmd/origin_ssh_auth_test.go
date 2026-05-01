@@ -474,7 +474,7 @@ func TestSSHWebSocketAuthRequired(t *testing.T) {
 
 	// Set up server config so issuer keys are available for token verification
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-origin.example.com"))
 	require.NoError(t, param.Origin_Port.Set(0))

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -35,7 +35,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
@@ -64,7 +63,7 @@ func GetEncryptedConfigName() (string, error) {
 	if override := param.Client_CredentialFile.GetString(); override != "" {
 		return override, nil
 	}
-	configDir := viper.GetString("ConfigDir")
+	configDir := param.ConfigBase.GetString()
 	if GetPreferredPrefix() == PelicanPrefix || IsRootExecution() {
 		return filepath.Join(configDir, "credentials", "client-credentials.pem"), nil
 	}

@@ -52,7 +52,7 @@ func setupMockConfig(t *testing.T) error {
 	require.NoError(t, param.Logging_Origin_Http.Set("info"))
 
 	// Set default config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	config.InitConfigInternal(log.InfoLevel)
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {

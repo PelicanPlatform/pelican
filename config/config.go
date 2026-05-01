@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -967,11 +967,15 @@ func setLoggingInternal() error {
 	return nil
 }
 
-// For the given Viper instance, set the default config directory.
+// For the given Viper instance, set the default config base directory.
 func InitConfigDir(v *viper.Viper) {
-	if configDir := v.GetString("ConfigDir"); configDir == "" {
-		v.SetDefault("ConfigDir", getConfigBase())
-	}
+	// ConfigBase's default in parameters.yaml is the literal string
+	// "~/.config/pelican", which viper does not expand. Override it here
+	// with the dynamically-resolved location, which depends on whether
+	// we're running as root and on the value of $HOME. Viper's precedence
+	// rules guarantee that an explicit ConfigBase from a flag, env var,
+	// or config file still wins over this SetDefault.
+	v.SetDefault(param.ConfigBase.GetName(), getConfigBase())
 	v.SetConfigName("pelican")
 }
 
@@ -979,8 +983,8 @@ func InitConfigDir(v *viper.Viper) {
 // user-defined config files, validates config params, and initializes logging.
 func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
-	// This must happen before config dir initialization so that Pelican
-	// can pick up setting the config dir with PELICAN_CONFIGDIR
+	// This must happen before config base initialization so that Pelican
+	// can pick up setting the config base with PELICAN_CONFIGBASE
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 
@@ -1011,11 +1015,17 @@ func InitConfigInternal(logLevel log.Level) {
 	}
 
 	InitConfigDir(viper.GetViper())
+	// InitConfigDir just installed the dynamically-resolved ConfigBase
+	// default; refresh the param cache so the param.ConfigBase accessor
+	// below sees it instead of the stale "~/.config/pelican" literal.
+	if _, err := param.Refresh(); err != nil {
+		cobra.CheckErr(err)
+	}
 
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
-		viper.AddConfigPath(viper.GetString("ConfigDir"))
+		viper.AddConfigPath(param.ConfigBase.GetString())
 
 		// Add /etc/pelican as a fallback path for all configs
 		// Note that viper only grabs the first config file it finds
@@ -1325,7 +1335,7 @@ func ComputeExternalWebUrl(v *viper.Viper) error {
 // here as part of the logic for setting defaults on the passed `v` because you'll be
 // operating on two different config structs!
 func SetServerDefaults(v *viper.Viper) error {
-	configDir := v.GetString("ConfigDir")
+	configDir := v.GetString(param.ConfigBase.GetName())
 	v.SetConfigType("yaml")
 
 	// Duplicate setting a default logging level so that this function picks picks up
@@ -1850,8 +1860,8 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled. Please set both variables")
 	}
 
-	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetString(), param.Cache_LowWatermark.GetName(), false)
+	if param.Cache_LowWaterMark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
 		if err != nil {
 			return err
 		}
@@ -1861,16 +1871,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 		if lwmIsAbs == hwmIsAbs && lowWm >= highWm {
 			// Use config strings in error to present the configured values (as opposed to whatever conversion we get from validation)
-			return errors.Errorf("invalid Cache.HighWaterMark/LowWaterMark values. The high watermark must be greater than the low "+
-				"watermark. Got %s (low) and %s (high)", param.Cache_LowWatermark.GetString(), param.Cache_HighWaterMark.GetString())
+			return errors.Errorf("invalid %s and %s values. The high watermark must be greater than the low "+
+				"watermark. Got %s (low) and %s (high)", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetString(), param.Cache_HighWaterMark.GetString())
 		}
 	}
 
 	if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
 		// Must have high/low watermarks
-		if !param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, then Cache.LowWatermark " +
-				"and Cache.HighWatermark must also be set")
+		if !param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.Errorf("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, then %s "+
+				"and %s must also be set", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
 		}
 
 		// Further, if one is set, all three must be set
@@ -1905,9 +1915,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// We already validate that one means all three, but I'm duplicating that here to make this safer in the case we switch orders
 		// in the future.
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
-			!param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.New("If Cache.EnableLotman is true, the following Cache parameters must also be set: HighWaterMark, LowWaterMark, " +
-				"FilesBaseSize, FilesNominalSize, FilesMaxSize")
+			!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.Errorf("If %s is true, the following Cache parameters must also be set: %s, %s, "+
+				"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
 	}
 
@@ -2137,7 +2148,7 @@ func ResetClientInitialized() {
 // here as part of the logic for setting defaults on the passed `v` because you'll be
 // operating on two different config structs!
 func SetClientDefaults(v *viper.Viper) error {
-	configDir := v.GetString("ConfigDir")
+	configDir := v.GetString(param.ConfigBase.GetName())
 
 	// Duplicate setting a default logging level so that this function picks picks up
 	// the one case where we need to set client/server defaults differently directly in

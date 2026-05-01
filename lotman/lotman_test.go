@@ -70,7 +70,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("50g"))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	if readConfig {
 		viper.SetConfigType("yaml")
@@ -103,7 +103,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	} else {
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
-		require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 		_ = config.InitServer(context.Background(), server_structs.CacheType)
 	}
 
