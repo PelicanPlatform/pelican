@@ -1,0 +1,89 @@
+name: Enforce Documentation Updates
+
+on:
+  pull_request:
+    branches: [main]
+    # Re-run on label add/remove so toggling `no-docs-required` flips the
+    # check immediately without needing a new push. `synchronize` covers
+    # subsequent pushes; `opened`/`reopened` cover PR creation/reopen.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-docs-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Short-circuit if `no-docs-required` label is present
+        id: check_label
+        run: |
+          set -euo pipefail
+          if jq -e '.pull_request.labels[]?.name | select(. == "no-docs-required")' \
+              "$GITHUB_EVENT_PATH" > /dev/null; then
+            echo "✅ `no-docs-required` label is set; skipping documentation check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository with full history
+        if: steps.check_label.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          # Need full history so we can diff against the PR base branch.
+          fetch-depth: 0
+
+      - name: Verify documentation changes are present
+        if: steps.check_label.outputs.skip != 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          ALL_CHANGED=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+
+          echo "All files changed in this PR vs. origin/${BASE_REF}:"
+          echo "$ALL_CHANGED" | sed 's/^/  /'
+          echo
+
+          # Filter for qualifying documentation changes:
+          #   - must live under docs/app/
+          #   - exclude docs/app/commands-reference/ (auto-generated CLI docs)
+          #   - exclude any _meta.js files (navigation/index scaffolding only)
+          DOC_CHANGES=$(echo "$ALL_CHANGED" \
+            | grep -E '^docs/app/' \
+            | grep -Ev '^docs/app/commands-reference/' \
+            | grep -Ev '(^|/)_meta\.js$' \
+            || true)
+
+          echo "Qualifying documentation changes:"
+          if [ -n "$DOC_CHANGES" ]; then
+            echo "$DOC_CHANGES" | sed 's/^/  /'
+            echo
+            echo "✅ Documentation changes detected; check passes."
+            exit 0
+          fi
+
+          echo "  (none)"
+          echo
+          echo "❌ No qualifying documentation changes detected for this PR."
+          echo
+          echo "Pelican requires that PRs introducing user-visible features or"
+          echo "behavior changes also update the documentation. To resolve this:"
+          echo
+          echo "  1. Add or update content under docs/app/ describing your"
+          echo "     change. Files under docs/app/commands-reference/ and any"
+          echo "     _meta.js navigation files do NOT count toward this check."
+          echo
+          echo "  OR"
+          echo
+          echo "  2. If your PR genuinely does not require documentation"
+          echo "     updates (e.g. a small bug fix, an internal-only refactor,"
+          echo "     CI changes), apply the `no-docs-required` label to this"
+          echo "     PR. The check will re-run and pass automatically."
+          echo
+          echo "See CONTRIBUTE.md for the full documentation policy:"
+          echo "  https://github.com/PelicanPlatform/pelican/blob/main/CONTRIBUTE.md#pull-requests"
+          exit 1
