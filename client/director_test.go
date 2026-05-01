@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -419,6 +421,81 @@ func TestDirectorDecisionInfo(t *testing.T) {
 		assert.Contains(t, body, "directorSortMethod")
 		assert.Contains(t, body, "distance")
 	})
+}
+
+// TestQueryDirectorDebugHeaderPercentage verifies that queryDirector sends the
+// X-Pelican-Debug header with the frequency determined by the caller's sampling
+// logic (mirroring Plugin.DirectorDecisionPercentage) — and no more.
+//
+// This test would have failed before the fix that replaced
+//
+//	log.IsLevelEnabled(log.DebugLevel)
+//
+// with
+//
+//	config.GetEffectiveLogLevel() >= log.DebugLevel
+//
+// in queryDirector. config.InitClient() calls initFilterLogging(), which
+// unconditionally sets logrus's global level to TraceLevel, making
+// log.IsLevelEnabled(log.DebugLevel) always return true. In the broken code the
+// header was therefore sent on every request, not just on the configured
+// percentage of requests.
+func TestQueryDirectorDebugHeaderPercentage(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	// InitClient with a non-debug level. Critically, this calls initFilterLogging(),
+	// which sets logrus's global level to TraceLevel so that filter hooks see every
+	// message. Before the fix, log.IsLevelEnabled(log.DebugLevel) would return true
+	// here even though the configured level is "warning".
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1,
+		param.Logging_Level:          "warning",
+	})
+
+	const pct = 20
+	require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(pct))
+
+	var debugHeaderCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Pelican-Debug") == "true" {
+			debugHeaderCount++
+		}
+		http.Redirect(w, r, "http://cache.example.com:8443/foo/bar", http.StatusTemporaryRedirect)
+	}))
+	defer ts.Close()
+
+	pUrl := &pelican_url.PelicanURL{
+		FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: ts.URL},
+		Path:    "/foo/bar",
+	}
+
+	// Use a fixed seed so the test is deterministic while still exercising the
+	// full sampling distribution.
+	const n = 10_000
+	for range n {
+		ctx := context.Background()
+		// Mirror the logic of shouldRequestDirectorDecision() in cmd/plugin.go:
+		// That function is tested separately, so here we use the shim to manually
+		// set the context value -- this test is really about testing the log level
+		// logic. While it'd be nice _not_ to shim things, the other function isn't
+		// exported from `cmd`.
+		if rand.Intn(100) < pct { //nolint:gosec
+			ctx = WithDirectorDebug(ctx)
+		}
+		_, _, err := queryDirector(ctx, http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+	}
+
+	observed := float64(debugHeaderCount) / float64(n)
+	expected := float64(pct) / 100.0
+	// 6-sigma binomial tolerance: the probability of a spurious failure is ~1e-9.
+	sigma := math.Sqrt(expected * (1.0 - expected) / float64(n))
+	delta := 6.0*sigma + 0.002
+	assert.InDelta(t, expected, observed, delta,
+		"X-Pelican-Debug was set on %d/%d requests (%.1f%%), expected ~%d%%",
+		debugHeaderCount, n, observed*100, pct)
 }
 
 func TestDirectorTimeout(t *testing.T) {
