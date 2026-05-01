@@ -120,13 +120,13 @@ For hardware keys that require a touch confirmation, the Origin will log a messa
 Before running a full Origin, you can test SSH connectivity with:
 
 ```bash
-pelican origin ssh-auth test storage.example.com
+pelican-server origin ssh-auth test storage.example.com
 ```
 
 Or with explicit options:
 
 ```bash
-pelican origin ssh-auth test pelican@storage.example.com -i ~/.ssh/id_ed25519
+pelican-server origin ssh-auth test pelican@storage.example.com -i ~/.ssh/id_ed25519
 ```
 
 This will:
@@ -143,7 +143,7 @@ If the test succeeds, your Origin configuration should work.
 Once an Origin is running, check the SSH backend status with:
 
 ```bash
-pelican origin ssh-auth status
+pelican-server origin ssh-auth status
 ```
 
 This shows the current connection state, helper status, last keepalive time, and authentication method.
@@ -225,7 +225,7 @@ When the Origin starts, it will wait for you to complete authentication.
 Open a second terminal and run:
 
 ```bash
-pelican origin ssh-auth login
+pelican-server origin ssh-auth login
 ```
 
 This connects to the Origin and presents the SSH authentication prompts in your terminal.
@@ -235,7 +235,7 @@ While extremely flexible — this can complete 2FA challenges — be careful wit
 <Callout type="info">
 You can also specify a remote origin URL explicitly:
 ```bash
-pelican origin ssh-auth login --origin https://my-origin.example.com
+pelican-server origin ssh-auth login --origin https://my-origin.example.com
 ```
 </Callout>
 

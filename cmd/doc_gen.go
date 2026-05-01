@@ -26,10 +26,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra/doc"
 )
+
+// angleTagRe matches bare angle-bracket identifiers that MDX would interpret as
+// JSX tags (e.g. <client-id>, <path>, <pelican-url>).
+var angleTagRe = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9_-]*)>`)
 
 // generateCLIDocs creates per-command docs under the given directory. If the path
 // is relative, it is resolved against the repository root (directory containing go.mod).
@@ -43,16 +48,25 @@ func generateCLIDocs(outputDir string) error {
 		return err
 	}
 
-	docPathRoot := filepath.Base(outputDir)
+	// Override rootCmd.Use so Cobra names generated files correctly (e.g.
+	// "pelican-server_origin_serve.md" rather than a temp-binary path).
+	rootCmd.Use = docBinaryName
+
+	// docPathRoot is the site-relative path used in generated hyperlinks.
+	// Strip the leading "docs/app/" prefix so that e.g.
+	// "docs/app/commands-reference/pelican" becomes
+	// "commands-reference/pelican".
+	docPathRoot := strings.TrimPrefix(filepath.ToSlash(outputDir), "docs/app/")
 
 	// Generate a markdown file per command, with custom file names and content wrapper
 	linkHandler := func(name string) string {
-		// Cobra passes names like "pelican_serve.md"; strip root prefix but keep underscores so we can group by tokens
+		// Cobra passes names like "pelican-server_origin_serve.md"; strip the
+		// binary-name prefix so only the subcommand path remains.
 		base := strings.TrimSuffix(name, filepath.Ext(name))
-		if base == "pelican" {
+		if base == docBinaryName {
 			base = ""
 		} else {
-			base = strings.TrimPrefix(base, "pelican_")
+			base = strings.TrimPrefix(base, docBinaryName+"_")
 		}
 		path := strings.ReplaceAll(base, "_", "/")
 		// Must be an absolute path from the site root
@@ -140,7 +154,7 @@ func enforceAppRouterLayout(dir string) error {
 		base := strings.TrimSuffix(name, ".mdx")
 		// Build nested path from underscore-delimited tokens
 		segments := strings.Split(base, "_")
-		if len(segments) > 0 && segments[0] == "pelican" {
+		if len(segments) > 0 && segments[0] == docBinaryName {
 			segments = segments[1:]
 		}
 		// Create nested directory path
@@ -238,7 +252,7 @@ func generateMetaFiles(dir string) error {
 				return err
 			}
 
-			commandPrefix := "pelican"
+			commandPrefix := docBinaryName
 			if relPath != "." {
 				commandPrefix += " " + strings.ReplaceAll(relPath, string(filepath.Separator), " ")
 			}
@@ -283,6 +297,11 @@ func postProcessMdxFiles(dir string) error {
 			// Ensure single newline at EOF
 			fullContent = strings.TrimRight(fullContent, "\n") + "\n"
 
+			// Escape bare angle-bracket identifiers in prose sections so
+			// MDX does not try to parse them as JSX tags. Code fences are
+			// left untouched.
+			fullContent = escapeMdxAngleBrackets(fullContent)
+
 			if string(content) != fullContent {
 				info, err := d.Info()
 				if err != nil {
@@ -295,4 +314,25 @@ func postProcessMdxFiles(dir string) error {
 		}
 		return nil
 	})
+}
+
+// escapeMdxAngleBrackets replaces bare angle-bracket identifiers (e.g. <path>,
+// <client-id>) with HTML entities so that MDX/JSX parsers do not interpret them
+// as JSX tags. Lines inside code fences (delimited by ```) are left unchanged
+// because their content is rendered literally by the markdown renderer.
+func escapeMdxAngleBrackets(content string) string {
+	lines := strings.Split(content, "\n")
+	inCodeFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = !inCodeFence
+			// Don't modify the fence delimiter line itself.
+			continue
+		}
+		if !inCodeFence {
+			lines[i] = angleTagRe.ReplaceAllString(line, "&lt;$1&gt;")
+		}
+	}
+	return strings.Join(lines, "\n")
 }

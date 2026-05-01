@@ -72,7 +72,7 @@ across multiple dataset providers.`,
 
 	// We want the value of this port flag to correspond to the Port viper key.
 	// However, only one flag pointer can correspond to the key.  If we define this
-	// in `pelican registry serve` and `pelican director serve`, then whatever init()
+	// in `pelican-server registry serve` and `pelican-server director serve`, then whatever init()
 	// function is run second will be the only one that is set (the first definition
 	// of the flag is overwritten and thus ignored).
 	//

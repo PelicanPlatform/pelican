@@ -15,8 +15,17 @@ This document lists Pelican's operating system requirements and explains how you
 
 ## Before Starting
 
-Pelican executables can run as a **client** or a **server**, and both are packaged in the same executable. However, if you intend to run a server, some non-RPM installations may require additional package dependencies.
-For this use case (hosting an Origin/Cache, starting your own federation Central Services) we recommend using a containerized version of Pelican from our [Pelican Docker images](./install/docker.mdx).
+Pelican is distributed as two separate executables:
+
+| Binary | Purpose |
+|---|---|
+| `pelican` | **Client** — download and upload data, manage credentials, submit jobs |
+| `pelican-server` | **Server** — run an Origin, Cache, Director, or Registry |
+
+Most users only need the `pelican` client.
+If you intend to run a federation service (Origin, Cache, Director, or Registry), you also need `pelican-server`.
+On RPM-based Linux systems both binaries are installed together via the `pelican` and `pelican-server` RPM packages.
+For containerized server deployments we recommend our [Pelican Docker images](./install/docker.mdx), which ship both binaries.
 
 ## Supported Operating Systems
 
@@ -74,9 +83,9 @@ The download table above includes Pelican versions as old as `v7.6.x` To downloa
 
 ### Install OSDF or Server Package
 
-Pelican has two special packaging, `OSDF` and `Server`. The `OSDF` packaging, i.e. `pelican-osdf-compat`, is for running Pelican in the Open Science Data Federation (OSDF). The `Server` packaging, i.e. `pelican-server` is for running Pelican services, e.g., an *Origin* or a *Cache*.
+Pelican has two special RPM packages: `pelican-osdf-compat` (for running Pelican in the Open Science Data Federation) and `pelican-server` (which installs the `pelican-server` binary needed to run federation services such as an Origin or Cache).
 
-Both of the packages **require Pelican package to be installed first**. You may get the following error message if you only install the special package:
+The `pelican-server` RPM **requires the `pelican` RPM to be installed first**. You may get the following error message if you only install the special package:
 
 ```console
 Problem: conflicting requests
@@ -105,6 +114,18 @@ Are you planning to contribute to the OSDF? Check out the OSDF documentation for
         where pelican
         ```
     If this command outputs a filepath, Pelican is installed correctly. If no output is returned, revisit instructions for your operating system.
+
+1. If you installed the `pelican-server` RPM or a server Docker image, verify the server binary is also available:
+
+    * **Linux and macOS**:
+        ```bash
+        which pelican-server
+        ```
+
+    * **Windows**:
+        ```bash
+        where pelican-server
+        ```
 
 1. Test the Client's functionality by running an **object get** command that downloads a test file from [Open Science Data Federation (OSDF)](https://osg-htc.org/services/osdf) to your current directory
 
