@@ -36,11 +36,14 @@ package database
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -99,6 +102,131 @@ func GrantUserScope(db *gorm.DB, userID string, scope token_scopes.TokenScope, g
 		AuthMethodID: granter.AuthMethodID,
 	}
 	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+}
+
+// DefaultUserScopesFromConfig parses Server.NewUserDefaultScopes into a
+// validated TokenScope slice. Each entry must be user-grantable
+// (token_scopes.IsUserGrantable) — operators can't bootstrap a new
+// account with a data-plane (wlcg.*, scitokens.*) or inter-server
+// scope through this knob. Returns ErrUngrantableScope (wrapped) on
+// the first bad entry; ApplyDefaultUserScopes / the startup backfill
+// surface that as a logged warning rather than a hard failure so a
+// misconfigured value doesn't take the whole server out of service.
+//
+// An empty / unset config returns an empty slice (no auto-grants).
+func DefaultUserScopesFromConfig() ([]token_scopes.TokenScope, error) {
+	raw := param.Server_NewUserDefaultScopes.GetStringSlice()
+	out := make([]token_scopes.TokenScope, 0, len(raw))
+	for _, s := range raw {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		ts := token_scopes.TokenScope(s)
+		if !token_scopes.IsUserGrantable(ts) {
+			return nil, fmt.Errorf("%w: %s", ErrUngrantableScope, s)
+		}
+		out = append(out, ts)
+	}
+	return out, nil
+}
+
+// ApplyDefaultUserScopes grants the operator-configured baseline
+// scopes (Server.NewUserDefaultScopes, default web_ui.access) to a
+// freshly-created user. Called from each user-creation path so a new
+// account starts with the same baseline regardless of how it was
+// minted.
+//
+// Errors are logged but never returned: failing to grant a baseline
+// scope must not void the user record itself, and any operator-side
+// misconfiguration would already have surfaced in startup logs via
+// the backfill's validation pass. The startup backfill also runs as
+// a safety net for any user a transient grant failure missed here.
+func ApplyDefaultUserScopes(db *gorm.DB, userID string, granter Creator) {
+	if userID == "" {
+		return
+	}
+	scopes, err := DefaultUserScopesFromConfig()
+	if err != nil {
+		log.Warnf("Skipping default-scope grant for new user %s: %v", userID, err)
+		return
+	}
+	for _, s := range scopes {
+		if err := GrantUserScope(db, userID, s, granter); err != nil {
+			log.Warnf("Failed to grant default scope %s to user %s: %v", s, userID, err)
+		}
+	}
+}
+
+// newUserDefaultScopesBackfillKey is the Counter row that records
+// whether BackfillNewUserDefaultScopes has run on this database. The
+// `_v1` suffix lets a future migration force a re-run by bumping the
+// key (e.g., if a follow-up changes the backfill semantics).
+const newUserDefaultScopesBackfillKey = "new_user_default_scopes_backfill_v1"
+
+// BackfillNewUserDefaultScopes grants the operator-configured
+// Server.NewUserDefaultScopes to every existing user account, ONCE
+// per server installation. Subsequent runs are no-ops via the
+// counters row keyed by newUserDefaultScopesBackfillKey.
+//
+// The backfill exists because the auto-grant path triggers only at
+// user-creation time. Pre-existing users (created before the knob
+// existed, or before its current default) wouldn't otherwise pick up
+// the baseline scope; this gives them the same starting posture a
+// new account would receive on the same server.
+//
+// Subsequent edits to Server.NewUserDefaultScopes do NOT propagate
+// retroactively — by design. The backfill is a one-time fixup, not
+// a continuous reconciliation; "I added a baseline scope after
+// running for a year" must not silently grant that scope to every
+// existing account. Operators who want that behavior should grant
+// the scope to a relevant group instead.
+func BackfillNewUserDefaultScopes(db *gorm.DB) error {
+	// Already run? No-op.
+	var counter Counter
+	err := db.Where("key = ?", newUserDefaultScopesBackfillKey).First(&counter).Error
+	if err == nil && counter.Value > 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	scopes, err := DefaultUserScopesFromConfig()
+	if err != nil {
+		// Misconfiguration — skip the backfill but don't crash startup.
+		// The operator sees the error in the startup logs and can fix
+		// the config; we'll re-attempt on the next start because the
+		// counter row was never written.
+		log.Warnf("Skipping NewUserDefaultScopes backfill (will retry next startup): %v", err)
+		return nil
+	}
+
+	// Grant the configured baseline to every user. Even when there's
+	// nothing to grant we still mark complete below so the lookup +
+	// User scan don't repeat on every startup.
+	granter := Creator{UserID: CreatorUnknown}
+	var users []User
+	if err := db.Find(&users).Error; err != nil {
+		return err
+	}
+	granted := 0
+	for _, u := range users {
+		for _, s := range scopes {
+			if grantErr := GrantUserScope(db, u.ID, s, granter); grantErr != nil {
+				log.Warnf("Backfill: failed to grant %s to user %s: %v", s, u.ID, grantErr)
+				continue
+			}
+			granted++
+		}
+	}
+	if len(scopes) > 0 {
+		log.Infof("NewUserDefaultScopes backfill: granted %d scope rows across %d users", granted, len(users))
+	} else {
+		log.Debugf("NewUserDefaultScopes backfill: no default scopes configured; marking complete without changes")
+	}
+
+	return db.Save(&Counter{Key: newUserDefaultScopesBackfillKey, Value: 1}).Error
 }
 
 // RevokeUserScope removes a scope grant. Returns gorm.ErrRecordNotFound

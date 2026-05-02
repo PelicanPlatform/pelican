@@ -957,7 +957,7 @@ func handleUpdateUser(ctx *gin.Context) {
 		return
 	}
 
-	// Route-level UserAdminAuthHandler clears either web_admin or
+	// Route-level UserAdminAuthHandler clears either admin or
 	// user_admin. Per the design contract, a user-admin must NOT be
 	// able to rename or relabel a system admin (otherwise they could
 	// kick a system admin off their own account by renaming them out

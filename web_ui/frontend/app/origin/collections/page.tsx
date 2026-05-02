@@ -112,7 +112,7 @@ const Page = () => {
   }, [groups]);
 
   // Mirror the backend gate on POST /origin_ui/collections: only callers
-  // who hold server.collection_admin (or web_admin, which implies it)
+  // who hold server.collection_admin (or admin, which implies it)
   // can create. Hiding the buttons for everyone else avoids dangling
   // CTAs that would 403 the moment the user clicked them. We accept
   // EITHER role==='admin' OR the explicit scope so a system admin
@@ -122,7 +122,7 @@ const Page = () => {
   const canCreate =
     who?.role === 'admin' || hasScope(who, 'server.collection_admin');
   // Mirrors the page-level gate on /settings/users/edit/: only callers
-  // with server.user_admin (or web_admin, which implies it) can land
+  // with server.user_admin (or admin, which implies it) can land
   // there without a 403. We use the same predicate the user-management
   // pages do so the owner pill only links to a destination the caller
   // can actually reach.
@@ -358,7 +358,7 @@ const CollectionCard: React.FC<{
           {/*
             Render the pencil only on rows the caller can actually
             modify. The backend computes canEdit (owner, admin-group
-            member, collection_admin / web_admin) per row and surfaces
+            member, collection_admin / admin) per row and surfaces
             it on ListCollectionRes; older payloads without the field
             are treated as not-editable to avoid silently re-enabling
             the affordance during a partial deploy.

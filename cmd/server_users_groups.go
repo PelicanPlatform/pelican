@@ -997,7 +997,7 @@ var serverUserScopeRevokeCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The route is DELETE /users/:id/scopes/:scope. Scopes contain
-		// colons (e.g. "server.web_admin"), which are valid path
+		// colons (e.g. "server.admin"), which are valid path
 		// characters but worth path-escaping defensively.
 		_, err := makeGroupAPICall("DELETE", "/api/v1.0/users/"+args[0]+"/scopes/"+url.PathEscape(args[1]), nil)
 		if err != nil {

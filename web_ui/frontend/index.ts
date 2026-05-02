@@ -13,7 +13,7 @@ export interface User {
   csrfToken?: string;
   // scopes is the caller's effective user-grantable scope set as
   // returned by /whoami: DB user_scopes ∪ DB group_scopes via
-  // membership ∪ config-derived grants ∪ web_admin implications.
+  // membership ∪ config-derived grants ∪ admin implications.
   // Used to gate UI surfaces below the granularity of `role`:
   // server.user_admin lets a non-system-admin into /settings/users,
   // server.collection_admin into the collection-management surfaces,
@@ -32,7 +32,7 @@ export interface User {
 
 // hasScope reports whether the supplied User holds `scope` in their
 // effective set. Backend-side EffectiveScopesForIdentity already
-// applies the server.web_admin → server.user_admin/collection_admin
+// applies the server.admin → server.user_admin/collection_admin
 // implication, so a system admin returns true for every management
 // scope without the frontend needing its own implication table.
 export const hasScope = (user: User | undefined, scope: string): boolean =>

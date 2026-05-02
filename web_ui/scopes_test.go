@@ -83,46 +83,46 @@ func TestEffectiveScopesForIdentity(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
-	t.Run("builtin admin username gets web_admin (and implications)", func(t *testing.T) {
+	t.Run("builtin admin username gets admin (and implications)", func(t *testing.T) {
 		setupScopesTestDB(t)
 
 		got := EffectiveScopesForIdentity(UserIdentity{Username: "admin"})
-		assert.True(t, contains(got, token_scopes.Server_WebAdmin))
+		assert.True(t, contains(got, token_scopes.Server_Admin))
 		assert.True(t, contains(got, token_scopes.Server_UserAdmin),
-			"server.web_admin must imply server.user_admin")
+			"server.admin must imply server.user_admin")
 		assert.True(t, contains(got, token_scopes.Server_CollectionAdmin),
-			"server.web_admin must imply server.collection_admin")
+			"server.admin must imply server.collection_admin")
 	})
 
-	t.Run("UIAdminUsers username match grants web_admin", func(t *testing.T) {
+	t.Run("UIAdminUsers username match grants admin", func(t *testing.T) {
 		setupScopesTestDB(t)
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
 
 		got := EffectiveScopesForIdentity(UserIdentity{
 			Username: "alice", ID: "u-alice",
 		})
-		assert.True(t, contains(got, token_scopes.Server_WebAdmin))
+		assert.True(t, contains(got, token_scopes.Server_Admin))
 
 		// Same user with a non-matching username doesn't get the scope —
 		// catches accidental ID/Sub matching regressions.
 		none := EffectiveScopesForIdentity(UserIdentity{
 			Username: "bob", ID: "u-alice", Sub: "alice",
 		})
-		assert.False(t, contains(none, token_scopes.Server_WebAdmin),
+		assert.False(t, contains(none, token_scopes.Server_Admin),
 			"admin lists must match Username, never ID or Sub")
 	})
 
-	t.Run("AdminGroups match grants web_admin via cookie groups", func(t *testing.T) {
+	t.Run("AdminGroups match grants admin via cookie groups", func(t *testing.T) {
 		setupScopesTestDB(t)
 		require.NoError(t, param.Server_AdminGroups.Set([]string{"sysadmins"}))
 
 		got := EffectiveScopesForIdentity(UserIdentity{
 			Username: "carol", ID: "u-carol", Groups: []string{"sysadmins"},
 		})
-		assert.True(t, contains(got, token_scopes.Server_WebAdmin))
+		assert.True(t, contains(got, token_scopes.Server_Admin))
 	})
 
-	t.Run("UserAdmin / CollectionAdmin variants don't auto-imply web_admin", func(t *testing.T) {
+	t.Run("UserAdmin / CollectionAdmin variants don't auto-imply admin", func(t *testing.T) {
 		setupScopesTestDB(t)
 		require.NoError(t, param.Server_UserAdminUsers.Set([]string{"dan"}))
 
@@ -130,8 +130,8 @@ func TestEffectiveScopesForIdentity(t *testing.T) {
 			Username: "dan", ID: "u-dan",
 		})
 		assert.True(t, contains(got, token_scopes.Server_UserAdmin))
-		assert.False(t, contains(got, token_scopes.Server_WebAdmin),
-			"the user_admin → web_admin direction must NOT be implied")
+		assert.False(t, contains(got, token_scopes.Server_Admin),
+			"the user_admin → admin direction must NOT be implied")
 		assert.False(t, contains(got, token_scopes.Server_CollectionAdmin),
 			"user_admin must not imply collection_admin")
 	})
@@ -168,14 +168,14 @@ func TestEffectiveScopesForIdentity(t *testing.T) {
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"frank"}))
 
 		identity := UserIdentity{Username: "frank", ID: "u-frank"}
-		require.True(t, contains(EffectiveScopesForIdentity(identity), token_scopes.Server_WebAdmin),
+		require.True(t, contains(EffectiveScopesForIdentity(identity), token_scopes.Server_Admin),
 			"sanity: frank should be admin while listed")
 
 		// Take frank back off the config list; per the design contract
 		// (no config-to-DB backfill) this MUST take effect immediately.
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
 		got := EffectiveScopesForIdentity(identity)
-		assert.False(t, contains(got, token_scopes.Server_WebAdmin),
+		assert.False(t, contains(got, token_scopes.Server_Admin),
 			"removing a name from the config must revoke the privilege live")
 	})
 }
@@ -202,13 +202,13 @@ func TestCheckHelpersConsultEffectiveScopes(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("CheckUserAdmin true via web_admin implication", func(t *testing.T) {
+	t.Run("CheckUserAdmin true via admin implication", func(t *testing.T) {
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
 		ok, _ := CheckUserAdmin(UserIdentity{Username: "alice"})
-		assert.True(t, ok, "web_admin must satisfy CheckUserAdmin via implication")
+		assert.True(t, ok, "admin must satisfy CheckUserAdmin via implication")
 	})
 
-	t.Run("CheckCollectionAdmin true via web_admin implication", func(t *testing.T) {
+	t.Run("CheckCollectionAdmin true via admin implication", func(t *testing.T) {
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
 		ok, _ := CheckCollectionAdmin(UserIdentity{Username: "alice"})
 		assert.True(t, ok)
@@ -247,14 +247,14 @@ func TestCheckHelpersHonorAdminGroupsConfig(t *testing.T) {
 		// Web admin on the strength of the AdminGroups match alone.
 		ok, _ := CheckAdmin(identity)
 		assert.True(t, ok, "AdminGroups membership asserted via cookie groups must satisfy CheckAdmin")
-		// Implication chain: web_admin → user_admin AND collection_admin.
+		// Implication chain: admin → user_admin AND collection_admin.
 		// This is the integration the audit specifically called out:
 		// Server.AdminGroups feeds into the collection-admin gate via
 		// the implication, not via a direct collection_admin grant.
 		ua, _ := CheckUserAdmin(identity)
-		assert.True(t, ua, "web_admin (from AdminGroups) must imply user_admin via Check helpers")
+		assert.True(t, ua, "admin (from AdminGroups) must imply user_admin via Check helpers")
 		ca, _ := CheckCollectionAdmin(identity)
-		assert.True(t, ca, "web_admin (from AdminGroups) must imply collection_admin via Check helpers")
+		assert.True(t, ca, "admin (from AdminGroups) must imply collection_admin via Check helpers")
 	})
 
 	t.Run("UserAdminGroups via cookie groups grants only CheckUserAdmin", func(t *testing.T) {
@@ -268,10 +268,10 @@ func TestCheckHelpersHonorAdminGroupsConfig(t *testing.T) {
 		}
 		ua, _ := CheckUserAdmin(identity)
 		assert.True(t, ua)
-		// user_admin must NOT promote to web_admin or collection_admin —
-		// the implication arrow only points downward from web_admin.
+		// user_admin must NOT promote to admin or collection_admin —
+		// the implication arrow only points downward from admin.
 		full, _ := CheckAdmin(identity)
-		assert.False(t, full, "user_admin must not promote to web_admin")
+		assert.False(t, full, "user_admin must not promote to admin")
 		ca, _ := CheckCollectionAdmin(identity)
 		assert.False(t, ca, "user_admin must not promote to collection_admin")
 	})
@@ -289,7 +289,7 @@ func TestCheckHelpersHonorAdminGroupsConfig(t *testing.T) {
 		assert.True(t, ca)
 		// Same containment as above, the other direction.
 		full, _ := CheckAdmin(identity)
-		assert.False(t, full, "collection_admin must not promote to web_admin")
+		assert.False(t, full, "collection_admin must not promote to admin")
 		ua, _ := CheckUserAdmin(identity)
 		assert.False(t, ua, "collection_admin must not promote to user_admin")
 	})
