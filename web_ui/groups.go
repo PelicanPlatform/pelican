@@ -27,6 +27,11 @@ type CreateGroupReq struct {
 	// Optional; UIs typically fall back to Name when empty.
 	DisplayName string `json:"displayName,omitempty"`
 	Description string `json:"description"`
+	// CreatedForCollectionID ties the new group to a specific collection's
+	// onboarding pass. Set by the collection-onboarding form so a later
+	// ownership transfer of that collection cascades to its onboarded
+	// groups; empty for standalone group creation.
+	CreatedForCollectionID string `json:"createdForCollectionId,omitempty"`
 }
 
 // GroupView wraps a database.Group with resolved user/group summaries for
@@ -375,7 +380,7 @@ func handleCreateGroup(ctx *gin.Context) {
 		UserID:       userId,
 		AuthMethod:   authMethod,
 		AuthMethodID: authMethodID,
-	}, nil)
+	}, req.CreatedForCollectionID)
 	if err != nil {
 		if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{

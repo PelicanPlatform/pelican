@@ -266,9 +266,17 @@ type Group struct {
 	OwnerID             string        `gorm:"not null;default:''" json:"ownerId"`
 	AdminID             string        `gorm:"not null;default:''" json:"adminId"`
 	AdminType           AdminType     `gorm:"not null;default:''" json:"adminType"`
-	CreatedAt           time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt           time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
-	Members             []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
+	// CreatedForCollectionID marks groups minted alongside a specific
+	// collection during the onboarding flow. The redemption path of a
+	// collection-ownership invite cascades the transfer to every group
+	// where this field equals the collection being transferred AND the
+	// group's current owner still matches the collection's previous
+	// owner — that "AND owner unchanged" guard avoids yanking a group
+	// out from under a downstream operator who already re-homed it.
+	CreatedForCollectionID string        `gorm:"not null;default:''" json:"createdForCollectionId,omitempty"`
+	CreatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	Members                []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
 }
 
 type GroupMember struct {
@@ -507,14 +515,29 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID
 	return collection, nil
 }
 
-func ListCollections(db *gorm.DB, user string, groups []string, isAdmin bool) ([]Collection, error) {
-	// Admins (server.web_admin or server.collection_admin) get global
-	// visibility — without it, a system admin investigating a report
-	// can't see the collection that's actually causing trouble unless
-	// they also happen to have a read ACL on it. The mutating
-	// endpoints already key off CheckCollectionAdmin; making list
-	// match keeps "what an admin sees in the UI" coherent with "what
-	// they can manage."
+// ListCollections returns every collection the caller can see. The
+// visibility set is the union of:
+//
+//  1. Public collections (visibility=public).
+//  2. Collections the caller owns — by OwnerID (canonical) or by
+//     legacy Owner username. Without this branch a freshly-transferred
+//     owner's listing comes up empty: the row carries no read ACL for
+//     them, and the auto-owner ACL is gone per the ownership-model
+//     rewrite, so OwnerID is the *only* link between the user and
+//     the row.
+//  3. Collections whose admin-group the caller is a member of, where
+//     "member" means: a row in group_members (DB-driven membership)
+//     OR a name in the caller's `groups` slice that resolves to the
+//     admin group (cookie/IdP-asserted membership). Mirrors the same
+//     two-path admin-group check that CallerIsCollectionOwnerOrAdmin
+//     uses on the management side.
+//  4. Collections with a read-eligible ACL for one of the caller's
+//     groups (the existing path).
+//
+// Admins (server.web_admin / server.collection_admin) bypass and get
+// global visibility — the management endpoints already do this and the
+// list should match so admin-as-investigator works.
+func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin bool) ([]Collection, error) {
 	if isAdmin {
 		var all []Collection
 		if result := db.Find(&all); result.Error != nil {
@@ -523,38 +546,91 @@ func ListCollections(db *gorm.DB, user string, groups []string, isAdmin bool) ([
 		return all, nil
 	}
 
-	collections := []Collection{}
-	// Every user is part of their own user group, ensure this is in the slice
+	// Every user is implicitly in their own personal group. Mirrors
+	// the same convention used by validateACL / GetUserCollectionScopes.
 	userGroup := "user-" + user
 	if !slices.Contains(groups, userGroup) {
 		groups = append(groups, userGroup)
 	}
-	// First, get all public collections.
-	if result := db.Where("visibility = ?", VisibilityPublic).Find(&collections); result.Error != nil {
-		return nil, result.Error
+
+	out := []Collection{}
+	seen := make(map[string]struct{})
+	addAll := func(rows []Collection) {
+		for _, r := range rows {
+			if _, ok := seen[r.ID]; ok {
+				continue
+			}
+			seen[r.ID] = struct{}{}
+			out = append(out, r)
+		}
 	}
-	// Then, get all collections for which the user has a read ACL.
+
+	// (1) Public collections.
+	var pub []Collection
+	if err := db.Where("visibility = ?", VisibilityPublic).Find(&pub).Error; err != nil {
+		return nil, err
+	}
+	addAll(pub)
+
+	// (2) Owned collections. Match either OwnerID (the immutable User.ID
+	// path used by post-rewrite code) or the legacy username field
+	// (back-compat for rows pre-dating OwnerID).
+	var owned []Collection
+	switch {
+	case userID != "" && user != "":
+		if err := db.Where("owner_id = ? OR owner = ?", userID, user).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	case userID != "":
+		if err := db.Where("owner_id = ?", userID).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	case user != "":
+		if err := db.Where("owner = ?", user).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	}
+	addAll(owned)
+
+	// (3a) Admin-group membership via the GroupMember table — the
+	// canonical "user has been added to this group" record.
+	if userID != "" {
+		var adminViaMember []Collection
+		if err := db.Table("collections").
+			Joins("JOIN group_members ON group_members.group_id = collections.admin_id").
+			Where("collections.admin_id <> '' AND group_members.user_id = ?", userID).
+			Find(&adminViaMember).Error; err != nil {
+			return nil, err
+		}
+		addAll(adminViaMember)
+	}
+
+	// (3b) Admin-group membership via cookie-asserted group names. The
+	// `groups` slice carries names; admin_id is a group ID slug. We
+	// join groups to translate one to the other and match against the
+	// caller's set.
+	if len(groups) > 0 {
+		var adminViaName []Collection
+		if err := db.Table("collections").
+			Joins("JOIN groups ON groups.id = collections.admin_id").
+			Where("collections.admin_id <> '' AND groups.name IN ?", groups).
+			Find(&adminViaName).Error; err != nil {
+			return nil, err
+		}
+		addAll(adminViaName)
+	}
+
+	// (4) ACL-granted read access.
 	var aclCollections []Collection
-	if result := db.
+	if err := db.
 		Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
 		Where("collection_acls.group_id IN ? AND collection_acls.role IN ?", groups, ScopeToRole[token_scopes.Collection_Read]).
-		Find(&aclCollections); result.Error != nil {
-		return nil, result.Error
+		Find(&aclCollections).Error; err != nil {
+		return nil, err
 	}
-	// Merge the two lists, avoiding duplicates.
-	for _, aclCol := range aclCollections {
-		found := false
-		for _, pubCol := range collections {
-			if aclCol.ID == pubCol.ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			collections = append(collections, aclCol)
-		}
-	}
-	return collections, nil
+	addAll(aclCollections)
+
+	return out, nil
 }
 
 func GetCollection(db *gorm.DB, id string, user, userID string, groups []string, isAdmin bool) (*Collection, error) {
@@ -1477,7 +1553,13 @@ func isUniqueConstraintError(err error) bool {
 // from creator.UserID (so it can be set even if the creator is not also
 // the owner — though by default the creator becomes the owner). For
 // API-driven creation pass the API token's audit info via captureAuthMethod.
-func CreateGroup(db *gorm.DB, name, displayName, description string, creator Creator, groups []string) (*Group, error) {
+//
+// `createdForCollectionID` ties the group to a specific collection's
+// onboarding pass. Empty for the standalone group-create path; set by
+// the collection-onboarding flow so a later ownership transfer of that
+// collection can cascade to its onboarded groups (see
+// RedeemCollectionOwnershipInviteLink).
+func CreateGroup(db *gorm.DB, name, displayName, description string, creator Creator, createdForCollectionID string) (*Group, error) {
 	if err := ValidateIdentifier(name); err != nil {
 		return nil, err
 	}
@@ -1505,14 +1587,15 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	}
 
 	group := &Group{
-		ID:                  slug,
-		Name:                name,
-		DisplayName:         displayName,
-		Description:         description,
-		CreatedBy:           createdBy,
-		CreatorAuthMethod:   creator.AuthMethod,
-		CreatorAuthMethodID: creator.AuthMethodID,
-		OwnerID:             owner,
+		ID:                     slug,
+		Name:                   name,
+		DisplayName:            displayName,
+		Description:            description,
+		CreatedBy:              createdBy,
+		CreatorAuthMethod:      creator.AuthMethod,
+		CreatorAuthMethodID:    creator.AuthMethodID,
+		OwnerID:                owner,
+		CreatedForCollectionID: createdForCollectionID,
 	}
 
 	if result := db.Create(group); result.Error != nil {
@@ -2349,6 +2432,27 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 			}).Error; err != nil {
 			return err
 		}
+
+		// Cascade: every group that was minted alongside this
+		// collection during onboarding follows the collection on
+		// transfer (per the demo punch-list #2C). The "AND owner_id =
+		// previous owner" clause prevents stomping on a group whose
+		// ownership was already re-homed manually since onboarding;
+		// without that guard a stray ownership transfer would yank
+		// groups away from whoever was administering them.
+		//
+		// previousOwnerID may be empty for legacy collections that
+		// never had owner_id populated. In that case we skip the
+		// cascade entirely — there's no safe predicate to identify
+		// "still owned by the original onboarding owner."
+		if previousOwnerID != "" {
+			if err := tx.Model(&Group{}).
+				Where("created_for_collection_id = ? AND owner_id = ?", link.CollectionID, previousOwnerID).
+				Update("owner_id", redeemer.ID).Error; err != nil {
+				return err
+			}
+		}
+
 		if err := tx.Model(&GroupInviteLink{}).
 			Where("id = ?", link.ID).
 			Updates(map[string]interface{}{

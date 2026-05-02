@@ -222,3 +222,119 @@ func TestCheckHelpersConsultEffectiveScopes(t *testing.T) {
 		assert.False(t, full, "user-admin must not auto-promote to system admin")
 	})
 }
+
+// TestCheckHelpersHonorAdminGroupsConfig pins the audit gap noted in
+// the OIDC-group propagation review: a user whose ONLY admin signal
+// is membership in a group named in the *_AdminGroups config (with
+// the membership asserted via the cookie's wlcg.groups claim — i.e.
+// no DB user_scopes / group_scopes row, no UIAdminUsers username
+// match) must still pass the corresponding Check*Admin helper.
+//
+// We exercise each *Groups config independently so a regression in
+// any one of them surfaces as a failure tied to that specific config
+// key, rather than the bundle test failing with a single line that
+// hides which path broke.
+func TestCheckHelpersHonorAdminGroupsConfig(t *testing.T) {
+	t.Run("AdminGroups via cookie groups grants CheckAdmin (and via implication, the rest)", func(t *testing.T) {
+		setupScopesTestDB(t)
+		require.NoError(t, param.Server_AdminGroups.Set([]string{"sysadmins"}))
+
+		identity := UserIdentity{
+			Username: "carol",
+			ID:       "u-carol",
+			Groups:   []string{"sysadmins"},
+		}
+		// Web admin on the strength of the AdminGroups match alone.
+		ok, _ := CheckAdmin(identity)
+		assert.True(t, ok, "AdminGroups membership asserted via cookie groups must satisfy CheckAdmin")
+		// Implication chain: web_admin → user_admin AND collection_admin.
+		// This is the integration the audit specifically called out:
+		// Server.AdminGroups feeds into the collection-admin gate via
+		// the implication, not via a direct collection_admin grant.
+		ua, _ := CheckUserAdmin(identity)
+		assert.True(t, ua, "web_admin (from AdminGroups) must imply user_admin via Check helpers")
+		ca, _ := CheckCollectionAdmin(identity)
+		assert.True(t, ca, "web_admin (from AdminGroups) must imply collection_admin via Check helpers")
+	})
+
+	t.Run("UserAdminGroups via cookie groups grants only CheckUserAdmin", func(t *testing.T) {
+		setupScopesTestDB(t)
+		require.NoError(t, param.Server_UserAdminGroups.Set([]string{"useradmins"}))
+
+		identity := UserIdentity{
+			Username: "erin",
+			ID:       "u-erin",
+			Groups:   []string{"useradmins"},
+		}
+		ua, _ := CheckUserAdmin(identity)
+		assert.True(t, ua)
+		// user_admin must NOT promote to web_admin or collection_admin —
+		// the implication arrow only points downward from web_admin.
+		full, _ := CheckAdmin(identity)
+		assert.False(t, full, "user_admin must not promote to web_admin")
+		ca, _ := CheckCollectionAdmin(identity)
+		assert.False(t, ca, "user_admin must not promote to collection_admin")
+	})
+
+	t.Run("CollectionAdminGroups via cookie groups grants only CheckCollectionAdmin", func(t *testing.T) {
+		setupScopesTestDB(t)
+		require.NoError(t, param.Server_CollectionAdminGroups.Set([]string{"colladmins"}))
+
+		identity := UserIdentity{
+			Username: "frank",
+			ID:       "u-frank",
+			Groups:   []string{"colladmins"},
+		}
+		ca, _ := CheckCollectionAdmin(identity)
+		assert.True(t, ca)
+		// Same containment as above, the other direction.
+		full, _ := CheckAdmin(identity)
+		assert.False(t, full, "collection_admin must not promote to web_admin")
+		ua, _ := CheckUserAdmin(identity)
+		assert.False(t, ua, "collection_admin must not promote to user_admin")
+	})
+
+	t.Run("Cookie group not matching any config name confers nothing", func(t *testing.T) {
+		setupScopesTestDB(t)
+		require.NoError(t, param.Server_AdminGroups.Set([]string{"sysadmins"}))
+
+		// Same shape as the success case but the asserted group name
+		// differs from the configured one — guards against accidental
+		// loose-prefix / case-insensitive matching regressions.
+		identity := UserIdentity{
+			Username: "greta",
+			ID:       "u-greta",
+			Groups:   []string{"SYSADMINS", "sysadmins-readonly"},
+		}
+		ok, _ := CheckAdmin(identity)
+		assert.False(t, ok, "config-group match must be exact / case-sensitive")
+	})
+
+	t.Run("Removing the config group revokes the privilege immediately", func(t *testing.T) {
+		setupScopesTestDB(t)
+		require.NoError(t, param.Server_AdminGroups.Set([]string{"sysadmins"}))
+
+		identity := UserIdentity{
+			Username: "henry",
+			ID:       "u-henry",
+			Groups:   []string{"sysadmins"},
+		}
+		require.True(t, mustCheckCollectionAdmin(identity),
+			"sanity: should be admin while listed")
+
+		// Per the design contract (no config-to-DB backfill) clearing
+		// the AdminGroups list must take effect immediately, even for
+		// the implication-derived collection_admin.
+		require.NoError(t, param.Server_AdminGroups.Set([]string{}))
+		assert.False(t, mustCheckCollectionAdmin(identity),
+			"removing the AdminGroups entry must revoke the implied collection_admin live")
+	})
+}
+
+// mustCheckCollectionAdmin is a tiny helper that drops the message
+// return value at call sites where only the bool matters. Keeps the
+// "live revocation" test legible.
+func mustCheckCollectionAdmin(identity UserIdentity) bool {
+	ok, _ := CheckCollectionAdmin(identity)
+	return ok
+}

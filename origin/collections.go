@@ -529,7 +529,7 @@ func handleListCollections(ctx *gin.Context) {
 		isAdmin = true
 	}
 
-	collections, err := database.ListCollections(database.ServerDatabase, user, groups, isAdmin)
+	collections, err := database.ListCollections(database.ServerDatabase, user, userId, groups, isAdmin)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
