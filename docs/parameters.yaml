@@ -3460,6 +3460,31 @@ type: string
 default: iss
 components: ["origin", "registry", "cache", "director"]
 ---
+name: Issuer.AccessTokenLifespan
+description: |+
+  Lifetime of access tokens issued by the embedded OAuth2 issuer.
+type: duration
+default: 1h
+hidden: true
+components: ["origin"]
+---
+name: Issuer.AuthorizationCodeLifespan
+description: |+
+  Lifetime of authorization codes and device codes issued by the
+  embedded OAuth2 issuer.
+type: duration
+default: 10m
+hidden: true
+components: ["origin"]
+---
+name: Issuer.IDTokenLifespan
+description: |+
+  Lifetime of ID tokens issued by the embedded OAuth2 issuer.
+type: duration
+default: 1h
+hidden: true
+components: ["origin"]
+---
 name: Issuer.RefreshTokenGracePeriod
 description: |+
   Duration during which a used refresh token may still be reused.
@@ -3467,6 +3492,14 @@ description: |+
   instead it remains valid for this grace period.
 type: duration
 default: 5m
+hidden: true
+components: ["origin"]
+---
+name: Issuer.RefreshTokenLifespan
+description: |+
+  Lifetime of refresh tokens issued by the embedded OAuth2 issuer.
+type: duration
+default: 168h
 hidden: true
 components: ["origin"]
 ---

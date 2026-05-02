@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/ory/fosite"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -339,10 +340,20 @@ func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, er
 	}
 	// Refresh tokens: expires_at may be NULL (never-expire), so only delete
 	// rows where expires_at is set and in the past, or where the token has
-	// been revoked (active=0) and its grace period is long past.
+	// been revoked (active=0), has no expiry set, and its grace period is
+	// long past.
+	//
+	// Rotated tokens (active=0) that DO have expires_at set are handled by
+	// the first condition: we keep them as tombstones until their natural
+	// expiry so that replays of rotated tokens return ErrInactiveToken
+	// (triggering family revocation) rather than ErrNotFound.
+	//
+	// Rotated tokens without expires_at are cleaned up after the grace
+	// period has long passed.
+	legacyCutoff := now.Add(-(s.RefreshTokenGracePeriod + 24*time.Hour))
 	result := s.db.WithContext(ctx).
-		Where("(expires_at IS NOT NULL AND expires_at < ?) OR (active = ? AND first_used_at IS NOT NULL AND first_used_at < ?)",
-			now, false, now.Add(-24*time.Hour)).
+		Where("(expires_at IS NOT NULL AND expires_at < ?) OR (active = ? AND first_used_at IS NOT NULL AND expires_at IS NULL AND first_used_at < ?)",
+			now, false, legacyCutoff).
 		Delete(&OIDCRefreshToken{})
 	if result.Error != nil {
 		return total, result.Error
@@ -794,7 +805,7 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 	sessionData, _ := json.Marshal(request.GetSession())
 
 	// Derive expiration from the session's token-type-specific expiry when
-	// available, so that refresh tokens honour RefreshTokenLifespan (7d)
+	// available, so that refresh tokens honour RefreshTokenLifespan
 	// instead of always using a 1h default.
 	var expiresAt time.Time
 	switch table {
@@ -802,10 +813,12 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 		expiresAt = request.GetSession().GetExpiresAt(fosite.RefreshToken)
 	case "oidc_access_tokens":
 		expiresAt = request.GetSession().GetExpiresAt(fosite.AccessToken)
-	case "oidc_authorization_codes":
+	case "oidc_pkce_requests", "oidc_openid_sessions", "oidc_authorization_codes":
 		expiresAt = request.GetSession().GetExpiresAt(fosite.AuthorizeCode)
 	}
 	if expiresAt.IsZero() {
+		log.WithField("table", table).Warn("Embedded issuer: token session has no expiry set; " +
+			"falling back to 1h. SetExpiresAt should be called before CreateTokenSession.")
 		expiresAt = time.Now().Add(1 * time.Hour)
 	}
 

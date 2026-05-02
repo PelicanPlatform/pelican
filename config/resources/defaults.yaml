@@ -163,6 +163,10 @@ OIDC:
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
   Scopes: ["openid", "email", "profile"]
 Issuer:
+  AccessTokenLifespan: 1h
+  AuthorizationCodeLifespan: 10m
+  IDTokenLifespan: 1h
+  RefreshTokenLifespan: 168h
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server
   QDLLocation: /opt/qdl

@@ -148,13 +148,16 @@ type Config struct {
 	} `mapstructure:"federation" yaml:"Federation"`
 	GeoIPOverrides any `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
 	Issuer struct {
+		AccessTokenLifespan time.Duration `mapstructure:"accesstokenlifespan" yaml:"AccessTokenLifespan"`
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
+		AuthorizationCodeLifespan time.Duration `mapstructure:"authorizationcodelifespan" yaml:"AuthorizationCodeLifespan"`
 		AuthorizationTemplates any `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
 		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
 		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
 		GroupRequirements []string `mapstructure:"grouprequirements" yaml:"GroupRequirements"`
 		GroupSource string `mapstructure:"groupsource" yaml:"GroupSource"`
+		IDTokenLifespan time.Duration `mapstructure:"idtokenlifespan" yaml:"IDTokenLifespan"`
 		IssuerClaimValue string `mapstructure:"issuerclaimvalue" yaml:"IssuerClaimValue"`
 		OIDCAuthenticationRequirements any `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
 		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim" yaml:"OIDCAuthenticationUserClaim"`
@@ -166,6 +169,7 @@ type Config struct {
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
 		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
 		RefreshTokenGracePeriod time.Duration `mapstructure:"refreshtokengraceperiod" yaml:"RefreshTokenGracePeriod"`
+		RefreshTokenLifespan time.Duration `mapstructure:"refreshtokenlifespan" yaml:"RefreshTokenLifespan"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
@@ -603,13 +607,16 @@ type configWithType struct {
 	}
 	GeoIPOverrides struct { Type string; Value any }
 	Issuer struct {
+		AccessTokenLifespan struct { Type string; Value time.Duration }
 		AuthenticationSource struct { Type string; Value string }
+		AuthorizationCodeLifespan struct { Type string; Value time.Duration }
 		AuthorizationTemplates struct { Type string; Value any }
 		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
 		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
+		IDTokenLifespan struct { Type string; Value time.Duration }
 		IssuerClaimValue struct { Type string; Value string }
 		OIDCAuthenticationRequirements struct { Type string; Value any }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
@@ -621,6 +628,7 @@ type configWithType struct {
 		QDLLocation struct { Type string; Value string }
 		RedirectUris struct { Type string; Value []string }
 		RefreshTokenGracePeriod struct { Type string; Value time.Duration }
+		RefreshTokenLifespan struct { Type string; Value time.Duration }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
 		UserStripDomain struct { Type string; Value bool }
