@@ -18,7 +18,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 import {
   Box,
@@ -54,6 +54,7 @@ import {
   CollectionSummary,
 } from '@/helpers/api/Collection/types';
 import CollectionService from '@/helpers/api/Collection/service';
+import GroupService from '@/helpers/api/Group/service';
 
 // formatUserPill renders the canonical "Display Name (username)"
 // label used elsewhere in the app. Falls back to the bare username
@@ -89,6 +90,27 @@ const Page = () => {
   const [search, setSearch] = useState<string>('');
   const searchedData = useFuse<CollectionSummary>(collections || [], search);
 
+  // Resolve group NAMES (the form ACL rows store) to slug IDs (the
+  // /groups/view/?id=… route expects). The /groups list endpoint is
+  // already filtered server-side to groups the caller can see, so
+  // unknown names — e.g. an ACL granted to a group the caller has no
+  // visibility into — simply stay un-linked rather than producing a
+  // "permission denied" landing page.
+  const { data: groups } = useSWR('groups', () => GroupService.getAll(), {
+    // The collections page rarely outlives a single user action, so
+    // refetching on every focus would just amplify rate-limit risk
+    // without giving fresher group metadata. Manual refresh comes via
+    // the existing reload button on the page.
+    revalidateOnFocus: false,
+  });
+  const groupIdByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of groups ?? []) {
+      m.set(g.name, g.id);
+    }
+    return m;
+  }, [groups]);
+
   // Mirror the backend gate on POST /origin_ui/collections: only callers
   // who hold server.collection_admin (or web_admin, which implies it)
   // can create. Hiding the buttons for everyone else avoids dangling
@@ -99,6 +121,13 @@ const Page = () => {
   const { data: who } = useSWR('getUser', getUser);
   const canCreate =
     who?.role === 'admin' || hasScope(who, 'server.collection_admin');
+  // Mirrors the page-level gate on /settings/users/edit/: only callers
+  // with server.user_admin (or web_admin, which implies it) can land
+  // there without a 403. We use the same predicate the user-management
+  // pages do so the owner pill only links to a destination the caller
+  // can actually reach.
+  const canEditUsers =
+    who?.role === 'admin' || hasScope(who, 'server.user_admin');
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this collection?')) return;
@@ -168,6 +197,8 @@ const Page = () => {
             key={c.id}
             c={c}
             onDelete={() => handleDelete(c.id)}
+            groupIdByName={groupIdByName}
+            canEditUsers={canEditUsers}
           />
         ))}
       </Box>
@@ -181,10 +212,25 @@ const Page = () => {
 // the owner pill so a user can see who runs each collection they have
 // access to even when they can't edit it; the expanded body adds the
 // rest of the metadata + ACL list.
+// groupHrefByName resolves an ACL's group NAME (the backend
+// canonicalises slug→name on write, so ACL rows carry names) to a
+// `/groups/view/?id=…` URL. Returns undefined when the caller has no
+// visibility into the group via /groups — we render a non-clickable
+// chip in that case rather than minting a link the user can't follow.
+const groupHrefByName = (
+  name: string,
+  groupIdByName: Map<string, string>
+): string | undefined => {
+  const id = groupIdByName.get(name);
+  return id ? `/groups/view/?id=${encodeURIComponent(id)}` : undefined;
+};
+
 const CollectionCard: React.FC<{
   c: CollectionSummary;
   onDelete: () => void;
-}> = ({ c, onDelete }) => {
+  groupIdByName: Map<string, string>;
+  canEditUsers: boolean;
+}> = ({ c, onDelete, groupIdByName, canEditUsers }) => {
   const [open, setOpen] = useState(false);
   return (
     <Card sx={{ mb: 1 }}>
@@ -215,6 +261,23 @@ const CollectionCard: React.FC<{
               color={c.visibility === 'public' ? 'success' : 'default'}
             />
           </Box>
+          {/*
+            Namespace is the path operators reach this collection at —
+            arguably the most useful identifier on the row, so it sits
+            immediately under the name in monospace rather than being
+            buried in the expanded panel.
+          */}
+          <Typography
+            variant='body2'
+            mt={0.25}
+            sx={{
+              fontFamily: 'monospace',
+              wordBreak: 'break-all',
+              color: 'text.secondary',
+            }}
+          >
+            {c.namespace}
+          </Typography>
           <Box
             display='flex'
             alignItems='center'
@@ -229,23 +292,57 @@ const CollectionCard: React.FC<{
               title={c.ownerCard?.id ? `User.ID: ${c.ownerCard.id}` : ''}
               placement='top'
             >
-              <Chip
-                size='small'
-                variant='outlined'
-                label={formatUserPill(c.ownerCard, c.owner)}
-              />
+              {/*
+                Owner pill links to the user's edit page when the
+                caller holds server.user_admin (the gate on
+                /settings/users/edit/) AND we have an ownerCard ID to
+                route by. Non-admin callers see the same chip without
+                navigation — preventing dead links into a page that
+                would just 403.
+              */}
+              {canEditUsers && c.ownerCard?.id ? (
+                <Link
+                  href={`/settings/users/edit/?id=${encodeURIComponent(c.ownerCard.id)}`}
+                  // The card body has its own onClick (toggle expand);
+                  // stop propagation so a click on the pill navigates
+                  // instead of also collapsing/expanding the row.
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Chip
+                    size='small'
+                    variant='outlined'
+                    label={formatUserPill(c.ownerCard, c.owner)}
+                    clickable
+                  />
+                </Link>
+              ) : (
+                <Chip
+                  size='small'
+                  variant='outlined'
+                  label={formatUserPill(c.ownerCard, c.owner)}
+                />
+              )}
             </Tooltip>
             {c.adminCard && (
               <>
                 <Typography variant='caption' color='text.secondary'>
                   · Admin group:
                 </Typography>
-                <Chip
-                  size='small'
-                  variant='outlined'
-                  color='primary'
-                  label={c.adminCard.name}
-                />
+                <Link
+                  href={`/groups/view/?id=${encodeURIComponent(c.adminCard.id)}`}
+                  // The card body has its own onClick (toggle expand);
+                  // stop propagation so a click on the pill navigates
+                  // instead of also collapsing/expanding the row.
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Chip
+                    size='small'
+                    variant='outlined'
+                    color='primary'
+                    label={c.adminCard.name}
+                    clickable
+                  />
+                </Link>
               </>
             )}
           </Box>
@@ -294,7 +391,7 @@ const CollectionCard: React.FC<{
       </CardContent>
       <Collapse in={open} unmountOnExit>
         <Divider />
-        <ExpandedDetails c={c} open={open} />
+        <ExpandedDetails c={c} open={open} groupIdByName={groupIdByName} />
       </Collapse>
     </Card>
   );
@@ -307,7 +404,8 @@ const CollectionCard: React.FC<{
 const ExpandedDetails: React.FC<{
   c: CollectionSummary;
   open: boolean;
-}> = ({ c }) => {
+  groupIdByName: Map<string, string>;
+}> = ({ c, groupIdByName }) => {
   const { data: acls, isLoading } = useSWR<CollectionAcl[] | undefined>(
     `collection/${c.id}/acls`,
     () => CollectionService.listAcls(c.id)
@@ -321,11 +419,6 @@ const ExpandedDetails: React.FC<{
             <Typography variant='body2'>{c.description}</Typography>
           </Section>
         )}
-        <Section label='Namespace'>
-          <Typography variant='body2' sx={{ fontFamily: 'monospace' }}>
-            {c.namespace}
-          </Typography>
-        </Section>
         <Section label='Access groups'>
           {isLoading ? (
             <Skeleton variant='rounded' height={36} />
@@ -335,21 +428,36 @@ const ExpandedDetails: React.FC<{
             </Typography>
           ) : (
             <Box display='flex' gap={1} flexWrap='wrap'>
-              {acls.map((acl) => (
-                <Chip
-                  key={`${acl.groupId}:${acl.role}`}
-                  size='small'
-                  label={`${acl.role}: ${acl.groupId}`}
-                  color={
-                    acl.role === 'write'
-                      ? 'secondary'
-                      : acl.role === 'owner'
-                        ? 'default'
-                        : 'primary'
-                  }
-                  variant={acl.role === 'owner' ? 'outlined' : 'filled'}
-                />
-              ))}
+              {acls.map((acl) => {
+                // ACL rows store the group NAME (the backend
+                // canonicalises slug→name on write); resolve to the
+                // slug ID via groupIdByName so the chip links to
+                // /groups/view/?id=…. When the caller can't see this
+                // group in /groups (no membership / admin / owner),
+                // the lookup misses and we render a non-clickable
+                // chip rather than a dead link.
+                const href = groupHrefByName(acl.groupId, groupIdByName);
+                const chip = (
+                  <Chip
+                    size='small'
+                    label={`${acl.role}: ${acl.groupId}`}
+                    color={
+                      acl.role === 'write'
+                        ? 'secondary'
+                        : acl.role === 'owner'
+                          ? 'default'
+                          : 'primary'
+                    }
+                    variant={acl.role === 'owner' ? 'outlined' : 'filled'}
+                    clickable={!!href}
+                  />
+                );
+                return (
+                  <React.Fragment key={`${acl.groupId}:${acl.role}`}>
+                    {href ? <Link href={href}>{chip}</Link> : chip}
+                  </React.Fragment>
+                );
+              })}
             </Box>
           )}
         </Section>

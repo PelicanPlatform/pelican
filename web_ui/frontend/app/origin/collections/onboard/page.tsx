@@ -391,7 +391,7 @@ const OnboardForm: React.FC = () => {
       name: '',
       displayName: '',
       description:
-        'Admin group — members can manage members and ACLs and edit the collection. Only the owner can transfer ownership or delete it.',
+        'Admin group — members can manage permissions and edit the collection',
       nameDirty: false,
       displayNameDirty: false,
       existingGroup: null,
@@ -402,7 +402,7 @@ const OnboardForm: React.FC = () => {
       source: 'create',
       name: '',
       displayName: '',
-      description: 'Writers — may add and remove members.',
+      description: 'Writers — can upload objects into the collection.',
       nameDirty: false,
       displayNameDirty: false,
       existingGroup: null,
@@ -413,7 +413,7 @@ const OnboardForm: React.FC = () => {
       source: 'create',
       name: '',
       displayName: '',
-      description: 'Readers — may list members and read content.',
+      description: 'Readers — can list and read objects in the collection.',
       nameDirty: false,
       displayNameDirty: false,
       existingGroup: null,
@@ -674,6 +674,11 @@ const OnboardForm: React.FC = () => {
               name: row.name.trim(),
               displayName: row.displayName.trim(),
               description: row.description.trim(),
+              // Tie this newly-minted group to the collection so a
+              // later ownership transfer cascades to it (per #2C).
+              // Existing groups picked from the dropdown are NOT
+              // tagged this way — they may be shared elsewhere.
+              createdForCollectionId: collection.id,
             } as any),
           `Failed to create group "${row.name}"`,
           dispatch
@@ -777,6 +782,49 @@ const OnboardForm: React.FC = () => {
               '',
               '',
               `Could not grant ${row.role} access to "${groupName}".`
+            )
+          );
+          return;
+        }
+      }
+    }
+
+    // ---- Step 3b — cascade the collection's admin group onto the
+    // *other* freshly-created groups in this onboarding pass. The
+    // operator's intent (per demo feedback): one group runs the
+    // collection AND every group that came along with it. Without
+    // this, after onboarding finishes the admin-group can manage
+    // the collection but not the read/write groups attached to it,
+    // which forces day-to-day admins to ping the collection owner
+    // for every group-membership tweak.
+    //
+    // We only touch groups we *just created* (reused=false). Groups
+    // the operator picked from the existing pool are left alone —
+    // they may be shared with other collections, and stomping on
+    // their admin group would leak this collection's authority into
+    // unrelated places.
+    const adminGroupRow = wired.find((g) => g.role === 'owner');
+    if (adminGroupRow) {
+      for (const row of wired) {
+        if (row.reused) continue;
+        if (row.groupId === adminGroupRow.groupId) continue;
+        const ok = await alertOnError(
+          () =>
+            GroupService.transferOwnership(row.groupId, {
+              adminId: adminGroupRow.groupId,
+              adminType: 'group',
+            }).then(() => true),
+          `Failed to set "${adminGroupRow.groupName}" as admin of "${row.groupName}"`,
+          dispatch
+        );
+        if (!ok) {
+          setBusy(false);
+          setResult(
+            partialResult(
+              wired,
+              '',
+              '',
+              `Could not set "${adminGroupRow.groupName}" as the admin group of "${row.groupName}".`
             )
           );
           return;
@@ -988,12 +1036,13 @@ const OnboardForm: React.FC = () => {
         {/* --- Groups (up to 3) --- */}
         <Paper variant='outlined' sx={{ p: 3, mb: 3 }}>
           <Typography variant='h6' mb={1}>
-            Groups
+            Access Control
           </Typography>
           <Typography variant='body2' color='text.secondary' mb={2}>
-            One row per group. Each row either creates a fresh group OR attaches
-            an existing one you can already see. Disable rows you don&apos;t
-            need; more can be added later from the collection&apos;s page.
+            Configure the access and management of the collection. For each
+            permission, either create a fresh group OR attach an existing
+            one. Disable rows you don&apos;t need; more can be added later
+            from the collection&apos;s page.
           </Typography>
           <Stack spacing={2}>
             {groups.map((g, i) => (
@@ -1003,6 +1052,7 @@ const OnboardForm: React.FC = () => {
                 onChange={(patch) => updateGroup(i, patch)}
                 visibleGroups={visibleGroups ?? []}
                 groupsLoading={groupsLoading}
+                seesAllGroups={canManageUsers}
               />
             ))}
           </Stack>
@@ -1047,7 +1097,7 @@ const NamespaceField: React.FC<{
   return (
     <Box sx={{ mb: 2 }}>
       <Typography variant='body2' sx={{ mb: 0.5 }}>
-        Namespace
+        Prefix
       </Typography>
       {noExports ? (
         <Alert severity='warning' sx={{ mb: 1 }}>
@@ -1071,7 +1121,7 @@ const NamespaceField: React.FC<{
               <InputLabel>Exported prefix</InputLabel>
               <Select
                 value={prefix}
-                label='Exported prefix'
+                label='Exported namespace'
                 onChange={(e) => onPrefixChange(e.target.value as string)}
               >
                 {prefixes.map((p) => (
@@ -1104,11 +1154,11 @@ const NamespaceField: React.FC<{
       >
         {fullPath ? (
           <>
-            Full namespace:{' '}
+            Full prefix:{' '}
             <span style={{ fontFamily: 'monospace' }}>{fullPath}</span>
           </>
         ) : (
-          'Full namespace: (pick an exported prefix)'
+          'Full collection prefix: (pick an exported namespace)'
         )}
       </Typography>
     </Box>
@@ -1342,7 +1392,11 @@ const GroupRowEditor: React.FC<{
   // SWR key in OnboardForm).
   visibleGroups: ApiGroup[];
   groupsLoading: boolean;
-}> = ({ row, onChange, visibleGroups, groupsLoading }) => (
+  // True when the caller's /groups response is unfiltered (system or
+  // user-admin). Suppresses the "groups you own/administer/belong to"
+  // hint, which would just be noise for someone who sees everything.
+  seesAllGroups: boolean;
+}> = ({ row, onChange, visibleGroups, groupsLoading, seesAllGroups }) => (
   <Box
     sx={{
       p: 2,
@@ -1373,8 +1427,8 @@ const GroupRowEditor: React.FC<{
         {row.role === 'owner'
           ? 'Members can manage the collection (members, ACLs, edit) but cannot transfer ownership or delete — those stay owner-only.'
           : row.role === 'write'
-            ? 'Add and remove members.'
-            : 'List members and read content.'}
+            ? 'Write objects into the collection.'
+            : 'List and read objects in the collection.'}
       </Typography>
     </Box>
     {row.enabled && (
@@ -1471,11 +1525,11 @@ const GroupRowEditor: React.FC<{
                 />
               )}
             />
-            <Typography variant='caption' color='text.secondary'>
-              The picker shows every group you can see — system / user-admins
-              see all groups; everyone else sees groups they own, administer, or
-              belong to.
-            </Typography>
+            {!seesAllGroups && (
+              <Typography variant='caption' color='text.secondary'>
+                Choose from groups you own, administer, or belong to.
+              </Typography>
+            )}
           </>
         )}
       </Stack>
@@ -1564,7 +1618,7 @@ const ResultPanel: React.FC<{
 
       <Paper variant='outlined' sx={{ p: 3, mb: 3 }}>
         <Typography variant='h6' mb={1}>
-          Wired groups
+          Associated Groups
         </Typography>
         {result.groups.length === 0 ? (
           <Typography color='text.secondary'>None.</Typography>

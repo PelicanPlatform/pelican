@@ -201,10 +201,45 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
         dispatch
       )
   );
+  // The picker has to always be able to render the *current* owner,
+  // even when our candidate-list endpoints leave them out. That can
+  // happen when:
+  //
+  //   - candidate-owners returns the owner only via Group membership;
+  //     a non-user-admin caller looking at a collection whose owner is
+  //     not in any of its admin/ACL groups (rare but possible after a
+  //     transfer) gets a list without the owner.
+  //   - allUsers (server.user_admin path) momentarily lags the
+  //     collection fetch on first render.
+  //   - The owner User row is soft-deleted but the collection still
+  //     points at it.
+  //
+  // Fall back to a synthesized UserOption built from the collection
+  // record itself (it carries `owner` username + `ownerId` slug). The
+  // display label degrades gracefully — username-only — but the
+  // picker shows the truth instead of looking empty.
+  const currentOwnerOption: UserOption | undefined = useMemo(() => {
+    if (!collection?.ownerId) return undefined;
+    return {
+      id: collection.ownerId,
+      username: collection.owner ?? '',
+      displayName: '',
+    };
+  }, [collection?.ownerId, collection?.owner]);
+
   const ownerOptions: UserOption[] = useMemo(() => {
     const src = canListAllUsers ? allUsers : candidateOwners;
-    return src ?? [];
-  }, [canListAllUsers, allUsers, candidateOwners]);
+    const base = src ?? [];
+    if (
+      currentOwnerOption &&
+      !base.some((u) => u.id === currentOwnerOption.id)
+    ) {
+      // Prepend so the current owner is visible at the top of the
+      // dropdown too, not just in the value chip.
+      return [currentOwnerOption, ...base];
+    }
+    return base;
+  }, [canListAllUsers, allUsers, candidateOwners, currentOwnerOption]);
 
   // Local form state — initialised from the loaded collection on
   // first render and reset when the upstream record changes.
@@ -214,6 +249,14 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
   const [ownerID, setOwnerID] = useState('');
   const [adminGroupID, setAdminGroupID] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // initialized flips true after the first sync from the loaded
+  // collection. We block the form (incl. the Owner Autocomplete) until
+  // then because MUI Autocomplete latches its internal inputValue from
+  // the initial `value` prop on mount; mounting with `value={undefined}`
+  // for one frame and *then* updating to the real value leaves the
+  // input visibly empty even though the prop is correct on every
+  // subsequent render.
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
     if (!collection) return;
@@ -222,6 +265,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
     setVisibility(collection.visibility);
     setOwnerID(collection.ownerId ?? '');
     setAdminGroupID(collection.adminId ?? '');
+    setInitialized(true);
   }, [collection]);
 
   // Resolve the admin-group ID to a friendly label for the chip in
@@ -279,7 +323,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
     }
   };
 
-  if (collectionLoading || !collection) {
+  if (collectionLoading || !collection || !initialized) {
     return <Skeleton variant='rounded' height={500} />;
   }
 
@@ -289,8 +333,15 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
         <Link href='/origin/collections/'>Collections</Link>
         <Typography color='text.primary'>{collection.name}</Typography>
       </Breadcrumbs>
-      <Typography variant='h4' mb={1}>
-        Edit collection
+      <Typography variant='h4' mb={0.5} sx={{ wordBreak: 'break-all' }}>
+        {collection.name}
+      </Typography>
+      <Typography
+        variant='body1'
+        mb={1}
+        sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
+      >
+        {collection.namespace}
       </Typography>
       <Typography
         variant='caption'
@@ -298,7 +349,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
         mb={3}
         display='block'
       >
-        <code>{collection.namespace}</code> · created{' '}
+        Edit collection · created{' '}
         {collection.createdAt
           ? new Date(collection.createdAt).toLocaleDateString()
           : 'unknown'}
@@ -369,7 +420,16 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
         */}
         <Autocomplete
           options={ownerOptions}
-          value={ownerOptions.find((u) => u.id === ownerID) ?? undefined}
+          // The fallback to currentOwnerOption keeps the picker truthful
+          // during the brief window after the collection has loaded but
+          // ownerOptions hasn't (so `find` would otherwise return
+          // undefined and render an empty picker for the live owner).
+          value={
+            ownerOptions.find((u) => u.id === ownerID) ??
+            (currentOwnerOption && currentOwnerOption.id === ownerID
+              ? currentOwnerOption
+              : undefined)
+          }
           // disableClearable: every collection must always have an
           // owner; the backend rejects an empty PATCH but the form
           // shouldn't even let the admin try. To hand the
@@ -464,6 +524,16 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
             );
           }}
         />
+        {adminGroup && (
+          <Box mt={1}>
+            <Link
+              href={`/groups/view/?id=${encodeURIComponent(adminGroup.id)}`}
+              style={{ fontSize: '0.875rem' }}
+            >
+              Manage admin group →
+            </Link>
+          </Box>
+        )}
         <TransferViaInvite collectionID={collectionID} />
       </Paper>
 
@@ -597,6 +667,17 @@ const AclSection: React.FC<{
   const [granting, setGranting] = useState(false);
   const [revokingKey, setRevokingKey] = useState<string | null>(null);
 
+  // Index visible groups by name so we can resolve an ACL row's
+  // groupId (a name, per GrantCollectionAcl in database/collection.go)
+  // back to a Group record and link to its management page. Mirrors
+  // the same lookup the owned-collections page does — see
+  // app/origin/owned/page.tsx.
+  const groupByName = React.useMemo(() => {
+    const m = new Map<string, Group>();
+    for (const g of groups) m.set(g.name, g);
+    return m;
+  }, [groups]);
+
   const grant = async () => {
     if (!pickerGroup) return;
     setGranting(true);
@@ -668,9 +749,24 @@ const AclSection: React.FC<{
                   variant={legacy ? 'outlined' : 'filled'}
                   sx={{ textTransform: 'capitalize' }}
                 />
-                <Typography sx={{ fontFamily: 'monospace' }}>
-                  {acl.groupId}
-                </Typography>
+                {(() => {
+                  const grp = groupByName.get(acl.groupId);
+                  return grp ? (
+                    <Link
+                      href={`/groups/view/?id=${encodeURIComponent(grp.id)}`}
+                      style={{
+                        fontFamily: 'monospace',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      {acl.groupId}
+                    </Link>
+                  ) : (
+                    <Typography sx={{ fontFamily: 'monospace' }}>
+                      {acl.groupId}
+                    </Typography>
+                  );
+                })()}
                 {legacy && (
                   <Tooltip title='Legacy owner-role ACL. Ownership now lives on the Collection.OwnerID and AdminID fields; safe to revoke this row once the new fields are populated.'>
                     <Chip label='legacy' size='small' variant='outlined' />

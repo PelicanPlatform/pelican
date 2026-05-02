@@ -233,3 +233,155 @@ func TestInputValidation_UserStatus(t *testing.T) {
 		assert.NotEqual(t, UserStatusInactive, status)
 	})
 }
+
+// mintTestOwnershipInvite is the helper analogue of
+// createTestInviteLink for collection-ownership invites. The
+// production code mints these via CreateCollectionOwnershipInviteLink
+// (which validates the caller's authority); the database-level test
+// here doesn't care about that gate and just needs a known plaintext
+// token tied to a known collection.
+func mintTestOwnershipInvite(t *testing.T, db *gorm.DB, collectionID, createdBy, plaintext string, expiresAt time.Time) *GroupInviteLink {
+	t.Helper()
+	hashed, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	link := GroupInviteLink{
+		ID:           "owner-link-" + plaintext,
+		Kind:         InviteKindCollectionOwnership,
+		CollectionID: collectionID,
+		HashedToken:  string(hashed),
+		CreatedBy:    createdBy,
+		ExpiresAt:    expiresAt,
+		IsSingleUse:  true,
+	}
+	require.NoError(t, db.Create(&link).Error)
+	return &link
+}
+
+// TestRedeemCollectionOwnershipInviteLink_GroupCascade pins #2C from
+// the demo punch list: when a collection's ownership transfers via
+// invite redemption, every group that was minted alongside that
+// collection during onboarding follows it to the new owner.
+//
+// The cascade is gated on (a) the breadcrumb column
+// `created_for_collection_id` being set, AND (b) the group's current
+// owner still being the collection's previous owner. (b) protects
+// groups that have been intentionally re-homed since onboarding.
+func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
+	t.Run("cascades-to-onboarded-group", func(t *testing.T) {
+		db := setupCollectionTestDB(t)
+		// Two real users: the original owner and the redeemer.
+		require.NoError(t, db.Create(&User{
+			ID: "owner-1", Username: "owner1",
+			Sub: "owner1-sub", Issuer: "https://issuer.example.com",
+		}).Error)
+		require.NoError(t, db.Create(&User{
+			ID: "redeemer-1", Username: "redeemer1",
+			Sub: "redeemer1-sub", Issuer: "https://issuer.example.com",
+			Status: UserStatusActive,
+		}).Error)
+
+		// A collection currently owned by owner-1.
+		coll := Collection{
+			ID:        "col-iota",
+			Name:      "iota",
+			Owner:     "owner1",
+			OwnerID:   "owner-1",
+			Namespace: "/iota",
+		}
+		require.NoError(t, db.Create(&coll).Error)
+
+		// Two groups: one minted "for" this collection (should
+		// follow), one standalone (should NOT follow).
+		onboardedGroup := Group{
+			ID:                     "g-iota-readers",
+			Name:                   "iota-readers",
+			CreatedBy:              "owner-1",
+			OwnerID:                "owner-1",
+			CreatedForCollectionID: "col-iota",
+		}
+		require.NoError(t, db.Create(&onboardedGroup).Error)
+		standaloneGroup := Group{
+			ID:        "g-shared",
+			Name:      "shared",
+			CreatedBy: "owner-1",
+			OwnerID:   "owner-1",
+			// CreatedForCollectionID intentionally empty.
+		}
+		require.NoError(t, db.Create(&standaloneGroup).Error)
+
+		// Mint and redeem the ownership-transfer invite.
+		token := "iota-transfer-token"
+		mintTestOwnershipInvite(t, db, "col-iota", "owner-1", token, time.Now().Add(1*time.Hour))
+
+		colID, prevOwner, err := RedeemCollectionOwnershipInviteLink(db, token, "redeemer-1")
+		require.NoError(t, err)
+		assert.Equal(t, "col-iota", colID)
+		assert.Equal(t, "owner-1", prevOwner)
+
+		// Collection ownership flipped to the redeemer.
+		var afterCol Collection
+		require.NoError(t, db.First(&afterCol, "id = ?", "col-iota").Error)
+		assert.Equal(t, "redeemer-1", afterCol.OwnerID)
+		assert.Equal(t, "redeemer1", afterCol.Owner)
+
+		// The onboarded group's ownership followed.
+		var afterOnboarded Group
+		require.NoError(t, db.First(&afterOnboarded, "id = ?", "g-iota-readers").Error)
+		assert.Equal(t, "redeemer-1", afterOnboarded.OwnerID,
+			"groups minted for this collection during onboarding must follow on transfer")
+
+		// The standalone group did NOT.
+		var afterStandalone Group
+		require.NoError(t, db.First(&afterStandalone, "id = ?", "g-shared").Error)
+		assert.Equal(t, "owner-1", afterStandalone.OwnerID,
+			"groups not tied to this collection must keep their original owner")
+	})
+
+	t.Run("does-not-cascade-when-group-was-rehomed", func(t *testing.T) {
+		// If the operator manually transferred the onboarded group
+		// to a third party between onboarding and the eventual
+		// collection-transfer redemption, we must NOT yank it back.
+		// The "AND owner_id = previous owner" clause in the redeem
+		// path is what enforces this.
+		db := setupCollectionTestDB(t)
+		require.NoError(t, db.Create(&User{
+			ID: "owner-2", Username: "owner2",
+			Sub: "owner2-sub", Issuer: "https://issuer.example.com",
+		}).Error)
+		require.NoError(t, db.Create(&User{
+			ID: "redeemer-2", Username: "redeemer2",
+			Sub: "redeemer2-sub", Issuer: "https://issuer.example.com",
+			Status: UserStatusActive,
+		}).Error)
+		require.NoError(t, db.Create(&User{
+			ID: "third-party", Username: "third",
+			Sub: "third-sub", Issuer: "https://issuer.example.com",
+		}).Error)
+
+		coll := Collection{
+			ID: "col-alpha", Name: "alpha",
+			Owner: "owner2", OwnerID: "owner-2", Namespace: "/alpha",
+		}
+		require.NoError(t, db.Create(&coll).Error)
+
+		// Group was minted for this collection but has since been
+		// transferred to a third party.
+		require.NoError(t, db.Create(&Group{
+			ID: "g-alpha-team", Name: "alpha-team",
+			CreatedBy: "owner-2",
+			OwnerID:   "third-party",
+			CreatedForCollectionID: "col-alpha",
+		}).Error)
+
+		token := "alpha-transfer-token"
+		mintTestOwnershipInvite(t, db, "col-alpha", "owner-2", token, time.Now().Add(1*time.Hour))
+
+		_, _, err := RedeemCollectionOwnershipInviteLink(db, token, "redeemer-2")
+		require.NoError(t, err)
+
+		var afterGrp Group
+		require.NoError(t, db.First(&afterGrp, "id = ?", "g-alpha-team").Error)
+		assert.Equal(t, "third-party", afterGrp.OwnerID,
+			"a group already re-homed to a third party must NOT be yanked back by a downstream collection transfer")
+	})
+}
