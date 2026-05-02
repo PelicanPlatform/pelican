@@ -30,19 +30,31 @@ import { NavigationItem } from '@/components/layout/Navigation/Sidebar/Navigatio
 import { NavigationProps } from '@/components/layout/Navigation';
 import { evaluateOrReturn } from '@/helpers/util';
 
-export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
+export const Sidebar = ({
+  config,
+  exportType,
+  role,
+  topOffset = 0,
+}: NavigationProps) => {
   return (
     <Box>
       <Box
         sx={{
           display: 'flex',
           flexDirection: 'row',
-          top: 0,
+          // topOffset reserves space for an out-of-flow banner above
+          // the viewport's true top (admin-session banner). Without
+          // this, the banner sits on top of the Pelican logo at the
+          // sidebar's top edge.
+          top: `${topOffset}px`,
           position: 'fixed',
           zIndex: 2,
         }}
       >
-        <Box height={'100vh'} display={'flex'}>
+        <Box
+          height={`calc(100vh - ${topOffset}px)`}
+          display={'flex'}
+        >
           <Box
             className={styles.header}
             style={{

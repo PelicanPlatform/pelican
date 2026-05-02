@@ -250,7 +250,7 @@ const CollectionCard: React.FC<{
         <Divider sx={{ my: 2 }} />
 
         <Typography variant='subtitle2' gutterBottom>
-          Wired groups
+          Groups
         </Typography>
         {isLoading ? (
           <Skeleton variant='rounded' height={48} />

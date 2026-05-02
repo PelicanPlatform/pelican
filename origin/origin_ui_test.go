@@ -140,6 +140,12 @@ func TestCollectionsAPI(t *testing.T) {
 	require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{
 		"test-user",
 		"test-user-owner",
+		// Used by owner-sees-own-private-collection-in-listing and
+		// admin-group-member-sees-collection-in-listing — both pin
+		// the post-rewrite ListCollections visibility paths
+		// (owner-by-ID, admin-group membership).
+		"owner-listing-user",
+		"ag-owner-user",
 	}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
@@ -565,6 +571,167 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNotFound, recorder.Code,
 			"a non-admin without an ACL must still get 404 on a private collection — admin bypass is for admins only")
+	})
+
+	t.Run("owner-sees-own-private-collection-in-listing", func(t *testing.T) {
+		// Pins the fix for the demo bug where, after an ownership
+		// transfer, the new owner's "my collections" page came up
+		// empty. The cause was that ListCollections only returned
+		// public-or-ACL'd rows; owner-by-ID was never queried, so the
+		// only thing tying a private collection to its owner —
+		// the OwnerID column — was invisible to the listing layer.
+		//
+		// (Per the ownership-model rewrite, CreateCollection no
+		// longer auto-mints a `user-<owner>` AclRoleOwner row, so
+		// the legacy "owner shows up because of their auto-ACL"
+		// shortcut is gone too.)
+		createReq := CreateCollectionReq{
+			Name:       "owner-listing-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		ownerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "owner-listing-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"setup: owner must be able to create the probe (body: %s)", recorder.Body.String())
+		var createResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createResp))
+		probeID := createResp["id"]
+		require.NotEmpty(t, probeID)
+
+		// The owner lists collections — the probe MUST appear.
+		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code,
+			"owner list call must succeed (body: %s)", recorder.Body.String())
+		var listResp []map[string]interface{}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&listResp))
+		seenIDs := make([]string, 0, len(listResp))
+		for _, c := range listResp {
+			if id, ok := c["id"].(string); ok {
+				seenIDs = append(seenIDs, id)
+			}
+		}
+		assert.Contains(t, seenIDs, probeID,
+			"owner must see their own private collection in the listing — without this, post-transfer users get an empty 'my collections' page")
+
+		// Negative control: a different non-admin, non-ACL user
+		// must not see the probe just because the listing also
+		// looks at owner_id.
+		stranger := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "owner-listing-stranger")
+		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: stranger})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var strangerList []map[string]interface{}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&strangerList))
+		for _, c := range strangerList {
+			if id, _ := c["id"].(string); id == probeID {
+				t.Errorf("a non-owner, non-ACL stranger must NOT see %q in their listing", probeID)
+			}
+		}
+	})
+
+	t.Run("admin-group-member-sees-collection-in-listing", func(t *testing.T) {
+		// Members of a collection's admin group have full management
+		// authority on the row; the listing has to include it for
+		// them to actually exercise that authority. Mirrors the
+		// management-side admin-group bypass in
+		// CallerIsCollectionOwnerOrAdmin.
+		//
+		// We exercise both membership-discovery paths: the GroupMember
+		// row (DB-driven) and the cookie-asserted groups slice
+		// (IdP-driven). One subtest each would be ideal but the
+		// existing test scaffolding gives us a single router; we
+		// cover the GroupMember path here and the cookie path
+		// implicitly via the existing test-collection-acls suite.
+
+		// Step 1: create a group.
+		groupName := "ag-listing-group"
+		gReq := map[string]string{"name": groupName, "description": "admin-group listing probe"}
+		body, _ := json.Marshal(gReq)
+		req, _ := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		adminTok := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminTok})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, "group create: %s", recorder.Body.String())
+		var grpResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&grpResp))
+		groupID := grpResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Step 2: insert a GroupMember row directly. Going through
+		// the API would require a second token + the membership flow;
+		// the listing-visibility behavior we want to pin is
+		// independent of how the membership got there.
+		require.NoError(t, database.ServerDatabase.Create(&database.GroupMember{
+			GroupID: groupID,
+			UserID:  "ag-member-user",
+		}).Error)
+
+		// Step 3: the collection-owner creates a private collection
+		// and sets that group as the AdminID.
+		colReq := CreateCollectionReq{
+			Name:       "ag-listing-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, _ = json.Marshal(colReq)
+		req, _ = http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		ownerTok := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "ag-owner-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerTok})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, "create collection: %s", recorder.Body.String())
+		var colResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
+		colID := colResp["id"]
+		require.NotEmpty(t, colID)
+
+		// Set the admin group on the collection.
+		patchReq := UpdateCollectionReq{AdminID: &groupID}
+		body, _ = json.Marshal(patchReq)
+		req, _ = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+colID, bytes.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerTok})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code, "set adminId: %s", recorder.Body.String())
+
+		// Step 4: the GroupMember user lists collections. The probe
+		// MUST appear — they're an admin-group member, even though
+		// they have no read ACL row and the collection is private.
+		memberTok := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "ag-member-user")
+		req, _ = http.NewRequest("GET", "/api/v1.0/origin_ui/collections", nil)
+		req.AddCookie(&http.Cookie{Name: "login", Value: memberTok})
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var memberList []map[string]interface{}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&memberList))
+		seenIDs := make([]string, 0, len(memberList))
+		for _, c := range memberList {
+			if id, ok := c["id"].(string); ok {
+				seenIDs = append(seenIDs, id)
+			}
+		}
+		assert.Contains(t, seenIDs, colID,
+			"admin-group member must see the collection in their listing")
 	})
 
 	t.Run("create-collection-with-invalid-visibility", func(t *testing.T) {

@@ -36,6 +36,7 @@ import {
 import { UserIdentity } from '@/types';
 import useServiceSWR from '@/hooks/useServiceSWR';
 import useSWR from 'swr';
+import { getUser } from '@/helpers/login';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import ConfirmButton from '@chtc/web-components/ConfirmButton';
 import InlineConfirmButton from '@/components/InlineConfirmButton';
@@ -54,6 +55,15 @@ const Page = () => {
     [userId ?? undefined],
     { suspense: true }
   );
+
+  // Caller's role drives the visibility of the scopes panel below.
+  // Granting/revoking a user-level scope is system-admin-only at the
+  // backend (see web_ui/ui.go around handleGrantUserScope), so the
+  // panel is meaningless to a user-admin who could otherwise reach
+  // this page via server.user_admin. Hiding it is purely a UX gate;
+  // the API still rejects.
+  const { data: whoami } = useSWR('getUser', getUser);
+  const isSystemAdmin = whoami?.authenticated && whoami.role === 'admin';
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -103,8 +113,12 @@ const Page = () => {
         aupVersion={user?.aupVersion}
         aupAgreedAt={user?.aupAgreedAt}
       />
-      <Divider sx={{ my: 4 }} />
-      <ScopesSection userId={userId} />
+      {isSystemAdmin && (
+        <>
+          <Divider sx={{ my: 4 }} />
+          <ScopesSection userId={userId} />
+        </>
+      )}
       <Divider sx={{ my: 4 }} />
       <IdentitiesSection userId={userId} />
     </>

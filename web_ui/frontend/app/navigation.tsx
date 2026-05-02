@@ -143,6 +143,7 @@ const NavigationConfig: NavigationConfiguration = {
       title: 'Globus Configurations',
       href: '/origin/globus/',
       icon: <Public />,
+      allowedRoles: ['admin'],
       allowedExportTypes: ['globus'],
     },
     {
