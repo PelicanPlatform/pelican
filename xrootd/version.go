@@ -22,7 +22,9 @@ package xrootd
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
@@ -33,19 +35,65 @@ import (
 // This version must be kept in sync with the version specified in .goreleaser.yml (two locations: RPM and DEB dependencies).
 const MinXrootdVersion = "5.8.2"
 
+var (
+	xrootdVersionOnce   sync.Once
+	xrootdVersionOutput string
+	xrootdVersionErr    error
+)
+
+// ResetXrootdVersionForTesting resets the cached XRootD version output.
+// This should only be used in tests.
+func ResetXrootdVersionForTesting() {
+	xrootdVersionOnce = sync.Once{}
+	xrootdVersionOutput = ""
+	xrootdVersionErr = nil
+}
+
+// getXrootdVersionOutput runs 'xrootd -v' once and caches the result.
+// Subsequent calls return the cached output without re-executing the command.
+func getXrootdVersionOutput() (string, error) {
+	xrootdVersionOnce.Do(func() {
+		// Execute xrootd -v to get version information
+		// Note: xrootd outputs version to stderr, not stdout
+		cmd := exec.Command("xrootd", "-v")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			xrootdVersionErr = err
+			return
+		}
+		xrootdVersionOutput = strings.TrimSpace(string(output))
+	})
+	return xrootdVersionOutput, xrootdVersionErr
+}
+
+// GetXrootdMajorVersion returns the major version number of the installed XRootD
+// (e.g., "5" or "6"). Returns an empty string if the version cannot be determined.
+// The result is cached after the first call.
+func GetXrootdMajorVersion() string {
+	output, err := getXrootdVersionOutput()
+	if err != nil || output == "" {
+		return ""
+	}
+
+	re := regexp.MustCompile(`v?(\d+)\.\d+\.\d+`)
+	matches := re.FindStringSubmatch(output)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
 /*
 * CheckXrootdVersion checks if the installed XRootD version meets the minimum requirement.
 * It executes 'xrootd -v' to retrieve the version and compares it against MinXrootdVersion.
+* The xrootd binary is only invoked once; subsequent calls use the cached result.
 * Returns an error if:
 *   - The xrootd binary is not found in PATH
 *   - The version cannot be determined
 *   - The version is below the minimum requirement
  */
 func CheckXrootdVersion() error {
-	// Execute xrootd -v to get version information
-	// Note: xrootd outputs version to stderr, not stdout
-	cmd := exec.Command("xrootd", "-v")
-	output, err := cmd.CombinedOutput()
+	output, err := getXrootdVersionOutput()
 	if err != nil {
 		// Check if this is a "command not found" error
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -60,20 +108,19 @@ func CheckXrootdVersion() error {
 	}
 
 	// Parse the version output
-	versionStr := strings.TrimSpace(string(output))
-	log.Debugf("XRootD version output: %s", versionStr)
+	log.Debugf("XRootD version output: %s", output)
 
 	// Remove leading 'v' if present (e.g., "v5.8.2" -> "5.8.2")
-	versionStr = strings.TrimPrefix(versionStr, "v")
+	versionStr := strings.TrimPrefix(output, "v")
 
 	// Parse the version string
-	xrootdVersion, err := version.NewVersion(versionStr)
+	xrootdVer, err := version.NewVersion(versionStr)
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse XRootD version string '%s'. Please ensure XRootD is properly installed", versionStr)
 	}
 
 	// Normalize to core version (strips pre-release suffixes like -rc1, +git123)
-	xrootdVersion = xrootdVersion.Core()
+	xrootdVer = xrootdVer.Core()
 
 	// Parse the minimum required version
 	requiredVersion, err := version.NewVersion(MinXrootdVersion)
@@ -83,13 +130,13 @@ func CheckXrootdVersion() error {
 	}
 
 	// Compare versions
-	if xrootdVersion.LessThan(requiredVersion) {
+	if xrootdVer.LessThan(requiredVersion) {
 		return errors.Errorf("XRootD version %s is insufficient (minimum required: %s). "+
 			"Please upgrade XRootD to version %s or later. "+
 			"This requirement is necessary for proper operation of Pelican Cache and Origin servers.",
-			xrootdVersion.String(), MinXrootdVersion, MinXrootdVersion)
+			xrootdVer.String(), MinXrootdVersion, MinXrootdVersion)
 	}
 
-	log.Debugf("XRootD version check passed: %s >= %s", xrootdVersion.String(), MinXrootdVersion)
+	log.Debugf("XRootD version check passed: %s >= %s", xrootdVer.String(), MinXrootdVersion)
 	return nil
 }
