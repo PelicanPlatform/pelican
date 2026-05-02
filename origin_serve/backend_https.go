@@ -19,7 +19,6 @@
 package origin_serve
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -737,94 +736,161 @@ func (f *httpsReadFile) Stat() (os.FileInfo, error) {
 }
 
 // ---------------------------------------------------------------------------
-// httpsWriteFile — write file that PUTs to the upstream server on Close.
-// Uses a mutex to protect concurrent appends to the buffer.
+// httpsWriteFile — write file that streams PUTs to the upstream server.
+//
+// Bytes flow Write -> io.Pipe -> http.Request.Body -> upstream. We do NOT
+// buffer the whole upload in memory anymore; multi-GB writes therefore
+// no longer balloon RSS in proportion to the body size.
+//
+// Lifecycle:
+//   - newHTTPSWriteFile only records intent; nothing happens on the wire.
+//   - The first Write (or Close, for an empty PUT) triggers ensureStarted,
+//     which optionally pre-flights MKCOL for missing parents and then kicks
+//     off a goroutine that runs the upstream PUT with the pipe reader as
+//     its body. Subsequent Writes feed the pipe.
+//   - Close shuts the pipe writer (signaling EOF to the body) and waits
+//     for the PUT goroutine to return its status.
+//
+// Auto-mkdir trade-off: the old code retried on 409/404, but with a
+// streamed body the request body is already consumed by the time we'd
+// know we need to retry. So when auto-mkdir is on for a WebDAV upstream
+// we Stat/MKCOL the parents up front and skip the retry path. For
+// plain-HTTP upstreams (or auto-mkdir disabled) we just PUT and surface
+// whatever status the server returns.
 // ---------------------------------------------------------------------------
 
 type httpsWriteFile struct {
-	ctx    context.Context
-	fs     *httpsFileSystem
-	name   string
+	ctx  context.Context
+	fs   *httpsFileSystem
+	name string
+
+	// startOnce gates the lazy spawn of the PUT goroutine. Subsequent
+	// Writes / a single Close all funnel through it.
+	startOnce sync.Once
+	startErr  error // non-nil if pre-flight (e.g. ensureParentDirs) failed
+
+	// pipeW is the local end the WebDAV handler's bytes are written into;
+	// the goroutine consumes the matching reader as the request body.
+	pipeW *io.PipeWriter
+	// putErrCh receives exactly one value: the PUT goroutine's terminal
+	// error (or nil on success). Buffered so the goroutine never blocks.
+	putErrCh chan error
+
+	// mu guards offset; serializes Stat/Seek against Write.
 	mu     sync.Mutex
-	buf    []byte
 	offset int64
+	closed bool
 }
 
 func newHTTPSWriteFile(ctx context.Context, fs *httpsFileSystem, name string) *httpsWriteFile {
 	return &httpsWriteFile{ctx: ctx, fs: fs, name: name}
 }
 
+// ensureStarted lazily kicks off the upstream PUT. It is safe to call
+// repeatedly; only the first call does work. If the pre-flight mkdir
+// fails, the cached startErr is returned to every caller.
+func (f *httpsWriteFile) ensureStarted() error {
+	f.startOnce.Do(func() {
+		// When auto-mkdir is on with a WebDAV upstream we cannot rely on
+		// the old retry-on-409/404 path -- the streamed body is already
+		// consumed by the time we know we need a retry. Pay the Stat
+		// cost up front instead. For the common case the parent already
+		// exists and Stat short-circuits cheaply.
+		if f.fs.enableAutoMkdir && f.fs.backendMode == BackendModeWebDAV {
+			if err := f.fs.ensureParentDirs(f.ctx, f.name); err != nil {
+				f.startErr = fmt.Errorf("auto-mkdir before HTTPS PUT failed: %w", err)
+				return
+			}
+		}
+
+		pipeR, pipeW := io.Pipe()
+		f.pipeW = pipeW
+		f.putErrCh = make(chan error, 1)
+
+		urlStr := f.fs.upstreamURL(f.name)
+		req, err := http.NewRequestWithContext(f.ctx, http.MethodPut, urlStr, pipeR)
+		if err != nil {
+			_ = pipeR.CloseWithError(err)
+			f.startErr = err
+			return
+		}
+		if token := f.fs.getToken(f.ctx); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		if ph := server_utils.PelicanHeadersFromContext(f.ctx); ph != nil {
+			if ph.JobId != "" {
+				req.Header.Set("X-Pelican-JobId", ph.JobId)
+			}
+			if ph.Timeout != "" {
+				req.Header.Set("X-Pelican-Timeout", ph.Timeout)
+			}
+		}
+		// Honor a Content-Length hint from the request context so the wire
+		// stays non-chunked when the size is known up front. With no hint
+		// we leave ContentLength == -1 and the transport will use chunked
+		// transfer-encoding.
+		if hint := contentLengthFromCtx(f.ctx); hint >= 0 {
+			req.ContentLength = hint
+		}
+
+		go func() {
+			resp, err := f.fs.httpClient.Do(req)
+			if err != nil {
+				// Wake any blocked Write with the same error so the caller
+				// learns about the failure synchronously.
+				_ = pipeR.CloseWithError(err)
+				f.putErrCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			switch resp.StatusCode {
+			case http.StatusOK, http.StatusCreated, http.StatusNoContent:
+				f.putErrCh <- nil
+				return
+			}
+			log.Debugf("HTTPS PUT to %s response (%d): %s", urlStr, resp.StatusCode, string(body))
+			putErr := fmt.Errorf("https put failed with status %d", resp.StatusCode)
+			_ = pipeR.CloseWithError(putErr)
+			f.putErrCh <- putErr
+		}()
+	})
+	return f.startErr
+}
+
 func (f *httpsWriteFile) Write(p []byte) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.buf = append(f.buf, p...)
-	f.offset += int64(len(p))
-	return len(p), nil
+	if err := f.ensureStarted(); err != nil {
+		return 0, err
+	}
+	n, err := f.pipeW.Write(p)
+	if n > 0 {
+		f.mu.Lock()
+		f.offset += int64(n)
+		f.mu.Unlock()
+	}
+	return n, err
 }
 
 func (f *httpsWriteFile) Close() error {
-	// NOTE: This file buffers the entire upload in memory before issuing
-	// the PUT. For multi-gigabyte writes that is a memory bomb / DoS vector
-	// in production -- a real fix should stream via io.Pipe and a chunked
-	// PUT (or use a different write file for large transfers). We skirt
-	// double-copying the buffer here, but the underlying memory profile
-	// is still bounded only by client behavior.
 	f.mu.Lock()
-	data := f.buf
-	f.buf = nil // hand ownership to the request body; subsequent Writes are forbidden post-Close
-	f.mu.Unlock()
-
-	urlStr := f.fs.upstreamURL(f.name)
-	headers := map[string]string{
-		"Content-Length": fmt.Sprintf("%d", len(data)),
-	}
-
-	doPut := func() (*http.Response, error) {
-		// bytes.NewReader avoids the []byte->string->Reader copy chain.
-		return f.fs.doRequest(f.ctx, http.MethodPut, urlStr, bytes.NewReader(data), headers)
-	}
-
-	resp, err := doPut()
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusNoContent {
+	if f.closed {
+		f.mu.Unlock()
 		return nil
 	}
+	f.closed = true
+	f.mu.Unlock()
 
-	respBody, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	// If auto-mkdir is enabled and the server indicates a missing parent
-	// directory (409 Conflict in WebDAV, or 404 Not Found), create the
-	// directory tree and retry the PUT.
-	if f.fs.enableAutoMkdir && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound) {
-		log.Debugf("HTTPS PUT to %s returned %d; attempting auto-mkdir for parent directories", urlStr, resp.StatusCode)
-
-		if mkdirErr := f.fs.ensureParentDirs(f.ctx, f.name); mkdirErr != nil {
-			log.Warningf("Auto-mkdir failed for %s: %v", f.name, mkdirErr)
-			return fmt.Errorf("https put failed with status %d (auto-mkdir also failed: %v)", resp.StatusCode, mkdirErr)
-		}
-
-		// Retry the PUT after creating parent directories.
-		retryResp, retryErr := doPut()
-		if retryErr != nil {
-			return retryErr
-		}
-		defer retryResp.Body.Close()
-
-		if retryResp.StatusCode == http.StatusOK || retryResp.StatusCode == http.StatusCreated || retryResp.StatusCode == http.StatusNoContent {
-			return nil
-		}
-		retryBody, _ := io.ReadAll(retryResp.Body)
-		log.Debugf("HTTPS PUT retry response (%d): %s", retryResp.StatusCode, string(retryBody))
-		return fmt.Errorf("https put failed with status %d after auto-mkdir", retryResp.StatusCode)
+	// Even an empty PUT (no Write calls) must hit the wire so the upstream
+	// observes a zero-byte file. ensureStarted is idempotent.
+	if err := f.ensureStarted(); err != nil {
+		return err
 	}
-
-	log.Debugf("HTTPS PUT response (%d): %s", resp.StatusCode, string(respBody))
-	return fmt.Errorf("https put failed with status %d", resp.StatusCode)
+	// Signal EOF to the request body and wait for the PUT goroutine to
+	// surface the upstream's status.
+	if err := f.pipeW.Close(); err != nil {
+		return err
+	}
+	return <-f.putErrCh
 }
 
 func (f *httpsWriteFile) Read(_ []byte) (int, error) {
@@ -861,11 +927,11 @@ func (f *httpsWriteFile) Readdir(_ int) ([]os.FileInfo, error) {
 
 func (f *httpsWriteFile) Stat() (os.FileInfo, error) {
 	f.mu.Lock()
-	n := len(f.buf)
+	n := f.offset
 	f.mu.Unlock()
 	return &httpsFileInfo{
 		name:  path.Base(f.name),
-		size:  int64(n),
+		size:  n,
 		isDir: false,
 	}, nil
 }
