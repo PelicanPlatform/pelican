@@ -19,6 +19,7 @@
 package origin_serve
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -222,8 +224,10 @@ func TestHTTPSWriteFile_NoOpSeek(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), pos)
 
-	// Write some data
-	_, _ = wf.Write([]byte("hello"))
+	// Pretend 5 bytes were streamed through. We bypass Write here because
+	// the streaming impl needs a real upstream + fs to start the PUT
+	// goroutine; this test only exercises Seek's no-op semantics.
+	wf.offset = 5
 
 	// Seeking to current offset (5) should succeed
 	pos, err = wf.Seek(5, io.SeekStart)
@@ -246,11 +250,153 @@ func TestHTTPSWriteFile_NoOpSeek(t *testing.T) {
 
 func TestHTTPSWriteFile_Stat(t *testing.T) {
 	wf := &httpsWriteFile{name: "/test.txt"}
-	wf.buf = []byte("hello")
+	// Stat reports the cumulative bytes accepted by the pipe; the
+	// streaming impl no longer keeps a buffer field, but it tracks the
+	// offset so size reporting still works.
+	wf.offset = 5
 	info, err := wf.Stat()
 	require.NoError(t, err)
 	assert.Equal(t, "test.txt", info.Name())
 	assert.Equal(t, int64(5), info.Size())
+}
+
+// TestHTTPSWriteFile_Streams asserts the streaming behavior of Write/Close:
+// bytes flow to the wire as Write is called, not buffered until Close, so a
+// multi-GB upload no longer requires multi-GB of RSS. We run with a body
+// large enough that any in-memory buffering would be obvious, and we use
+// a server that records each chunk and unblocks the test once it has
+// observed bytes BEFORE Close was called.
+func TestHTTPSWriteFile_Streams(t *testing.T) {
+	const chunkSize = 64 * 1024
+	const numChunks = 16
+
+	receivedFirstChunk := make(chan struct{}, 1)
+	var totalBytes int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodOptions:
+			w.Header().Set("Allow", "GET, PUT, OPTIONS")
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPut:
+			defer r.Body.Close()
+			buf := make([]byte, chunkSize)
+			for {
+				n, err := r.Body.Read(buf)
+				if n > 0 {
+					if totalBytes == 0 {
+						// Signal the test that the upstream has actually
+						// received bytes -- proving Write is flushing,
+						// not buffering until Close.
+						select {
+						case receivedFirstChunk <- struct{}{}:
+						default:
+						}
+					}
+					totalBytes += int64(n)
+				}
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL: server.URL,
+		TokenMode:  HTTPSTokenNone,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	wf, err := backend.FileSystem().OpenFile(context.Background(), "/big.bin", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+
+	// Stream the body chunk-by-chunk. We deliberately wait between
+	// chunks long enough that the upstream-side handler has time to
+	// observe the first chunk; if the implementation regressed to
+	// buffering until Close, that would never happen.
+	chunk := bytes.Repeat([]byte{'A'}, chunkSize)
+	for i := 0; i < numChunks; i++ {
+		n, werr := wf.Write(chunk)
+		require.NoError(t, werr)
+		require.Equal(t, chunkSize, n)
+		if i == 0 {
+			// Allow the upstream goroutine time to read the first chunk
+			// before we issue the rest. With the streaming impl the
+			// channel fires; if not, the select below times out.
+			select {
+			case <-receivedFirstChunk:
+			case <-time.After(5 * time.Second):
+				t.Fatal("upstream never saw bytes before Close; Write is buffering instead of streaming")
+			}
+		}
+	}
+	require.NoError(t, wf.Close())
+	assert.Equal(t, int64(chunkSize*numChunks), totalBytes)
+}
+
+// TestHTTPSWriteFile_EmptyPUT verifies that Close() with no preceding
+// Write still issues a zero-byte PUT (correct webdav.FileSystem semantics
+// for creating an empty file).
+func TestHTTPSWriteFile_EmptyPUT(t *testing.T) {
+	var sawPUT bool
+	var receivedBytes int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodOptions:
+			w.Header().Set("Allow", "GET, PUT, OPTIONS")
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPut:
+			sawPUT = true
+			body, _ := io.ReadAll(r.Body)
+			receivedBytes = len(body)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL: server.URL,
+		TokenMode:  HTTPSTokenNone,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	wf, err := backend.FileSystem().OpenFile(context.Background(), "/empty.bin", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+	assert.True(t, sawPUT, "Close on a never-written file must still issue a zero-byte PUT")
+	assert.Equal(t, 0, receivedBytes)
+}
+
+// TestHTTPSWriteFile_PreflightMkdirOn409 verifies that with auto-mkdir
+// enabled, the parent directory is created via MKCOL before the streamed
+// PUT runs (so a 409-on-PUT is never seen even though we cannot retry
+// the streamed body).
+func TestHTTPSWriteFile_PreflightMkdirOn409(t *testing.T) {
+	server, files := mockWebDAVServer()
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL:      server.URL,
+		TokenMode:       HTTPSTokenNone,
+		EnableAutoMkdir: true,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	// /deep/dir does not exist; without pre-flight MKCOL the streamed
+	// PUT would receive 409 with no way to retry.
+	wf, err := backend.FileSystem().OpenFile(context.Background(), "/deep/dir/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("streamed"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+	assert.Equal(t, []byte("streamed"), files["/deep/dir/file.txt"])
 }
 
 // ---------------------------------------------------------------------------
