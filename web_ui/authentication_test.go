@@ -925,11 +925,11 @@ func TestAdminAuthHandler(t *testing.T) {
 }
 
 // TestUserAdminAuthHandler pins the route gate's contract: a caller
-// holding EITHER server.web_admin or server.user_admin clears the
+// holding EITHER server.admin or server.user_admin clears the
 // door, anyone else gets 403. This is the gate that the user-report
 // "added a group with server.user_admin scope, gave the user no
 // powers" was tripping on — the route used to use AdminAuthHandler
-// (web_admin only) and a user-admin would 403 before any handler
+// (admin only) and a user-admin would 403 before any handler
 // could even read the request.
 //
 // Group-membership-derived scope grants need a backing DB, so we
@@ -973,7 +973,7 @@ func TestUserAdminAuthHandler(t *testing.T) {
 			expectedMsg:  "Login required to view this page",
 		},
 		{
-			name: "config-derived web_admin clears the gate",
+			name: "config-derived admin clears the gate",
 			setup: func(t *testing.T, ctx *gin.Context) {
 				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
 				ctx.Set("User", "alice")
@@ -1061,7 +1061,7 @@ func TestUserAdminAuthHandler(t *testing.T) {
 			name: "config-derived collection_admin alone is NOT user_admin",
 			setup: func(t *testing.T, ctx *gin.Context) {
 				// collection_admin is a sibling scope, not a parent —
-				// only web_admin implies user_admin. A pure
+				// only admin implies user_admin. A pure
 				// collection-admin must be refused at this gate.
 				require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{"frank"}))
 				ctx.Set("User", "frank")

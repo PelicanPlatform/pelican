@@ -40,7 +40,7 @@ export interface CollectionSummary {
   ownerCard?: CollectionUserCard;
   adminCard?: CollectionGroupCard;
   // Server-computed: true when the calling user can PATCH this row
-  // (owner, admin-group member, or server.collection_admin / web_admin
+  // (owner, admin-group member, or server.collection_admin / admin
   // holder). Lets the listing UI hide edit affordances on rows where
   // a save would 403, without the frontend having to re-implement
   // the membership check. Always present from the backend.

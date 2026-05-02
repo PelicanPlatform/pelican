@@ -128,7 +128,7 @@ func TestCollectionsAPI(t *testing.T) {
 
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 	// The cookie path on POST /collections / GET /collections (admin
-	// list) now requires server.web_admin or server.collection_admin
+	// list) now requires server.admin or server.collection_admin
 	// in the caller's effective scope set — without this, every
 	// logged-in user could create or list every collection. Bearer
 	// API tokens with explicit collection.create still pass through
@@ -225,7 +225,7 @@ func TestCollectionsAPI(t *testing.T) {
 
 	t.Run("unprivileged-cookie-cannot-create-collection", func(t *testing.T) {
 		// Pins the security contract: a logged-in user without
-		// server.web_admin or server.collection_admin must not be
+		// server.admin or server.collection_admin must not be
 		// able to create a collection through the web UI cookie path.
 		// Before this gate existed, every cookie carried web_ui.access
 		// and the verify path fell through to "authenticated → ok".

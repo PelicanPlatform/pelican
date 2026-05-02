@@ -159,7 +159,7 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 
 	// 2. Config-derived grants.
 	if identity.Username == builtinAdminUsername {
-		add(token_scopes.Server_WebAdmin)
+		add(token_scopes.Server_Admin)
 	}
 
 	addByUsernameMatch := func(list []string, scope token_scopes.TokenScope) {
@@ -188,21 +188,21 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 	}
 
 	if param.Server_UIAdminUsers.IsSet() {
-		addByUsernameMatch(param.Server_UIAdminUsers.GetStringSlice(), token_scopes.Server_WebAdmin)
+		addByUsernameMatch(param.Server_UIAdminUsers.GetStringSlice(), token_scopes.Server_Admin)
 	}
 	if param.Server_AdminGroups.IsSet() {
-		addByGroupMatch(param.Server_AdminGroups.GetStringSlice(), token_scopes.Server_WebAdmin)
+		addByGroupMatch(param.Server_AdminGroups.GetStringSlice(), token_scopes.Server_Admin)
 	}
 	addByUsernameMatch(param.Server_UserAdminUsers.GetStringSlice(), token_scopes.Server_UserAdmin)
 	addByGroupMatch(param.Server_UserAdminGroups.GetStringSlice(), token_scopes.Server_UserAdmin)
 	addByUsernameMatch(param.Server_CollectionAdminUsers.GetStringSlice(), token_scopes.Server_CollectionAdmin)
 	addByGroupMatch(param.Server_CollectionAdminGroups.GetStringSlice(), token_scopes.Server_CollectionAdmin)
 
-	// 3. Implications. server.web_admin is the master scope; per the
+	// 3. Implications. server.admin is the master scope; per the
 	//    description in docs/scopes.yaml it implies the other two.
 	//    Apply this AFTER both sources so the implication holds
-	//    regardless of where Server_WebAdmin came from.
-	if _, ok := seen[token_scopes.Server_WebAdmin]; ok {
+	//    regardless of where Server_Admin came from.
+	if _, ok := seen[token_scopes.Server_Admin]; ok {
 		add(token_scopes.Server_UserAdmin)
 		add(token_scopes.Server_CollectionAdmin)
 	}
@@ -403,7 +403,7 @@ func handleListGroupScopes(ctx *gin.Context) {
 }
 
 // handleGrantGroupScope assigns a scope to a group. System-admin-only
-// at the route level: granting Server_WebAdmin (or any management
+// at the route level: granting Server_Admin (or any management
 // scope) to a group lets every member of that group act as an admin,
 // so the privilege boundary has to be tight.
 func handleGrantGroupScope(ctx *gin.Context) {

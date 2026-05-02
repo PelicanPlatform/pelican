@@ -105,7 +105,7 @@ const formatUserPill = (
 
 const Page = () => (
   // The backend's PATCH /collections/:id permits the row's owner,
-  // admin-group members, AND server.collection_admin / web_admin
+  // admin-group members, AND server.collection_admin / admin
   // holders. Gating on collection_admin alone here would lock out an
   // ordinary owner trying to edit *their own* collection — the
   // permission depends on the row, which we can't know at gate time.
