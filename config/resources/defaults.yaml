@@ -106,6 +106,9 @@ Origin:
   ScitokensUnauthenticatedUser: nobody
   IssuerMode: oa4mp
   SelfTestInterval: 15s
+  GlobusIssuerURL: https://auth.globus.org/
+  GlobusTransferAPIBaseUrl: https://transfer.api.globusonline.org/v0.10/
+  Globusv2TokenRefreshInterval: 5m
   SSH:
     AuthMethods: ["publickey", "agent", "keyboard-interactive", "password"]
     ChallengeTimeout: 1m

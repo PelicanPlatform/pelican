@@ -1,0 +1,694 @@
+/***************************************************************
+ *
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package origin_serve
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	log "github.com/sirupsen/logrus"
+	"gocloud.dev/blob"
+	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
+	_ "gocloud.dev/blob/gcsblob"   // register gs:// URL opener
+	_ "gocloud.dev/blob/memblob"   // register mem:// URL opener (useful for testing)
+	_ "gocloud.dev/blob/s3blob"    // register s3:// URL opener
+	"gocloud.dev/gcerrors"
+	"golang.org/x/net/webdav"
+
+	"github.com/pelicanplatform/pelican/server_utils"
+)
+
+// ---------------------------------------------------------------------------
+// blobBackend implements server_utils.OriginBackend using gocloud.dev/blob.
+// Supports S3, GCS (gs://), and Azure (azblob://) via driver imports.
+// ---------------------------------------------------------------------------
+
+type blobBackend struct {
+	bucket *blob.Bucket
+	fs     *blobFileSystem
+}
+
+// BlobBackendOptions groups the parameters needed to construct a blob backend.
+// There are two ways to open a bucket:
+//  1. Set BlobURL to a gocloud.dev URL (e.g. "s3://bucket", "gs://bucket", "azblob://container").
+//  2. Set the S3-specific fields (ServiceURL, Region, Bucket, etc.) for backwards-compatible S3 config.
+//
+// If BlobURL is set it takes precedence.
+type BlobBackendOptions struct {
+	// Generic gocloud.dev/blob URL — takes precedence over the S3-specific fields.
+	BlobURL string
+
+	// S3-specific fields (used only when BlobURL is empty).
+	ServiceURL string // e.g. "https://s3.us-east-1.amazonaws.com"
+	Region     string
+	Bucket     string
+	AccessKey  string
+	SecretKey  string
+	URLStyle   string // "path" or "virtual" (default: "path")
+
+	// Common fields.
+	StoragePrefix string // optional key prefix within the bucket/container
+}
+
+// buildS3BlobURL constructs an s3:// gocloud URL from the backward-compatible
+// S3-specific fields in BlobBackendOptions.
+func buildS3BlobURL(opts BlobBackendOptions) (string, error) {
+	if opts.Bucket == "" {
+		return "", fmt.Errorf("S3 bucket name is required when BlobURL is not set")
+	}
+
+	u := &url.URL{
+		Scheme: "s3",
+		Host:   opts.Bucket,
+	}
+	q := u.Query()
+
+	if opts.Region != "" {
+		q.Set("region", opts.Region)
+	}
+
+	if opts.ServiceURL != "" {
+		q.Set("endpoint", opts.ServiceURL)
+	}
+
+	urlStyle := strings.ToLower(opts.URLStyle)
+	if urlStyle != "virtual" {
+		q.Set("use_path_style", "true")
+	}
+
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// newBlobBackend opens a gocloud.dev/blob bucket according to opts and returns
+// a blobBackend.
+func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
+	var (
+		bucket *blob.Bucket
+		err    error
+	)
+
+	blobURL := opts.BlobURL
+	if blobURL == "" {
+		// Build an s3:// URL from the backward-compatible S3-specific fields.
+		blobURL, err = buildS3BlobURL(opts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// If per-export S3 credentials were provided, set them in the environment
+	// so the gocloud AWS credential chain picks them up.
+	//
+	// FIXME(deploy): this mutates global process environment, which has two
+	// real-world consequences in production:
+	//   1. With multiple S3 backends configured against different accounts,
+	//      whichever export is initialized last "wins" -- subsequent SDK
+	//      calls (including from other backends, presigners, debug hooks,
+	//      and any subprocess we spawn) see the last-set credentials.
+	//   2. Because os.Setenv writes to the global env, it leaks into any
+	//      child process inheriting our env (notably the xrootd workers in
+	//      mixed deployments).
+	// The proper fix is to construct an *s3.Client with explicit
+	// aws.Credentials and call s3blob.OpenBucket(ctx, client, bucket, opts)
+	// directly instead of going through blob.OpenBucket(URL). Until then,
+	// per-export AccessKey/SecretKey is only safe when one S3 export is
+	// configured per origin process.
+	if opts.AccessKey != "" && opts.SecretKey != "" {
+		os.Setenv("AWS_ACCESS_KEY_ID", opts.AccessKey)
+		os.Setenv("AWS_SECRET_ACCESS_KEY", opts.SecretKey)
+	} else if strings.HasPrefix(blobURL, "s3://") {
+		// No credentials supplied — request anonymous access unless the env
+		// already has credentials configured.
+		if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+			// Append anonymous=true so the SDK doesn't try IAM, etc.
+			if strings.Contains(blobURL, "?") {
+				blobURL += "&anonymous=true"
+			} else {
+				blobURL += "?anonymous=true"
+			}
+		}
+	}
+
+	log.Infof("Opening blob bucket via URL: %s", blobURL)
+	bucket, err = blob.OpenBucket(context.Background(), blobURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open blob bucket from URL %q: %w", blobURL, err)
+	}
+
+	// If a storagePrefix is configured, scope all operations to it.
+	prefix := strings.TrimPrefix(opts.StoragePrefix, "/")
+	if prefix != "" {
+		prefix = strings.TrimSuffix(prefix, "/") + "/"
+		bucket = blob.PrefixedBucket(bucket, prefix)
+	}
+
+	fs := &blobFileSystem{bucket: bucket}
+	return &blobBackend{bucket: bucket, fs: fs}, nil
+}
+
+func (b *blobBackend) CheckAvailability() error {
+	ok, err := b.bucket.IsAccessible(context.Background())
+	if err != nil {
+		return fmt.Errorf("blob bucket accessibility check failed: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("blob bucket is not accessible")
+	}
+	return nil
+}
+
+func (b *blobBackend) FileSystem() webdav.FileSystem { return b.fs }
+func (b *blobBackend) Checksummer() server_utils.OriginChecksummer {
+	return &blobChecksummer{bucket: b.bucket}
+}
+
+// Close cleans up the underlying bucket handle.
+func (b *blobBackend) Close() error {
+	return b.bucket.Close()
+}
+
+// ---------------------------------------------------------------------------
+// blobChecksummer — implements OriginChecksummer using blob Attributes.
+// Returns MD5 digests (RFC 3230) when the provider supplies them.
+// ---------------------------------------------------------------------------
+
+type blobChecksummer struct {
+	bucket *blob.Bucket
+}
+
+func (c *blobChecksummer) GetDigests(relativePath, wantDigest string) ([]string, error) {
+	key := blobKey(relativePath)
+	attrs, err := c.bucket.Attributes(context.Background(), key)
+	if err != nil {
+		// Best-effort: if we can't get attributes, return nothing.
+		return nil, nil
+	}
+
+	var digests []string
+	for _, alg := range strings.Split(wantDigest, ",") {
+		alg = strings.TrimSpace(strings.ToLower(alg))
+		switch alg {
+		case "md5":
+			if len(attrs.MD5) > 0 {
+				digests = append(digests, "md5="+base64.StdEncoding.EncodeToString(attrs.MD5))
+			}
+		}
+	}
+	return digests, nil
+}
+
+// ---------------------------------------------------------------------------
+// Content-length hint — allows callers (e.g. HTTP handlers) to pass the
+// expected upload size to the blob writer via context.  This mirrors
+// xrootd-s3-http's "oss.asize" mechanism.
+// ---------------------------------------------------------------------------
+
+type blobCtxKey int
+
+const blobContentLengthKey blobCtxKey = iota
+
+// ContextWithContentLength returns a child context carrying the expected
+// upload size.  The blob filesystem's OpenFile will use this to hint the
+// underlying writer, enabling single-PUT uploads for small objects.
+func ContextWithContentLength(ctx context.Context, size int64) context.Context {
+	return context.WithValue(ctx, blobContentLengthKey, size)
+}
+
+func contentLengthFromCtx(ctx context.Context) int64 {
+	if v, ok := ctx.Value(blobContentLengthKey).(int64); ok {
+		return v
+	}
+	return -1
+}
+
+// ---------------------------------------------------------------------------
+// blobFileSystem — implements webdav.FileSystem backed by gocloud.dev/blob.
+// ---------------------------------------------------------------------------
+
+type blobFileSystem struct {
+	bucket *blob.Bucket
+}
+
+// blobKey normalises a webdav path ("/foo/bar") to a blob key ("foo/bar").
+// Also cleans path traversal sequences as defense-in-depth.
+func blobKey(name string) string {
+	return strings.TrimPrefix(path.Clean("/"+name), "/")
+}
+
+// Mkdir implements webdav.FileSystem.
+// Blob stores don't have real directories; we create a zero-byte marker.
+func (fs *blobFileSystem) Mkdir(ctx context.Context, name string, _ os.FileMode) error {
+	key := blobKey(name)
+	if key == "" {
+		return nil // Root always exists.
+	}
+	if !strings.HasSuffix(key, "/") {
+		key += "/"
+	}
+	return fs.bucket.WriteAll(ctx, key, nil, nil)
+}
+
+// OpenFile implements webdav.FileSystem.
+func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _ os.FileMode) (webdav.File, error) {
+	key := blobKey(name)
+
+	// Write mode — open a streaming writer immediately so permission
+	// or connectivity errors surface now, not on the first Write call.
+	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
+		wf, err := newBlobWriteFile(ctx, fs.bucket, key, name)
+		if err != nil {
+			return nil, err
+		}
+		return wf, nil
+	}
+
+	// Check if this is a "directory" by peeking at a prefix listing.
+	dirPrefix := key
+	if dirPrefix != "" && !strings.HasSuffix(dirPrefix, "/") {
+		dirPrefix += "/"
+	}
+	peekIter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix, Delimiter: "/"})
+	if _, peekErr := peekIter.Next(ctx); peekErr == nil {
+		// It is a directory — return a lazy dir handle (a fresh iterator
+		// will be created when Readdir is called).
+		return &blobDirFile{name: name, bucket: fs.bucket, prefix: dirPrefix}, nil
+	}
+
+	// Read mode — open via blob.NewReader (supports seek).
+	reader, err := fs.bucket.NewReader(ctx, key, nil)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("blob read %q: %w", key, err)
+	}
+
+	return &blobReadFile{
+		name:   name,
+		reader: reader,
+		size:   reader.Size(),
+		mod:    reader.ModTime(),
+	}, nil
+}
+
+// RemoveAll implements webdav.FileSystem.
+//
+// Per the webdav.FileSystem contract this must remove `name` and, if it is a
+// directory, everything underneath it. The previous implementation only
+// deleted the named object plus its directory marker, leaving children
+// orphaned. We list the prefix and delete every key, then remove the marker.
+//
+// Listing is paginated so memory stays bounded for large directories. Each
+// delete is best-effort -- a partial failure returns the first error but
+// continues so we don't strand half a tree.
+func (fs *blobFileSystem) RemoveAll(ctx context.Context, name string) error {
+	key := blobKey(name)
+
+	// First try a plain-object delete (handles non-directory paths).
+	err := fs.bucket.Delete(ctx, key)
+	if err != nil && !isNotFound(err) {
+		return err
+	}
+
+	// Recursively delete anything under the directory prefix. Note we
+	// intentionally don't pass a Delimiter here -- we want every descendant.
+	dirPrefix := key
+	if dirPrefix != "" && !strings.HasSuffix(dirPrefix, "/") {
+		dirPrefix += "/"
+	}
+	iter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix})
+	var firstErr error
+	for {
+		obj, listErr := iter.Next(ctx)
+		if listErr == io.EOF {
+			break
+		}
+		if listErr != nil {
+			if firstErr == nil {
+				firstErr = listErr
+			}
+			break
+		}
+		if delErr := fs.bucket.Delete(ctx, obj.Key); delErr != nil && !isNotFound(delErr) {
+			if firstErr == nil {
+				firstErr = delErr
+			}
+		}
+	}
+
+	// Finally, the directory marker (some providers return it as a child of
+	// the prefix above and some don't, so this is belt-and-suspenders).
+	_ = fs.bucket.Delete(ctx, key+"/")
+	return firstErr
+}
+
+// Rename implements webdav.FileSystem.
+func (fs *blobFileSystem) Rename(ctx context.Context, oldName, newName string) error {
+	oldKey := blobKey(oldName)
+	newKey := blobKey(newName)
+
+	if err := fs.bucket.Copy(ctx, newKey, oldKey, nil); err != nil {
+		return fmt.Errorf("blob copy %q -> %q: %w", oldKey, newKey, err)
+	}
+	return fs.bucket.Delete(ctx, oldKey)
+}
+
+// Stat implements webdav.FileSystem.
+func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
+	key := blobKey(name)
+
+	attrs, err := fs.bucket.Attributes(ctx, key)
+	if err == nil {
+		return &blobFileInfo{
+			name: path.Base(name),
+			size: attrs.Size,
+			mod:  attrs.ModTime,
+			etag: attrs.ETag,
+		}, nil
+	}
+
+	// Not found as an object — check if it's a directory prefix.
+	dirPrefix := key
+	if dirPrefix != "" && !strings.HasSuffix(dirPrefix, "/") {
+		dirPrefix += "/"
+	}
+	iter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix, Delimiter: "/"})
+	obj, iterErr := iter.Next(ctx)
+	if iterErr == nil && obj != nil {
+		return &blobFileInfo{name: path.Base(name), isDir: true}, nil
+	}
+
+	if isNotFound(err) {
+		return nil, os.ErrNotExist
+	}
+	return nil, err
+}
+
+// isNotFound returns true if the error represents a "not found" condition.
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return gcerrors.Code(err) == gcerrors.NotFound
+}
+
+// ---------------------------------------------------------------------------
+// blobFileInfo — implements os.FileInfo
+// ---------------------------------------------------------------------------
+
+type blobFileInfo struct {
+	name  string
+	size  int64
+	mod   time.Time
+	isDir bool
+	etag  string
+}
+
+// BlobFileSysInfo is returned by blobFileInfo.Sys() when metadata is available.
+type BlobFileSysInfo struct {
+	ETag string
+}
+
+func (fi *blobFileInfo) Name() string      { return fi.name }
+func (fi *blobFileInfo) Size() int64       { return fi.size }
+func (fi *blobFileInfo) Mode() os.FileMode { return 0444 }
+func (fi *blobFileInfo) ModTime() time.Time {
+	if fi.mod.IsZero() {
+		return time.Now()
+	}
+	return fi.mod
+}
+func (fi *blobFileInfo) IsDir() bool { return fi.isDir }
+func (fi *blobFileInfo) Sys() interface{} {
+	if fi.etag != "" {
+		return &BlobFileSysInfo{ETag: fi.etag}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// blobReadFile — read-only file backed by a blob.Reader.
+// blob.Reader already supports Read and Seek.
+// Uses atomic offset tracking for concurrent safety.
+// ---------------------------------------------------------------------------
+
+type blobReadFile struct {
+	name   string
+	reader *blob.Reader
+	size   int64
+	mod    time.Time
+	offset atomic.Int64
+}
+
+func (f *blobReadFile) Read(p []byte) (int, error) {
+	n, err := f.reader.Read(p)
+	f.offset.Add(int64(n))
+	return n, err
+}
+
+func (f *blobReadFile) Seek(offset int64, whence int) (int64, error) {
+	n, err := f.reader.Seek(offset, whence)
+	if err == nil {
+		f.offset.Store(n)
+	}
+	return n, err
+}
+
+func (f *blobReadFile) Close() error { return f.reader.Close() }
+
+func (f *blobReadFile) Write(_ []byte) (int, error) {
+	return 0, fmt.Errorf("write not supported on read file")
+}
+
+func (f *blobReadFile) Readdir(_ int) ([]os.FileInfo, error) {
+	return nil, fmt.Errorf("readdir not supported on file")
+}
+
+func (f *blobReadFile) Stat() (os.FileInfo, error) {
+	return &blobFileInfo{
+		name: path.Base(f.name),
+		size: f.size,
+		mod:  f.mod,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// blobWriteFile — write file backed by blob.Writer.
+// The writer is opened eagerly so that permission and connectivity
+// errors are reported at OpenFile time, not deferred to the first Write.
+// Data is streamed directly through to the underlying blob store;
+// nothing is buffered beyond the driver's internal upload-part buffer.
+// Uses a mutex to protect concurrent writes.
+// ---------------------------------------------------------------------------
+
+type blobWriteFile struct {
+	name   string
+	mu     sync.Mutex
+	writer *blob.Writer
+	closed bool
+}
+
+// newBlobWriteFile opens a blob.Writer immediately.  If the context
+// carries a content-length hint (see ContextWithContentLength), it is
+// used to size the driver's upload buffer — small objects that fit in
+// a single part avoid multipart overhead entirely.
+func newBlobWriteFile(ctx context.Context, bucket *blob.Bucket, key, name string) (*blobWriteFile, error) {
+	var opts blob.WriterOptions
+	if hint := contentLengthFromCtx(ctx); hint > 0 {
+		// Set the buffer to the exact object size when it is small
+		// enough for a single-part upload. The S3 driver will issue
+		// a simple PutObject instead of a multipart sequence.
+		const maxSinglePart = 5 * 1024 * 1024 * 1024 // 5 GiB S3 single-part limit
+		if hint <= maxSinglePart {
+			opts.BufferSize = int(hint)
+		}
+	}
+	w, err := bucket.NewWriter(ctx, key, &opts)
+	if err != nil {
+		return nil, fmt.Errorf("blob open for write %q: %w", key, err)
+	}
+	return &blobWriteFile{name: name, writer: w}, nil
+}
+
+func (f *blobWriteFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return 0, fmt.Errorf("write to closed file")
+	}
+	return f.writer.Write(p)
+}
+
+func (f *blobWriteFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	// Close flushes buffered data and finalises the upload.
+	// If nothing was written the driver creates a zero-byte object.
+	return f.writer.Close()
+}
+
+func (f *blobWriteFile) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("read not supported on write file")
+}
+
+func (f *blobWriteFile) Seek(_ int64, _ int) (int64, error) {
+	return 0, fmt.Errorf("seek not supported on write file")
+}
+
+func (f *blobWriteFile) Readdir(_ int) ([]os.FileInfo, error) {
+	return nil, fmt.Errorf("readdir not supported on write file")
+}
+
+func (f *blobWriteFile) Stat() (os.FileInfo, error) {
+	return &blobFileInfo{
+		name: path.Base(f.name),
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// blobDirFile — lazy directory representation for blob listings.
+// Entries are fetched on demand from the blob iterator, avoiding
+// pre-buffering an unbounded number of objects.
+// ---------------------------------------------------------------------------
+
+type blobDirFile struct {
+	name   string
+	bucket *blob.Bucket
+	prefix string
+
+	mu   sync.Mutex
+	iter *blob.ListIterator
+	done bool
+}
+
+func (f *blobDirFile) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("read not supported on directory")
+}
+
+func (f *blobDirFile) Seek(_ int64, _ int) (int64, error) {
+	return 0, fmt.Errorf("seek not supported on directory")
+}
+
+func (f *blobDirFile) Close() error { return nil }
+
+func (f *blobDirFile) Write(_ []byte) (int, error) {
+	return 0, fmt.Errorf("write not supported on directory")
+}
+
+// Readdir returns directory entries lazily from the underlying blob
+// listing iterator.  When count <= 0 it returns all remaining entries;
+// otherwise it returns up to count entries per call.
+// Internally the iterator pages through the provider's native page size
+// (typically 1 000 objects for S3) so memory stays bounded even for
+// very large directories.
+func (f *blobDirFile) Readdir(count int) ([]os.FileInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.iter == nil {
+		f.iter = f.bucket.List(&blob.ListOptions{Prefix: f.prefix, Delimiter: "/"})
+	}
+
+	if f.done {
+		return nil, io.EOF
+	}
+
+	var entries []os.FileInfo
+	for {
+		if count > 0 && len(entries) >= count {
+			break
+		}
+
+		obj, err := f.iter.Next(context.Background())
+		if err == io.EOF {
+			f.done = true
+			break
+		}
+		if err != nil {
+			return entries, err
+		}
+
+		baseName := strings.TrimPrefix(obj.Key, f.prefix)
+		baseName = strings.TrimSuffix(baseName, "/")
+		if baseName == "" {
+			continue
+		}
+
+		entries = append(entries, &blobFileInfo{
+			name:  baseName,
+			size:  obj.Size,
+			mod:   obj.ModTime,
+			isDir: obj.IsDir,
+		})
+	}
+
+	if len(entries) == 0 && f.done {
+		return nil, io.EOF
+	}
+	return entries, nil
+}
+
+func (f *blobDirFile) Stat() (os.FileInfo, error) {
+	return &blobFileInfo{
+		name:  path.Base(f.name),
+		isDir: true,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// S3 credential loading (reads key files from disk)
+// ---------------------------------------------------------------------------
+
+func loadS3Credentials(accessKeyFile, secretKeyFile string) (accessKey, secretKey string, err error) {
+	if accessKeyFile == "" || secretKeyFile == "" {
+		return "", "", nil
+	}
+	akBytes, rErr := os.ReadFile(accessKeyFile)
+	if rErr != nil {
+		return "", "", fmt.Errorf("failed to read S3 access key file %s: %w", accessKeyFile, rErr)
+	}
+	skBytes, rErr := os.ReadFile(secretKeyFile)
+	if rErr != nil {
+		return "", "", fmt.Errorf("failed to read S3 secret key file %s: %w", secretKeyFile, rErr)
+	}
+	return strings.TrimSpace(string(akBytes)), strings.TrimSpace(string(skBytes)), nil
+}
+
+// parseHTTPDate parses an HTTP-Date header value.
+func parseHTTPDate(s string) time.Time {
+	t, err := time.Parse(time.RFC1123, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}

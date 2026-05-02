@@ -628,6 +628,12 @@ func GetOriginExports() ([]OriginExport, error) {
 		origin = &S3Origin{}
 	case server_structs.OriginStorageGlobus:
 		origin = &GlobusOrigin{}
+	case server_structs.OriginStorageS3v2:
+		origin = &S3v2Origin{}
+	case server_structs.OriginStorageHTTPSv2:
+		origin = &HTTPSv2Origin{}
+	case server_structs.OriginStorageGlobusv2:
+		origin = &Globusv2Origin{}
 	case server_structs.OriginStorageXRoot:
 		origin = &XRootOrigin{}
 	default:

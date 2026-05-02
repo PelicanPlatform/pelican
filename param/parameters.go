@@ -326,8 +326,15 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusCollectionID": false,
 	"Origin.GlobusCollectionName": false,
 	"Origin.GlobusConfigLocation": false,
+	"Origin.GlobusIssuerURL": false,
+	"Origin.GlobusTransferAPIBaseUrl": false,
 	"Origin.GlobusTransferTokenFile": false,
+	"Origin.Globusv2TokenRefreshInterval": false,
+	"Origin.HttpAuthOAuth2ClientID": false,
+	"Origin.HttpAuthOAuth2ClientSecretFile": false,
+	"Origin.HttpAuthOAuth2Issuer": false,
 	"Origin.HttpAuthTokenFile": false,
+	"Origin.HttpAuthTokenPassthrough": false,
 	"Origin.HttpServiceUrl": false,
 	"Origin.IssuerMode": false,
 	"Origin.Mode": false,
@@ -336,6 +343,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.MultiuserUmask": false,
 	"Origin.MultiuserVarlinkSocketPath": false,
 	"Origin.NamespacePrefix": false,
+	"Origin.ObjectProviderURL": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
@@ -619,13 +627,19 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.GlobusCollectionID": func(c *Config) string { return c.Origin.GlobusCollectionID },
 	"Origin.GlobusCollectionName": func(c *Config) string { return c.Origin.GlobusCollectionName },
 	"Origin.GlobusConfigLocation": func(c *Config) string { return c.Origin.GlobusConfigLocation },
+	"Origin.GlobusIssuerURL": func(c *Config) string { return c.Origin.GlobusIssuerURL },
+	"Origin.GlobusTransferAPIBaseUrl": func(c *Config) string { return c.Origin.GlobusTransferAPIBaseUrl },
 	"Origin.GlobusTransferTokenFile": func(c *Config) string { return c.Origin.GlobusTransferTokenFile },
+	"Origin.HttpAuthOAuth2ClientID": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientID },
+	"Origin.HttpAuthOAuth2ClientSecretFile": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientSecretFile },
+	"Origin.HttpAuthOAuth2Issuer": func(c *Config) string { return c.Origin.HttpAuthOAuth2Issuer },
 	"Origin.HttpAuthTokenFile": func(c *Config) string { return c.Origin.HttpAuthTokenFile },
 	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
 	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
 	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
 	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
+	"Origin.ObjectProviderURL": func(c *Config) string { return c.Origin.ObjectProviderURL },
 	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
 	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
 	"Origin.S3Bucket": func(c *Config) string { return c.Origin.S3Bucket },
@@ -964,6 +978,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
 	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
 	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
+	"Origin.HttpAuthTokenPassthrough": func(c *Config) bool { return c.Origin.HttpAuthTokenPassthrough },
 	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
 	"Origin.SSH.AutoAddHostKey": func(c *Config) bool { return c.Origin.SSH.AutoAddHostKey },
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
@@ -1051,6 +1066,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Monitoring.TokenRefreshInterval": func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
 	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
 	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
+	"Origin.Globusv2TokenRefreshInterval": func(c *Config) time.Duration { return c.Origin.Globusv2TokenRefreshInterval },
 	"Origin.SSH.ChallengeTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
 	"Origin.SSH.ConnectTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
 	"Origin.SSH.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
@@ -1392,8 +1408,15 @@ var allParameterNames = []string{
 	"Origin.GlobusCollectionID",
 	"Origin.GlobusCollectionName",
 	"Origin.GlobusConfigLocation",
+	"Origin.GlobusIssuerURL",
+	"Origin.GlobusTransferAPIBaseUrl",
 	"Origin.GlobusTransferTokenFile",
+	"Origin.Globusv2TokenRefreshInterval",
+	"Origin.HttpAuthOAuth2ClientID",
+	"Origin.HttpAuthOAuth2ClientSecretFile",
+	"Origin.HttpAuthOAuth2Issuer",
 	"Origin.HttpAuthTokenFile",
+	"Origin.HttpAuthTokenPassthrough",
 	"Origin.HttpServiceUrl",
 	"Origin.IssuerMode",
 	"Origin.Mode",
@@ -1402,6 +1425,7 @@ var allParameterNames = []string{
 	"Origin.MultiuserUmask",
 	"Origin.MultiuserVarlinkSocketPath",
 	"Origin.NamespacePrefix",
+	"Origin.ObjectProviderURL",
 	"Origin.Port",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
@@ -1658,13 +1682,19 @@ var (
 	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
 	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
 	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
+	Origin_GlobusIssuerURL = StringParam{"Origin.GlobusIssuerURL"}
+	Origin_GlobusTransferAPIBaseUrl = StringParam{"Origin.GlobusTransferAPIBaseUrl"}
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
+	Origin_HttpAuthOAuth2ClientID = StringParam{"Origin.HttpAuthOAuth2ClientID"}
+	Origin_HttpAuthOAuth2ClientSecretFile = StringParam{"Origin.HttpAuthOAuth2ClientSecretFile"}
+	Origin_HttpAuthOAuth2Issuer = StringParam{"Origin.HttpAuthOAuth2Issuer"}
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
+	Origin_ObjectProviderURL = StringParam{"Origin.ObjectProviderURL"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
 	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
@@ -1882,6 +1912,7 @@ var (
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
+	Origin_HttpAuthTokenPassthrough = BoolParam{"Origin.HttpAuthTokenPassthrough"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
@@ -1941,6 +1972,7 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_Globusv2TokenRefreshInterval = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
 	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
@@ -2092,13 +2124,19 @@ func init() {
 		"Origin.GlobusCollectionID": Origin_GlobusCollectionID,
 		"Origin.GlobusCollectionName": Origin_GlobusCollectionName,
 		"Origin.GlobusConfigLocation": Origin_GlobusConfigLocation,
+		"Origin.GlobusIssuerURL": Origin_GlobusIssuerURL,
+		"Origin.GlobusTransferAPIBaseUrl": Origin_GlobusTransferAPIBaseUrl,
 		"Origin.GlobusTransferTokenFile": Origin_GlobusTransferTokenFile,
+		"Origin.HttpAuthOAuth2ClientID": Origin_HttpAuthOAuth2ClientID,
+		"Origin.HttpAuthOAuth2ClientSecretFile": Origin_HttpAuthOAuth2ClientSecretFile,
+		"Origin.HttpAuthOAuth2Issuer": Origin_HttpAuthOAuth2Issuer,
 		"Origin.HttpAuthTokenFile": Origin_HttpAuthTokenFile,
 		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
 		"Origin.IssuerMode": Origin_IssuerMode,
 		"Origin.Mode": Origin_Mode,
 		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
+		"Origin.ObjectProviderURL": Origin_ObjectProviderURL,
 		"Origin.RunLocation": Origin_RunLocation,
 		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
 		"Origin.S3Bucket": Origin_S3Bucket,
@@ -2304,6 +2342,7 @@ func init() {
 		"Origin.EnableVoms": Origin_EnableVoms,
 		"Origin.EnableWrite": Origin_EnableWrite,
 		"Origin.EnableWrites": Origin_EnableWrites,
+		"Origin.HttpAuthTokenPassthrough": Origin_HttpAuthTokenPassthrough,
 		"Origin.Multiuser": Origin_Multiuser,
 		"Origin.SSH.AutoAddHostKey": Origin_SSH_AutoAddHostKey,
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
@@ -2360,6 +2399,7 @@ func init() {
 		"Monitoring.TokenRefreshInterval": Monitoring_TokenRefreshInterval,
 		"Origin.DiskUsageCalculationDelay": Origin_DiskUsageCalculationDelay,
 		"Origin.DiskUsageCalculationInterval": Origin_DiskUsageCalculationInterval,
+		"Origin.Globusv2TokenRefreshInterval": Origin_Globusv2TokenRefreshInterval,
 		"Origin.SSH.ChallengeTimeout": Origin_SSH_ChallengeTimeout,
 		"Origin.SSH.ConnectTimeout": Origin_SSH_ConnectTimeout,
 		"Origin.SSH.KeepaliveInterval": Origin_SSH_KeepaliveInterval,
