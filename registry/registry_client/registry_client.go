@@ -115,7 +115,11 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	if err != nil {
 		return errors.Wrap(err, "failed to assign key ID to public key")
 	}
-	if err = publicKey.Set("alg", "ES256"); err != nil {
+	alg, err := config.SigningAlgorithmForJWK(privateKey)
+	if err != nil {
+		return errors.Wrap(err, "failed to determine signature algorithm for public key")
+	}
+	if err = publicKey.Set("alg", alg.String()); err != nil {
 		return errors.Wrap(err, "failed to assign signature algorithm to public key")
 	}
 	keySet := jwk.NewSet()
@@ -311,7 +315,11 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	if err = jwk.AssignKeyID(publicKey); err != nil {
 		return errors.Wrap(err, "failed to assign key ID to public key")
 	}
-	if err = publicKey.Set("alg", "ES256"); err != nil {
+	alg, err := config.SigningAlgorithmForJWK(privateKey)
+	if err != nil {
+		return errors.Wrap(err, "failed to determine signature algorithm for public key")
+	}
+	if err = publicKey.Set("alg", alg.String()); err != nil {
 		return errors.Wrap(err, "failed to assign signature algorithm to public key")
 	}
 	keySet := jwk.NewSet()

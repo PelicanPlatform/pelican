@@ -20,6 +20,10 @@ package token
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -403,4 +409,64 @@ func TestGetWLCGAudience(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateTokenWithKeyTypes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("ec-key-signs-with-ES256", func(t *testing.T) {
+		privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		ecKey, err := jwk.FromRaw(privEC)
+		require.NoError(t, err)
+		require.NoError(t, ecKey.Set(jwk.KeyIDKey, "test-ec-key"))
+		require.NoError(t, ecKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+		tc := TokenConfig{
+			tokenProfile: WlcgProfile{},
+			audience:     []string{"test-audience"},
+			Subject:      "test-subject",
+			Issuer:       "https://test-issuer.example.com",
+			Lifetime:     10 * time.Minute,
+		}
+		tokStr, err := tc.CreateTokenWithKey(ecKey)
+		require.NoError(t, err)
+		require.NotEmpty(t, tokStr)
+
+		// Verify the token was signed with ES256
+		tok, err := jwt.ParseString(tokStr, jwt.WithVerify(false))
+		require.NoError(t, err)
+		assert.Equal(t, "https://test-issuer.example.com", tok.Issuer())
+	})
+
+	t.Run("rsa-key-signs-with-RS256", func(t *testing.T) {
+		privRSA, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		rsaKey, err := jwk.FromRaw(privRSA)
+		require.NoError(t, err)
+		require.NoError(t, rsaKey.Set(jwk.KeyIDKey, "test-rsa-key"))
+		require.NoError(t, rsaKey.Set(jwk.AlgorithmKey, jwa.RS256))
+
+		tc := TokenConfig{
+			tokenProfile: WlcgProfile{},
+			audience:     []string{"test-audience"},
+			Subject:      "test-subject",
+			Issuer:       "https://test-issuer.example.com",
+			Lifetime:     10 * time.Minute,
+		}
+		tokStr, err := tc.CreateTokenWithKey(rsaKey)
+		require.NoError(t, err)
+		require.NotEmpty(t, tokStr)
+
+		// Verify the token can be parsed
+		tok, err := jwt.ParseString(tokStr, jwt.WithVerify(false))
+		require.NoError(t, err)
+		assert.Equal(t, "https://test-issuer.example.com", tok.Issuer())
+
+		// Verify the token can be verified with the RSA public key
+		pubKey, err := rsaKey.PublicKey()
+		require.NoError(t, err)
+		_, err = jwt.ParseString(tokStr, jwt.WithKey(jwa.RS256, pubKey))
+		require.NoError(t, err)
+	})
 }
