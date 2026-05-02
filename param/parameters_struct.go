@@ -396,6 +396,7 @@ type Config struct {
 		IssuerPort int `mapstructure:"issuerport" yaml:"IssuerPort"`
 		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
 		Modules []string `mapstructure:"modules" yaml:"Modules"`
+		NewUserDefaultScopes []string `mapstructure:"newuserdefaultscopes" yaml:"NewUserDefaultScopes"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile" yaml:"SessionSecretFile"`
 		StartupTimeout time.Duration `mapstructure:"startuptimeout" yaml:"StartupTimeout"`
@@ -861,6 +862,7 @@ type configWithType struct {
 		IssuerPort struct { Type string; Value int }
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
+		NewUserDefaultScopes struct { Type string; Value []string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
 		StartupTimeout struct { Type string; Value time.Duration }

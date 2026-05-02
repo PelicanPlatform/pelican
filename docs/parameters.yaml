@@ -3265,6 +3265,25 @@ type: stringSlice
 default: []
 components: ["origin"]
 ---
+name: Server.NewUserDefaultScopes
+description: |+
+  Scopes automatically granted to a user record when it is created. The
+  default `["web_ui.access"]` lets new users sign in to the web UI and
+  carry that capability through API tokens (which intersect against
+  effective scopes); operators can extend the list to give every new
+  account additional baseline capabilities.
+
+  Each entry must be a user-grantable scope (see `docs/scopes.yaml`,
+  entries with `userGrantable: true`); non-grantable scopes are
+  rejected at startup.
+
+  Changing this list affects ONLY accounts created after the change.
+  Pre-existing users were backfilled from this list once at upgrade
+  time; later edits do not retroactively grant or revoke scopes.
+type: stringSlice
+default: ["web_ui.access"]
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.StartupTimeout
 description: |+
   The amount of time the pelican server will wait for its components and services to startup.

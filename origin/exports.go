@@ -42,7 +42,7 @@ type (
 // callers reveals nothing new; the slim response shape lets us gate
 // this on AuthHandler alone (rather than AdminAuthHandler) so the
 // collection-onboarding form's prefix dropdown works for callers who
-// hold server.collection_admin without holding server.web_admin.
+// hold server.collection_admin without holding server.admin.
 func handleExportPrefixes(ctx *gin.Context) {
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {

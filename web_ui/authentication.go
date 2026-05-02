@@ -73,10 +73,10 @@ type (
 		DisplayName string `json:"displayName,omitempty"`
 		// Scopes is the caller's effective user-grantable scope set
 		// (DB user_scopes ∪ DB group_scopes via membership ∪
-		// config-derived grants ∪ web_admin implications). Used by
+		// config-derived grants ∪ admin implications). Used by
 		// the frontend to gate UI surfaces below the granularity of
 		// Role: e.g. /settings/users/ is reachable by anyone with
-		// server.user_admin (which is a subset of server.web_admin),
+		// server.user_admin (which is a subset of server.admin),
 		// and the navbar toggles its visibility off scopes rather
 		// than role membership. Empty for unauthenticated callers.
 		Scopes      []string `json:"scopes,omitempty"`
@@ -601,7 +601,7 @@ type UserIdentity struct {
 	Groups   []string
 }
 
-// CheckAdmin reports whether the identity holds the server.web_admin
+// CheckAdmin reports whether the identity holds the server.admin
 // scope. The decision is delegated to EffectiveScopesForIdentity,
 // which unions DB-stored user_scopes/group_scopes grants with the
 // historical config-derived sources (Server.UIAdminUsers,
@@ -612,7 +612,7 @@ type UserIdentity struct {
 // inherit privileges. See the user/group design doc for the reason
 // usernames are the only authorization handle.
 func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
-	if hasScope(identity, token_scopes.Server_WebAdmin) {
+	if hasScope(identity, token_scopes.Server_Admin) {
 		return true, ""
 	}
 	// Preserve the historical "neither configured" message so existing
@@ -624,7 +624,7 @@ func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
 }
 
 // CheckUserAdmin reports whether the identity holds the
-// server.user_admin scope. server.web_admin implies it (the
+// server.user_admin scope. server.admin implies it (the
 // implication is applied inside EffectiveScopesForIdentity).
 func CheckUserAdmin(identity UserIdentity) (bool, string) {
 	if hasScope(identity, token_scopes.Server_UserAdmin) {
@@ -634,7 +634,7 @@ func CheckUserAdmin(identity UserIdentity) (bool, string) {
 }
 
 // CheckCollectionAdmin reports whether the identity holds the
-// server.collection_admin scope. server.web_admin implies it.
+// server.collection_admin scope. server.admin implies it.
 func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 	if hasScope(identity, token_scopes.Server_CollectionAdmin) {
 		return true, ""
@@ -659,7 +659,7 @@ func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
 }
 
 // UserAdminAuthHandler accepts callers whose effective scope set
-// contains EITHER server.web_admin OR server.user_admin. It is the
+// contains EITHER server.admin OR server.user_admin. It is the
 // route-level gate for the /api/v1.0/users/* surface and the
 // onboarding-invite endpoint: surfaces a system administrator must be
 // able to use, and which a "user administrator" (per the design

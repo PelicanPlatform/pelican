@@ -717,7 +717,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		groupRouterGroup.DELETE("/:id/invites/:linkId", handleRevokeGroupInviteLink)
 		// Group-level scope grants. Listing is open to anyone who can
 		// see the group; granting/revoking is system-admin-only because
-		// pinning Server_WebAdmin to a group transitively elevates
+		// pinning Server_Admin to a group transitively elevates
 		// every member of it.
 		groupRouterGroup.GET("/:id/scopes", handleListGroupScopes)
 		groupRouterGroup.POST("/:id/scopes", AdminAuthHandler, handleGrantGroupScope)
@@ -746,7 +746,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// User-onboarding invite link (no group; requires user admin privileges).
 	// User-admin actions touch policy state, so the AUP must be signed.
 	// Gated by UserAdminAuthHandler so a holder of server.user_admin (not
-	// just server.web_admin) can mint onboarding links.
+	// just server.admin) can mint onboarding links.
 	routerGroup.POST("/invites/onboarding", AuthHandler, RequireAUPCompliance, UserAdminAuthHandler, handleCreateUserOnboardingInvite)
 
 	// AUP endpoint (public read, no auth required). The bare /aup path
@@ -773,7 +773,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	}
 
 	// /users/* is gated by UserAdminAuthHandler — accepts holders of either
-	// server.web_admin OR server.user_admin. Per-target guards inside the
+	// server.admin OR server.user_admin. Per-target guards inside the
 	// handlers (IsSystemAdminUserID) prevent a user-admin from acting on a
 	// system-admin account. Self-service for ordinary users lives under
 	// /me/* (see below). Even admins must be AUP-compliant.

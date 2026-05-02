@@ -241,7 +241,7 @@ const DEFAULT_INVITE_EXPIRY = '168h';
 
 const Page = () => (
   // Gate matches the backend: POST /origin_ui/collections requires
-  // server.collection_admin OR server.web_admin (admin implies it).
+  // server.collection_admin OR server.admin (admin implies it).
   // Admit on EITHER role==='admin' OR the explicit scope so a system
   // admin always lands on the form regardless of how their effective
   // scope set was computed, and a non-admin holding only the targeted
@@ -270,7 +270,7 @@ const OnboardForm: React.FC = () => {
   );
   // user_admin gates the "pick existing user" autocomplete and the
   // inline "create new user" form, because /users (list + create)
-  // requires that scope server-side. web_admin implies user_admin in
+  // requires that scope server-side. admin implies user_admin in
   // EffectiveScopesForIdentity, so a system admin gets both paths.
   const canManageUsers =
     who?.role === 'admin' || hasScope(who, 'server.user_admin');

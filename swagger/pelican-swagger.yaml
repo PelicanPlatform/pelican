@@ -1873,7 +1873,7 @@ tags:
   - name: invites
     description: Public invite-link redemption APIs (no authentication; the token is the credential)
   - name: scopes
-    description: First-class user/group scope grants (server.web_admin, server.user_admin, server.collection_admin) and the catalog of user-grantable scopes
+    description: First-class user/group scope grants (server.admin, server.user_admin, server.collection_admin) and the catalog of user-grantable scopes
   - name: aup
     description: Acceptable Use Policy — public reads (current and versioned), admin edit, and persisted version history
   - name: issuer-admin
@@ -4591,7 +4591,7 @@ paths:
         Collection.OwnerID (and the legacy Collection.Owner username)
         from the current owner to the redeemer. Issued only to the
         current owner or to holders of `server.collection_admin` /
-        `server.web_admin` — admin-group members CANNOT mint
+        `server.admin` — admin-group members CANNOT mint
         ownership invites (handing out an invite is morally identical
         to transferring ownership, so it stays owner-exclusive).
 
@@ -5288,7 +5288,7 @@ paths:
         the caller holds: direct user_scopes grants, scopes inherited
         from group membership (DB and OIDC-asserted), and scopes
         derived from the legacy config (Server.UIAdminUsers,
-        Server.AdminGroups, etc.). The `server.web_admin → server.user_admin
+        Server.AdminGroups, etc.). The `server.admin → server.user_admin
         / server.collection_admin` implication is applied. Useful so
         the UI can hide management surfaces the caller can't drive
         without per-component round-trips.

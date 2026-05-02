@@ -59,7 +59,7 @@ func RegisterCollectionsAPI(group *gin.RouterGroup) {
 }
 
 // callerIsCollectionAdmin reports whether the cookie/bearer-bound
-// caller's effective scope set contains server.web_admin or
+// caller's effective scope set contains server.admin or
 // server.collection_admin. Used as the authorization step on
 // management endpoints (create/modify/delete/list-all): the existing
 // verifyTokenWithCollectionScope merely AUTHENTICATES (since it
@@ -458,7 +458,7 @@ type ListCollectionRes struct {
 	AdminCard *database.GroupCard `json:"adminCard,omitempty"`
 	// CanEdit mirrors the PATCH gate: true iff the calling user is
 	// the row's owner, a member of the row's admin group, or holds
-	// server.collection_admin (web_admin implies it). Computed
+	// server.collection_admin (admin implies it). Computed
 	// server-side per row so the listing UI can hide edit affordances
 	// for callers who would just 403 on save — no equivalent client-
 	// side lookup is possible since membership requires a DB query.
@@ -621,14 +621,14 @@ func handleCreateCollection(ctx *gin.Context) {
 	// Web UI cookies all carry web_ui.access, so without this guard every
 	// logged-in user could create a collection. Per the design contract,
 	// creating a collection is server.collection_admin (or
-	// server.web_admin, which transitively grants collection_admin); the
+	// server.admin, which transitively grants collection_admin); the
 	// bearer-API-token path with an explicit collection.create scope
 	// stays open for OA4MP / device-flow clients.
 	if !hasExplicitBearerCollectionScope(ctx, token_scopes.Collection_Create) &&
 		!callerIsCollectionAdmin(ctx) {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "you must hold server.collection_admin (or server.web_admin) to create a collection",
+			Msg:    "you must hold server.collection_admin (or server.admin) to create a collection",
 		})
 		return
 	}
@@ -1536,7 +1536,7 @@ type CreateCollectionOwnershipInviteRes struct {
 // when redeemed by an authenticated user, transfers ownership of the
 // collection to that user. Authorization mirrors the PATCH-ownerId
 // path: existing owner / admin-group member / server.collection_admin
-// or web_admin holders pass; everyone else gets ErrForbidden (mapped
+// or admin holders pass; everyone else gets ErrForbidden (mapped
 // to 404 to match the rest of the surface's leak posture).
 func handleCreateCollectionOwnershipInvite(ctx *gin.Context) {
 	collectionID := ctx.Param("id")

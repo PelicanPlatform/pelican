@@ -48,7 +48,7 @@ const MeService = {
     );
   },
   // The caller's effective scope set (DB user_scopes ∪ DB group_scopes
-  // via membership ∪ config-derived grants ∪ web_admin implications).
+  // via membership ∪ config-derived grants ∪ admin implications).
   // Returned as scope-name strings; the catalog at /scopes pairs each
   // name with a human-readable description for display.
   getScopes: async (): Promise<string[]> => {

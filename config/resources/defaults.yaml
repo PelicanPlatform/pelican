@@ -40,6 +40,14 @@ Server:
   StartupTimeout: 10s
   UILoginRateLimit: 1
   UnprivilegedUser: pelican
+  # Scopes auto-granted to a user record at creation. The web_ui.access
+  # default lets a freshly-onboarded account sign in to the UI and
+  # carry that capability through any API tokens they mint (which
+  # intersect against effective scopes). Operators can extend the list
+  # to give every new account additional baseline capabilities — only
+  # user-grantable scopes are accepted; see docs/scopes.yaml.
+  NewUserDefaultScopes:
+    - "web_ui.access"
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"

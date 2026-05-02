@@ -36,7 +36,7 @@ const (
 	Pelican_DowntimeModify TokenScope = "pelican.downtime_modify"
 	Pelican_DowntimeDelete TokenScope = "pelican.downtime_delete"
 	WebUi_Access TokenScope = "web_ui.access"
-	Server_WebAdmin TokenScope = "server.web_admin"
+	Server_Admin TokenScope = "server.admin"
 	Server_UserAdmin TokenScope = "server.user_admin"
 	Server_CollectionAdmin TokenScope = "server.collection_admin"
 	Pelican_LoggingModify TokenScope = "pelican.logging_modify"
@@ -92,9 +92,11 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 //
 // Values come from docs/scopes.yaml entries with userGrantable: true.
 var UserGrantableScopes = []TokenScope{
-	Server_WebAdmin,
+	WebUi_Access,
+	Server_Admin,
 	Server_UserAdmin,
 	Server_CollectionAdmin,
+	Monitoring_Query,
 }
 
 // IsUserGrantable reports whether the supplied scope can be granted to
@@ -123,14 +125,14 @@ var scopeDescriptions = map[TokenScope]string{
 	Pelican_DowntimeCreate: `Permits origin and cache to create downtimes at the registry`,
 	Pelican_DowntimeModify: `Permits origin and cache to modify existing downtimes at the registry`,
 	Pelican_DowntimeDelete: `Permits origin and cache to delete downtimes at the registry`,
-	WebUi_Access: `For user to access various server Web UI`,
-	Server_WebAdmin: `Full server-administration capability. Holders can manage every user/group/collection/setting; equivalent to the historical "system admin" role. Implies server.user_admin and server.collection_admin.`,
+	WebUi_Access: `Sign in to the server's web UI and the cookie-authenticated APIs. Auto-granted to new user accounts; granting it explicitly to a user or group lets API tokens (which intersect against effective scopes) carry web-UI access too.`,
+	Server_Admin: `Full server-administration capability. Holders can manage every user/group/collection/setting; equivalent to the historical "system admin" role. Implies server.user_admin and server.collection_admin.`,
 	Server_UserAdmin: `Manage non-admin users and unprivileged groups. Holders can create users, mint password-set invites, and run the user-onboarding flows, but cannot modify system-admin accounts.`,
 	Server_CollectionAdmin: `Create, modify, and delete collections and manage their ACLs.`,
 	Pelican_LoggingModify: `Permits modification of server log levels at runtime`,
 	Registry_EditRegistration: `For origin admin to edit namespace registration at the registry`,
 	Monitoring_Scrape: `For server's Prometheus instance to scrape its Prometheus http data exporter at /metrics`,
-	Monitoring_Query: `For Web UI user and third-party tools to access server's Prometheus query engine endpoints at /api/v1.0/prometheus`,
+	Monitoring_Query: `View server metrics. Required for the web UI's metrics dashboards and for external monitoring tools (e.g. Grafana) to read this server's metrics through its Prometheus-compatible query endpoint.`,
 	Broker_Reverse: `Permits reversal requests sent to the broker by a cache.`,
 	Broker_Retrieve: `Permits retrieval of requests to an origin`,
 	Broker_Callback: `Permits callbacks from the origin to the cache in response to a reversal request`,

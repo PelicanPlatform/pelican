@@ -534,7 +534,7 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID
 //  4. Collections with a read-eligible ACL for one of the caller's
 //     groups (the existing path).
 //
-// Admins (server.web_admin / server.collection_admin) bypass and get
+// Admins (server.admin / server.collection_admin) bypass and get
 // global visibility — the management endpoints already do this and the
 // list should match so admin-as-investigator works.
 func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin bool) ([]Collection, error) {
@@ -870,7 +870,7 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 		// admin-group member must NOT be able to seize the
 		// collection by re-pointing OwnerID at themselves. The
 		// privileged-scope bypass above already covers
-		// server.collection_admin / web_admin, so this check only
+		// server.collection_admin / admin, so this check only
 		// runs for cookie callers without those scopes.
 		//
 		// Admin-group reassignment (adminID) stays available to
@@ -1104,7 +1104,7 @@ func CallerIsCollectionOwnerOrAdmin(db *gorm.DB, collection *Collection, usernam
 // member could lock the actual owner out of their own collection by
 // reassigning ownership to themselves or wiping the row).
 //
-// Privileged scopes (server.web_admin / server.collection_admin) are
+// Privileged scopes (server.admin / server.collection_admin) are
 // NOT consulted here — the caller is responsible for layering an
 // admin-scope check on top when that bypass is appropriate (it is
 // for the management API, but isn't a property of this helper).
@@ -1233,6 +1233,11 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string, creator
 		}
 		return nil, err
 	}
+	// Stamp the operator-configured baseline scopes
+	// (Server.NewUserDefaultScopes; default web_ui.access). Logged-only
+	// on failure — the user record itself is the authoritative thing,
+	// and the startup backfill is the safety net.
+	ApplyDefaultUserScopes(db, newUser.ID, creator)
 	return newUser, nil
 }
 
@@ -1283,6 +1288,7 @@ func CreateLocalUser(db *gorm.DB, username, displayName, localIssuer string, cre
 		}
 		return nil, err
 	}
+	ApplyDefaultUserScopes(db, user.ID, creator)
 	return user, nil
 }
 
@@ -1541,6 +1547,7 @@ func tryCreateUser(db *gorm.DB, username, sub, issuer, displayName string, creat
 	if err := db.Create(user).Error; err != nil {
 		return nil, err
 	}
+	ApplyDefaultUserScopes(db, user.ID, creator)
 	return user, nil
 }
 
@@ -2330,7 +2337,7 @@ func CreatePasswordInviteLink(db *gorm.DB, targetUserID, createdByUserID string,
 //
 // Authorization: the caller must already be able to mutate the
 // collection — owner, admin-group member, or holder of
-// server.collection_admin / server.web_admin (the same gate as
+// server.collection_admin / server.admin (the same gate as
 // `PATCH /:id` with ownerId / adminId). We derive the result of
 // that gate from `isCollectionAdmin` (the scope-bypass) plus the
 // owner / admin-group check inside the existing helper, mirroring

@@ -69,7 +69,7 @@ var (
 //     These are bearer-token capabilities granted by an admin, not
 //     derived from the user's role; the token bearer is the
 //     credential, full stop.
-//   - User-grantable scopes (server.web_admin / user_admin /
+//   - User-grantable scopes (server.admin / user_admin /
 //     collection_admin) are kept ONLY if the creator's current
 //     effective set still contains them. A user who has lost
 //     server.user_admin loses it on every API token they ever
@@ -283,7 +283,7 @@ func VerifyApiKey(apiKey string) (bool, []string, string, error) {
 // The scopes can are a comma-separated list of capabilities. i.e "monitoring.query,monitoring.scrape"
 // The scopes are defined in the token_scopes package
 //
-// User-grantable scopes (server.web_admin / user_admin /
+// User-grantable scopes (server.admin / user_admin /
 // collection_admin) must be in the creator's CURRENT effective set;
 // otherwise the call returns an error listing the unauthorized
 // scopes. Use-time intersection (Verify) is the security gate;

@@ -86,6 +86,17 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		log.Warnf("Post-migration bootstrap incomplete: %v", err)
 	}
 
+	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.
+	// Pre-existing accounts (created before the knob existed, or on
+	// older builds) wouldn't otherwise carry the operator-configured
+	// baseline because the auto-grant path triggers only at user
+	// creation. See BackfillNewUserDefaultScopes for the one-shot
+	// semantics — subsequent edits to the config do not propagate
+	// retroactively, by design.
+	if err := BackfillNewUserDefaultScopes(ServerDatabase); err != nil {
+		log.Warnf("NewUserDefaultScopes backfill incomplete: %v", err)
+	}
+
 	// NOTE: we deliberately do NOT mirror Server.UIAdminUsers /
 	// Server.AdminGroups (or the User-/Collection-admin variants)
 	// into user_scopes / group_scopes at startup. Doing so would

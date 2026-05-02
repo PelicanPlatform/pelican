@@ -425,6 +425,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerPort": false,
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
+	"Server.NewUserDefaultScopes": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
@@ -772,6 +773,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Server.CollectionAdminUsers": func(c *Config) []string { return c.Server.CollectionAdminUsers },
 	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
 	"Server.Modules": func(c *Config) []string { return c.Server.Modules },
+	"Server.NewUserDefaultScopes": func(c *Config) []string { return c.Server.NewUserDefaultScopes },
 	"Server.TrustedProxies": func(c *Config) []string { return c.Server.TrustedProxies },
 	"Server.UIAdminUsers": func(c *Config) []string { return c.Server.UIAdminUsers },
 	"Server.UserAdminGroups": func(c *Config) []string { return c.Server.UserAdminGroups },
@@ -1511,6 +1513,7 @@ var allParameterNames = []string{
 	"Server.IssuerPort",
 	"Server.IssuerUrl",
 	"Server.Modules",
+	"Server.NewUserDefaultScopes",
 	"Server.RegistrationRetryInterval",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
@@ -1803,6 +1806,7 @@ var (
 	Server_CollectionAdminUsers = StringSliceParam{"Server.CollectionAdminUsers"}
 	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Server_NewUserDefaultScopes = StringSliceParam{"Server.NewUserDefaultScopes"}
 	Server_TrustedProxies = StringSliceParam{"Server.TrustedProxies"}
 	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
 	Server_UserAdminGroups = StringSliceParam{"Server.UserAdminGroups"}
@@ -2244,6 +2248,7 @@ func init() {
 		"Server.CollectionAdminUsers": Server_CollectionAdminUsers,
 		"Server.DirectorUrls": Server_DirectorUrls,
 		"Server.Modules": Server_Modules,
+		"Server.NewUserDefaultScopes": Server_NewUserDefaultScopes,
 		"Server.TrustedProxies": Server_TrustedProxies,
 		"Server.UIAdminUsers": Server_UIAdminUsers,
 		"Server.UserAdminGroups": Server_UserAdminGroups,

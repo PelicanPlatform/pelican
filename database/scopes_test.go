@@ -112,8 +112,8 @@ func TestEffectiveScopes(t *testing.T) {
 		got, err := EffectiveScopes(db, fx.aliceID, nil)
 		require.NoError(t, err)
 		assert.True(t, scopeContains(got, token_scopes.Server_UserAdmin))
-		assert.False(t, scopeContains(got, token_scopes.Server_WebAdmin),
-			"granting user_admin must NOT imply web_admin (implication is web_admin -> others)")
+		assert.False(t, scopeContains(got, token_scopes.Server_Admin),
+			"granting user_admin must NOT imply admin (implication is admin -> others)")
 	})
 
 	t.Run("group_scopes via DB membership", func(t *testing.T) {
@@ -216,7 +216,7 @@ func TestEffectiveScopes(t *testing.T) {
 	t.Run("revoke of a nonexistent grant returns ErrRecordNotFound", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedScopeFixtures(t, db)
-		err := RevokeUserScope(db, fx.aliceID, token_scopes.Server_WebAdmin)
+		err := RevokeUserScope(db, fx.aliceID, token_scopes.Server_Admin)
 		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound),
 			"revoke of a never-granted scope is a 'noop revoke' and must signal that to the caller")
 	})
@@ -247,7 +247,7 @@ func TestEffectiveScopes(t *testing.T) {
 			token_scopes.Server_UserAdmin, CreatorSelf()))
 
 		assert.True(t, HasEffectiveScope(db, fx.bobID, nil, token_scopes.Server_UserAdmin))
-		assert.False(t, HasEffectiveScope(db, fx.bobID, nil, token_scopes.Server_WebAdmin))
+		assert.False(t, HasEffectiveScope(db, fx.bobID, nil, token_scopes.Server_Admin))
 		assert.False(t, HasEffectiveScope(db, fx.danID, nil, token_scopes.Server_UserAdmin))
 	})
 }
