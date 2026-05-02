@@ -390,6 +390,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.EnableOIDC": false,
 	"Registry.Institutions": false,
 	"Registry.InstitutionsUrl": false,
 	"Registry.InstitutionsUrlReloadMinutes": false,
@@ -397,9 +398,15 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.RequireKeyChaining": false,
 	"Registry.RequireOriginApproval": false,
 	"RuntimeDir": false,
+	"Server.AUPCanonicalURL": false,
+	"Server.AUPFile": false,
+	"Server.AUPLastUpdated": false,
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
+	"Server.AutoEnrollUsernameClaims": false,
+	"Server.CollectionAdminGroups": false,
+	"Server.CollectionAdminUsers": false,
 	"Server.DatabaseBackup.Frequency": false,
 	"Server.DatabaseBackup.Location": false,
 	"Server.DatabaseBackup.MaxCount": false,
@@ -410,6 +417,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.EnablePprof": false,
 	"Server.EnableUI": false,
 	"Server.ExternalWebUrl": false,
+	"Server.GroupInviteLinkExpiration": false,
 	"Server.HealthMonitoringPublic": false,
 	"Server.Hostname": false,
 	"Server.IssuerHostname": false,
@@ -417,6 +425,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerPort": false,
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
+	"Server.NewUserDefaultScopes": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
@@ -432,6 +441,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.UILoginRateLimit": false,
 	"Server.UIPasswordFile": false,
 	"Server.UnprivilegedUser": false,
+	"Server.UserAdminGroups": false,
+	"Server.UserAdminUsers": false,
 	"Server.WebConfigFile": false,
 	"Server.WebHost": false,
 	"Server.WebPort": false,
@@ -659,6 +670,9 @@ var stringAccessors = map[string]func(*Config) string{
 	"Registry.DbLocation": func(c *Config) string { return c.Registry.DbLocation },
 	"Registry.InstitutionsUrl": func(c *Config) string { return c.Registry.InstitutionsUrl },
 	"RuntimeDir": func(c *Config) string { return c.RuntimeDir },
+	"Server.AUPCanonicalURL": func(c *Config) string { return c.Server.AUPCanonicalURL },
+	"Server.AUPFile": func(c *Config) string { return c.Server.AUPFile },
+	"Server.AUPLastUpdated": func(c *Config) string { return c.Server.AUPLastUpdated },
 	"Server.DatabaseBackup.Location": func(c *Config) string { return c.Server.DatabaseBackup.Location },
 	"Server.DbLocation": func(c *Config) string { return c.Server.DbLocation },
 	"Server.ExternalWebUrl": func(c *Config) string { return c.Server.ExternalWebUrl },
@@ -754,10 +768,16 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Origin.SupportedChecksumTypes": func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
 	"Registry.AdminUsers": func(c *Config) []string { return c.Registry.AdminUsers },
 	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
+	"Server.AutoEnrollUsernameClaims": func(c *Config) []string { return c.Server.AutoEnrollUsernameClaims },
+	"Server.CollectionAdminGroups": func(c *Config) []string { return c.Server.CollectionAdminGroups },
+	"Server.CollectionAdminUsers": func(c *Config) []string { return c.Server.CollectionAdminUsers },
 	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
 	"Server.Modules": func(c *Config) []string { return c.Server.Modules },
+	"Server.NewUserDefaultScopes": func(c *Config) []string { return c.Server.NewUserDefaultScopes },
 	"Server.TrustedProxies": func(c *Config) []string { return c.Server.TrustedProxies },
 	"Server.UIAdminUsers": func(c *Config) []string { return c.Server.UIAdminUsers },
+	"Server.UserAdminGroups": func(c *Config) []string { return c.Server.UserAdminGroups },
+	"Server.UserAdminUsers": func(c *Config) []string { return c.Server.UserAdminUsers },
 	"Shoveler.OutputDestinations": func(c *Config) []string { return c.Shoveler.OutputDestinations },
 }
 
@@ -969,6 +989,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
 	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.EnableOIDC": func(c *Config) bool { return c.Registry.EnableOIDC },
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
 	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
@@ -1063,6 +1084,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Server.AdLifetime": func(c *Config) time.Duration { return c.Server.AdLifetime },
 	"Server.AdvertisementInterval": func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
 	"Server.DatabaseBackup.Frequency": func(c *Config) time.Duration { return c.Server.DatabaseBackup.Frequency },
+	"Server.GroupInviteLinkExpiration": func(c *Config) time.Duration { return c.Server.GroupInviteLinkExpiration },
 	"Server.RegistrationRetryInterval": func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
 	"Server.StartupTimeout": func(c *Config) time.Duration { return c.Server.StartupTimeout },
 	"Transport.BrokerEndpointCacheTTL": func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
@@ -1456,6 +1478,7 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.EnableOIDC",
 	"Registry.Institutions",
 	"Registry.InstitutionsUrl",
 	"Registry.InstitutionsUrlReloadMinutes",
@@ -1463,9 +1486,15 @@ var allParameterNames = []string{
 	"Registry.RequireKeyChaining",
 	"Registry.RequireOriginApproval",
 	"RuntimeDir",
+	"Server.AUPCanonicalURL",
+	"Server.AUPFile",
+	"Server.AUPLastUpdated",
 	"Server.AdLifetime",
 	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
+	"Server.AutoEnrollUsernameClaims",
+	"Server.CollectionAdminGroups",
+	"Server.CollectionAdminUsers",
 	"Server.DatabaseBackup.Frequency",
 	"Server.DatabaseBackup.Location",
 	"Server.DatabaseBackup.MaxCount",
@@ -1476,6 +1505,7 @@ var allParameterNames = []string{
 	"Server.EnablePprof",
 	"Server.EnableUI",
 	"Server.ExternalWebUrl",
+	"Server.GroupInviteLinkExpiration",
 	"Server.HealthMonitoringPublic",
 	"Server.Hostname",
 	"Server.IssuerHostname",
@@ -1483,6 +1513,7 @@ var allParameterNames = []string{
 	"Server.IssuerPort",
 	"Server.IssuerUrl",
 	"Server.Modules",
+	"Server.NewUserDefaultScopes",
 	"Server.RegistrationRetryInterval",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
@@ -1498,6 +1529,8 @@ var allParameterNames = []string{
 	"Server.UILoginRateLimit",
 	"Server.UIPasswordFile",
 	"Server.UnprivilegedUser",
+	"Server.UserAdminGroups",
+	"Server.UserAdminUsers",
 	"Server.WebConfigFile",
 	"Server.WebHost",
 	"Server.WebPort",
@@ -1698,6 +1731,9 @@ var (
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	RuntimeDir = StringParam{"RuntimeDir"}
+	Server_AUPCanonicalURL = StringParam{"Server.AUPCanonicalURL"}
+	Server_AUPFile = StringParam{"Server.AUPFile"}
+	Server_AUPLastUpdated = StringParam{"Server.AUPLastUpdated"}
 	Server_DatabaseBackup_Location = StringParam{"Server.DatabaseBackup.Location"}
 	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
@@ -1765,10 +1801,16 @@ var (
 	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
+	Server_AutoEnrollUsernameClaims = StringSliceParam{"Server.AutoEnrollUsernameClaims"}
+	Server_CollectionAdminGroups = StringSliceParam{"Server.CollectionAdminGroups"}
+	Server_CollectionAdminUsers = StringSliceParam{"Server.CollectionAdminUsers"}
 	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Server_NewUserDefaultScopes = StringSliceParam{"Server.NewUserDefaultScopes"}
 	Server_TrustedProxies = StringSliceParam{"Server.TrustedProxies"}
 	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
+	Server_UserAdminGroups = StringSliceParam{"Server.UserAdminGroups"}
+	Server_UserAdminUsers = StringSliceParam{"Server.UserAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
 )
 
@@ -1887,6 +1929,7 @@ var (
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_EnableOIDC = BoolParam{"Registry.EnableOIDC"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
@@ -1953,6 +1996,7 @@ var (
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_DatabaseBackup_Frequency = DurationParam{"Server.DatabaseBackup.Frequency"}
+	Server_GroupInviteLinkExpiration = DurationParam{"Server.GroupInviteLinkExpiration"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
@@ -2132,6 +2176,9 @@ func init() {
 		"Registry.DbLocation": Registry_DbLocation,
 		"Registry.InstitutionsUrl": Registry_InstitutionsUrl,
 		"RuntimeDir": RuntimeDir,
+		"Server.AUPCanonicalURL": Server_AUPCanonicalURL,
+		"Server.AUPFile": Server_AUPFile,
+		"Server.AUPLastUpdated": Server_AUPLastUpdated,
 		"Server.DatabaseBackup.Location": Server_DatabaseBackup_Location,
 		"Server.DbLocation": Server_DbLocation,
 		"Server.ExternalWebUrl": Server_ExternalWebUrl,
@@ -2196,10 +2243,16 @@ func init() {
 		"Origin.SupportedChecksumTypes": Origin_SupportedChecksumTypes,
 		"Registry.AdminUsers": Registry_AdminUsers,
 		"Server.AdminGroups": Server_AdminGroups,
+		"Server.AutoEnrollUsernameClaims": Server_AutoEnrollUsernameClaims,
+		"Server.CollectionAdminGroups": Server_CollectionAdminGroups,
+		"Server.CollectionAdminUsers": Server_CollectionAdminUsers,
 		"Server.DirectorUrls": Server_DirectorUrls,
 		"Server.Modules": Server_Modules,
+		"Server.NewUserDefaultScopes": Server_NewUserDefaultScopes,
 		"Server.TrustedProxies": Server_TrustedProxies,
 		"Server.UIAdminUsers": Server_UIAdminUsers,
+		"Server.UserAdminGroups": Server_UserAdminGroups,
+		"Server.UserAdminUsers": Server_UserAdminUsers,
 		"Shoveler.OutputDestinations": Shoveler_OutputDestinations,
 		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
 		"Cache.Concurrency": Cache_Concurrency,
@@ -2309,6 +2362,7 @@ func init() {
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
 		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.EnableOIDC": Registry_EnableOIDC,
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
 		"Registry.RequireOriginApproval": Registry_RequireOriginApproval,
@@ -2372,6 +2426,7 @@ func init() {
 		"Server.AdLifetime": Server_AdLifetime,
 		"Server.AdvertisementInterval": Server_AdvertisementInterval,
 		"Server.DatabaseBackup.Frequency": Server_DatabaseBackup_Frequency,
+		"Server.GroupInviteLinkExpiration": Server_GroupInviteLinkExpiration,
 		"Server.RegistrationRetryInterval": Server_RegistrationRetryInterval,
 		"Server.StartupTimeout": Server_StartupTimeout,
 		"Transport.BrokerEndpointCacheTTL": Transport_BrokerEndpointCacheTTL,

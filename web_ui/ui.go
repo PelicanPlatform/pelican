@@ -65,8 +65,19 @@ var (
 	//go:embed frontend/out/*
 	webAssets         embed.FS
 	serverPages       = []string{"director", "registry", "origin", "cache"}
-	publicAccessPages = []string{"director", "registry"}      // UI pages that allow unauthenticated users to access.
-	adminAccessPages  = []string{"config", "origin", "cache"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
+	publicAccessPages = []string{"director", "registry"} // UI pages that allow unauthenticated users to access.
+	// adminAccessPages lists UI roots that REQUIRE system-admin privilege
+	// (the middleware redirects logged-in non-admins to /view/403/ and
+	// unauthenticated users to /view/login/).
+	//
+	// "origin" was previously here but the page now ships a NonAdminHome
+	// component that's specifically meant to be visible to non-admins —
+	// the page picks AdminHome vs. NonAdminHome based on /whoami's role
+	// claim. Gating /view/origin/ at the middleware level forced a 403
+	// before that role-aware switch could even run, which broke
+	// post-login flows whose returnURL pointed at the origin home for a
+	// non-admin user (e.g. a freshly-AUP-reset user redirecting back).
+	adminAccessPages = []string{"config", "cache"}
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
@@ -632,9 +643,11 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// Singleton routes
 	routerGroup.POST("/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	routerGroup.GET("/servers", getEnabledServers)
+	routerGroup.GET("/federation", AuthHandler, HandleGetFederationInfo)
 
 	// TODO: Move this to the Origin or Cache specific API group
 	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		routerGroup.GET("/server/localMetadata", AuthHandler, HandleGetServerLocalMetadata)
 		routerGroup.GET("/server/localMetadata/history", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
 	}
 
@@ -679,26 +692,185 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		downtimeAPI.DELETE("/:uuid", DowntimeAuthHandler, HandleDeleteDowntime)
 	}
 
-	groupRouterGroup := routerGroup.Group("/groups", AuthHandler, AdminAuthHandler)
+	// /groups/* is authenticated; per-route authorization (system admin,
+	// group owner, group admin, or group member) is enforced inside each
+	// handler via database.CanSeeGroup / CanManageGroup. Listing is scoped
+	// to the caller (admin sees all, others see only groups they belong to).
+	//
+	// RequireAUPCompliance gates the surface so callers who haven't yet
+	// signed the configured AUP get a structured 403 instead of being
+	// allowed to manage groups. The frontend consumes the 403 body's
+	// `requires_aup` flag and routes the user to /aup-acceptance/.
+	groupRouterGroup := routerGroup.Group("/groups", AuthHandler, RequireAUPCompliance)
 	{
 		groupRouterGroup.GET("", handleListGroups)
 		groupRouterGroup.POST("", handleCreateGroup)
 		groupRouterGroup.GET("/:id", handleGetGroup)
 		groupRouterGroup.PATCH("/:id", handleUpdateGroup)
 		groupRouterGroup.DELETE("/:id", handleDeleteGroup)
+		groupRouterGroup.PUT("/:id/ownership", handleUpdateGroupOwnership)
 		groupRouterGroup.GET("/:id/members", handleListGroupMembers)
 		groupRouterGroup.POST("/:id/members", handleAddGroupMember)
 		groupRouterGroup.DELETE("/:id/members/:userId", handleRemoveGroupMember)
+		groupRouterGroup.GET("/:id/invites", handleListGroupInviteLinks)
+		groupRouterGroup.POST("/:id/invites", handleCreateGroupInviteLink)
+		groupRouterGroup.DELETE("/:id/invites/:linkId", handleRevokeGroupInviteLink)
+		// Group-level scope grants. Listing is open to anyone who can
+		// see the group; granting/revoking is system-admin-only because
+		// pinning Server_Admin to a group transitively elevates
+		// every member of it.
+		groupRouterGroup.GET("/:id/scopes", handleListGroupScopes)
+		groupRouterGroup.POST("/:id/scopes", AdminAuthHandler, handleGrantGroupScope)
+		groupRouterGroup.DELETE("/:id/scopes/:scope", AdminAuthHandler, handleRevokeGroupScope)
 	}
 
-	userRouterGroup := routerGroup.Group("/users", AuthHandler, AdminAuthHandler)
+	// Group-invite redeem joins the caller's existing user to a group.
+	// We DO require AUP compliance here: an unsigned user cannot
+	// be conscripted into a group as a side effect of redeeming a
+	// link — they have to sign first and try again.
+	routerGroup.POST("/invites/redeem", AuthHandler, RequireAUPCompliance, handleRedeemGroupInviteLink)
+	// Password-set invite redemption is intentionally unauthenticated:
+	// possession of the (single-use, time-bounded) token IS the
+	// credential, so admins never have to know the user's password.
+	routerGroup.POST("/invites/redeem/password", handleRedeemPasswordInvite)
+	// Ownership-transfer redemption — separate from /redeem so the
+	// authenticated-but-no-AUP-required posture is unambiguous: the
+	// redeemer is asserting "yes, transfer this collection to me",
+	// which doesn't itself require AUP acceptance (collection ownership
+	// doesn't grant management-policy authority — those gates run on
+	// the API surface itself, not on the act of being an owner).
+	routerGroup.POST("/invites/redeem/collection-ownership", AuthHandler, handleRedeemCollectionOwnershipInvite)
+	// Public-info probe so the redemption UI can render the right form
+	// without consuming the link.
+	routerGroup.GET("/invites/info", handleGetInviteInfo)
+	// User-onboarding invite link (no group; requires user admin privileges).
+	// User-admin actions touch policy state, so the AUP must be signed.
+	// Gated by UserAdminAuthHandler so a holder of server.user_admin (not
+	// just server.admin) can mint onboarding links.
+	routerGroup.POST("/invites/onboarding", AuthHandler, RequireAUPCompliance, UserAdminAuthHandler, handleCreateUserOnboardingInvite)
+
+	// AUP endpoint (public read, no auth required). The bare /aup path
+	// always serves the *currently active* policy. /aup/:version is the
+	// versioned variant: callers asserting a specific version (e.g. an
+	// auditor recording exactly which text they accepted) can use it.
+	// Pelican only retains the active version on the server itself, so a
+	// versioned URL works only when the requested hash matches what's
+	// configured right now; older versions return 404 with a hint to
+	// look at Server.AUPCanonicalURL for an external archive.
+	routerGroup.GET("/aup", handleGetAUP)
+	routerGroup.GET("/aup/:version", handleGetAUP)
+	// PUT /aup is the admin-only edit surface, GET /aup/versions is
+	// the history view. Both are admin-walled (system admins; not
+	// user admins, since the AUP is server-policy and applies to
+	// every user including admins). RequireAUPCompliance is NOT
+	// applied here: an admin who hasn't yet signed the current
+	// policy must still be able to edit it (otherwise a freshly
+	// rotated AUP could lock its own author out).
+	aupAdminGroup := routerGroup.Group("/aup", AuthHandler, AdminAuthHandler)
+	{
+		aupAdminGroup.PUT("", handleUpdateAUP)
+		aupAdminGroup.GET("/versions", handleListAUPVersions)
+	}
+
+	// /users/* is gated by UserAdminAuthHandler — accepts holders of either
+	// server.admin OR server.user_admin. Per-target guards inside the
+	// handlers (IsSystemAdminUserID) prevent a user-admin from acting on a
+	// system-admin account. Self-service for ordinary users lives under
+	// /me/* (see below). Even admins must be AUP-compliant.
+	//
+	// Two sub-routes are walled tighter (AdminAuthHandler — system admin
+	// only): granting/revoking a scope and adding/removing a linked OIDC
+	// identity. Both are elevation paths: a user-admin who could grant a
+	// scope to themselves would self-elevate, and one who could link an
+	// arbitrary OIDC sub to a system admin's account would hand admin
+	// access to whoever holds that sub.
+	userRouterGroup := routerGroup.Group("/users", AuthHandler, RequireAUPCompliance, UserAdminAuthHandler)
 	{
 		userRouterGroup.GET("", handleListUsers)
 		userRouterGroup.POST("", handleAddUser)
 		userRouterGroup.GET("/:id", handleGetUser)
 		userRouterGroup.PATCH("/:id", handleUpdateUser)
 		userRouterGroup.DELETE("/:id", handleDeleteUser)
+		// No PUT /:id/password here on purpose: admins must never know
+		// a user's password. To onboard a local-password account, mint
+		// a password-set invite and hand it to the user.
+		userRouterGroup.POST("/:id/password-invite", handleCreatePasswordInvite)
+		userRouterGroup.GET("/:id/password-invites", handleListPasswordInvites)
+		// DELETE /:id/password is the *clear* path — admins can disable
+		// local-password login on a compromised account without ever
+		// learning what the password was.
+		userRouterGroup.DELETE("/:id/password", handleClearUserPassword)
+		userRouterGroup.PUT("/:id/status", handleUpdateUserStatus)
+		userRouterGroup.POST("/:id/aup", handleRecordAUPAgreement)
+		// Admin tooling for forcing a single user back through the AUP
+		// workflow (without rotating the policy itself, which would
+		// re-prompt every user on the server).
+		userRouterGroup.DELETE("/:id/aup", handleClearAUPAgreement)
+		// First-class scope grants per docs/user-group-design.md.
+		// Only direct user_scopes rows live here; the full effective set
+		// (which folds in group memberships and config) is read via
+		// GET /me/scopes for self or computed inline by Check* helpers.
+		// Listing is open to user-admins, but mutating (grant/revoke)
+		// is system-admin-only — granting yourself a scope is exactly
+		// the elevation we're guarding against.
+		userRouterGroup.GET("/:id/scopes", handleListUserScopes)
+		userRouterGroup.POST("/:id/scopes", AdminAuthHandler, handleGrantUserScope)
+		userRouterGroup.DELETE("/:id/scopes/:scope", AdminAuthHandler, handleRevokeUserScope)
+		// Linked-identity management is system-admin-only: a user-admin
+		// who could attach an arbitrary OIDC sub to another account
+		// (especially a system admin's) would hand admin access to
+		// whoever owns that sub at the IdP.
+		userRouterGroup.GET("/:id/identities", handleListUserIdentities)
+		userRouterGroup.POST("/:id/identities", AdminAuthHandler, handleAddUserIdentity)
+		userRouterGroup.DELETE("/:id/identities/:identityId", AdminAuthHandler, handleDeleteUserIdentity)
 	}
+
+	// Self-service endpoints for any authenticated user. These never accept a
+	// :id; the target is always the caller. See web_ui/me.go.
+	//
+	// /me itself splits into two route groups: a small AUP-exempt one (read
+	// self, sign AUP) so a user who hasn't yet signed can complete the
+	// signing flow, and the rest gated by RequireAUPCompliance like every
+	// other action surface.
+	meExemptGroup := routerGroup.Group("/me", AuthHandler)
+	{
+		meExemptGroup.GET("", handleGetMe)
+		// POST /me/aup is the signing endpoint itself — it MUST work for
+		// callers who haven't yet signed, otherwise they'd be locked out
+		// of the only way to comply.
+		meExemptGroup.POST("/aup", handleRecordMyAUPAgreement)
+	}
+	meRouterGroup := routerGroup.Group("/me", AuthHandler, RequireAUPCompliance)
+	{
+		meRouterGroup.PATCH("", handleUpdateMe)
+		// /me/password is "manage what's already set". The handlers
+		// refuse to operate on an account with no password, so an
+		// OIDC-only user can't quietly grow a local password that
+		// would outlive the IdP relationship — the only way to
+		// *create* one is admin-issued password-invite redemption
+		// (see /invites/redeem/password). PUT is rotate (current +
+		// new); DELETE is clear (turns off local-password login).
+		meRouterGroup.PUT("/password", handleUpdateMyPassword)
+		meRouterGroup.DELETE("/password", handleClearMyPassword)
+		meRouterGroup.GET("/groups", handleListMyGroups)
+		meRouterGroup.DELETE("/groups/:id", handleLeaveMyGroup)
+		// Self-service identity management. Read returns the caller's
+		// secondary identities (the primary one is on the User row,
+		// already exposed via GET /me). Delete unlinks a secondary
+		// only — the primary identity is admin-managed.
+		meRouterGroup.GET("/identities", handleListMyIdentities)
+		meRouterGroup.DELETE("/identities/:id", handleUnlinkMyIdentity)
+		// Self-service: read the caller's effective scopes. Useful so
+		// the UI can hide management surfaces the caller can't use
+		// without each component fetching ALL of /users/:id/scopes.
+		meRouterGroup.GET("/scopes", handleGetMyScopes)
+	}
+
+	// Public catalog of user-grantable scopes — drives the management
+	// UI's scope picker. Authentication isn't required (knowing the
+	// scope catalog leaks nothing); placing it under AuthHandler keeps
+	// it simple though.
+	routerGroup.GET("/scopes", AuthHandler, handleListScopeCatalog)
 
 	return nil
 }

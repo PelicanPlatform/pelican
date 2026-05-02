@@ -42,6 +42,72 @@ func RegisterCollectionsAPI(group *gin.RouterGroup) {
 	group.GET("/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
 	group.POST("/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
 	group.DELETE("/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
+	// Candidate-owners list — drives the owner-picker on the edit
+	// page for callers who don't hold server.user_admin (and so
+	// can't list every user). The set is the union of: current
+	// owner, admin-group members, and members of every group
+	// attached via an ACL row.
+	group.GET("/:id/candidate-owners", web_ui.AuthHandler, handleListCollectionCandidateOwners)
+
+	// Ownership-transfer invites: mint a single-use link that, when
+	// redeemed, transfers Collection.OwnerID to the redeemer. Useful
+	// for the "I'm onboarding a faculty member who'll own this
+	// collection" flow without having to pre-create their User row.
+	// Authorization mirrors PATCH-ownerId — the underlying DB helper
+	// re-gates on owner / admin-group / collection_admin.
+	group.POST("/:id/ownership-invites", web_ui.AuthHandler, handleCreateCollectionOwnershipInvite)
+}
+
+// callerIsCollectionAdmin reports whether the cookie/bearer-bound
+// caller's effective scope set contains server.admin or
+// server.collection_admin. Used as the authorization step on
+// management endpoints (create/modify/delete/list-all): the existing
+// verifyTokenWithCollectionScope merely AUTHENTICATES (since it
+// accepts the bearer-only web_ui.access scope from a login cookie),
+// it does not authorize. Without this check, every logged-in user
+// could create or list collections.
+//
+// Returns false (and sets identity = nil) when the caller has no
+// resolvable identity in the context — handlers should already have
+// short-circuited on that earlier, but the helper stays safe.
+func callerIsCollectionAdmin(ctx *gin.Context) bool {
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		return false
+	}
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	if isAdmin, _ := web_ui.CheckAdmin(identity); isAdmin {
+		return true
+	}
+	if isCollAdmin, _ := web_ui.CheckCollectionAdmin(identity); isCollAdmin {
+		return true
+	}
+	return false
+}
+
+// hasExplicitBearerCollectionScope reports whether the caller presented
+// a bearer (Authorization: Bearer …) token whose verified scope set
+// contains the supplied collection.* scope EXPLICITLY — i.e. not via
+// the web_ui.access fallback that verifyTokenWithCollectionScope also
+// accepts. This is the path OA4MP / CLI clients use to drive a
+// collection action without holding a management role; we keep it
+// open in the management-endpoint authorization step.
+func hasExplicitBearerCollectionScope(ctx *gin.Context, scope token_scopes.TokenScope) bool {
+	auth := ctx.Request.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return false
+	}
+	_, ok, _ := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{scope},
+	})
+	return ok
 }
 
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
@@ -53,6 +119,11 @@ func RegisterCollectionsAPI(group *gin.RouterGroup) {
 // This design allows both:
 //   - Web UI users (who have web_ui.access from login cookies) to access collections
 //   - CLI/API clients (who have collection-specific scopes from OAuth2 device flow) to access collections
+//
+// AUTHENTICATION ONLY. The web_ui.access fallback means every logged-in
+// caller (including unprivileged ones) clears this gate. Management
+// endpoints must additionally call callerIsCollectionAdmin (or
+// equivalent) before mutating collection state.
 func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) (status int, ok bool, err error) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -253,6 +324,37 @@ func checkPublicCollectionAccess(ctx *gin.Context, collectionID string, parsed j
 	return true
 }
 
+// namespaceWithinExport reports whether the supplied namespace path
+// is contained within at least one of the origin's exported prefixes.
+// "Within" means either an exact match OR a strict path-descendant —
+// e.g. an export of `/org/foo` accepts a collection rooted at
+// `/org/foo`, `/org/foo/projectA`, or `/org/foo/team/2026`, but
+// rejects `/org/foobar` (the next character after the prefix MUST
+// be a `/` separator). The empty namespace and any path that
+// doesn't begin with `/` are rejected, matching the same path-shape
+// invariant ACL enforcement uses elsewhere in this file.
+//
+// Pulled out of the handler so unit tests can exercise the
+// boundary cases without spinning up a Gin engine.
+func namespaceWithinExport(ns string, exports []server_utils.OriginExport) bool {
+	if ns == "" || !strings.HasPrefix(ns, "/") {
+		return false
+	}
+	for _, export := range exports {
+		prefix := export.FederationPrefix
+		if prefix == "" {
+			continue
+		}
+		if ns == prefix {
+			return true
+		}
+		if strings.HasPrefix(ns, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 type CreateCollectionReq struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
@@ -265,21 +367,62 @@ type UpdateCollectionReq struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	Visibility  *string `json:"visibility"`
+	// Ownership-model fields. OwnerID transfers the collection to a
+	// different user (passed as a User.ID slug); AdminID assigns or
+	// clears the admin group. Use the empty string to clear AdminID.
+	// Only the existing owner / admin-group / collection_admin can
+	// touch these — write-ACL holders cannot self-promote.
+	OwnerID *string `json:"ownerId"`
+	AdminID *string `json:"adminId"`
 }
 
 type MetadataValue struct {
 	Value string `json:"value"`
 }
 
+// GrantAclReq accepts BOTH camelCase (groupId) and snake_case
+// (group_id) so the older test/CLI clients that use group_id keep
+// working alongside the frontend's groupId convention. Same for
+// RevokeAclReq below. The handler resolves the effective value via
+// `cmp.Or` style: groupId wins when both are set, otherwise
+// group_id is used.
 type GrantAclReq struct {
-	GroupID   string     `json:"group_id"`
-	Role      string     `json:"role"`
-	ExpiresAt *time.Time `json:"expires_at"`
+	GroupID         string     `json:"groupId"`
+	GroupIDSnakeAlt string     `json:"group_id"`
+	Role            string     `json:"role"`
+	ExpiresAt       *time.Time `json:"expiresAt"`
+	ExpiresAtSnake  *time.Time `json:"expires_at"`
+}
+
+// resolvedGroupID returns whichever of groupId / group_id the caller
+// actually populated. The frontend uses camelCase; older tooling and
+// existing tests use snake_case.
+func (r *GrantAclReq) resolvedGroupID() string {
+	if r.GroupID != "" {
+		return r.GroupID
+	}
+	return r.GroupIDSnakeAlt
+}
+
+// resolvedExpiresAt mirrors resolvedGroupID for the optional expiry.
+func (r *GrantAclReq) resolvedExpiresAt() *time.Time {
+	if r.ExpiresAt != nil {
+		return r.ExpiresAt
+	}
+	return r.ExpiresAtSnake
 }
 
 type RevokeAclReq struct {
-	GroupID string `json:"group_id"`
-	Role    string `json:"role"`
+	GroupID         string `json:"groupId"`
+	GroupIDSnakeAlt string `json:"group_id"`
+	Role            string `json:"role"`
+}
+
+func (r *RevokeAclReq) resolvedGroupID() string {
+	if r.GroupID != "" {
+		return r.GroupID
+	}
+	return r.GroupIDSnakeAlt
 }
 
 type AddCollectionMembersReq struct {
@@ -291,26 +434,55 @@ type RemoveCollectionMembersReq struct {
 }
 
 type ListCollectionRes struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	OwnerID     string `json:"owner_id"`
-	Description string `json:"description"`
-	Visibility  string `json:"visibility"`
-	Namespace   string `json:"namespace"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Owner is the legacy username field (kept for client back-compat
+	// + audit). OwnerID is the User.ID slug — the authoritative
+	// ownership handle going forward. AdminID is the optional admin
+	// group slug; empty means no admin group is assigned.
+	Owner       string    `json:"owner"`
+	OwnerID     string    `json:"ownerId"`
+	AdminID     string    `json:"adminId"`
+	Description string    `json:"description"`
+	Visibility  string    `json:"visibility"`
+	Namespace   string    `json:"namespace"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	// OwnerCard / AdminCard are the resolved {id, username,
+	// displayName} / {id, name} summaries — populated server-side in
+	// one batched query so the listing page can render
+	// "Display Name (username)" and the admin-group label without an
+	// N+1 round-trip from the client. Either may be omitted when the
+	// referenced row is missing (deleted user, no admin group set).
+	OwnerCard *database.UserCard  `json:"ownerCard,omitempty"`
+	AdminCard *database.GroupCard `json:"adminCard,omitempty"`
+	// CanEdit mirrors the PATCH gate: true iff the calling user is
+	// the row's owner, a member of the row's admin group, or holds
+	// server.collection_admin (admin implies it). Computed
+	// server-side per row so the listing UI can hide edit affordances
+	// for callers who would just 403 on save — no equivalent client-
+	// side lookup is possible since membership requires a DB query.
+	CanEdit bool `json:"canEdit"`
 }
 
 type GetCollectionRes struct {
 	ID          string                   `json:"id"`
 	Name        string                   `json:"name"`
-	OwnerID     string                   `json:"owner_id"`
+	Owner       string                   `json:"owner"`
+	OwnerID     string                   `json:"ownerId"`
+	AdminID     string                   `json:"adminId"`
 	Description string                   `json:"description"`
 	Visibility  string                   `json:"visibility"`
 	Namespace   string                   `json:"namespace"`
 	Members     []string                 `json:"members"`
 	ACLs        []database.CollectionACL `json:"acls"`
 	Metadata    map[string]string        `json:"metadata"`
-	CreatedAt   time.Time                `json:"created_at"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	CreatedAt   time.Time                `json:"createdAt"`
+	UpdatedAt   time.Time                `json:"updatedAt"`
+	// CanEdit — same contract as ListCollectionRes.CanEdit. Lets the
+	// edit page disable controls (or refuse to mount) when the caller
+	// can read but not modify this row.
+	CanEdit bool `json:"canEdit"`
 }
 
 func handleListCollections(ctx *gin.Context) {
@@ -324,7 +496,7 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -340,7 +512,24 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	collections, err := database.ListCollections(database.ServerDatabase, user, groups)
+	// Admin bypass: a system or collection admin gets global
+	// visibility into every collection on the origin (matches the
+	// management posture on update/delete). Non-admins keep the
+	// existing public-or-ACL-granted scope.
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isAdmin = true
+	}
+
+	collections, err := database.ListCollections(database.ServerDatabase, user, userId, groups, isAdmin)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -349,16 +538,69 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
+	// Batch-resolve owner User.IDs → UserCard and admin Group.IDs →
+	// GroupCard so the list page can render "Display Name (username)"
+	// + admin-group labels without an N+1 round-trip per row.
+	ownerIDs := make([]string, 0, len(collections))
+	adminIDs := make([]string, 0, len(collections))
+	for _, c := range collections {
+		if c.OwnerID != "" {
+			ownerIDs = append(ownerIDs, c.OwnerID)
+		}
+		if c.AdminID != "" {
+			adminIDs = append(adminIDs, c.AdminID)
+		}
+	}
+	ownerCards, err := database.GetUserCards(database.ServerDatabase, ownerIDs)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to resolve owner cards: %v", err),
+		})
+		return
+	}
+	adminCards, err := database.GetGroupCards(database.ServerDatabase, adminIDs)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to resolve admin-group cards: %v", err),
+		})
+		return
+	}
+
 	res := make([]ListCollectionRes, 0)
 	for _, collection := range collections {
-		res = append(res, ListCollectionRes{
+		row := ListCollectionRes{
 			ID:          collection.ID,
 			Name:        collection.Name,
-			OwnerID:     collection.Owner,
+			Owner:       collection.Owner,
+			OwnerID:     collection.OwnerID,
+			AdminID:     collection.AdminID,
 			Description: collection.Description,
 			Visibility:  string(collection.Visibility),
 			Namespace:   collection.Namespace,
-		})
+			CreatedAt:   collection.CreatedAt,
+			UpdatedAt:   collection.UpdatedAt,
+		}
+		if uc, ok := ownerCards[collection.OwnerID]; ok {
+			row.OwnerCard = &uc
+		}
+		if gc, ok := adminCards[collection.AdminID]; ok {
+			row.AdminCard = &gc
+		}
+		// Mirror the PATCH gate (database.UpdateCollection): admin
+		// scope holders pass unconditionally, otherwise the row's
+		// owner / admin-group members can edit. The membership check
+		// touches the DB; we eat the per-row cost rather than
+		// inventing a join — a typical listing has at most dozens of
+		// rows so the latency hit is negligible.
+		row.CanEdit = isAdmin ||
+			database.CallerIsCollectionOwnerOrAdmin(
+				database.ServerDatabase,
+				&collection,
+				user, userId, groups,
+			)
+		res = append(res, row)
 	}
 
 	ctx.JSON(http.StatusOK, res)
@@ -371,6 +613,22 @@ func handleCreateCollection(ctx *gin.Context) {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error(),
+		})
+		return
+	}
+
+	// AUTHORIZATION: verifyTokenWithCollectionScope only AUTHENTICATES.
+	// Web UI cookies all carry web_ui.access, so without this guard every
+	// logged-in user could create a collection. Per the design contract,
+	// creating a collection is server.collection_admin (or
+	// server.admin, which transitively grants collection_admin); the
+	// bearer-API-token path with an explicit collection.create scope
+	// stays open for OA4MP / device-flow clients.
+	if !hasExplicitBearerCollectionScope(ctx, token_scopes.Collection_Create) &&
+		!callerIsCollectionAdmin(ctx) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "you must hold server.collection_admin (or server.admin) to create a collection",
 		})
 		return
 	}
@@ -393,7 +651,15 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	// Validate that the namespace is one that this origin exports
+	// Validate that the namespace is *within* an exported prefix.
+	// Collections aren't limited to top-level exports — operators
+	// regularly want a collection rooted at a sub-path of a larger
+	// namespace (e.g. an export of `/org/foo` with one collection at
+	// `/org/foo/projectA` and another at `/org/foo/projectB/2026`).
+	// We accept the request when the requested namespace equals OR is
+	// a strict path-descendant of any exported prefix; the
+	// "next character is /" guard prevents `/org/foo` from matching
+	// `/org/foobar`.
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		log.Errorf("Failed to get origin exports: %v", err)
@@ -403,22 +669,15 @@ func handleCreateCollection(ctx *gin.Context) {
 		})
 		return
 	}
-	validNamespace := false
-	for _, export := range exports {
-		if export.FederationPrefix == req.Namespace {
-			validNamespace = true
-			break
-		}
-	}
-	if !validNamespace {
+	if !namespaceWithinExport(req.Namespace, exports) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Namespace '%s' is not a valid export for this origin", req.Namespace),
+			Msg:    fmt.Sprintf("Namespace '%s' is not within a prefix exported by this origin", req.Namespace),
 		})
 		return
 	}
 
-	user, _, _, err := web_ui.GetUserGroups(ctx)
+	user, userId, _, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -442,7 +701,12 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, req.Namespace, visibility, req.Metadata)
+	// Pass both `user` (legacy username audit field — kept for the
+	// uniqueness index and back-compat) and `userId` (User.ID slug —
+	// the authoritative ownership handle going forward). userId may be
+	// empty for bearer-token callers without a user record; the
+	// collection then falls back to username-only ownership semantics.
+	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, userId, req.Namespace, visibility, req.Metadata)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -504,7 +768,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	var visibility database.Visibility
 	if req.Visibility != nil {
@@ -524,7 +788,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		visPtr = &visibility
 	}
 
-	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr, isAdmin)
+	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, userId, groups, req.Name, req.Description, visPtr, req.OwnerID, req.AdminID, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -832,7 +1096,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -847,7 +1111,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups)
+	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, userId, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -931,9 +1195,9 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value, isAdmin)
+	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, userId, groups, key, value, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -993,9 +1257,9 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, isAdmin)
+	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, userId, groups, key, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1025,7 +1289,7 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1040,7 +1304,23 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
+	// Same admin bypass as list/update/delete: a collection admin can
+	// open any collection's page; non-admins still pass through the
+	// public/ACL filter inside GetCollection.
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isAdmin = true
+	}
+
+	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "collection not found"})
@@ -1066,7 +1346,9 @@ func handleGetCollection(ctx *gin.Context) {
 	res := GetCollectionRes{
 		ID:          coll.ID,
 		Name:        coll.Name,
-		OwnerID:     coll.Owner,
+		Owner:       coll.Owner,
+		OwnerID:     coll.OwnerID,
+		AdminID:     coll.AdminID,
 		Description: coll.Description,
 		Visibility:  string(coll.Visibility),
 		Namespace:   coll.Namespace,
@@ -1075,6 +1357,15 @@ func handleGetCollection(ctx *gin.Context) {
 		Metadata:    metadata,
 		CreatedAt:   coll.CreatedAt,
 		UpdatedAt:   coll.UpdatedAt,
+		// Same predicate as the listing: admin scope OR row-level
+		// owner / admin-group membership. Surfaced so the edit page
+		// can render read-only when the caller can see but not modify.
+		CanEdit: isAdmin ||
+			database.CallerIsCollectionOwnerOrAdmin(
+				database.ServerDatabase,
+				coll,
+				user, userId, groups,
+			),
 	}
 	ctx.JSON(http.StatusOK, res)
 }
@@ -1114,9 +1405,9 @@ func handleDeleteCollection(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups, isAdmin)
+	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1135,6 +1426,204 @@ func handleDeleteCollection(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
+// handleListCollectionCandidateOwners drives the owner-picker on the
+// edit page when the caller doesn't hold server.user_admin (and so
+// can't list every user via /users). The set of candidates is the
+// union of:
+//
+//   - The current owner.
+//   - Members of the collection's admin group.
+//   - Members of every group attached via a CollectionACL row.
+//
+// Output rows are UserCard ({id, username, displayName}) so callers
+// never see more than the public-safe projection. Callers with
+// server.user_admin should prefer the regular /users endpoint, which
+// returns the full list — this endpoint is the fallback for
+// not-quite-admin callers (collection owners, admin-group members,
+// holders of server.collection_admin) who still need to pick a new
+// owner from the people already adjacent to the collection.
+//
+// Authorization: same gate as PATCH on the collection — owner /
+// admin-group / collection_admin pass; everyone else gets the
+// generic 404 to match GetCollection's leak posture.
+func handleListCollectionCandidateOwners(ctx *gin.Context) {
+	collectionID := ctx.Param("id")
+	if collectionID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Collection ID is required",
+		})
+		return
+	}
+
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user from context",
+		})
+		return
+	}
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isCollectionAdmin, _ := web_ui.CheckCollectionAdmin(identity)
+
+	// Reuse GetCollection's authorization (owner / admin / ACL /
+	// admin-bypass / public-visibility) so the candidate list is
+	// only readable by callers who can already see the collection.
+	coll, err := database.GetCollection(database.ServerDatabase, collectionID, user, userId, groups, isCollectionAdmin)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to load collection: %v", err),
+		})
+		return
+	}
+
+	cards, err := database.CollectionCandidateOwners(database.ServerDatabase, coll)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to compute candidate owners: %v", err),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, cards)
+}
+
+// CreateCollectionOwnershipInviteReq is the body for
+// POST /collections/:id/ownership-invites. ExpiresIn is a Go
+// duration string; an absent or empty value defaults to 7 days. The
+// link is always single-use — there's no client-controllable
+// IsSingleUse field, by design (ownership transfer is by definition
+// one-shot).
+type CreateCollectionOwnershipInviteReq struct {
+	ExpiresIn string `json:"expiresIn,omitempty"`
+}
+
+// CreateCollectionOwnershipInviteRes is what we send back. Mirrors
+// the existing group-invite shape so the frontend's existing
+// "redeem-link displayer" components can consume it without a
+// kind-specific adapter.
+type CreateCollectionOwnershipInviteRes struct {
+	ID          string    `json:"id"`
+	InviteToken string    `json:"inviteToken"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	IsSingleUse bool      `json:"isSingleUse"`
+}
+
+// handleCreateCollectionOwnershipInvite mints a single-use link that,
+// when redeemed by an authenticated user, transfers ownership of the
+// collection to that user. Authorization mirrors the PATCH-ownerId
+// path: existing owner / admin-group member / server.collection_admin
+// or admin holders pass; everyone else gets ErrForbidden (mapped
+// to 404 to match the rest of the surface's leak posture).
+func handleCreateCollectionOwnershipInvite(ctx *gin.Context) {
+	collectionID := ctx.Param("id")
+	if collectionID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Collection ID is required",
+		})
+		return
+	}
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	var req CreateCollectionOwnershipInviteReq
+	if bindErr := ctx.ShouldBindJSON(&req); bindErr != nil && bindErr.Error() != "EOF" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid request body: %v", bindErr),
+		})
+		return
+	}
+	expiry := 7 * 24 * time.Hour
+	if req.ExpiresIn != "" {
+		d, parseErr := time.ParseDuration(req.ExpiresIn)
+		if parseErr != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid expiresIn (Go duration): %v", parseErr),
+			})
+			return
+		}
+		expiry = d
+	}
+
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user from context",
+		})
+		return
+	}
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isCollectionAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isCollectionAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isCollectionAdmin = true
+	}
+	authMethod, authMethodID := web_ui.CaptureAuthMethod(ctx)
+
+	link, plaintext, err := database.CreateCollectionOwnershipInviteLink(
+		database.ServerDatabase, collectionID, user, userId, groups,
+		time.Now().Add(expiry), isCollectionAdmin, authMethod, authMethodID,
+	)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to mint ownership invite: %v", err),
+		})
+		return
+	}
+	ctx.JSON(http.StatusCreated, CreateCollectionOwnershipInviteRes{
+		ID:          link.ID,
+		InviteToken: plaintext,
+		ExpiresAt:   link.ExpiresAt,
+		IsSingleUse: link.IsSingleUse,
+	})
+}
+
 func handleGetCollectionAcls(ctx *gin.Context) {
 	collectionID := ctx.Param("id")
 	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
@@ -1146,7 +1635,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1161,7 +1650,25 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user, groups)
+	// Same admin bypass as GetCollection: a system or collection
+	// admin reading the ACL list of any collection they can see goes
+	// through. Without this, opening the edit page (or expanding the
+	// listing row) for a collection with no Modify-scope ACL would
+	// return a misleading "collection not found" 404.
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isAdmin = true
+	}
+
+	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user, userId, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1200,20 +1707,27 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		})
 		return
 	}
+	groupID := req.resolvedGroupID()
+	expiresAt := req.resolvedExpiresAt()
 
-	if req.GroupID == "" || req.Role == "" {
+	if groupID == "" || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "GroupID and role are required",
+			Msg:    "groupId and role are required",
 		})
 		return
 	}
 
 	role := database.AclRole(req.Role)
-	if role != database.AclRoleRead && role != database.AclRoleWrite && role != database.AclRoleOwner {
+	// Per the user/group-design rewrite, ownership is now a property
+	// of the Collection row itself (Owner = user, AdminID = group);
+	// the AclRoleOwner row pattern is deprecated. New ACL grants are
+	// limited to read/write — owner-equivalent authority comes from
+	// the Owner / AdminID fields on the collection.
+	if role != database.AclRoleRead && role != database.AclRoleWrite {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid role. Must be one of 'read', 'write', or 'owner'",
+			Msg:    "Invalid role. Must be one of 'read' or 'write'. To make a user the owner, set the collection's owner field; to give a group full management rights, set the collection's admin group.",
 		})
 		return
 	}
@@ -1239,9 +1753,9 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
+	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, expiresAt, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1280,19 +1794,24 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	if req.GroupID == "" || req.Role == "" {
+	groupID := req.resolvedGroupID()
+	if groupID == "" || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "GroupID and role are required",
+			Msg:    "groupId and role are required",
 		})
 		return
 	}
 
 	role := database.AclRole(req.Role)
+	// Revoke tolerates AclRoleOwner because legacy rows minted before
+	// the ownership-model rewrite still carry it; an admin needs to
+	// be able to clear them. Grant is what gets locked down to
+	// read/write.
 	if role != database.AclRoleRead && role != database.AclRoleWrite && role != database.AclRoleOwner {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid role. Must be one of 'read', 'write', or 'owner'",
+			Msg:    "Invalid role. Must be one of 'read', 'write', or 'owner' (legacy)",
 		})
 		return
 	}
@@ -1318,9 +1837,9 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, isAdmin)
+	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{

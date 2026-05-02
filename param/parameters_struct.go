@@ -357,6 +357,7 @@ type Config struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
 		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		Institutions any `mapstructure:"institutions" yaml:"Institutions"`
 		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
 		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
@@ -366,9 +367,15 @@ type Config struct {
 	} `mapstructure:"registry" yaml:"Registry"`
 	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
+		AUPCanonicalURL string `mapstructure:"aupcanonicalurl" yaml:"AUPCanonicalURL"`
+		AUPFile string `mapstructure:"aupfile" yaml:"AUPFile"`
+		AUPLastUpdated string `mapstructure:"auplastupdated" yaml:"AUPLastUpdated"`
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		AutoEnrollUsernameClaims []string `mapstructure:"autoenrollusernameclaims" yaml:"AutoEnrollUsernameClaims"`
+		CollectionAdminGroups []string `mapstructure:"collectionadmingroups" yaml:"CollectionAdminGroups"`
+		CollectionAdminUsers []string `mapstructure:"collectionadminusers" yaml:"CollectionAdminUsers"`
 		DatabaseBackup struct {
 			Frequency time.Duration `mapstructure:"frequency" yaml:"Frequency"`
 			Location string `mapstructure:"location" yaml:"Location"`
@@ -381,6 +388,7 @@ type Config struct {
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
+		GroupInviteLinkExpiration time.Duration `mapstructure:"groupinvitelinkexpiration" yaml:"GroupInviteLinkExpiration"`
 		HealthMonitoringPublic bool `mapstructure:"healthmonitoringpublic" yaml:"HealthMonitoringPublic"`
 		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
@@ -388,6 +396,7 @@ type Config struct {
 		IssuerPort int `mapstructure:"issuerport" yaml:"IssuerPort"`
 		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
 		Modules []string `mapstructure:"modules" yaml:"Modules"`
+		NewUserDefaultScopes []string `mapstructure:"newuserdefaultscopes" yaml:"NewUserDefaultScopes"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile" yaml:"SessionSecretFile"`
 		StartupTimeout time.Duration `mapstructure:"startuptimeout" yaml:"StartupTimeout"`
@@ -403,6 +412,8 @@ type Config struct {
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
 		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
 		UnprivilegedUser string `mapstructure:"unprivilegeduser" yaml:"UnprivilegedUser"`
+		UserAdminGroups []string `mapstructure:"useradmingroups" yaml:"UserAdminGroups"`
+		UserAdminUsers []string `mapstructure:"useradminusers" yaml:"UserAdminUsers"`
 		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
 		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
 		WebPort int `mapstructure:"webport" yaml:"WebPort"`
@@ -812,6 +823,7 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
+		EnableOIDC struct { Type string; Value bool }
 		Institutions struct { Type string; Value any }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
@@ -821,9 +833,15 @@ type configWithType struct {
 	}
 	RuntimeDir struct { Type string; Value string }
 	Server struct {
+		AUPCanonicalURL struct { Type string; Value string }
+		AUPFile struct { Type string; Value string }
+		AUPLastUpdated struct { Type string; Value string }
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		AutoEnrollUsernameClaims struct { Type string; Value []string }
+		CollectionAdminGroups struct { Type string; Value []string }
+		CollectionAdminUsers struct { Type string; Value []string }
 		DatabaseBackup struct {
 			Frequency struct { Type string; Value time.Duration }
 			Location struct { Type string; Value string }
@@ -836,6 +854,7 @@ type configWithType struct {
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
+		GroupInviteLinkExpiration struct { Type string; Value time.Duration }
 		HealthMonitoringPublic struct { Type string; Value bool }
 		Hostname struct { Type string; Value string }
 		IssuerHostname struct { Type string; Value string }
@@ -843,6 +862,7 @@ type configWithType struct {
 		IssuerPort struct { Type string; Value int }
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
+		NewUserDefaultScopes struct { Type string; Value []string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
 		StartupTimeout struct { Type string; Value time.Duration }
@@ -858,6 +878,8 @@ type configWithType struct {
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		UnprivilegedUser struct { Type string; Value string }
+		UserAdminGroups struct { Type string; Value []string }
+		UserAdminUsers struct { Type string; Value []string }
 		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }

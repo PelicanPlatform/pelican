@@ -6,6 +6,7 @@ import {
   ReactElement,
   useState,
 } from 'react';
+import useSWR from 'swr';
 import NavigationConfiguration from '@/app/navigation';
 import {
   StaticNavigationChildItemProps,
@@ -15,12 +16,41 @@ import Link from 'next/link';
 import { Box, Collapse } from '@mui/material';
 import { evaluateOrReturn } from '@/helpers/util';
 import { usePathname } from 'next/navigation';
+import { getUser } from '@/helpers/login';
+import { hasScope } from '@/index';
 
+// SubNavigation is the Settings sidebar (General / API / Groups /
+// Users / AUP). Most entries are admin-only; the Users entry is
+// reachable by user-admins too (server.user_admin granted directly
+// or via group membership). The component renders for any caller
+// who has at least one visible item — anyone outside that set sees
+// the standard chrome without a misleading sub-nav (e.g. a non-admin
+// who landed here from /groups/).
+//
+// Per-item visibility honors `allowedRoles` and `anyScopes` from the
+// nav config: an item is shown if EITHER the role is in
+// allowedRoles or any of anyScopes is in the caller's effective
+// scope set. An item with neither filter is always visible.
 const SubNavigation = () => {
   const pathname = usePathname();
+  const { data: who } = useSWR('getUser', getUser);
+
+  if (!who?.authenticated) {
+    return null;
+  }
+  const visibleItems = NavigationConfiguration.settings.filter((item) => {
+    if (!item.allowedRoles && !item.anyScopes) return true;
+    const roleOk = !!item.allowedRoles && item.allowedRoles.includes(who.role);
+    const scopeOk =
+      !!item.anyScopes && item.anyScopes.some((s) => hasScope(who, s));
+    return roleOk || scopeOk;
+  });
+  if (visibleItems.length === 0) {
+    return null;
+  }
   return (
     <Box>
-      {NavigationConfiguration.settings.map((item) => (
+      {visibleItems.map((item) => (
         <NavigationItem
           navItem={item}
           key={evaluateOrReturn(item.title)}

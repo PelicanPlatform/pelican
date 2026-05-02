@@ -141,27 +141,37 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to join downtime creation path")
 	cacheWebUrl.Path = downtimeCreationPath
 
-	// Create token for admin user in test
-	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
-	tk.Subject = "admin-user"
-	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
-	tk.AddScopes(token_scopes.WebUi_Access)
-	tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
-	tok, err := tk.CreateToken()
-	require.NoError(t, err)
+	// Mint a login cookie for the cache server. The cookie path in
+	// GetUserGroups now pins both `iss` and `aud` to the receiving
+	// server's own ExternalWebUrl (auth-layer security pass — see
+	// the comment around jwt.WithIssuer/jwt.WithAudience in
+	// authentication.go), so a single federation-wide cookie can no
+	// longer authenticate against multiple servers. We mint a
+	// token per server for the cookie: this one is bound to the cache.
+	mintCookieFor := func(t *testing.T, externalWebUrl string) string {
+		t.Helper()
+		tk := token.NewWLCGToken()
+		tk.Issuer = externalWebUrl
+		tk.Subject = "admin-user"
+		tk.Lifetime = 5 * time.Minute
+		tk.AddAudiences(externalWebUrl)
+		tk.AddScopes(token_scopes.WebUi_Access)
+		tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
+		out, err := tk.CreateToken()
+		require.NoError(t, err)
+		return out
+	}
+	cacheTok := mintCookieFor(t, cacheWebUrlStr)
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))
 	downtimeCreationReq.Header.Set("Content-Type", "application/json")
-	downtimeCreationReq.Header.Set("Authorization", "Bearer "+tok)
-	downtimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: tok})
+	downtimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: cacheTok})
 
 	downtimeCreationResp, err := client.Do(downtimeCreationReq)
 	require.NoError(t, err, "Failed to get response from downtime creation request")
 	defer func() {
 		_ = downtimeCreationResp.Body.Close()
 	}()
-	assert.Equal(t, http.StatusOK, downtimeCreationResp.StatusCode, "Failed to create downtime")
+	require.Equal(t, http.StatusOK, downtimeCreationResp.StatusCode, "Failed to create downtime")
 	downtimeCreationRespBody, err := io.ReadAll(downtimeCreationResp.Body)
 	require.NoError(t, err, "Failed to read downtime creation response body")
 	t.Log("Downtime Creation Response: ", string(downtimeCreationRespBody))
@@ -182,16 +192,19 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	}
 	registryDowntimebody, _ := json.Marshal(downtimeByFedAdmin)
 	require.NotEmpty(t, registryDowntimebody, "Failed to marshal registry downtime creation request")
+	// Same per-server cookie story as the cache POST above —
+	// the registry pins iss/aud to its own ExternalWebUrl.
+	registryTok := mintCookieFor(t, fedInfo.RegistryEndpoint)
 	registryDowntimeCreationReq, _ := http.NewRequest("POST", registryUrl.String(), bytes.NewBuffer(registryDowntimebody))
 	registryDowntimeCreationReq.Header.Set("Content-Type", "application/json")
-	registryDowntimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: tok})
+	registryDowntimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: registryTok})
 
 	registryDowntimeCreationResp, err := client.Do(registryDowntimeCreationReq)
 	require.NoError(t, err, "Failed to get response from registry downtime creation request")
 	defer func() {
 		_ = registryDowntimeCreationResp.Body.Close()
 	}()
-	assert.Equal(t, http.StatusOK, registryDowntimeCreationResp.StatusCode, "Failed to create downtime")
+	require.Equal(t, http.StatusOK, registryDowntimeCreationResp.StatusCode, "Failed to create downtime")
 	registryDowntimeCreationRespBody, err := io.ReadAll(registryDowntimeCreationResp.Body)
 	require.NoError(t, err, "Failed to read downtime creation response body")
 	t.Log("Registry Downtime Creation Response: ", string(registryDowntimeCreationRespBody))

@@ -77,9 +77,47 @@ acceptedBy: ["registry"]
 ############################
 name: web_ui.access
 description: >-
-  For user to access various server Web UI
+  Sign in to the server's web UI and the cookie-authenticated APIs.
+  Auto-granted to new user accounts; granting it explicitly to a user
+  or group lets API tokens (which intersect against effective scopes)
+  carry web-UI access too.
 issuedBy: ["*"]
 acceptedBy: ["*"]
+userGrantable: true
+---
+############################
+#  Server Management Scopes #
+############################
+# These scopes are user-grantable: the management UI can assign them
+# directly to users or groups. They feed EffectiveScopes(user) which
+# CheckAdmin / CheckUserAdmin / CheckCollectionAdmin all consult.
+# The data-access scopes below (wlcg.*, scitokens.*) are intentionally
+# NOT user-grantable; they describe per-token capabilities for
+# bearer-token authorization on the data plane.
+name: server.admin
+description: >-
+  Full server-administration capability. Holders can manage every
+  user/group/collection/setting; equivalent to the historical "system
+  admin" role. Implies server.user_admin and server.collection_admin.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
+---
+name: server.user_admin
+description: >-
+  Manage non-admin users and unprivileged groups. Holders can create
+  users, mint password-set invites, and run the user-onboarding flows,
+  but cannot modify system-admin accounts.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
+---
+name: server.collection_admin
+description: >-
+  Create, modify, and delete collections and manage their ACLs.
+issuedBy: ["*"]
+acceptedBy: ["*"]
+userGrantable: true
 ---
 ############################
 # Logging Management Scopes#
@@ -110,9 +148,12 @@ acceptedBy: ["*"]
 ---
 name: monitoring.query
 description: >-
-  For Web UI user and third-party tools to access server's Prometheus query engine endpoints at /api/v1.0/prometheus
+  View server metrics. Required for the web UI's metrics dashboards
+  and for external monitoring tools (e.g. Grafana) to read this
+  server's metrics through its Prometheus-compatible query endpoint.
 issuedBy: ["web_ui"]
 acceptedBy: ["*"]
+userGrantable: true
 ---
 ############################
 #       Broker Scopes      #

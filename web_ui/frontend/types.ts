@@ -120,7 +120,152 @@ export interface GetToken extends BaseToken {
   createdBy: string;
 }
 
-/** Authorization Types */
+/** Groups and Authorization Types */
+
+export type UserStatus = 'active' | 'inactive';
+
+export interface User {
+  id: string;
+  username: string;
+  sub: string;
+  issuer: string;
+  status: UserStatus;
+  lastLoginAt: string | null;
+  displayName: string;
+  aupVersion: string;
+  aupAgreedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type UserPost = Omit<
+  User,
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'status'
+  | 'lastLoginAt'
+  | 'displayName'
+  | 'aupVersion'
+  | 'aupAgreedAt'
+>;
+
+export type UserPatch = Partial<Omit<User, 'createdAt'>>;
+
+export type AdminType = 'user' | 'group';
+
+// UserCard / GroupCard mirror the backend's database.UserCard / GroupCard:
+// the minimum needed to render an identity ("Display Name (username)")
+// without pulling the full record or requiring user-listing privilege.
+export interface UserCard {
+  id: string;
+  username: string;
+  displayName: string;
+}
+export interface GroupCard {
+  id: string;
+  name: string;
+}
+
+export interface Group {
+  id: string;
+  // Machine-readable identifier; admin-only renames. Used in policy
+  // strings (admin-group lists, ACL grants) so it must be a stable
+  // restricted-character handle.
+  name: string;
+  // Human-readable label; owner-editable. UIs that surface a group
+  // anywhere it might affect authorization decisions (transfer
+  // ownership, add to ACL) should render BOTH "displayName (name)" so
+  // admins are not acting on an ambiguous label alone.
+  displayName: string;
+  description: string;
+  // The backend serializes Group.Members as a list of GroupMember rows
+  // (membership + nested User), NOT a list of bare Users. UIs must
+  // dereference `.user` for the actual identity. The previous typing
+  // here as `User[]` was wrong and silently produced "(unset)" labels
+  // because `member.username` was always undefined on the wrapper.
+  members: GroupMember[];
+  createdBy: string;
+  ownerId: string;
+  adminId: string;
+  adminType: AdminType;
+  createdAt: string;
+  updatedAt: string;
+  // Resolved server-side; absent if the referenced user/group no longer
+  // exists. The UI falls back to the raw id in that case.
+  ownerUser?: UserCard;
+  adminUser?: UserCard;
+  adminGroup?: GroupCard;
+  createdByUser?: UserCard;
+}
+
+export type GroupPost = Omit<
+  Group,
+  | 'members'
+  | 'createdBy'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'ownerId'
+  | 'adminId'
+  | 'adminType'
+>;
+
+export interface GroupMember {
+  groupId: string;
+  userId: string;
+  user: User;
+  createdBy: string;
+  createdAt: string;
+}
+
+export type GroupMemberPost = Omit<
+  GroupMember,
+  'user' | 'addedBy' | 'addedAt' | 'groupId'
+>;
+
+export interface GroupInviteLink {
+  id: string;
+  groupId: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  isSingleUse: boolean;
+  redeemedBy: string;
+  redeemedAt: string | null;
+  revoked: boolean;
+  /** Public short identifier — first few chars of the plaintext token.
+   * Safe to display in admin UIs and logs; not a credential. */
+  tokenPrefix: string;
+  /** Optional: when the row was redeemed, the resolved user-card for
+   * that user. Backed by the InviteLinkView wrapper in groups.go;
+   * lets the UI render a UserPill instead of the raw redeemedBy ID. */
+  redeemedByUser?: UserCard;
+}
+
+export interface GroupInviteLinkCreated extends GroupInviteLink {
+  /** The plaintext invite token, shown only once at creation */
+  inviteToken: string;
+}
+
+export interface GroupInviteLinkPost {
+  isSingleUse: boolean;
+  expiresIn: string; // Duration string, e.g. "168h"
+}
+
+export interface UserIdentity {
+  id: string;
+  userId: string;
+  sub: string;
+  issuer: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type UserIdentityPost = Omit<
+  UserIdentity,
+  'id' | 'userId' | 'createdAt'
+>;
 
 export interface WellKnownConfiguration {
   director_endpoint: string;

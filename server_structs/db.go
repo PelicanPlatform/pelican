@@ -11,6 +11,13 @@ type (
 		Token        string // "$ID.$SECRET_IN_HEX" string form
 		Capabilities []string
 		ExpiresAt    time.Time
+		// CreatedBy is the user ID of the admin who minted the key.
+		// Cached so api_token.Verify can look up the creator's
+		// *current* effective scopes on every request and intersect
+		// them with the token's persisted Capabilities — that way a
+		// scope revocation reaches into already-issued keys without
+		// the admin having to manually rotate them.
+		CreatedBy string
 	}
 
 	ApiKey struct {

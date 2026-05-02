@@ -279,7 +279,12 @@ Key steps:
 
 ## API Documentation
 
-API endpoints are documented using OpenAPI V2.0. The specification is generated from code annotations.
+API endpoints are documented using OpenAPI V2.0 (Swagger). The specification lives in `swagger/pelican-swagger.yaml` and is **hand-edited** — there are no code annotations and no generator. When you add, remove, or change the shape of an HTTP endpoint or a request/response type, update the swagger file in the same change. Conventions to follow:
+
+- Pick the right tag (`auth`, `common`, `users`, `me`, `groups`, `invites`, `registry_ui`, `director_ui`, `origin_ui`, `cache_ui`, `collections`, `issuer-admin`, `metrics`, `director`).
+- Note authorization in the description with the existing inline tags: `` `Authentication Required` ``, `` `Admin privilege Required` ``, `` `User Admin Required` ``. OpenAPI 2.0 has no native cookie-auth scheme, so this prose is the contract.
+- Define request/response shapes under `definitions:` and reference them with `$ref`. Reuse existing shapes where the contract genuinely matches; do not introduce near-duplicates.
+- Reflect security-relevant behavior accurately — e.g. when an endpoint's behavior depends on the *kind* of caller (system admin vs owner vs anonymous-token-bearer), say so.
 
 ## Testing Philosophy
 

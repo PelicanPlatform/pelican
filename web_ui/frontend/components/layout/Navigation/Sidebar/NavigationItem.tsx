@@ -18,21 +18,33 @@ export const NavigationItem = ({
   role,
   config,
 }: NavigationItemProps) => {
-  // If the role or export has yet to propagate, show a skeleton
+  // Hard rejections first: when role or exportType are known and don't
+  // match, hide the item without ever showing the loading skeleton.
+  // Order matters — non-admins never load exportType (the upstream
+  // /origin_ui/exports fetch is skipped for them), so a role-based
+  // rejection has to be able to short-circuit before the exportType
+  // skeleton branch below would otherwise sit forever.
+  if (
+    config?.allowedRoles &&
+    role !== undefined &&
+    !config.allowedRoles.includes(role)
+  ) {
+    return null;
+  }
+  if (
+    config?.allowedExportTypes &&
+    exportType !== undefined &&
+    !config.allowedExportTypes.includes(exportType as ExportRes['type'])
+  ) {
+    return null;
+  }
+
+  // Still waiting on data we'd need to make a final decision.
   if (
     (config?.allowedRoles && role === undefined) ||
     (config?.allowedExportTypes && exportType === undefined)
   ) {
     return <NavigationItemSkeleton />;
-  }
-
-  // If the role or export is not allowed, return null
-  if (
-    (config?.allowedRoles && !config.allowedRoles.includes(role)) ||
-    (config?.allowedExportTypes &&
-      !config.allowedExportTypes.includes(exportType as ExportRes['type']))
-  ) {
-    return null;
   }
 
   // If the item has children, render a menu

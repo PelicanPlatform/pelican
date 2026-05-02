@@ -37,6 +37,7 @@ import (
 	"github.com/tg123/go-htpasswd"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -65,6 +66,22 @@ type (
 		Authenticated bool     `json:"authenticated"`
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
+		// DisplayName is the human label from the User row (if any).
+		// Surfaced here so the navbar's user menu can render it
+		// without a second /me round-trip on every page mount.
+		// Empty when the row has no display name set.
+		DisplayName string `json:"displayName,omitempty"`
+		// Scopes is the caller's effective user-grantable scope set
+		// (DB user_scopes ∪ DB group_scopes via membership ∪
+		// config-derived grants ∪ admin implications). Used by
+		// the frontend to gate UI surfaces below the granularity of
+		// Role: e.g. /settings/users/ is reachable by anyone with
+		// server.user_admin (which is a subset of server.admin),
+		// and the navbar toggles its visibility off scopes rather
+		// than role membership. Empty for unauthenticated callers.
+		Scopes      []string `json:"scopes,omitempty"`
+		RequiresAUP bool     `json:"requires_aup,omitempty"`
+		AUPVersion  string   `json:"aup_version,omitempty"`
 	}
 
 	OIDCEnabledServerRes struct {
@@ -133,6 +150,16 @@ func configureAuthDB() error {
 
 // extractUserFromBearerToken parses and verifies a Bearer token, extracting user info.
 // Uses early-exit pattern for cleaner flow control.
+//
+// Security contract: ONLY tokens issued by *this* server (issuer claim
+// equal to Server.ExternalWebUrl AND signed by our key) are trusted to
+// carry user_id / oidc_sub / wlcg.groups. Tokens from federation,
+// registered-server, or any third-party OIDC issuer must NOT reach this
+// code path — those go through the dedicated checkers in token/token_verify.go,
+// which deliberately do not extract user-identity claims. The reasoning:
+// some IdPs let users self-assert arbitrary non-standard claims, so
+// trusting `user_id` from "any verified token" would let the user
+// declare themselves into a different account.
 func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string, userId string, groups []string, err error) {
 	// Parse token without verification first to check issuer
 	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
@@ -142,6 +169,9 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 
 	// Verify issuer matches local issuer
 	serverURL := param.Server_ExternalWebUrl.GetString()
+	if serverURL == "" {
+		return "", "", nil, errors.New("Server.ExternalWebUrl is not configured; cannot validate bearer tokens")
+	}
 	if parsed.Issuer() != serverURL {
 		return "", "", nil, errors.New("token issuer does not match server URL")
 	}
@@ -157,7 +187,10 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		return "", "", nil, err
 	}
 
-	if err = jwt.Validate(verified); err != nil {
+	// Validate standard claims AND re-pin the issuer in the validator
+	// (defense-in-depth: jwt.WithKeySet only proves the signature is
+	// from our key, not that the claims are still consistent).
+	if err = jwt.Validate(verified, jwt.WithIssuer(serverURL)); err != nil {
 		return "", "", nil, err
 	}
 
@@ -264,12 +297,35 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if err != nil {
 		return
 	}
-	if err = jwt.Validate(parsed); err != nil {
+	// Verify standard claims AND that the cookie was issued by *this*
+	// server. Signature verification alone isn't enough: the local
+	// issuer key signs many other token kinds (advertise tokens,
+	// federation registration tokens, file-transfer test tokens, ...)
+	// and a cookie reader that only checks the signature would happily
+	// accept any of them as a session token. Adding the issuer +
+	// audience match pins the cookie to the login flow specifically —
+	// only setLoginCookie sets both to Server.ExternalWebUrl.
+	externalUrl := param.Server_ExternalWebUrl.GetString()
+	if externalUrl == "" {
+		err = errors.New("Server.ExternalWebUrl is not configured; cannot validate login cookie")
+		return
+	}
+	if err = jwt.Validate(parsed,
+		jwt.WithIssuer(externalUrl),
+		jwt.WithAudience(externalUrl),
+	); err != nil {
 		return
 	}
 	user = parsed.Subject()
 
-	// Extract userId claim
+	// Extract userId claim. user_id, oidc_sub, oidc_iss, and wlcg.groups
+	// are EXTRACTED FROM THE COOKIE, not from the upstream OIDC token
+	// directly: they were captured at login time by setLoginCookie and
+	// re-asserted by us. Because we just verified the cookie's issuer
+	// and audience match the local server, these claims are trustworthy.
+	// Do NOT extend this code to read the same claims out of bearer
+	// tokens minted by other issuers — see extractUserFromBearerToken
+	// for the (more restrictive) rule there.
 	userIdIface, ok := parsed.Get("user_id")
 	if !ok {
 		err = errors.New("Missing user_id claim")
@@ -286,6 +342,13 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+
+	// Extract oidc_iss claim (the OIDC issuer that authenticated this user)
+	if oidcIssIface, ok := parsed.Get("oidc_iss"); ok {
+		if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+			ctx.Set("OIDCIss", oidcIss)
 		}
 	}
 
@@ -352,6 +415,13 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	// One cookie should be used for all path
 	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
+
+	// Track last login time
+	if userRecord.ID != "" {
+		if err := database.UpdateUserLastLogin(database.ServerDatabase, userRecord.ID); err != nil {
+			log.Warnf("Failed to update last login time for user %s: %v", userRecord.ID, err)
+		}
+	}
 }
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
@@ -366,12 +436,139 @@ func AuthHandler(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "Authentication required to perform this operation",
 			})
-	} else {
-		ctx.Set("User", user)
-		ctx.Set("UserId", userId)
-		ctx.Set("Groups", groups)
-		ctx.Next()
+		return
 	}
+
+	// Soft-delete / inactive revocation. The cookie is good — but
+	// the user record may have been removed (DeletedAt set, which
+	// GORM's default scope filters out) or marked inactive since
+	// the cookie was issued. Without this check, those state
+	// changes don't take effect until the cookie expires (up to
+	// 16h). Skip the check when userId is empty (legacy cookie
+	// without a user_id claim, or a path that intentionally doesn't
+	// carry one); those callers are already minimal-trust.
+	if userId != "" && !userRecordIsActive(userId) {
+		// Clear the now-revoked cookie so the next request goes
+		// through the login flow rather than tripping the same
+		// 401 again.
+		ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Your account has been deactivated. Please log in again.",
+			})
+		return
+	}
+
+	ctx.Set("User", user)
+	ctx.Set("UserId", userId)
+	ctx.Set("Groups", groups)
+	ctx.Next()
+}
+
+// userRecordIsActive reports whether the supplied user ID resolves to
+// a live (non-soft-deleted) row whose Status is active. Used by
+// AuthHandler to revoke live sessions when an admin deletes or
+// inactivates a user — without this, those changes wouldn't take
+// effect until the user's 16h cookie expired.
+//
+// Returns true when the DB isn't reachable, when the lookup fails for
+// reasons other than not-found, or when ServerDatabase is nil. We
+// fail-OPEN on those error paths because failing-CLOSED would lock
+// every authenticated user out of every protected page during a
+// transient DB hiccup. The cost is a small "deletion takes effect
+// only once the DB recovers" window, which is acceptable.
+//
+// Special case: the built-in "admin" username comes from the htpasswd
+// bootstrap path; if BootstrapAdminAndBackfillOwners hasn't run yet
+// (Server.ExternalWebUrl unconfigured), there's no row to look up.
+// The caller's userId would be empty in that case, so AuthHandler
+// short-circuits before reaching this function.
+func userRecordIsActive(userId string) bool {
+	if database.ServerDatabase == nil {
+		return true
+	}
+	user, err := database.GetUserByID(database.ServerDatabase, userId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Soft-deleted (GORM filters out via DeletedAt) or never
+			// existed. Either way, the cookie is no longer valid.
+			return false
+		}
+		// Unexpected error — log and fail-open per the contract above.
+		log.Warnf("Failed to validate user record %s on cookie read: %v", userId, err)
+		return true
+	}
+	return user.Status != database.UserStatusInactive
+}
+
+// CurrentAUPVersion lives in web_ui/aup.go alongside the embedded
+// default and source-resolution logic.
+
+// userHasAcceptedAUP returns true when the user's AUPVersion matches
+// the configured AUP's current version, or when no AUP is configured
+// (in which case there is nothing to accept).
+func userHasAcceptedAUP(userID string) (bool, error) {
+	_, version, err := CurrentAUPVersion()
+	if err != nil {
+		return false, err
+	}
+	if version == "" {
+		return true, nil
+	}
+	user, err := database.GetUserByID(database.ServerDatabase, userID)
+	if err != nil {
+		return false, err
+	}
+	return user.AUPVersion == version, nil
+}
+
+// RequireAUPCompliance is a gate that runs after AuthHandler and blocks
+// the request when the caller has not yet agreed to the current AUP.
+//
+// AUP signing is a hard precondition for using the system per the
+// Pelican design contract: a user who refuses must not be able to
+// proceed with anything other than (a) reading the AUP, (b) signing it,
+// or (c) logging out. Those endpoints are intentionally NOT wrapped in
+// this middleware; everything else that touches user-affecting state is.
+//
+// The 403 body carries `requires_aup: true` so the frontend can route
+// the user to the AUP page; the version field matches the one returned
+// by /whoami, so the UI can compute "this is the version I need to
+// sign" without a separate fetch.
+func RequireAUPCompliance(ctx *gin.Context) {
+	userID := ctx.GetString("UserId")
+	if userID == "" {
+		// AuthHandler should have populated this; if it didn't,
+		// short-circuit with 401 rather than fail open.
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Authentication required",
+			})
+		return
+	}
+	ok, err := userHasAcceptedAUP(userID)
+	if err != nil {
+		// Don't fail closed on a transient DB / file error: log and
+		// allow through. Returning 500 here would lock everyone out
+		// any time the AUP file is briefly unreadable, which is worse
+		// than the (small) window where an unsigned user gets through.
+		log.Warnf("Failed to evaluate AUP compliance for user %s: %v", userID, err)
+		ctx.Next()
+		return
+	}
+	if ok {
+		ctx.Next()
+		return
+	}
+	_, version, _ := CurrentAUPVersion()
+	ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+		"status":       server_structs.RespFailed,
+		"msg":          "You must accept the Acceptable Use Policy before using this server.",
+		"requires_aup": true,
+		"aup_version":  version,
+	})
 }
 
 // Require auth; if missing, redirect to the login endpoint.
@@ -404,56 +601,110 @@ type UserIdentity struct {
 	Groups   []string
 }
 
-// CheckAdmin checks if a user has admin privilege. It returns boolean and a message
-// indicating the error message.
+// CheckAdmin reports whether the identity holds the server.admin
+// scope. The decision is delegated to EffectiveScopesForIdentity,
+// which unions DB-stored user_scopes/group_scopes grants with the
+// historical config-derived sources (Server.UIAdminUsers,
+// Server.AdminGroups, the built-in "admin" username).
 //
-// The function checks the following in order:
-//  1. If user == "admin" (built-in admin)
-//  2. If any of the user's groups match Server.AdminGroups
-//  3. If any of the user's identifiers (Username, ID, Sub) match Server.UIAdminUsers
-//
-// Note: If you have a custom list of admin identifiers to check, set Server.UIAdminUsers.
-// If you want to grant admin privileges based on group membership, set Server.AdminGroups.
+// All matches are username-based — never ID, never OIDC Sub — so a
+// malicious IdP cannot mint a token with sub == an admin's name and
+// inherit privileges. See the user/group design doc for the reason
+// usernames are the only authorization handle.
 func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
-	if identity.Username == "admin" {
+	if hasScope(identity, token_scopes.Server_Admin) {
 		return true, ""
 	}
-
-	// Check admin groups if groups are provided
-	if len(identity.Groups) > 0 {
-		adminGroups := param.Server_AdminGroups.GetStringSlice()
-		if param.Server_AdminGroups.IsSet() && len(adminGroups) > 0 {
-			for _, userGroup := range identity.Groups {
-				for _, adminGroup := range adminGroups {
-					if userGroup == adminGroup {
-						return true, ""
-					}
-				}
-			}
-		}
-	}
-
-	// Check admin users against all user identifiers
-	adminList := param.Server_UIAdminUsers.GetStringSlice()
-	if param.Server_UIAdminUsers.IsSet() {
-		// Build list of all identifiers to check
-		identifiers := []string{identity.Username, identity.ID, identity.Sub}
-
-		for _, admin := range adminList {
-			for _, identifier := range identifiers {
-				if identifier != "" && identifier == admin {
-					return true, ""
-				}
-			}
-		}
-	}
-
-	// If neither admin groups nor admin users are configured, and user is not "admin", deny access
-	if !param.Server_AdminGroups.IsSet() && !param.Server_UIAdminUsers.IsSet() {
+	// Preserve the historical "neither configured" message so existing
+	// monitoring / docs that key off it still work.
+	if !param.Server_AdminGroups.IsSet() && !param.Server_UIAdminUsers.IsSet() && identity.Username != "admin" {
 		return false, "Server.UIAdminUsers and Server.UIAdminGroups are not set, and user is not root user. Admin check returns false"
 	}
-
 	return false, "You don't have permission to perform this action"
+}
+
+// CheckUserAdmin reports whether the identity holds the
+// server.user_admin scope. server.admin implies it (the
+// implication is applied inside EffectiveScopesForIdentity).
+func CheckUserAdmin(identity UserIdentity) (bool, string) {
+	if hasScope(identity, token_scopes.Server_UserAdmin) {
+		return true, ""
+	}
+	return false, "You don't have user administrator permission"
+}
+
+// CheckCollectionAdmin reports whether the identity holds the
+// server.collection_admin scope. server.admin implies it.
+func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
+	if hasScope(identity, token_scopes.Server_CollectionAdmin) {
+		return true, ""
+	}
+	return false, "You don't have collection administrator permission"
+}
+
+// IsSystemAdminUserID checks whether the given user ID belongs to a system admin.
+// This is used to prevent user administrators from modifying system admin accounts.
+func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
+	user, err := database.GetUserByID(db, userID)
+	if err != nil {
+		return false
+	}
+	identity := UserIdentity{
+		Username: user.Username,
+		ID:       user.ID,
+		Sub:      user.Sub,
+	}
+	isAdmin, _ := CheckAdmin(identity)
+	return isAdmin
+}
+
+// UserAdminAuthHandler accepts callers whose effective scope set
+// contains EITHER server.admin OR server.user_admin. It is the
+// route-level gate for the /api/v1.0/users/* surface and the
+// onboarding-invite endpoint: surfaces a system administrator must be
+// able to use, and which a "user administrator" (per the design
+// contract: manage non-admin users and unprivileged groups) is also
+// expected to use. Per-target guards inside the handlers (notably
+// IsSystemAdminUserID) prevent a user-admin from acting on a
+// system-admin account; this gate just decides who clears the door.
+//
+// Cascade behind AuthHandler (cookie/bearer parsing must have run
+// first so the identity is in context).
+func UserAdminAuthHandler(ctx *gin.Context) {
+	user := ctx.GetString("User")
+	if user == "" {
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Login required to view this page",
+			})
+		return
+	}
+	var groups []string
+	if v, exists := ctx.Get("Groups"); exists {
+		if s, ok := v.([]string); ok {
+			groups = s
+		}
+	}
+	identity := UserIdentity{
+		Username: user,
+		Groups:   groups,
+		ID:       ctx.GetString("UserId"),
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	if isAdmin, _ := CheckAdmin(identity); isAdmin {
+		ctx.Next()
+		return
+	}
+	if isUserAdmin, _ := CheckUserAdmin(identity); isUserAdmin {
+		ctx.Next()
+		return
+	}
+	ctx.AbortWithStatusJSON(http.StatusForbidden,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You do not have user administrator permission",
+		})
 }
 
 // AdminAuthHandler checks the admin status of a logged-in user. This middleware
@@ -551,16 +802,18 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 
 }
 
-// Handle regular username/password based login
+// Handle regular username/password based login.
+//
+// Login order:
+//  1. If a user with (username, externalURL) exists in the database AND has a
+//     non-empty password_hash, verify against that hash. This is the primary
+//     path for admin-created local accounts.
+//  2. Otherwise fall back to the htpasswd file. The htpasswd path is used to
+//     bootstrap the built-in "admin" account before any DB password is set
+//     and to remain compatible with installations that already have one.
 func loginHandler(ctx *gin.Context) {
-	db := authDB.Load()
-	if db == nil {
-		newPath := path.Join(ctx.Request.URL.Path, "..", "initLogin")
-		initUrl := ctx.Request.URL
-		initUrl.Path = newPath
-		ctx.Redirect(307, initUrl.String())
-		return
-	}
+	htDB := authDB.Load()
+	externalUrl := param.Server_ExternalWebUrl.GetString()
 
 	login := Login{}
 	if ctx.ShouldBind(&login) != nil {
@@ -587,33 +840,75 @@ func loginHandler(ctx *gin.Context) {
 			})
 		return
 	}
-	if !db.Match(login.User, login.Password) {
-		ctx.JSON(401,
-			server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Password and user didn't match",
-			})
-		return
+
+	var userRecord *database.User
+
+	// Step 1: try the local-user database.
+	if externalUrl != "" {
+		dbUser, dbErr := database.VerifyUserPassword(database.ServerDatabase, login.User, login.Password, externalUrl)
+		if dbErr == nil {
+			userRecord = dbUser
+		} else if !errors.Is(dbErr, database.ErrInvalidPassword) {
+			log.Errorf("Local password verification failed for user %s: %s", login.User, dbErr)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to verify credentials",
+				})
+			return
+		}
 	}
 
-	groups, err := generateGroupInfo(login.User)
+	// Step 2: fall back to htpasswd for users not yet in the DB (e.g. the
+	// initial "admin" account before any DB password is set).
+	if userRecord == nil {
+		if htDB == nil {
+			// No DB match and no htpasswd configured. If we're not yet
+			// initialized, point the client at the bootstrap endpoint;
+			// otherwise treat as an auth failure.
+			if currentCode.Load() != nil {
+				newPath := path.Join(ctx.Request.URL.Path, "..", "initLogin")
+				initUrl := ctx.Request.URL
+				initUrl.Path = newPath
+				ctx.Redirect(307, initUrl.String())
+				return
+			}
+			ctx.JSON(401,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Password and user didn't match",
+				})
+			return
+		}
+		if !htDB.Match(login.User, login.Password) {
+			ctx.JSON(401,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Password and user didn't match",
+				})
+			return
+		}
+		// htpasswd verified — load or create the corresponding User row.
+		// First htpasswd login for a new account counts as self-enrollment
+		// (the user came in with their own credential, no other user
+		// brought the account into existence).
+		var err error
+		userRecord, err = database.GetOrCreateUser(database.ServerDatabase, login.User, login.User, externalUrl, database.CreatorSelf())
+		if err != nil {
+			log.Errorf("Failed to get or create user %s: %s", login.User, err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to create user session",
+				})
+			return
+		}
+	}
+
+	groups, err := generateGroupInfo(userRecord.Username)
 	if err != nil {
-		log.Errorf("Failed to generate group info for user %s: %s", login.User, err)
+		log.Errorf("Failed to generate group info for user %s: %s", userRecord.Username, err)
 		groups = nil
-	}
-
-	// Get or create the user in the database
-	// For password-based login, we use the username as both sub and issuer with server URL
-	externalUrl := param.Server_ExternalWebUrl.GetString()
-	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, login.User, login.User, externalUrl)
-	if err != nil {
-		log.Errorf("Failed to get or create user %s: %s", login.User, err)
-		ctx.JSON(http.StatusInternalServerError,
-			server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to create user session",
-			})
-		return
 	}
 
 	setLoginCookie(ctx, userRecord, groups)
@@ -679,9 +974,10 @@ func initLoginHandler(ctx *gin.Context) {
 		groups = nil
 	}
 
-	// Get or create the admin user in the database
+	// Get or create the admin user in the database. The init-code path
+	// is the bootstrap admin authenticating themselves — self-enrolled.
 	externalUrl := param.Server_ExternalWebUrl.GetString()
-	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, "admin", "admin", externalUrl)
+	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, "admin", "admin", externalUrl, database.CreatorSelf())
 	if err != nil {
 		log.Errorf("Failed to get or create admin user: %s", err)
 		ctx.JSON(http.StatusInternalServerError,
@@ -764,13 +1060,52 @@ func whoamiHandler(ctx *gin.Context) {
 		} else {
 			res.Role = NonAdminRole
 		}
+
+		// Effective user-grantable scopes (DB grants + config-derived +
+		// implications) — used by the frontend to gate /settings/users
+		// for user-admins, render scope chips on the profile page, etc.
+		effective := EffectiveScopesForIdentity(identity)
+		if len(effective) > 0 {
+			res.Scopes = make([]string, 0, len(effective))
+			for _, s := range effective {
+				res.Scopes = append(res.Scopes, s.String())
+			}
+		}
+
+		// Pull the User row once per call. We use it for two things:
+		// the optional DisplayName (surfaced for the navbar's user
+		// menu) and the AUP-version comparison below. The cookie's
+		// audience+issuer were verified upstream so the row's
+		// authority is not a security check — just a label lookup.
+		var userRecord *database.User
+		if rec, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
+			userRecord = rec
+			res.DisplayName = rec.DisplayName
+		}
+
+		// Check AUP compliance. resolveAUP centralizes the operator-file
+		// vs. embedded-default vs. "none" logic — see web_ui/aup.go.
+		if doc, _ := resolveAUP(); doc != nil && userRecord != nil {
+			if userRecord.AUPVersion != doc.Version {
+				res.RequiresAUP = true
+				res.AUPVersion = doc.Version
+			}
+		}
+
 		ctx.JSON(http.StatusOK, res)
 	}
 }
 
 func listOIDCEnabledServersHandler(ctx *gin.Context) {
-	// Registry has OIDC enabled by default
-	res := OIDCEnabledServerRes{ODICEnabledServers: []string{strings.ToLower(server_structs.RegistryType.String())}}
+	// All four module types are gated by their own EnableOIDC flag,
+	// including the registry. Registry historically forced OIDC on
+	// regardless of config; per the user/group design contract that's
+	// now opt-in (Registry.EnableOIDC) so the registry can run with
+	// only local username/password accounts.
+	res := OIDCEnabledServerRes{ODICEnabledServers: []string{}}
+	if param.Registry_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(server_structs.RegistryType.String()))
+	}
 	if param.Origin_EnableOIDC.GetBool() {
 		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(server_structs.OriginType.String()))
 	}
