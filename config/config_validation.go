@@ -19,10 +19,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -100,3 +103,37 @@ func validateConfigKeys() []string {
 
 	return unknownKeys
 }
+
+// ValidateLogExportsConfig checks that the Logging.LogExports configuration is internally
+// consistent. It is called during server initialization (after viper is fully initialised)
+// for all server types. It is a no-op if Logging.LogExports.Enabled is false.
+//
+// Rules enforced:
+//   - Logging.LogLocation must be set to an absolute file path other than "/dev/null",
+//     because the virtual-object handler reads that file to assemble log responses.
+//   - If IssuerKeysDirectory is empty the server will not be able to auto-generate access
+//     tokens for the logging namespace; a warning is emitted but startup is not blocked.
+func ValidateLogExportsConfig() error {
+	if !param.Logging_LogExports_Enabled.GetBool() {
+		return nil
+	}
+
+	logLocation := param.Logging_LogLocation.GetString()
+	if !filepath.IsAbs(logLocation) || logLocation == "/dev/null" {
+		return fmt.Errorf(
+			"%s is true but %s must be set to an absolute file path (not \"/dev/null\") to enable log export",
+			param.Logging_LogExports_Enabled.GetName(),
+			param.Logging_LogLocation.GetName(),
+		)
+	}
+
+	if param.IssuerKeysDirectory.GetString() == "" {
+		log.Warningf("%s is true but %s is not configured; "+
+			"the server will not be able to auto-generate access tokens for the logging namespace",
+			param.Logging_LogExports_Enabled.GetName(),
+			param.IssuerKeysDirectory.GetName())
+	}
+
+	return nil
+}
+
