@@ -137,4 +137,3 @@ func ValidateLogExportsConfig() error {
 
 	return nil
 }
-
