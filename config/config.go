@@ -2273,6 +2273,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
+	if err := ValidateLogExportsConfig(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
