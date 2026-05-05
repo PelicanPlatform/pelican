@@ -57,8 +57,6 @@ var angleTagRe = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9_-]*)>`)
 var hiddenFromDocs = map[string]bool{
 	// rclone integration is not yet functional.
 	"rclone": true,
-	// SSH origin backend is not yet functional.
-	"origin/ssh-auth": true,
 }
 
 // generateCLIDocs creates per-command docs under the given directory. If the path
