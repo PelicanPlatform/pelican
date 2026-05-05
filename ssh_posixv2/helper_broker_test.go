@@ -1231,8 +1231,9 @@ func TestCallbackAndServeDefaultPort(t *testing.T) {
 
 	// Construct a URL that points to 127.0.0.1 without an explicit port,
 	// mimicking an origin running on the default HTTPS port (443).
-	serverIP := tlsServer.Listener.Addr().(*net.TCPAddr).IP.String() // "127.0.0.1"
-	noPortURL := "https://" + serverIP + "/api/v1.0/origin/ssh/callback"
+	tcpAddr, ok := tlsServer.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected TCP address from test server listener")
+	noPortURL := "https://" + tcpAddr.IP.String() + "/api/v1.0/origin/ssh/callback"
 
 	// Before the fix this would error with "missing port in address".
 	// After the fix the error must NOT contain "missing port in address";
