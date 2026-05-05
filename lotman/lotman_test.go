@@ -72,6 +72,12 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
 	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
 	require.NoError(t, param.Logging_Level.Set("debug"))
+	// The newer lotman library strictly enforces creation_time < expiration_time
+	// when storing a lot. The auto-created `default` and `root` lots derive
+	// their timestamps from these params, so we must ensure non-zero defaults
+	// regardless of whether the embedded yaml is loaded.
+	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.Set(2016*time.Hour))
+	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.Set(4032*time.Hour))
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -258,7 +264,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "root", test1Lot.Parents[0])
 	require.Equal(t, 1.11, *(test1Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test1Lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1", test1Lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/", test1Lot.Paths[0].Path)
 	require.False(t, test1Lot.Paths[0].Recursive)
 
 	// Finally test-2
@@ -277,7 +284,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "test-1", test2Lot.Parents[0])
 	require.Equal(t, 1.11, *(test2Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test2Lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1/test-2", test2Lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/test-2/", test2Lot.Paths[0].Path)
 	require.True(t, test2Lot.Paths[0].Recursive)
 }
 
@@ -341,7 +349,8 @@ func TestGetLot(t *testing.T) {
 	require.Contains(t, lot.Owners, "https://another-fake-federation.com")
 	require.Equal(t, 1.11, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1/test-2", lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/test-2/", lot.Paths[0].Path)
 	require.True(t, lot.Paths[0].Recursive)
 }
 
@@ -382,7 +391,8 @@ func TestUpdateLot(t *testing.T) {
 	require.Equal(t, "test-1", lot.LotName)
 	require.Equal(t, dedicatedGB, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(84), lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1-updated", lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1-updated/", lot.Paths[0].Path)
 	require.False(t, lot.Paths[0].Recursive)
 }
 
@@ -411,6 +421,8 @@ func TestAddToLot(t *testing.T) {
 	// -- this lets us do the comparison later, as `GetLot()`` sets this value but
 	// `AddToLot()`` doesn't accept it
 	newLotPath.LotName = "test-1"
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	newLotPath.Path = "/a/new/path/"
 
 	// Now check that the addition was successful
 	lot, err := GetLot("test-1", false)

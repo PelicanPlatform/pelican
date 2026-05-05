@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
@@ -92,7 +93,8 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	errMsg := make([]byte, 2048)
 	lots := unsafe.Pointer(nil)
 	// Pass a pointer to the first element of the slice to the C++ function.
-	ret := LotmanGetLotsFromDir(path, false, &lots, &errMsg)
+	// query_time = now: we want the lot currently tracking the path.
+	ret := LotmanGetLotsFromDir(path, false, time.Now().UnixMilli(), &lots, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
 		return false, errors.Errorf("Error getting lot JSON: %s", string(errMsg))

@@ -70,15 +70,37 @@ var (
 
 	// Auxiliary functions
 	LotmanLotExists     func(lotName string, errMsg *[]byte) int32
+	LotmanIsRoot        func(lotName string, errMsg *[]byte) int32
 	LotmanSetContextStr func(contextKey string, contextValue string, errMsg *[]byte) int32
 	LotmanGetContextStr func(key string, output *[]byte, errMsg *[]byte) int32
+	LotmanSetContextInt func(contextKey string, contextValue int32, errMsg *[]byte) int32
+	LotmanGetContextInt func(key string, output *int32, errMsg *[]byte) int32
 	// Functions that would normally take a char *** as an argument take an *unsafe.Pointer instead because
 	// these functions are responsible for allocating and deallocating the memory for the char ***. The Go
 	// runtime will handle the memory management for the *unsafe.Pointer.
 	LotmanGetLotOwners func(lotName string, recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
 	// Here, getSelf means get the lot proper if it's a self parent
-	LotmanGetLotParents  func(lotName string, recursive bool, getSelf bool, output *unsafe.Pointer, errMsg *[]byte) int32
-	LotmanGetLotsFromDir func(dir string, recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotParents   func(lotName string, recursive bool, getSelf bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotChildren  func(lotName string, recursive bool, getSelf bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotsFromDir  func(dir string, recursive bool, queryTimeMs int64, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanListAllLots     func(output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotsPastExp  func(recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotsPastDel  func(recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotsPastDed  func(recursiveQuota bool, recursiveChildren bool, output *unsafe.Pointer, hierarchical bool, errMsg *[]byte) int32
+	LotmanGetLotsPastOpp  func(recursiveQuota bool, recursiveChildren bool, output *unsafe.Pointer, hierarchical bool, errMsg *[]byte) int32
+	LotmanGetLotsPastObj  func(recursiveQuota bool, recursiveChildren bool, output *unsafe.Pointer, hierarchical bool, errMsg *[]byte) int32
+
+	// Functions returning a single JSON document via char **
+	LotmanGetPolicyAttributes  func(requestJSON string, output *[]byte, errMsg *[]byte) int32
+	LotmanGetLotDirs           func(lotName string, recursive bool, output *[]byte, errMsg *[]byte) int32
+	LotmanGetLotUsage          func(requestJSON string, output *[]byte, errMsg *[]byte) int32
+	LotmanGetAvailableCapacity func(parentLotName string, startTimeMs int64, endTimeMs int64, output *[]byte, errMsg *[]byte) int32
+
+	// Lot deletion preserving children (vs. recursive delete)
+	LotmanRemoveLot func(lotName string, assignLTBRParentsToOrphans bool, assignLTBRParentsToNonOrphans bool, assignPolicyToChildren bool, overridePolicy bool, errMsg *[]byte) int32
+
+	// Free a char ** allocated by lotman.
+	LotmanFreeStringList func(strList unsafe.Pointer)
 )
 
 type (
@@ -109,6 +131,56 @@ type (
 		CreationTime    *Int64FromFloat `json:"creation_time,omitempty" mapstructure:"CreationTime"`
 		ExpirationTime  *Int64FromFloat `json:"expiration_time,omitempty" mapstructure:"ExpirationTime"`
 		DeletionTime    *Int64FromFloat `json:"deletion_time,omitempty" mapstructure:"DeletionTime"`
+	}
+
+	// ParentAttribution describes how much of a parent lot's MPA budget is
+	// attributed to a particular child lot. It is the per-axis carve-out
+	// of the parent's quota that the child is permitted to consume. Used
+	// in lotman's strict_hierarchy mode to enforce that the sum of
+	// children's attributed quotas (with sweep-line over overlapping
+	// active intervals) never exceeds the parent's MPA.
+	ParentAttribution struct {
+		DedicatedGB     *float64        `json:"dedicated_GB,omitempty" mapstructure:"DedicatedGB"`
+		OpportunisticGB *float64        `json:"opportunistic_GB,omitempty" mapstructure:"OpportunisticGB"`
+		MaxNumObjects   *Int64FromFloat `json:"max_num_objects,omitempty" mapstructure:"MaxNumObjects"`
+	}
+
+	// AvailableCapacity is the JSON document returned by
+	// lotman_get_available_capacity. All sizes are in GB; counts are int64.
+	AvailableCapacity struct {
+		AvailableDedicatedGB     float64 `json:"available_dedicated_GB"`
+		AvailableOpportunisticGB float64 `json:"available_opportunistic_GB"`
+		AvailableMaxNumObjects   int64   `json:"available_max_num_objects"`
+		AvailableTotalGB         float64 `json:"available_total_GB"`
+		PeakDedicatedGB          float64 `json:"peak_dedicated_GB"`
+		PeakOpportunisticGB      float64 `json:"peak_opportunistic_GB"`
+		PeakMaxNumObjects        int64   `json:"peak_max_num_objects"`
+		PeakTotalGB              float64 `json:"peak_total_GB"`
+	}
+
+	// PolicyAttrsRequest is the input JSON to lotman_get_policy_attributes.
+	// Each bool selects whether that attribute should be present in the output.
+	PolicyAttrsRequest struct {
+		LotName         string `json:"lot_name"`
+		DedicatedGB     bool   `json:"dedicated_GB,omitempty"`
+		OpportunisticGB bool   `json:"opportunistic_GB,omitempty"`
+		MaxNumObjects   bool   `json:"max_num_objects,omitempty"`
+		CreationTime    bool   `json:"creation_time,omitempty"`
+		ExpirationTime  bool   `json:"expiration_time,omitempty"`
+		DeletionTime    bool   `json:"deletion_time,omitempty"`
+	}
+
+	// UsageRequest is the input JSON to lotman_get_lot_usage. Each bool
+	// selects whether that usage axis should be reported and whether
+	// children's contributions roll up into the result for that axis.
+	UsageRequest struct {
+		LotName             string `json:"lot_name"`
+		DedicatedGB         *bool  `json:"dedicated_GB,omitempty"`
+		OpportunisticGB     *bool  `json:"opportunistic_GB,omitempty"`
+		TotalGB             *bool  `json:"total_GB,omitempty"`
+		NumObjects          *bool  `json:"num_objects,omitempty"`
+		GBBeingWritten      *bool  `json:"GB_being_written,omitempty"`
+		ObjectsBeingWritten *bool  `json:"objects_being_written,omitempty"`
 	}
 
 	RestrictiveMPA struct {
@@ -151,6 +223,10 @@ type (
 		Children *[]string `json:"children,omitempty"`
 		Paths    []LotPath `json:"paths,omitempty" mapstructure:"Paths"`
 		MPA      *MPA      `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
+		// ParentAttributions records how much of each parent lot's MPA budget
+		// is reserved for this lot. Required (along with strict_hierarchy +
+		// contraction_policy) by lotman's reservation enforcement.
+		ParentAttributions map[string]ParentAttribution `json:"parent_attributions,omitempty" mapstructure:"ParentAttributions"`
 		// Again, these are derived
 		RestrictiveMPA *RestrictiveMPA `json:"restrictive_management_policy_attrs,omitempty"`
 		Usage          *LotUsage       `json:"usage,omitempty"`
@@ -168,17 +244,19 @@ type (
 	}
 
 	LotUpdate struct {
-		LotName string          `json:"lot_name"`
-		Owner   *string         `json:"owner,omitempty"`
-		Parents *[]ParentUpdate `json:"parents,omitempty"`
-		Paths   *[]PathUpdate   `json:"paths,omitempty"`
-		MPA     *MPA            `json:"management_policy_attrs,omitempty"`
+		LotName            string                       `json:"lot_name"`
+		Owner              *string                      `json:"owner,omitempty"`
+		Parents            *[]ParentUpdate              `json:"parents,omitempty"`
+		Paths              *[]PathUpdate                `json:"paths,omitempty"`
+		MPA                *MPA                         `json:"management_policy_attrs,omitempty"`
+		ParentAttributions map[string]ParentAttribution `json:"parent_attributions,omitempty"`
 	}
 
 	LotAddition struct {
-		LotName string    `json:"lot_name"`
-		Parents []string  `json:"parents,omitempty"`
-		Paths   []LotPath `json:"paths,omitempty"`
+		LotName            string                       `json:"lot_name"`
+		Parents            []string                     `json:"parents,omitempty"`
+		Paths              []LotPath                    `json:"paths,omitempty"`
+		ParentAttributions map[string]ParentAttribution `json:"parent_attributions,omitempty"`
 	}
 
 	LotPathRemoval struct {
@@ -1096,11 +1174,27 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 
 	// Auxiliary functions
 	purego.RegisterLibFunc(&LotmanLotExists, lotmanLib, "lotman_lot_exists")
+	purego.RegisterLibFunc(&LotmanIsRoot, lotmanLib, "lotman_is_root")
 	purego.RegisterLibFunc(&LotmanSetContextStr, lotmanLib, "lotman_set_context_str")
 	purego.RegisterLibFunc(&LotmanGetContextStr, lotmanLib, "lotman_get_context_str")
+	purego.RegisterLibFunc(&LotmanSetContextInt, lotmanLib, "lotman_set_context_int")
+	purego.RegisterLibFunc(&LotmanGetContextInt, lotmanLib, "lotman_get_context_int")
 	purego.RegisterLibFunc(&LotmanGetLotOwners, lotmanLib, "lotman_get_owners")
 	purego.RegisterLibFunc(&LotmanGetLotParents, lotmanLib, "lotman_get_parent_names")
+	purego.RegisterLibFunc(&LotmanGetLotChildren, lotmanLib, "lotman_get_children_names")
 	purego.RegisterLibFunc(&LotmanGetLotsFromDir, lotmanLib, "lotman_get_lots_from_dir")
+	purego.RegisterLibFunc(&LotmanListAllLots, lotmanLib, "lotman_list_all_lots")
+	purego.RegisterLibFunc(&LotmanGetLotsPastExp, lotmanLib, "lotman_get_lots_past_exp")
+	purego.RegisterLibFunc(&LotmanGetLotsPastDel, lotmanLib, "lotman_get_lots_past_del")
+	purego.RegisterLibFunc(&LotmanGetLotsPastDed, lotmanLib, "lotman_get_lots_past_ded")
+	purego.RegisterLibFunc(&LotmanGetLotsPastOpp, lotmanLib, "lotman_get_lots_past_opp")
+	purego.RegisterLibFunc(&LotmanGetLotsPastObj, lotmanLib, "lotman_get_lots_past_obj")
+	purego.RegisterLibFunc(&LotmanGetPolicyAttributes, lotmanLib, "lotman_get_policy_attributes")
+	purego.RegisterLibFunc(&LotmanGetLotDirs, lotmanLib, "lotman_get_lot_dirs")
+	purego.RegisterLibFunc(&LotmanGetLotUsage, lotmanLib, "lotman_get_lot_usage")
+	purego.RegisterLibFunc(&LotmanGetAvailableCapacity, lotmanLib, "lotman_get_available_capacity")
+	purego.RegisterLibFunc(&LotmanRemoveLot, lotmanLib, "lotman_remove_lot")
+	purego.RegisterLibFunc(&LotmanFreeStringList, lotmanLib, "lotman_free_string_list")
 
 	// Create the lot home dir (where lotman's sqlite db lives) and set the lot_home context
 	lotHome := param.Lotman_LotHome.GetString()
@@ -1478,5 +1572,292 @@ func DeleteLotsRecursive(lotName string, caller string) error {
 		return fmt.Errorf("error deleting lots: %s", string(errMsg))
 	}
 
+	return nil
+}
+
+// drainStringList copies the contents of a lotman char** output into a Go
+// slice and frees the underlying C allocation. Safe to call on a nil pointer.
+func drainStringList(p *unsafe.Pointer) []string {
+	if p == nil || *p == nil {
+		return nil
+	}
+	out := cArrToGoArr(p)
+	LotmanFreeStringList(*p)
+	*p = nil
+	return out
+}
+
+// IsRoot reports whether lotName names a root lot (only self-parent).
+func IsRoot(lotName string) (bool, error) {
+	errMsg := make([]byte, 2048)
+	ret := LotmanIsRoot(lotName, &errMsg)
+	if ret < 0 {
+		trimBuf(&errMsg)
+		return false, errors.Errorf("error checking root status of %s: %s", lotName, string(errMsg))
+	}
+	return ret == 1, nil
+}
+
+// LotExists reports whether a lot with the given name exists in the lotman DB.
+func LotExists(lotName string) (bool, error) {
+	errMsg := make([]byte, 2048)
+	ret := LotmanLotExists(lotName, &errMsg)
+	if ret < 0 {
+		trimBuf(&errMsg)
+		return false, errors.Errorf("error checking existence of lot %s: %s", lotName, string(errMsg))
+	}
+	return ret == 1, nil
+}
+
+// ListAllLots returns every lot name currently stored in the lotman DB.
+func ListAllLots() ([]string, error) {
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := LotmanListAllLots(&out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error listing lots: %s", string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// GetChildrenNames returns the names of lotName's children. If recursive is
+// true, all transitive descendants are returned. If getSelf is true, lotName
+// is included when it self-parents.
+func GetChildrenNames(lotName string, recursive, getSelf bool) ([]string, error) {
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := LotmanGetLotChildren(lotName, recursive, getSelf, &out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting children of %s: %s", lotName, string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// GetParentNames returns the names of lotName's parents. If recursive is
+// true, all transitive ancestors are returned.
+func GetParentNames(lotName string, recursive, getSelf bool) ([]string, error) {
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := LotmanGetLotParents(lotName, recursive, getSelf, &out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting parents of %s: %s", lotName, string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// GetOwners returns the owner identities recorded for lotName. If recursive
+// is true, owners of all ancestor lots are unioned in.
+func GetOwners(lotName string, recursive bool) ([]string, error) {
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := LotmanGetLotOwners(lotName, recursive, &out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting owners of %s: %s", lotName, string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// GetLotsFromDir returns the names of lots tracking the supplied path at the
+// supplied wall-clock time (Unix milliseconds). queryTimeMs of 0 means "now".
+// If recursive is true, every parent lot is also returned. The result is
+// non-empty for every legal input: paths not tied to any lot resolve to the
+// "default" lot.
+func GetLotsFromDir(dir string, recursive bool, queryTimeMs int64) ([]string, error) {
+	if queryTimeMs == 0 {
+		queryTimeMs = time.Now().UnixMilli()
+	}
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := LotmanGetLotsFromDir(dir, recursive, queryTimeMs, &out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting lots for path %s: %s", dir, string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// pastLotsHelper centralises the past-quota query pattern.
+func pastLotsHelper(name string, fn func(*unsafe.Pointer, *[]byte) int32) ([]string, error) {
+	errMsg := make([]byte, 2048)
+	out := unsafe.Pointer(nil)
+	ret := fn(&out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error querying %s: %s", name, string(errMsg))
+	}
+	return drainStringList(&out), nil
+}
+
+// GetLotsPastExp returns all lots past their expiration_time. If recursive,
+// the most-restricting ancestor expiration_time is used.
+func GetLotsPastExp(recursive bool) ([]string, error) {
+	return pastLotsHelper("lots-past-exp", func(out *unsafe.Pointer, errMsg *[]byte) int32 {
+		return LotmanGetLotsPastExp(recursive, out, errMsg)
+	})
+}
+
+// GetLotsPastDel returns all lots past their deletion_time.
+func GetLotsPastDel(recursive bool) ([]string, error) {
+	return pastLotsHelper("lots-past-del", func(out *unsafe.Pointer, errMsg *[]byte) int32 {
+		return LotmanGetLotsPastDel(recursive, out, errMsg)
+	})
+}
+
+// GetLotsPastDed returns all lots past their dedicated_GB quota.
+// When hierarchical is true, recursiveQuota and recursiveChildren are ignored
+// (the hierarchical query path supersedes them) and results are returned
+// depth-ordered (deepest first).
+func GetLotsPastDed(recursiveQuota, recursiveChildren, hierarchical bool) ([]string, error) {
+	return pastLotsHelper("lots-past-ded", func(out *unsafe.Pointer, errMsg *[]byte) int32 {
+		return LotmanGetLotsPastDed(recursiveQuota, recursiveChildren, out, hierarchical, errMsg)
+	})
+}
+
+// GetLotsPastOpp returns all lots past their opportunistic_GB quota.
+func GetLotsPastOpp(recursiveQuota, recursiveChildren, hierarchical bool) ([]string, error) {
+	return pastLotsHelper("lots-past-opp", func(out *unsafe.Pointer, errMsg *[]byte) int32 {
+		return LotmanGetLotsPastOpp(recursiveQuota, recursiveChildren, out, hierarchical, errMsg)
+	})
+}
+
+// GetLotsPastObj returns all lots past their max_num_objects quota.
+func GetLotsPastObj(recursiveQuota, recursiveChildren, hierarchical bool) ([]string, error) {
+	return pastLotsHelper("lots-past-obj", func(out *unsafe.Pointer, errMsg *[]byte) int32 {
+		return LotmanGetLotsPastObj(recursiveQuota, recursiveChildren, out, hierarchical, errMsg)
+	})
+}
+
+// GetPolicyAttributes returns the most-restrictive MPA values for each axis
+// flagged true in req. The returned RestrictiveMPA contains zero-valued slots
+// for axes not requested.
+func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "error marshalling policy-attributes request")
+	}
+	errMsg := make([]byte, 2048)
+	output := make([]byte, 4096)
+	ret := LotmanGetPolicyAttributes(string(reqJSON), &output, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting policy attributes for %s: %s", req.LotName, string(errMsg))
+	}
+	trimBuf(&output)
+	var rmpa RestrictiveMPA
+	if err := json.Unmarshal(output, &rmpa); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling policy-attributes response %q", string(output))
+	}
+	return &rmpa, nil
+}
+
+// GetLotDirs returns the path entries associated with lotName. If recursive,
+// paths owned by descendant lots are also included.
+func GetLotDirs(lotName string, recursive bool) ([]LotPath, error) {
+	errMsg := make([]byte, 2048)
+	output := make([]byte, 4096)
+	ret := LotmanGetLotDirs(lotName, recursive, &output, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting paths for %s: %s", lotName, string(errMsg))
+	}
+	trimBuf(&output)
+	var paths []LotPath
+	if err := json.Unmarshal(output, &paths); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling lot-dirs response %q", string(output))
+	}
+	return paths, nil
+}
+
+// GetLotUsage returns usage statistics for the lot named in req. Only axes
+// flagged in req are populated in the returned LotUsage.
+func GetLotUsage(req UsageRequest) (*LotUsage, error) {
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "error marshalling usage request")
+	}
+	errMsg := make([]byte, 2048)
+	output := make([]byte, 4096)
+	ret := LotmanGetLotUsage(string(reqJSON), &output, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting usage for %s: %s", req.LotName, string(errMsg))
+	}
+	trimBuf(&output)
+	var usage LotUsage
+	if err := json.Unmarshal(output, &usage); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling usage response %q", string(output))
+	}
+	return &usage, nil
+}
+
+// GetAvailableCapacity returns the available and peak capacity attributable
+// to direct children of parentLotName during the half-open window
+// [startTimeMs, endTimeMs). This is an advisory query; reservation
+// enforcement is performed atomically inside lotman's add/update transactions
+// when strict_hierarchy is enabled.
+func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*AvailableCapacity, error) {
+	errMsg := make([]byte, 2048)
+	output := make([]byte, 4096)
+	ret := LotmanGetAvailableCapacity(parentLotName, startTimeMs, endTimeMs, &output, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return nil, errors.Errorf("error getting available capacity for %s: %s", parentLotName, string(errMsg))
+	}
+	trimBuf(&output)
+	var ac AvailableCapacity
+	if err := json.Unmarshal(output, &ac); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling available-capacity response %q", string(output))
+	}
+	return &ac, nil
+}
+
+// SetContextInt sets an integer-valued lotman context variable (e.g. db_timeout).
+func SetContextInt(key string, value int) error {
+	errMsg := make([]byte, 2048)
+	ret := LotmanSetContextInt(key, int32(value), &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return errors.Errorf("error setting lotman context int %s=%d: %s", key, value, string(errMsg))
+	}
+	return nil
+}
+
+// GetContextInt reads an integer-valued lotman context variable.
+func GetContextInt(key string) (int, error) {
+	errMsg := make([]byte, 2048)
+	var out int32
+	ret := LotmanGetContextInt(key, &out, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return 0, errors.Errorf("error getting lotman context int %s: %s", key, string(errMsg))
+	}
+	return int(out), nil
+}
+
+// RemoveLot deletes a single lot from the lotman DB while preserving its
+// children, applying the supplied reassignment options. Prefer
+// DeleteLotsRecursive for normal teardown; this entry point exists for
+// callers that need fine-grained control over orphan reassignment.
+//
+// The caller must be one of the lot's owners. The override_policy flag is
+// not yet implemented in the underlying library and is forwarded as-is.
+func RemoveLot(lotName string, assignLTBRParentsToOrphans, assignLTBRParentsToNonOrphans, assignPolicyToChildren, overridePolicy bool, caller string) error {
+	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret := LotmanSetContextStr("caller", caller, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return errors.Errorf("error setting caller for lot removal: %s", string(errMsg))
+	}
+	ret = LotmanRemoveLot(lotName, assignLTBRParentsToOrphans, assignLTBRParentsToNonOrphans, assignPolicyToChildren, overridePolicy, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return errors.Errorf("error removing lot %s: %s", lotName, string(errMsg))
+	}
 	return nil
 }
