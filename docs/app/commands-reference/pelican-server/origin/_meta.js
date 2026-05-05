@@ -3,7 +3,7 @@ export default {
     "config": "pelican-server origin config",
     "issuer": "pelican-server origin issuer",
     "serve": "pelican-server origin serve",
-    "ssh-auth": "pelican-server origin ssh-auth",
+    "ssh-auth": { display: 'hidden' },
     "token": "pelican-server origin token",
     "web-ui": "pelican-server origin web-ui",
 }

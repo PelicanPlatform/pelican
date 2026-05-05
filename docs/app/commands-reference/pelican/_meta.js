@@ -6,6 +6,6 @@ export default {
     "namespace": "pelican namespace",
     "object": "pelican object",
     "plugin": "pelican plugin",
-    "rclone": "pelican rclone",
+    "rclone": { display: 'hidden' },
     "token": "pelican token",
 }
