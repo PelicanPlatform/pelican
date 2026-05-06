@@ -44,6 +44,27 @@ const (
 	AclRoleOwner AclRole = "owner"
 )
 
+// AllAuthenticatedUsersACLGroup is the sentinel value that may appear
+// in CollectionACL.GroupID to grant the row's role to every
+// authenticated caller, regardless of group membership. The string
+// begins with `@`, which `ValidateIdentifier` rejects (identifiers
+// must start with an alphanumeric), so this sentinel can never collide
+// with a real Group.Name. Treat it like a group: callers add it to
+// their effective-groups list when authenticated, and the existing
+// ACL evaluator matches it the same way it would match any other
+// group name. See validateACL / ListCollections /
+// GetUserCollectionScopes for the injection points.
+const AllAuthenticatedUsersACLGroup = "@authenticated"
+
+// IsACLGroupVirtual reports whether `name` is a known virtual ACL
+// target — currently only the all-authenticated-users sentinel.
+// Frontends and CLI surfaces consult this to render a friendly label
+// instead of the bare `@authenticated` string, and the ACL grant
+// resolver uses it to skip the "real group must exist" lookup.
+func IsACLGroupVirtual(name string) bool {
+	return name == AllAuthenticatedUsersACLGroup
+}
+
 var (
 	ScopeToRole map[token_scopes.TokenScope][]AclRole = map[token_scopes.TokenScope][]AclRole{
 		token_scopes.Collection_Read:   {AclRoleRead, AclRoleWrite, AclRoleOwner},
@@ -51,6 +72,86 @@ var (
 		token_scopes.Collection_Delete: {AclRoleOwner},
 	}
 )
+
+// FilterAuthTemplateEligibleGroups removes from `names` any group
+// whose DB row has auth_template_eligible == false. Names that have
+// no DB row at all (purely OIDC-asserted, no Pelican-managed Group)
+// pass through unchanged — eligibility is a flag on Pelican-managed
+// rows; we don't deny names this server doesn't even know about.
+//
+// Used by every authz consumer that treats group names as bearer
+// authority: the issuer's `Issuer.AuthorizationTemplates` matcher
+// (oa4mp) and the `Server.*AdminGroups` config matcher
+// (web_ui.EffectiveScopesForIdentity). Collection-ACL evaluation
+// does NOT call this — collection ACLs are operator-set per row,
+// and the unique-name constraint already prevents a self-created
+// group from impersonating an admin-named one.
+//
+// Empty input → empty output. DB errors fall back to returning the
+// input unchanged: a transient DB hiccup must not silently strip a
+// user's group memberships and turn them into an unprivileged
+// caller. The downside is a brief window where a freshly-flagged
+// ineligible group still matches templates — acceptable.
+func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
+	if db == nil || len(names) == 0 {
+		return names
+	}
+	// Names that exist in the DB AND are flagged ineligible. Anything
+	// else (eligible, or not in the DB at all) is kept.
+	type row struct{ Name string }
+	var rows []row
+	if err := db.Table("groups").
+		Select("name").
+		Where("name IN ? AND auth_template_eligible = 0", names).
+		Scan(&rows).Error; err != nil {
+		return names
+	}
+	if len(rows) == 0 {
+		return names
+	}
+	excluded := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		excluded[r.Name] = struct{}{}
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if _, drop := excluded[n]; drop {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// expandCallerACLGroups returns the effective list of "groups" used
+// when matching collection ACL rows for a single caller. It augments
+// the caller-supplied list (DB members + cookie-asserted wlcg.groups)
+// with two synthetic entries:
+//   - `user-<username>` — the personal group every user implicitly
+//     belongs to; carries per-user ACL grants.
+//   - `@authenticated` — the all-authenticated-users sentinel; only
+//     added when the caller has any identity (username or User.ID).
+//     A bearer-token call with neither set is treated as anonymous
+//     and does NOT inherit the sentinel.
+//
+// Caller is responsible for passing in only the groups they trust
+// (the cookie-asserted ones, plus any DB-derived membership). This
+// helper does not consult the database.
+func expandCallerACLGroups(user, userID string, groups []string) []string {
+	out := groups
+	if user != "" {
+		userGroup := "user-" + user
+		if !slices.Contains(out, userGroup) {
+			out = append(out, userGroup)
+		}
+	}
+	if user != "" || userID != "" {
+		if !slices.Contains(out, AllAuthenticatedUsersACLGroup) {
+			out = append(out, AllAuthenticatedUsersACLGroup)
+		}
+	}
+	return out
+}
 
 // Collection — origin-local record of a curated namespace. Ownership
 // model (per the user/group-design rewrite):
@@ -75,19 +176,39 @@ var (
 // Visibility=public collections are readable by anyone; private ones
 // require Owner / admin-group / ACL membership / collection_admin scope.
 type Collection struct {
-	ID          string               `gorm:"primaryKey" json:"id"`
-	Name        string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
-	Description string               `json:"description"`
-	Owner       string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
-	OwnerID     string               `gorm:"not null;default:''" json:"ownerId"`
-	AdminID     string               `gorm:"not null;default:''" json:"adminId"`
-	Namespace   string               `gorm:"not null" json:"namespace"`
-	Visibility  Visibility           `gorm:"not null;default:private" json:"visibility"`
-	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
-	Members     []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
-	ACLs        []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
-	Metadata    []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
+	ID          string     `gorm:"primaryKey" json:"id"`
+	Name        string     `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
+	Description string     `json:"description"`
+	Owner       string     `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
+	OwnerID     string     `gorm:"not null;default:''" json:"ownerId"`
+	AdminID     string     `gorm:"not null;default:''" json:"adminId"`
+	Namespace   string     `gorm:"not null" json:"namespace"`
+	Visibility  Visibility `gorm:"not null;default:private" json:"visibility"`
+	// EnableSharing is the operator-set opt-in that lets read-access
+	// holders mint a "share" — a child collection that delegates a
+	// subset of this collection's access. Defaults false; flipped only
+	// by the collection owner / admin-group / collection_admin via
+	// PATCH. The share self-service endpoint refuses to create a child
+	// collection when the parent has EnableSharing == false.
+	EnableSharing bool `gorm:"not null;default:false" json:"enableSharing"`
+	// ParentCollectionID, when non-empty, marks this row as a *share*
+	// of the named collection. Per the design (see
+	// docs/collections-design.md), shares delegate a subset of the
+	// parent's access to whoever the share is handed to; access-token
+	// minting clamps the share's effective scopes by the share owner's
+	// CURRENT access to the parent, so revocation propagates. Set only
+	// by the share self-service endpoint; immutable thereafter.
+	// The partial index on this column is created by the migration
+	// (universal_migrations/20260502165710_collection_parent_id.sql);
+	// not declaring it on the struct keeps GORM AutoMigrate from
+	// trying to recreate it as a non-partial index in tests that
+	// rely on AutoMigrate alone.
+	ParentCollectionID   string               `gorm:"not null;default:''" json:"parentCollectionId,omitempty"`
+	CreatedAt            time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt            time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	Members              []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
+	ACLs                 []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
+	Metadata             []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
 }
 
 type CollectionMember struct {
@@ -266,6 +387,23 @@ type Group struct {
 	OwnerID             string        `gorm:"not null;default:''" json:"ownerId"`
 	AdminID             string        `gorm:"not null;default:''" json:"adminId"`
 	AdminType           AdminType     `gorm:"not null;default:''" json:"adminType"`
+	// AuthTemplateEligible gates whether this group is allowed to
+	// match against Issuer.AuthorizationTemplates and the
+	// Server.*AdminGroups config lists at runtime. Group creation is
+	// open to any authenticated user so they can mint groups for their
+	// own collection ACLs / shares; the bit prevents a self-named
+	// group from also gaining authz-template authority. Only an
+	// admin / user-admin can set or flip the bit. Pre-existing rows
+	// (before the open-creation rollout) are migrated to true since
+	// they were minted by an admin and operators expect them to keep
+	// matching templates.
+	// gorm:"not null" without a `default:` tag — the SQL default (TRUE
+	// for backfill of pre-existing rows) lives in the migration. Adding
+	// `default:true` here would make GORM substitute the default on
+	// every insert with a zero Go value, defeating the create-time
+	// non-admin clamp ("AuthTemplateEligible: false" would round-trip
+	// as true).
+	AuthTemplateEligible bool          `gorm:"not null" json:"authTemplateEligible"`
 	// CreatedForCollectionID marks groups minted alongside a specific
 	// collection during the onboarding flow. The redemption path of a
 	// collection-ownership invite cascades the transfer to every group
@@ -470,20 +608,23 @@ func CreateCollection(db *gorm.DB, name, description, owner, ownerID, namespace 
 // CreateCollectionWithMetadata is the create path used by the HTTP
 // handlers — accepts the same `ownerID` posture as CreateCollection
 // plus an optional metadata map persisted in the same transaction.
-func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID, namespace string, visibility Visibility, metadata map[string]string) (*Collection, error) {
+// `enableSharing` opts the collection in to user-driven shares; the
+// flag can also be flipped after creation via UpdateCollection.
+func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID, namespace string, visibility Visibility, enableSharing bool, metadata map[string]string) (*Collection, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
 	}
 
 	collection := &Collection{
-		ID:          slug,
-		Name:        name,
-		Description: description,
-		Owner:       owner,
-		OwnerID:     ownerID,
-		Namespace:   namespace,
-		Visibility:  visibility,
+		ID:            slug,
+		Name:          name,
+		Description:   description,
+		Owner:         owner,
+		OwnerID:       ownerID,
+		Namespace:     namespace,
+		Visibility:    visibility,
+		EnableSharing: enableSharing,
 	}
 
 	err = db.Transaction(func(tx *gorm.DB) error {
@@ -546,12 +687,10 @@ func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin 
 		return all, nil
 	}
 
-	// Every user is implicitly in their own personal group. Mirrors
+	// Augment with the personal `user-<name>` group and (when
+	// authenticated) the all-authenticated-users sentinel. Mirrors
 	// the same convention used by validateACL / GetUserCollectionScopes.
-	userGroup := "user-" + user
-	if !slices.Contains(groups, userGroup) {
-		groups = append(groups, userGroup)
-	}
+	groups = expandCallerACLGroups(user, userID, groups)
 
 	out := []Collection{}
 	seen := make(map[string]struct{})
@@ -848,6 +987,213 @@ func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 	})
 }
 
+// ErrSharingDisabled means the parent collection has not opted into
+// user-driven shares (Collection.EnableSharing == false). Surface
+// this from the share-create handler as a 409 — refusing is correct,
+// but the caller should know it's a deliberate opt-out, not an
+// authorization issue.
+var ErrSharingDisabled = errors.New("sharing is not enabled on this collection")
+
+// CreateShareReq is the input for CreateShare. Mirrors
+// CreateCollectionWithMetadata's positional arguments but bundles
+// share-specific fields (the parent + the share-owner identity) and
+// dis-allows the operator-only knobs (no admin group, no
+// enable-sharing flag, no metadata) on the create path. A share owner
+// can set those later via the regular PATCH surface if they hold the
+// owner gate on the share itself.
+type CreateShareReq struct {
+	ParentCollectionID string
+	Name               string
+	Description        string
+	Namespace          string
+	Visibility         Visibility
+	// Owner identity — the share is owned by the caller minting it,
+	// not by the parent collection's owner. Per the design, access
+	// tokens for the share's prefixes are clamped to whatever the
+	// share owner currently has on the parent — that intersection
+	// happens at token-mint time (see oa4mp), not here.
+	OwnerUsername string
+	OwnerID       string
+}
+
+// CreateShare persists a new share — a child Collection whose
+// `parent_collection_id` is the parent's ID. Authorization is the
+// caller's responsibility; this helper enforces only the data-model
+// invariants:
+//
+//   - The parent must exist.
+//   - The parent must have EnableSharing == true (else
+//     ErrSharingDisabled, distinct from ErrForbidden so the handler
+//     can surface a clearer message than "not found").
+//   - The supplied namespace must be a prefix-or-equal of the
+//     parent's namespace — you can't delegate access you don't have.
+//
+// The handler is expected to enforce: caller has Collection_Read on
+// the parent, AND the configured Origin storage backend is not
+// multi-user (impersonation isn't supported there per the design).
+//
+// The new share starts with no ACLs, no admin group, and
+// EnableSharing = false. The share owner is free to add ACLs after
+// the fact (they hold owner authority on the row).
+func CreateShare(db *gorm.DB, req CreateShareReq) (*Collection, error) {
+	if req.ParentCollectionID == "" {
+		return nil, errors.New("parent collection id is required")
+	}
+	if req.Name == "" {
+		return nil, errors.New("share name is required")
+	}
+	if req.Visibility != VisibilityPublic && req.Visibility != VisibilityPrivate {
+		return nil, errors.New("share visibility must be 'public' or 'private'")
+	}
+
+	var parent Collection
+	if err := db.Where("id = ?", req.ParentCollectionID).First(&parent).Error; err != nil {
+		return nil, err
+	}
+	if !parent.EnableSharing {
+		return nil, ErrSharingDisabled
+	}
+	// Shares of shares are not supported in the current design — the
+	// intersection logic at token-mint time only walks one hop. If
+	// later we want recursive sharing, this guard is the place to
+	// drop and the mint-time intersection is the place to teach.
+	if parent.ParentCollectionID != "" {
+		return nil, errors.New("cannot create a share of an existing share")
+	}
+
+	// Namespace must equal the parent's or be a path-descendant.
+	// Strip trailing slashes for comparison, then either equality or
+	// a "<parent>/" prefix match counts. Empty namespace defaults to
+	// the parent's exact namespace.
+	ns := strings.TrimRight(req.Namespace, "/")
+	parentNS := strings.TrimRight(parent.Namespace, "/")
+	if ns == "" {
+		ns = parentNS
+	}
+	if ns != parentNS && !strings.HasPrefix(ns, parentNS+"/") {
+		return nil, errors.New("share namespace must equal or be a path-descendant of the parent's namespace")
+	}
+
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, err
+	}
+	share := &Collection{
+		ID:                 slug,
+		Name:               req.Name,
+		Description:        req.Description,
+		Owner:              req.OwnerUsername,
+		OwnerID:            req.OwnerID,
+		Namespace:          ns,
+		Visibility:         req.Visibility,
+		ParentCollectionID: parent.ID,
+		// EnableSharing intentionally false — see the comment above
+		// about share-of-share.
+	}
+	if err := db.Create(share).Error; err != nil {
+		return nil, err
+	}
+	return share, nil
+}
+
+// ListCollectionShares returns every collection that has its
+// `parent_collection_id` set to the supplied parent ID — i.e. every
+// share of that parent. The visibility filter mirrors
+// ListCollections: an admin-bypass returns all shares, otherwise
+// shares are filtered to the same {public, owned, admin-group, ACL}
+// union as plain collections. The caller is expected to pass the
+// already-fetched parent's authorisation gate elsewhere; this helper
+// only filters its own results, so a private share inside a parent
+// the caller can read still hides if the share's ACL doesn't admit
+// them.
+func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []string, isAdmin bool) ([]Collection, error) {
+	if parentID == "" {
+		return nil, errors.New("parent collection id is required")
+	}
+	if isAdmin {
+		var all []Collection
+		if err := db.Where("parent_collection_id = ?", parentID).Find(&all).Error; err != nil {
+			return nil, err
+		}
+		return all, nil
+	}
+
+	groups = expandCallerACLGroups(user, userID, groups)
+
+	out := []Collection{}
+	seen := map[string]struct{}{}
+	addAll := func(rows []Collection) {
+		for _, r := range rows {
+			if _, ok := seen[r.ID]; ok {
+				continue
+			}
+			seen[r.ID] = struct{}{}
+			out = append(out, r)
+		}
+	}
+
+	// (1) Public shares.
+	var pub []Collection
+	if err := db.Where("parent_collection_id = ? AND visibility = ?", parentID, VisibilityPublic).Find(&pub).Error; err != nil {
+		return nil, err
+	}
+	addAll(pub)
+
+	// (2) Owned shares — match either OwnerID or the legacy
+	// username field.
+	var owned []Collection
+	switch {
+	case userID != "" && user != "":
+		if err := db.Where("parent_collection_id = ? AND (owner_id = ? OR owner = ?)", parentID, userID, user).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	case userID != "":
+		if err := db.Where("parent_collection_id = ? AND owner_id = ?", parentID, userID).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	case user != "":
+		if err := db.Where("parent_collection_id = ? AND owner = ?", parentID, user).Find(&owned).Error; err != nil {
+			return nil, err
+		}
+	}
+	addAll(owned)
+
+	// (3) Admin-group membership via DB membership.
+	if userID != "" {
+		var adminViaMember []Collection
+		if err := db.Table("collections").
+			Joins("JOIN group_members ON group_members.group_id = collections.admin_id").
+			Where("collections.parent_collection_id = ? AND collections.admin_id <> '' AND group_members.user_id = ?", parentID, userID).
+			Find(&adminViaMember).Error; err != nil {
+			return nil, err
+		}
+		addAll(adminViaMember)
+	}
+	// (3b) Admin-group membership via cookie-asserted group names.
+	if len(groups) > 0 {
+		var adminViaName []Collection
+		if err := db.Table("collections").
+			Joins("JOIN groups ON groups.id = collections.admin_id").
+			Where("collections.parent_collection_id = ? AND collections.admin_id <> '' AND groups.name IN ?", parentID, groups).
+			Find(&adminViaName).Error; err != nil {
+			return nil, err
+		}
+		addAll(adminViaName)
+	}
+
+	// (4) ACL-granted read access.
+	var aclRows []Collection
+	if err := db.
+		Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
+		Where("collections.parent_collection_id = ? AND collection_acls.group_id IN ? AND collection_acls.role IN ?", parentID, groups, ScopeToRole[token_scopes.Collection_Read]).
+		Find(&aclRows).Error; err != nil {
+		return nil, err
+	}
+	addAll(aclRows)
+
+	return out, nil
+}
+
 // UpdateCollection mutates the high-level fields of a collection.
 // Owner-managed fields (OwnerID, AdminID) live on this same call so
 // the edit-form can patch everything in one round-trip; transferring
@@ -855,7 +1201,7 @@ func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 // callers who pass the existing-owner-or-admin gate (so the current
 // owner can hand the collection to someone else, but a writer can't
 // elevate themselves).
-func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, name, description *string, visibility *Visibility, ownerID, adminID *string, isAdmin bool) error {
+func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, name, description *string, visibility *Visibility, ownerID, adminID *string, enableSharing *bool, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
@@ -917,6 +1263,9 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 	}
 	if adminID != nil {
 		updates["admin_id"] = *adminID
+	}
+	if enableSharing != nil {
+		updates["enable_sharing"] = *enableSharing
 	}
 
 	if len(updates) == 0 {
@@ -1036,6 +1385,109 @@ func DeleteCollection(db *gorm.DB, id string, owner, ownerID string, groups []st
 	})
 }
 
+// rolePriority orders the ACL role values so callers can take the
+// "higher" of two roles. Owner > Write > Read > "" (none). Stored as
+// integers so EffectiveCollectionRole can return the maximum match
+// across multiple ACL paths (admin-group, personal group, etc).
+func rolePriority(r AclRole) int {
+	switch r {
+	case AclRoleOwner:
+		return 3
+	case AclRoleWrite:
+		return 2
+	case AclRoleRead:
+		return 1
+	}
+	return 0
+}
+
+// MinRole returns whichever of the two roles is *lower*. Used by the
+// share-token-mint intersection: a recipient's effective role on a
+// share must be clamped by the share owner's CURRENT role on the
+// parent collection — pick the weaker of the two so revocation
+// propagates (the share owner losing write on the parent must not
+// leave the recipient with write on the share).
+func MinRole(a, b AclRole) AclRole {
+	if rolePriority(a) <= rolePriority(b) {
+		return a
+	}
+	return b
+}
+
+// EffectiveCollectionRole returns the highest ACL role the named
+// user holds on the supplied collection, or "" when they hold none.
+// Walks all the same paths CallerIsCollectionOwnerOrAdmin does
+// (direct ownership, admin-group via DB membership, ACL via DB
+// membership and personal `user-<name>` group, the
+// all-authenticated-users sentinel) but does NOT consider cookie-
+// asserted groups — the caller is identified by their stable User
+// row, not their current session.
+//
+// Used by the share-token-mint intersection: the data plane mints
+// `share.access:/$shareID` plus storage scopes clamped to the share
+// owner's current parent role. No session is available for that
+// owner at mint time, so DB-membership is the only authoritative
+// signal we can consult.
+func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username string) AclRole {
+	if coll == nil {
+		return ""
+	}
+	// Direct ownership — Owner takes precedence over everything else.
+	if userID != "" && coll.OwnerID != "" && coll.OwnerID == userID {
+		return AclRoleOwner
+	}
+	if username != "" && coll.Owner == username {
+		return AclRoleOwner
+	}
+	// Admin-group membership — also Owner-equivalent for storage
+	// purposes (the admin group can add/remove members and ACLs;
+	// the only thing they can't do is delete the collection).
+	if coll.AdminID != "" && userID != "" && db != nil {
+		var n int64
+		if err := db.Model(&GroupMember{}).
+			Where("group_id = ? AND user_id = ?", coll.AdminID, userID).
+			Count(&n).Error; err == nil && n > 0 {
+			return AclRoleOwner
+		}
+	}
+	// ACL match — gather the user's group names (via DB membership)
+	// and synthesize the personal + all-authenticated entries the
+	// runtime uses elsewhere.
+	groupNames := []string{}
+	if userID != "" && db != nil {
+		var rows []struct{ Name string }
+		if err := db.Table("group_members").
+			Joins("JOIN groups ON groups.id = group_members.group_id").
+			Select("groups.name").
+			Where("group_members.user_id = ?", userID).
+			Scan(&rows).Error; err == nil {
+			for _, r := range rows {
+				groupNames = append(groupNames, r.Name)
+			}
+		}
+	}
+	if username != "" {
+		groupNames = append(groupNames, "user-"+username)
+	}
+	if userID != "" || username != "" {
+		groupNames = append(groupNames, AllAuthenticatedUsersACLGroup)
+	}
+
+	best := AclRole("")
+	for _, acl := range coll.ACLs {
+		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+			continue
+		}
+		if !slices.Contains(groupNames, acl.GroupID) {
+			continue
+		}
+		if rolePriority(acl.Role) > rolePriority(best) {
+			best = acl.Role
+		}
+	}
+	return best
+}
+
 // CallerIsCollectionOwnerOrAdmin reports whether the caller's
 // identity (username + User.ID + group memberships) gives them
 // owner-or-admin authority on the collection: matches Collection.Owner
@@ -1147,11 +1599,10 @@ func validateACL(db *gorm.DB, collection *Collection, user, userID string, group
 		return fmt.Errorf("invalid scope: %s", scope.String())
 	}
 
-	// Every user is part of their own user group, ensure this is in the slice
-	userGroup := "user-" + user
-	if !slices.Contains(groups, userGroup) {
-		groups = append(groups, userGroup)
-	}
+	// Augment with the personal `user-<name>` group and (when
+	// authenticated) the all-authenticated-users sentinel. See
+	// expandCallerACLGroups for the contract.
+	groups = expandCallerACLGroups(user, userID, groups)
 
 	// for each acl, check if a user's group is the group in the ACL and has the required role
 	for _, acl := range collection.ACLs {
@@ -1566,7 +2017,12 @@ func isUniqueConstraintError(err error) bool {
 // the collection-onboarding flow so a later ownership transfer of that
 // collection can cascade to its onboarded groups (see
 // RedeemCollectionOwnershipInviteLink).
-func CreateGroup(db *gorm.DB, name, displayName, description string, creator Creator, createdForCollectionID string) (*Group, error) {
+//
+// `authTemplateEligible` controls whether this group can match
+// Issuer.AuthorizationTemplates and Server.*AdminGroups at runtime.
+// The handler is responsible for refusing to set it true for a
+// non-admin caller; this layer just persists what it's told.
+func CreateGroup(db *gorm.DB, name, displayName, description string, creator Creator, createdForCollectionID string, authTemplateEligible bool) (*Group, error) {
 	if err := ValidateIdentifier(name); err != nil {
 		return nil, err
 	}
@@ -1603,6 +2059,7 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 		CreatorAuthMethodID:    creator.AuthMethodID,
 		OwnerID:                owner,
 		CreatedForCollectionID: createdForCollectionID,
+		AuthTemplateEligible:   authTemplateEligible,
 	}
 
 	if result := db.Create(group); result.Error != nil {
@@ -1786,7 +2243,12 @@ func isGroupOwnerOnly(group *Group, userID string, isSystemAdmin bool) bool {
 //
 // `isAdmin` here is the *system admin* flag (the caller passed in from
 // CheckAdmin); group-admin privileges flow through isGroupOwnerOrAdmin.
-func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string, requestorUserID string, isAdmin bool) error {
+//
+// `isUserAdminCaller` is the user-admin scope-bearer flag. The
+// authTemplateEligible field can be flipped only by an admin or
+// user-admin (a non-admin owner of the group cannot quietly grant
+// their own group authz-template authority).
+func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string, authTemplateEligible *bool, requestorUserID string, isAdmin, isUserAdminCaller bool) error {
 	updates := make(map[string]interface{})
 	if name != nil {
 		if !isAdmin {
@@ -1808,6 +2270,15 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 	}
 	if description != nil {
 		updates["description"] = *description
+	}
+	if authTemplateEligible != nil {
+		// Refuse outright for non-admin callers — see the field's
+		// docstring on Group. The owner of a group cannot give it
+		// authz-template authority on their own.
+		if !isAdmin && !isUserAdminCaller {
+			return ErrForbidden
+		}
+		updates["auth_template_eligible"] = *authTemplateEligible
 	}
 
 	if len(updates) == 0 {

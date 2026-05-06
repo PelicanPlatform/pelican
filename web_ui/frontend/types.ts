@@ -192,6 +192,12 @@ export interface Group {
   adminType: AdminType;
   createdAt: string;
   updatedAt: string;
+  // authTemplateEligible gates whether the group's name participates
+  // in Issuer.AuthorizationTemplates and Server.*AdminGroups matchers.
+  // Settable only by an admin / user-admin. Optional in the type so a
+  // backend that hasn't been migrated yet (or a partial response that
+  // doesn't include the field) doesn't trip TypeScript.
+  authTemplateEligible?: boolean;
   // Resolved server-side; absent if the referenced user/group no longer
   // exists. The UI falls back to the raw id in that case.
   ownerUser?: UserCard;

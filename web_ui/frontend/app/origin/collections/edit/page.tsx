@@ -49,6 +49,7 @@ import {
   Chip,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
@@ -56,6 +57,7 @@ import {
   Select,
   Skeleton,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -75,6 +77,10 @@ import {
   GroupService,
   UserService,
 } from '@/helpers/api';
+import {
+  ALL_AUTHENTICATED_USERS_ACL_GROUP,
+  labelForACLTarget,
+} from '@/helpers/api/Collection/types';
 import { Group } from '@/helpers/api/Group/types';
 import { getUser } from '@/helpers/login';
 import { hasScope } from '@/index';
@@ -248,6 +254,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
   const [visibility, setVisibility] = useState<CollectionVisibility>('private');
   const [ownerID, setOwnerID] = useState('');
   const [adminGroupID, setAdminGroupID] = useState<string>('');
+  const [enableSharing, setEnableSharing] = useState(false);
   const [saving, setSaving] = useState(false);
   // initialized flips true after the first sync from the loaded
   // collection. We block the form (incl. the Owner Autocomplete) until
@@ -265,6 +272,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
     setVisibility(collection.visibility);
     setOwnerID(collection.ownerId ?? '');
     setAdminGroupID(collection.adminId ?? '');
+    setEnableSharing(collection.enableSharing ?? false);
     setInitialized(true);
   }, [collection]);
 
@@ -282,9 +290,18 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
       description !== (collection.description ?? '') ||
       visibility !== collection.visibility ||
       ownerID !== (collection.ownerId ?? '') ||
-      adminGroupID !== (collection.adminId ?? '')
+      adminGroupID !== (collection.adminId ?? '') ||
+      enableSharing !== (collection.enableSharing ?? false)
     );
-  }, [collection, name, description, visibility, ownerID, adminGroupID]);
+  }, [
+    collection,
+    name,
+    description,
+    visibility,
+    ownerID,
+    adminGroupID,
+    enableSharing,
+  ]);
 
   const save = async () => {
     if (!collection) return;
@@ -303,6 +320,10 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
           adminId:
             adminGroupID !== (collection.adminId ?? '')
               ? adminGroupID
+              : undefined,
+          enableSharing:
+            enableSharing !== (collection.enableSharing ?? false)
+              ? enableSharing
               : undefined,
         }).then(() => true),
       'Failed to save collection',
@@ -377,7 +398,7 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
           rows={2}
           sx={{ mb: 2 }}
         />
-        <FormControl fullWidth>
+        <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel>Visibility</InputLabel>
           <Select
             value={visibility}
@@ -390,6 +411,28 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
             <MenuItem value='public'>Public</MenuItem>
           </Select>
         </FormControl>
+        {/*
+          EnableSharing opts the collection in to user-driven shares —
+          read-access holders can mint a child collection that delegates
+          a subset of this one's access. Defaults off; flipping it on
+          doesn't create any shares, it just makes the create-share
+          endpoint reachable for the collection's read-ACL holders.
+          Owner / admin / collection_admin gate is enforced server-side.
+        */}
+        <FormControlLabel
+          control={
+            <Switch
+              checked={enableSharing}
+              onChange={(e) => setEnableSharing(e.target.checked)}
+            />
+          }
+          label='Allow users to create shares'
+        />
+        <Typography variant='caption' color='text.secondary' display='block'>
+          When on, anyone with read access to this collection can mint
+          a single-use &quot;share&quot; link that delegates a subset of
+          their access to a third party. Off by default.
+        </Typography>
       </Paper>
 
       {/* --- Ownership --- */}
@@ -678,6 +721,29 @@ const AclSection: React.FC<{
     return m;
   }, [groups]);
 
+  // pickerOptions injects the all-authenticated-users virtual group at
+  // the top of the picker. The synthetic ID prefix `<virtual>:` is
+  // chosen so isOptionEqualToValue (matches by id) cleanly distinguishes
+  // it from any real Group; the `name` field carries the wire sentinel
+  // (`@authenticated`) so the unchanged grant call site —
+  // `CollectionService.grantAcl(..., { groupId: pickerGroup.name })` —
+  // submits the right value without further branching. Consumers that
+  // render a Group's `id` for routing (e.g. linking to /groups/view)
+  // must skip the virtual entry; we do not generate such a link below.
+  const pickerOptions = React.useMemo<Group[]>(() => {
+    const virtualAllAuthed: Group = {
+      id: '<virtual>:authenticated',
+      name: ALL_AUTHENTICATED_USERS_ACL_GROUP,
+      displayName: 'All authenticated users',
+      description:
+        'Grants this role to every signed-in caller, regardless of group membership. Useful for opening a collection to "anyone with an account on this server".',
+      members: [],
+      createdBy: '',
+      createdAt: '',
+    };
+    return [virtualAllAuthed, ...groups];
+  }, [groups]);
+
   const grant = async () => {
     if (!pickerGroup) return;
     setGranting(true);
@@ -750,6 +816,17 @@ const AclSection: React.FC<{
                   sx={{ textTransform: 'capitalize' }}
                 />
                 {(() => {
+                  // Render the virtual all-authenticated-users
+                  // sentinel as a friendly label rather than the raw
+                  // `@authenticated` wire value, and skip the link to
+                  // /groups/view (no real group to navigate to).
+                  if (acl.groupId === ALL_AUTHENTICATED_USERS_ACL_GROUP) {
+                    return (
+                      <Typography sx={{ fontStyle: 'italic' }}>
+                        {labelForACLTarget(acl.groupId)}
+                      </Typography>
+                    );
+                  }
                   const grp = groupByName.get(acl.groupId);
                   return grp ? (
                     <Link
@@ -793,11 +870,38 @@ const AclSection: React.FC<{
       <Stack direction='row' spacing={1} alignItems='flex-start'>
         <Autocomplete
           sx={{ flex: 1 }}
-          options={groups}
+          options={pickerOptions}
           value={pickerGroup}
           onChange={(_, v) => setPickerGroup(v)}
           getOptionLabel={(g) => g.displayName || g.name}
           isOptionEqualToValue={(a, b) => a.id === b.id}
+          renderOption={(props, g) => {
+            // Surface the virtual all-authenticated-users entry with
+            // an italic label so it visually distinguishes from real
+            // groups in the dropdown.
+            const { key, ...rest } =
+              props as React.HTMLAttributes<HTMLLIElement> & {
+                key?: React.Key;
+              };
+            const isVirtual = g.name === ALL_AUTHENTICATED_USERS_ACL_GROUP;
+            return (
+              <li key={key} {...rest}>
+                <Box>
+                  <Typography
+                    variant='body2'
+                    sx={isVirtual ? { fontStyle: 'italic' } : undefined}
+                  >
+                    {g.displayName || g.name}
+                  </Typography>
+                  {isVirtual && (
+                    <Typography variant='caption' color='text.secondary'>
+                      Virtual group · matches every signed-in caller
+                    </Typography>
+                  )}
+                </Box>
+              </li>
+            );
+          }}
           renderInput={(params) => (
             <TextField {...params} label='Add group' size='small' />
           )}

@@ -56,6 +56,22 @@ func RegisterCollectionsAPI(group *gin.RouterGroup) {
 	// Authorization mirrors PATCH-ownerId — the underlying DB helper
 	// re-gates on owner / admin-group / collection_admin.
 	group.POST("/:id/ownership-invites", web_ui.AuthHandler, handleCreateCollectionOwnershipInvite)
+
+	// Shares: child collections that delegate a subset of the parent's
+	// access. Listing the children of a given parent feeds the parent's
+	// edit page ("who has shares?") and the share owner's home page.
+	// Creation is the self-service POST below; only callers with at
+	// least Collection_Read on the parent (and parent.EnableSharing
+	// == true) can mint a share.
+	group.GET("/:id/shares", web_ui.AuthHandler, handleListCollectionShares)
+
+	// Self-service share creation. Any caller with Collection_Read on
+	// the parent can mint a share, provided the parent's owner has
+	// flipped EnableSharing on. The handler also refuses when the
+	// configured storage backend is multi-user, since the design
+	// excludes that backend from share semantics (impersonation is
+	// not supported there).
+	group.POST("/:id/shares", web_ui.AuthHandler, handleCreateCollectionShare)
 }
 
 // callerIsCollectionAdmin reports whether the cookie/bearer-bound
@@ -357,6 +373,9 @@ type CreateCollectionReq struct {
 	Visibility  string            `json:"visibility"`
 	Metadata    map[string]string `json:"metadata"`
 	Namespace   string            `json:"namespace"`
+	// EnableSharing opts the collection in to user-driven shares.
+	// Defaults false; can also be flipped via PATCH after creation.
+	EnableSharing bool `json:"enableSharing"`
 }
 
 type UpdateCollectionReq struct {
@@ -370,6 +389,10 @@ type UpdateCollectionReq struct {
 	// touch these — write-ACL holders cannot self-promote.
 	OwnerID *string `json:"ownerId"`
 	AdminID *string `json:"adminId"`
+	// EnableSharing toggles the parent flag that gates user-driven
+	// share creation. Pointer-typed so the patch can leave it alone:
+	// nil = no change, &true / &false = explicit set.
+	EnableSharing *bool `json:"enableSharing"`
 }
 
 type MetadataValue struct {
@@ -436,14 +459,16 @@ type ListCollectionRes struct {
 	// + audit). OwnerID is the User.ID slug — the authoritative
 	// ownership handle going forward. AdminID is the optional admin
 	// group slug; empty means no admin group is assigned.
-	Owner       string    `json:"owner"`
-	OwnerID     string    `json:"ownerId"`
-	AdminID     string    `json:"adminId"`
-	Description string    `json:"description"`
-	Visibility  string    `json:"visibility"`
-	Namespace   string    `json:"namespace"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Owner              string    `json:"owner"`
+	OwnerID            string    `json:"ownerId"`
+	AdminID            string    `json:"adminId"`
+	Description        string    `json:"description"`
+	Visibility         string    `json:"visibility"`
+	Namespace          string    `json:"namespace"`
+	EnableSharing      bool      `json:"enableSharing"`
+	ParentCollectionID string    `json:"parentCollectionId,omitempty"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 	// OwnerCard / AdminCard are the resolved {id, username,
 	// displayName} / {id, name} summaries — populated server-side in
 	// one batched query so the listing page can render
@@ -462,19 +487,21 @@ type ListCollectionRes struct {
 }
 
 type GetCollectionRes struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	Owner       string                   `json:"owner"`
-	OwnerID     string                   `json:"ownerId"`
-	AdminID     string                   `json:"adminId"`
-	Description string                   `json:"description"`
-	Visibility  string                   `json:"visibility"`
-	Namespace   string                   `json:"namespace"`
-	Members     []string                 `json:"members"`
-	ACLs        []database.CollectionACL `json:"acls"`
-	Metadata    map[string]string        `json:"metadata"`
-	CreatedAt   time.Time                `json:"createdAt"`
-	UpdatedAt   time.Time                `json:"updatedAt"`
+	ID                 string                   `json:"id"`
+	Name               string                   `json:"name"`
+	Owner              string                   `json:"owner"`
+	OwnerID            string                   `json:"ownerId"`
+	AdminID            string                   `json:"adminId"`
+	Description        string                   `json:"description"`
+	Visibility         string                   `json:"visibility"`
+	Namespace          string                   `json:"namespace"`
+	EnableSharing      bool                     `json:"enableSharing"`
+	ParentCollectionID string                   `json:"parentCollectionId,omitempty"`
+	Members            []string                 `json:"members"`
+	ACLs               []database.CollectionACL `json:"acls"`
+	Metadata           map[string]string        `json:"metadata"`
+	CreatedAt          time.Time                `json:"createdAt"`
+	UpdatedAt          time.Time                `json:"updatedAt"`
 	// CanEdit — same contract as ListCollectionRes.CanEdit. Lets the
 	// edit page disable controls (or refuse to mount) when the caller
 	// can read but not modify this row.
@@ -567,16 +594,18 @@ func handleListCollections(ctx *gin.Context) {
 	res := make([]ListCollectionRes, 0)
 	for _, collection := range collections {
 		row := ListCollectionRes{
-			ID:          collection.ID,
-			Name:        collection.Name,
-			Owner:       collection.Owner,
-			OwnerID:     collection.OwnerID,
-			AdminID:     collection.AdminID,
-			Description: collection.Description,
-			Visibility:  string(collection.Visibility),
-			Namespace:   collection.Namespace,
-			CreatedAt:   collection.CreatedAt,
-			UpdatedAt:   collection.UpdatedAt,
+			ID:                 collection.ID,
+			Name:               collection.Name,
+			Owner:              collection.Owner,
+			OwnerID:            collection.OwnerID,
+			AdminID:            collection.AdminID,
+			Description:        collection.Description,
+			Visibility:         string(collection.Visibility),
+			Namespace:          collection.Namespace,
+			EnableSharing:      collection.EnableSharing,
+			ParentCollectionID: collection.ParentCollectionID,
+			CreatedAt:          collection.CreatedAt,
+			UpdatedAt:          collection.UpdatedAt,
 		}
 		if uc, ok := ownerCards[collection.OwnerID]; ok {
 			row.OwnerCard = &uc
@@ -702,7 +731,7 @@ func handleCreateCollection(ctx *gin.Context) {
 	// the authoritative ownership handle going forward). userId may be
 	// empty for bearer-token callers without a user record; the
 	// collection then falls back to username-only ownership semantics.
-	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, userId, req.Namespace, visibility, req.Metadata)
+	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, userId, req.Namespace, visibility, req.EnableSharing, req.Metadata)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -784,7 +813,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		visPtr = &visibility
 	}
 
-	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, userId, groups, req.Name, req.Description, visPtr, req.OwnerID, req.AdminID, isAdmin)
+	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, userId, groups, req.Name, req.Description, visPtr, req.OwnerID, req.AdminID, req.EnableSharing, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1340,19 +1369,21 @@ func handleGetCollection(ctx *gin.Context) {
 	}
 
 	res := GetCollectionRes{
-		ID:          coll.ID,
-		Name:        coll.Name,
-		Owner:       coll.Owner,
-		OwnerID:     coll.OwnerID,
-		AdminID:     coll.AdminID,
-		Description: coll.Description,
-		Visibility:  string(coll.Visibility),
-		Namespace:   coll.Namespace,
-		Members:     members,
-		ACLs:        coll.ACLs,
-		Metadata:    metadata,
-		CreatedAt:   coll.CreatedAt,
-		UpdatedAt:   coll.UpdatedAt,
+		ID:                 coll.ID,
+		Name:               coll.Name,
+		Owner:              coll.Owner,
+		OwnerID:            coll.OwnerID,
+		AdminID:            coll.AdminID,
+		Description:        coll.Description,
+		Visibility:         string(coll.Visibility),
+		Namespace:          coll.Namespace,
+		EnableSharing:      coll.EnableSharing,
+		ParentCollectionID: coll.ParentCollectionID,
+		Members:            members,
+		ACLs:               coll.ACLs,
+		Metadata:           metadata,
+		CreatedAt:          coll.CreatedAt,
+		UpdatedAt:          coll.UpdatedAt,
 		// Same predicate as the listing: admin scope OR row-level
 		// owner / admin-group membership. Surfaced so the edit page
 		// can render read-only when the caller can see but not modify.
@@ -1505,6 +1536,267 @@ func handleListCollectionCandidateOwners(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, cards)
+}
+
+// handleListCollectionShares returns the children of a collection —
+// every row whose ParentCollectionID matches the supplied parent ID.
+// Visibility filtering matches the main /collections listing: an
+// admin-bypass returns every share, otherwise the result is the
+// {public, owned, admin-group, ACL'd} union the caller could see in
+// /collections directly. The caller must first pass the parent's
+// read gate (we surface a "not found" the same way the rest of this
+// surface does) so a stranger to the parent can't enumerate its
+// shares.
+func handleListCollectionShares(ctx *gin.Context) {
+	parentID := ctx.Param("id")
+	if parentID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Collection ID is required",
+		})
+		return
+	}
+
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, parentID)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user from context",
+		})
+		return
+	}
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isAdmin = true
+	}
+
+	// Authorise on the parent first so a stranger can't enumerate.
+	if _, err := database.GetCollection(database.ServerDatabase, parentID, user, userId, groups, isAdmin); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to load parent: %v", err),
+		})
+		return
+	}
+
+	shares, err := database.ListCollectionShares(database.ServerDatabase, parentID, user, userId, groups, isAdmin)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to list shares: %v", err),
+		})
+		return
+	}
+
+	out := make([]ListCollectionRes, 0, len(shares))
+	for _, share := range shares {
+		out = append(out, ListCollectionRes{
+			ID:                 share.ID,
+			Name:               share.Name,
+			Owner:              share.Owner,
+			OwnerID:            share.OwnerID,
+			AdminID:            share.AdminID,
+			Description:        share.Description,
+			Visibility:         string(share.Visibility),
+			Namespace:          share.Namespace,
+			EnableSharing:      share.EnableSharing,
+			ParentCollectionID: share.ParentCollectionID,
+			CreatedAt:          share.CreatedAt,
+			UpdatedAt:          share.UpdatedAt,
+			// CanEdit per row, same as the main listing.
+			CanEdit: isAdmin || database.CallerIsCollectionOwnerOrAdmin(
+				database.ServerDatabase, &share, user, userId, groups,
+			),
+		})
+	}
+	ctx.JSON(http.StatusOK, out)
+}
+
+// CreateShareReq is the body for POST /collections/:id/shares. The
+// path parameter `:id` is the parent collection. Visibility defaults
+// to private when omitted (we do not surface "public" shares — a
+// share that bypasses its parent's ACLs entirely defeats the design's
+// "delegate a subset" promise; if an operator wants a public dataset
+// they can flip the parent's visibility).
+type CreateShareReq struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Namespace   string `json:"namespace"`
+	Visibility  string `json:"visibility"`
+}
+
+// handleCreateCollectionShare mints a share — a child Collection
+// whose ParentCollectionID is the path's :id. Self-service: any
+// caller with Collection_Read on the parent (per the parent's ACLs)
+// can create one, provided:
+//
+//   - parent.EnableSharing == true (collection owner / admin opted in);
+//   - the configured Origin storage backend is not multi-user
+//     (Origin.Multiuser == false). The design explicitly excludes
+//     multi-user backends because the data-plane impersonation hook
+//     would have to switch the acting Unix UID, which the multiuser
+//     filesystem mode cannot safely do.
+//
+// The new share's owner is the caller — NOT the parent's owner. At
+// token-mint time (oa4mp/proxy.go) the share's effective scope set
+// is intersected with the share owner's CURRENT access to the
+// parent, so revocation propagates: removing the share owner from
+// the parent's ACLs clamps any token they mint via the share.
+func handleCreateCollectionShare(ctx *gin.Context) {
+	parentID := ctx.Param("id")
+	if parentID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Collection ID is required",
+		})
+		return
+	}
+
+	// Sharing is unsafe on multi-user backends — the design says the
+	// data-plane impersonation must act as the share owner, and the
+	// multiuser filesystem path can't safely re-target the acting
+	// UID. Refuse up front; the rest of the share machinery (token
+	// mint, ACL evaluation) doesn't need to be aware of this gate
+	// because nothing reaches it without a row first.
+	if param.Origin_Multiuser.GetBool() {
+		ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Shares are not supported on multi-user origin backends",
+		})
+		return
+	}
+
+	// Authn (cookie or bearer with web_ui.access OR Collection_Read).
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, parentID)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user from context",
+		})
+		return
+	}
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin := false
+	if a, _ := web_ui.CheckAdmin(identity); a {
+		isAdmin = true
+	} else if a, _ := web_ui.CheckCollectionAdmin(identity); a {
+		isAdmin = true
+	}
+
+	// Authz on the parent — must have at least Collection_Read.
+	// GetCollection embeds the visibility/ACL check; a stranger
+	// to the parent gets ErrRecordNotFound or ErrForbidden which we
+	// flatten to a single 404 to match the rest of the surface.
+	if _, err := database.GetCollection(database.ServerDatabase, parentID, user, userId, groups, isAdmin); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to load parent: %v", err),
+		})
+		return
+	}
+
+	var req CreateShareReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
+	}
+	if req.Name == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "A name is required for the share",
+		})
+		return
+	}
+	visibility := database.Visibility(strings.ToLower(req.Visibility))
+	if visibility == "" {
+		visibility = database.VisibilityPrivate
+	}
+	if visibility != database.VisibilityPublic && visibility != database.VisibilityPrivate {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "A share's visibility must be 'public' or 'private'",
+		})
+		return
+	}
+
+	share, err := database.CreateShare(database.ServerDatabase, database.CreateShareReq{
+		ParentCollectionID: parentID,
+		Name:               req.Name,
+		Description:        req.Description,
+		Namespace:          req.Namespace,
+		Visibility:         visibility,
+		OwnerUsername:      user,
+		OwnerID:            userId,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, database.ErrSharingDisabled):
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Sharing is not enabled on this collection",
+			})
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		default:
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to create share: %v", err),
+			})
+		}
+		return
+	}
+	ctx.JSON(http.StatusCreated, share)
 }
 
 // CreateCollectionOwnershipInviteReq is the body for

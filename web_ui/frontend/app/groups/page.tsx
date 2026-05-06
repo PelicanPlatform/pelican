@@ -57,6 +57,7 @@ import useApiSWR from '@/hooks/useApiSWR';
 import { Group } from '@/types';
 import { Me, MeService } from '@/helpers/api';
 import { getUser } from '@/helpers/login';
+import { hasScope } from '@/index';
 import GroupDetail from './components/GroupDetail';
 import UserPill from './components/UserPill';
 
@@ -77,6 +78,12 @@ const Page = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
   const [newGroupJoinSelf, setNewGroupJoinSelf] = useState(true);
+  // Auth-template-eligibility flag. The server clamps this to false
+  // for non-admin / non-user-admin callers regardless of what the
+  // request body says, so the toggle is only rendered (and only ever
+  // submitted as true) when the caller can actually grant it.
+  const [newGroupAuthTemplateEligible, setNewGroupAuthTemplateEligible] =
+    useState(false);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // Client-side filter — the /groups response is already scoped to
@@ -102,11 +109,16 @@ const Page = () => {
   const { data: me } = useSWR<Me | undefined>('me', () => MeService.get());
   const { data: whoami } = useSWR('getUser', getUser);
   const isSystemAdmin = whoami?.authenticated && whoami.role === 'admin';
-  // Group creation requires admin or user-admin server-side. We don't
-  // have a public "user-admin" signal from /me/whoami, so for the UI
-  // we restrict the Create button to system admins (the common case);
-  // user-admins can still POST /groups via the CLI/API.
-  const canCreateGroups = !!isSystemAdmin;
+  // Per the user-group design (docs/user-group-design.md), group
+  // creation is open to any authenticated caller — the privileged
+  // gate sits on auth-template-eligibility, not on the act of
+  // creation. The button is therefore visible to everyone signed
+  // in; the eligibility toggle below is the gated piece.
+  const canCreateGroups = !!whoami?.authenticated;
+  // Only an admin or user-admin can flip a fresh group into
+  // auth-template-eligible state. Mirrors the server-side gate.
+  const canSetAuthTemplateEligible =
+    !!isSystemAdmin || hasScope(whoami, 'server.user_admin');
 
   const handleCreateGroup = async () => {
     if (!newGroupName) return;
@@ -120,6 +132,14 @@ const Page = () => {
               body: JSON.stringify({
                 name: newGroupName,
                 description: newGroupDescription,
+                // Only submit `true` when the caller can actually
+                // grant it; otherwise the server would clamp to false
+                // anyway, but elide the field to keep the wire body
+                // tidy.
+                ...(canSetAuthTemplateEligible &&
+                newGroupAuthTemplateEligible
+                  ? { authTemplateEligible: true }
+                  : {}),
               }),
             })
           ),
@@ -157,6 +177,7 @@ const Page = () => {
         setNewGroupName('');
         setNewGroupDescription('');
         setNewGroupJoinSelf(true);
+        setNewGroupAuthTemplateEligible(false);
         setCreateOpen(false);
       }
     } finally {
@@ -402,6 +423,35 @@ const Page = () => {
               }
               label='Add me as a member of this group'
             />
+            {/*
+              Auth-template eligibility — only rendered for callers
+              who can actually flip it server-side. A non-admin owner
+              of the group cannot grant their own group authz-template
+              authority; surfacing the control to them would just
+              produce a confusing post-create error.
+            */}
+            {canSetAuthTemplateEligible && (
+              <Box>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={newGroupAuthTemplateEligible}
+                      onChange={(e) =>
+                        setNewGroupAuthTemplateEligible(e.target.checked)
+                      }
+                    />
+                  }
+                  label='Auth-template eligible'
+                />
+                <Typography variant='caption' color='text.secondary' display='block'>
+                  Allow this group&apos;s name to match
+                  Issuer.AuthorizationTemplates and Server.*AdminGroups
+                  config. Off by default — only enable for groups whose
+                  name should be honored by those operator-controlled
+                  surfaces.
+                </Typography>
+              </Box>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -473,10 +523,16 @@ const EmptyGroupList: React.FC<{
         membership rather than per-user. You join one by redeeming an invite
         link from whoever runs the group — typically a project lead or admin.
       </Typography>
-      <Typography variant='body2' color='text.secondary'>
+      <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
         If you&rsquo;re expecting to be in a group, ask its owner or
-        administrator to send you an invite link.
+        administrator to send you an invite link. You can also create
+        your own group to use in collection ACLs and shares.
       </Typography>
+      {canCreate && (
+        <Button variant='outlined' onClick={onCreate}>
+          Create Group
+        </Button>
+      )}
     </Box>
   );
 };

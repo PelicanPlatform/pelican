@@ -38,6 +38,13 @@ type ScopeName struct {
 	// these via EffectiveScopes). Data-plane scopes (wlcg.*,
 	// scitokens.*) and inter-server scopes are intentionally false.
 	UserGrantable bool
+	// PathBearing marks scopes that compose with a path suffix via
+	// TokenScope.Path(). The wlcg.storage.* and scitokens.read/write
+	// scopes are path-bearing by convention; the share-access scope
+	// joined them in the post-rewrite design (`share.access:/$ID`
+	// uses the share's collection ID as the path). Used by the
+	// generator to populate the Path() allow-list across categories.
+	PathBearing bool
 	// Description is the human-readable explanation pulled from
 	// docs/scopes.yaml. Used to drive the management UI's scope
 	// picker so admins can see what they're granting.
@@ -122,6 +129,12 @@ func GenTokenScope() {
 				userGrantable = b
 			}
 		}
+		pathBearing := false
+		if v, ok := entry["pathBearing"]; ok {
+			if b, ok := v.(bool); ok {
+				pathBearing = b
+			}
+		}
 		description := ""
 		if v, ok := entry["description"]; ok {
 			if s, ok := v.(string); ok {
@@ -141,6 +154,7 @@ func GenTokenScope() {
 				Raw:           scopeName,
 				Display:       displayName,
 				UserGrantable: userGrantable,
+				PathBearing:   pathBearing,
 				Description:   description,
 			})
 		}
@@ -228,8 +242,9 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 	// Only some of the token scopes can be assigned a path. This list might grow in the future.
 	if !(
 		{{- range $idx, $scope := .WlcgScopes -}}s == {{$scope.Display}} || {{end}}
-		{{- range $idx, $scope := .ScitokensScopes -}}s == {{$scope.Display}} || {{end}}false) { // final "false" is a hack so we don't have to post process the template we generate from
-		return "", errors.New("cannot assign path to non-wlcg or non-scitokens2 token scope")
+		{{- range $idx, $scope := .ScitokensScopes -}}s == {{$scope.Display}} || {{end}}
+		{{- range $idx, $scope := .Scopes -}}{{- if $scope.PathBearing -}}s == {{$scope.Display}} || {{end}}{{end}}false) { // final "false" is a hack so we don't have to post process the template we generate from
+		return "", errors.New("cannot assign path to a non-path-bearing token scope")
 	}
 
 	return TokenScope(s.String() + ":" + path), nil

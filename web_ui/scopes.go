@@ -173,12 +173,24 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 			}
 		}
 	}
-	addByGroupMatch := func(list []string, scope token_scopes.TokenScope) {
+	// Eligible-only group list, computed lazily at first need. Group
+	// creation is open to non-admin users (per the user-group design),
+	// so a self-named group must NOT match Server.AdminGroups even if
+	// the operator never created the configured group as a real DB
+	// row. Pelican-managed groups whose row carries
+	// auth_template_eligible == false are filtered out; purely
+	// OIDC-asserted names (no DB row) pass through unchanged. See
+	// database.FilterAuthTemplateEligibleGroups.
+	var eligibleGroups []string
+	groupMatcher := func(list []string, scope token_scopes.TokenScope) {
 		if len(identity.Groups) == 0 || len(list) == 0 {
 			return
 		}
+		if eligibleGroups == nil {
+			eligibleGroups = database.FilterAuthTemplateEligibleGroups(database.ServerDatabase, identity.Groups)
+		}
 		for _, configured := range list {
-			for _, userGroup := range identity.Groups {
+			for _, userGroup := range eligibleGroups {
 				if configured == userGroup {
 					add(scope)
 					return
@@ -186,6 +198,7 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 			}
 		}
 	}
+	addByGroupMatch := groupMatcher
 
 	if param.Server_UIAdminUsers.IsSet() {
 		addByUsernameMatch(param.Server_UIAdminUsers.GetStringSlice(), token_scopes.Server_Admin)

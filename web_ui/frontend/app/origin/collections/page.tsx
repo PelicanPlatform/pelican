@@ -18,17 +18,26 @@
 
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
   Chip,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   Skeleton,
   Stack,
   TextField,
@@ -41,17 +50,21 @@ import {
   ExpandLess,
   ExpandMore,
   Refresh,
+  Share as ShareIcon,
 } from '@mui/icons-material';
 import Link from 'next/link';
 import useSWR from 'swr';
 import useApiSWR from '@/hooks/useApiSWR';
 import useFuse from '@/helpers/useFuse';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { alertOnError } from '@/helpers/util';
 import { getUser } from '@/helpers/login';
 import { hasScope } from '@/index';
 import {
   CollectionAcl,
   CollectionSummary,
+  labelForACLTarget,
 } from '@/helpers/api/Collection/types';
 import CollectionService from '@/helpers/api/Collection/service';
 import GroupService from '@/helpers/api/Group/service';
@@ -197,6 +210,7 @@ const Page = () => {
             key={c.id}
             c={c}
             onDelete={() => handleDelete(c.id)}
+            onChanged={() => mutate()}
             groupIdByName={groupIdByName}
             canEditUsers={canEditUsers}
           />
@@ -228,10 +242,19 @@ const groupHrefByName = (
 const CollectionCard: React.FC<{
   c: CollectionSummary;
   onDelete: () => void;
+  onChanged: () => Promise<unknown> | void;
   groupIdByName: Map<string, string>;
   canEditUsers: boolean;
-}> = ({ c, onDelete, groupIdByName, canEditUsers }) => {
+}> = ({ c, onDelete, onChanged, groupIdByName, canEditUsers }) => {
   const [open, setOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const isShare = !!c.parentCollectionId;
+  // The Create-Share button is visible on rows that the parent has
+  // opted in (enableSharing) and that aren't themselves a share —
+  // shares-of-shares are deliberately not supported (the token-mint
+  // intersection only walks one hop). Server enforces the same gate
+  // independently.
+  const canCreateShare = !!c.enableSharing && !isShare;
   return (
     <Card sx={{ mb: 1 }}>
       <CardContent
@@ -260,6 +283,26 @@ const CollectionCard: React.FC<{
               size='small'
               color={c.visibility === 'public' ? 'success' : 'default'}
             />
+            {/*
+              Annotate share rows so they're distinguishable in the
+              listing — per the design we don't break shares out into
+              a separate page, just mark them inline. The chip is
+              non-clickable; the parent collection ID is surfaced in
+              the expanded panel below.
+            */}
+            {isShare && (
+              <Tooltip
+                title={`Share of collection ${c.parentCollectionId}`}
+                placement='top'
+              >
+                <Chip
+                  size='small'
+                  label='share'
+                  variant='outlined'
+                  icon={<ShareIcon fontSize='small' />}
+                />
+              </Tooltip>
+            )}
           </Box>
           {/*
             Namespace is the path operators reach this collection at —
@@ -372,6 +415,21 @@ const CollectionCard: React.FC<{
               </IconButton>
             </Link>
           )}
+          {/*
+            Create-share affordance. Only visible when the collection's
+            owner has opted in to user-driven shares (c.enableSharing)
+            and this row isn't itself a share. The actual permission
+            (read access on the parent) is enforced server-side; this
+            UI gate just hides a button that would always 409.
+          */}
+          {canCreateShare && (
+            <IconButton
+              title='Create share'
+              onClick={() => setShareOpen(true)}
+            >
+              <ShareIcon />
+            </IconButton>
+          )}
           <IconButton
             color='error'
             onClick={onDelete}
@@ -393,6 +451,17 @@ const CollectionCard: React.FC<{
         <Divider />
         <ExpandedDetails c={c} open={open} groupIdByName={groupIdByName} />
       </Collapse>
+      {canCreateShare && (
+        <CreateShareDialog
+          open={shareOpen}
+          parent={c}
+          onClose={() => setShareOpen(false)}
+          onCreated={async () => {
+            setShareOpen(false);
+            await onChanged();
+          }}
+        />
+      )}
     </Card>
   );
 };
@@ -433,14 +502,16 @@ const ExpandedDetails: React.FC<{
                 // canonicalises slug→name on write); resolve to the
                 // slug ID via groupIdByName so the chip links to
                 // /groups/view/?id=…. When the caller can't see this
-                // group in /groups (no membership / admin / owner),
-                // the lookup misses and we render a non-clickable
-                // chip rather than a dead link.
+                // group in /groups (no membership / admin / owner)
+                // — or when the row targets the all-authenticated
+                // sentinel, which isn't a real group at all — the
+                // lookup misses and we render a non-clickable chip.
                 const href = groupHrefByName(acl.groupId, groupIdByName);
+                const label = `${acl.role}: ${labelForACLTarget(acl.groupId)}`;
                 const chip = (
                   <Chip
                     size='small'
-                    label={`${acl.role}: ${acl.groupId}`}
+                    label={label}
                     color={
                       acl.role === 'write'
                         ? 'secondary'
@@ -488,5 +559,148 @@ const Section: React.FC<{ label: string; children: React.ReactNode }> = ({
     <Box mt={0.25}>{children}</Box>
   </Box>
 );
+
+// CreateShareDialog mints a child collection ("share") whose
+// parent_collection_id is the supplied parent's. Per the design
+// (docs/collections-design.md), self-service share creation needs
+// only Collection_Read on the parent — the heavy lifting (clamping
+// the recipient's tokens by the share owner's CURRENT parent
+// access) lives in the OA4MP scope-emission path.
+//
+// The dialog deliberately stays minimal: name, description,
+// namespace (defaults to the parent's), visibility (defaults to
+// private). The new share's owner is the calling user; recipients
+// are added later via ACL grants on the share's edit page (the
+// same surface used by regular collection ACLs).
+const CreateShareDialog: React.FC<{
+  open: boolean;
+  parent: CollectionSummary;
+  onClose: () => void;
+  onCreated: () => Promise<unknown> | void;
+}> = ({ open, parent, onClose, onCreated }) => {
+  const dispatch = useContext(AlertDispatchContext);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [namespace, setNamespace] = useState('');
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
+  const [busy, setBusy] = useState(false);
+  // Reset state every time the dialog opens — without this, a user who
+  // closes the dialog and re-opens it would see stale fields from the
+  // last attempt.
+  React.useEffect(() => {
+    if (open) {
+      setName('');
+      setDescription('');
+      setNamespace('');
+      setVisibility('private');
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (!name) return;
+    setBusy(true);
+    try {
+      const ok = await alertOnError(
+        async () => {
+          const r = await fetch(
+            `/api/v1.0/origin_ui/collections/${encodeURIComponent(parent.id)}/shares`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name,
+                description,
+                // Server defaults the namespace to the parent's when
+                // empty, and rejects anything outside the parent's
+                // sub-tree. Pass through whatever the user typed.
+                namespace,
+                visibility,
+              }),
+            }
+          );
+          if (!r.ok) {
+            const text = await r.text();
+            throw new Error(text || `share create failed (${r.status})`);
+          }
+          return true;
+        },
+        'Failed to create share',
+        dispatch
+      );
+      if (ok) {
+        await onCreated();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth='sm' fullWidth>
+      <DialogTitle>Create share of {parent.name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Alert severity='info'>
+            A share is a child collection that delegates a subset of{' '}
+            <strong>{parent.name}</strong>&apos;s access to whoever you
+            grant ACLs to. Access is impersonated as you, the share
+            owner, and is automatically clamped to whatever access you
+            currently hold on {parent.name}.
+          </Alert>
+          <TextField
+            label='Share name'
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            fullWidth
+            autoFocus
+          />
+          <TextField
+            label='Description'
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            fullWidth
+            multiline
+            rows={2}
+          />
+          <TextField
+            label='Namespace (optional)'
+            value={namespace}
+            onChange={(e) => setNamespace(e.target.value)}
+            placeholder={parent.namespace}
+            helperText={`Defaults to ${parent.namespace}. Must equal or be a path-descendant of the parent's namespace.`}
+            fullWidth
+            slotProps={{
+              input: {
+                style: { fontFamily: 'monospace' },
+              },
+            }}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Visibility</InputLabel>
+            <Select
+              value={visibility}
+              label='Visibility'
+              onChange={(e) =>
+                setVisibility(e.target.value as 'private' | 'public')
+              }
+            >
+              <MenuItem value='private'>Private</MenuItem>
+              <MenuItem value='public'>Public</MenuItem>
+            </Select>
+          </FormControl>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant='contained' onClick={submit} disabled={busy || !name}>
+          {busy ? 'Creating…' : 'Create share'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
 export default Page;

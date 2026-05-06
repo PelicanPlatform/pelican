@@ -35,6 +35,7 @@ import {
   ListItem,
   ListItemText,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -62,6 +63,7 @@ import {
 import type { User } from '@/helpers/api/User/types';
 import { getUser } from '@/helpers/login';
 import { fetchApi } from '@/helpers/api';
+import { hasScope } from '@/index';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import UserPill from './UserPill';
@@ -146,6 +148,13 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
   const role = whoami?.authenticated ? whoami.role : null;
   const canManage = canManageGroup(group, me, myGroups, role);
   const canEditOwnership = canTransferOwnership(group, me, role);
+  // Auth-template eligibility can be flipped only by a system admin
+  // or user-admin (mirrors the server-side gate). The toggle below
+  // is rendered only for those callers; everyone else sees the
+  // current state as a non-interactive chip so they understand
+  // whether the group is "trusted" by operator authz surfaces.
+  const canEditAuthTemplateEligible =
+    role === 'admin' || hasScope(whoami, 'server.user_admin');
   // The caller is already a member if they appear in group.members.
   // (Owners and group admins are NOT necessarily members — a user can
   // own/administer a group without being listed in its membership; we
@@ -222,6 +231,17 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
               on {new Date(group.createdAt).toLocaleDateString()}
             </Typography>
           </Box>
+          {/*
+            Auth-template eligibility row. Visible to everyone (so
+            users understand whether their group is "trusted" by
+            operator authz surfaces) but only interactive for
+            admin / user-admin callers — mirrors the server gate.
+          */}
+          <AuthTemplateEligibleRow
+            group={group}
+            canEdit={canEditAuthTemplateEligible}
+            onChanged={onChanged}
+          />
         </Stack>
       </Box>
 
@@ -775,6 +795,85 @@ const AddMemberDialog: React.FC<{
         </Button>
       </DialogActions>
     </Dialog>
+  );
+};
+
+// AuthTemplateEligibleRow renders the group's auth-template-eligibility
+// state. Anyone can see it (a user looking at "their" group should
+// know whether the operator has trusted it by authz surfaces); only
+// admin / user-admin callers can flip it, since the server-side
+// PATCH gate is the same. The row uses a Switch + helper text rather
+// than a chip because admins are the primary interactor and the
+// implications of flipping the bit warrant a one-line reminder.
+const AuthTemplateEligibleRow: React.FC<{
+  group: Group;
+  canEdit: boolean;
+  onChanged: () => Promise<unknown> | void;
+}> = ({ group, canEdit, onChanged }) => {
+  const dispatch = useContext(AlertDispatchContext);
+  const [busy, setBusy] = useState(false);
+  const eligible = !!group.authTemplateEligible;
+  const flip = async () => {
+    setBusy(true);
+    try {
+      await alertOnError(
+        async () =>
+          fetchApi(async () =>
+            fetch(`/api/v1.0/groups/${group.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ authTemplateEligible: !eligible }),
+            })
+          ),
+        eligible
+          ? 'Failed to mark group ineligible'
+          : 'Failed to mark group eligible',
+        dispatch
+      );
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!canEdit) {
+    // Read-only chip for non-privileged viewers.
+    return (
+      <Box display='flex' alignItems='center' gap={1}>
+        <Typography variant='body2' color='text.secondary'>
+          Auth template:
+        </Typography>
+        <Chip
+          size='small'
+          label={eligible ? 'eligible' : 'ineligible'}
+          color={eligible ? 'primary' : 'default'}
+          variant={eligible ? 'filled' : 'outlined'}
+        />
+      </Box>
+    );
+  }
+  return (
+    <Box>
+      <Box display='flex' alignItems='center' gap={1}>
+        <Typography variant='body2' color='text.secondary'>
+          Auth template:
+        </Typography>
+        <Switch
+          size='small'
+          checked={eligible}
+          disabled={busy}
+          onChange={flip}
+          inputProps={{ 'aria-label': 'auth-template-eligible' }}
+        />
+        <Typography variant='body2'>
+          {eligible ? 'Eligible' : 'Ineligible'}
+        </Typography>
+      </Box>
+      <Typography variant='caption' color='text.secondary'>
+        When eligible, this group&apos;s name is honored by
+        Issuer.AuthorizationTemplates and Server.*AdminGroups config.
+        Off keeps the group usable in collection ACLs and shares
+        without granting it any operator-level authority.
+      </Typography>
+    </Box>
   );
 };
 

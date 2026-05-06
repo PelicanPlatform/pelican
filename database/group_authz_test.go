@@ -186,13 +186,13 @@ func TestUpdateGroupAuthz(t *testing.T) {
 		newName := "ops-renamed"
 
 		// Owner — not enough.
-		err := UpdateGroup(db, fx.opsID, &newName, nil, nil, fx.ownerID, false)
+		err := UpdateGroup(db, fx.opsID, &newName, nil, nil, nil, fx.ownerID, false, false)
 		assert.ErrorIs(t, err, ErrForbidden,
 			"the group's owner must NOT be allowed to rename the group")
 
 		// System admin — allowed.
 		require.NoError(t,
-			UpdateGroup(db, fx.opsID, &newName, nil, nil, fx.strangerID, true))
+			UpdateGroup(db, fx.opsID, &newName, nil, nil, nil, fx.strangerID, true, true))
 
 		var g Group
 		require.NoError(t, db.First(&g, "id = ?", fx.opsID).Error)
@@ -203,14 +203,14 @@ func TestUpdateGroupAuthz(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedGroupAuthzFixtures(t, db)
 		dn := "Operations Team"
-		require.NoError(t, UpdateGroup(db, fx.opsID, nil, &dn, nil, fx.ownerID, false))
+		require.NoError(t, UpdateGroup(db, fx.opsID, nil, &dn, nil, nil, fx.ownerID, false, false))
 	})
 
 	t.Run("display name change rejected for stranger", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedGroupAuthzFixtures(t, db)
 		dn := "I should not be allowed"
-		err := UpdateGroup(db, fx.opsID, nil, &dn, nil, fx.strangerID, false)
+		err := UpdateGroup(db, fx.opsID, nil, &dn, nil, nil, fx.strangerID, false, false)
 		assert.ErrorIs(t, err, ErrForbidden)
 	})
 
@@ -218,7 +218,7 @@ func TestUpdateGroupAuthz(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedGroupAuthzFixtures(t, db)
 		dn := "Members shouldn't"
-		err := UpdateGroup(db, fx.opsID, nil, &dn, nil, fx.memberID, false)
+		err := UpdateGroup(db, fx.opsID, nil, &dn, nil, nil, fx.memberID, false, false)
 		assert.ErrorIs(t, err, ErrForbidden,
 			"plain membership must not confer the right to edit the group label")
 	})
@@ -227,7 +227,7 @@ func TestUpdateGroupAuthz(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedGroupAuthzFixtures(t, db)
 		bad := "user-foo"
-		err := UpdateGroup(db, fx.opsID, &bad, nil, nil, fx.strangerID, true)
+		err := UpdateGroup(db, fx.opsID, &bad, nil, nil, nil, fx.strangerID, true, true)
 		assert.ErrorIs(t, err, ErrReservedGroupPrefix)
 	})
 
@@ -235,7 +235,7 @@ func TestUpdateGroupAuthz(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		fx := seedGroupAuthzFixtures(t, db)
 		bad := "ops/admin"
-		err := UpdateGroup(db, fx.opsID, &bad, nil, nil, fx.strangerID, true)
+		err := UpdateGroup(db, fx.opsID, &bad, nil, nil, nil, fx.strangerID, true, true)
 		assert.ErrorIs(t, err, ErrInvalidIdentifier,
 			"slashes are banned in group names")
 	})

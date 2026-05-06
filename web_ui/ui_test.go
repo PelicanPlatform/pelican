@@ -1209,17 +1209,26 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.Equal(t, newDescription, fetchedGroup["description"])
 	})
 
-	t.Run("test-only-admin-can-create-group", func(t *testing.T) {
-		// Test that a regular (non-admin) user cannot create a group
-		groupName := "test-admin-only-group"
-		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
+	t.Run("any-authenticated-user-can-create-group-but-not-eligible", func(t *testing.T) {
+		// The user-group design opens group creation to any
+		// authenticated caller so users can mint groups for their
+		// own collection ACLs and shares; the privileged twist is
+		// the AuthTemplateEligible bit, which only an admin /
+		// user-admin can set. We assert both halves: a non-admin
+		// create succeeds and the resulting row is NOT eligible,
+		// regardless of what the request asked for.
+		groupName := "test-non-admin-group"
+		createGroupReq := map[string]any{
+			"name":                 groupName,
+			"description":          "test group",
+			"authTemplateEligible": true, // non-admin must NOT have this honored
+		}
 		body, err := json.Marshal(createGroupReq)
 		require.NoError(t, err)
 
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		// Regular (non-admin) user should be rejected
 		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		ensureTestUserRow(t, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
@@ -1227,11 +1236,28 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("expected 403 for non-admin, got %d: %s", recorder.Code, recorder.Body.String()))
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"non-admin create must succeed (body: %s)", recorder.Body.String())
 
-		// Admin user should succeed
+		var nonAdminGroup struct {
+			ID                   string `json:"id"`
+			AuthTemplateEligible bool   `json:"authTemplateEligible"`
+		}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&nonAdminGroup))
+		require.NotEmpty(t, nonAdminGroup.ID)
+		assert.False(t, nonAdminGroup.AuthTemplateEligible,
+			"non-admin must NOT be able to mint an authz-template-eligible group, even if the request body asked for one")
+
+		// Admin can mint AND mark eligible. Use a different name so
+		// it doesn't collide with the non-admin row above (group
+		// names are unique).
 		adminToken := generateTestAdminUserToken(t)
-		body, err = json.Marshal(createGroupReq)
+		adminGroupReq := map[string]any{
+			"name":                 "test-admin-eligible-group",
+			"description":          "test group",
+			"authTemplateEligible": true,
+		}
+		body, err = json.Marshal(adminGroupReq)
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -1242,17 +1268,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		// Decode just the id — Group has fields the loose map[string]string
-		// can't accept (members slice, time fields, the bool HasPassword
-		// on nested users). The other fields aren't relevant to this
-		// test, so a typed extractor is safer than relaxing the map type.
 		var createGroupResp struct {
-			ID string `json:"id"`
+			ID                   string `json:"id"`
+			AuthTemplateEligible bool   `json:"authTemplateEligible"`
 		}
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
 		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
+		assert.True(t, createGroupResp.AuthTemplateEligible,
+			"admin-created group with authTemplateEligible:true must be eligible")
 
 		// Verify the admin can manage the group members
 		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}

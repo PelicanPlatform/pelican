@@ -28,6 +28,12 @@ export interface Group {
   // transfer cascades to it. Read-only from the client's perspective;
   // set on POST and never updated thereafter.
   createdForCollectionId?: string;
+  // authTemplateEligible gates whether the group's name is allowed to
+  // match Issuer.AuthorizationTemplates and the Server.*AdminGroups
+  // config lists. Settable only by an admin / user-admin (server-side
+  // gate); user-created groups default to false. Pre-existing groups
+  // (before user-driven creation was opened) are migrated to true.
+  authTemplateEligible?: boolean;
 }
 
 export type GroupPost = Omit<Group, 'members' | 'createdBy' | 'createdAt'>;
