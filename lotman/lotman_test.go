@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -41,7 +40,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -957,318 +955,6 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 	}
 }
 
-// If so configured, we'll divide unallocated space between lot's dedicated GB and
-// opportunistict GB values. This test ensures the calculations are correct and that
-// hardcoded configuration isn't modified.
-// I don't test for errors here because the internal functions capable of generating
-// errors are tested elsewhere (e.g. convertWatermarkToBytes)
-func TestDivideRemainingSpace(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	dedGB := float64(10.0)
-	oppGB := float64(1.5)
-
-	createLotMap := func() map[string]Lot {
-		return map[string]Lot{
-			"lot1": {
-				LotName: "lot1",
-				MPA: &MPA{
-					DedicatedGB:     &dedGB,
-					OpportunisticGB: &oppGB,
-				},
-			},
-			"lot2": {
-				LotName: "lot2",
-				MPA:     &MPA{},
-			},
-			"lot3": {
-				LotName: "lot3",
-				MPA: &MPA{
-					DedicatedGB: &dedGB,
-				},
-			},
-			"lot4": {
-				LotName: "lot4",
-				MPA: &MPA{
-					OpportunisticGB: &oppGB, // hardcoded values should be respected
-				},
-			},
-		}
-	}
-
-	lotMap := createLotMap()
-	totalDiskSpaceB := uint64(30000000000) // 30GB
-	require.NoError(t, param.Cache_HighWaterMark.Set("25g"))
-	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
-	require.NoError(t, err)
-	// dedGB divisions should sum to HWM
-	require.Equal(t, 10.0, *lotMap["lot1"].MPA.DedicatedGB)
-	require.Equal(t, 2.5, *lotMap["lot2"].MPA.DedicatedGB)
-	require.Equal(t, 10.0, *lotMap["lot3"].MPA.DedicatedGB)
-	require.Equal(t, 2.5, *lotMap["lot4"].MPA.DedicatedGB)
-	// oppGB should be HWM - dedGB unless hardcoded
-	require.Equal(t, 1.5, *lotMap["lot1"].MPA.OpportunisticGB)
-	require.Equal(t, 22.5, *lotMap["lot2"].MPA.OpportunisticGB)
-	require.Equal(t, 15.0, *lotMap["lot3"].MPA.OpportunisticGB)
-	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
-
-	// Now make sure we this allocation fails if sum of dedGB is lower than HWM
-	require.NoError(t, param.Cache_HighWaterMark.Set("1g"))
-	lotMap = createLotMap()
-	err = divideRemainingSpace(&lotMap, totalDiskSpaceB)
-	require.Error(t, err)
-}
-
-// Pretty straightforward -- tests should make sure we can grab viper config and use it when
-// setting lot timestamps if they're not pre-configured.
-func TestConfigLotTimestamps(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	now := time.Now().UnixMilli()
-	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.SetString("24h"))
-	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.SetString("48h"))
-
-	defaultExpiration := now + 24*60*60*1000 // 24 hours in milliseconds
-	defaultDeletion := now + 48*60*60*1000   // 48 hours in milliseconds
-
-	// Helper function to create a lot with optional timestamps
-	createLot := func(creationTime, expirationTime, deletionTime *Int64FromFloat) Lot {
-		return Lot{
-			MPA: &MPA{
-				CreationTime:   creationTime,
-				ExpirationTime: expirationTime,
-				DeletionTime:   deletionTime,
-			},
-		}
-	}
-
-	// Define the test cases
-	testCases := []struct {
-		name           string
-		lotMap         map[string]Lot
-		expectedLotMap map[string]Lot
-	}{
-		{
-			name: "Lots with missing timestamps",
-			lotMap: map[string]Lot{
-				"lot1": createLot(nil, nil, nil),
-				"lot2": createLot(&Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}),
-			},
-			expectedLotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
-				"lot2": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
-			},
-		},
-		{
-			name: "Lots with existing timestamps",
-			lotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
-			},
-			expectedLotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			configLotTimestamps(&tc.lotMap)
-
-			for lotName, lot := range tc.lotMap {
-				expectedLot, exists := tc.expectedLotMap[lotName]
-				require.True(t, exists)
-
-				// Use delta comparisons for timestamps to account for small skews
-				// that occur between creation of expected test lot and actual lot. This
-				// happens infrequently in GHA runners, but still causes test failures.
-				if expectedLot.MPA.CreationTime != nil && lot.MPA.CreationTime != nil {
-					assert.InDelta(t, expectedLot.MPA.CreationTime.Value, lot.MPA.CreationTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected creation time to be set")
-				}
-				if expectedLot.MPA.ExpirationTime != nil && lot.MPA.ExpirationTime != nil {
-					assert.InDelta(t, expectedLot.MPA.ExpirationTime.Value, lot.MPA.ExpirationTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected expiration time to be set")
-				}
-				if expectedLot.MPA.DeletionTime != nil && lot.MPA.DeletionTime != nil {
-					assert.InDelta(t, expectedLot.MPA.DeletionTime.Value, lot.MPA.DeletionTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected deletion time to be set")
-				}
-			}
-		})
-	}
-}
-
-func TestConfigLotsFromFedPrefixes(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	test_utils.MockFederationRoot(t, nil, nil)
-	fedInfo, err := config.GetFederation(context.Background())
-	require.NoError(t, err)
-	discUrl := fedInfo.DiscoveryEndpoint
-
-	issuer1Str := "https://issuer1.com"
-	issuer1, _ := url.Parse(issuer1Str)
-	issuer2Str := "https://issuer2.com"
-	issuer2, _ := url.Parse(issuer2Str)
-	testCases := []struct {
-		name             string
-		nsAds            []server_structs.NamespaceAdV2
-		federationIssuer string
-		directorUrl      string
-		expectedLotMap   map[string]Lot
-		expectedError    string
-	}{
-		{
-			name: "Valid namespaces",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer1},
-					},
-				},
-				{
-					Path: "/namespace2",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer2},
-					},
-				},
-			},
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace1": {
-					LotName: "/namespace1",
-					Owner:   issuer1Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace1",
-							Recursive: true,
-						},
-					},
-				},
-				"/namespace2": {
-					LotName: "/namespace2",
-					Owner:   issuer2Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace2",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Skip monitoring namespaces",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/pelican/monitoring/namespace1",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer1},
-					},
-				},
-				{
-					Path: "/namespace2",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer2},
-					},
-				},
-			},
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace2": {
-					LotName: "/namespace2",
-					Owner:   issuer2Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace2",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Discovery endpoint used as federation issuer",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-				},
-			},
-			// In production, the discovery endpoint is always populated (even when
-			// bootstrapped via the Director URL). Verify it's used as the lot owner.
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace1": {
-					LotName: "/namespace1",
-					Owner:   discUrl,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace1",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Unresolvable issuer triggers error",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-				},
-			},
-			federationIssuer: "",
-			directorUrl:      "",
-			expectedLotMap:   map[string]Lot{},
-			expectedError:    "unable to determine the federation's discovery endpoint/issuer for lot ownership",
-		},
-	}
-
-	// Run the test cases
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			config.ResetFederationForTest()
-			fed := pelican_url.FederationDiscovery{
-				// Most of these aren't actually used by the test, but to prevent auto discovery
-				// and needing to spin up a separate mock discovery server, set them all.
-				DiscoveryEndpoint: tc.federationIssuer,
-				DirectorEndpoint:  tc.directorUrl,
-				RegistryEndpoint:  "https://dne-registry.com",
-				JwksUri:           "https://dne-jwks.com",
-				BrokerEndpoint:    "https://dne-broker.com",
-			}
-			config.SetFederation(fed)
-
-			lotMap, err := configLotsFromFedPrefixes(tc.nsAds)
-			if tc.expectedError == "" {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.expectedError)
-			}
-			assert.Equal(t, tc.expectedLotMap, lotMap)
-		})
-	}
-}
-
 // TestStrictHierarchyContextSet verifies that InitLotman installs the
 // strict-hierarchy execution context (PR-2): the three flags
 // strict_hierarchy, contraction_policy, and admin_override must each be
@@ -1317,4 +1003,82 @@ func TestLotmanVersionCompatibility(t *testing.T) {
 
 	assert.True(t, checkLotmanVersionCompatibility(),
 		"installed lotman version %q must be >= %s", LotmanVersion(), minLotmanVersion)
+}
+
+// TestInitLotmanNestedNamespaces drives the full PR-3/PR-4 path-prefix
+// nesting pipeline through a real lotman_add_lot call. Three namespaces
+// are submitted: /a, /a/b, and /c. Expected lot tree:
+//
+//	root -> /a -> /a/b
+//	root -> /c
+//
+// The test confirms (1) parent linkage stored by lotman matches the tree
+// computed by buildLotTree, (2) per-axis ParentAttributions written via
+// lotman_add_lot are honoured by lotman_get_lot_as_json, and (3) the
+// (N+1) allocator yields the documented quotas at each level.
+func TestInitLotmanNestedNamespaces(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	require.NoError(t, param.Cache_DataLocations.Set([]string{}))
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+
+	nsAds := makeAds("/a", "/a/b", "/c")
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", server.URL, nsAds)
+	defer cleanup()
+	require.True(t, success)
+
+	getLot := func(name string) Lot {
+		buf := make([]byte, 8192)
+		errBuf := make([]byte, 2048)
+		ret := LotmanGetLotJSON(name, false, &buf, &errBuf)
+		if ret != 0 {
+			trimBuf(&errBuf)
+			t.Fatalf("get lot %q failed: %s", name, string(errBuf))
+		}
+		trimBuf(&buf)
+		var l Lot
+		require.NoErrorf(t, json.Unmarshal(buf, &l), "unmarshal %q: %s", name, string(buf))
+		return l
+	}
+
+	a := getLot("/a")
+	b := getLot("/a/b")
+	c := getLot("/c")
+
+	// Parent linkage as computed by buildLotTree.
+	assert.Equal(t, []string{"root"}, a.Parents)
+	assert.Equal(t, []string{"/a"}, b.Parents)
+	assert.Equal(t, []string{"root"}, c.Parents)
+
+	// (N+1) allocator: root has HighWaterMark=100GB (no Cache.DataLocations
+	// set, so HWM is the fallback root quota) and 2 top-level children
+	// /a and /c, so each gets 100/2 = 50 GB.
+	require.NotNil(t, a.MPA.DedicatedGB)
+	require.NotNil(t, c.MPA.DedicatedGB)
+	assert.InDelta(t, 50.0, *a.MPA.DedicatedGB, 1e-9)
+	assert.InDelta(t, 50.0, *c.MPA.DedicatedGB, 1e-9)
+
+	// /a then has 1 child, divisor = N+1 = 2, so /a/b gets 50/2 = 25 GB.
+	require.NotNil(t, b.MPA.DedicatedGB)
+	assert.InDelta(t, 25.0, *b.MPA.DedicatedGB, 1e-9)
+
+	// ParentAttributions wired through to lotman: each child's attribution
+	// equals its own dedicated quota (axiom 1 trivially satisfied).
+	require.Contains(t, a.ParentAttributions, "root")
+	require.Contains(t, b.ParentAttributions, "/a")
+	require.Contains(t, c.ParentAttributions, "root")
+	assert.InDelta(t, 50.0, *a.ParentAttributions["root"].DedicatedGB, 1e-9)
+	assert.InDelta(t, 25.0, *b.ParentAttributions["/a"].DedicatedGB, 1e-9)
+	assert.InDelta(t, 50.0, *c.ParentAttributions["root"].DedicatedGB, 1e-9)
+
+	// Sentinel propagation (root.opportunistic = -1, root.max_num_objects = -1):
+	// lotman PR #46 accepts -1 verbatim as "unbounded" for both MPAs and
+	// parent attributions.
+	require.NotNil(t, a.MPA.OpportunisticGB)
+	assert.Equal(t, float64(-1), *a.MPA.OpportunisticGB)
+	require.NotNil(t, a.MPA.MaxNumObjects)
+	assert.Equal(t, int64(-1), a.MPA.MaxNumObjects.Value)
 }

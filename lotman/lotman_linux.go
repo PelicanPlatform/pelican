@@ -49,7 +49,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -728,76 +727,6 @@ func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error
 	return uint64((percentage / 100) * float64(totalDiskSpace)), nil
 }
 
-// Divide the remaining space among lots' dedicatedGB values -- we don't ever want to
-// dedicate more space than we have available, as indicated by the HWM of the cache. This is because
-// our model is that as long as a lot stays under its dedicated GB, its data is safe in the cache --
-// If the sum of each lot's dedicated GB exceeds the HWM, the cache may purge data without a single lot
-// exceeding it's quota. BAD!
-//
-// Opportunistic space can (and should) be overallocated, so unless explicitly set, each lot will have
-// dedicatedGB + opportunisticGB = HWM. This isn't maxed out to the total disk space, because otherwise
-// no lot could ever exceed its opportunistic storage and we'd lose some of the capabilities to reason about
-// how greedy the lot is.
-func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error {
-	hwmStr := param.Cache_HighWaterMark.GetString()
-	if hwmStr == "" {
-		return errors.New("high watermark is not set in the cache configuration")
-	}
-	hwm, err := convertWatermarkToBytes(hwmStr, totalDiskSpaceB)
-	if err != nil {
-		return errors.Wrap(err, "error converting high watermark to byte value for Lotman")
-	}
-	remainingToHwmB := hwm
-
-	// first iterate through all lots and subtract from our total space any amount
-	// that's already been allocated. Note which lots have an unset value, as we'll
-	// need to return to them.
-	returnToKeys := make([]string, 0, len(*lotMap))
-	for key, lot := range *lotMap {
-		if lot.LotName == "root" || lot.LotName == "default" {
-			continue
-		}
-		if lot.MPA != nil && lot.MPA.DedicatedGB != nil {
-			dedicatedGBBytes := gigabytesToBytes(*lot.MPA.DedicatedGB)
-			// While we check that lot config is valid later, we can't finish dividing space if
-			// remainintToHwmB dips negative. Can't check for < 0 after subtraction because the uint64 will wrap
-			if remainingToHwmB < dedicatedGBBytes {
-				return errors.New(fmt.Sprintf("the sum of all lots' dedicatedGB values exceeds the high watermark of %s. This would allow the cache to purge namespaces using less than their dedicated quota", hwmStr))
-			}
-			remainingToHwmB -= dedicatedGBBytes
-			if lot.MPA.OpportunisticGB == nil {
-				oGb := bytesToGigabytes(hwm) - *lot.MPA.DedicatedGB
-				lot.MPA.OpportunisticGB = &oGb
-			}
-		} else {
-			returnToKeys = append(returnToKeys, lot.LotName)
-		}
-		(*lotMap)[key] = lot
-	}
-
-	if len(returnToKeys) > 0 {
-		// now iterate through the lots that need space allocated and assign them the
-		// remaining space
-		spacePerLotRemainingB := remainingToHwmB / uint64(len(returnToKeys))
-		for _, key := range returnToKeys {
-			lot := (*lotMap)[key]
-			if lot.MPA == nil {
-				lot.MPA = &MPA{}
-			}
-			dGb := bytesToGigabytes(spacePerLotRemainingB)
-			oGb := bytesToGigabytes(hwm - spacePerLotRemainingB)
-			lot.MPA.DedicatedGB = &dGb
-			if lot.MPA.OpportunisticGB == nil {
-				lot.MPA.OpportunisticGB = &oGb
-			}
-			lot.MPA.MaxNumObjects = &Int64FromFloat{Value: 0} // Purge plugin doesn't yet use this, set to 0.
-			(*lotMap)[key] = lot
-		}
-	}
-
-	return nil
-}
-
 // Lots have unix millisecond timestamps for creation, expiration, and deletion. If these are not set in the
 // config, we'll set them to the current time. Expiration and deletion times are set to the default lifetime
 func configLotTimestamps(lotMap *map[string]Lot) {
@@ -830,48 +759,66 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 	}
 }
 
-// By default, Lotman should discover namespaces from the Director and try to create the relevant top-level
-// lots for those namespaces. This function creates those lots, but they may be merged with local config
-// at a later time.
-func configLotsFromFedPrefixes(nsAds []server_structs.NamespaceAdV2) (map[string]Lot, error) {
-	directorLotMap := make(map[string]Lot)
-	federationIssuer, err := getFederationIssuer()
-	if err != nil {
-		return directorLotMap, errors.Wrap(err, "Unable to determine federation issuer which is needed by Lotman to determine lot ownership")
+// configLotsFromFedPrefixesNested turns federation namespace ads into a flat
+// map[name]Lot whose parent/child structure is derived by path-prefix
+// containment and whose per-axis MPAs and parent_attributions follow the
+// recursive (N+1) allocator. The synthetic root entry is dropped from the
+// returned map: callers add their own root lot (with timestamps, owner,
+// the "/" path) afterwards and only need the discovered descendants here.
+//
+// Pure data transform: no lotman C calls. The tree pipeline lives in
+// lot_tree.go and is fully unit-tested without dlopen.
+func configLotsFromFedPrefixesNested(nsAds []server_structs.NamespaceAdV2, federationIssuer string, rootDedGB float64) map[string]Lot {
+	out := make(map[string]Lot)
+
+	// Synthetic root lot used only as the seed for the allocator: it carries
+	// the federation-wide quota that the (N+1) rule subdivides. The actual
+	// "root" lot stored in lotMap is constructed by initLots immediately
+	// after this call so it picks up consistent owner/timestamps even when
+	// nsAds is empty.
+	rootDed := rootDedGB
+	rootOpp := float64(-1)
+	rootObj := Int64FromFloat{Value: -1}
+	seed := Lot{
+		LotName: "root",
+		MPA: &MPA{
+			DedicatedGB:     &rootDed,
+			OpportunisticGB: &rootOpp,
+			MaxNumObjects:   &rootObj,
+		},
 	}
-	if federationIssuer == "" {
-		return directorLotMap, errors.New("The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty")
-	}
-	for _, nsAd := range nsAds {
-		// Skip monitoring namespaces
-		if strings.HasPrefix(nsAd.Path, server_utils.MonitoringBaseNs) {
+
+	tree := buildLotTree(seed, nsAds, federationIssuer)
+	allocateQuotas(tree)
+	flat := flattenTreeForCreation(tree)
+	for _, lot := range flat {
+		if lot.LotName == "root" {
 			continue
 		}
-		var issuer string
-		if len(nsAd.Issuer) > 0 {
-			issuer = (nsAd.Issuer[0]).IssuerUrl.String()
-		} else {
-			issuer = federationIssuer
-		}
+		out[lot.LotName] = lot
+	}
+	return out
+}
 
-		// Incoming namespace prefixes have a trailing "/". Until Lotman handles it
-		// correctly for various database queries, we need to trim it.
-		path := strings.TrimSuffix(nsAd.Path, "/")
-		directorLotMap[path] = Lot{
-			LotName: path,
-			Owner:   issuer, // grab the first issuer -- lotman doesn't currently support multiple direct owners
-			// Assign parent as the root lot at the cache. This lets root edit the lot, but still allows the owner of the namespace to further subdivide
-			Parents: []string{"root"},
-			Paths: []LotPath{
-				{
-					Path:      path,
-					Recursive: true,
-				},
-			},
+// computeRootDedicatedGB picks the per-axis dedicated quota for the root
+// lot in GB. When at least one cache disk is detected we use the full
+// disk total (so root's quota naturally contains every child's
+// allocation). When no disks are detected (tests, early startup) we fall
+// back to Cache.HighWaterMark so the root lot is still non-zero and
+// strict-hierarchy axiom 1 remains satisfiable.
+func computeRootDedicatedGB(totalDiskSpaceB uint64) float64 {
+	rootDedGB := bytesToGigabytes(totalDiskSpaceB)
+	if totalDiskSpaceB == 0 {
+		hwmStr := param.Cache_HighWaterMark.GetString()
+		if hwmStr != "" {
+			hwmBytes, hwmErr := convertWatermarkToBytes(hwmStr, 0)
+			if hwmErr == nil && hwmBytes > 0 {
+				rootDedGB = bytesToGigabytes(hwmBytes)
+				log.Debugf("No cache disks detected; using HighWaterMark (%s = %.2f GB) as root lot quota", hwmStr, rootDedGB)
+			}
 		}
 	}
-
-	return directorLotMap, nil
+	return rootDedGB
 }
 
 // One limitation in Lotman is that a lot cannot be created unless all of its parents exist. Unfortunately,
@@ -1046,12 +993,33 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 		policyLotMap[lot.LotName] = lot
 	}
 
+	cacheDisks := param.Cache_DataLocations.GetStringSlice()
+	log.Tracef("Cache data locations being tracked by Lotman: %v", cacheDisks)
+	var totalDiskSpaceB uint64
+	for _, disk := range cacheDisks {
+		diskSpace, _, err := getDiskUsage(disk)
+		if err != nil {
+			return internalLots, errors.Wrapf(err, "error getting disk usage for filesystem path %s", disk)
+		}
+		totalDiskSpaceB += diskSpace
+	}
+
+	federationIssuer, err := getFederationIssuer()
+	if err != nil {
+		return internalLots, errors.Wrap(err, "Unable to determine the federation's issuer, which is needed by Lotman to determine lot ownership")
+	}
+	if federationIssuer == "" {
+		return internalLots, errors.New("The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty")
+	}
+	rootDedGB := computeRootDedicatedGB(totalDiskSpaceB)
+
 	var lotMap map[string]Lot
 	if discoverPrefixes {
-		directorLotMap, err := configLotsFromFedPrefixes(nsAds)
-		if err != nil {
-			return internalLots, errors.Wrap(err, "error configuring lots from federation prefixes")
-		}
+		// Build a nested lot graph from discovered namespace ads. The root
+		// lot's per-axis quota is supplied here so the recursive (N+1)
+		// allocator has something concrete to subdivide; the synthesised
+		// root/default lots themselves are added to lotMap below.
+		directorLotMap := configLotsFromFedPrefixesNested(nsAds, federationIssuer, rootDedGB)
 
 		// Handle potential need to merge discovered namespaces with provided configuration
 		if shouldMerge {
@@ -1076,46 +1044,10 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 		lotMap = policyLotMap
 	}
 
-	cacheDisks := param.Cache_DataLocations.GetStringSlice()
-	log.Tracef("Cache data locations being tracked by Lotman: %v", cacheDisks)
-	var totalDiskSpaceB uint64
-	for _, disk := range cacheDisks {
-		diskSpace, _, err := getDiskUsage(disk)
-		if err != nil {
-			return internalLots, errors.Wrapf(err, "error getting disk usage for filesystem path %s", disk)
-		}
-		totalDiskSpaceB += diskSpace
-	}
-
 	// Now guarantee our special "default" and "root" lots if the user hasn't provided them
 	// in the config. For now, these lots must always exist because they're used to make sure
 	// all data is tied to a lot (default) and that the requirement of a root lot is satisfied
 	// without allowing discovered lots to gain rootly status.
-	federationIssuer, err := getFederationIssuer()
-	if err != nil {
-		return internalLots, errors.Wrap(err, "Unable to determine the federation's issuer, which is needed by Lotman to determine lot ownership")
-	}
-	if federationIssuer == "" {
-		return internalLots, errors.New("The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty")
-	}
-	// rootDedGB represents the entire cache disk so the root lot's dedicated
-	// quota naturally contains every child's allocation. When Cache.DataLocations
-	// is empty (tests, early startup) fall back to Cache.HighWaterMark so the
-	// root lot is still non-zero and strict-hierarchy axiom 1 is satisfiable.
-	// Note: percentage-based HWMs against a 0-byte total would also yield 0;
-	// in that unlikely edge case root's quota remains 0 until disk detection
-	// succeeds on the next init.
-	rootDedGB := bytesToGigabytes(totalDiskSpaceB)
-	if totalDiskSpaceB == 0 {
-		hwmStr := param.Cache_HighWaterMark.GetString()
-		if hwmStr != "" {
-			hwmBytes, hwmErr := convertWatermarkToBytes(hwmStr, 0)
-			if hwmErr == nil && hwmBytes > 0 {
-				rootDedGB = bytesToGigabytes(hwmBytes)
-				log.Debugf("No cache disks detected; using HighWaterMark (%s = %.2f GB) as root lot quota", hwmStr, rootDedGB)
-			}
-		}
-	}
 	zero := float64(0)
 	unboundedGB := float64(-1)
 	// `default` is the catch-all parent for namespaces that have not been
@@ -1175,12 +1107,6 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	}
 
 	log.Tracef("Lotman will split lot disk space quotas amongst the discovered disk space: %vB", totalDiskSpaceB)
-	if policy.DivideUnallocated {
-		log.Traceln("Dividing unallocated space among lots")
-		if err := divideRemainingSpace(&lotMap, totalDiskSpaceB); err != nil {
-			return nil, err
-		}
-	}
 
 	// Set up lot timestamps (creation, expiration, deletion) if needed
 	configLotTimestamps(&lotMap)
