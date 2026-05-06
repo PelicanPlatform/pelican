@@ -32,6 +32,12 @@ type CreateGroupReq struct {
 	// ownership transfer of that collection cascades to its onboarded
 	// groups; empty for standalone group creation.
 	CreatedForCollectionID string `json:"createdForCollectionId,omitempty"`
+	// AuthTemplateEligible asks the server to mark this new group as
+	// eligible to match Issuer.AuthorizationTemplates and the
+	// Server.*AdminGroups config lists. Only an admin / user-admin
+	// caller may set this to true — for everyone else the request
+	// field is silently forced to false (the handler enforces this).
+	AuthTemplateEligible bool `json:"authTemplateEligible,omitempty"`
 }
 
 // GroupView wraps a database.Group with resolved user/group summaries for
@@ -139,6 +145,10 @@ type UpdateGroupReq struct {
 	Name        *string `json:"name"`
 	DisplayName *string `json:"displayName"`
 	Description *string `json:"description"`
+	// AuthTemplateEligible may only be flipped by an admin or
+	// user-admin (the database layer also enforces this). nil = no
+	// change; &true / &false = explicit set.
+	AuthTemplateEligible *bool `json:"authTemplateEligible"`
 }
 
 type UpdateGroupOwnershipReq struct {
@@ -362,17 +372,21 @@ func handleCreateGroup(ctx *gin.Context) {
 		Groups:   callerGroups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	// System admins and user admins can create groups (the latter manages
-	// non-privileged groups per the user-admin role's contract). Non-admins
-	// can manage groups they own but cannot stand up new ones.
+	// Group creation is open to any authenticated user — the design
+	// (docs/user-group-design.md) calls this out so users can mint
+	// groups for their own collection ACLs and shares without going
+	// through an admin. The privileged twist is the
+	// AuthTemplateEligible flag below: only an admin / user-admin can
+	// flip a group into authz-template-eligible state, where its
+	// name participates in Issuer.AuthorizationTemplates and the
+	// Server.*AdminGroups matchers. Non-admin creators get
+	// auth_template_eligible=false regardless of what the request
+	// body says, so a self-named group can't gain authz authority.
 	isAdmin, _ := CheckAdmin(identity)
 	isUserAdmin, _ := CheckUserAdmin(identity)
+	authTemplateEligible := req.AuthTemplateEligible
 	if !isAdmin && !isUserAdmin {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "you do not have permission to create groups",
-		})
-		return
+		authTemplateEligible = false
 	}
 
 	authMethod, authMethodID := captureAuthMethod(ctx)
@@ -380,7 +394,7 @@ func handleCreateGroup(ctx *gin.Context) {
 		UserID:       userId,
 		AuthMethod:   authMethod,
 		AuthMethodID: authMethodID,
-	}, req.CreatedForCollectionID)
+	}, req.CreatedForCollectionID, authTemplateEligible)
 	if err != nil {
 		if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -447,14 +461,16 @@ func handleUpdateGroup(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(UserIdentity{
+	identity := UserIdentity{
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
-	})
+	}
+	isAdmin, _ := CheckAdmin(identity)
+	isUserAdmin, _ := CheckUserAdmin(identity)
 
-	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.DisplayName, req.Description, userId, isAdmin); err != nil {
+	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.DisplayName, req.Description, req.AuthTemplateEligible, userId, isAdmin, isUserAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

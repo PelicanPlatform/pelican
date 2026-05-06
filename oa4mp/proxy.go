@@ -147,11 +147,23 @@ func CalculateAllowedScopes(user string, userId string, groupsList []string) ([]
 // based on the given set of compiled authorization rules.  This is the
 // per-namespace variant; CalculateAllowedScopes delegates here using the
 // global compiledAuthzRules.
+//
+// Group-eligibility filter: any caller-supplied group whose Pelican
+// `groups` row has `auth_template_eligible == false` is dropped before
+// matching. Group creation is open to non-admin users (per the
+// user-group design); without this filter a user could create a group
+// named e.g. "alpha" and gain `storage.modify:/projects/alpha` via a
+// `Prefix: /projects/$GROUP` template. Names with no Pelican row at
+// all (purely OIDC-asserted from a federation IdP) pass through —
+// eligibility is a flag on locally-managed groups, not a denylist
+// against external IdPs.
 func CalculateAllowedScopesWithRules(rules []*CompiledAuthz, user string, userId string, groupsList []string) ([]string, []string) {
 	if len(rules) == 0 {
 		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
 	}
+
+	groupsList = database.FilterAuthTemplateEligibleGroups(database.ServerDatabase, groupsList)
 
 	log.Debugf("calculateAllowedScopes: user=%s, userId=%s, groupsList=%v, numRules=%d", user, userId, groupsList, len(rules))
 	scopeSet := make(map[string]struct{})
@@ -347,21 +359,35 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 	if !slices.Contains(groupsList, userGroup) {
 		groupsList = append(groupsList, userGroup)
 	}
-
-	// Pull each ACL row alongside the parent collection's namespace. We
-	// use a flat projection (rather than Preload) so a single query
-	// returns exactly the four columns we need; a *gorm.DB scan into a
-	// non-model struct is the standard way to do this.
-	type aclWithNamespace struct {
-		CollectionID string
-		GroupID      string
-		Role         database.AclRole
-		ExpiresAt    *time.Time
-		Namespace    string
+	// Inject the all-authenticated-users sentinel so any collection
+	// with an ACL granted to `@authenticated` confers its scopes on
+	// every signed-in caller. The sentinel is not a real Group and
+	// won't appear in wlcg.groups; the matchedGroupSet captures it
+	// only for ACL evaluation here.
+	if !slices.Contains(groupsList, database.AllAuthenticatedUsersACLGroup) {
+		groupsList = append(groupsList, database.AllAuthenticatedUsersACLGroup)
 	}
-	var rows []aclWithNamespace
+
+	// Pull each ACL row alongside the parent collection's namespace,
+	// share-parent link, and share-owner identity. We use a flat
+	// projection (rather than Preload) so a single query returns
+	// exactly the columns we need.
+	type aclWithCollection struct {
+		CollectionID       string
+		GroupID            string
+		Role               database.AclRole
+		ExpiresAt          *time.Time
+		Namespace          string
+		ParentCollectionID string
+		// OwnerID / Owner identify the COLLECTION's owner — used to
+		// compute the share owner's current parent-collection role
+		// when the row is itself a share.
+		OwnerID string
+		Owner   string
+	}
+	var rows []aclWithCollection
 	if result := db.Table("collection_acls").
-		Select("collection_acls.collection_id, collection_acls.group_id, collection_acls.role, collection_acls.expires_at, collections.namespace").
+		Select("collection_acls.collection_id, collection_acls.group_id, collection_acls.role, collection_acls.expires_at, collections.namespace, collections.parent_collection_id, collections.owner_id, collections.owner").
 		Joins("JOIN collections ON collections.id = collection_acls.collection_id").
 		Where("collection_acls.group_id IN ?", groupsList).
 		Scan(&rows); result.Error != nil {
@@ -369,8 +395,11 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 	}
 
 	type collectionPerm struct {
-		role      database.AclRole
-		namespace string
+		role               database.AclRole
+		namespace          string
+		parentCollectionID string
+		ownerID            string
+		ownerUsername      string
 	}
 	collectionPerms := make(map[string]collectionPerm)
 	for _, r := range rows {
@@ -383,12 +412,18 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 
 		existing, ok := collectionPerms[r.CollectionID]
 		if !ok {
-			collectionPerms[r.CollectionID] = collectionPerm{role: r.Role, namespace: r.Namespace}
+			collectionPerms[r.CollectionID] = collectionPerm{
+				role:               r.Role,
+				namespace:          r.Namespace,
+				parentCollectionID: r.ParentCollectionID,
+				ownerID:            r.OwnerID,
+				ownerUsername:      r.Owner,
+			}
 			continue
 		}
 		// Owner > Write > Read — keep the highest-privilege role we've
-		// seen for this collection so far. Namespace is invariant per
-		// collection, so we leave it alone.
+		// seen for this collection so far. Namespace + parent + owner
+		// are invariants of the row, so we leave them alone.
 		if r.Role == database.AclRoleOwner {
 			existing.role = database.AclRoleOwner
 		} else if r.Role == database.AclRoleWrite && existing.role != database.AclRoleOwner && existing.role != database.AclRoleWrite {
@@ -397,8 +432,33 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 		collectionPerms[r.CollectionID] = existing
 	}
 
+	// Cache parents we've already fetched for the share-intersection
+	// pass — a single user may hold ACL on multiple shares of the
+	// same parent (and we want one DB hit per parent, not per share).
+	parentCache := make(map[string]*database.Collection)
+	loadParent := func(id string) *database.Collection {
+		if id == "" {
+			return nil
+		}
+		if cached, ok := parentCache[id]; ok {
+			return cached
+		}
+		var p database.Collection
+		if err := db.Preload("ACLs").Where("id = ?", id).First(&p).Error; err != nil {
+			parentCache[id] = nil
+			return nil
+		}
+		parentCache[id] = &p
+		return &p
+	}
+
 	for collectionID, perm := range collectionPerms {
-		// Management-plane: collection.* scopes are keyed by collection ID.
+		// Management-plane: collection.* scopes are keyed by collection
+		// ID. These are NOT clamped by share semantics — a share
+		// recipient with read ACL on a share gets to read the share's
+		// metadata, regardless of what the share owner can do on the
+		// parent. (Modify / Delete are still rare since the share's
+		// own ACL almost never grants those.)
 		switch perm.role {
 		case database.AclRoleOwner:
 			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
@@ -422,7 +482,37 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 		if !ok {
 			continue
 		}
-		switch perm.role {
+
+		// Share intersection: when this row IS a share (parent set),
+		// the design (docs/collections-design.md) requires that the
+		// effective storage access be the *intersection* of the
+		// recipient's ACL on the share with the share owner's CURRENT
+		// access to the parent. The share owner losing write — or all
+		// access — must propagate to every token minted via the share.
+		// We also emit `share.access:/<share-id>` so the data plane
+		// knows to impersonate the share owner inside the share's
+		// prefix, not the token bearer.
+		effectiveRole := perm.role
+		if perm.parentCollectionID != "" {
+			parent := loadParent(perm.parentCollectionID)
+			if parent == nil {
+				// Parent gone; emit no storage scopes for this share.
+				continue
+			}
+			ownerRole := database.EffectiveCollectionRole(db, parent, perm.ownerID, perm.ownerUsername)
+			effectiveRole = database.MinRole(perm.role, ownerRole)
+			if effectiveRole == "" {
+				// The share owner has no current access to the parent
+				// — revocation has cascaded. Still no data-plane scope,
+				// AND no share.access either (it would be useless).
+				continue
+			}
+			scopes = append(scopes,
+				token_scopes.Share_Access.String()+":/"+collectionID,
+			)
+		}
+
+		switch effectiveRole {
 		case database.AclRoleOwner, database.AclRoleWrite:
 			scopes = append(scopes,
 				token_scopes.Wlcg_Storage_Read.String()+":"+ns,
@@ -436,9 +526,15 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 		}
 	}
 
-	// Convert matched group set to slice
+	// Convert matched group set to slice. The all-authenticated-users
+	// sentinel is intentionally excluded — it's a virtual ACL target,
+	// not a real group, and emitting it on a token's wlcg.groups claim
+	// would invite downstream consumers to treat it as one.
 	matchedGroups = make([]string, 0, len(matchedGroupSet))
 	for group := range matchedGroupSet {
+		if group == database.AllAuthenticatedUsersACLGroup {
+			continue
+		}
 		matchedGroups = append(matchedGroups, group)
 	}
 

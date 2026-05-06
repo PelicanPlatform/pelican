@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +36,22 @@ var (
 	tempPasswdFile *os.File
 	router         *gin.Engine
 )
+
+// decodeCollectionID extracts the `id` field from a collection
+// create / get / update response. The response carries heterogeneous
+// types (bools for enableSharing, timestamps, the metadata map, ACL
+// arrays), so a plain map[string]string decode no longer fits — pull
+// `id` out via json.RawMessage and stay permissive about the rest.
+func decodeCollectionID(t *testing.T, body io.Reader) string {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.NewDecoder(body).Decode(&fields))
+	raw, ok := fields["id"]
+	require.True(t, ok, "response missing id field")
+	var id string
+	require.NoError(t, json.Unmarshal(raw, &id))
+	return id
+}
 
 func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject string, groups ...string) string {
 	tk := token.NewWLCGToken()
@@ -208,10 +225,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		var createCollectionResp map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&createCollectionResp)
-		assert.NoError(t, err)
-		collectionID := createCollectionResp["id"]
+		collectionID := decodeCollectionID(t, recorder.Body)
 		assert.NotEmpty(t, collectionID)
 
 		// Delete the collection
@@ -316,9 +330,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code,
 			"setup: collection create must succeed (body: %s)", recorder.Body.String())
-		var colResp map[string]string
-		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
-		probeID := colResp["id"]
+		probeID := decodeCollectionID(t, recorder.Body)
 		require.NotEmpty(t, probeID)
 
 		// Create the admin group as a system admin (system-admin
@@ -336,9 +348,10 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code,
 			"setup: admin group create (body: %s)", recorder.Body.String())
-		var grpResp map[string]string
+		var grpResp map[string]json.RawMessage
 		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&grpResp))
-		groupID := grpResp["id"]
+		var groupID string
+		require.NoError(t, json.Unmarshal(grpResp["id"], &groupID))
 		require.NotEmpty(t, groupID)
 
 		// Owner sets adminId on the collection.
@@ -441,9 +454,7 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, "body: %s", recorder.Body.String())
-		var colResp map[string]string
-		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
-		probeID := colResp["id"]
+		probeID := decodeCollectionID(t, recorder.Body)
 
 		// Grant a write ACL to a group, then try to PATCH ownerId
 		// from a member of that group. The PATCH must fail (403/404
@@ -518,9 +529,7 @@ func TestCollectionsAPI(t *testing.T) {
 		require.Equal(t, http.StatusCreated, recorder.Code,
 			"setup: owner must be able to create the probe collection (body: %s)",
 			recorder.Body.String())
-		var createResp map[string]string
-		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createResp))
-		probeID := createResp["id"]
+		probeID := decodeCollectionID(t, recorder.Body)
 		require.NotEmpty(t, probeID)
 
 		// Step 2: a system admin (Server.UIAdminUsers) lists
@@ -601,9 +610,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code,
 			"setup: owner must be able to create the probe (body: %s)", recorder.Body.String())
-		var createResp map[string]string
-		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createResp))
-		probeID := createResp["id"]
+		probeID := decodeCollectionID(t, recorder.Body)
 		require.NotEmpty(t, probeID)
 
 		// The owner lists collections — the probe MUST appear.
@@ -669,9 +676,10 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, "group create: %s", recorder.Body.String())
-		var grpResp map[string]string
+		var grpResp map[string]json.RawMessage
 		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&grpResp))
-		groupID := grpResp["id"]
+		var groupID string
+		require.NoError(t, json.Unmarshal(grpResp["id"], &groupID))
 		require.NotEmpty(t, groupID)
 
 		// Step 2: insert a GroupMember row directly. Going through
@@ -698,9 +706,7 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, "create collection: %s", recorder.Body.String())
-		var colResp map[string]string
-		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&colResp))
-		colID := colResp["id"]
+		colID := decodeCollectionID(t, recorder.Body)
 		require.NotEmpty(t, colID)
 
 		// Set the admin group on the collection.
@@ -822,10 +828,9 @@ func TestCollectionsAPI(t *testing.T) {
 
 		// Round-trip the namespace to confirm the row stored the
 		// requested sub-path verbatim, not a normalized version.
-		var resp map[string]string
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&resp))
-		require.NotEmpty(t, resp["id"])
-		col, err := database.GetCollection(database.ServerDatabase, resp["id"], "test-user", "", nil, false)
+		newID := decodeCollectionID(t, r.Body)
+		require.NotEmpty(t, newID)
+		col, err := database.GetCollection(database.ServerDatabase, newID, "test-user", "", nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, "/test1/projectA", col.Namespace)
 	})
@@ -922,10 +927,7 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
-		var createResp map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&createResp)
-		require.NoError(t, err)
-		collectionID := createResp["id"]
+		collectionID := decodeCollectionID(t, recorder.Body)
 		require.NotEmpty(t, collectionID)
 
 		// 2. List collections and verify the new one is there
@@ -1021,10 +1023,16 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
-		var createGroupResp map[string]string
+		// Same heterogeneous-types issue as the collection create
+		// decode helper: Group rows now include a bool
+		// (auth_template_eligible) so the old map[string]string decode
+		// trips. Pull the id out of a json.RawMessage map and stay
+		// permissive about the rest of the schema.
+		var createGroupResp map[string]json.RawMessage
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
-		groupID := createGroupResp["id"]
+		var groupID string
+		require.NoError(t, json.Unmarshal(createGroupResp["id"], &groupID))
 		require.NotEmpty(t, groupID)
 
 		// 2. Create a private collection
@@ -1043,10 +1051,16 @@ func TestCollectionsAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
-		var createColResp map[string]string
+		// The create response now includes non-string fields
+		// (enableSharing is a bool, timestamps are RFC3339 strings,
+		// metadata is a map) so the previous map[string]string decode
+		// tripped on the bool. We only need the id; pull it out via
+		// the raw-message form and leave the rest opaque.
+		var createColResp map[string]json.RawMessage
 		err = json.NewDecoder(recorder.Body).Decode(&createColResp)
 		require.NoError(t, err)
-		collectionID := createColResp["id"]
+		var collectionID string
+		require.NoError(t, json.Unmarshal(createColResp["id"], &collectionID))
 		require.NotEmpty(t, collectionID)
 
 		// 3. Grant the group read access to the collection

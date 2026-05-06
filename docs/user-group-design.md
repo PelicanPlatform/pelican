@@ -41,6 +41,7 @@ A group has the following properties:
 - **Membership**: A set of user IDs that are in the group.
 - **Owner**: A user ID that owns the group.
 - **Administrator**: A user ID or group ID that can manipulate group membership and display name.
+- **Auth-template eligibility**: A boolean flag controlling whether this group's name is allowed to match `Issuer.AuthorizationTemplates` and the `Server.*AdminGroups` config lists. Settable only by an administrator or user-administrator (see "Group creation" note below). Pre-existing groups, minted before group creation was open to all users, are eligible by default.
 - **Creation date, last edit date**: Metadata about changes; useful in diagnosing the source of users.
 - **Creator**: The user ID + session info that created this record. Similar to creator for users.
 - **Scopes**: A list of known authorizations the group has in the Pelican server.
@@ -48,7 +49,7 @@ A group has the following properties:
 **Notes**:
 
 - Group names should pass a reasonable regular expression. Particularly, `/` should be a banned character as group names are often used in object name authorization.
-- Group creation either should require a specific scope or be limited to administrators.
+- **Group creation is open to any authenticated user.** This is necessary so users can mint groups for their own collection ACLs and for shares. The privilege gradient sits on the *auth-template-eligibility* bit, not on the act of creation: a non-admin can create a group, become its owner, and use it in any *operator-set* surface (collection ACLs, share ACLs) — but the group will *not* match `Issuer.AuthorizationTemplates` or `Server.*AdminGroups` until an admin or user-admin flips it eligible. The reasoning is that templates and admin-group config use group *names* as bearer authority (e.g. `Prefix: /projects/$GROUP` or `Server.AdminGroups: [sysadmins]`), so a self-named group must not auto-promote into those surfaces.
 - Users are permitted to *leave* a group. Hence, there should be no negative authorizations based on group membership (e.g., “banned user group”-style of authorizations).
 
 # Authorizations

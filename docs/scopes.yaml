@@ -288,3 +288,21 @@ description: >-
   For deleting a collection
 issuedBy: ["origin"]
 acceptedBy: ["origin", "director"]
+---
+############################
+#       Share Scopes       #
+############################
+name: "share.access"
+description: >-
+  Path-bearing scope minted onto access tokens issued for a "share"
+  (a child collection that delegates a subset of its parent's
+  access). The path component is the share's collection ID — e.g.
+  share.access:/abcdef12 — and the data plane reads it to impersonate
+  the share's owner, not the token bearer, when serving objects
+  under the share's prefix. See docs/collections-design.md for the
+  full design. Not user-grantable: the issuer mints it directly on
+  access tokens, intersecting against the share owner's current
+  parent-collection ACLs at mint and refresh time.
+issuedBy: ["origin"]
+acceptedBy: ["origin", "cache"]
+pathBearing: true

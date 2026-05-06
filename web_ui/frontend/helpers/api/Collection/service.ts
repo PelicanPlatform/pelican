@@ -60,6 +60,7 @@ const CollectionService = {
       visibility: 'private' | 'public';
       ownerId: string;
       adminId: string;
+      enableSharing: boolean;
     }>
   ): Promise<void> => {
     await fetchApi(
