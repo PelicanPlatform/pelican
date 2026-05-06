@@ -183,8 +183,12 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, "default", defaultLot.LotName)
 		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
-		require.Equal(t, 0.0, *(defaultLot.MPA.DedicatedGB))
-		require.Equal(t, int64(0), (defaultLot.MPA.MaxNumObjects.Value))
+		// default has literal-zero storage quotas (lotman PR #46 reserves -1
+		// for unbounded). Any usage of default puts it over-quota and the
+		// purge plugin reclaims it on the next cycle.
+		require.Equal(t, float64(0), *(defaultLot.MPA.DedicatedGB))
+		require.Equal(t, float64(0), *(defaultLot.MPA.OpportunisticGB))
+		require.Equal(t, int64(0), defaultLot.MPA.MaxNumObjects.Value)
 
 		rootOutput := make([]byte, 4096)
 		ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
@@ -199,8 +203,14 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, "root", rootLot.LotName)
 		require.Equal(t, server.URL, rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
-		require.Equal(t, 0.0, *(rootLot.MPA.DedicatedGB))
-		require.Equal(t, int64(0), (rootLot.MPA.MaxNumObjects.Value))
+		// root's dedicatedGB is set to the full cache disk space; when no
+		// disks are detected (as in this test) it falls back to
+		// Cache.HighWaterMark, which setupLotmanFromConf sets to "100g".
+		// Opportunistic and object quotas are unbounded (-1 sentinel,
+		// lotman PR #46).
+		require.InDelta(t, float64(100), *(rootLot.MPA.DedicatedGB), 1e-6)
+		require.Equal(t, float64(-1), *(rootLot.MPA.OpportunisticGB))
+		require.Equal(t, int64(-1), rootLot.MPA.MaxNumObjects.Value)
 	})
 }
 
@@ -363,8 +373,11 @@ func TestUpdateLot(t *testing.T) {
 	defer cleanup()
 	require.True(t, success)
 
-	// Update the test-1 lot
-	dedicatedGB := float64(999.0)
+	// Update the test-1 lot. Under strict_hierarchy a child's DedicatedGB
+	// cannot exceed its parent's (root), which is derived from
+	// Cache.HighWaterMark ("100g" in tests). Use 50 GB: clearly different
+	// from the initial 1.11 and well within root's 100 GB ceiling.
+	dedicatedGB := float64(50.0)
 	lotUpdate := LotUpdate{
 		LotName: "test-1",
 		MPA: &MPA{
@@ -409,10 +422,21 @@ func TestAddToLot(t *testing.T) {
 		Path:      "/a/new/path",
 		Recursive: true,
 	}
+	// default has zero storage MPAs (lotman PR #46), so we must explicitly
+	// attribute 0 of test-1's quota to default; root absorbs the full
+	// child MPA (test-1 is configured with 1.11 / 2.22 / 42).
+	zeroDed := float64(0)
+	zeroOpp := float64(0)
+	childDed := float64(1.11)
+	childOpp := float64(2.22)
 	addition := LotAddition{
 		LotName: "test-1",
 		Paths:   []LotPath{newLotPath},
 		Parents: []string{"default"},
+		ParentAttributions: map[string]ParentAttribution{
+			"default": {DedicatedGB: &zeroDed, OpportunisticGB: &zeroOpp, MaxNumObjects: &Int64FromFloat{Value: 0}},
+			"root":    {DedicatedGB: &childDed, OpportunisticGB: &childOpp, MaxNumObjects: &Int64FromFloat{Value: 42}},
+		},
 	}
 
 	err := AddToLot(&addition, server.URL)
@@ -443,9 +467,19 @@ func TestRemoveLotParents(t *testing.T) {
 
 	// First add default lot as parent to test-1, then remove it. We do this
 	// because lotman won't let us remove _all_ parents.
+	// default has zero storage MPAs (lotman PR #46), so attribute 0 to it
+	// and the full child MPA to root.
+	zeroDed := float64(0)
+	zeroOpp := float64(0)
+	childDed := float64(1.11)
+	childOpp := float64(2.22)
 	addition := LotAddition{
 		LotName: "test-1",
 		Parents: []string{"default"},
+		ParentAttributions: map[string]ParentAttribution{
+			"default": {DedicatedGB: &zeroDed, OpportunisticGB: &zeroOpp, MaxNumObjects: &Int64FromFloat{Value: 0}},
+			"root":    {DedicatedGB: &childDed, OpportunisticGB: &childOpp, MaxNumObjects: &Int64FromFloat{Value: 42}},
+		},
 	}
 	err := AddToLot(&addition, server.URL)
 	require.NoError(t, err, "Failed to add to lot")
@@ -1233,4 +1267,54 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			assert.Equal(t, tc.expectedLotMap, lotMap)
 		})
 	}
+}
+
+// TestStrictHierarchyContextSet verifies that InitLotman installs the
+// strict-hierarchy execution context (PR-2): the three flags
+// strict_hierarchy, contraction_policy, and admin_override must each be
+// readable via lotman_get_context_str with the documented values after a
+// successful init.
+func TestStrictHierarchyContextSet(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanStrictHierCtx", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	cases := []struct {
+		key, want string
+	}{
+		{"strict_hierarchy", "true"},
+		{"contraction_policy", "always"},
+		{"admin_override", "false"},
+	}
+	for _, c := range cases {
+		out := make([]byte, 256)
+		errMsg := make([]byte, 2048)
+		ret := LotmanGetContextStr(c.key, &out, &errMsg)
+		if ret != 0 {
+			trimBuf(&errMsg)
+			t.Fatalf("LotmanGetContextStr(%s) failed: %s", c.key, string(errMsg))
+		}
+		trimBuf(&out)
+		assert.Equal(t, c.want, string(out), "context flag %s should be %q", c.key, c.want)
+	}
+}
+
+// TestLotmanVersionCompatibility verifies that checkLotmanVersionCompatibility
+// accepts the version string returned by the currently loaded libLotMan.so
+// (which must be >= v0.0.5 to support strict_hierarchy + parent_attributions).
+func TestLotmanVersionCompatibility(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanVersionCheck", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	assert.True(t, checkLotmanVersionCompatibility(),
+		"installed lotman version %q must be >= %s", LotmanVersion(), minLotmanVersion)
 }

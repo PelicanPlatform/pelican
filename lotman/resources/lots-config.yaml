@@ -45,6 +45,15 @@ Lotman:
               Value: 12345
             DeletionTime:
               Value: 123456
+          # Required by lotman's strict_hierarchy: every non-self parent must
+          # be told how much of its budget the child reserves. Mirrors the
+          # MPA values above so the full child quota is attributed to root.
+          ParentAttributions:
+            root:
+              DedicatedGB: 1.11
+              OpportunisticGB: 2.22
+              MaxNumObjects:
+                Value: 42
         - LotName: "test-2"
           Owner: "https://another-fake-federation.com"
           Parents:
@@ -65,6 +74,12 @@ Lotman:
               Value: 12345
             DeletionTime:
               Value: 123456
+          ParentAttributions:
+            test-1:
+              DedicatedGB: 1.11
+              OpportunisticGB: 2.22
+              MaxNumObjects:
+                Value: 42
     - PolicyName: "another policy"
       DivideUnallocated: true
       PurgeOrder: ["ded", "opp", "exp", "del"]

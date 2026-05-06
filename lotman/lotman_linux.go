@@ -44,6 +44,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -613,9 +615,12 @@ func validateLotsConfig(lots []Lot, totalDiskSpaceB uint64) error {
 
 	totalDedicatedGB := 0.0
 	for _, lot := range lots {
-		// Skip the root lot, which is a container we use to make sure all lots have a federation-owned parent.
-		// We don't use the root lot for any other purpose.
-		if lot.LotName == "root" {
+		// Skip the root and default lots, which are synthesised by Pelican with
+		// effectively unbounded MPAs so that strict-hierarchy axiom 1 is
+		// trivially satisfied for any lot that is (re)parented under them.
+		// Their dedicatedGB therefore intentionally exceeds the HWM and must
+		// be excluded from the sum check below.
+		if lot.LotName == "root" || lot.LotName == "default" {
 			continue
 		}
 		// Instead of returning on the first missing field, try to get everything for the entire lot.
@@ -664,13 +669,15 @@ func validateLotsConfig(lots []Lot, totalDiskSpaceB uint64) error {
 				missingValues = append(missingValues, "ManagementPolicyAttrs.OpportunisticGB")
 			}
 			// No checking for MaxNumObjects -- the purge plugin doesn't use it yet
-			if lot.MPA.CreationTime == nil || lot.MPA.CreationTime.Value == 0 {
+			// Timestamp nil-check only: a value of 0 is the lotman non-expiring
+			// sentinel (PR #44) and is explicitly valid for user-defined lots.
+			if lot.MPA.CreationTime == nil {
 				missingValues = append(missingValues, "ManagementPolicyAttrs.CreationTime")
 			}
-			if lot.MPA.ExpirationTime == nil || lot.MPA.ExpirationTime.Value == 0 {
+			if lot.MPA.ExpirationTime == nil {
 				missingValues = append(missingValues, "ManagementPolicyAttrs.ExpirationTime")
 			}
-			if lot.MPA.DeletionTime == nil || lot.MPA.DeletionTime.Value == 0 {
+			if lot.MPA.DeletionTime == nil {
 				missingValues = append(missingValues, "ManagementPolicyAttrs.DeletionTime")
 			}
 		}
@@ -747,7 +754,7 @@ func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error 
 	// need to return to them.
 	returnToKeys := make([]string, 0, len(*lotMap))
 	for key, lot := range *lotMap {
-		if lot.LotName == "root" {
+		if lot.LotName == "root" || lot.LotName == "default" {
 			continue
 		}
 		if lot.MPA != nil && lot.MPA.DedicatedGB != nil {
@@ -799,6 +806,12 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 	defaultDeletion := now + param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds()
 
 	for name, lot := range *lotMap {
+		// root and default carry the all-zero non-expiring sentinel introduced
+		// in lotman PR #44. Skip them so their timestamps are not overwritten
+		// with real values by the defaulting logic below.
+		if lot.LotName == "root" || lot.LotName == "default" {
+			continue
+		}
 		if lot.MPA == nil {
 			lot.MPA = &MPA{}
 		}
@@ -1085,22 +1098,53 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	if federationIssuer == "" {
 		return internalLots, errors.New("The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty")
 	}
+	// rootDedGB represents the entire cache disk so the root lot's dedicated
+	// quota naturally contains every child's allocation. When Cache.DataLocations
+	// is empty (tests, early startup) fall back to Cache.HighWaterMark so the
+	// root lot is still non-zero and strict-hierarchy axiom 1 is satisfiable.
+	// Note: percentage-based HWMs against a 0-byte total would also yield 0;
+	// in that unlikely edge case root's quota remains 0 until disk detection
+	// succeeds on the next init.
 	rootDedGB := bytesToGigabytes(totalDiskSpaceB)
+	if totalDiskSpaceB == 0 {
+		hwmStr := param.Cache_HighWaterMark.GetString()
+		if hwmStr != "" {
+			hwmBytes, hwmErr := convertWatermarkToBytes(hwmStr, 0)
+			if hwmErr == nil && hwmBytes > 0 {
+				rootDedGB = bytesToGigabytes(hwmBytes)
+				log.Debugf("No cache disks detected; using HighWaterMark (%s = %.2f GB) as root lot quota", hwmStr, rootDedGB)
+			}
+		}
+	}
 	zero := float64(0)
+	unboundedGB := float64(-1)
+	// `default` is the catch-all parent for namespaces that have not been
+	// given an explicit lot. Its storage MPAs are literal 0 -- it has no
+	// protected quota at all, so any usage immediately puts the lot
+	// over-quota and the purge plugin reclaims it on the next cycle.
+	// Note: lotman PR #46 reserves -1 (not 0) as the unbounded sentinel for
+	// storage MPAs, so 0 here means exactly what it says: zero capacity.
 	if _, exists := lotMap["default"]; !exists {
+		defDed := zero
+		defOpp := zero
 		lotMap["default"] = Lot{
 			LotName: "default",
 			Owner:   federationIssuer,
 			Parents: []string{"default"},
 			MPA: &MPA{
-				// Set default values to 0 and let potential reallocation happen later.
-				DedicatedGB:     &zero,
-				OpportunisticGB: &zero,
-				MaxNumObjects:   &Int64FromFloat{Value: 0}, // Purge plugin doesn't yet use this, set to 0.
+				DedicatedGB:     &defDed,
+				OpportunisticGB: &defOpp,
+				MaxNumObjects:   &Int64FromFloat{Value: 0},
+				// All-zero timestamps = non-expiring sentinel (lotman PR #44).
+				// configLotTimestamps skips root and default intentionally.
+				CreationTime:   &Int64FromFloat{Value: 0},
+				ExpirationTime: &Int64FromFloat{Value: 0},
+				DeletionTime:   &Int64FromFloat{Value: 0},
 			},
 		}
 	}
 	if _, exists := lotMap["root"]; !exists {
+		rootOpp := unboundedGB
 		lotMap["root"] = Lot{
 			LotName: "root",
 			Owner:   federationIssuer,
@@ -1113,10 +1157,19 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 				},
 			},
 			MPA: &MPA{
-				// Max out dedicatedGB so the root lot never purges. All other lots should be tied to their own policies.
+				// dedicatedGB equals the entire cache disk (or HWM in tests),
+				// so the root lot itself is never a purge target. Opportunistic
+				// and object quotas are unbounded (-1 sentinel, lotman PR #46):
+				// root is purely a metadata container and should never be the
+				// binding constraint on any axis besides dedicated bytes.
 				DedicatedGB:     &rootDedGB,
-				OpportunisticGB: &zero,
-				MaxNumObjects:   &Int64FromFloat{Value: 0}, // Purge plugin doesn't yet use this, set to 0.
+				OpportunisticGB: &rootOpp,
+				MaxNumObjects:   &Int64FromFloat{Value: -1},
+				// All-zero timestamps = non-expiring sentinel (lotman PR #44).
+				// configLotTimestamps skips root and default intentionally.
+				CreationTime:   &Int64FromFloat{Value: 0},
+				ExpirationTime: &Int64FromFloat{Value: 0},
+				DeletionTime:   &Int64FromFloat{Value: 0},
 			},
 		}
 	}
@@ -1144,6 +1197,61 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	}
 
 	return internalLots, nil
+}
+
+// setLotmanContextFlags installs the strict-hierarchy execution context that
+// the new lotman library uses to enforce parent/child quota and time-window
+// axioms. Must be called after `lot_home` is set but before any lots are
+// created/queried so the flags apply to subsequent transactions.
+//
+// The flags are:
+//   - strict_hierarchy=true: every non-root child must declare
+//     parent_attributions for every non-self parent, and the recursive
+//     allocator's invariants (axioms 1, 2, 3) are enforced on add/update.
+//   - contraction_policy=always: refuse any update that contracts a lot's
+//     MPAs (the strictest of lotman's three options 'none', 'alive', 'always')
+//     unless `admin_override=true` is also set.
+//   - admin_override=false: do not bypass policy checks by default.
+func setLotmanContextFlags() error {
+	errMsg := make([]byte, 2048)
+	flags := []struct {
+		key, value string
+	}{
+		{"strict_hierarchy", "true"},
+		{"contraction_policy", "always"},
+		{"admin_override", "false"},
+	}
+	for _, f := range flags {
+		ret := LotmanSetContextStr(f.key, f.value, &errMsg)
+		if ret != 0 {
+			trimBuf(&errMsg)
+			return errors.Errorf("error setting lotman context %q to %q: %s", f.key, f.value, string(errMsg))
+		}
+	}
+	return nil
+}
+
+// minLotmanVersion is the earliest lotman release that supports
+// strict_hierarchy with parent_attributions (lotman PR #43 / v0.0.5).
+const minLotmanVersion = "v0.0.5"
+
+// checkLotmanVersionCompatibility returns true when the loaded libLotMan.so
+// is new enough to support Pelican's strict-hierarchy lot layout, and false
+// (with a logged error) when it is not.  It uses the semver package so the
+// comparison is correct for any future minor/patch bump.
+func checkLotmanVersionCompatibility() bool {
+	v := LotmanVersion()
+	if !semver.IsValid(v) {
+		log.Errorf("lotman_version() returned an unrecognised version string %q; "+
+			"cannot verify compatibility. Require lotman >= %s.", v, minLotmanVersion)
+		return false
+	}
+	if semver.Compare(v, minLotmanVersion) < 0 {
+		log.Errorf("Installed lotman version %s is too old; Pelican requires lotman >= %s. "+
+			"Please upgrade libLotMan.so and restart.", v, minLotmanVersion)
+		return false
+	}
+	return true
 }
 
 // Initialize the LotMan library and bind its functions to the global vars
@@ -1221,6 +1329,20 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	if ret != 0 {
 		trimBuf(&errMsg)
 		log.Errorf("Error setting lot_home context: %s", string(errMsg))
+		return false
+	}
+
+	// Enable strict_hierarchy + contraction_policy=strict + admin_override=false
+	// before any lot creation so the new lotman schema's invariants are
+	// enforced from the very first add_lot call.
+	if err := setLotmanContextFlags(); err != nil {
+		log.Errorf("Error setting lotman context flags: %v", err)
+		return false
+	}
+
+	// Verify the installed libLotMan.so is >= minLotmanVersion before
+	// creating any lots.
+	if !checkLotmanVersionCompatibility() {
 		return false
 	}
 
@@ -1565,7 +1687,20 @@ func DeleteLotsRecursive(lotName string, caller string) error {
 		return fmt.Errorf("error creating lot: %s", string(errMsg))
 	}
 
-	// We've set the caller, now try to delete the lots
+	// We've set the caller, now try to delete the lots. Under
+	// contraction_policy=always, deletion is treated as contraction-to-zero
+	// and is blocked unless admin_override=true. Pelican-internal teardown
+	// is by definition admin-driven, so flip the flag for the duration of
+	// this call. callerMutex is already held above, which serialises the
+	// admin_override toggle as well.
+	if ret = LotmanSetContextStr("admin_override", "true", &errMsg); ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf("error enabling admin_override for deletion: %s", string(errMsg))
+	}
+	defer func() {
+		restoreErr := make([]byte, 2048)
+		_ = LotmanSetContextStr("admin_override", "false", &restoreErr)
+	}()
 	ret = LotmanDeleteLotsRecursive(lotName, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -1854,6 +1989,16 @@ func RemoveLot(lotName string, assignLTBRParentsToOrphans, assignLTBRParentsToNo
 		trimBuf(&errMsg)
 		return errors.Errorf("error setting caller for lot removal: %s", string(errMsg))
 	}
+	// Same admin_override dance as DeleteLotsRecursive: contraction_policy
+	// blocks single-lot removal too unless admin_override=true.
+	if ret = LotmanSetContextStr("admin_override", "true", &errMsg); ret != 0 {
+		trimBuf(&errMsg)
+		return errors.Errorf("error enabling admin_override for lot removal: %s", string(errMsg))
+	}
+	defer func() {
+		restoreErr := make([]byte, 2048)
+		_ = LotmanSetContextStr("admin_override", "false", &restoreErr)
+	}()
 	ret = LotmanRemoveLot(lotName, assignLTBRParentsToOrphans, assignLTBRParentsToNonOrphans, assignPolicyToChildren, overridePolicy, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)

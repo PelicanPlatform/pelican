@@ -172,10 +172,10 @@ func TestLotmanNewBindings(t *testing.T) {
 		require.NotNil(t, rmpa)
 		// `recursive` is implicit (the bool acts as the recursion flag in the
 		// C API). The restricting value is therefore the smallest dedicated_GB
-		// across {test-2, test-1, root}; root's MPA is zero in this fixture,
-		// so the call resolves to root/0.
-		assert.InDelta(t, 0.0, rmpa.DedicatedGB.Value, 1e-6)
-		assert.Equal(t, "root", rmpa.DedicatedGB.LotName)
+		// across {test-2, test-1, root}. test-2's configured value (1.11) is
+		// the smallest, so it is the binding constraint.
+		assert.InDelta(t, 1.11, rmpa.DedicatedGB.Value, 1e-6)
+		assert.Equal(t, "test-2", rmpa.DedicatedGB.LotName)
 	})
 
 	t.Run("GetLotsPastExp", func(t *testing.T) {
@@ -217,9 +217,9 @@ func TestLotmanNewBindings(t *testing.T) {
 		ac, err := GetAvailableCapacity("root", 0, time.Now().Add(365*24*time.Hour).UnixMilli())
 		require.NoError(t, err)
 		require.NotNil(t, ac)
-		// root's MPAs are zero (it is purely a container in the test config),
-		// so available capacity should be zero or negative across all axes;
-		// we only assert the call succeeded and decoded.
+		// root is a non-expiring container with the full cache disk as its
+		// dedicated quota. We only assert the call succeeded and decoded;
+		// capacity arithmetic is tested in unit tests closer to the C layer.
 		_ = ac
 	})
 
