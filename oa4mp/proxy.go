@@ -29,7 +29,6 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -343,7 +342,15 @@ func CalculateAllowedScopesWithRules(rules []*CompiledAuthz, user string, userId
 // The matched groups are returned so they can be added to the token's
 // wlcg.groups claim — collection-ACL checks downstream still consult
 // the groups list.
-func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issuerNamespace string) (scopes []string, matchedGroups []string, err error) {
+//
+// `userID` is the caller's stable User.ID slug (NOT the Username) and
+// drives the DB-stored membership expansion: a user added to a group
+// via the management UI but whose cookie's wlcg.groups doesn't carry
+// the assertion (htpasswd login, or OIDC with GroupSource != internal)
+// must STILL get storage scopes for ACL'd collections in their
+// minted token. Pass empty when the caller has no User row — the
+// function then falls back to the cookie-asserted list alone.
+func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []string, issuerNamespace string) (scopes []string, matchedGroups []string, err error) {
 	scopes = make([]string, 0)
 	matchedGroupSet := make(map[string]struct{})
 
@@ -355,18 +362,11 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string, issu
 	// is handled at the database level based on ACLs and visibility.
 	scopes = append(scopes, token_scopes.Collection_Read.String()+":/")
 
-	userGroup := "user-" + user
-	if !slices.Contains(groupsList, userGroup) {
-		groupsList = append(groupsList, userGroup)
-	}
-	// Inject the all-authenticated-users sentinel so any collection
-	// with an ACL granted to `@authenticated` confers its scopes on
-	// every signed-in caller. The sentinel is not a real Group and
-	// won't appear in wlcg.groups; the matchedGroupSet captures it
-	// only for ACL evaluation here.
-	if !slices.Contains(groupsList, database.AllAuthenticatedUsersACLGroup) {
-		groupsList = append(groupsList, database.AllAuthenticatedUsersACLGroup)
-	}
+	// Expand to the full effective ACL group list: cookie-asserted +
+	// DB-stored memberships + the personal `user-<name>` group + the
+	// all-authenticated-users sentinel. Identical contract to
+	// validateACL / ListCollections.
+	groupsList = database.ExpandCallerACLGroups(db, user, userID, groupsList)
 
 	// Pull each ACL row alongside the parent collection's namespace,
 	// share-parent link, and share-owner identity. We use a flat
@@ -591,7 +591,7 @@ func oa4mpProxy(ctx *gin.Context) {
 		// The legacy oa4mp proxy path is the global (non-namespaced)
 		// issuer; pass "" so the bridge emits federation-absolute
 		// data-plane scopes.
-		userCollectionScopes, collectionMatchedGroups, err := GetUserCollectionScopes(database.ServerDatabase, user, groupsList, "")
+		userCollectionScopes, collectionMatchedGroups, err := GetUserCollectionScopes(database.ServerDatabase, user, userId, groupsList, "")
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

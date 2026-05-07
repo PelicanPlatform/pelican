@@ -78,7 +78,7 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		// Carol gets read on the share.
 		seedACL(t, db, "share-1", "carol-readers", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "carol", []string{"carol-readers"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "carol", "", []string{"carol-readers"}, "")
 		require.NoError(t, err)
 
 		// share.access pinned to the share's collection ID — the data
@@ -107,7 +107,7 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		// and missing-table errors are tolerated (the helper falls
 		// back to the personal-group + sentinel synthesis path).
 
-		scopes, _, err := GetUserCollectionScopes(db, "carol", []string{"carol-writers"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "carol", "", []string{"carol-writers"}, "")
 		require.NoError(t, err)
 
 		assert.Contains(t, scopes, "share.access:/share-2")
@@ -127,7 +127,7 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		seedShare(t, db, "share-3", "/data/p3/x", "bob", "bob-id", "parent-3")
 		seedACL(t, db, "share-3", "carol-readers", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "carol", []string{"carol-readers"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "carol", "", []string{"carol-readers"}, "")
 		require.NoError(t, err)
 
 		// Management plane: Carol still gets collection.read on the
@@ -147,7 +147,7 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		seedCollection(t, db, "regular", "/data/regular")
 		seedACL(t, db, "regular", "physics", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 
 		assert.Contains(t, scopes, "storage.read:/data/regular")
