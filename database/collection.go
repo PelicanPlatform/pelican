@@ -123,10 +123,19 @@ func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
 	return out
 }
 
-// expandCallerACLGroups returns the effective list of "groups" used
+// ExpandCallerACLGroups returns the effective list of "groups" used
 // when matching collection ACL rows for a single caller. It augments
-// the caller-supplied list (DB members + cookie-asserted wlcg.groups)
-// with two synthetic entries:
+// the caller-supplied cookie-asserted list with three additional
+// sources, in this order:
+//
+//   - DB-stored memberships from `group_members` joined to `groups`
+//     for the user's own User.ID. This makes the listing / ACL gates
+//     work for callers whose cookie carries no wlcg.groups (htpasswd
+//     login, or OIDC with `Issuer.GroupSource: none`) but who have
+//     been added to a group via the management UI. Without this, a
+//     user added to "alpha-writers" wouldn't see "alpha" in their
+//     collection listing until a re-login on a properly-configured
+//     issuer — which is broken from the user's perspective.
 //   - `user-<username>` — the personal group every user implicitly
 //     belongs to; carries per-user ACL grants.
 //   - `@authenticated` — the all-authenticated-users sentinel; only
@@ -134,11 +143,30 @@ func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
 //     A bearer-token call with neither set is treated as anonymous
 //     and does NOT inherit the sentinel.
 //
-// Caller is responsible for passing in only the groups they trust
-// (the cookie-asserted ones, plus any DB-derived membership). This
-// helper does not consult the database.
-func expandCallerACLGroups(user, userID string, groups []string) []string {
+// `db` may be nil for in-memory unit tests; in that case only the
+// synthetic `user-` / `@authenticated` entries are added (the DB
+// branch is silently skipped). Errors on the membership query are
+// also tolerated — the listing falls back to the cookie-asserted
+// view rather than failing the whole request.
+func ExpandCallerACLGroups(db *gorm.DB, user, userID string, groups []string) []string {
 	out := groups
+	if db != nil && userID != "" {
+		var rows []struct{ Name string }
+		if err := db.Table("group_members").
+			Joins("JOIN groups ON groups.id = group_members.group_id").
+			Select("groups.name").
+			Where("group_members.user_id = ?", userID).
+			Scan(&rows).Error; err == nil {
+			for _, r := range rows {
+				if r.Name == "" {
+					continue
+				}
+				if !slices.Contains(out, r.Name) {
+					out = append(out, r.Name)
+				}
+			}
+		}
+	}
 	if user != "" {
 		userGroup := "user-" + user
 		if !slices.Contains(out, userGroup) {
@@ -690,7 +718,7 @@ func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin 
 	// Augment with the personal `user-<name>` group and (when
 	// authenticated) the all-authenticated-users sentinel. Mirrors
 	// the same convention used by validateACL / GetUserCollectionScopes.
-	groups = expandCallerACLGroups(user, userID, groups)
+	groups = ExpandCallerACLGroups(db, user, userID, groups)
 
 	out := []Collection{}
 	seen := make(map[string]struct{})
@@ -1118,7 +1146,7 @@ func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []s
 		return all, nil
 	}
 
-	groups = expandCallerACLGroups(user, userID, groups)
+	groups = ExpandCallerACLGroups(db, user, userID, groups)
 
 	out := []Collection{}
 	seen := map[string]struct{}{}
@@ -1601,8 +1629,8 @@ func validateACL(db *gorm.DB, collection *Collection, user, userID string, group
 
 	// Augment with the personal `user-<name>` group and (when
 	// authenticated) the all-authenticated-users sentinel. See
-	// expandCallerACLGroups for the contract.
-	groups = expandCallerACLGroups(user, userID, groups)
+	// ExpandCallerACLGroups for the contract.
+	groups = ExpandCallerACLGroups(db, user, userID, groups)
 
 	// for each acl, check if a user's group is the group in the ACL and has the required role
 	for _, acl := range collection.ACLs {

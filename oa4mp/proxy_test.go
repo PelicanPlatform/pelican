@@ -80,7 +80,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-read", "/data/read-only")
 		seedACL(t, db, "col-read", "physics", database.AclRoleRead, nil)
 
-		scopes, matched, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, matched, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 
 		assert.Contains(t, scopes, "storage.read:/data/read-only",
@@ -104,7 +104,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-write", "/data/shared")
 		seedACL(t, db, "col-write", "physics", database.AclRoleWrite, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 
 		assert.Contains(t, scopes, "storage.read:/data/shared")
@@ -125,7 +125,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-owner", "/data/legacy")
 		seedACL(t, db, "col-owner", "physics", database.AclRoleOwner, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 
 		assert.Contains(t, scopes, "storage.read:/data/legacy")
@@ -143,7 +143,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-read", "/data/private")
 		seedACL(t, db, "col-read", "physics", database.AclRoleRead, nil)
 
-		scopes, matched, err := GetUserCollectionScopes(db, "bob", []string{"chemistry"}, "")
+		scopes, matched, err := GetUserCollectionScopes(db, "bob", "", []string{"chemistry"}, "")
 		require.NoError(t, err)
 
 		// The capability scopes (collection.create:/, collection.read:/)
@@ -163,7 +163,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		past := time.Now().Add(-1 * time.Hour)
 		seedACL(t, db, "col-expired", "physics", database.AclRoleWrite, &past)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 
 		assert.NotContains(t, scopes, "storage.read:/data/stale",
@@ -180,7 +180,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-personal", "/data/alice-only")
 		seedACL(t, db, "col-personal", "user-alice", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{}, "")
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/data/alice-only",
 			"a user-<name> ACL on a collection should bridge to storage.read")
@@ -195,7 +195,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedACL(t, db, "col-multi", "physics", database.AclRoleRead, nil)
 		seedACL(t, db, "col-multi", "writers", database.AclRoleWrite, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics", "writers"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics", "writers"}, "")
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/data/team")
 		assert.Contains(t, scopes, "storage.modify:/data/team")
@@ -211,7 +211,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-dirty", "/data//sub/../shared/")
 		seedACL(t, db, "col-dirty", "physics", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"physics"}, "")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"physics"}, "")
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/data/shared",
 			"namespace path should be canonicalized before being emitted as a scope")
