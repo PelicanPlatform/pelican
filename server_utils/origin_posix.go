@@ -174,10 +174,12 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 			"(files are accessed as the requesting user, not the XRootD daemon user)", e.FederationPrefix)
 	} else {
 		if err := o.validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
-			log.Warningf("Permission validation failed on storage prefix %q for export %q. "+
-				"The origin will still start, but runtime errors may occur if the XRootD daemon user truly lacks access. "+
-				"This may also be a false positive on filesystems that synthesize ownership at system call stat(2) time (e.g. FUSE, NFS).",
-				e.StoragePrefix, e.FederationPrefix)
+			log.Warningf("Storage prefix %q may lack permissions for export %q: %v. "+
+				"The origin will still start, but runtime errors may occur "+
+				"if the XRootD daemon user truly lacks access. "+
+				"This may be a false positive on filesystems that don't store real uid/gid on disk "+
+				"and synthesize ownership at runtime (e.g. FUSE, NFS, etc.).",
+				e.StoragePrefix, e.FederationPrefix, err)
 		}
 	}
 
@@ -249,7 +251,7 @@ func (o *PosixOrigin) validatePosixPermissions(storagePath string, caps server_s
 		return errors.Wrapf(ErrInvalidOriginConfig,
 			"storage prefix %q for export %q requires %q permissions for the %q user (uid=%d, gid=%d) "+
 				"to support the %q capability, but the current permissions are %q (owner uid=%d, gid=%d). "+
-				"Please adjust the ownership or permissions of the directory so that the XRootD daemon user "+
+				"You may need to adjust the ownership or permissions of the directory so that the XRootD daemon user "+
 				"has the necessary access",
 			storagePath, federationPrefix, requiredPerms, username, uid, gid,
 			capability, mode.Perm().String(), dirUID, dirGID)
