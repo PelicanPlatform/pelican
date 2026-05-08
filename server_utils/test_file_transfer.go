@@ -60,7 +60,8 @@ const (
 	DirectorTest   TestType = "director-test" // Director-based object transfer test
 )
 
-const MonitoringBaseNs string = "/pelican/monitoring" // The base namespace for monitoring objects
+const MonitoringBaseNs string = "/pelican/monitoring"   // The base namespace for monitoring objects
+const DirectorTestDir string = "directorTest"           // Subdirectory under MonitoringBaseNs for director test files
 
 const (
 	SelfTestBody     string = "This object was created by the Pelican self-test functionality"
@@ -274,7 +275,7 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 		t.testFilePath = path.Join(MonitoringBaseNs, "selfTest")
 	} else if t.testType == DirectorTest {
 		t.testBody = DirectorTestBody
-		t.testFilePath = path.Join(MonitoringBaseNs, "directorTest")
+		t.testFilePath = path.Join(MonitoringBaseNs, DirectorTestDir)
 	} else {
 		return false, errors.New("unsupported testType: " + testType.String())
 	}

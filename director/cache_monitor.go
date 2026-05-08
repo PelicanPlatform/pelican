@@ -38,9 +38,11 @@ import (
 // workflow than the origin tests. We can't reuse server_utils.RunTests(), but we want to keep common
 // pieces together
 func runCacheTest(ctx context.Context, cacheUrl url.URL) error {
-	nowStr := time.Now().Format(time.RFC3339)
-	dirMonPath := path.Join(server_utils.MonitoringBaseNs, "directorTest")
-	cacheUrl = *cacheUrl.JoinPath(path.Join(dirMonPath, server_utils.DirectorTest.String()+"-"+nowStr+".txt"))
+	now := time.Now()
+	nowStr := now.Format(time.RFC3339)
+	dayStr := now.Format("2006-01-02")
+	dirMonPath := path.Join(server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
+	cacheUrl = *cacheUrl.JoinPath(path.Join(dirMonPath, dayStr, server_utils.DirectorTest.String()+"-"+nowStr+".txt"))
 	client := config.GetClient()
 	req, err := http.NewRequestWithContext(ctx, "GET", cacheUrl.String(), nil)
 	if err != nil {
