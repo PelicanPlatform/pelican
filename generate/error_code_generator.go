@@ -142,7 +142,7 @@ func writeErrorCodesJSON(values []interface{}) {
 	}
 
 	var prettyJSON bytes.Buffer
-	if err := json.Indent(&prettyJSON, fullJSONBytes, "", "\t"); err != nil {
+	if err := json.Indent(&prettyJSON, fullJSONBytes, "", "  "); err != nil {
 		panic(fmt.Sprintf("%v: failed to format generated error_codes json", err))
 	}
 
@@ -151,13 +151,15 @@ func writeErrorCodesJSON(values []interface{}) {
 		"../docs/error_codes.json",
 	}
 
+	jsonWithNewline := append(prettyJSON.Bytes(), '\n')
+
 	for _, outputPath := range outputPaths {
 		if _, err := os.Stat(outputPath); err == nil {
 			existingJSONBytes, err := os.ReadFile(outputPath)
 			if err != nil {
 				panic(fmt.Sprintf("%v: failed to read existing error_codes json", err))
 			}
-			if bytes.Equal(existingJSONBytes, prettyJSON.Bytes()) {
+			if bytes.Equal(existingJSONBytes, jsonWithNewline) {
 				continue
 			}
 		}
@@ -165,8 +167,7 @@ func writeErrorCodesJSON(values []interface{}) {
 		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 			panic(fmt.Sprintf("%v: failed to ensure output directory for error_codes json", err))
 		}
-
-		if err := os.WriteFile(outputPath, prettyJSON.Bytes(), 0644); err != nil {
+		if err := os.WriteFile(outputPath, jsonWithNewline, 0644); err != nil {
 			panic(fmt.Sprintf("%v: failed to write error_codes json", err))
 		}
 	}

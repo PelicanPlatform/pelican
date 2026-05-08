@@ -39,7 +39,6 @@
 ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
 ARG OSG_SERIES=25
-ARG OSG_REPO=release
 
 # For compiling custom/one-off releases of Pelican.
 # (We cannot supply a default value because GoReleaser will use it as-is.)
@@ -67,24 +66,40 @@ ARG TOMCAT_GID=10443
 #     When building RPMs from source, this may be any commit spec understood
 #     by 'git checkout'.
 #
+#   - Optionally, set '*_RELEASE' to the specific RPM "release" (i.e. build)
+#     when installing from repositories.  These options have no effect when
+#     building from source.
+#
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
+ARG LOTMAN_RELEASE=
+# ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.6.2
+ARG XRDCL_PELICAN_RELEASE=
+# ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
+ARG XROOTD_LOTMAN_RELEASE=
+# ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.4
-# Installed from Koji if not building it from source.
+ARG XROOTD_S3_HTTP_VER=0.6.7
+ARG XROOTD_S3_HTTP_RELEASE=
+# ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.11
-ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
+ARG XRDHTTP_PELICAN_RELEASE=
+# ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_MULTIUSER_SRC_BUILD=false
+ARG XROOTD_MULTIUSER_VER=2.2.1
+ARG XROOTD_MULTIUSER_RELEASE=
+# ARG XROOTD_MULTIUSER_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
 # For controlling the version of OA4MP that is installed.
 ARG OA4MP_VER=6.2.3
@@ -187,10 +202,12 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   set -eux
   set -o pipefail
 
+  make goreleaser-config
+
   if ${IS_NONRELEASE_BUILD}; then
-    goreleaser build --id pelican-server --clean --single-target --snapshot
+    goreleaser build --id pelican --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml
   else
-    goreleaser build --id pelican-server --clean --single-target
+    goreleaser build --id pelican --id pelican-server --clean --single-target --config .goreleaser.generated.yml
   fi
 
   # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
@@ -272,6 +289,7 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
     procps \
     psmisc \
     python3-pip \
+    sqlite \
     tini \
     unzip
 ENDRUN
@@ -291,15 +309,14 @@ ARG XROOTD_USERNAME
 ARG XROOTD_UID
 ARG XROOTD_GID
 
-# We need to pin the install for many of the RPMs to "Koji" until all of
-# Pelican's patches are ingested into the OSG repositories.
+# Pin the version of XRootD to ensure consistency across all installations.
+# We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.1"
-ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
-ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
+ARG XROOTD_VER="5.9.2"
+ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
-# The packages from Koji need to be installed in a single dnf command in
+# The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
@@ -332,28 +349,27 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     xrootd-server-devel \
     "
 
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
-
-  package_urls=()
+  # Build pinned package names (NVR format) from XRootD version and release.
+  package_names=()
 
   for package in ${PACKAGES}; do
-    if [ "$package" = "xrootd-selinux" ]; then
-      package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.noarch.rpm)
-    else
-      package_urls+=(${KOJIHUB_BASE_URL}/${PKG_ARCH}/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.${PKG_ARCH}.rpm)
-    fi
+    package_names+=(${package}-${XROOTD_VER}-${XROOTD_RELEASE})
   done
-  dnf install -y "${package_urls[@]}"
+
+  # Install the pinned packages from osg-testing.
+  dnf install -y --enablerepo=osg-testing "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
   # prevent other packages from changing them via dependencies.
 
   dnf versionlock "xrootd*"
+
+  # Install PKCS#11 dependencies required by XRootD when Server.EnablePKCS11 is
+  # enabled. These packages provide the OpenSSL 3.x provider and the p11-kit
+  # Unix-socket server that Pelican's p11proxy communicates with.
+
+  dnf install -y p11-kit-server pkcs11-provider
 ENDRUN
 
 #################################################################
@@ -372,6 +388,8 @@ ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
+ARG XROOTD_MULTIUSER_SRC_BUILD
+ARG XROOTD_MULTIUSER_VER
 
 WORKDIR /xrootd-build
 
@@ -441,11 +459,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   }
 
-  run_task  LOTMAN          PelicanPlatform  lotman
-  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
-  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
-  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+  run_task  LOTMAN            PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN     PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN   PelicanPlatform  xrdhttp-pelican
+  run_task  XROOTD_LOTMAN     PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP    PelicanPlatform  xrootd-s3-http
+  run_task  XROOTD_MULTIUSER  opensciencegrid  xrootd-multiuser
 ENDRUN
 
 #################################################################
@@ -459,19 +478,22 @@ FROM xrootd-software-init AS xrootd-software-base
 ARG TARGETARCH
 ARG LOTMAN_SRC_BUILD
 ARG LOTMAN_VER
+ARG LOTMAN_RELEASE
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
+ARG XRDCL_PELICAN_RELEASE
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
 ARG XRDHTTP_PELICAN_RELEASE
 ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
+ARG XROOTD_LOTMAN_RELEASE
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
-
-# If we didn't build it from source, install it from Koji instead.
-# Note the %ARCH% placeholders that need to be substituted.
-ARG XRDHTTP_PELICAN_KOJI_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrdhttp-pelican/${XRDHTTP_PELICAN_VER}/${XRDHTTP_PELICAN_RELEASE}/%ARCH%/xrdhttp-pelican-${XRDHTTP_PELICAN_VER}-${XRDHTTP_PELICAN_RELEASE}.%ARCH%.rpm"
+ARG XROOTD_S3_HTTP_RELEASE
+ARG XROOTD_MULTIUSER_SRC_BUILD
+ARG XROOTD_MULTIUSER_VER
+ARG XROOTD_MULTIUSER_RELEASE
 
 RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -479,14 +501,6 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
   set -eux
   set -o pipefail
-
-  dnf install -y xrootd-multiuser
-
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
 
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
@@ -498,23 +512,23 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
     local SRC_BUILD=${ARG}_SRC_BUILD
     local VER=${ARG}_VER
-    local KOJI_URL=${ARG}_KOJI_URL
+    local RELEASE=${ARG}_RELEASE
 
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
-    elif [ -n "${!KOJI_URL-}" ]; then
-      echo ${!KOJI_URL} | sed "s/%ARCH%/${PKG_ARCH}/g" | xargs \
-          dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing
+    elif [ -n "${!RELEASE-}" ]; then
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
     else
       dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
-  run_task  LOTMAN          PelicanPlatform  lotman
-  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
-  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
-  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+  run_task  LOTMAN           PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN    PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN  PelicanPlatform  xrdhttp-pelican
+  run_task  XROOTD_LOTMAN    PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP   PelicanPlatform  xrootd-s3-http
+  run_task  XROOTD_MULTIUSER opensciencegrid  xrootd-multiuser
 
   # Configure XRootD to use the Pelican plugin.
   rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
@@ -564,6 +578,9 @@ RUN --mount=type=bind,source=oa4mp/resources,target=/context \
 
   set -eux
   set -o pipefail
+
+  # Some XRootD multi-user setups require sssd-client.
+  dnf install -y sssd-client
 
   # OA4MP and Apache Tomcat both require a Java runtime.
   dnf install -y java-${JAVA_VER}-openjdk-headless
@@ -661,11 +678,20 @@ RUN --mount=type=bind,source=oa4mp/resources,target=/context \
 ENDRUN
 
 #################################################################
+# Pelican Client
+#################################################################
+FROM gcr.io/distroless/static-debian13:nonroot AS client
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
+ENTRYPOINT ["/bin/pelican"]
+
+#################################################################
 # Pelican Director and Registry (a.k.a. the Central Services)
 #################################################################
 FROM pelican-software-base AS central-services-base
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 
 FROM central-services-base AS director
@@ -675,7 +701,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
 
 FROM director AS osdf-director
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "director"]
 CMD ["serve"]
 
@@ -684,7 +711,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican-server", "registry"]
 CMD ["serve"]
 
 FROM registry AS osdf-registry
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "registry"]
 CMD ["serve"]
 
@@ -694,25 +722,14 @@ CMD ["serve"]
 FROM origin-software-base AS origin
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
-ARG TARGETPLATFORM
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  set -o pipefail
-
-  ln -s pelican-server /usr/local/sbin/osdf-server
-
-  # Some XRootD multi-user setups require sssd-client.
-  # The IDs here are chosen to match OSG's sssd sidecar containers.
-
-  groupadd -r -g 990 sssd
-  useradd -r -u 990 -g 990 -d / -s /sbin/nologin -c "System user for sssd" sssd
-  dnf install -y sssd-client
-ENDRUN
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
@@ -722,12 +739,14 @@ CMD ["serve"]
 FROM xrootd-software-base AS cache
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "cache"]
 CMD ["serve"]
 
 FROM cache AS osdf-cache
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server && \
+    ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
@@ -757,19 +776,16 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   dnf install -y condor
   rpm -e --nodeps pelican pelican-osdf-compat
 
-  # Install the MinIO server and client for S3 tests.
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
-  dnf install -y https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
-
   # Add some normal user accounts for testing.
   # The inspiration for their names: https://en.wikipedia.org/wiki/Alice_and_Bob#Cast_of_characters.
   for name in alice bob carol dave; do
     useradd -m -s /bin/bash -c "Someone who would like to test Pelican" ${name}
   done
+
+  # A shared group for testing secondary-group access.
+  # alice is a member; bob is intentionally not.
+  groupadd pelican_shared
+  usermod -aG pelican_shared alice
 ENDRUN
 
 #################################################################

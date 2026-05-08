@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -33,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -56,7 +59,7 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", testPelicanBinary, ".")
+		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, ".")
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
 			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
@@ -137,29 +140,29 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 			rootCmd.Long,
 		},
 		{
-			"no-flag-on-subcommand",
-			[]string{"pelican", "origin"},
-			originCmd.Short,
-		},
-		{
 			"flag-on-root-command",
 			[]string{"pelican", "--version"},
-			mockVersionOutput,
-		},
-		{
-			"flag-on-subcommand",
-			[]string{"pelican", "origin", "--version"},
-			mockVersionOutput,
-		},
-		{
-			"flag-on-second-layer-subcommand",
-			[]string{"pelican", "origin", "get", "--version"},
 			mockVersionOutput,
 		},
 		{
 			"other-flag-on-root-command",
 			[]string{"pelican", "--help"},
 			rootCmd.Long,
+		},
+		{
+			"no-flag-on-subcommand",
+			[]string{"pelican", "config"},
+			config_printer.ConfigCmd.Short,
+		},
+		{
+			"flag-on-subcommand",
+			[]string{"pelican", "config", "--version"},
+			mockVersionOutput,
+		},
+		{
+			"flag-on-second-layer-subcommand",
+			[]string{"pelican", "config", "get", "--version"},
+			mockVersionOutput,
 		},
 	}
 

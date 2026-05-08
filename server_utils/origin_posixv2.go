@@ -32,7 +32,8 @@ func (o *Posixv2Origin) Type(_ Origin) server_structs.OriginStorageType {
 }
 
 func (o *Posixv2Origin) validateStoragePrefix(prefix string) error {
-	// For posixv2 origins, the storage prefix is validated the same way we validate
-	// the federation prefix.
-	return validateFederationPrefix(prefix)
+	// Storage prefixes need basic path validation but not the federation-specific
+	// reserved prefix checks (e.g. /pelican is reserved in the federation namespace
+	// but is a valid local storage path).
+	return validatePathLikePrefix(prefix)
 }

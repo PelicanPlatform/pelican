@@ -115,7 +115,7 @@ func TestOriginMultiuser(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create the federation with Multiuser enabled
 	ft := fed_test_utils.NewFedTest(t, multiuserOriginConfig)
@@ -269,7 +269,7 @@ func TestMultiuserChecksumFallback(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	ft := fed_test_utils.NewFedTest(t, multiuserOriginConfig)
 	require.NotNil(t, ft)

@@ -95,7 +95,7 @@ echo "This is some random content in the random file" > "${TEST_ROOT}/origin/inp
 touch "${PELICAN_CONFIG}"
 
 # Run federation in the background with port 0 (random port)
-federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port 0 || :"
+federationServe="./pelican-server --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port 0 || :"
 
 $federationServe &
 pid_federationServe=$!
@@ -143,7 +143,7 @@ export PELICAN_FEDERATION_DIRECTORURL="$SERVER_EXTERNAL_WEB_URL"
 export PELICAN_FEDERATION_REGISTRYURL="$SERVER_EXTERNAL_WEB_URL"
 
 # Prepare token for calling stat
-TOKEN=$(./pelican --config "${PELICAN_CONFIG}" origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
+TOKEN=$(./pelican-server --config "${PELICAN_CONFIG}" origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Give the federation time to spin up:
 API_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/health"

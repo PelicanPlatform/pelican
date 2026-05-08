@@ -65,7 +65,7 @@ This section describes how to connect Grafana to the Pelican Prometheus instance
 2. Run your Pelican Origin server. You may run other Pelican servers, but in this documentation we will use the Origin server for demonstration. For details about serving a Pelican Origin, refer to [Federating Your Data](../federating-your-data.mdx) page.
 
     ```bash copy
-    pelican origin serve -v /tmp/stash:/test-namespace -f "osg-htc.org"
+    pelican-server origin serve -v /tmp/stash:/test-namespace -f "osg-htc.org"
     ```
 
 3. Go to the URL for Web UI and confirm it's working. The default URL is `https://localhost:8444`. You should be directed to the Pelican login page.
@@ -128,7 +128,7 @@ By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https
     * Replace `--lifetime 604800` with your desired lifetime for the token. The value is in seconds. The example below generates a token with a lifetime of 7 days.
 
     ```bash
-    $ pelican origin token create --scope monitoring.query --claim wlcg.ver=1.0 --issuer <server-web-url> --subject grafana --audience <server-web-url> --lifetime 604800
+    $ pelican-server origin token create --scope monitoring.query --claim wlcg.ver=1.0 --issuer <server-web-url> --subject grafana --audience <server-web-url> --lifetime 604800
 
     eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwiaWF0IjoxNzA5NjUwMjMyLCJleHAiOjE3NDExODYyMzIsImF1ZCI6Imh0dHBzOi8vZXhhbXBsZS5jb20iLCJzdWIiOiJncmFmYW5hIiwic2NvcGUiOiJtb25pdG9yaW5nLnF1ZXJ5Iiwid2xjZy52ZXIiOiIxLjAifQ.cK5QyYJinn3QCPa6YB10Wn37MEEKzt_kyDMR9meN1Ec
     ```
@@ -173,7 +173,7 @@ export PELICAN_MONITORING_PROMQLAUTHORIZATION=false
 or
 
 ```bash copy
-PELICAN_MONITORING_PROMQLAUTHORIZATION=false pelican origin serve
+PELICAN_MONITORING_PROMQLAUTHORIZATION=false pelican-server origin serve
 ```
 
 Once you configured the authentication either in Grafana or in Pelican, click **Save & Test** to see if the connection can be established.

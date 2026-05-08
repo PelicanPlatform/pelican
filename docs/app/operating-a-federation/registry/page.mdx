@@ -6,6 +6,13 @@ The Pelican [*Registry*](../about-pelican/core-concepts.mdx#registry-service) ma
 
 ## Before Starting
 
+### Enable Time Synchronization
+
+Pelican servers rely on time-sensitive tokens for authorization.
+If your server's clock is not synchronized, tokens may be rejected and your Registry may fail to operate correctly.
+Please ensure NTP is enabled on your server.
+See [Server Prerequisites](../install.mdx#enable-time-synchronization) for setup instructions.
+
 ### Get OIDC Credential (Required)
 
 The Pelican registry follows [OIDC](https://openid.net/developers/how-connect-works/) for user authentication, and [CILogon](https://www.cilogon.org/) is our OpenID Provider by default, which enables single sign-on for users with an account associated with an institution that joins CILogon. (Check out [this page](https://cilogon.org) for institutions in CILogon)
@@ -44,7 +51,7 @@ Note that, by doing this, when users attempt to use `CILogon` to login to the re
 That's it! Now you can launch the registry by running the following command:
 
 ```bash copy
-pelican registry serve
+pelican-server registry serve
 ```
 
 and you will see the following message:

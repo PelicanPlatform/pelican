@@ -42,6 +42,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - reference$
 formatters:
   enable:
     - gofmt
@@ -56,3 +57,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - reference$

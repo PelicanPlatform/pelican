@@ -138,7 +138,7 @@ func FlushLogs(pushToFile bool) {
 				cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
 			}
 			logFHandle = f
-			fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
+			fmt.Fprintf(os.Stderr, "%s is set to %s. All logs are redirected to the log file.\n", param.Logging_LogLocation.GetName(), logLocation)
 			log.SetOutput(f)
 
 			// Disable colors for log files

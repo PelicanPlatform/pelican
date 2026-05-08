@@ -89,15 +89,16 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 	tokenURL := issuerURL + "/token"
 
 	fositeConfig := &fosite.Config{
-		AccessTokenLifespan:      time.Hour,
-		RefreshTokenLifespan:     7 * 24 * time.Hour,
-		AuthorizeCodeLifespan:    10 * time.Minute,
-		IDTokenLifespan:          time.Hour,
-		TokenURL:                 tokenURL,
-		AccessTokenIssuer:        issuerURL,
-		ScopeStrategy:            sciTokensScopeStrategy,
-		AudienceMatchingStrategy: fosite.DefaultAudienceMatchingStrategy,
-		JWTScopeClaimKey:         jwt.JWTScopeFieldString,
+		AccessTokenLifespan:         time.Hour,
+		RefreshTokenLifespan:        7 * 24 * time.Hour,
+		AuthorizeCodeLifespan:       10 * time.Minute,
+		IDTokenLifespan:             time.Hour,
+		TokenURL:                    tokenURL,
+		AccessTokenIssuer:           issuerURL,
+		ScopeStrategy:               sciTokensScopeStrategy,
+		AudienceMatchingStrategy:    fosite.DefaultAudienceMatchingStrategy,
+		JWTScopeClaimKey:            jwt.JWTScopeFieldString,
+		EnforcePKCEForPublicClients: true,
 	}
 
 	// Load (or generate) the encrypted master key and derive the HMAC

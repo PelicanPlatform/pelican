@@ -126,17 +126,17 @@ func (o *S3Origin) mapSingleExtra() {
 
 	e := o.Exports[0]
 	if e.S3Bucket != "" {
-		if err := param.Set(param.Origin_S3Bucket.GetName(), e.S3Bucket); err != nil {
+		if err := param.Origin_S3Bucket.Set(e.S3Bucket); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_S3Bucket.GetName(), err)
 		}
 	}
 	if e.S3AccessKeyfile != "" {
-		if err := param.Set(param.Origin_S3AccessKeyfile.GetName(), e.S3AccessKeyfile); err != nil {
+		if err := param.Origin_S3AccessKeyfile.Set(e.S3AccessKeyfile); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_S3AccessKeyfile.GetName(), err)
 		}
 	}
 	if e.S3SecretKeyfile != "" {
-		if err := param.Set(param.Origin_S3SecretKeyfile.GetName(), e.S3SecretKeyfile); err != nil {
+		if err := param.Origin_S3SecretKeyfile.Set(e.S3SecretKeyfile); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_S3SecretKeyfile.GetName(), err)
 		}
 	}

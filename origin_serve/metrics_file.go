@@ -37,16 +37,18 @@ type metricsFile struct {
 	afero.File
 	rateLimiter *htb.HTB
 	userID      string
+	username    string
 	ctx         context.Context
 	startTime   time.Time
 }
 
 // newMetricsFile wraps a file to track metrics
-func newMetricsFile(file afero.File, rateLimiter *htb.HTB, userID string, ctx context.Context) *metricsFile {
+func newMetricsFile(file afero.File, rateLimiter *htb.HTB, userID string, username string, ctx context.Context) *metricsFile {
 	return &metricsFile{
 		File:        file,
 		rateLimiter: rateLimiter,
 		userID:      userID,
+		username:    username,
 		ctx:         ctx,
 		startTime:   time.Now(),
 	}
@@ -77,33 +79,33 @@ func (mf *metricsFile) Write(p []byte) (n int, err error) {
 // metricsOnlyRead performs a read without rate limiting, just tracking metrics
 func (mf *metricsFile) metricsOnlyRead(p []byte) (n int, err error) {
 	start := time.Now()
-	metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageReadsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	metrics.StorageReadsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
-		metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
+		metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
+		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.StorageReadTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
-		metrics.StorageReadTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+		metrics.StorageReadTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
+		metrics.StorageReadTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
+		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowReadsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowReadTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			metrics.StorageSlowReadsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+			metrics.StorageSlowReadTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 		}
 
 		if err != nil && err != io.EOF {
-			metrics.StorageReadErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			metrics.StorageReadErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 		}
 	}()
 
 	n, err = mf.File.Read(p)
 	if n > 0 {
-		metrics.StorageBytesRead.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(n))
-		metrics.StorageReadSizes.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(n))
+		metrics.StorageBytesRead.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(float64(n))
+		metrics.StorageReadSizes.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(float64(n))
 	}
 	return n, err
 }
@@ -111,33 +113,33 @@ func (mf *metricsFile) metricsOnlyRead(p []byte) (n int, err error) {
 // metricsOnlyWrite performs a write without rate limiting, just tracking metrics
 func (mf *metricsFile) metricsOnlyWrite(p []byte) (n int, err error) {
 	start := time.Now()
-	metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageWritesTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	metrics.StorageWritesTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
-		metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
+		metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
+		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.StorageWriteTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
-		metrics.StorageWriteTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+		metrics.StorageWriteTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
+		metrics.StorageWriteTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
+		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowWritesTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowWriteTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			metrics.StorageSlowWritesTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+			metrics.StorageSlowWriteTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 		}
 
 		if err != nil {
-			metrics.StorageWriteErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			metrics.StorageWriteErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 		}
 	}()
 
 	n, err = mf.File.Write(p)
 	if n > 0 {
-		metrics.StorageBytesWritten.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(n))
-		metrics.StorageWriteSizes.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(n))
+		metrics.StorageBytesWritten.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(float64(n))
+		metrics.StorageWriteSizes.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(float64(n))
 	}
 	return n, err
 }
@@ -167,25 +169,25 @@ func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error),
 	waitStart := time.Now()
 	tokens, err := mf.rateLimiter.Wait(mf.ctx, mf.userID, initialWaitNs)
 	if err != nil {
-		m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+		m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 		return 0, err
 	}
 	waitTime := time.Since(waitStart).Seconds()
 	if waitTime > 0.0 {
-		metrics.StorageRateLimitWaitsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-		metrics.StorageRateLimitWaitTime.WithLabelValues(metrics.BackendPOSIXv2).Add(waitTime)
+		metrics.StorageRateLimitWaitsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+		metrics.StorageRateLimitWaitTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(waitTime)
 	}
 
 	// Start tracking the operation
 	opStart := time.Now()
 	tickerStart := opStart
 
-	m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	m.totalCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+	m.totalCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
-		m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
+		m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
+		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Dec()
 		now := time.Now()
 		tickerElapsed := now.Sub(tickerStart)
 		tickerElapsedSec := tickerElapsed.Seconds()
@@ -198,18 +200,18 @@ func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error),
 
 		opElapsed := now.Sub(opStart)
 		opElapsedSec := opElapsed.Seconds()
-		m.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(opElapsedSec)
-		m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(tickerElapsedSec)
-		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(tickerElapsedSec)
+		m.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(opElapsedSec)
+		m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(tickerElapsedSec)
+		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(tickerElapsedSec)
 
 		// Track slow operations (>2s)
 		if opElapsed >= metrics.SlowOperationThreshold {
-			m.slowCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			m.slowTimeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(opElapsedSec)
+			m.slowCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+			m.slowTimeHistogram.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(opElapsedSec)
 		}
 
 		if err != nil && !(m.ignoreEOF && err == io.EOF) {
-			m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 		}
 	}()
 
@@ -236,8 +238,8 @@ func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error),
 
 		case result := <-resultCh:
 			if result.n > 0 {
-				m.bytesCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(result.n))
-				m.sizeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(result.n))
+				m.bytesCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(float64(result.n))
+				m.sizeHistogram.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(float64(result.n))
 			}
 			return result.n, result.err
 
@@ -250,8 +252,8 @@ func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error),
 			elapsedNs := elapsed.Nanoseconds()
 			elapsedSec := elapsed.Seconds()
 
-			m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-			metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+			m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
+			metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Add(elapsedSec)
 
 			if tokens != nil {
 				// If elapsed is nonzero, it means more time elapsed than tokens
@@ -262,7 +264,7 @@ func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error),
 			// Get new tokens with force allocation (operation already started)
 			tokens, err = mf.rateLimiter.ForceWait(mf.ctx, mf.userID, chunkWaitNs+elapsedNs)
 			if err != nil {
-				m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+				m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 				tokens = nil
 				return 0, err
 			}
@@ -308,10 +310,10 @@ func (mf *metricsFile) rateLimitedWrite(p []byte) (n int, err error) {
 // Close implements afero.File.Close with metrics
 func (mf *metricsFile) Close() error {
 	start := time.Now()
-	metrics.StorageClosesTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageClosesTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
 		elapsed := time.Since(start).Seconds()
-		metrics.StorageCloseTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsed)
+		metrics.StorageCloseTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsed)
 	}()
 
 	return mf.File.Close()
@@ -320,16 +322,16 @@ func (mf *metricsFile) Close() error {
 // Stat implements afero.File.Stat with metrics
 func (mf *metricsFile) Stat() (os.FileInfo, error) {
 	start := time.Now()
-	metrics.StorageStatsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageStatsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.StorageStatTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+		metrics.StorageStatTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowStatsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowStatTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			metrics.StorageSlowStatsTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+			metrics.StorageSlowStatTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 		}
 	}()
 
@@ -339,16 +341,16 @@ func (mf *metricsFile) Stat() (os.FileInfo, error) {
 // Readdir implements afero.File.Readdir with metrics
 func (mf *metricsFile) Readdir(count int) ([]os.FileInfo, error) {
 	start := time.Now()
-	metrics.StorageReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
 	defer func() {
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.StorageReaddirTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+		metrics.StorageReaddirTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowReaddirTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			metrics.StorageSlowReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Inc()
+			metrics.StorageSlowReaddirTime.WithLabelValues(metrics.BackendPOSIXv2, mf.username).Observe(elapsedSec)
 		}
 	}()
 

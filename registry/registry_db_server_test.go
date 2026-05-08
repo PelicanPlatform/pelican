@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -686,5 +687,117 @@ func TestServerWithMultipleServices(t *testing.T) {
 
 		assert.False(t, server2.IsOrigin, "Server2 should not be marked as origin")
 		assert.True(t, server2.IsCache, "Server2 should be marked as cache")
+	})
+}
+
+func testDowntimeForServer(serverID, serverName string) server_structs.Downtime {
+	now := time.Now().UnixMilli()
+	return server_structs.Downtime{
+		UUID:        uuid.NewString(),
+		ServerID:    serverID,
+		ServerName:  serverName,
+		CreatedBy:   "test-user",
+		UpdatedBy:   "test-user",
+		Source:      "registry",
+		Class:       server_structs.SCHEDULED,
+		Description: "unit test downtime",
+		Severity:    server_structs.NoSignificantOutageExpected,
+		StartTime:   now,
+		EndTime:     now + 3600000,
+	}
+}
+
+// TestDeleteRegistrationByID_RemovesDowntimes covers explicit downtime cleanup when the last
+// service for a server is removed (no FK from downtimes to servers).
+func TestDeleteRegistrationByID_RemovesDowntimes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("deletes-downtimes-when-last-service-removed", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		ns := server_structs.Registration{
+			Prefix: "/origins/downtime-reg-delete.edu",
+			Pubkey: "test-pubkey",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "downtime-reg-delete.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err := AddRegistration(&ns)
+		require.NoError(t, err)
+
+		server, err := getServerByRegistrationID(ns.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, server.ID)
+
+		dt := testDowntimeForServer(server.ID, server.Name)
+		err = database.ServerDatabase.Create(&dt).Error
+		require.NoError(t, err)
+
+		err = deleteRegistrationByID(ns.ID)
+		require.NoError(t, err)
+
+		var downtimeCount int64
+		err = database.ServerDatabase.Model(&server_structs.Downtime{}).Where("server_id = ?", server.ID).Count(&downtimeCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), downtimeCount)
+
+		var serverCount int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", server.ID).Count(&serverCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serverCount)
+	})
+
+	t.Run("keeps-downtimes-when-other-service-remains", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		originReg := server_structs.Registration{
+			Prefix: "/origins/downtime-dual.edu",
+			Pubkey: jwks,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "downtime-dual.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&originReg)
+		require.NoError(t, err)
+
+		cacheReg := server_structs.Registration{
+			Prefix: "/caches/downtime-dual.edu",
+			Pubkey: jwks,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "downtime-dual.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&cacheReg)
+		require.NoError(t, err)
+
+		server, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+		dt := testDowntimeForServer(server.ID, server.Name)
+		err = database.ServerDatabase.Create(&dt).Error
+		require.NoError(t, err)
+
+		err = deleteRegistrationByID(originReg.ID)
+		require.NoError(t, err)
+
+		var downtimeCount int64
+		err = database.ServerDatabase.Model(&server_structs.Downtime{}).Where("server_id = ?", server.ID).Count(&downtimeCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), downtimeCount)
+
+		var serverCount int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", server.ID).Count(&serverCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), serverCount)
 	})
 }

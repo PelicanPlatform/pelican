@@ -361,7 +361,8 @@ X-Transfer-Status: 500: unexpected EOF
 
 - Generated using the Gorilla CSRF package
 - Shares the same authentication key as the session secret
-- Invalid tokens result in HTTP 403 Forbidden responses
+- Invalid CSRF tokens result in HTTP 403 Forbidden responses
+- Missing or invalid authentication tokens result in HTTP 401 Unauthorized responses
 - Uses `SameSite=Strict` mode for additional security
 
 ---

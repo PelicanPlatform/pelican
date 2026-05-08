@@ -20,7 +20,6 @@ package logging
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -122,85 +121,14 @@ func GetLogLevelManager() *LogLevelManager {
 	return globalManager
 }
 
-// isValidLoggingParameter checks if a parameter name is valid for log level changes
-// isValidLoggingParameter checks if a parameter name exists in the param.Config structure
-// using reflection to validate the actual field path
+// isValidLoggingParameter checks if a parameter name corresponds to a known
+// Logging.* parameter that can be used for temporary log level changes.
 func isValidLoggingParameter(paramName string) bool {
-	// Split the parameter name into parts (e.g., "Logging.Origin.Xrootd" -> ["Logging", "Origin", "Xrootd"])
-	parts := strings.Split(paramName, ".")
-
-	// Must start with "Logging" and have at least 2 parts
-	if len(parts) < 2 || parts[0] != "Logging" {
+	if !strings.HasPrefix(paramName, "Logging.") {
 		return false
 	}
-
-	// Second level must be one of the valid categories
-	validSecondLevels := map[string]bool{
-		"Level":  true,
-		"Cache":  true,
-		"Origin": true,
-	}
-	if !validSecondLevels[parts[1]] {
-		return false
-	}
-
-	// Use reflection to check if the path exists in param.Config
-	configType := reflect.TypeOf(param.Config{})
-
-	// Start with the Config struct
-	currentType := configType
-	for i, part := range parts {
-		// Find the field with this name (case-insensitive struct tag matching)
-		field, found := findFieldByName(currentType, part)
-		if !found {
-			return false
-		}
-
-		// If this is not the last part, make sure it's a struct so we can continue
-		if i < len(parts)-1 {
-			fieldType := field.Type
-			if fieldType.Kind() != reflect.Struct {
-				return false
-			}
-			currentType = fieldType
-		} else {
-			// Last part should be a string field (the actual log level parameter)
-			return field.Type.Kind() == reflect.String
-		}
-	}
-
-	return true
-}
-
-// findFieldByName searches for a struct field by name, matching against both
-// the field name and yaml/mapstructure tags (case-insensitive)
-func findFieldByName(structType reflect.Type, name string) (reflect.StructField, bool) {
-	nameLower := strings.ToLower(name)
-
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-
-		// Check field name (case-insensitive)
-		if strings.ToLower(field.Name) == nameLower {
-			return field, true
-		}
-
-		// Check yaml tag
-		if yamlTag := field.Tag.Get("yaml"); yamlTag != "" {
-			if strings.ToLower(yamlTag) == nameLower {
-				return field, true
-			}
-		}
-
-		// Check mapstructure tag
-		if mapTag := field.Tag.Get("mapstructure"); mapTag != "" {
-			if strings.ToLower(mapTag) == nameLower {
-				return field, true
-			}
-		}
-	}
-
-	return reflect.StructField{}, false
+	_, ok := param.LookupParam(paramName)
+	return ok
 }
 
 // HasParameter returns true if the parameter is valid for log level changes
@@ -307,8 +235,21 @@ func (m *LogLevelManager) applyChanges() {
 				levelStr = "warn"
 			}
 
-			// Update via param.Set() - existing callbacks will handle updating logrus
-			if err := param.Set(paramName, levelStr); err != nil {
+			// Look up the typed param and use the typed Set method
+			p, ok := param.LookupParam(paramName)
+			if !ok {
+				log.WithFields(log.Fields{
+					"parameter": paramName,
+				}).Warn("Unknown parameter in log level change")
+				continue
+			}
+			var err error
+			if sp, ok := p.(param.StringParam); ok {
+				err = sp.Set(levelStr)
+			} else {
+				err = param.Set(p, levelStr)
+			}
+			if err != nil {
 				log.WithError(err).WithFields(log.Fields{
 					"parameter": paramName,
 					"new_level": effectiveLevel.String(),
@@ -422,69 +363,22 @@ func (m *LogLevelManager) Shutdown() {
 	}
 }
 
-// getParamValue uses reflection to get a string value from the param.Config struct by parameter name
-// e.g., "Logging.Cache.Ofs" -> config.Logging.Cache.Ofs
-func getParamValue(paramName string) string {
-	config, err := param.GetUnmarshaledConfig()
-	if err != nil || config == nil {
-		return ""
-	}
-
-	// Split parameter name into parts (e.g., "Logging.Cache.Ofs" -> ["Logging", "Cache", "Ofs"])
-	parts := strings.Split(paramName, ".")
-
-	// Start with the config struct
-	val := reflect.ValueOf(config).Elem()
-
-	// Walk through each part to navigate the struct
-	for _, part := range parts {
-		if !val.IsValid() {
-			return ""
-		}
-
-		// Get the field by name (case-insensitive matching like viper)
-		field := val.FieldByNameFunc(func(name string) bool {
-			return strings.EqualFold(name, part)
-		})
-
-		if !field.IsValid() {
-			return ""
-		}
-
-		val = field
-	}
-
-	// Convert the final value to string
-	if val.Kind() == reflect.String {
-		return val.String()
-	}
-
-	return ""
-}
-
 // getCurrentLevel reads the current level for a parameter from the param system
 func (m *LogLevelManager) getCurrentLevel(paramName string) log.Level {
-	// For Logging.Level, we can also check logrus directly as a fallback
-	if paramName == "Logging.Level" {
-		// Try to get from param system first
-		levelStr := param.Logging_Level.GetString()
-		if levelStr != "" {
-			level, err := log.ParseLevel(levelStr)
-			if err == nil {
-				return level
+	p, ok := param.LookupParam(paramName)
+	if ok {
+		if sp, ok := p.(param.StringParam); ok {
+			if levelStr := sp.GetString(); levelStr != "" {
+				if level, err := log.ParseLevel(levelStr); err == nil {
+					return level
+				}
 			}
 		}
-		// Fallback to logrus current level
-		return log.GetLevel()
 	}
 
-	// For other parameters, try param system
-	levelStr := getParamValue(paramName)
-	if levelStr != "" {
-		level, err := log.ParseLevel(levelStr)
-		if err == nil {
-			return level
-		}
+	// For Logging.Level, fall back to logrus current level
+	if paramName == param.Logging_Level.GetName() {
+		return log.GetLevel()
 	}
 
 	// Default to info level if not found
@@ -496,7 +390,7 @@ func (m *LogLevelManager) SetBaseLevel(level log.Level) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.baseLevels["Logging.Level"] = level
+	m.baseLevels[param.Logging_Level.GetName()] = level
 	m.applyChanges()
 }
 

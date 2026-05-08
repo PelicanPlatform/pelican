@@ -5,12 +5,11 @@ import React, { useContext, useState } from 'react';
 import { alertOnError } from '@/helpers/util';
 import UserForm from '../components/UserForm';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { UserPost } from '@/types';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import { Breadcrumbs, Typography } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { fetchApi } from '@/helpers/api';
+import { UserService, UserPost } from '@/helpers/api';
 
 const Page = () => {
   const dispatch = useContext(AlertDispatchContext);
@@ -29,16 +28,17 @@ const Page = () => {
         onSubmit={async (user: UserPost) => {
           setIsSubmitting(true);
           const response = await alertOnError(
-            async () => addUser(user),
+            async () => UserService.post(user),
             'Error Creating New User',
             dispatch
           );
-          if (response?.ok) {
+          if (response) {
             dispatch({
               type: 'openAlert',
               payload: {
                 onClose: () => dispatch({ type: 'closeAlert' }),
                 message: `Created User`,
+                autoHideDuration: 3000,
                 alertProps: {
                   severity: 'success',
                 },
@@ -51,12 +51,6 @@ const Page = () => {
         isSubmitting={isSubmitting}
       />
     </>
-  );
-};
-
-const addUser = (user: UserPost) => {
-  return fetchApi(async () =>
-    fetch('/api/v1.0/users', { method: 'POST', body: JSON.stringify(user) })
   );
 };
 

@@ -41,7 +41,7 @@ import (
 func TestPosixv2LegitimateAccessWorks(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for storage
 	tmpDir := t.TempDir()
@@ -89,7 +89,7 @@ Director:
 func TestPosixv2PathTraversalAttack(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory structure with proper isolation
 	tmpDir := t.TempDir()
@@ -195,7 +195,7 @@ Director:
 func TestPosixv2SymlinkTraversalAttack(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory structure:
 	// tmpDir/
@@ -309,7 +309,7 @@ Director:
 func TestPosixv2UploadedSymlinkAttack(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory structure to test if symlinks can escape
 	tmpDir := t.TempDir()
@@ -375,7 +375,7 @@ Director:
 func TestPosixv2CapabilityEnforcement(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin WITHOUT Writes capability
 	originConfig := `
@@ -440,7 +440,7 @@ Origin:
 func TestPosixv2ListingsCapabilityEnforcement(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin WITHOUT Listings capability
 	originConfig := `

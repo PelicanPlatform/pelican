@@ -138,11 +138,11 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
-	require.NoError(t, param.Set("ConfigDir", filepath.Join(dirpath, "config")))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), "0"))
-	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite")))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo"))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.ConfigDir.Set(filepath.Join(dirpath, "config")))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(dirpath, "ns-registry.sqlite")))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/foo"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -270,8 +270,8 @@ func TestBroker(t *testing.T) {
 	}
 
 	// Launch the origin-side monitoring of requests.
-	require.NoError(t, param.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString()))
-	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, param.Server_ExternalWebUrl.GetString()))
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
 	defer deadlineCancel()
@@ -390,8 +390,8 @@ func TestRetrieveTimeout(t *testing.T) {
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString()))
-	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, param.Server_ExternalWebUrl.GetString()))
 
 	resp, err := doRetrieveRequest(t, ctx, time.Millisecond)
 	require.NoError(t, err)

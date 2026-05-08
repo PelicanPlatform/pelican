@@ -36,6 +36,7 @@ type rateLimitedFs struct {
 type rateLimitedFile struct {
 	afero.File
 	limiter *rate.Limiter
+	ctx     context.Context
 }
 
 func newRateLimitedFs(fs afero.Fs, rateLimit byte_rate.ByteRate) afero.Fs {
@@ -52,7 +53,7 @@ func (r *rateLimitedFs) Open(name string) (afero.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rateLimitedFile{File: file, limiter: r.limiter}, nil
+	return &rateLimitedFile{File: file, limiter: r.limiter, ctx: context.Background()}, nil
 }
 
 func (r *rateLimitedFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -60,7 +61,7 @@ func (r *rateLimitedFs) OpenFile(name string, flag int, perm os.FileMode) (afero
 	if err != nil {
 		return nil, err
 	}
-	return &rateLimitedFile{File: file, limiter: r.limiter}, nil
+	return &rateLimitedFile{File: file, limiter: r.limiter, ctx: context.Background()}, nil
 }
 
 func (f *rateLimitedFile) Read(p []byte) (int, error) {
@@ -114,7 +115,7 @@ func (f *rateLimitedFile) waitN(n int) error {
 		if step > burst {
 			step = burst
 		}
-		if err := f.limiter.WaitN(context.Background(), step); err != nil {
+		if err := f.limiter.WaitN(f.ctx, step); err != nil {
 			return err
 		}
 		remaining -= step

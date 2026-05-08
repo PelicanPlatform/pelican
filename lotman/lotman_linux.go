@@ -1,4 +1,4 @@
-//go:build lotman && linux && !ppc64le
+//go:build linux && !ppc64le
 
 /***************************************************************
 *
@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -752,7 +753,7 @@ func configLotsFromFedPrefixes(nsAds []server_structs.NamespaceAdV2) (map[string
 	}
 	for _, nsAd := range nsAds {
 		// Skip monitoring namespaces
-		if strings.HasPrefix(nsAd.Path, "/pelican/monitoring") {
+		if strings.HasPrefix(nsAd.Path, server_utils.MonitoringBaseNs) {
 			continue
 		}
 		var issuer string
@@ -1045,7 +1046,9 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	log.Tracef("Lotman will split lot disk space quotas amongst the discovered disk space: %vB", totalDiskSpaceB)
 	if policy.DivideUnallocated {
 		log.Traceln("Dividing unallocated space among lots")
-		divideRemainingSpace(&lotMap, totalDiskSpaceB)
+		if err := divideRemainingSpace(&lotMap, totalDiskSpaceB); err != nil {
+			return nil, err
+		}
 	}
 
 	// Set up lot timestamps (creation, expiration, deletion) if needed

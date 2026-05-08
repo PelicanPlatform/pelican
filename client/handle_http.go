@@ -227,6 +227,12 @@ type (
 
 		// Whether or not the cache has been queried
 		CacheQuery bool
+
+		// Preferred indicates this server came from the user's PreferredCaches
+		// configuration rather than being discovered via the Director.  When true,
+		// the server must not be sorted after any non-preferred (director-provided)
+		// server, even if the origin/cache service responds more quickly.
+		Preferred bool
 	}
 
 	// A structure representing a single file to transfer.
@@ -686,13 +692,15 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 
 // Determines whether or not we can interact with the site HTTP proxy
 func isProxyEnabled() bool {
-	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
-		return false
-	}
 	if param.Client_DisableHttpProxy.GetBool() {
 		return false
 	}
-	return true
+	for _, envVar := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"} {
+		if val, isSet := os.LookupEnv(envVar); isSet && val != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Determine whether we are allowed to skip the proxy as a fallback
@@ -1347,9 +1355,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
-	operation := config.TokenSharedRead
+	operation := config.TokenRead
 	if upload {
-		operation = config.TokenSharedWrite
+		operation = config.TokenWrite
 	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
@@ -1548,7 +1556,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
+		token:          NewTokenGenerator(&copyUrl, nil, config.TokenRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1663,7 +1671,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pelicanURL, nil, config.TokenRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1731,7 +1739,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var sortedServers []*url.URL
-	sortedServers, err = generateSortedObjServers(dirResp, prefObjServers)
+	sortedServers, _, err = generateSortedObjServers(dirResp, prefObjServers)
 	if err != nil {
 		log.Errorln("Failed to get namespace caches (treated as non-fatal):", err)
 		return
@@ -1916,13 +1924,15 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 }
 
 // Generate the unique list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
-// in the slice of transferAttemptDetails structs
-func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string) (transfers []transferAttemptDetails) {
+// in the slice of transferAttemptDetails structs.
+// nPreferred indicates how many entries at the start of sortedObjectServers came from the user's PreferredCaches
+// configuration; those entries will have Preferred=true in the returned details.
+func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
 	oServersListed := 0
 	oServerList := make(map[string]bool)
 	oServers := make([]string, 0)
 
-	for _, oServer := range sortedObjectServers {
+	for idx, oServer := range sortedObjectServers {
 		if oServersListed == oServersToTry {
 			break
 		}
@@ -1937,7 +1947,12 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServ
 				NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
 				PackOption: packOption,
 			}
-			transfers = append(transfers, generateTransferDetails(oServer, td)...)
+			isPreferred := idx < nPreferred
+			newTransfers := generateTransferDetails(oServer, td)
+			for i := range newTransfers {
+				newTransfers[i].Preferred = isPreferred
+			}
+			transfers = append(transfers, newTransfers...)
 		}
 	}
 	log.Debugln("Trying the object servers:", oServers)
@@ -1976,7 +1991,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		})
 	} else {
 		var sortedServers []*url.URL
-		sortedServers, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
+		var nPreferred int
+		sortedServers, nPreferred, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
 		if err != nil {
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}
@@ -1991,7 +2007,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			objectServersToTry = len(sortedServers)
 		}
 		log.Debugf("Trying the first %d object servers", objectServersToTry)
-		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption)
+		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
 
 		if len(transfers) > 0 {
 			log.Traceln("First transfer in list:", transfers[0].Url)
@@ -2169,6 +2185,33 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 	}
 }
 
+// attemptSorter pairs a responsiveness score with a transfer attempt for sorting.
+type attemptSorter struct {
+	good    int
+	attempt transferAttemptDetails
+}
+
+// compareAttempts is the comparison function used by sortAttempts.
+// Preferred (user-configured) servers always sort before director-provided servers.
+// Within the same preference tier, servers are sorted by responsiveness (good values).
+func compareAttempts(left attemptSorter, right attemptSorter) int {
+	// Preferred servers always sort before director-provided (fallback) servers.
+	if left.attempt.Preferred != right.attempt.Preferred {
+		if left.attempt.Preferred {
+			return -1
+		}
+		return 1
+	}
+	// Within the same preference tier, sort by responsiveness.
+	if left.good > right.good {
+		return -1
+	}
+	if left.good < right.good {
+		return 1
+	}
+	return 0
+}
+
 // If there are multiple potential attempts, try to see if we can quickly eliminate some of them
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
@@ -2259,21 +2302,15 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 	// Sort all the successful attempts first; use stable sort so the original ordering
 	// is preserved if the two entries are both successful or both unsuccessful.
-	type sorter struct {
-		good    int
-		attempt transferAttemptDetails
-	}
-	tmpResults := make([]sorter, len(attempts))
+	// Preferred (user-configured) servers are never sorted after director-provided
+	// servers, ensuring all preferred caches are tried before falling back to the
+	// Director's choices.
+	tmpResults := make([]attemptSorter, len(attempts))
 	for idx, attempt := range attempts {
-		tmpResults[idx] = sorter{finished[idx], attempt}
+		tmpResults[idx] = attemptSorter{finished[idx], attempt}
 	}
 	results = make([]transferAttemptDetails, len(attempts))
-	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
-		if left.good > right.good {
-			return -1
-		}
-		return 0
-	})
+	slices.SortStableFunc(tmpResults, compareAttempts)
 	for idx, val := range tmpResults {
 		results[idx] = val.attempt
 	}
@@ -2380,13 +2417,27 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// Determine write destination - use temporary file unless inPlace is true
 			// Special case: os.DevNull should always use inPlace mode (no temp files)
 			writeDestination = localPath
-			if !transfer.job.inPlace && localPath != os.DevNull {
-				// Use rsync-style temporary naming: .filename.XXXXXX (random suffix)
-				writeDestination = generateTempPath(localPath)
+			if !transfer.job.inPlace && localPath != os.DevNull && localPath != "" {
+				// Use os.CreateTemp for secure atomic temp file creation in the
+				// destination directory, using an rsync-style .basename.* pattern.
+				dir := filepath.Dir(localPath)
+				base := filepath.Base(localPath)
+				fp, err = os.CreateTemp(dir, "."+base+".")
+				if err == nil {
+					writeDestination = fp.Name()
+					fileWriter = fp
+				} else {
+					return
+				}
 			}
 			// Ensure temporary file is cleaned up if we exit early (errors, panics, etc.)
+			// Also handles closing the file; on Windows, open files cannot be removed.
 			if !transfer.job.inPlace && writeDestination != localPath {
 				defer func() {
+					if fp != nil {
+						fp.Close()
+						fp = nil
+					}
 					// Only clean up if the temporary file still exists and wasn't renamed
 					if _, statErr := os.Stat(writeDestination); statErr == nil {
 						if removeErr := os.Remove(writeDestination); removeErr != nil {
@@ -2394,18 +2445,22 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 						}
 					}
 				}()
-			}
-			// If the destination is something strange, like a block device, then the OpenFile below
-			// will create the appropriate error message
-			if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
-				fileWriter = fp
+			} else {
 				defer func() {
 					if fp != nil {
 						fp.Close()
+						fp = nil
 					}
 				}()
-			} else {
-				return
+			}
+			if fp == nil {
+				// If the destination is something strange, like a block device, then the OpenFile below
+				// will create the appropriate error message
+				if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+					fileWriter = fp
+				} else {
+					return
+				}
 			}
 		}
 	} else { // Prestage case

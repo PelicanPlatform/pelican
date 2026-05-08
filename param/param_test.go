@@ -39,7 +39,7 @@ func TestSetAndGet(t *testing.T) {
 	defer viper.Reset()
 
 	// Test setting a value
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Verify the value was set in viper
@@ -107,7 +107,7 @@ func TestConcurrentSetAndGet(t *testing.T) {
 		go func(val int) {
 			defer wg.Done()
 			key := "ConcurrentKey"
-			_ = Set(key, val)
+			_ = SetRaw(key, val)
 		}(i)
 	}
 
@@ -340,7 +340,7 @@ func TestCallbackRegistration(t *testing.T) {
 	})
 
 	// Set a value to trigger callback
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Wait for callback to be invoked (with timeout)
@@ -371,7 +371,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	})
 
 	// Set initial value
-	err := Set("Logging.Level", "info")
+	err := Set(Logging_Level, "info")
 	require.NoError(t, err)
 
 	// Wait for first callback
@@ -383,7 +383,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	}
 
 	// Change the value
-	err = Set("Logging.Level", "debug")
+	err = Set(Logging_Level, "debug")
 	require.NoError(t, err)
 
 	// Wait for second callback
@@ -874,4 +874,266 @@ func TestByteRateDecoding(t *testing.T) {
 		require.NotNil(t, config)
 		assert.Equal(t, expected, config.Origin.TransferRateLimit)
 	})
+}
+
+// TestConcurrentIsSetAndUnmarshalConfig verifies that concurrent IsSet() calls
+// do not race with UnmarshalConfig() / Set(). Before the fix, this would panic
+// with "concurrent map read and map write" inside viper because IsSet() called
+// viper.IsSet() without holding configMutex while UnmarshalConfig() called
+// viper.AllSettings() which mutates viper's internal path-index cache.
+//
+// Run with: go test -race -run TestConcurrentIsSetAndUnmarshalConfig ./param/
+func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	// Seed some config values so viper has internal state to race on
+	require.NoError(t, Server_UIAdminUsers.Set([]string{"admin"}))
+	require.NoError(t, Server_AdminGroups.Set([]string{"admins"}))
+	require.NoError(t, Cache_Port.Set(8443))
+	require.NoError(t, Logging_Level.Set("debug"))
+
+	var wg sync.WaitGroup
+
+	// Goroutines calling IsSet (the read path that was unprotected)
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				_ = Server_UIAdminUsers.IsSet()
+				_ = Server_AdminGroups.IsSet()
+				_ = Cache_Port.IsSet()
+				_ = Logging_Level.IsSet()
+			}
+		}()
+	}
+
+	// Goroutines calling UnmarshalConfig (the write path via AllSettings)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = UnmarshalConfig()
+			}
+		}()
+	}
+
+	// Goroutines calling Set (another write path)
+	for i := range 3 {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for range 10 {
+				_ = Logging_Level.Set("info")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// If we get here without a panic or race detector complaint, the fix works
+	config, err := GetUnmarshaledConfig()
+	require.NoError(t, err)
+	assert.NotNil(t, config)
+}
+
+// TestIntToTimeDurationRejectHookFunc verifies that bare integers and floats
+// are rejected for time.Duration fields, while strings with unit suffixes and
+// existing time.Duration values are accepted.
+func TestIntToTimeDurationRejectHookFunc(t *testing.T) {
+	durationType := reflect.TypeOf(time.Duration(0))
+	intType := reflect.TypeOf(int(0))
+	int64Type := reflect.TypeOf(int64(0))
+	float64Type := reflect.TypeOf(float64(0))
+	stringType := reflect.TypeOf("")
+
+	hook := intToTimeDurationRejectHookFunc()
+	fn := hook.(func(f reflect.Type, t reflect.Type, data any) (any, error))
+
+	t.Run("bare-int-rejected", func(t *testing.T) {
+		_, err := fn(intType, durationType, 600)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-int64-rejected", func(t *testing.T) {
+		_, err := fn(int64Type, durationType, int64(600))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-float64-rejected", func(t *testing.T) {
+		_, err := fn(float64Type, durationType, 600.0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("time-duration-allowed", func(t *testing.T) {
+		result, err := fn(durationType, durationType, 10*time.Minute)
+		require.NoError(t, err)
+		assert.Equal(t, 10*time.Minute, result)
+	})
+
+	t.Run("string-passed-through", func(t *testing.T) {
+		// Strings are handled by StringToTimeDurationHookFunc; this hook passes them through.
+		result, err := fn(stringType, durationType, "10m")
+		require.NoError(t, err)
+		assert.Equal(t, "10m", result)
+	})
+
+	t.Run("non-duration-target-unaffected", func(t *testing.T) {
+		// Hook must not interfere with int → int conversions.
+		result, err := fn(intType, intType, 42)
+		require.NoError(t, err)
+		assert.Equal(t, 42, result)
+	})
+}
+
+// TestDurationDecoding verifies end-to-end YAML parsing behavior for
+// time.Duration configuration fields.
+func TestDurationDecoding(t *testing.T) {
+	t.Run("string-with-unit-suffix-accepted", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 10m
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+		assert.Equal(t, 10*time.Minute, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("bare-integer-rejected", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 600
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		_, err := DecodeConfig(v)
+		require.Error(t, err, "bare integer should be rejected for a duration field")
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("bare-float-rejected", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Cache:
+  SelfTestInterval: 600.0
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		require.NoError(t, v.ReadInConfig())
+
+		_, err := DecodeConfig(v)
+		require.Error(t, err, "bare float should be rejected for a duration field")
+		assert.Contains(t, err.Error(), "unit suffix")
+	})
+
+	t.Run("time-duration-via-viper-set-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		v := viper.New()
+		v.Set("Cache.SelfTestInterval", 5*time.Minute)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Minute, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("time-duration-via-unmarshalconfig-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		viper.Set("Cache.SelfTestInterval", 15*time.Second)
+
+		cfg, err := UnmarshalConfig()
+		require.NoError(t, err)
+		assert.Equal(t, 15*time.Second, cfg.Cache.SelfTestInterval)
+	})
+
+	t.Run("time-duration-via-multiset-allowed", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		err := MultiSet(map[string]any{
+			"Cache.SelfTestInterval": 30 * time.Second,
+		})
+		require.NoError(t, err)
+
+		cfg, err := GetUnmarshaledConfig()
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Second, cfg.Cache.SelfTestInterval)
+	})
+}
+
+// TestConcurrentObjectParamUnmarshal verifies that ObjectParam.Unmarshal()
+// doesn't race with concurrent viper writes.
+func TestConcurrentObjectParamUnmarshal(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	require.NoError(t, Registry_Institutions.Set([]map[string]interface{}{
+		{"name": "TestInst", "id": "test-001"},
+	}))
+
+	var wg sync.WaitGroup
+
+	// Concurrent Unmarshal calls
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				var result any
+				_ = Registry_Institutions.Unmarshal(&result)
+			}
+		}()
+	}
+
+	// Concurrent Set calls to create contention
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				_ = Logging_Level.Set("warn")
+			}
+		}()
+	}
+
+	wg.Wait()
 }

@@ -120,43 +120,7 @@ export interface GetToken extends BaseToken {
   createdBy: string;
 }
 
-/** Groups and Authorization Types */
-
-export interface User {
-  id: string;
-  username: string;
-  sub: string;
-  issuer: string;
-  createdAt: string;
-}
-
-export type UserPost = Omit<User, 'id' | 'createdAt'>;
-
-export type UserPatch = Partial<Omit<User, 'createdAt'>>;
-
-export interface Group {
-  id: string;
-  name: string;
-  description: string;
-  members: User[];
-  createdBy: string;
-  createdAt: string;
-}
-
-export type GroupPost = Omit<Group, 'members' | 'createdBy' | 'createdAt'>;
-
-export interface GroupMember {
-  groupId: string;
-  userId: string;
-  user: User;
-  createdBy: string;
-  createdAt: string;
-}
-
-export type GroupMemberPost = Omit<
-  GroupMember,
-  'user' | 'addedBy' | 'addedAt' | 'groupId'
->;
+/** Authorization Types */
 
 export interface WellKnownConfiguration {
   director_endpoint: string;
@@ -183,4 +147,14 @@ export interface MetadataDiscrepancy {
   lastChecked: string;
   discoveryUrl: string;
   enabled: boolean;
+}
+
+export type JsonPrimitive = string | number | boolean | null;
+
+export interface ServerLocalMetadata {
+  id: string;
+  name: string;
+  type: 'origin' | 'cache' | 'origin_cache' | 'unknown';
+  createdAt: string;
+  updatedAt: string;
 }

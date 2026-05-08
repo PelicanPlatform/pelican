@@ -39,7 +39,7 @@ import (
 
 // TestInPlaceDefault tests that downloads use temporary files by default
 func TestInPlaceDefault(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "test file content for inplace default"
 	var tempFileSeen bool
@@ -94,21 +94,22 @@ func TestInPlaceDefault(t *testing.T) {
 		}
 	}()
 
-	// Give download time to start
-	time.Sleep(50 * time.Millisecond)
-
-	// Check for temporary file (should exist during download)
-	files, err := os.ReadDir(tempDir)
-	require.NoError(t, err)
-
-	for _, file := range files {
-		if strings.HasPrefix(file.Name(), ".testfile.txt.") {
-			tempFileSeen = true
-			// Verify temp file has expected format: .basename.XXXXXX
-			assert.Regexp(t, `^\.testfile\.txt\.[a-zA-Z0-9]{6}$`, file.Name())
-			break
+	// Wait for temp file to appear (replaces fixed sleep for reliability)
+	require.Eventually(t, func() bool {
+		files, readErr := os.ReadDir(tempDir)
+		if readErr != nil {
+			return false
 		}
-	}
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), ".testfile.txt.") {
+				tempFileSeen = true
+				// Verify temp file has expected format from os.CreateTemp: .basename.NNNNNNNNN
+				assert.Regexp(t, `^\.testfile\.txt\.\d+$`, file.Name())
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "Temporary file should appear during download")
 
 	// Wait for download to complete
 	err = <-doneChan
@@ -123,7 +124,7 @@ func TestInPlaceDefault(t *testing.T) {
 	assert.Equal(t, testContent, string(content))
 
 	// Verify temp file was cleaned up
-	files, err = os.ReadDir(tempDir)
+	files, err := os.ReadDir(tempDir)
 	require.NoError(t, err)
 	for _, file := range files {
 		assert.False(t, strings.HasPrefix(file.Name(), ".testfile.txt."),
@@ -133,7 +134,7 @@ func TestInPlaceDefault(t *testing.T) {
 
 // TestInPlaceFlag tests that --inplace flag bypasses temporary files
 func TestInPlaceFlag(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "test file content for inplace flag"
 
@@ -186,8 +187,11 @@ func TestInPlaceFlag(t *testing.T) {
 		}
 	}()
 
-	// Give download time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for inPlace download to start writing the final file directly
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(finalPath)
+		return statErr == nil
+	}, 5*time.Second, 10*time.Millisecond, "Final file should appear when inPlace=true")
 
 	// Check that NO temporary file exists
 	files, err := os.ReadDir(tempDir)
@@ -213,7 +217,7 @@ func TestInPlaceFlag(t *testing.T) {
 
 // TestTempFileCleanupOnFailure tests that temp files are cleaned up on download failure
 func TestTempFileCleanupOnFailure(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "partial content"
 
@@ -276,7 +280,7 @@ func TestTempFileCleanupOnFailure(t *testing.T) {
 // a file already exists, and the download fails, the file should NOT be deleted.
 // This is essential for sync operations - we don't want to lose existing data on transient failures.
 func TestInPlaceSyncPreservesFileOnFailure(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	oldContent := "original file content before sync"
 	partialContent := "partial"
@@ -337,7 +341,7 @@ func TestInPlaceSyncPreservesFileOnFailure(t *testing.T) {
 
 // TestDevNullSpecialCase tests that os.DevNull never uses temp files
 func TestDevNullSpecialCase(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "test content for dev null"
 
@@ -383,7 +387,7 @@ func TestDevNullSpecialCase(t *testing.T) {
 
 // TestContextCancellationCleanup tests that temp files are cleaned up on context cancellation
 func TestContextCancellationCleanup(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "test content that will be interrupted"
 
@@ -470,7 +474,7 @@ func TestContextCancellationCleanup(t *testing.T) {
 
 // TestExistingFileOverwrite tests that existing files are properly overwritten
 func TestExistingFileOverwrite(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	oldContent := "old content that should be replaced"
 	newContent := "new content from server"
@@ -523,7 +527,7 @@ func TestExistingFileOverwrite(t *testing.T) {
 
 // TestDirectoryDestination tests downloads to directory destinations
 func TestDirectoryDestination(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	testContent := "test content for directory destination"
 

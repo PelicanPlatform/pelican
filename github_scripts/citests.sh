@@ -67,7 +67,7 @@ export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_TLSSKIPVERIFY=true
 touch ${PELICAN_CONFIG}
 
-./pelican serve --config ${PELICAN_CONFIG} -d -f osg-htc.org --module localcache &
+./pelican-server serve --config ${PELICAN_CONFIG} -d -f osg-htc.org --module localcache &
 PELICAN_PID=$!
 
 cleanup() {

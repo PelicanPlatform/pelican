@@ -72,7 +72,7 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 
 	// Create token for authenticated operations
 	t.Log("setupTestEnvironment: Creating token")
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.IssuerKeysDirectory.Set(t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)

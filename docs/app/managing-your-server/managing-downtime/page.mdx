@@ -63,10 +63,10 @@ The Director will stop routing around that downtime on the next advertisement cy
 ## Method 2: CLI (`pelican downtime`)
 
 <Callout type="warning">
-The `pelican downtime` CLI commands interact directly with your server's admin API and require either local admin access or a valid admin token.
+The `pelican-server downtime` CLI commands interact directly with your server's admin API and require either local admin access or a valid admin token.
 </Callout>
 
-All `pelican downtime` subcommands accept the following persistent flags:
+All `pelican-server downtime` subcommands accept the following persistent flags:
 
 | Flag | Required | Description |
 |---|---|---|
@@ -77,10 +77,10 @@ All `pelican downtime` subcommands accept the following persistent flags:
 
 ```bash copy
 # Show active and future downtimes (default)
-pelican downtime list --server https://my-server.example.com:8444
+pelican-server downtime list --server https://my-server.example.com:8444
 
 # Show all downtimes including past ones
-pelican downtime list --server https://my-server.example.com:8444 --status all
+pelican-server downtime list --server https://my-server.example.com:8444 --status all
 ```
 
 ### Create a Downtime
@@ -88,7 +88,7 @@ pelican downtime list --server https://my-server.example.com:8444 --status all
 The `create` subcommand is **interactive** — it will prompt you for each field:
 
 ```bash copy
-pelican downtime create --server https://my-server.example.com:8444
+pelican-server downtime create --server https://my-server.example.com:8444
 ```
 
 Example session:
@@ -119,13 +119,13 @@ Downtime created successfully: ...
 The `update` subcommand is also interactive. Press **Enter** without typing anything to leave a field unchanged:
 
 ```bash copy
-pelican downtime update <uuid> --server https://my-server.example.com:8444
+pelican-server downtime update <uuid> --server https://my-server.example.com:8444
 ```
 
 ### Delete a Downtime
 
 ```bash copy
-pelican downtime delete <uuid> --server https://my-server.example.com:8444
+pelican-server downtime delete <uuid> --server https://my-server.example.com:8444
 ```
 
 ---

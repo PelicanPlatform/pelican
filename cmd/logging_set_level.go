@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -50,9 +52,9 @@ Valid log levels: debug, info, warn, error, fatal, panic
 Duration should be specified as a Go duration string (e.g., 5m, 1h30m, 300s)
 
 Examples:
-  pelican server set-logging-level debug 5m -s https://my-origin.com:8447
-	pelican server set-logging-level info 30m -s https://my-cache.com:8447 -t /path/to/token
-	pelican server set-logging-level debug 2m -s https://my-origin.com:8447 --param Logging.Origin.Xrootd`,
+  pelican-server server set-logging-level debug 5m -s https://my-origin.com:8447
+	pelican-server server set-logging-level info 30m -s https://my-cache.com:8447 -t /path/to/token
+	pelican-server server set-logging-level debug 2m -s https://my-origin.com:8447 --param Logging.Origin.Xrootd`,
 		Args: cobra.ExactArgs(2),
 		RunE: setLogLevel,
 	}

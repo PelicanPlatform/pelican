@@ -30,7 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/registry/registry_client"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -82,7 +82,7 @@ func updateNamespacesPubKey(ctx context.Context, prefixes []string) error {
 	if err != nil {
 		return err
 	}
-	if err = registry.NamespacesPubKeyUpdate(key, prefixes, siteName, url); err != nil {
+	if err = registry_client.NamespacesPubKeyUpdate(key, prefixes, siteName, url); err != nil {
 		return err
 	}
 	return nil

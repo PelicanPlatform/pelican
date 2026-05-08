@@ -901,7 +901,15 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 	dialer := &tls.Dialer{
 		Config: callbackTLSConfig,
 	}
-	conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
+	// Ensure dialHost has an explicit port. When the origin runs on the
+	// default HTTPS port (443), url.Parse leaves the port out of Host, but
+	// net.Dial requires "host:port" form.
+	dialHost := parsedURL.Host
+	if _, _, portErr := net.SplitHostPort(dialHost); portErr != nil {
+		// No port present — add the default HTTPS port.
+		dialHost = net.JoinHostPort(dialHost, "443")
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", dialHost)
 	if err != nil {
 		return errors.Wrap(err, "failed to establish TLS connection for callback")
 	}

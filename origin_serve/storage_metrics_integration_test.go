@@ -47,11 +47,11 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	fs := newAferoFileSystem(osRootFs, "", nil)
 
 	// Get initial metric values for backend="posixv2"
-	initialReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
-	initialWrites := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2"))
-	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
-	initialOpens := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2"))
-	initialMkdirs := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2"))
+	initialReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
+	initialWrites := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2", ""))
+	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", ""))
+	initialOpens := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2", ""))
+	initialMkdirs := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2", ""))
 
 	ctx := context.Background()
 
@@ -60,7 +60,7 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify mkdir metric incremented
-	mkdirCount := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2"))
+	mkdirCount := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, mkdirCount, initialMkdirs, "Mkdir metric should increment for backend=posixv2")
 
 	// Test 2: Stat operation
@@ -68,7 +68,7 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify stat metric incremented
-	statCount := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
+	statCount := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, statCount, initialStats, "Stat metric should increment for backend=posixv2")
 
 	// Test 3: File open/write operation
@@ -76,7 +76,7 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify open metric incremented
-	openCount := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2"))
+	openCount := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, openCount, initialOpens, "Open metric should increment for backend=posixv2")
 
 	// Write data
@@ -90,11 +90,11 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify write metric incremented
-	writeCount := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2"))
+	writeCount := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, writeCount, initialWrites, "Write metric should increment for backend=posixv2")
 
 	// Verify bytes written
-	bytesWritten := promtest.ToFloat64(metrics.StorageBytesWritten.WithLabelValues("posixv2"))
+	bytesWritten := promtest.ToFloat64(metrics.StorageBytesWritten.WithLabelValues("posixv2", ""))
 	assert.GreaterOrEqual(t, bytesWritten, float64(len(testData)), "Write bytes should be at least the data written")
 
 	// Test 4: File read operation
@@ -111,11 +111,11 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify read metric incremented
-	readCount := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
+	readCount := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, readCount, initialReads, "Read metric should increment for backend=posixv2")
 
 	// Verify bytes read
-	bytesRead := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
+	bytesRead := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", ""))
 	assert.GreaterOrEqual(t, bytesRead, float64(len(testData)), "Read bytes should be at least the data read")
 }
 
@@ -146,14 +146,14 @@ func TestPOSIXv2SlowOperationMetrics(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get initial slow operation count
-	initialSlowStats := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2"))
+	initialSlowStats := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2", ""))
 
 	// Perform a slow Stat operation (2.5s delay)
 	_, err = fs.Stat(ctx, "/test.txt")
 	require.NoError(t, err)
 
 	// Verify slow stat metric incremented
-	slowStatCount := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2"))
+	slowStatCount := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, slowStatCount, initialSlowStats, "Slow stat metric should increment for operations >2s with backend=posixv2")
 }
 
@@ -169,14 +169,14 @@ func TestPOSIXv2ErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	// Get initial stat count
-	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
+	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", ""))
 
 	// Try to stat a nonexistent file (should error)
 	_, err = fs.Stat(ctx, "/nonexistent-file-12345")
 	require.Error(t, err, "Should error for nonexistent file")
 
 	// Verify stat metric still incremented (operation attempted)
-	stats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
+	stats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, stats, initialStats, "Stat metric should increment even for errors for backend=posixv2")
 }
 
@@ -206,7 +206,7 @@ func TestPOSIXv2ActiveOperationMetrics(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get initial active read count
-	initialActiveReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	initialActiveReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2", ""))
 
 	// Start a read operation in a goroutine
 	// The flow will be: file.Read() -> metricsFile.metricsOnlyRead() -> Inc gauge -> mf.File.Read(p) -> slowFile.Read(p) -> block on channel
@@ -232,7 +232,7 @@ func TestPOSIXv2ActiveOperationMetrics(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify active reads incremented while operation is in progress
-	activeReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	activeReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2", ""))
 	assert.Greater(t, activeReads, initialActiveReads, "Active reads should increment while read operation is in progress for backend=posixv2")
 
 	// Signal the Read to proceed
@@ -246,7 +246,7 @@ func TestPOSIXv2ActiveOperationMetrics(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// After operation completes, active reads should be back to baseline
-	activeReadsAfter := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	activeReadsAfter := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2", ""))
 	assert.Equal(t, initialActiveReads, activeReadsAfter, "Active reads should return to baseline after operation completes for backend=posixv2")
 }
 
@@ -262,13 +262,13 @@ func TestPOSIXv2MetricLabels(t *testing.T) {
 	ctx := context.Background()
 
 	// Get initial metric values to establish baseline
-	initialReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
-	initialWrites := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2"))
-	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
-	initialOpens := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2"))
-	initialMkdirs := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2"))
-	initialUnlinks := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2"))
-	initialRenames := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2"))
+	initialReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
+	initialWrites := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2", ""))
+	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", ""))
+	initialOpens := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2", ""))
+	initialMkdirs := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2", ""))
+	initialUnlinks := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2", ""))
+	initialRenames := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2", ""))
 
 	// Perform various operations
 	err = fs.Mkdir(ctx, "/dir", 0755)
@@ -300,30 +300,30 @@ func TestPOSIXv2MetricLabels(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all metrics incremented with the correct backend="posixv2" label
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2")), initialReads,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", "")), initialReads,
 		"StorageReadsTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2")), initialWrites,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2", "")), initialWrites,
 		"StorageWritesTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2")), initialStats,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2", "")), initialStats,
 		"StorageStatsTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2")), initialOpens,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2", "")), initialOpens,
 		"StorageOpensTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2")), initialMkdirs,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2", "")), initialMkdirs,
 		"StorageMkdirsTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2")), initialUnlinks,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2", "")), initialUnlinks,
 		"StorageUnlinksTotal should increment for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2")), initialRenames,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2", "")), initialRenames,
 		"StorageRenamesTotal should increment for backend=posixv2")
 
 	// Verify byte counters also work
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2")), 0.0,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", "")), 0.0,
 		"StorageBytesRead should be >0 for backend=posixv2")
-	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesWritten.WithLabelValues("posixv2")), 0.0,
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesWritten.WithLabelValues("posixv2", "")), 0.0,
 		"StorageBytesWritten should be >0 for backend=posixv2")
 
 	// Verify gauge metrics exist and can be queried (they may be 0 at this point)
-	_ = promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
-	_ = promtest.ToFloat64(metrics.StorageActiveWrites.WithLabelValues("posixv2"))
+	_ = promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2", ""))
+	_ = promtest.ToFloat64(metrics.StorageActiveWrites.WithLabelValues("posixv2", ""))
 
 	t.Log("All metrics verified with correct backend=posixv2 label")
 }
@@ -345,14 +345,14 @@ func TestPOSIXv2RemoveMetrics(t *testing.T) {
 	file.Close()
 
 	// Get initial unlink count
-	initialUnlinks := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2"))
+	initialUnlinks := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2", ""))
 
 	// Remove the file
 	err = fs.RemoveAll(ctx, "/remove-me.txt")
 	require.NoError(t, err)
 
 	// Verify unlink metric incremented
-	unlinkCount := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2"))
+	unlinkCount := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, unlinkCount, initialUnlinks, "Unlink metric should increment for backend=posixv2")
 }
 
@@ -373,13 +373,13 @@ func TestPOSIXv2RenameMetrics(t *testing.T) {
 	file.Close()
 
 	// Get initial rename count
-	initialRenames := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2"))
+	initialRenames := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2", ""))
 
 	// Rename the file
 	err = fs.Rename(ctx, "/old-name.txt", "/new-name.txt")
 	require.NoError(t, err)
 
 	// Verify rename metric incremented
-	renameCount := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2"))
+	renameCount := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, renameCount, initialRenames, "Rename metric should increment for backend=posixv2")
 }

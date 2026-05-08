@@ -20,6 +20,9 @@ package client
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/url"
@@ -28,7 +31,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +46,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -76,8 +84,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 	}
 
 	t.Run("testNoPreferredServers", func(t *testing.T) {
-		oServers, err := generateSortedObjServers(dirResp, []*url.URL{})
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, []*url.URL{})
 		assert.NoError(t, err)
+		assert.Equal(t, 0, nPreferred)
 		require.Len(t, oServers, 3)
 		assert.Equal(t, "https://server1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://server2.com/foo", oServers[1].String())
@@ -88,7 +97,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 	t.Run("testPreferredCacheEmpty", func(t *testing.T) {
 		preferredUrl, _ := url.Parse("")
 		someEmptyUrlList := []*url.URL{preferredUrl}
-		_, err := generateSortedObjServers(dirResp, someEmptyUrlList)
+		_, _, err := generateSortedObjServers(dirResp, someEmptyUrlList)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "Preferred server was specified as an empty string")
 	})
@@ -99,8 +108,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 		}
-		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
 		require.Len(t, oServers, 2)
 		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
@@ -113,8 +123,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 			{Scheme: "", Host: "", Path: "+"},
 		}
-		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
 		require.Len(t, oServers, 5)
 		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
@@ -130,7 +141,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "", Host: "", Path: "+"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 		}
-		_, err := generateSortedObjServers(dirResp, preferredOServers)
+		_, _, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The special character '+' must be the last item in the list of preferred servers")
 	})
@@ -160,7 +171,7 @@ func TestGetToken(t *testing.T) {
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err := token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", tokenContents)
@@ -174,7 +185,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -187,7 +198,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -200,7 +211,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -213,7 +224,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -234,7 +245,7 @@ func TestGetToken(t *testing.T) {
 			Namespace: "/user/ligo/frames",
 		},
 	}
-	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -250,7 +261,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("renamed.handle1+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -266,7 +277,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle2+osdf"
 	assert.NoError(t, err)
-	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -282,7 +293,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle3+osdf"
 	assert.NoError(t, err)
-	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -298,7 +309,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenRead, false)
 	token.SetTokenName("renamed")
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
@@ -317,7 +328,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -325,7 +336,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Check that we haven't regressed on our error messages
-	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, false)
 	_, err = token.Get()
 	var pe *error_codes.PelicanError
 	require.ErrorAs(t, err, &pe)
@@ -414,7 +425,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 
 	// Unset the global discovery endpoint set by MockFederationRoot so that these
 	// tests can set it as needed
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), ""))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
 
 	oldHost, err := pelican_url.SetOsdfDiscoveryHost(discUrl.Host)
 	t.Cleanup(func() {
@@ -483,12 +494,12 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Set up global metadata if we have it. We do this because the function may
 			// fall back to configured discovery/director URLs if it can't find them in the URL
-			configOpts := map[string]any{"TLSSkipVerify": true}
+			configOpts := map[param.Param]any{param.TLSSkipVerify: true}
 			if test.discEP != "" {
-				configOpts[param.Federation_DiscoveryUrl.GetName()] = test.discEP
+				configOpts[param.Federation_DiscoveryUrl] = test.discEP
 			}
 			if test.dirEP != "" {
-				configOpts["Federation.DirectorUrl"] = test.dirEP
+				configOpts[param.Federation_DirectorUrl] = test.dirEP
 			}
 
 			test_utils.InitClient(t, configOpts)
@@ -503,4 +514,285 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			assertPelicanURLEqual(t, test.expected, pUrl)
 		})
 	}
+}
+
+// TestTokenIsAcceptable exercises the full scope-checking logic in tokenIsAcceptable,
+// including multi-operation requirements, SciToken-style scopes, and edge cases.
+func TestTokenIsAcceptable(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	issuerURL, err := url.Parse("https://issuer.example")
+	require.NoError(t, err)
+
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{
+			Namespace: "/ns",
+		},
+		XPelTokGenHdr: server_structs.XPelTokGen{
+			Issuers:   []*url.URL{issuerURL},
+			BasePaths: []string{"/ns"},
+		},
+	}
+
+	// Helper: generate a WLCG token with the given scopes.
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	jwkKey, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, jwkKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	makeWLCGToken := func(t *testing.T, scopes ...token_scopes.ResourceScope) string {
+		t.Helper()
+		tc, err := token.NewTokenConfig(token.WlcgProfile{})
+		require.NoError(t, err)
+		tc.Lifetime = time.Hour
+		tc.Issuer = "https://issuer.example"
+		tc.Subject = "test-user"
+		tc.AddAudienceAny()
+		tc.AddResourceScopes(scopes...)
+		tok, err := tc.CreateTokenWithKey(jwkKey)
+		require.NoError(t, err)
+		return string(tok)
+	}
+
+	makeSciToken := func(t *testing.T, scopes ...token_scopes.ResourceScope) string {
+		t.Helper()
+		tc, err := token.NewTokenConfig(token.Scitokens2Profile{})
+		require.NoError(t, err)
+		tc.Lifetime = time.Hour
+		tc.Issuer = "https://issuer.example"
+		tc.AddAudienceAny()
+		tc.AddResourceScopes(scopes...)
+		tok, err := tc.CreateTokenWithKey(jwkKey)
+		require.NoError(t, err)
+		return string(tok)
+	}
+
+	// --- Single-operation tests ---
+
+	t.Run("read-only-with-storage.read", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	t.Run("read-only-missing-scope", func(t *testing.T) {
+		// Token has storage.create but not storage.read
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	t.Run("write-only-with-storage.create", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	t.Run("write-only-with-storage.modify", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	t.Run("delete-with-storage.modify", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenDelete}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	t.Run("delete-with-storage.create-rejected", func(t *testing.T) {
+		// storage.create does not satisfy delete
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenDelete}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts))
+	})
+
+	// --- Multi-operation tests (the class of bug being fixed) ---
+
+	t.Run("read+write-needs-both-scopes", func(t *testing.T) {
+		// Token has only storage.create — should fail because storage.read is missing
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"))
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"token with only storage.create should not satisfy read+write")
+	})
+
+	t.Run("read+write-with-only-read-rejected", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"))
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"token with only storage.read should not satisfy read+write")
+	})
+
+	t.Run("read+write-with-both-scopes-accepted", func(t *testing.T) {
+		tok := makeWLCGToken(t,
+			token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+			token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"),
+		)
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"token with storage.read + storage.create should satisfy read+write")
+	})
+
+	t.Run("read+list+write-accepted", func(t *testing.T) {
+		tok := makeWLCGToken(t,
+			token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+			token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, "/"),
+		)
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenList)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"TokenList maps to storage.read, which is already present")
+	})
+
+	// --- SciToken-style scopes ---
+
+	t.Run("scitoken-read-scope-for-read-op", func(t *testing.T) {
+		// SciTokens use "read:/path" instead of "storage.read:/path"
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken 'read' scope should satisfy TokenRead")
+	})
+
+	t.Run("scitoken-write-scope-for-write-op", func(t *testing.T) {
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken 'write' scope should satisfy TokenWrite")
+	})
+
+	t.Run("scitoken-write-scope-for-delete-op", func(t *testing.T) {
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenDelete}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken 'write' scope should satisfy TokenDelete")
+	})
+
+	t.Run("scitoken-read+write-for-multi-op", func(t *testing.T) {
+		tok := makeSciToken(t,
+			token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/"),
+			token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"),
+		)
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken read+write should satisfy read+write operations")
+	})
+
+	t.Run("scitoken-only-write-for-read+write-rejected", func(t *testing.T) {
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"))
+		var op config.TokenOperation
+		op.Set(config.TokenRead)
+		op.Set(config.TokenWrite)
+		opts := config.TokenGenerationOpts{Operation: op}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken with only 'write' should not satisfy read+write")
+	})
+
+	// --- Empty / missing scope edge cases ---
+
+	t.Run("no-scope-claim-rejected", func(t *testing.T) {
+		// Build a WLCG token with no scopes at all
+		tc, err := token.NewTokenConfig(token.WlcgProfile{})
+		require.NoError(t, err)
+		tc.Lifetime = time.Hour
+		tc.Issuer = "https://issuer.example"
+		tc.Subject = "test-user"
+		tc.AddAudienceAny()
+		// Do NOT add any scopes
+		tok, err := tc.CreateTokenWithKey(jwkKey)
+		require.NoError(t, err)
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.False(t, tokenIsAcceptable(string(tok), "/ns/data", dirResp, opts),
+			"token with no scope claim should be rejected")
+	})
+
+	// --- Path matching ---
+
+	t.Run("scope-path-mismatch-rejected", func(t *testing.T) {
+		// Token has storage.read:/other — doesn't match target /data
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/other"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"token scoped to /other should not match request for /data")
+	})
+
+	t.Run("scope-path-prefix-accepted", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/data"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data/subdir/file", dirResp, opts),
+			"token scoped to /data should match /data/subdir/file by prefix")
+	})
+
+	t.Run("shared-read-exact-match-required", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/data"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+		// /data/subdir doesn't exact-match /data for shared reads
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data/subdir", dirResp, opts),
+			"shared read should require exact scope path match")
+		// Exact match should work
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"shared read with exact scope path should be accepted")
+		// Mismatch should be rejected
+		assert.False(t, tokenIsAcceptable(tok, "/ns/other", dirResp, opts),
+			"shared read should reject non-matching path")
+	})
+
+	// --- Profile-aware scope matching ---
+
+	t.Run("wlcg-rejects-bare-read-scope", func(t *testing.T) {
+		// A WLCG token with scope "read:/" should be rejected;
+		// only "storage.read" is valid for WLCG.
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"WLCG token with bare 'read' scope should be rejected")
+	})
+
+	t.Run("wlcg-rejects-bare-write-scope", func(t *testing.T) {
+		// A WLCG token with scope "write:/" should be rejected;
+		// only "storage.modify"/"storage.create" are valid for WLCG.
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
+		assert.False(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"WLCG token with bare 'write' scope should be rejected")
+	})
+
+	t.Run("wlcg-accepts-storage.read", func(t *testing.T) {
+		tok := makeWLCGToken(t, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"WLCG token with storage.read should be accepted for read")
+	})
+
+	t.Run("scitoken-accepts-bare-read-scope", func(t *testing.T) {
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken with bare 'read' scope should be accepted for read")
+	})
+
+	t.Run("scitoken-accepts-bare-write-scope", func(t *testing.T) {
+		tok := makeSciToken(t, token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/"))
+		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
+		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
+			"SciToken with bare 'write' scope should be accepted for write")
+	})
 }

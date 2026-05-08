@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import { TextField, Button, Box, Alert, Stack } from '@mui/material';
-
-import { User, UserPatch, UserPost } from '@/types';
+import { UserPatch, UserPost, User } from '@/helpers/api';
 
 type CreateUserFormProps = {
   user?: undefined;

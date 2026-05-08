@@ -513,6 +513,16 @@ func GenerateCert() error {
 		return errors.Wrap(err, "failed to load TLS host certificate due to I/O error")
 	}
 
+	// If we reach here with tlsCertPrivateKeyExists == true, it means the TLS
+	// cert and key both exist but the CA cert file was not found (ErrNotExist).
+	// In this case, we don't need to generate a CA cert/key since the existing
+	// TLS credentials are sufficient. The CA is only needed to sign a new host
+	// certificate.
+	if tlsCertPrivateKeyExists {
+		log.Debug("TLS Certificate and its private key are present; skipping CA generation")
+		return nil
+	}
+
 	// In this case, no host certificate exists - we should generate our own.
 
 	if err := GenerateCACert(); err != nil {
@@ -521,13 +531,6 @@ func GenerateCert() error {
 	caCert, err := LoadCertificate(param.Server_TLSCACertificateFile.GetString())
 	if err != nil {
 		return err
-	}
-
-	// However, if only CA is missing but TLS cert and private key are present, we simply
-	// generate the CA and return
-	if tlsCertPrivateKeyExists {
-		log.Debug("TLS Certificate and its private key are present. Generated a CA and returns.")
-		return nil
 	}
 
 	tlsCertDir := filepath.Dir(tlsCert)

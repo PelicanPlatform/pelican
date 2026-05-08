@@ -37,7 +37,7 @@ import (
 // Configure XrootD directory for both self-based and director-based file transfer tests
 func ConfigureXrootdMonitoringDir() error {
 	pelicanMonitoringPath := filepath.Join(param.Origin_RunLocation.GetString(),
-		"export", "pelican", "monitoring")
+		"export", server_utils.MonitoringBaseNs)
 
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -69,7 +69,7 @@ func ConfigureXrootdMonitoringDir() error {
 // from diector-based/self tests. There could be dangling files due to
 // error in testing
 func LaunchOriginFileTestMaintenance(ctx context.Context) {
-	monitoringDir := filepath.Join(param.Origin_RunLocation.GetString(), "export", "pelican", "monitoring")
+	monitoringDir := filepath.Join(param.Origin_RunLocation.GetString(), "export", server_utils.MonitoringBaseNs)
 
 	server_utils.LaunchWatcherMaintenance(
 		ctx,

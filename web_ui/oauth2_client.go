@@ -628,7 +628,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	redirectLocation := "/"
-	if nextURL != "" {
+	if nextURL != "" && isSafeRedirectURL(nextURL) {
 		redirectLocation = nextURL
 	}
 

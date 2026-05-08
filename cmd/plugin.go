@@ -1,6 +1,8 @@
+//go:build client
+
 /***************************************************************
 *
-* Copyright (C) 2025, University of Nebraska-Lincoln
+* Copyright (C) 2026, University of Nebraska-Lincoln
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -75,7 +77,21 @@ const (
 	Retryable     = 11
 )
 
+func shouldRequestDirectorDecision() bool {
+	pct := param.Plugin_DirectorDecisionPercentage.GetInt()
+	if pct <= 0 {
+		return false
+	}
+	if pct >= 100 {
+		return true
+	}
+	// We use [0,100) so pct=1 means ~1% and pct=99 means ~99%.
+	return rand.Intn(100) < pct
+}
+
 func init() {
+	rootCmd.AddCommand(rootPluginCmd)
+
 	// Define the file transfer plugin command
 	xferCmd := &cobra.Command{
 		Use:                "transfer",
@@ -90,7 +106,7 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
-	if err := param.Set(param.Client_IsPlugin.GetName(), true); err != nil {
+	if err := param.Client_IsPlugin.Set(true); err != nil {
 		log.Warningln("Failed to set plugin mode:", err)
 	}
 
@@ -485,7 +501,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			urlCopy := *(pUrl.GetRawUrl())
 			jobCtx := context.Background()
-			if pct := param.Plugin_DirectorDecisionPercentage.GetInt(); pct > 0 && rand.Intn(100) < pct {
+			if shouldRequestDirectorDecision() {
 				jobCtx = client.WithDirectorDebug(jobCtx)
 			}
 			tj, err = tc.NewTransferJob(jobCtx, &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))

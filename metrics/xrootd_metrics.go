@@ -177,7 +177,7 @@ type (
 		SID  int64 // Provider identification
 	}
 
-	// Cache g-stream: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968526
+	// Cache g-stream: https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968524
 	CacheGS struct {
 		AccessCnt    uint32 `json:"access_cnt"`
 		AttachT      int64  `json:"attach_t"`
@@ -434,10 +434,10 @@ const (
 
 // Summary data types
 const (
-	LinkStat  SummaryStatType = "link"  // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653739
-	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
-	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
-	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
+	LinkStat  SummaryStatType = "link"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968503
+	SchedStat SummaryStatType = "sched" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968509
+	OssStat   SummaryStatType = "oss"   // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968505
+	CacheStat SummaryStatType = "cache" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968497
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
@@ -1115,7 +1115,10 @@ func computePrefix(inputPath string, monitorPaths []PathList) string {
 
 func GetSIDRest(info []byte) (xrdUserId XrdUserId, rest string, err error) {
 	log.Debugln("GetSIDRest inputs:", string(info))
-	infoSplit := strings.SplitN(string(info), "\n", 2)
+	// Trim trailing null bytes from the info before parsing; XRootD
+	// monitoring packets are null-terminated C strings.
+	infoStr := strings.TrimRight(string(info), "\x00")
+	infoSplit := strings.SplitN(infoStr, "\n", 2)
 	if len(infoSplit) == 1 {
 		err = errors.New("Unable to parse SID")
 		return
@@ -1186,17 +1189,17 @@ func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err err
 		}
 		switch keyVal[0] {
 		case "Uc":
-			var id int
-			id, err = strconv.Atoi(keyVal[1])
+			var id int64
+			id, err = strconv.ParseInt(keyVal[1], 10, 64)
 			if err != nil {
 				err = errors.Wrap(err, "Unable to parse user ID to integer")
 				return
 			}
-			if id < 0 || id > math.MaxUint32 {
+			if id > math.MaxInt32 || id < math.MinInt32 {
 				err = errors.Errorf("Provided ID, %d, is not a valid uint32", id)
 				return
 			}
-			userId.Id = uint32(id)
+			userId.Id = uint32(int32(id))
 			foundUc = true
 		case "s":
 			record.DN = keyVal[1]
@@ -2009,7 +2012,7 @@ func updateCounterWithUnified[T int | uint | float32 | float64](new T, old T, co
 	}
 	if incBy > 0 {
 		counter.Add(incBy)
-		unifiedCounter.WithLabelValues(BackendXRootD).Add(incBy)
+		unifiedCounter.WithLabelValues(BackendXRootD, "").Add(incBy)
 	}
 	return new
 }
@@ -2023,7 +2026,7 @@ func updateHistogramWithUnified(newTotalTime, oldTotalTime float64, newCount, ol
 		// Update both histograms for each operation that occurred
 		for i := 0; i < deltaCount; i++ {
 			histogram.Observe(avgLatency)
-			unifiedHistogram.WithLabelValues(BackendXRootD).Observe(avgLatency)
+			unifiedHistogram.WithLabelValues(BackendXRootD, "").Observe(avgLatency)
 		}
 	}
 }
@@ -2427,32 +2430,30 @@ func handleXrdcurlstatsPacket(stats []byte) error {
 
 		if strings.HasPrefix(key, "http_") {
 			parts := strings.SplitN(key, "_", 4)
-			if len(parts) == 3 { // http_VERB_field
+			if len(parts) == 3 { // http_VERB_field (e.g. http_HEAD_started)
 				verb, field := parts[1], parts[2]
 				switch field {
 				case "started":
 					XrdclHTTPRequests.WithLabelValues(verb, "", "started").Add(incBy)
-				case "error":
-					XrdclHTTPRequests.WithLabelValues(verb, "", "error").Add(incBy)
-				case "timeout":
-					XrdclHTTPRequests.WithLabelValues(verb, "", "timeout").Add(incBy)
-				case "preheaderduration":
-					XrdclHTTPRequestDuration.WithLabelValues(verb, "", "preheader").Add(incBy)
 				}
-			} else if len(parts) == 4 { // http_VERB_STATUS_field
+			} else if len(parts) == 4 { // http_VERB_STATUS_field (e.g. http_HEAD_200_finished, http_HEAD_preheader_duration)
 				verb, status, field := parts[1], parts[2], parts[3]
 				switch field {
 				case "duration":
 					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "duration").Add(incBy)
-				case "pauseduration":
+				case "pause_duration":
 					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "pause_duration").Add(incBy)
 				case "bytes":
 					XrdclHTTPBytes.WithLabelValues(verb, status).Add(incBy)
+				case "error":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "error").Add(incBy)
 				case "finished":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "finished").Add(incBy)
-				case "servertimeout":
+				case "timeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "timeout").Add(incBy)
+				case "server_timeout":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "server_timeout").Add(incBy)
-				case "clienttimeout":
+				case "client_timeout":
 					XrdclHTTPRequests.WithLabelValues(verb, status, "client_timeout").Add(incBy)
 				}
 			}

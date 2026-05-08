@@ -122,13 +122,13 @@ func TestMakeUnprivilegedXrootdLauncher_DisableClientX509(t *testing.T) {
 			})
 
 			runDir := t.TempDir()
-			require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), runDir))
-			require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), false))
-			require.NoError(t, param.Set(param.Cache_DisableClientX509.GetName(), tc.disableClientX509))
+			require.NoError(t, param.Cache_RunLocation.Set(runDir))
+			require.NoError(t, param.Server_DropPrivileges.Set(false))
+			require.NoError(t, param.Cache_DisableClientX509.Set(tc.disableClientX509))
 
 			if !tc.disableClientX509 && tc.certEKUs != nil {
 				certPath := writeCertWithEKUs(t, runDir, tc.certEKUs)
-				require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+				require.NoError(t, param.Server_TLSCertificateChain.Set(certPath))
 			}
 
 			launcher, err := makeUnprivilegedXrootdLauncher("xrootd", runDir, "/fake/xrootd.cfg", true)

@@ -32,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -64,9 +65,12 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Set the registry URL to the mock server.
-	require.NoError(t, param.Set("Federation.Registryurl", server.URL))
-	require.NoError(t, param.Set("Director.RegistryQueryInterval", "200ms"))
+	// Set up federation discovery with registry pointing to our mock server.
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
+		RegistryEndpoint: server.URL,
+	}, nil)
+
+	require.NoError(t, param.Director_RegistryQueryInterval.SetString("200ms"))
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()

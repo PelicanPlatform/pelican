@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -318,6 +320,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 }
 
 func init() {
+	rootCmd.AddCommand(rootConfigCmd)
 
 	// Define the config commands
 	addConfigSubcommands(rootConfigCmd)

@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net"
 	"net/http"
@@ -1190,4 +1191,56 @@ func TestHelperLogAtLevel(t *testing.T) {
 		assert.Contains(t, out, "daemon=ssh-helper")
 		assert.Contains(t, out, "level=info") // default level for unrecognized lines
 	})
+}
+
+// TestCallbackAndServeDefaultPort verifies that callbackAndServe correctly
+// handles callback URLs that omit the port (i.e., the origin runs on the
+// default HTTPS port 443).  Before the fix, url.Parse would return a Host
+// without a port, and the subsequent net.Dial would fail with
+// "missing port in address" instead of a connection-refused error.
+func TestCallbackAndServeDefaultPort(t *testing.T) {
+	// Build a minimal helper process with a self-signed cert pool.  We use
+	// httptest.NewTLSServer to obtain a real certificate, then extract the
+	// PEM chain from it to satisfy callbackAndServe's certificate parsing.
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This handler is never reached in this test — we only care that the
+		// dial does not fail with "missing port in address".
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer tlsServer.Close()
+
+	// Extract the PEM-encoded certificate chain from the test TLS server.
+	var certPEM strings.Builder
+	for _, certDER := range tlsServer.TLS.Certificates[0].Certificate {
+		if err := pem.Encode(&certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+			t.Fatalf("failed to encode certificate: %v", err)
+		}
+	}
+
+	helper := &HelperProcess{
+		config: &HelperConfig{
+			AuthCookie:       "test-cookie",
+			CertificateChain: certPEM.String(),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client := tlsServer.Client()
+
+	// Construct a URL that points to 127.0.0.1 without an explicit port,
+	// mimicking an origin running on the default HTTPS port (443).
+	tcpAddr, ok := tlsServer.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected TCP address from test server listener")
+	noPortURL := "https://" + tcpAddr.IP.String() + "/api/v1.0/origin/ssh/callback"
+
+	// Before the fix this would error with "missing port in address".
+	// After the fix the error must NOT contain "missing port in address";
+	// it will instead be a connection-refused or TLS error because nothing
+	// actually listens on port 443 in the test environment.
+	err := helper.callbackAndServe(ctx, client, noPortURL, "req-id-test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	require.Error(t, err, "expected an error since nothing listens on port 443")
+	assert.NotContains(t, err.Error(), "missing port in address",
+		"error should not be 'missing port in address' after the fix")
 }

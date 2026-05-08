@@ -27,7 +27,7 @@ $ pelican object get /test/query1 ./
 To launch a Pelican origin, run the following:
 
 ```
-pelican origin serve -f https://director.example.com -v /tmp/stash/:/test
+pelican-server origin serve -f https://director.example.com -v /tmp/stash/:/test
 ```
 
 ## Running an OSDF origin or client
@@ -59,7 +59,8 @@ and it shares the same defaults and behavior as stashcp.
 Building is performed with the [goreleaser](https://goreleaser.com/) tool. To build a snapshot (not release):
 
 ```
-$ goreleaser --clean --snapshot
+$ make goreleaser-config
+$ goreleaser --clean --snapshot --config .goreleaser.generated.yml
 ```
 
 The binaries will be located in `./dist` directory.

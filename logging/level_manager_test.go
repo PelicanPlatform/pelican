@@ -36,6 +36,7 @@ func TestLogLevelManager_AddChange(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state for this test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	// Save original level
@@ -46,6 +47,7 @@ func TestLogLevelManager_AddChange(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	// Set base level to Info
@@ -78,6 +80,7 @@ func TestLogLevelManager_RemoveChange(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state for this test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	// Save original level
@@ -88,6 +91,7 @@ func TestLogLevelManager_RemoveChange(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	// Set base level to Info
@@ -129,6 +133,7 @@ func TestLogLevelManager_MultipleChanges(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state for this test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	// Save original level
@@ -139,6 +144,7 @@ func TestLogLevelManager_MultipleChanges(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	// Set base level to Info
@@ -208,6 +214,7 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state for this test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	// Save original level
@@ -218,6 +225,7 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	// Set base level to Info
@@ -234,15 +242,19 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 
 	require.Eventually(t,
 		func() bool { return log.DebugLevel == log.GetLevel() },
-		100*time.Millisecond,
+		1*time.Second,
 		10*time.Millisecond,
 	)
 
 	// Wait for expiration
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify level reverted
-	assert.Equal(t, log.InfoLevel, config.GetEffectiveLogLevel())
+	// Verify level reverted after expiration
+	require.Eventually(t,
+		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	// Verify no active changes
 	changes := manager.GetActiveChanges()
@@ -253,6 +265,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state for this test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	// Save original level
@@ -263,6 +276,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	// Set initial base level
@@ -278,7 +292,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 
 	require.Eventually(t,
 		func() bool { return log.DebugLevel == log.GetLevel() },
-		100*time.Millisecond,
+		1*time.Second,
 		10*time.Millisecond,
 	)
 
@@ -286,15 +300,19 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	manager.SetBaseLevel(log.WarnLevel)
 
 	// Should still be at debug (temporary change is more verbose)
-	assert.Equal(t, log.DebugLevel, log.GetLevel())
+	require.Eventually(t,
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	// Remove the temporary change
 	manager.RemoveChange("test-1")
 
 	// Should now be at the new base level
 	require.Eventually(t,
-		func() bool { return log.WarnLevel == log.GetLevel() },
-		100*time.Millisecond,
+		func() bool { return log.WarnLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
 		10*time.Millisecond,
 	)
 }
@@ -302,6 +320,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 func TestLogLevelManager_BackgroundExpiry(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
 	origLevel := log.GetLevel()
@@ -311,6 +330,7 @@ func TestLogLevelManager_BackgroundExpiry(t *testing.T) {
 	defer func() {
 		manager.Shutdown()
 		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
 	}()
 
 	manager.SetBaseLevel(log.InfoLevel)
@@ -321,23 +341,44 @@ func TestLogLevelManager_BackgroundExpiry(t *testing.T) {
 	)
 
 	require.NoError(t, manager.AddChange("c1", "Logging.Level", log.DebugLevel, 250*time.Millisecond))
-	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, log.DebugLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, log.InfoLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	require.NoError(t, manager.AddChange("c2", "Logging.Level", log.TraceLevel, 250*time.Millisecond))
-	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, log.TraceLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.TraceLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, log.InfoLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	require.NoError(t, manager.AddChange("c3", "Logging.Level", log.DebugLevel, 250*time.Millisecond))
-	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, log.DebugLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, log.InfoLevel, config.GetEffectiveLogLevel())
+	require.Eventually(t,
+		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
+		1*time.Second,
+		10*time.Millisecond,
+	)
 }

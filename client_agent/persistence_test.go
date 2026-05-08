@@ -26,9 +26,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent/store"
 	"github.com/pelicanplatform/pelican/client_agent/types"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // setupTestStore creates a temporary database for testing
@@ -159,15 +161,15 @@ func TestJobRecovery(t *testing.T) {
 	// Reopen the store and create a new transfer manager (simulating restart)
 	testStore, err = store.NewStore(dbPath)
 	require.NoError(t, err, "Failed to reopen store")
-	defer testStore.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	tm := NewTransferManager(ctx, 5, testStore)
-	defer func() {
-		_ = tm.Shutdown()
-	}()
+	t.Cleanup(func() {
+		cancel()          // signal goroutines to stop
+		_ = tm.Shutdown() // wait for them to finish
+		testStore.Close() // close DB cleanly after goroutines exit
+	})
 
 	// Poll for recovery to complete (up to 2 seconds)
 	// The job should be recreated with the same ID but incremented retry count
@@ -409,12 +411,17 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 // TestInMemoryMode verifies that TransferManager works without a store
 func TestInMemoryMode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	// Create errgroup and pass via context so we can wait for goroutines
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	ctx = context.WithValue(egrpCtx, config.EgrpKey, egrp)
 
 	// Create transfer manager without a store
 	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
+		cancel()
 		_ = tm.Shutdown()
+		_ = egrp.Wait()
 	}()
 
 	// Create a job
@@ -435,7 +442,9 @@ func TestInMemoryMode(t *testing.T) {
 	retrievedJob, err := tm.GetJob(job.ID)
 	require.NoError(t, err)
 	assert.Equal(t, job.ID, retrievedJob.ID)
-	assert.Equal(t, StatusPending, retrievedJob.Status)
+	// Job may already be running by the time we check (goroutine executes immediately)
+	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, retrievedJob.Status,
+		"Job status should be pending, running, or failed (transfer will fail without real federation)")
 
 	// With nil store, jobs remain in memory only - no database operations
 }
@@ -499,6 +508,10 @@ func TestConcurrentJobPersistence(t *testing.T) {
 	defer testStore.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Create errgroup and pass via context so we can wait for goroutines
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	ctx = context.WithValue(egrpCtx, config.EgrpKey, egrp)
 
 	tm := NewTransferManager(ctx, 10, testStore)
 
@@ -568,6 +581,8 @@ func TestConcurrentJobPersistence(t *testing.T) {
 	// Cancel context before shutdown to force jobs to stop
 	cancel()
 	_ = tm.Shutdown()
+	// Wait for all goroutines to finish before closing the store
+	_ = egrp.Wait()
 }
 
 // TestDeleteJobHistory verifies individual job deletion from history

@@ -480,6 +480,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 // The rest of the AdminMetadata fields is matched by `==`
 func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefixType, legacy bool) ([]server_structs.Registration, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM registrations WHERE 1=1 `
+	queryArgs := []interface{}{}
 	if pType == prefixForCache {
 		// Refer to the cache prefix name in cmd/cache_serve
 		query += ` AND prefix LIKE '/caches/%'`
@@ -504,7 +505,8 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 		return nil, errors.New("Unsupported operation: Can't filter against Pubkey field.")
 	}
 	if filterNs.Prefix != "" {
-		query += fmt.Sprintf(" AND prefix like '%%%s%%' ", filterNs.Prefix)
+		query += " AND prefix like ? "
+		queryArgs = append(queryArgs, "%"+filterNs.Prefix+"%")
 	}
 	if !filterNs.AdminMetadata.ApprovedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.UpdatedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.CreatedAt.Equal(time.Time{}) {
 		return nil, errors.New("Unsupported operation: Can't filter against date.")
@@ -513,7 +515,7 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 	query += " ORDER BY id ASC"
 
 	registrationsIn := []server_structs.Registration{}
-	if err := database.ServerDatabase.Raw(query).Scan(&registrationsIn).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query, queryArgs...).Scan(&registrationsIn).Error; err != nil {
 		return nil, err
 	}
 
@@ -828,6 +830,10 @@ func deleteRegistrationByID(id int) error {
 				if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
 					return err
 				}
+				// Delete all downtimes associated with this server (no FK constraint, so must be done explicitly)
+				if err := tx.Where("server_id = ?", svc.ServerID).Delete(&server_structs.Downtime{}).Error; err != nil {
+					return errors.Wrapf(err, "failed to delete downtimes for server %s", svc.ServerID)
+				}
 			} else {
 				// Update server flags to reflect remaining service types
 				var hasOrigin, hasCache bool
@@ -867,26 +873,30 @@ func deleteServerByID(id string) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
-		serverRegistration, err := getServerByID(id)
-		if err != nil {
-			return errors.Wrap(err, "failed to get server by ID")
+		// Look up registration IDs for this server inside the transaction to avoid
+		// a race where a registration is added after we read but before we delete.
+		var registrationIDs []int
+		if err := tx.Model(&server_structs.Service{}).Where("server_id = ?", id).Pluck("registration_id", &registrationIDs).Error; err != nil {
+			return errors.Wrapf(err, "failed to get registration IDs for server %s", id)
 		}
+
 		// Because of the foreign key constraints applied on the DB,
-		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically
-		err = tx.Delete(&server_structs.Server{}, id).Error
-		if err != nil {
+		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically.
+		if err := tx.Where("id = ?", id).Delete(&server_structs.Server{}).Error; err != nil {
 			return errors.Wrap(err, "failed to delete server")
 		}
 		// Delete all registrations corresponding to the server separately
-		for _, registration := range serverRegistration.Registration {
-			err = tx.Delete(&server_structs.Registration{}, registration.ID).Error
-			if err != nil {
-				return errors.Wrapf(err, "failed to delete the registration corresponding to the server: %s", registration.Prefix)
+		if len(registrationIDs) > 0 {
+			if err := tx.Delete(&server_structs.Registration{}, registrationIDs).Error; err != nil {
+				return errors.Wrapf(err, "failed to delete registrations for server %s", id)
 			}
+		}
+		// Delete all downtimes associated with this server
+		if err := tx.Where("server_id = ?", id).Delete(&server_structs.Downtime{}).Error; err != nil {
+			return errors.Wrapf(err, "failed to delete downtimes for server %s", id)
 		}
 		return nil
 	})
-
 }
 
 func getAllRegistrations() ([]*server_structs.Registration, error) {

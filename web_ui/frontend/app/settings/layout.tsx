@@ -24,7 +24,10 @@ import SubNavigation from '@/app/settings/components/SubNavigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export const metadata = {
-  title: 'Settings',
+  title: {
+    template: '%s | Settings',
+    default: 'Settings',
+  },
   description: 'Server Settings',
 };
 
@@ -38,6 +41,7 @@ export default function RootLayout({
       <Main>
         <AuthenticatedContent
           redirect
+          trustThenValidate
           allowedRoles={['admin']}
           boxProps={{ width: '100%' }}
         >
@@ -49,8 +53,9 @@ export default function RootLayout({
               <Grid
                 size={{
                   xs: 12,
-                  md: 8,
-                  lg: 6,
+                  md: 12,
+                  lg: 10,
+                  xl: 8,
                 }}
               >
                 <Box width={'100%'}>{children}</Box>

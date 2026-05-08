@@ -17,10 +17,10 @@ The content in this section is outdated and describes use of a deprecated comman
 For modern guidelines describing token generation, see "[Getting Data with Pelican/Working with Protected Data](../../getting-data-with-pelican/auth)".
 </Callout>
 
-The Pelican binary comes with a command `pelican origin token create` to generate the token. To generate a valid token, this command **MUST** be run on the same server where the Pelican Origin hosting the target object runs. On the Origin server, run:
+The Pelican binary comes with a command `pelican-server origin token create` to generate the token. To generate a valid token, this command **MUST** be run on the same server where the Pelican Origin hosting the target object runs. On the Origin server, run:
 
 ```bash copy
-pelican origin token create \
+pelican-server origin token create \
     --scope "storage.read:/" \
     --issuer https://localhost:8444 \
     --claim "wlcg.ver=1.0" \

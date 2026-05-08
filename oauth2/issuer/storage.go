@@ -133,18 +133,18 @@ func (s *OIDCStorage) CreateClient(ctx context.Context, client *fosite.DefaultCl
 
 	record := OIDCClientRecord{
 		ID:            client.ID,
+		Namespace:     s.Namespace,
 		ClientSecret:  string(client.Secret),
 		RedirectURIs:  string(redirectURIs),
 		GrantTypes:    string(grantTypes),
 		ResponseTypes: string(responseTypes),
 		Scopes:        string(scopes),
 		Public:        client.Public,
-		Namespace:     s.Namespace,
 	}
 
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		UpdateAll: true,
-	}).Create(&record).Error
+	// Client creation should fail on duplicate (id, namespace) so operators
+	// must explicitly delete-and-recreate instead of silently overwriting.
+	return s.db.WithContext(ctx).Create(&record).Error
 }
 
 // CreateDynamicClient stores a new dynamically registered OAuth2 client.
@@ -160,6 +160,7 @@ func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.De
 
 	record := OIDCClientRecord{
 		ID:                      client.ID,
+		Namespace:               s.Namespace,
 		ClientSecret:            string(client.Secret),
 		RedirectURIs:            string(redirectURIs),
 		GrantTypes:              string(grantTypes),
@@ -170,7 +171,6 @@ func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.De
 		RegistrationIP:          registrationIP,
 		RegistrationAccessToken: string(hashedRAT),
 		ClientName:              clientName,
-		Namespace:               s.Namespace,
 	}
 
 	return s.db.WithContext(ctx).Create(&record).Error
@@ -272,7 +272,7 @@ func (s *OIDCStorage) BindClientToUser(ctx context.Context, clientID, user strin
 		}
 
 		// Unbound — bind now.
-		return tx.Model(&OIDCClientRecord{}).Where("id = ?", clientID).Update("bound_user", user).Error
+		return tx.Model(&OIDCClientRecord{}).Where("id = ? AND namespace = ?", clientID, s.Namespace).Update("bound_user", user).Error
 	})
 }
 
@@ -536,12 +536,16 @@ func (s *OIDCStorage) DeleteRefreshTokenSession(ctx context.Context, signature s
 }
 
 // RotateRefreshToken is called when a refresh token is being rotated.
-// It marks the old token with first_used_at for grace period tracking rather
-// than immediately revoking it, allowing brief reuse during network issues.
+// It marks the specific token inactive and sets first_used_at for grace-period
+// tracking; getRefreshTokenSession may still allow brief reuse while within
+// the configured grace window.
 func (s *OIDCStorage) RotateRefreshToken(ctx context.Context, requestID string, refreshTokenSignature string) error {
 	return s.db.WithContext(ctx).Model(&OIDCRefreshToken{}).
-		Where("request_id = ? AND active = ?", requestID, true).
-		Update("first_used_at", gorm.Expr("COALESCE(first_used_at, ?)", time.Now().UTC())).Error
+		Where("signature = ? AND namespace = ? AND active = ?", refreshTokenSignature, s.Namespace, true).
+		Updates(map[string]interface{}{
+			"first_used_at": gorm.Expr("COALESCE(first_used_at, ?)", time.Now().UTC()),
+			"active":        false,
+		}).Error
 }
 
 // ---- fosite.AuthorizeCodeStorage ----
@@ -556,7 +560,7 @@ func (s *OIDCStorage) GetAuthorizeCodeSession(ctx context.Context, signature str
 
 func (s *OIDCStorage) InvalidateAuthorizeCodeSession(ctx context.Context, signature string) error {
 	return s.db.WithContext(ctx).Table("oidc_authorization_codes").
-		Where("signature = ?", signature).
+		Where("signature = ? AND namespace = ?", signature, s.Namespace).
 		Update("active", false).Error
 }
 
@@ -592,20 +596,20 @@ func (s *OIDCStorage) DeleteOpenIDConnectSession(ctx context.Context, signature 
 
 func (s *OIDCStorage) RevokeRefreshToken(ctx context.Context, requestID string) error {
 	return s.db.WithContext(ctx).Model(&OIDCRefreshToken{}).
-		Where("request_id = ?", requestID).
+		Where("request_id = ? AND namespace = ?", requestID, s.Namespace).
 		Update("active", false).Error
 }
 
 func (s *OIDCStorage) RevokeAccessToken(ctx context.Context, requestID string) error {
 	return s.db.WithContext(ctx).Table("oidc_access_tokens").
-		Where("request_id = ?", requestID).
+		Where("request_id = ? AND namespace = ?", requestID, s.Namespace).
 		Update("active", false).Error
 }
 
-func (s *OIDCStorage) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, _ string) error {
-	// Delegate to RotateRefreshToken which implements the same grace-period
-	// logic (set first_used_at instead of immediately revoking).
-	return s.RotateRefreshToken(ctx, requestID, "")
+func (s *OIDCStorage) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, refreshTokenSignature string) error {
+	// Mark only the specific token being rotated (by signature) rather than
+	// all tokens for the request_id, preventing chain poisoning.
+	return s.RotateRefreshToken(ctx, requestID, refreshTokenSignature)
 }
 
 // ---- fosite.ClientAssertionJWTValid / SetClientAssertionJWT ----
@@ -830,7 +834,7 @@ func (s *OIDCStorage) getTokenSession(ctx context.Context, table, signature stri
 	}
 
 	var record OIDCTokenSession
-	if err := s.db.WithContext(ctx).Table(table).First(&record, "signature = ?", signature).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(table).First(&record, "signature = ? AND namespace = ?", signature, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -850,7 +854,7 @@ func (s *OIDCStorage) getTokenSession(ctx context.Context, table, signature stri
 // for refresh token reuse.
 func (s *OIDCStorage) getRefreshTokenSession(ctx context.Context, signature string, session fosite.Session) (fosite.Requester, error) {
 	var record OIDCRefreshToken
-	if err := s.db.WithContext(ctx).First(&record, "signature = ?", signature).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&record, "signature = ? AND namespace = ?", signature, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -867,17 +871,19 @@ func (s *OIDCStorage) getRefreshTokenSession(ctx context.Context, signature stri
 		return nil, err
 	}
 
+	// Grace period logic: when a token has been rotated (active=false),
+	// allow reuse within the grace period so that a client can retry after
+	// a transient failure (e.g. the response carrying the new token was
+	// lost). Outside the grace period, the token is definitively inactive.
 	if !record.Active {
+		if record.FirstUsedAt != nil && time.Since(*record.FirstUsedAt) <= s.RefreshTokenGracePeriod {
+			// Within grace period — allow reuse.
+			return req, nil
+		}
 		return req, fosite.ErrInactiveToken
 	}
 
-	// If the token has been used before, check the grace period
-	if record.FirstUsedAt != nil {
-		if time.Since(*record.FirstUsedAt) > s.RefreshTokenGracePeriod {
-			return req, fosite.ErrInactiveToken
-		}
-	}
-
+	// Active token that has never been used — fully valid.
 	return req, nil
 }
 
@@ -885,7 +891,7 @@ func (s *OIDCStorage) deleteTokenSession(ctx context.Context, table, signature s
 	if !validTableNames[table] {
 		return fmt.Errorf("invalid table name: %s", table)
 	}
-	return s.db.WithContext(ctx).Table(table).Where("signature = ?", signature).Delete(&OIDCTokenSession{}).Error
+	return s.db.WithContext(ctx).Table(table).Where("signature = ? AND namespace = ?", signature, s.Namespace).Delete(&OIDCTokenSession{}).Error
 }
 
 func (s *OIDCStorage) scanToRequest(ctx context.Context,

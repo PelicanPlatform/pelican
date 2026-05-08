@@ -40,7 +40,7 @@ jobs:
       # because pre-commit (below) isn't configured to run them within the
       # CI actions.
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9.0
           args: --config=.golangci.yaml

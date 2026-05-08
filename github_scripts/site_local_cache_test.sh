@@ -177,7 +177,12 @@ cleanup() {
 
 # Check if pelican executable exists
 if [ ! -f ./pelican ]; then
-  echo "Pelican executable does not exist in PWD. Exiting.."
+  echo "Pelican client executable does not exist in PWD. Exiting.."
+  exit 1
+fi
+
+if [ ! -f ./pelican-server ]; then
+  echo "Pelican server executable does not exist in PWD. Exiting.."
   exit 1
 fi
 
@@ -188,7 +193,7 @@ echo "This is test content for site-local cache testing" > "$FED_ORIGIN_DIR/test
 
 # Run federation in the background (director + registry + origin + cache)
 echo "Starting federation with director, registry, origin, and cache..."
-./pelican serve --module director --module registry --module origin --module cache -d &
+./pelican-server serve --module director --module registry --module origin --module cache -d &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
@@ -295,7 +300,7 @@ OIDC:
 EOF
 
 # Start the site-local cache
-PELICAN_RUNTIMEDIR="$SITE_LOCAL_RUNTIME_DIR" ./pelican cache serve --config "$SITE_LOCAL_CONFIG_PATH" -d &
+PELICAN_RUNTIMEDIR="$SITE_LOCAL_RUNTIME_DIR" ./pelican-server cache serve --config "$SITE_LOCAL_CONFIG_PATH" -d &
 pid_siteLocalCache=$!
 
 # Update trap to include site-local cache PID

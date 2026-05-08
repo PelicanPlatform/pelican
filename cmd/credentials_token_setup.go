@@ -1,3 +1,5 @@
+//go:build client || server
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research

@@ -32,6 +32,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // encrypt should be ecdsa|rsa
@@ -335,5 +337,82 @@ func TestSymlinkIssuerKeys(t *testing.T) {
 		allKeys := getIssuerPrivateKeysCopy()
 		assert.Len(t, allKeys, 1)
 		assert.Contains(t, allKeys, key.KeyID())
+	})
+}
+
+func TestGenerateCertNoSpuriousCAKey(t *testing.T) {
+	// Helper: use GenerateCert to produce a full cert chain (CA + TLS cert/key),
+	// then return the paths used. Caller can remove the CA files before re-invoking.
+	setupCertChain := func(t *testing.T, tmpDir string) (caCertPath, caKeyPath string) {
+		t.Helper()
+
+		certPath := filepath.Join(tmpDir, "tls.crt")
+		keyPath := filepath.Join(tmpDir, "tls.key")
+		caCertPath = filepath.Join(tmpDir, "tlsca.pem")
+		caKeyPath = filepath.Join(tmpDir, "tlscakey.pem")
+
+		require.NoError(t, param.Server_TLSCertificateChain.Set(certPath))
+		require.NoError(t, param.Server_TLSKey.Set(keyPath))
+		require.NoError(t, param.Server_TLSCACertificateFile.Set(caCertPath))
+		require.NoError(t, param.Server_TLSCAKey.Set(caKeyPath))
+		require.NoError(t, param.Server_Hostname.Set("localhost"))
+
+		// Generate a full cert chain (CA cert, CA key, TLS cert, TLS key)
+		require.NoError(t, GenerateCert())
+
+		// Sanity-check that all four files were created
+		for _, p := range []string{certPath, keyPath, caCertPath, caKeyPath} {
+			_, err := os.Stat(p)
+			require.NoError(t, err, "expected %s to exist after initial GenerateCert", p)
+		}
+
+		return caCertPath, caKeyPath
+	}
+
+	t.Run("no-ca-key-when-tls-cert-key-present", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		caCertPath, caKeyPath := setupCertChain(t, tmpDir)
+
+		// Remove the CA cert and key, simulating an environment where the
+		// admin provided their own TLS cert+key without a CA.
+		require.NoError(t, os.Remove(caCertPath))
+		require.NoError(t, os.Remove(caKeyPath))
+
+		// GenerateCert should succeed without re-creating the CA files
+		err := GenerateCert()
+		require.NoError(t, err)
+
+		// Verify that the CA key was NOT re-created
+		_, err = os.Stat(caKeyPath)
+		assert.True(t, os.IsNotExist(err), "CA key file should not have been created when TLS cert+key exist")
+
+		// Verify that the CA cert was NOT re-created
+		_, err = os.Stat(caCertPath)
+		assert.True(t, os.IsNotExist(err), "CA cert file should not have been created when TLS cert+key exist")
+	})
+
+	t.Run("no-ca-key-when-tls-cert-key-present-readonly-dir", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		caCertPath, caKeyPath := setupCertChain(t, tmpDir)
+
+		// Remove the CA files and make the directory read-only to simulate
+		// the scenario from the issue report.
+		require.NoError(t, os.Remove(caCertPath))
+		require.NoError(t, os.Remove(caKeyPath))
+		require.NoError(t, os.Chmod(tmpDir, 0555))
+		t.Cleanup(func() {
+			_ = os.Chmod(tmpDir, 0755)
+		})
+
+		// GenerateCert should succeed even with a read-only directory
+		// because it should not attempt to write any CA files
+		err := GenerateCert()
+		require.NoError(t, err, "GenerateCert should succeed with read-only dir when TLS cert+key exist")
 	})
 }

@@ -1,8 +1,8 @@
-//go:build !windows
+//go:build server && !windows
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -45,9 +45,9 @@ func TestResetPassword(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	test_utils.MockFederationRoot(t, nil, nil)
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 8444))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_WebPort.Set(8444))
+	require.NoError(t, param.Origin_Port.Set(8443))
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

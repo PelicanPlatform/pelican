@@ -129,10 +129,10 @@ func TestSharingUrl(t *testing.T) {
 	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "password")
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName():           "debug",
-		param.TLSSkipVerify.GetName():           true,
-		param.Federation_DiscoveryUrl.GetName(): server.URL,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level:           "debug",
+		param.TLSSkipVerify:           true,
+		param.Federation_DiscoveryUrl: server.URL,
 	})
 
 	// Call QueryDirector with the test server URL and a source path

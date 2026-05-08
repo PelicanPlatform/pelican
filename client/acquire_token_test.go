@@ -198,11 +198,11 @@ func TestMatchesResource(t *testing.T) {
 			expected:       true,
 		},
 		{
-			name:           "shared write prefix match still works",
+			name:           "shared write prefix match rejected",
 			targetResource: "/foo/bar/baz",
 			scopeResource:  "/foo/bar",
 			operation:      config.TokenSharedWrite,
-			expected:       true,
+			expected:       false,
 		},
 		// Write operation
 		{
@@ -825,9 +825,9 @@ func TestTokenIsAcceptableForSciTokens(t *testing.T) {
 		require.NoError(t, err)
 		sciTok := string(sciTokBytes)
 
-		// Resource "/foo/bar/baz" is inside namespace and matches scope
-		accepted := tokenIsAcceptable(sciTok, "/foo/bar/baz", dirResp, opts)
-		assert.True(t, accepted, "expected SciToken to be acceptable for /foo/bar/baz")
+		// Resource "/foo/bar" matches namespace "/foo" and scope "/bar" exactly
+		accepted := tokenIsAcceptable(sciTok, "/foo/bar", dirResp, opts)
+		assert.True(t, accepted, "expected SciToken to be acceptable for /foo/bar")
 	})
 
 	t.Run("SciToken rejected for resource outside namespace", func(t *testing.T) {
@@ -957,7 +957,7 @@ func TestTokenIsAcceptableForWLCGTokens(t *testing.T) {
 		require.NoError(t, err)
 		wlcgTok := string(wlcgTokBytes)
 
-		accepted := tokenIsAcceptable(wlcgTok, "/foo/bar/baz", dirResp, opts)
+		accepted := tokenIsAcceptable(wlcgTok, "/foo/bar", dirResp, opts)
 		assert.True(t, accepted, "expected WLCG token to be acceptable for shared read")
 	})
 
@@ -1034,7 +1034,7 @@ func TestTokenIsAcceptableForWLCGTokens(t *testing.T) {
 		require.NoError(t, err)
 		wlcgTok := string(wlcgTokBytes)
 
-		accepted := tokenIsAcceptable(wlcgTok, "/foo/bar/baz", dirResp, opts)
+		accepted := tokenIsAcceptable(wlcgTok, "/foo/bar", dirResp, opts)
 		assert.True(t, accepted, "expected WLCG token with storage.create to be acceptable for shared write")
 	})
 

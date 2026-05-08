@@ -688,12 +688,12 @@ func TestInitializeBackendConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(knownHostsFile, []byte(""), 0644))
 
 	// Set configuration
-	require.NoError(t, param.Set(param.Origin_SSH_Host.GetName(), "test.example.com"))
-	require.NoError(t, param.Set(param.Origin_SSH_Port.GetName(), "2222"))
-	require.NoError(t, param.Set(param.Origin_SSH_User.GetName(), "testuser"))
-	require.NoError(t, param.Set(param.Origin_SSH_AuthMethods.GetName(), "publickey"))
-	require.NoError(t, param.Set(param.Origin_SSH_PrivateKeyFile.GetName(), privateKeyFile))
-	require.NoError(t, param.Set(param.Origin_SSH_KnownHostsFile.GetName(), knownHostsFile))
+	require.NoError(t, param.Origin_SSH_Host.Set("test.example.com"))
+	require.NoError(t, param.Origin_SSH_Port.Set(2222))
+	require.NoError(t, param.Origin_SSH_User.Set("testuser"))
+	require.NoError(t, param.Origin_SSH_AuthMethods.Set([]string{"publickey"}))
+	require.NoError(t, param.Origin_SSH_PrivateKeyFile.Set(privateKeyFile))
+	require.NoError(t, param.Origin_SSH_KnownHostsFile.Set(knownHostsFile))
 
 	// Build config from parameters
 	sshConfig := &SSHConfig{

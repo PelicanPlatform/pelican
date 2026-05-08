@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,11 +20,12 @@ package web_ui
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"embed"
 	"fmt"
 	builtin_log "log"
-	"math/rand"
+	"math/big"
 	"mime"
 	"net"
 	"net/http"
@@ -48,6 +49,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
+	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -69,8 +71,46 @@ var (
 
 const notFoundFilePath = "frontend/out/404/index.html"
 
-func ServerHeaderMiddleware(ctx *gin.Context) {
-	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+// isSafeRedirectURL checks whether a redirect target is a relative
+// path (no scheme or host), preventing open-redirect attacks.
+//
+// We reject anything that:
+//   - is empty
+//   - has any leading whitespace (some browsers strip control chars
+//     before parsing the URL, so " //evil.com" can become "//evil.com"
+//     and turn into a same-protocol cross-origin redirect)
+//   - has a scheme (https://, javascript:, data:)
+//   - has a host (parsed.Host != "")
+//   - is a protocol-relative URL ("//evil.com")
+//   - starts with a backslash, which some browsers treat as a path
+//     separator and combine with a following slash to land on a host
+func isSafeRedirectURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	// Strip nothing -- but reject if there is anything to strip. A leading
+	// control character (space, tab, newline, etc.) is a strong signal
+	// that something is trying to bypass the parser.
+	if rawURL != strings.TrimLeft(rawURL, " \t\r\n\v\f") {
+		return false
+	}
+	// "//host/path" is a protocol-relative URL; some parsers/browsers
+	// resolve it against the current scheme, which lets an attacker
+	// redirect to a same-protocol foreign host.
+	if strings.HasPrefix(rawURL, "//") {
+		return false
+	}
+	// Backslashes can be normalized to slashes by some browsers and turn
+	// "/\evil.com" into "//evil.com".
+	if strings.HasPrefix(rawURL, `\`) || strings.HasPrefix(rawURL, `/\`) {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	// Reject absolute URLs (scheme or host set).
+	return parsed.Scheme == "" && parsed.Host == ""
 }
 
 type CreateApiTokenReq struct {
@@ -304,7 +344,7 @@ func handleWebUIAuth(ctx *gin.Context) {
 	// Redirect authenticated users from login pages
 	if strings.HasPrefix(requestPath, "/login") && err == nil && user != "" {
 		returnUrl := ctx.Query("returnURL")
-		if returnUrl == "" {
+		if !isSafeRedirectURL(returnUrl) {
 			returnUrl = "/view/"
 		}
 		ctx.Redirect(http.StatusFound, returnUrl)
@@ -473,7 +513,7 @@ func createApiToken(ctx *gin.Context) {
 		})
 		return
 	}
-	token, err := database.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
+	token, err := api_token.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
@@ -502,7 +542,7 @@ func deleteApiToken(ctx *gin.Context) {
 		return
 	}
 	id := ctx.Param("id")
-	err = database.DeleteApiKey(database.ServerDatabase, id, token.VerifiedKeysCache)
+	err = api_token.DeleteApiKey(database.ServerDatabase, id)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -534,7 +574,7 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	apiKeys, err := database.ListApiKeys(database.ServerDatabase)
+	apiKeys, err := api_token.ListApiKeys(database.ServerDatabase)
 	if err != nil {
 		log.Warning("Failed to list API keys: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -586,33 +626,50 @@ func configureWebResource(engine *gin.Engine) {
 	})
 }
 
-// Configure common endpoint available to all server web UI which are located at /api/v1.0/*
-func configureCommonEndpoints(engine *gin.Engine) error {
-	engine.GET("/api/v1.0/config", AuthHandler, AdminAuthHandler, getConfigValues)
-	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
-	engine.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
-	engine.GET("/api/v1.0/servers", getEnabledServers)
+// Configure common endpoint available to all server web UI
+func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
+
+	// Singleton routes
+	routerGroup.POST("/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
+	routerGroup.GET("/servers", getEnabledServers)
+
+	// TODO: Move this to the Origin or Cache specific API group
 	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
-		engine.GET("/api/v1.0/server", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
+		routerGroup.GET("/server/localMetadata/history", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
 	}
-	// Health check endpoint for web engine
-	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
+
+	// Health check endpoint for web routerGroup
+	routerGroup.GET("/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
 	})
-	engine.POST("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, createApiToken)
-	engine.DELETE("/api/v1.0/tokens/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
-	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
-	engine.GET("/api/v1.0/version", getVersionHandler)
 
-	// Logging level management API
-	loggingAPI := engine.Group("/api/v1.0/logging")
+	// Version endpoint
+	routerGroup.GET("/version", getVersionHandler)
+
+	// Config management endpoints
+	configAPIGroup := routerGroup.Group("/config", AuthHandler, AdminAuthHandler)
 	{
-		loggingAPI.POST("/level", AuthHandler, AdminAuthHandler, HandleSetLogLevel)
-		loggingAPI.GET("/level", AuthHandler, AdminAuthHandler, HandleGetLogLevel)
-		loggingAPI.DELETE("/level/:changeId", AuthHandler, AdminAuthHandler, HandleDeleteLogLevel)
+		configAPIGroup.GET("", getConfigValues)
+		configAPIGroup.PATCH("", updateConfigValues)
 	}
 
-	downtimeAPI := engine.Group("/api/v1.0/downtime")
+	// Token management endpoints
+	tokenAPIGroup := routerGroup.Group("/tokens", AuthHandler, AdminAuthHandler)
+	{
+		tokenAPIGroup.POST("", createApiToken)
+		tokenAPIGroup.DELETE("/:id", deleteApiToken)
+		tokenAPIGroup.GET("", listApiTokens)
+	}
+
+	// Logging level management API
+	loggingAPI := routerGroup.Group("/logging", AuthHandler, AdminAuthHandler)
+	{
+		loggingAPI.POST("/level", HandleSetLogLevel)
+		loggingAPI.GET("/level", HandleGetLogLevel)
+		loggingAPI.DELETE("/level/:changeId", HandleDeleteLogLevel)
+	}
+
+	downtimeAPI := routerGroup.Group("/downtime")
 	{
 		downtimeAPI.POST("", DowntimeAuthHandler, HandleCreateDowntime)
 		downtimeAPI.POST("/:uuid", DowntimeAuthHandler, HandleCreateDowntime)
@@ -622,20 +679,26 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 		downtimeAPI.DELETE("/:uuid", DowntimeAuthHandler, HandleDeleteDowntime)
 	}
 
-	engine.GET("/api/v1.0/groups", AuthHandler, handleListGroups)
-	engine.POST("/api/v1.0/groups", AuthHandler, handleCreateGroup)
-	engine.GET("/api/v1.0/groups/:id", AuthHandler, handleGetGroup)
-	engine.PATCH("/api/v1.0/groups/:id", AuthHandler, handleUpdateGroup)
-	engine.DELETE("/api/v1.0/groups/:id", AuthHandler, handleDeleteGroup)
-	engine.GET("/api/v1.0/groups/:id/members", AuthHandler, handleListGroupMembers)
-	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, handleAddGroupMember)
-	engine.DELETE("/api/v1.0/groups/:id/members/:userId", AuthHandler, handleRemoveGroupMember)
+	groupRouterGroup := routerGroup.Group("/groups", AuthHandler, AdminAuthHandler)
+	{
+		groupRouterGroup.GET("", handleListGroups)
+		groupRouterGroup.POST("", handleCreateGroup)
+		groupRouterGroup.GET("/:id", handleGetGroup)
+		groupRouterGroup.PATCH("/:id", handleUpdateGroup)
+		groupRouterGroup.DELETE("/:id", handleDeleteGroup)
+		groupRouterGroup.GET("/:id/members", handleListGroupMembers)
+		groupRouterGroup.POST("/:id/members", handleAddGroupMember)
+		groupRouterGroup.DELETE("/:id/members/:userId", handleRemoveGroupMember)
+	}
 
-	engine.GET("/api/v1.0/users", AuthHandler, handleListUsers)
-	engine.POST("/api/v1.0/users", AuthHandler, handleAddUser)
-	engine.GET("/api/v1.0/users/:id", AuthHandler, handleGetUser)
-	engine.PATCH("/api/v1.0/users/:id", AuthHandler, handleUpdateUser)
-	engine.DELETE("/api/v1.0/users/:id", AuthHandler, AdminAuthHandler, handleDeleteUser)
+	userRouterGroup := routerGroup.Group("/users", AuthHandler, AdminAuthHandler)
+	{
+		userRouterGroup.GET("", handleListUsers)
+		userRouterGroup.POST("", handleAddUser)
+		userRouterGroup.GET("/:id", handleGetUser)
+		userRouterGroup.PATCH("/:id", handleUpdateUser)
+		userRouterGroup.DELETE("/:id", handleDeleteUser)
+	}
 
 	return nil
 }
@@ -726,7 +789,12 @@ func waitUntilLogin(ctx context.Context) error {
 	}()
 	for {
 		previousCode.Store(currentCode.Load())
-		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
+		randVal, err := rand.Int(rand.Reader, big.NewInt(1000000))
+		if err != nil {
+			log.Errorf("Failed to generate secure activation code: %v", err)
+			continue
+		}
+		newCode := fmt.Sprintf("%06v", randVal.Int64())
 		currentCode.Store(&newCode)
 		newCodeWithNewline := fmt.Sprintf("%v\n", newCode)
 		if err := os.WriteFile(activationFile, []byte(newCodeWithNewline), 0600); err != nil {
@@ -766,20 +834,24 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	// Give the API token package access to the server DB
+	api_token.ServerDatabase = database.ServerDatabase
+
 	// start the cache for verified API keys
 	egrp.Go(func() error {
-		token.VerifiedKeysCache.Start()
+		api_token.VerifiedKeysCache.Start()
 		return nil
 	})
 
 	// Wait on the context to stop the cache
 	egrp.Go(func() error {
 		<-ctx.Done()
-		token.VerifiedKeysCache.Stop()
+		api_token.VerifiedKeysCache.Stop()
 		return nil
 	})
 
-	if err := configureCommonEndpoints(engine); err != nil {
+	commonAPIGroup := engine.Group("/api/v1.0", ReadOnlyMiddleware)
+	if err := registerCommonEndpoints(commonAPIGroup); err != nil {
 		return err
 	}
 
@@ -792,7 +864,8 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 		return err
 	}
 
-	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+	authGroup := engine.Group("/api/v1.0/auth")
+	if err := RegisterAuthEndpoints(ctx, authGroup, egrp); err != nil {
 		return err
 	}
 
@@ -824,6 +897,31 @@ func GetEngine() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+
+	// Configure trusted proxies for accurate client IP detection.
+	// By default, trust no proxies so ctx.ClientIP() returns the
+	// network-level remote address and cannot be spoofed via
+	// X-Forwarded-For headers.
+	trustedProxies := param.Server_TrustedProxies.GetStringSlice()
+	if len(trustedProxies) > 0 {
+		// Expand wildcard "*" to trust all IPv4 and IPv6 addresses.
+		expanded := make([]string, 0, len(trustedProxies))
+		for _, entry := range trustedProxies {
+			if entry == "*" {
+				expanded = append(expanded, "0.0.0.0/0", "::/0")
+			} else {
+				expanded = append(expanded, entry)
+			}
+		}
+		if err := engine.SetTrustedProxies(expanded); err != nil {
+			return nil, errors.Wrap(err, "failed to set trusted proxies")
+		}
+	} else {
+		if err := engine.SetTrustedProxies(nil); err != nil {
+			return nil, errors.Wrap(err, "failed to disable trusted proxies")
+		}
+	}
+
 	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
 	engine.Use(func(ctx *gin.Context) {
 		startTime := time.Now()
@@ -839,6 +937,7 @@ func GetEngine() (*gin.Engine, error) {
 		).Info("Served Request")
 	})
 	engine.HandleMethodNotAllowed = true
+
 	return engine, nil
 }
 

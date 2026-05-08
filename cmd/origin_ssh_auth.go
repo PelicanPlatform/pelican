@@ -1,3 +1,5 @@
+//go:build server
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -34,8 +36,9 @@ import (
 )
 
 var sshAuthCmd = &cobra.Command{
-	Use:   "ssh-auth",
-	Short: "SSH authentication tools for the SSH backend",
+	Use:    "ssh-auth",
+	Hidden: true,
+	Short:  "SSH authentication tools for the SSH backend",
 	Long: `Tools for SSH backend authentication and testing.
 
 Sub-commands:
@@ -49,18 +52,18 @@ origins) or from the configuration file.
 
 Example:
   # Interactive login via WebSocket (auto-detects local origin)
-  pelican origin ssh-auth login
+  pelican-server origin ssh-auth login
 
   # Interactive login to a specific origin
-  pelican origin ssh-auth login --origin https://origin.example.com
+  pelican-server origin ssh-auth login --origin https://origin.example.com
 
   # Check the SSH connection status (auto-detects local origin)
-  pelican origin ssh-auth status
+  pelican-server origin ssh-auth status
 
   # Test SSH connectivity (similar to ssh command)
-  pelican origin ssh-auth test storage.example.com
-  pelican origin ssh-auth test pelican@storage.example.com
-  pelican origin ssh-auth test pelican@storage.example.com -i ~/.ssh/id_rsa
+  pelican-server origin ssh-auth test storage.example.com
+  pelican-server origin ssh-auth test pelican@storage.example.com
+  pelican-server origin ssh-auth test pelican@storage.example.com -i ~/.ssh/id_rsa
 `,
 }
 
@@ -77,9 +80,9 @@ If --origin is not specified, the command will try to determine the origin URL
 from the pelican.addresses file (for local origins) or the configuration.
 
 Example:
-  pelican origin ssh-auth login
-  pelican origin ssh-auth login --origin https://origin.example.com
-  pelican origin ssh-auth login --origin https://origin.example.com --host storage.internal
+  pelican-server origin ssh-auth login
+  pelican-server origin ssh-auth login --origin https://origin.example.com
+  pelican-server origin ssh-auth login --origin https://origin.example.com --host storage.internal
 `,
 	SilenceUsage: true,
 	RunE:         runSSHAuthLogin,
@@ -94,8 +97,8 @@ If --origin is not specified, the command will try to determine the origin URL
 from the pelican.addresses file (for local origins) or the configuration.
 
 Example:
-  pelican origin ssh-auth status
-  pelican origin ssh-auth status --origin https://origin.example.com
+  pelican-server origin ssh-auth status
+  pelican-server origin ssh-auth status --origin https://origin.example.com
 `,
 	RunE: runSSHAuthStatus,
 }

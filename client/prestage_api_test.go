@@ -38,7 +38,7 @@ import (
 
 // Test checking if a cache supports the prestage API
 func TestCheckPrestageAPISupport(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	t.Run("CacheSupportsPrestageAPI", func(t *testing.T) {
 		// Create a mock server that returns 400 (API supported)
@@ -80,7 +80,7 @@ func TestCheckPrestageAPISupport(t *testing.T) {
 
 // Test invoking the prestage API
 func TestInvokePrestageAPI(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	t.Run("SuccessfulPrestage", func(t *testing.T) {
 		// Create a mock server that simulates a successful prestage
@@ -195,7 +195,7 @@ func TestInvokePrestageAPI(t *testing.T) {
 
 // Test prestage with API fallback to traditional method
 func TestPrestageWithAPIFallback(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	// Create a mock server that:
 	// 1. Supports the prestage API (returns 400 for no-path query)

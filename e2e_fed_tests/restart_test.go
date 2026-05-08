@@ -73,7 +73,7 @@ func waitForComponentStatusNotOK(t *testing.T, component metrics.HealthStatusCom
 func TestXRootDRestart(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a federation with origin and cache
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
@@ -180,7 +180,7 @@ func TestXRootDRestartConcurrent(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a federation
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)

@@ -1,3 +1,5 @@
+//go:build server
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -35,12 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-const (
-	// issuerAdminClientsAPISuffix is the API path suffix for admin client management,
-	// appended after the per-namespace issuer prefix.
-	issuerAdminClientsAPISuffix = "/admin/clients"
-)
-
 var (
 	originIssuerCmd = &cobra.Command{
 		Use:   "issuer",
@@ -72,7 +68,7 @@ Accepted values (comma-separated):
   urn:ietf:params:oauth:grant-type:token-exchange
 
 Example — create a token-exchange client:
-  pelican origin issuer client create --server https://my-origin:8447 \
+  pelican-server origin issuer client create --server https://my-origin:8447 \
     --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token"`,
 		RunE: issuerClientCreateRun,
 	}
@@ -91,7 +87,7 @@ Example — create a token-exchange client:
 Only the flags you provide are changed; omitted fields are left unchanged.
 
 Example — add token-exchange grant and narrow scopes:
-  pelican origin issuer client update --server https://my-origin:8447 \
+  pelican-server origin issuer client update --server https://my-origin:8447 \
     --id <client-id> \
     --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token" \
     --scopes "openid,storage.read:/"`,
@@ -150,7 +146,7 @@ func init() {
 // issuerAdminClientsAPIPath returns the full admin clients API path
 // for the configured namespace.
 func issuerAdminClientsAPIPath() string {
-	return "/api/v1.0/issuer/ns" + issuerClientNamespace + issuerAdminClientsAPISuffix
+	return "/api/v1.0/issuer/admin/ns" + issuerClientNamespace + "/clients"
 }
 
 // constructIssuerAdminURL validates the server URL and returns the full admin API endpoint.

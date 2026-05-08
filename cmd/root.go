@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,8 +22,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -35,7 +37,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -58,7 +59,7 @@ across multiple dataset providers.`,
 				return err
 			}
 			if debugFlag {
-				if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
+				if err := param.Logging_Level.Set("debug"); err != nil {
 					return err
 				}
 			}
@@ -71,7 +72,7 @@ across multiple dataset providers.`,
 
 	// We want the value of this port flag to correspond to the Port viper key.
 	// However, only one flag pointer can correspond to the key.  If we define this
-	// in `pelican registry serve` and `pelican director serve`, then whatever init()
+	// in `pelican-server registry serve` and `pelican-server director serve`, then whatever init()
 	// function is run second will be the only one that is set (the first definition
 	// of the flag is overwritten and thus ignored).
 	//
@@ -101,6 +102,10 @@ func (i *uint16Value) Type() string {
 
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
+// egrpPostHandler is a hook for server-specific error handling in Execute().
+// It returns (handled, result) where handled=true means the error was consumed.
+var egrpPostHandler func(error) (bool, error)
+
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
@@ -117,14 +122,12 @@ func Execute() error {
 		_ = out.Sync()
 	}
 
-	if egrpErr == launchers.ErrExitOnSignal {
-		fmt.Println("Pelican is safely exited")
-		return nil
-	} else if egrpErr == launchers.ErrRestart {
-		fmt.Println("Restarting server...")
-		return restartProgram()
+	if egrpPostHandler != nil {
+		if handled, result := egrpPostHandler(egrpErr); handled {
+			return result
+		}
 	}
-	// Other errors we got from the errogroup
+	// Other errors we got from the errgroup
 	if egrpErr != nil {
 		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", egrpErr)
 		return egrpErr
@@ -148,26 +151,14 @@ func restartProgram() error {
 }
 
 func init() {
-	rootCmd.AddCommand(objectCmd)
-	objectCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(directorCmd)
-	rootCmd.AddCommand(registryCmd)
-	rootCmd.AddCommand(originCmd)
-	rootCmd.AddCommand(cacheCmd)
-	rootCmd.AddCommand(tokenCmd)
-	rootCmd.AddCommand(namespaceCmd)
-	rootCmd.AddCommand(rootConfigCmd)
-	rootCmd.AddCommand(rootPluginCmd)
-	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(generateCmd)
-	rootCmd.AddCommand(keyCmd)
-	rootCmd.AddCommand(downtimeCmd)
-	rootCmd.AddCommand(apiKeyCmd)
-	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
-	rootCmd.AddCommand(sshHelperCmd) // Hidden command for SSH POSIXv2 helper
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
+	// If the binary name differs from the prefix (e.g. pelican-server), use
+	// the actual binary name so that help output matches the executable.
+	if binName := filepath.Base(os.Args[0]); binName != "" {
+		rootCmd.Use = binName
+	}
 	rootCmd.DisableAutoGenTag = true
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")

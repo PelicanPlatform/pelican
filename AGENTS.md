@@ -66,16 +66,22 @@ Pelican is a data federation platform that allows users to serve and access data
 
 ### Build Commands
 
+First, generate the GoReleaser config:
+
+```bash
+make goreleaser-config
+```
+
 **Full build with GoReleaser:**
 
 ```bash
-goreleaser build --clean --snapshot
+goreleaser build --clean --snapshot --config .goreleaser.generated.yml
 ```
 
 **Faster build for testing (single architecture):**
 
 ```bash
-goreleaser build --clean --snapshot --single-target
+goreleaser build --clean --snapshot --single-target --config .goreleaser.generated.yml
 ```
 
 **Development build (faster):**
@@ -309,10 +315,10 @@ API endpoints are documented using OpenAPI V2.0. The specification is generated 
 
 ```bash
 # Run a local federation ("federation in a box")
-pelican serve --module director,registry,origin,cache
+pelican-server serve --module director,registry,origin,cache
 
 # Serve an origin
-pelican origin serve -f https://director.example.com -v /tmp/stash/:/test
+pelican-server origin serve -f https://director.example.com -v /tmp/stash/:/test
 
 # Download an object
 pelican object get /test/file ./local-file

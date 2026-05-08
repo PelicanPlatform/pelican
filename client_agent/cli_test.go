@@ -77,7 +77,7 @@ func buildPelicanBinary(t *testing.T) string {
 		}
 
 		pelicanBinPath = filepath.Join(binaryTempDir, "pelican")
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
+		cmd := exec.Command("go", "build", "-tags", "client", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			os.RemoveAll(binaryTempDir)
@@ -100,7 +100,7 @@ func TestCLIAsyncGet(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.IssuerKeysDirectory.Set(t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -240,7 +240,7 @@ func TestCLIAsyncPut(t *testing.T) {
 
 	// Create token
 	tokenStart := time.Now()
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.IssuerKeysDirectory.Set(t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -358,7 +358,7 @@ func TestCLIAsyncPrestage(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.IssuerKeysDirectory.Set(t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -515,7 +515,7 @@ func TestCLIJobCommands(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.IssuerKeysDirectory.Set(t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)

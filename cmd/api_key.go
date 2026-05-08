@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -34,6 +36,7 @@ var (
 )
 
 func init() {
+	rootCmd.AddCommand(apiKeyCmd)
 	// Add the server URL as a REQUIRED persistent flag to all subcommands of apiKeyCmd
 	apiKeyCmd.PersistentFlags().StringVarP(&apiKeyServerURLStr, "server", "s", "", "Web URL of the Pelican server (e.g. https://my-origin.com:8447)")
 

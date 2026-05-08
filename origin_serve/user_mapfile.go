@@ -179,25 +179,36 @@ type UserInfo struct {
 
 // UserMapper handles username and group extraction from tokens with optional mapfile support
 type UserMapper struct {
-	usernameClaim string
-	groupsClaim   string
-	mapfile       *Mapfile
-	mu            sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
+	usernameClaim       string
+	groupsClaim         string
+	mapfile             *Mapfile
+	defaultUser         string
+	unauthenticatedUser string
+	mu                  sync.RWMutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
 }
 
 // NewUserMapper creates a new user mapper
 // usernameClaim: token claim to use for username (default: "sub")
 // groupsClaim: token claim to use for groups (default: "wlcg.groups")
 // mapfilePath: optional path to mapfile for username mapping
-func NewUserMapper(usernameClaim, groupsClaim string, mapfilePath string) *UserMapper {
+// defaultUser: fallback username when mapfile is enabled but no rule matches;
+//
+//	set to empty string to reject unmatched tokens.
+//
+// unauthenticatedUser: username for token-less or invalid-token requests;
+//
+//	set to empty string to reject such requests.
+func NewUserMapper(usernameClaim, groupsClaim, mapfilePath, defaultUser, unauthenticatedUser string) *UserMapper {
 	ctx, cancel := context.WithCancel(context.Background())
 	um := &UserMapper{
-		usernameClaim: usernameClaim,
-		groupsClaim:   groupsClaim,
-		ctx:           ctx,
-		cancel:        cancel,
+		usernameClaim:       usernameClaim,
+		groupsClaim:         groupsClaim,
+		defaultUser:         defaultUser,
+		unauthenticatedUser: unauthenticatedUser,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	if mapfilePath != "" {
@@ -277,7 +288,11 @@ func (um *UserMapper) MapTokenToUser(tokenStr string) *userInfo {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
 	if err != nil {
 		log.Debugf("Failed to parse token for user mapping: %v", err)
-		return &userInfo{User: "nobody", Groups: []string{}}
+		if um.unauthenticatedUser == "" {
+			log.Warn("Invalid token and no unauthenticated user configured; denying access")
+			return nil
+		}
+		return &userInfo{User: um.unauthenticatedUser, Groups: []string{}}
 	}
 
 	// Extract user and group information from token claims
@@ -314,9 +329,25 @@ func (um *UserMapper) MapTokenToUser(tokenStr string) *userInfo {
 	// Extract user info using the UserMapper
 	ui := um.ExtractUserInfo(tokenClaims, "")
 
-	// Convert to userInfo struct for use in auth flow
+	// Convert to userInfo struct for use in auth flow.
+	// When a mapfile is configured and a rule matched, MappedUser
+	// contains the local username that should be used for filesystem
+	// operations instead of the raw token subject.
+	user := ui.User
+	if ui.MappedUser != "" {
+		user = ui.MappedUser
+	} else if um.mapfile != nil {
+		// Mapfile is enabled but no rule matched; apply the configured default user.
+		if um.defaultUser == "" {
+			log.WithFields(log.Fields{
+				"user": ui.User,
+			}).Warn("Token subject did not match any mapfile rule and no default user is configured; denying access")
+			return nil
+		}
+		user = um.defaultUser
+	}
 	return &userInfo{
-		User:   ui.User,
+		User:   user,
 		Groups: ui.Groups,
 	}
 }

@@ -68,9 +68,8 @@ func TestCollectionsAPI(t *testing.T) {
 	}()
 	defer cancel()
 
-	testCfgDir, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(t, err, "Failed to create temp config dir")
-	require.NoError(t, param.Set("ConfigDir", testCfgDir))
+	testCfgDir := t.TempDir()
+	require.NoError(t, param.ConfigDir.Set(testCfgDir))
 
 	// set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -78,37 +77,37 @@ func TestCollectionsAPI(t *testing.T) {
 	tempPasswdFile = tempFile
 
 	// Override viper default for testing
-	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
+	require.NoError(t, param.Server_UIPasswordFile.Set(tempPasswdFile.Name()))
 
 	// Make a testing issuer.jwk file to get a cookie
-	tempJWKDir, err := os.MkdirTemp("", "tempDir")
-	require.NoError(t, err, "Failed to create temp jwk dir")
+	tempJWKDir := t.TempDir()
 
 	// Override viper default for testing
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempJWKDir, "issuer-keys")))
 
-	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
+	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
 	// Set up origin exports
-	exportDir, err := os.MkdirTemp("", "test-export")
-	require.NoError(t, err)
-	// The defer call to remove the directory and its contents is commented out because it was causing a race condition with the file watcher.
-	// defer os.RemoveAll(exportDir)
+	exportDir := t.TempDir()
 	err = os.WriteFile(filepath.Join(exportDir, "test-origin"), []byte("test"), 0644)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
-	require.NoError(t, param.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
+	exportDir2 := t.TempDir()
+
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
+	require.NoError(t, param.Origin_Exports.Set([]map[string]interface{}{
 		{
 			"StoragePrefix":    exportDir,
 			"FederationPrefix": "/test1",
 			"SentinelLocation": "test-origin",
 		},
 		{
-			"StoragePrefix":    "/test2",
+			"StoragePrefix":    exportDir2,
 			"FederationPrefix": "/test2",
 		},
 	}))
+
+	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -120,7 +119,8 @@ func TestCollectionsAPI(t *testing.T) {
 	err = web_ui.ConfigureServerWebAPI(ctx, router, egrp)
 	require.NoError(t, err, "Failed to configure server web API")
 
-	err = RegisterOriginWebAPI(router)
+	routerGroup := router.Group("/api/v1.0/origin_ui")
+	err = RegisterOriginWebAPI(routerGroup)
 	require.NoError(t, err)
 
 	// set up database
@@ -359,8 +359,8 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		adminToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)

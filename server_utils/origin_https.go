@@ -41,8 +41,8 @@ func (o *HTTPSOrigin) Type(_ Origin) server_structs.OriginStorageType {
 
 func (o *HTTPSOrigin) validateStoragePrefix(prefix string) error {
 	// HTTPS Origins will have posix-like storage prefixes, owing to their prefixes being valid
-	// URL paths.
-	return validateFederationPrefix(prefix)
+	// URL paths. Use path-like validation without federation-specific reserved prefix checks.
+	return validatePathLikePrefix(prefix)
 }
 
 func (o *HTTPSOrigin) validateExtra(e *OriginExport, numExports int) (err error) {
@@ -57,7 +57,7 @@ func (o *HTTPSOrigin) validateExtra(e *OriginExport, numExports int) (err error)
 	// trailing / isn't handled by the origin, so fix that here
 	if strings.HasSuffix(httpServiceUrl, "/") {
 		log.Warningln("Removing trailing '/' from http service URL")
-		if err := param.Set(param.Origin_HttpServiceUrl.GetName(), strings.TrimSuffix(httpServiceUrl, "/")); err != nil {
+		if err := param.Origin_HttpServiceUrl.Set(strings.TrimSuffix(httpServiceUrl, "/")); err != nil {
 			return err
 		}
 	}

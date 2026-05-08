@@ -21,7 +21,7 @@ set -ex
 # Mac OS X instance in GitHub.
 #
 
-brew install minio ninja coreutils
+brew install coreutils
 
 # Attempted fix to install xrootd-s3-http, which relies on a dependency (nlohmann-json)
 # that requires cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
@@ -59,7 +59,7 @@ popd
 # Add patches to xrootd source code if needed
 git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout v5.9.1-pelican
+git checkout v5.9.2-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -90,7 +90,7 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHttpPelican-5.so" "$xrootd_libdir"
 popd
 
-git clone --recurse-submodules --branch v0.6.4 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 mkdir build
 cd build

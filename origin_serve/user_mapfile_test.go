@@ -244,7 +244,7 @@ func TestUserMapperExtraction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapper := NewUserMapper(tt.usernameClaim, tt.groupsClaim, "")
+			mapper := NewUserMapper(tt.usernameClaim, tt.groupsClaim, "", "nobody", "nobody")
 			result := mapper.ExtractUserInfo(tt.claims, "/test/path")
 			assert.Equal(t, tt.expectedUser, result.User)
 			assert.Equal(t, tt.expectedGrps, result.Groups, tt.description)
@@ -274,7 +274,7 @@ func TestUserMapperWithMapfile(t *testing.T) {
 	err = os.WriteFile(testPath, data, 0644)
 	require.NoError(t, err)
 
-	mapper := NewUserMapper("sub", "wlcg.groups", testPath)
+	mapper := NewUserMapper("sub", "wlcg.groups", testPath, "nobody", "nobody")
 
 	claims := map[string]interface{}{
 		"sub": "bbockelm",
@@ -287,6 +287,151 @@ func TestUserMapperWithMapfile(t *testing.T) {
 	assert.Equal(t, "bbockelm", result.User)
 	assert.Equal(t, "bbockelm", result.MappedUser, "Should apply mapfile mapping")
 	assert.Equal(t, []string{"/cms/prod"}, result.Groups)
+}
+
+// TestMapTokenToUser tests the full MapTokenToUser flow including
+// that MappedUser is correctly used when a mapfile rule matches.
+func TestMapTokenToUser(t *testing.T) {
+	key := generateTestKey(t)
+
+	t.Run("NoMapfile", func(t *testing.T) {
+		mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/group1"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		require.NotNil(t, result)
+		assert.Equal(t, "alice", result.User, "Should use token subject when no mapfile")
+		assert.Equal(t, []string{"/group1"}, result.Groups)
+	})
+
+	t.Run("MapfileRemapsUser", func(t *testing.T) {
+		testPath := filepath.Join(t.TempDir(), "mapfile.json")
+		rules := []MapfileRule{
+			{
+				Sub:    strPtr("alice"),
+				Result: "localAlice",
+			},
+		}
+		data, err := json.Marshal(rules)
+		require.NoError(t, err)
+		err = os.WriteFile(testPath, data, 0644)
+		require.NoError(t, err)
+
+		mapper := NewUserMapper("sub", "wlcg.groups", testPath, "nobody", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/group1"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		require.NotNil(t, result)
+		assert.Equal(t, "localAlice", result.User, "Should use mapped user when mapfile rule matches")
+		assert.Equal(t, []string{"/group1"}, result.Groups)
+	})
+
+	t.Run("MapfileNoMatchDefaultUser", func(t *testing.T) {
+		testPath := filepath.Join(t.TempDir(), "mapfile.json")
+		rules := []MapfileRule{
+			{
+				Sub:    strPtr("bob"),
+				Result: "localBob",
+			},
+		}
+		data, err := json.Marshal(rules)
+		require.NoError(t, err)
+		err = os.WriteFile(testPath, data, 0644)
+		require.NoError(t, err)
+
+		mapper := NewUserMapper("sub", "wlcg.groups", testPath, "nobody", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/group1"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		require.NotNil(t, result)
+		assert.Equal(t, "nobody", result.User, "Should fall back to configured default user when no rule matches")
+	})
+
+	t.Run("MapfileNoMatchCustomDefault", func(t *testing.T) {
+		testPath := filepath.Join(t.TempDir(), "mapfile.json")
+		rules := []MapfileRule{
+			{
+				Sub:    strPtr("bob"),
+				Result: "localBob",
+			},
+		}
+		data, err := json.Marshal(rules)
+		require.NoError(t, err)
+		err = os.WriteFile(testPath, data, 0644)
+		require.NoError(t, err)
+
+		mapper := NewUserMapper("sub", "wlcg.groups", testPath, "fallback_user", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/group1"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		require.NotNil(t, result)
+		assert.Equal(t, "fallback_user", result.User, "Should fall back to custom default user")
+	})
+
+	t.Run("MapfileNoMatchEmptyDefaultRejects", func(t *testing.T) {
+		testPath := filepath.Join(t.TempDir(), "mapfile.json")
+		rules := []MapfileRule{
+			{
+				Sub:    strPtr("bob"),
+				Result: "localBob",
+			},
+		}
+		data, err := json.Marshal(rules)
+		require.NoError(t, err)
+		err = os.WriteFile(testPath, data, 0644)
+		require.NoError(t, err)
+
+		mapper := NewUserMapper("sub", "wlcg.groups", testPath, "", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/group1"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		assert.Nil(t, result, "Should return nil when no rule matches and default user is empty")
+	})
+
+	t.Run("MapfileGroupMatch", func(t *testing.T) {
+		testPath := filepath.Join(t.TempDir(), "mapfile.json")
+		rules := []MapfileRule{
+			{
+				Group:  strPtr("/cms/prod"),
+				Result: "cmsprod",
+			},
+		}
+		data, err := json.Marshal(rules)
+		require.NoError(t, err)
+		err = os.WriteFile(testPath, data, 0644)
+		require.NoError(t, err)
+
+		mapper := NewUserMapper("sub", "wlcg.groups", testPath, "nobody", "nobody")
+		tokenStr := createTestToken(t, key, "https://issuer.example.com", "alice", []string{"/cms/prod"}, "read:/")
+
+		result := mapper.MapTokenToUser(tokenStr)
+		require.NotNil(t, result)
+		assert.Equal(t, "cmsprod", result.User, "Should use mapped user from group-based rule")
+		assert.Equal(t, []string{"/cms/prod"}, result.Groups)
+	})
+
+	t.Run("InvalidToken", func(t *testing.T) {
+		mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "nobody")
+
+		result := mapper.MapTokenToUser("not-a-valid-jwt")
+		require.NotNil(t, result)
+		assert.Equal(t, "nobody", result.User, "Should fall back to unauthenticated user for invalid token")
+	})
+
+	t.Run("InvalidTokenCustomUnauthenticated", func(t *testing.T) {
+		mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "anon")
+
+		result := mapper.MapTokenToUser("not-a-valid-jwt")
+		require.NotNil(t, result)
+		assert.Equal(t, "anon", result.User, "Should fall back to configured unauthenticated user")
+	})
+
+	t.Run("InvalidTokenEmptyUnauthenticatedRejects", func(t *testing.T) {
+		mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "")
+
+		result := mapper.MapTokenToUser("not-a-valid-jwt")
+		assert.Nil(t, result, "Should return nil when unauthenticated user is empty")
+	})
 }
 
 // TestMapfileLoadErrors tests error handling for mapfile operations
@@ -338,7 +483,7 @@ func TestUserMapperRefresh(t *testing.T) {
 	err = os.WriteFile(testPath, data, 0644)
 	require.NoError(t, err)
 
-	mapper := NewUserMapper("sub", "wlcg.groups", testPath)
+	mapper := NewUserMapper("sub", "wlcg.groups", testPath, "nobody", "nobody")
 
 	// Verify initial mapping works
 	claims := map[string]interface{}{"sub": "user1"}
@@ -406,7 +551,7 @@ func BenchmarkMapfileMatching(b *testing.B) {
 
 // BenchmarkUserExtraction benchmarks user info extraction
 func BenchmarkUserExtraction(b *testing.B) {
-	mapper := NewUserMapper("sub", "wlcg.groups", "")
+	mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "nobody")
 
 	claims := map[string]interface{}{
 		"sub": "testuser",

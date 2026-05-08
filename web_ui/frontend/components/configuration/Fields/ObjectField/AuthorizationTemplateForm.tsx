@@ -10,7 +10,7 @@ import {
   StringSliceField,
 } from '@/components/configuration';
 import useApiSWR from '@/hooks/useApiSWR';
-import { User, Group } from '@/types';
+import { User, Group } from '@/helpers/api';
 import AutocompleteField from '@/components/configuration/Fields/AutocompleteField';
 
 const verifyForm = (x: AuthorizationTemplate) => {

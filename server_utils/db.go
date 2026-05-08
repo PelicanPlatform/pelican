@@ -33,6 +33,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
@@ -51,7 +52,7 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	dbName := dbutils.SQLiteDSN(dbPath)
 
 	globalLogLevel := config.GetEffectiveLogLevel()
 	var ormLevel logger.LogLevel

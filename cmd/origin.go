@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -66,8 +68,8 @@ var (
 		Use:   "create",
 		Short: "Create a Pelican origin token",
 		Long: `Create a JSON web token (JWT) using the origin's signing keys:
-Usage: pelican origin token create [FLAGS] claims
-E.g. pelican origin token create --profile scitokens2 aud=my-audience scope="read:/storage" scope="write:/storage"
+Usage: pelican-server origin token create [FLAGS] claims
+E.g. pelican-server origin token create --profile scitokens2 aud=my-audience scope="read:/storage" scope="write:/storage"
 
 Pelican origins use JWTs as bearer tokens for authorizing specific requests,
 such as reading from or writing to the origin's underlying storage, advertising
@@ -93,6 +95,7 @@ func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 }
 
 func init() {
+	rootCmd.AddCommand(originCmd)
 	originCmd.AddCommand(originConfigCmd)
 	originCmd.AddCommand(originServeCmd)
 

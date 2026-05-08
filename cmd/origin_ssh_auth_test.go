@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -472,10 +474,10 @@ func TestSSHWebSocketAuthRequired(t *testing.T) {
 
 	// Set up server config so issuer keys are available for token verification
 	dirName := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-origin.example.com"))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-origin.example.com"))
+	require.NoError(t, param.Origin_Port.Set(0))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)

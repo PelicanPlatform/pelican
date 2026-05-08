@@ -102,16 +102,22 @@ func setupAdminTestServer(t *testing.T) (*OIDCProvider, *httptest.Server) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 
-	// Fake admin auth middleware
+	// Fake user auth middleware (applied globally)
 	engine.Use(func(c *gin.Context) {
 		c.Set("User", "admin")
 		c.Next()
 	})
 
+	// Fake admin auth middleware (passed to RegisterAdminRoutes so it is
+	// applied via Gin route groups for admin endpoints).
+	adminMiddleware := func(c *gin.Context) {
+		c.Next()
+	}
+
 	registry := NewProviderRegistry()
 	registry.Register(testNamespace, provider)
 	RegisterRoutesWithMiddleware(engine, registry)
-	RegisterAdminRoutes(engine, registry)
+	RegisterAdminRoutes(engine, registry, adminMiddleware)
 
 	newTS := httptest.NewTLSServer(engine)
 	t.Cleanup(newTS.Close)
@@ -123,7 +129,7 @@ func TestAdminListClientsAPI(t *testing.T) {
 	_, ts := setupAdminTestServer(t)
 	client := ts.Client()
 
-	resp, err := client.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/admin/clients")
+	resp, err := client.Get(ts.URL + "/api/v1.0/issuer/admin/ns/test/ns/clients")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -145,7 +151,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 			"scopes": ["openid", "storage.read:/", "storage.modify:/"]
 		}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+			ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -168,7 +174,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 	t.Run("create-with-invalid-grant-type", func(t *testing.T) {
 		body := `{"grant_types": ["bogus_grant"]}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+			ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -181,7 +187,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 	t.Run("create-empty-grant-types", func(t *testing.T) {
 		body := `{"grant_types": []}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+			ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -199,7 +205,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	// Create a client first
 	body := `{"grant_types": ["refresh_token"]}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+		ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -212,7 +218,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	clientID := created["client_id"].(string)
 
 	t.Run("delete-existing", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, nil)
+		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, nil)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -220,7 +226,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	})
 
 	t.Run("delete-nonexistent", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, nil)
+		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, nil)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -238,7 +244,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 		"scopes": ["openid", "storage.read:/"]
 	}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+		ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -252,7 +258,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-grant-types", func(t *testing.T) {
 		updateBody := `{"grant_types": ["refresh_token", "urn:ietf:params:oauth:grant-type:token-exchange"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -276,7 +282,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-scopes-only", func(t *testing.T) {
 		updateBody := `{"scopes": ["openid", "storage.read:/", "storage.modify:/"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -298,7 +304,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-invalid-grant-type", func(t *testing.T) {
 		updateBody := `{"grant_types": ["bogus_grant"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -309,7 +315,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-empty-grant-types", func(t *testing.T) {
 		updateBody := `{"grant_types": []}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -320,7 +326,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-nonexistent", func(t *testing.T) {
 		updateBody := `{"scopes": ["openid"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/nonexistent-id", strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients/nonexistent-id", strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -342,7 +348,7 @@ func TestTokenExchange(t *testing.T) {
 		"scopes": ["openid", "offline_access", "storage.read:/", "storage.modify:/"]
 	}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
+		ts.URL+"/api/v1.0/issuer/admin/ns/test/ns/clients",
 		"application/json",
 		strings.NewReader(body),
 	)

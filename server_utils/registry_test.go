@@ -28,16 +28,17 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, config.InitClient())
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", "https://registry.com:8446"))
-	url, err := GetNSIssuerURL("/test-prefix")
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.com:8446"))
+	url, err := registry_jwks.GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
 	ResetTestState()
@@ -46,18 +47,18 @@ func TestGetNSIssuerURL(t *testing.T) {
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, config.InitClient())
 
 	registry := test_utils.RegistryMockup(t, "/test-prefix")
 	defer registry.Close()
-	require.NoError(t, param.Set("Federation.RegistryUrl", registry.URL))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, registry.URL))
 	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
-	url, err := GetNSIssuerURL("/test-prefix")
+	url, err := registry_jwks.GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, expectedIssuerUrl, url)
 
-	keyLoc, err := GetJWKSURLFromIssuerURL(url)
+	keyLoc, err := registry_jwks.GetJWKSURLFromIssuerURL(url)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }

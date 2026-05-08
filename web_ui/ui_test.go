@@ -43,6 +43,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
@@ -86,7 +87,7 @@ func setupWebUIEnv(t *testing.T) {
 
 	testCfgDir := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", testCfgDir))
+	require.NoError(t, param.ConfigDir.Set(testCfgDir))
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -98,7 +99,7 @@ func setupWebUIEnv(t *testing.T) {
 	})
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
+	require.NoError(t, param.Server_UIPasswordFile.Set(tempPasswdFile.Name()))
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
@@ -110,15 +111,15 @@ func setupWebUIEnv(t *testing.T) {
 	})
 
 	//Override viper default for testing
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempJWKDir, "issuer-keys")))
 
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	if err != nil {
 		t.Fatal("Error making temp config dir:", err)
 	}
-	require.NoError(t, param.Set("ConfigDir", dirname))
-	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
+	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
@@ -223,8 +224,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		issuerDirectory := filepath.Join(tmpDir, "issuer-keys")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), issuerDirectory))
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com"))
+		require.NoError(t, param.IssuerKeysDirectory.Set(issuerDirectory))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 
 		_, err := config.GetIssuerPrivateJWK()
 		require.NoError(t, err)
@@ -410,7 +411,7 @@ func TestServerHostRestart(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
-	require.NoError(t, param.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk")))
+	require.NoError(t, param.IssuerKey.Set(filepath.Join(t.TempDir(), "issuer.jwk")))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
@@ -456,7 +457,7 @@ func TestServerHostRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
-		require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
 		c := gin.CreateTestContextOnly(r, route)
 		c.Set("User", "admin1")
 		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/restart", nil)
@@ -555,7 +556,8 @@ func TestApiToken(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	route := gin.New()
-	err := configureCommonEndpoints(route)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	route.GET("/privilegedRoute", func(ctx *gin.Context) {
 		authOption := token.AuthOption{
@@ -585,8 +587,8 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -596,6 +598,7 @@ func TestApiToken(t *testing.T) {
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
+	api_token.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
@@ -828,7 +831,8 @@ func TestApiToken(t *testing.T) {
 func TestGroupManagementAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
-	err := configureCommonEndpoints(route)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -837,8 +841,8 @@ func TestGroupManagementAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -1013,22 +1017,35 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.Equal(t, newDescription, fetchedGroup["description"])
 	})
 
-	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
-		// Test that a regular (non-admin) user can create a group
-		groupName := "test-regular-user-group"
-		createGroupReq := map[string]string{"name": groupName, "description": "test group by regular user"}
+	t.Run("test-only-admin-can-create-group", func(t *testing.T) {
+		// Test that a regular (non-admin) user cannot create a group
+		groupName := "test-admin-only-group"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
 		body, err := json.Marshal(createGroupReq)
 		require.NoError(t, err)
 
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		// Use a regular user token (not admin)
+		// Regular (non-admin) user should be rejected
 		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("expected 403 for non-admin, got %d: %s", recorder.Code, recorder.Body.String()))
+
+		// Admin user should succeed
+		adminToken := generateTestAdminUserToken(t)
+		body, err = json.Marshal(createGroupReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
@@ -1038,15 +1055,14 @@ func TestGroupManagementAPI(t *testing.T) {
 		groupID := createGroupResp["id"]
 		require.NotEmpty(t, groupID)
 
-		// Verify the regular user can manage their own group
+		// Verify the admin can manage the group members
 		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
 		body, err = json.Marshal(createUserReq)
 		require.NoError(t, err)
 
-		// Pre-create the user before adding them to the group
 		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
@@ -1064,7 +1080,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder = httptest.NewRecorder()
@@ -1073,8 +1089,7 @@ func TestGroupManagementAPI(t *testing.T) {
 	})
 
 	t.Run("test-delete-group-authz-and-acl-cleanup", func(t *testing.T) {
-		// Create a group as a regular user (non-admin creator)
-		creatorToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "group-creator")
+		// Create a group as an admin user (groups require admin auth)
 		otherToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "not-creator")
 		adminToken := generateTestAdminUserToken(t)
 
@@ -1085,7 +1100,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: creatorToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
@@ -1182,4 +1197,115 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
 		require.EqualValues(t, 0, aclCount)
 	})
+}
+
+func TestReadOnlyMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	defer server_utils.ResetTestState()
+
+	route := gin.New()
+	// Apply the ReadOnly middleware to a test route group
+	readOnlyGroup := route.Group("/api/v1.0")
+	readOnlyGroup.Use(ReadOnlyMiddleware)
+	// Set the app to have Read Only mode enabled
+	require.NoError(t, param.Server_WebReadOnly.Set(true))
+	{
+		readOnlyGroup.POST("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PUT("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PATCH("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.DELETE("/resource/:id", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.GET("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+	}
+
+	t.Run("blocks-POST-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPost, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PUT-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPut, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PATCH-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPatch, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-DELETE-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodDelete, "/api/v1.0/resource/123", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("allows-GET-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodGet, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+	})
+}
+
+// TestIsSafeRedirectURL exercises the open-redirect guard used by the
+// OAuth login flow. Anything that could send a user to a third-party
+// host on success must be rejected; only same-origin relative paths
+// are allowed.
+func TestIsSafeRedirectURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		safe bool
+	}{
+		// Allowed: relative paths (same-origin).
+		{name: "absolute-path", url: "/view/dashboard", safe: true},
+		{name: "absolute-path-with-query", url: "/view/dashboard?next=foo", safe: true},
+		{name: "absolute-path-with-fragment", url: "/view/dashboard#section", safe: true},
+		{name: "absolute-path-root", url: "/", safe: true},
+		{name: "relative-path", url: "view/dashboard", safe: true},
+		{name: "relative-path-with-dotdot", url: "../etc/passwd", safe: true}, // weird but same-origin
+
+		// Rejected: anything that could redirect off-host.
+		{name: "empty", url: "", safe: false},
+		{name: "https-absolute", url: "https://evil.com/login", safe: false},
+		{name: "http-absolute", url: "http://evil.com/login", safe: false},
+		{name: "scheme-relative", url: "//evil.com/login", safe: false},
+		{name: "scheme-relative-with-tab", url: "//\tevil.com/login", safe: false},
+		{name: "javascript-uri", url: "javascript:alert(1)", safe: false},
+		{name: "data-uri", url: "data:text/html,<script>alert(1)</script>", safe: false},
+		{name: "ftp-absolute", url: "ftp://evil.com/", safe: false},
+
+		// Backslash variants -- some browsers treat \ as a path separator,
+		// so /\evil.com or \\evil.com can become //evil.com after the
+		// browser's own normalization.
+		{name: "leading-backslash", url: `\\evil.com/login`, safe: false},
+		{name: "slash-backslash", url: `/\evil.com/login`, safe: false},
+
+		// Whitespace / control chars: Go's url.Parse rejects these in the
+		// scheme position, so they would otherwise fall through to the
+		// safe-by-empty-host path. Belt-and-suspenders: also reject if the
+		// raw URL begins with whitespace, which would mask a leading "//".
+		{name: "leading-space", url: " //evil.com/login", safe: false},
+		{name: "leading-tab", url: "\t//evil.com/login", safe: false},
+		{name: "leading-newline", url: "\n//evil.com/login", safe: false},
+		{name: "leading-cr", url: "\r//evil.com/login", safe: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSafeRedirectURL(tt.url)
+			assert.Equal(t, tt.safe, got, "url=%q", tt.url)
+		})
+	}
 }

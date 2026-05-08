@@ -42,6 +42,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
@@ -56,7 +57,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "t-issuer-keys")
 
 	//Setup a private key and a token
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
 
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -83,7 +84,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Mock cached jwks
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err := initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -91,7 +92,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	require.NoError(t, err)
 	namespaceKeys.Set(ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks", kSet, ttlcache.DefaultTTL)
 
-	issuerUrl, err := server_utils.GetNSIssuerURL("/test-namespace")
+	issuerUrl, err := registry_jwks.GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
 
 	advTokenCfg := token.NewWLCGToken()
@@ -263,15 +264,15 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	// Initialize director
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "t-issuer-keys")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
-	require.NoError(t, param.Set("ConfigDir", tDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(tDir))
 
 	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
 	// This affects both the server ad cache and the namespaceKeys cache expiration
 	originalTTL := param.Director_AdvertisementTTL.GetDuration()
-	require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second))
+	require.NoError(t, param.Director_AdvertisementTTL.Set(2*time.Second))
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), originalTTL))
+		require.NoError(t, param.Director_AdvertisementTTL.Set(originalTTL))
 	})
 
 	err = initServerForTest(t, ctx, server_structs.DirectorType)
@@ -281,9 +282,9 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	LaunchTTLCache(ctx, egrp)
 
 	// Get the namespace issuer URL and JWKS URL
-	issuerUrl, err := server_utils.GetNSIssuerURL("/test-namespace")
+	issuerUrl, err := registry_jwks.GetNSIssuerURL("/test-namespace")
 	require.NoError(t, err)
-	keyLoc, err := server_utils.GetJWKSURLFromIssuerURL(issuerUrl)
+	keyLoc, err := registry_jwks.GetJWKSURLFromIssuerURL(issuerUrl)
 	require.NoError(t, err)
 
 	// Get the director URL from federation info for token audience

@@ -29,10 +29,10 @@ jobs:
         include:
           - binary_name: pelican
             coverprofile: coverage.out
-            tags: ""
+            tags: client
           - binary_name: pelican-server
             coverprofile: coverage-server.out
-            tags: lotman
+            tags: server
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -48,7 +48,7 @@ jobs:
           check-latest: true
 
       - name: Cache Next.js
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
           path: |
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-${{ matrix.binary_name }}-${{ runner.os }}
           path: junit-${{ matrix.binary_name }}.xml
@@ -125,23 +125,37 @@ jobs:
           # definitions, but '$GITHUB_WORKSPACE' in scripts.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Generate GoReleaser config
+        run: |
+          make goreleaser-config
+
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: latest
-          args: build --single-target --clean --snapshot
+          version: "~> v2"
+          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
 
-      - name: Copy the pelican binary for the end-to-end tests
+      - name: Copy the pelican binaries for the end-to-end tests
+        if: matrix.binary_name == 'pelican-server'
         run: |
-          cp dist/${{ matrix.binary_name }}_linux_amd64_v1/${{ matrix.binary_name }} ./pelican
+          cp dist/pelican_linux_amd64_v1/pelican ./pelican
+          cp dist/pelican-server_linux_amd64_v1/pelican-server ./pelican-server
       - name: Run integration tests
+        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/citests.sh
       - name: Run end-to-end test for object get/put
+        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/get_put_test.sh
       - name: Run end-to-end test for director stat
+        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/stat_test.sh
       - name: Run end-to-end test for --version flag
+        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/version_test.sh
       - name: Run end-to-end test for site-local cache standup
+        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/site_local_cache_test.sh
+      - name: Run end-to-end test for Cache Availability/Stat weighting
+        if: matrix.binary_name == 'pelican-server'
+        run: ./github_scripts/cache_availability_test.sh

@@ -1092,7 +1092,7 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	}
 	issuer.Name = "Federation-based Monitoring"
 	issuer.Issuer = fedInfo.DiscoveryEndpoint
-	issuer.BasePaths = []string{"/pelican/monitoring"}
+	issuer.BasePaths = []string{server_utils.MonitoringBaseNs}
 	issuer.DefaultUser = "xrootd"
 
 	return
@@ -1145,10 +1145,10 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 			}
 			cacheIssuer := server_structs.NamespaceAdV2{
 				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
-				Path: "/pelican/monitoring",
+				Path: server_utils.MonitoringBaseNs,
 				Issuer: []server_structs.TokenIssuer{
 					{
-						BasePaths: []string{"/pelican/monitoring"},
+						BasePaths: []string{server_utils.MonitoringBaseNs},
 						IssuerUrl: *serverIssuer,
 					},
 				},

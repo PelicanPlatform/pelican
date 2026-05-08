@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -48,6 +50,7 @@ func initCache() error {
 }
 
 func init() {
+	rootCmd.AddCommand(cacheCmd)
 	cacheCmd.AddCommand(cacheServeCmd)
 	cacheServeCmd.Flags().AddFlag(portFlag)
 }

@@ -56,12 +56,12 @@ func CheckCacheSentinelLocation() error {
 // should have director-test- as the prefix
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
 	server_utils.LaunchWatcherMaintenance(ctx,
-		[]string{filepath.Join(param.Cache_NamespaceLocation.GetString(), "pelican", "monitoring")},
+		[]string{filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs)},
 		"cache director-based health test clean up",
 		time.Minute,
 		func(notifyEvent bool) error {
 			// We run this function regardless of notifyEvent to do the cleanup
-			dirPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), "pelican", "monitoring")
+			dirPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs)
 			dirInfo, err := os.Stat(dirPath)
 			if err != nil {
 				return err

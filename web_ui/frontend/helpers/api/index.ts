@@ -1,4 +1,13 @@
 /**
+ * API Exports
+ */
+
+export { UserService } from './User';
+export { GroupService } from './Group';
+export { makeGroupMemberService } from './GroupMember';
+export * from './types';
+
+/**
  * API Helper Functions
  *
  * Strictly return the response from the API, throwing an error if the response is not ok
@@ -7,6 +16,7 @@
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 import { RegistryNamespace } from '@/index';
+import { API_V1_BASE_URL } from '@/helpers/api/constants';
 import { DowntimePost, DowntimeRegistryPost } from '@/types';
 
 /**
@@ -35,17 +45,28 @@ export async function fetchApi(
     if (e instanceof Error) {
       throw Error('Fetch to API Failed', { cause: e });
     } else {
-      throw Error('Fetch to API Failed', { cause: e });
+      throw Error('Fetch to API Failed');
     }
   }
 }
+
+/**
+ * Secure API fetch
+ */
+export const secureApiFetch = async (
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> => {
+  return await fetchApi(async () => await secureFetch(url, options));
+};
 
 /**
  * Restart the server
  */
 export const restartServer = async (): Promise<Response> => {
   return fetchApi(
-    async () => await secureFetch('/api/v1.0/restart', { method: 'POST' })
+    async () =>
+      await secureFetch(`${API_V1_BASE_URL}/restart`, { method: 'POST' })
   );
 };
 
@@ -53,7 +74,7 @@ export const restartServer = async (): Promise<Response> => {
  * Get config
  */
 export const getConfig = async (): Promise<Response> => {
-  return fetchApi(async () => await secureFetch('/api/v1.0/config'));
+  return fetchApi(async () => await secureFetch(`${API_V1_BASE_URL}/config`));
 };
 
 /**
@@ -63,7 +84,7 @@ export const getConfig = async (): Promise<Response> => {
 export const deleteNamespace = async (id: number) => {
   return fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
+      await secureFetch(`${API_V1_BASE_URL}/registry_ui/namespaces/${id}`, {
         method: 'DELETE',
       })
   );
@@ -76,9 +97,12 @@ export const deleteNamespace = async (id: number) => {
 export const approveNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/approve`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/approve`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -89,9 +113,12 @@ export const approveNamespace = async (id: number): Promise<Response> => {
 export const denyNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/deny`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/deny`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -102,9 +129,12 @@ export const denyNamespace = async (id: number): Promise<Response> => {
 export const allowServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/director_ui/servers/allow/${name}`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/director_ui/servers/allow/${name}`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -115,9 +145,12 @@ export const allowServer = async (name: string): Promise<Response> => {
 export const filterServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/director_ui/servers/filter/${name}`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/director_ui/servers/filter/${name}`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -126,7 +159,10 @@ export const filterServer = async (name: string): Promise<Response> => {
  *
  */
 export const getDirectorServers = async () => {
-  const url = new URL('/api/v1.0/director_ui/servers', window.location.origin);
+  const url = new URL(
+    `${API_V1_BASE_URL}/director_ui/servers`,
+    window.location.origin
+  );
 
   return await fetchApi(async () => await fetch(url));
 };
@@ -137,7 +173,7 @@ export const getDirectorServers = async () => {
  */
 export const getDirectorServer = async (name: string): Promise<Response> => {
   const url = new URL(
-    `/api/v1.0/director_ui/servers/${name}`,
+    `${API_V1_BASE_URL}/director_ui/servers/${name}`,
     window.location.origin
   );
 
@@ -149,7 +185,7 @@ export const getDirectorServer = async (name: string): Promise<Response> => {
  */
 export const getDirectorNamespaces = async () => {
   const url = new URL(
-    '/api/v1.0/director_ui/namespaces',
+    `${API_V1_BASE_URL}/director_ui/namespaces`,
     window.location.origin
   );
 
@@ -163,7 +199,7 @@ export const NAMESPACE_KEY = 'getNamespaces';
  */
 export const getNamespaces = async (): Promise<Response> => {
   const url = new URL(
-    '/api/v1.0/registry_ui/namespaces',
+    `${API_V1_BASE_URL}/registry_ui/namespaces`,
     window.location.origin
   );
 
@@ -180,7 +216,7 @@ export const getNamespace = async (
   accessToken?: string
 ): Promise<Response> => {
   const url = new URL(
-    `/api/v1.0/registry_ui/namespaces/${id}`,
+    `${API_V1_BASE_URL}/registry_ui/namespaces/${id}`,
     window.location.origin
   );
   if (accessToken) {
@@ -194,7 +230,7 @@ export const postGeneralNamespace = async (
 ): Promise<Response> => {
   return await fetchApi(
     async () =>
-      await secureFetch('/api/v1.0/registry_ui/namespaces', {
+      await secureFetch(`${API_V1_BASE_URL}/registry_ui/namespaces`, {
         body: JSON.stringify(data),
         method: 'POST',
         headers: {
@@ -210,7 +246,7 @@ export const putGeneralNamespace = async (
 ): Promise<Response> => {
   // If an access_token is in the URL, add it to the request
   const url = new URL(
-    `/api/v1.0/registry_ui/namespaces/${data.id}`,
+    `${API_V1_BASE_URL}/registry_ui/namespaces/${data.id}`,
     window.location.origin
   );
   const accessToken = new URLSearchParams(window.location.search).get(
@@ -239,7 +275,7 @@ export const optionsNamespaceRegistrationFields =
   async (): Promise<Response> => {
     return await fetchApi(
       async () =>
-        await fetch('/api/v1.0/registry_ui/namespaces', {
+        await fetch(`${API_V1_BASE_URL}/registry_ui/namespaces`, {
           method: 'OPTIONS',
         })
     );
@@ -251,7 +287,7 @@ export const optionsNamespaceRegistrationFields =
 export const initLogin = async (code: string): Promise<Response> => {
   return await fetchApi(
     async () =>
-      await fetch('/api/v1.0/auth/initLogin', {
+      await fetch(`${API_V1_BASE_URL}/auth/initLogin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -269,7 +305,7 @@ export const initLogin = async (code: string): Promise<Response> => {
 export const resetLogin = async (password: string): Promise<Response> => {
   return await fetchApi(
     async () =>
-      await fetch('/api/v1.0/auth/resetLogin', {
+      await fetch(`${API_V1_BASE_URL}/auth/resetLogin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -290,7 +326,7 @@ export const login = async (
 ): Promise<Response> => {
   return await fetchApi(
     async () =>
-      await fetch('/api/v1.0/auth/login', {
+      await fetch(`${API_V1_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -311,7 +347,7 @@ export const postDowntime = async (
 ) => {
   return await fetchApi(
     async () =>
-      await secureFetch('/api/v1.0/downtime', {
+      await secureFetch(`${API_V1_BASE_URL}/downtime`, {
         method: 'POST',
         body: JSON.stringify(downtime),
         headers: {
@@ -324,7 +360,7 @@ export const postDowntime = async (
 export const deleteDowntime = async (id: string) => {
   return await fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/downtime/${id}`, {
+      await secureFetch(`${API_V1_BASE_URL}/downtime/${id}`, {
         method: 'DELETE',
       })
   );
@@ -336,7 +372,7 @@ export const putDowntime = async (
 ) => {
   return await fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/downtime/${downtimeId}`, {
+      await secureFetch(`${API_V1_BASE_URL}/downtime/${downtimeId}`, {
         method: 'PUT',
         body: JSON.stringify(downtime),
         headers: {
@@ -350,14 +386,14 @@ export const putDowntime = async (
  * Get downtime
  */
 export const getDowntime = async () => {
-  return await fetch('/api/v1.0/downtime?status=all');
+  return await fetch(`${API_V1_BASE_URL}/downtime?status=all`);
 };
 
 /**
  * Get director downtime
  */
 export const getDirectorDowntime = async () => {
-  return await fetch('/api/v1.0/director_ui/downtimes');
+  return await fetch(`${API_V1_BASE_URL}/director_ui/downtimes`);
 };
 
 /**
@@ -365,7 +401,7 @@ export const getDirectorDowntime = async () => {
  */
 export const getFederationDiscrepancyConfig = {
   errorMessage: 'Could not fetch federation discrepancy status',
-  key: '/api/v1.0/director_ui/federation/discrepancy',
+  key: `${API_V1_BASE_URL}/director_ui/federation/discrepancy`,
   fetcher: async () =>
-    await secureFetch('/api/v1.0/director_ui/federation/discrepancy'),
+    await secureFetch(`${API_V1_BASE_URL}/director_ui/federation/discrepancy`),
 };

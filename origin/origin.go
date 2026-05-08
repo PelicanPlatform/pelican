@@ -34,8 +34,8 @@ var (
 )
 
 // Configure API endpoints for origin that are not tied to UI
-func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) error {
-	if router == nil {
+func RegisterOriginAPI(routerGroup *gin.RouterGroup, ctx context.Context, egrp *errgroup.Group) error {
+	if routerGroup == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
@@ -43,12 +43,12 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 	// start the timer for the director test report timeout
 	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
 
-	deprecatedGroup := router.Group("/api/v1.0/origin-api")
+	deprecatedGroup := routerGroup.Group("/origin-api")
 	{
 		deprecatedGroup.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 	}
 
-	group := router.Group("/api/v1.0/origin")
+	group := routerGroup.Group("/origin")
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 	}

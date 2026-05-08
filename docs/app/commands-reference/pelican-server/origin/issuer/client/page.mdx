@@ -1,0 +1,39 @@
+---
+title: pelican server origin issuer client
+---
+
+## pelican-server origin issuer client
+
+Manage OIDC clients for the origin's embedded issuer
+
+### Synopsis
+
+Provides commands to create, list, update, and delete OIDC clients configured on the origin's embedded token issuer.
+
+### Options
+
+```
+  -h, --help               help for client
+      --namespace string   Federation namespace prefix for the issuer (e.g. /data/analysis) (required)
+      --server string      Web URL of the Pelican origin server (e.g. https://my-origin:8447)
+      --token string       Path to a file containing an admin token (optional; generated automatically if omitted)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin issuer](/commands-reference/pelican-server/origin/issuer/)	 - Manage the origin's embedded OIDC token issuer
+* [pelican-server origin issuer client create](/commands-reference/pelican-server/origin/issuer/client/create/)	 - Create a new OIDC client
+* [pelican-server origin issuer client delete](/commands-reference/pelican-server/origin/issuer/client/delete/)	 - Delete an OIDC client
+* [pelican-server origin issuer client list](/commands-reference/pelican-server/origin/issuer/client/list/)	 - List all OIDC clients
+* [pelican-server origin issuer client update](/commands-reference/pelican-server/origin/issuer/client/update/)	 - Update an existing OIDC client

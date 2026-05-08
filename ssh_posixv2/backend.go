@@ -565,7 +565,7 @@ func runConnection(ctx context.Context, sessionEstablishTimeout time.Duration, c
 // logConnectionProgress logs the SSH connection establishment at INFO
 // level every 3 seconds until ctx is cancelled.  When the connection is
 // waiting for user input (password or keyboard-interactive) it suggests
-// running `pelican origin ssh-auth login` to complete authentication.
+// running `pelican-server origin ssh-auth login` to complete authentication.
 func logConnectionProgress(ctx context.Context, conn *SSHConnection, host string) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
@@ -582,7 +582,7 @@ func logConnectionProgress(ctx context.Context, conn *SSHConnection, host string
 				if step == "agent" {
 					sshLog.Infof("SSH login to %s: waiting for agent confirmation (e.g., touch hardware key)", host)
 				} else {
-					sshLog.Infof("SSH login to %s: waiting for user input (%s) — run `pelican origin ssh-auth login` to complete authentication", host, step)
+					sshLog.Infof("SSH login to %s: waiting for user input (%s) — run `pelican-server origin ssh-auth login` to complete authentication", host, step)
 				}
 			case StateConnecting:
 				sshLog.Infof("SSH login to %s: connecting...", host)

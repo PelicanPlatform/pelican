@@ -31,19 +31,19 @@ var (
 	HttpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_requests_total",
 		Help: "Total number of HTTP requests processed",
-	}, []string{"server_type", "method", "code"}) // method: GET/PUT/DELETE, code: 200/404/500/etc
+	}, []string{"server_type", "method", "code", "username"}) // method: GET/PUT/DELETE, code: 200/404/500/etc
 
 	HttpRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_http_request_duration_seconds",
 		Help:    "HTTP request duration in seconds",
 		Buckets: prometheus.DefBuckets, // 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10
-	}, []string{"server_type", "method", "code"})
+	}, []string{"server_type", "method", "code", "username"})
 
 	// Transfer bytes metrics (similar to XRootD's TransferBytes and BytesXfer)
 	HttpBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_bytes_total",
 		Help: "Total bytes transferred via HTTP",
-	}, []string{"server_type", "direction", "method"}) // direction: in/out, method: GET/PUT/etc
+	}, []string{"server_type", "direction", "method", "username"}) // direction: in/out, method: GET/PUT/etc
 
 	// Active request tracking (similar to XRootD's Jobs/Queued)
 	HttpActiveRequests = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -55,18 +55,18 @@ var (
 	HttpErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_errors_total",
 		Help: "Total number of HTTP errors (5xx responses)",
-	}, []string{"server_type", "method", "code"})
+	}, []string{"server_type", "method", "code", "username"})
 
 	// Large transfer tracking (similar to slow operations)
 	HttpLargeTransfersTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_large_transfers_total",
 		Help: "Total number of large HTTP transfers (>100MB)",
-	}, []string{"server_type", "method"})
+	}, []string{"server_type", "method", "username"})
 
 	HttpLargeTransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_large_transfer_bytes_total",
 		Help: "Total bytes in large HTTP transfers (>100MB)",
-	}, []string{"server_type", "direction", "method"})
+	}, []string{"server_type", "direction", "method", "username"})
 )
 
 // WebDAV HTTP methods not defined in net/http

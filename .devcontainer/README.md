@@ -44,11 +44,13 @@ The development container includes:
 Once inside the container, you can build Pelican:
 
 ```bash
+make goreleaser-config
+
 # Full build
-goreleaser build --clean --snapshot
+goreleaser build --clean --snapshot --config .goreleaser.generated.yml
 
 # Faster single-target build
-goreleaser build --single-target --clean --snapshot
+goreleaser build --single-target --clean --snapshot --config .goreleaser.generated.yml
 
 # Development build (requires .goreleaser.dev.yml)
 make pelican-dev-build

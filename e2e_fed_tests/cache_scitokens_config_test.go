@@ -62,7 +62,6 @@ var singlePrivateFullOrigin string
 func TestCacheScitokensConfigOverride(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
@@ -80,13 +79,13 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 
 	// Set up Xrootd.ScitokensConfig location
 	scitokensConfigPath := filepath.Join(tmpDir, "scitokens.cfg")
-	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensConfigPath))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensConfigPath))
 
 	// Set floor to 0 to allow immediate director refreshes when scitokens config changes
-	require.NoError(t, param.Set(param.Cache_MinDirectorRefreshInterval.GetName(), "0s"))
+	require.NoError(t, param.Cache_MinDirectorRefreshInterval.SetString("0s"))
 
 	// Use long-lived ads so they don't expire during test
-	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "1h"))
+	require.NoError(t, param.Server_AdLifetime.SetString("1h"))
 
 	// Set up the federation with embedded config
 	_ = fed_test_utils.NewFedTest(t, singlePrivateFullOrigin)

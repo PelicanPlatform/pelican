@@ -19,10 +19,12 @@
 package param
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 
@@ -37,7 +39,14 @@ var (
 	configMutex sync.Mutex
 	callbacks   map[string]ConfigCallback
 	callbackMux sync.RWMutex
+	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
 )
+
+// ConfigDir is the typed parameter for the "ConfigDir" configuration key.
+// ConfigDir is not defined in parameters.yaml (it is a special internal key
+// injected directly into the Config struct), so its typed constant lives here
+// rather than in the generated parameters.go.
+var ConfigDir = StringParam{"ConfigDir"}
 
 // ConfigCallback is a function that is called when configuration changes.
 // It receives the old and new configuration.
@@ -45,6 +54,23 @@ type ConfigCallback func(oldConfig, newConfig *Config)
 
 func init() {
 	callbacks = make(map[string]ConfigCallback)
+}
+
+// viperIsSet wraps viper.IsSet with configMutex to prevent concurrent map
+// read/write panics inside viper's internal path-index cache. All generated
+// param IsSet() methods delegate here instead of calling viper directly.
+func viperIsSet(key string) bool {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	return viper.IsSet(key)
+}
+
+// viperUnmarshalKey wraps viper.UnmarshalKey with configMutex to prevent
+// concurrent map access panics for the same reason as viperIsSet.
+func viperUnmarshalKey(key string, rawVal any) error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	return viper.UnmarshalKey(key, rawVal)
 }
 
 // Refresh reloads the atomic cached configuration from viper's *global* instance.
@@ -93,7 +119,7 @@ func BindAllParameters(v *viper.Viper) {
 // element after splitting.
 // Empty strings after splitting are filtered out.
 func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
+	return func(f reflect.Kind, t reflect.Kind, data any) (any, error) {
 		if f != reflect.String || t != reflect.Slice {
 			return data, nil
 		}
@@ -145,7 +171,7 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 // For strings that don't look like byte rates (don't contain rate units), returns data unchanged
 // so other hooks or default conversions can handle them.
 func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
 		// Only convert string to int or ByteRate
 		byteRateType := reflect.TypeOf(byte_rate.ByteRate(0))
 		if f.Kind() != reflect.String || (t.Kind() != reflect.Int && t != byteRateType) {
@@ -195,6 +221,47 @@ func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
+// intToTimeDurationRejectHookFunc returns a DecodeHookFunc that rejects bare
+// integers and floats for time.Duration fields. Users must include a unit suffix
+// (e.g., "10s", "5m", "1h"); without one, a bare number would be silently
+// interpreted as nanoseconds due to WeaklyTypedInput.
+//
+// Values already typed as time.Duration (e.g., from param.Set or viper.SetDefault
+// with a time.Duration argument) are passed through unchanged.
+func intToTimeDurationRejectHookFunc() mapstructure.DecodeHookFunc {
+	durationType := reflect.TypeOf(time.Duration(0))
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
+		if t != durationType {
+			return data, nil
+		}
+		// Allow time.Duration → time.Duration (programmatic values set via
+		// param.Set, viper.Set, or viper.SetDefault with a time.Duration).
+		if f == durationType {
+			return data, nil
+		}
+		switch f.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64:
+			return nil, fmt.Errorf("duration value must include a unit suffix "+
+				"(e.g., \"10s\", \"5m\", \"1h\"); got bare number: %v", data)
+		}
+		return data, nil
+	}
+}
+
+// buildDecodeHookFunc returns the standard composed decode hook used for all
+// mapstructure decoders in this package. Centralizing it here ensures that all
+// three decoder sites (DecodeConfig, getOrCreateConfig, MultiSet) stay in sync.
+func buildDecodeHookFunc() mapstructure.DecodeHookFunc {
+	return mapstructure.ComposeDecodeHookFunc(
+		intToTimeDurationRejectHookFunc(),
+		mapstructure.StringToTimeDurationHookFunc(),
+		stringToSliceHookFunc(),
+		stringToByteRateHookFunc(),
+	)
+}
+
 // DecodeConfig decodes the provided viper instance into a new Config struct.
 //
 // Unlike UnmarshalConfig/Refresh, this does NOT update the global atomic cache.
@@ -211,11 +278,7 @@ func DecodeConfig(v *viper.Viper) (*Config, error) {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},
@@ -306,9 +369,9 @@ func GetUnmarshaledConfig() (*Config, error) {
 }
 
 // Helper function to set a parameter field entry in configWithType
-func setField(fieldType reflect.Type, value interface{}) reflect.Value {
+func setField(fieldType reflect.Type, value any) reflect.Value {
 	field := reflect.New(fieldType).Elem()
-	sliceInterfaceType := reflect.TypeOf([]interface{}(nil))
+	sliceInterfaceType := reflect.TypeOf([]any(nil))
 
 	// Check if the type of the value is nil
 	if reflect.TypeOf(value) == nil {
@@ -400,11 +463,7 @@ func getOrCreateConfig() *Config {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},
@@ -421,17 +480,36 @@ func getOrCreateConfig() *Config {
 	return newConfig
 }
 
-// Set sets a parameter value in both viper and the config struct.
+// Param is the interface satisfied by all typed parameter types (StringParam,
+// BoolParam, IntParam, etc.).  It can be used to accept any parameter type in
+// function signatures, avoiding the need for raw config-key strings.
+type Param interface {
+	// GetName returns the viper configuration key for this parameter
+	// (e.g. "Origin.EnablePublicReads").
+	GetName() string
+}
+
+// Set sets a typed parameter value in both viper and the config struct.
+// Prefer this over SetRaw to benefit from compile-time key safety.
 // This function is thread-safe and will update the atomic config pointer.
-func Set(key string, value interface{}) error {
-	return MultiSet(map[string]interface{}{key: value})
+func Set(p Param, value any) error {
+	return MultiSet(map[string]any{p.GetName(): value})
+}
+
+// SetRaw sets a parameter value by its raw string key in both viper and the
+// config struct.  Use this only for special cases where a typed Param constant
+// is not available (e.g. dynamic keys or internal viper keys like "config").
+// Prefer Set() with a typed Param when possible.
+// This function is thread-safe and will update the atomic config pointer.
+func SetRaw(key string, value any) error {
+	return MultiSet(map[string]any{key: value})
 }
 
 // MultiSet sets multiple parameter values in both viper and the config struct.
 // This function is thread-safe and will update the atomic config pointer.
 // It is more efficient than calling Set multiple times as it only updates
 // the config object once.
-func MultiSet(keyValues map[string]interface{}) error {
+func MultiSet(keyValues map[string]any) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -445,11 +523,7 @@ func MultiSet(keyValues map[string]interface{}) error {
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToSliceHookFunc(),
-			stringToByteRateHookFunc(),
-		),
+		DecodeHook:       buildDecodeHookFunc(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
 		},
@@ -471,7 +545,11 @@ func MultiSet(keyValues map[string]interface{}) error {
 
 // Reset resets the viper configuration and creates a new config struct.
 // This function is thread-safe and will update the atomic config pointer.
+// It waits for all in-flight callback goroutines to finish before returning.
 func Reset() error {
+	callbackWg.Wait()
+	ClearCallbacks()
+
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -510,7 +588,12 @@ func invokeCallbacks(oldConfig, newConfig *Config) {
 
 	for _, cb := range callbacks {
 		// Call each callback in a goroutine to avoid blocking config updates
-		// if a callback takes time to execute
-		go cb(oldConfig, newConfig)
+		// if a callback takes time to execute.
+		// The WaitGroup lets Reset() drain all in-flight callbacks.
+		callbackWg.Add(1)
+		go func(fn ConfigCallback) {
+			defer callbackWg.Done()
+			fn(oldConfig, newConfig)
+		}(cb)
 	}
 }

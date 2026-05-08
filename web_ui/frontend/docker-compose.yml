@@ -5,7 +5,7 @@ services:
     working_dir: /app
     volumes:
       - ../../:/app
-    command: --clean --snapshot --config .goreleaser.yml
+    command: --clean --snapshot --config .goreleaser.dev.yml
 
   # Run pelican server with all modules
   pelican-server:

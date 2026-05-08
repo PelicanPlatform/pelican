@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/logging"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -64,7 +65,6 @@ func setupLoggingRouter() *gin.Engine {
 // change to force sequential consistency.
 func TestHandleSetLogLevel(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	config.RegisterLoggingCallback()
 
 	// Save original level
 	origLevel := config.GetEffectiveLogLevel()
@@ -74,7 +74,14 @@ func TestHandleSetLogLevel(t *testing.T) {
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
+	config.RegisterLoggingCallback()
 	config.SetLogging(log.InfoLevel)
+
+	t.Cleanup(func() {
+		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
+	})
 
 	router := setupLoggingRouter()
 	manager := logging.GetLogLevelManager()
@@ -180,7 +187,14 @@ func TestHandleGetLogLevel(t *testing.T) {
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
+	config.RegisterLoggingCallback()
 	config.SetLogging(log.InfoLevel)
+
+	t.Cleanup(func() {
+		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
+	})
 
 	router := setupLoggingRouter()
 	manager := logging.GetLogLevelManager()
@@ -240,7 +254,6 @@ func TestHandleGetLogLevel(t *testing.T) {
 
 func TestHandleDeleteLogLevel(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	config.RegisterLoggingCallback()
 
 	// Save original level
 	origLevel := config.GetEffectiveLogLevel()
@@ -250,7 +263,14 @@ func TestHandleDeleteLogLevel(t *testing.T) {
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
+	config.RegisterLoggingCallback()
 	config.SetLogging(log.InfoLevel)
+
+	t.Cleanup(func() {
+		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
+	})
 
 	router := setupLoggingRouter()
 	manager := logging.GetLogLevelManager()
@@ -308,12 +328,22 @@ func TestLogLevelIntegration(t *testing.T) {
 		config.SetLogging(origLevel)
 	})
 
+	// Ensure a clean log level manager for each test
+	logging.ResetGlobalManager()
+	require.NoError(t, param.Reset())
+	config.RegisterLoggingCallback()
+	config.SetLogging(log.InfoLevel)
+
+	t.Cleanup(func() {
+		logging.ResetGlobalManager()
+		require.NoError(t, param.Reset())
+	})
+
 	router := setupLoggingRouter()
 	manager := logging.GetLogLevelManager()
 	defer manager.Shutdown()
 
 	// Set base level
-	config.SetLogging(log.InfoLevel)
 	manager.SetBaseLevel(log.InfoLevel)
 	require.Eventually(t,
 		func() bool { return log.InfoLevel.String() == config.GetEffectiveLogLevel().String() },
