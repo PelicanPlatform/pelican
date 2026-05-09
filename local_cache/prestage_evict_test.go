@@ -207,7 +207,7 @@ func TestEvictAPI(t *testing.T) {
 	evictTok := makeEvictToken(t)
 
 	t.Run("missing-path-returns-400", func(t *testing.T) {
-		req, err := http.NewRequest("GET", "http://localhost/pelican/api/v1.0/evict", nil)
+		req, err := http.NewRequest("POST", "http://localhost/pelican/api/v1.0/evict", nil)
 		require.NoError(t, err)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestEvictAPI(t *testing.T) {
 	t.Run("evict-not-cached-idempotent", func(t *testing.T) {
 		// Evicting a file that isn't cached should succeed (idempotent).
 		u := "http://localhost/pelican/api/v1.0/evict?path=/test/never_downloaded.txt&immediate=true"
-		req, err := http.NewRequest("GET", u, nil)
+		req, err := http.NewRequest("POST", u, nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+evictTok)
 		resp, err := httpClient.Do(req)
@@ -250,7 +250,7 @@ func TestEvictAPI(t *testing.T) {
 
 		// Evict via API (immediate).
 		u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt&immediate=true"
-		req, err = http.NewRequest("GET", u, nil)
+		req, err = http.NewRequest("POST", u, nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+evictTok)
 		resp, err = httpClient.Do(req)

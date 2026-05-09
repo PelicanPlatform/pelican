@@ -353,10 +353,17 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse, error) {
 	var xPelNs server_structs.XPelNs
 	if err := (&xPelNs).ParseRawResponse(dirResp); err != nil {
-		// Some director redirects (e.g. health-test monitoring paths) omit
-		// the X-Pelican-Namespace header.  Treat this as non-fatal: default
-		// to an empty namespace with no token requirement.
-		log.Debugf("Director response missing %s header (non-fatal): %v", xPelNs.GetName(), err)
+		// Only suppress the specific "header not present" error.  If the header
+		// exists but is malformed, return an error so the caller knows something
+		// is wrong rather than silently continuing with default values.
+		errStr := err.Error()
+		if strings.Contains(errStr, "No ") && strings.Contains(errStr, "header found") {
+			// Header not present — treat as non-fatal and default to empty namespace.
+			log.Debugf("Director response missing %s header (non-fatal): %v", xPelNs.GetName(), err)
+		} else {
+			// Header present but malformed — return error.
+			return server_structs.DirectorResponse{}, errors.Wrapf(err, "failed to parse %s header", xPelNs.GetName())
+		}
 	} else {
 		log.Debugln("Namespace path constructed from Director:", xPelNs.Namespace)
 	}

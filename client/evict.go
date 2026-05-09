@@ -142,6 +142,13 @@ func DoEvict(ctx context.Context, remoteObject string, immediate bool, options .
 
 	log.Debugf("Invoking evict API at %s for path %s (immediate=%v)", cacheUrl.Host, pelicanURL.Path, immediate)
 
+	// NOTE: POST or DELETE would be semantically correct for a state-changing
+	// operation (GET is expected to be safe/idempotent and may be cached or
+	// replayed by intermediaries).  However, production caches running the
+	// xrdhttp-pelican C++ plugin only support GET.  We use GET here for
+	// backward compatibility.  Once the Go-based persistent cache is
+	// ubiquitous, we should switch to POST or DELETE.
+	// See: https://github.com/PelicanPlatform/pelican/pull/3121
 	req, reqErr := http.NewRequestWithContext(ctx, "GET", apiUrl.String(), nil)
 	if reqErr != nil {
 		return "", errors.Wrap(reqErr, "failed to create evict request")

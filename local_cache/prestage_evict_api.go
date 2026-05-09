@@ -455,11 +455,18 @@ func (pc *PersistentCache) prestageHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// evictHandler handles GET /pelican/api/v1.0/evict
+// evictHandler handles GET/POST/DELETE /pelican/api/v1.0/evict
 //
 // By default, matching objects are marked for priority eviction (purge-first)
 // so they will be removed during the next eviction cycle.  Pass
 // immediate=true to delete them right away.
+//
+// NOTE: POST or DELETE are the semantically correct methods for a
+// state-changing operation (GET is expected to be safe/idempotent and may
+// be cached/replayed by intermediaries).  GET is supported for backward
+// compatibility with the xrdhttp-pelican C++ plugin deployed on production
+// caches.  Once the Go-based cache is ubiquitous, GET support can be
+// deprecated in favor of POST/DELETE.
 func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) {
 	pathParam := r.URL.Query().Get("path")
 	if pathParam == "" {

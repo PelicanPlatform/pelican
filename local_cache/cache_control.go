@@ -142,24 +142,25 @@ func DefaultFreshness(lastValidated time.Time) time.Duration {
 		jitterPercent = 100
 	}
 
-	// Apply jitter: reduce max age by up to jitterPercent (25% random component)
-	// Example: 24h with 10% jitter => grace period varies by 2.4h (21.6h - 24h)
-	// The random component is based on lastValidated to be deterministic per object
+	// Apply jitter: reduce max age by up to jitterPercent, picking a value
+	// uniformly in [minFreshness, defaultMaxAge]. For example, with 10% jitter
+	// and a defaultMaxAge of 24h, minFreshness is 21.6h and the actual freshness
+	// is chosen deterministically per object between 21.6h and 24h.
 	jitterFactor := 1.0 - (float64(jitterPercent) / 100.0)
 	minFreshness := time.Duration(float64(defaultMaxAge) * jitterFactor)
 
-	// Use a simple hash of the validation time to get deterministic randomness
-	// This ensures the same object gets the same jitter value across requests
+	// Use a simple hash of the validation time to get deterministic randomness.
+	// This ensures the same object gets the same jitter value across requests.
 	seed := uint64(lastValidated.Unix())
 	seed = seed ^ (seed >> 33)
 	seed *= 0xff51afd7ed558ccd
 	seed = seed ^ (seed >> 33)
 	jitterRand := float64(seed%10000) / 10000.0 // 0.0 to 1.0
 
-	// Apply 25% random jitter to avoid unintended synchronization
-	gracePeriod := defaultMaxAge - minFreshness
-	jitterRange := time.Duration(float64(gracePeriod) * 0.25)
-	return minFreshness + gracePeriod - jitterRange + time.Duration(float64(jitterRange*2)*jitterRand)
+	// Choose a jittered freshness in [minFreshness, defaultMaxAge] so that
+	// jitter only reduces freshness and never exceeds defaultMaxAge.
+	rangeDur := defaultMaxAge - minFreshness
+	return minFreshness + time.Duration(float64(rangeDur)*jitterRand)
 }
 
 // RemainingFreshness returns how much freshness lifetime is left for an object

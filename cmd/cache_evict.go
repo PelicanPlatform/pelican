@@ -178,7 +178,11 @@ func runCacheEvict(cmd *cobra.Command, args []string) error {
 	}
 	targetURL.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("GET", targetURL.String(), nil)
+	// Use POST since eviction modifies cache state.  The local Go-based
+	// cache server supports POST, DELETE, and GET; we prefer POST here.
+	// (The client/evict.go uses GET for backward compatibility with remote
+	// caches that may still run the C++ xrdhttp-pelican plugin.)
+	req, err := http.NewRequest("POST", targetURL.String(), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create request")
 	}

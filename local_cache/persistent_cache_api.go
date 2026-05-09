@@ -1397,9 +1397,18 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	engine.GET("/pelican/api/v1.0/prestage", func(c *gin.Context) {
 		pc.prestageHandler(c.Writer, c.Request)
 	})
-	engine.GET("/pelican/api/v1.0/evict", func(c *gin.Context) {
+	// Eviction modifies state, so POST or DELETE would be the correct HTTP
+	// semantics.  However, the original xrdhttp-pelican C++ implementation
+	// only supported GET, and production caches still use that code.  We
+	// accept all three methods for forward compatibility; once the Go-based
+	// cache is ubiquitous, clients can switch to POST/DELETE and GET support
+	// can be deprecated.
+	evictHandler := func(c *gin.Context) {
 		pc.evictHandler(c.Writer, c.Request)
-	})
+	}
+	engine.GET("/pelican/api/v1.0/evict", evictHandler)
+	engine.POST("/pelican/api/v1.0/evict", evictHandler)
+	engine.DELETE("/pelican/api/v1.0/evict", evictHandler)
 	log.Info("Prestage and eviction API registered at /pelican/api/v1.0/{prestage,evict}")
 
 	// Register introspection endpoints behind admin auth.

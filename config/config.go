@@ -704,8 +704,15 @@ func cleanupDirOnShutdown(ctx context.Context, dir string) {
 		fns := preCleanupFuncs
 		preCleanupFuncs = nil
 		preCleanupMu.Unlock()
-		for _, fn := range fns {
-			fn()
+		for name, fn := range fns {
+			func(name string, f func()) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("panic in pre-cleanup callback %q: %v", name, r)
+					}
+				}()
+				f()
+			}(name, fn)
 		}
 
 		err := CleanupTempResources()

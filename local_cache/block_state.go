@@ -72,28 +72,52 @@ func (obs *ObjectBlockState) Contains(block uint32) bool {
 }
 
 // ContainsRange returns true if every block in [start, end] is present.
+// Creates a temporary range bitmap and checks if the intersection has
+// the expected cardinality.  This is O(log n) for typical bitmap layouts.
 func (obs *ObjectBlockState) ContainsRange(start, end uint32) bool {
 	obs.mu.RLock()
 	defer obs.mu.RUnlock()
-	for b := start; b <= end; b++ {
-		if !obs.bitmap.Contains(b) {
-			return false
-		}
+
+	// Calculate expected count.  Handle overflow when end == MaxUint32.
+	var expectedCount uint64
+	if end >= start {
+		expectedCount = uint64(end) - uint64(start) + 1
+	} else {
+		return false
 	}
-	return true
+
+	// Create a range bitmap and intersect with what we have.
+	rangeMap := roaring.New()
+	if end == ^uint32(0) {
+		// AddRange takes [start, end), so for MaxUint32 we need special handling.
+		rangeMap.AddRange(uint64(start), uint64(end))
+		rangeMap.Add(end)
+	} else {
+		rangeMap.AddRange(uint64(start), uint64(end)+1)
+	}
+
+	return obs.bitmap.AndCardinality(rangeMap) == expectedCount
 }
 
 // MissingInRange returns the list of blocks in [start, end] that are not present.
+// Uses RoaringBitmap's iterator for efficiency instead of checking each block.
 func (obs *ObjectBlockState) MissingInRange(start, end uint32) []uint32 {
 	obs.mu.RLock()
 	defer obs.mu.RUnlock()
-	var missing []uint32
-	for b := start; b <= end; b++ {
-		if !obs.bitmap.Contains(b) {
-			missing = append(missing, b)
-		}
+
+	// Build a full-range bitmap and subtract what we have to find missing blocks.
+	// This is more efficient than iterating every block for large ranges.
+	fullRange := roaring.New()
+	// AddRange takes [start, end) so add 1 to end.  Handle overflow.
+	if end == ^uint32(0) {
+		fullRange.AddRange(uint64(start), uint64(end))
+		fullRange.Add(end)
+	} else {
+		fullRange.AddRange(uint64(start), uint64(end)+1)
 	}
-	return missing
+
+	missing := roaring.AndNot(fullRange, obs.bitmap)
+	return missing.ToArray()
 }
 
 // Add marks a single block as downloaded.

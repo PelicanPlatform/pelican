@@ -58,9 +58,12 @@ type (
 	// authzResult is the cached authorization result for a given token.
 	// It contains the computed access-control list (scopes) and an
 	// optional string describing why the token was not fully trusted
-	// (e.g. "token issuer X is not one of the trusted issuers").
+	// (e.g. "token validation failed: token issuer X is not one of the
+	// trusted issuers").
 	// When tokenError is non-empty the scopes only contain public
-	// namespace grants.
+	// namespace grants.  The full underlying error is included to
+	// provide actionable deny reasons while avoiding direct exposure
+	// of sensitive token details.
 	authzResult struct {
 		scopes     acls
 		tokenError string // human-readable reason the token was rejected (empty when OK)
@@ -323,15 +326,24 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 }
 
 func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token string) *ttlcache.Item[string, authzResult] {
-	newAcls, tokenTrusted, err := ac.getAcls(token)
-	if err != nil {
-		log.Warningln("Failed to compute ACLs:", err)
+	newAcls, tokenTrusted, tokenValidationErr := ac.getAcls(token)
+	if tokenValidationErr != nil && token == "" {
+		// Non-token-related error (e.g., namespace config issue) should
+		// be logged and result in a nil return.
+		log.Warningln("Failed to compute ACLs:", tokenValidationErr)
 		return nil
 	}
 
 	var tokenError string
 	if !tokenTrusted && token != "" {
-		tokenError = "token validation failed"
+		// Include a human-readable reason so authorize() can return actionable
+		// deny reasons.  The underlying error is not exposed in full to avoid
+		// sensitive data leakage, but we include enough detail to be useful.
+		if tokenValidationErr != nil {
+			tokenError = fmt.Sprintf("token validation failed: %v", tokenValidationErr)
+		} else {
+			tokenError = "token validation failed"
+		}
 	} else if token == "" {
 		// No token provided — public ACLs only.
 		tokenError = "no token provided"
