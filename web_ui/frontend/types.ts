@@ -101,6 +101,7 @@ export interface DowntimeGet extends DowntimeBase {
   createdAt: number;
   updatedBy: string;
   updatedAt: number;
+  deletedAt: number | null;
 }
 
 export type DowntimePut = Partial<DowntimeBase>;
