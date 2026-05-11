@@ -275,7 +275,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"Lotman.EnabledPolicy": false,
 	"Lotman.LibLocation": false,
 	"Lotman.LotHome": false,
+	"Lotman.LotRetention": false,
+	"Lotman.MaxLotLifetime": false,
+	"Lotman.MinFillerWidth": false,
 	"Lotman.PolicyDefinitions": false,
+	"Lotman.RenewalCheckInterval": false,
+	"Lotman.SchedulingHorizon": false,
 	"MinimumDownloadSpeed": false,
 	"Monitoring.AggregatePrefixes": false,
 	"Monitoring.DataLocation": false,
@@ -1072,6 +1077,11 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
+	"Lotman.LotRetention": func(c *Config) time.Duration { return c.Lotman.LotRetention },
+	"Lotman.MaxLotLifetime": func(c *Config) time.Duration { return c.Lotman.MaxLotLifetime },
+	"Lotman.MinFillerWidth": func(c *Config) time.Duration { return c.Lotman.MinFillerWidth },
+	"Lotman.RenewalCheckInterval": func(c *Config) time.Duration { return c.Lotman.RenewalCheckInterval },
+	"Lotman.SchedulingHorizon": func(c *Config) time.Duration { return c.Lotman.SchedulingHorizon },
 	"Monitoring.DataRetention": func(c *Config) time.Duration { return c.Monitoring.DataRetention },
 	"Monitoring.StorageHealthCheckInterval": func(c *Config) time.Duration { return c.Monitoring.StorageHealthCheckInterval },
 	"Monitoring.TokenExpiresIn": func(c *Config) time.Duration { return c.Monitoring.TokenExpiresIn },
@@ -1372,7 +1382,12 @@ var allParameterNames = []string{
 	"Lotman.EnabledPolicy",
 	"Lotman.LibLocation",
 	"Lotman.LotHome",
+	"Lotman.LotRetention",
+	"Lotman.MaxLotLifetime",
+	"Lotman.MinFillerWidth",
 	"Lotman.PolicyDefinitions",
+	"Lotman.RenewalCheckInterval",
+	"Lotman.SchedulingHorizon",
 	"MinimumDownloadSpeed",
 	"Monitoring.AggregatePrefixes",
 	"Monitoring.DataLocation",
@@ -1993,6 +2008,11 @@ var (
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
+	Lotman_LotRetention = DurationParam{"Lotman.LotRetention"}
+	Lotman_MaxLotLifetime = DurationParam{"Lotman.MaxLotLifetime"}
+	Lotman_MinFillerWidth = DurationParam{"Lotman.MinFillerWidth"}
+	Lotman_RenewalCheckInterval = DurationParam{"Lotman.RenewalCheckInterval"}
+	Lotman_SchedulingHorizon = DurationParam{"Lotman.SchedulingHorizon"}
 	Monitoring_DataRetention = DurationParam{"Monitoring.DataRetention"}
 	Monitoring_StorageHealthCheckInterval = DurationParam{"Monitoring.StorageHealthCheckInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
@@ -2425,6 +2445,11 @@ func init() {
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
+		"Lotman.LotRetention": Lotman_LotRetention,
+		"Lotman.MaxLotLifetime": Lotman_MaxLotLifetime,
+		"Lotman.MinFillerWidth": Lotman_MinFillerWidth,
+		"Lotman.RenewalCheckInterval": Lotman_RenewalCheckInterval,
+		"Lotman.SchedulingHorizon": Lotman_SchedulingHorizon,
 		"Monitoring.DataRetention": Monitoring_DataRetention,
 		"Monitoring.StorageHealthCheckInterval": Monitoring_StorageHealthCheckInterval,
 		"Monitoring.TokenExpiresIn": Monitoring_TokenExpiresIn,

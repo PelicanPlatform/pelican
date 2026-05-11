@@ -131,6 +131,11 @@ type (
 		Enabled    bool
 		LotHome    string
 		PurgeOrder []string
+		// PurgeColdFilesAge is the xrootd-formatted age (e.g. "604800s") passed
+		// to pfc.diskusage's purgecoldfiles directive. Sourced from
+		// Lotman.MaxLotLifetime so files untouched for longer than the maximum
+		// lot lifetime are evicted independently of the high watermark.
+		PurgeColdFilesAge string
 	}
 
 	CacheConfig struct {
@@ -1162,6 +1167,23 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				return "", errors.Errorf("lotman policy %s has an undefined purge order", enabledPolicy)
 			}
 			lotmanCfg.PurgeOrder = purgeOrder
+
+			// Tie pfc's age-based purge to the maximum lot lifetime. The renewal
+			// scheduler continuously schedules successor lots over advertised
+			// namespace paths, so files under those paths are always associated
+			// with a live lot. Without an age-based purge, watermark-driven
+			// eviction never fires on a cache that stays below the high
+			// watermark, and cold cruft accumulates indefinitely. The xrootd
+			// purgecoldfiles directive evicts files untouched for longer than
+			// the supplied age regardless of fill level.
+			maxLotLifetime := param.Lotman_MaxLotLifetime.GetDuration()
+			if maxLotLifetime > 0 {
+				ageStr, err := purgeColdFilesAgeFromMaxLotLifetime(maxLotLifetime)
+				if err != nil {
+					return "", err
+				}
+				lotmanCfg.PurgeColdFilesAge = ageStr
+			}
 		}
 		xrdConfig.Cache.LotmanCfg = lotmanCfg
 	}
@@ -1466,6 +1488,33 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 	}
 
 	return level, nil
+}
+
+// purgeColdFilesAgeFromMaxLotLifetime renders Lotman.MaxLotLifetime into
+// the xrootd-formatted age string consumed by the pfc.diskusage
+// purgecoldfiles directive (e.g. "604800s"), enforcing the directive's
+// own [1h, 360d] domain. Returns an error rather than a clamp because
+// a misconfigured cap is exactly the case where silent fallback would
+// hide the bug from operators.
+//
+// Extracted from ConfigXrootd so the validation can be unit-tested
+// without spinning up the entire xrootd config builder.
+func purgeColdFilesAgeFromMaxLotLifetime(maxLotLifetime time.Duration) (string, error) {
+	const (
+		minAge = time.Hour
+		maxAge = 360 * 24 * time.Hour
+	)
+	if maxLotLifetime < minAge {
+		return "", errors.Errorf(
+			"Lotman.MaxLotLifetime (%s) is below the minimum allowed value of 1h",
+			maxLotLifetime)
+	}
+	if maxLotLifetime > maxAge {
+		return "", errors.Errorf(
+			"Lotman.MaxLotLifetime (%s) exceeds the maximum allowed value of 360d",
+			maxLotLifetime)
+	}
+	return strconv.FormatInt(int64(maxLotLifetime.Seconds()), 10) + "s", nil
 }
 
 // mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones

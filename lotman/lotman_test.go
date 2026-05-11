@@ -74,8 +74,8 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	// when storing a lot. The auto-created `default` and `root` lots derive
 	// their timestamps from these params, so we must ensure non-zero defaults
 	// regardless of whether the embedded yaml is loaded.
-	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.Set(2016*time.Hour))
-	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.Set(4032*time.Hour))
+	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.Set(168*time.Hour))
+	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.Set(168*time.Hour))
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -1030,6 +1030,17 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	defer cleanup()
 	require.True(t, success)
 
+	// Lots are named with v4 UUIDs internally; resolve UUID names by
+	// asking lotman which lot owns the namespace path right now.
+	nowMs := time.Now().UnixMilli()
+	nameForPath := func(p string) string {
+		owners, err := GetLotsFromDir(p, false, nowMs)
+		require.NoErrorf(t, err, "GetLotsFromDir(%q)", p)
+		require.NotEmptyf(t, owners, "no lot owns %q", p)
+		// owners[0] is the most-specific lot for the path.
+		return owners[0]
+	}
+
 	getLot := func(name string) Lot {
 		buf := make([]byte, 8192)
 		errBuf := make([]byte, 2048)
@@ -1044,13 +1055,16 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 		return l
 	}
 
-	a := getLot("/a")
-	b := getLot("/a/b")
-	c := getLot("/c")
+	aName := nameForPath("/a")
+	bName := nameForPath("/a/b")
+	cName := nameForPath("/c")
+	a := getLot(aName)
+	b := getLot(bName)
+	c := getLot(cName)
 
 	// Parent linkage as computed by buildLotTree.
 	assert.Equal(t, []string{"root"}, a.Parents)
-	assert.Equal(t, []string{"/a"}, b.Parents)
+	assert.Equal(t, []string{aName}, b.Parents)
 	assert.Equal(t, []string{"root"}, c.Parents)
 
 	// (N+1) allocator: root has HighWaterMark=100GB (no Cache.DataLocations
@@ -1068,10 +1082,10 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	// ParentAttributions wired through to lotman: each child's attribution
 	// equals its own dedicated quota (axiom 1 trivially satisfied).
 	require.Contains(t, a.ParentAttributions, "root")
-	require.Contains(t, b.ParentAttributions, "/a")
+	require.Contains(t, b.ParentAttributions, aName)
 	require.Contains(t, c.ParentAttributions, "root")
 	assert.InDelta(t, 50.0, *a.ParentAttributions["root"].DedicatedGB, 1e-9)
-	assert.InDelta(t, 25.0, *b.ParentAttributions["/a"].DedicatedGB, 1e-9)
+	assert.InDelta(t, 25.0, *b.ParentAttributions[aName].DedicatedGB, 1e-9)
 	assert.InDelta(t, 50.0, *c.ParentAttributions["root"].DedicatedGB, 1e-9)
 
 	// Sentinel propagation (root.opportunistic = -1, root.max_num_objects = -1):

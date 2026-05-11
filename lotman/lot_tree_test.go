@@ -66,22 +66,26 @@ func rootSeed(dedGB float64) Lot {
 	}
 }
 
-// childByName looks up a node anywhere in the tree by its lot name.
-// Used by table tests to assert per-node quotas without depending on
-// child ordering.
-func childByName(root *lotTreeNode, name string) *lotTreeNode {
-	if root == nil {
-		return nil
+// childByPath looks up a tree node by its first declared namespace path.
+// This is the canonical lookup for namespace lots since their LotName is
+// a UUID. Returns nil if no node has nsPath in its paths[].
+func childByPath(root *lotTreeNode, nsPath string) *lotTreeNode {
+	return findLotNodeByPath(root, nsPath)
+}
+
+// parentNameMatches returns true when the supplied parent-name (recorded
+// in node.lot.Parents[0]) refers to either the literal "root" lot, or to
+// the lot returned by childByPath(root, expected). This indirection is
+// required because non-root namespace lots now have UUID names.
+func parentNameMatches(root *lotTreeNode, parentName, expected string) bool {
+	if expected == "root" {
+		return parentName == "root"
 	}
-	if root.lot.LotName == name {
-		return root
+	node := childByPath(root, expected)
+	if node == nil {
+		return false
 	}
-	for _, c := range root.children {
-		if found := childByName(c, name); found != nil {
-			return found
-		}
-	}
-	return nil
+	return node.lot.LotName == parentName
 }
 
 func TestPathContains(t *testing.T) {
@@ -90,9 +94,9 @@ func TestPathContains(t *testing.T) {
 		want          bool
 	}{
 		{"/foo", "/foo/bar", true},
-		{"/foo", "/foobar", false},        // segment-boundary check
-		{"/foo", "/foo", false},           // strict ancestor
-		{"/", "/anything", true},          // root contains everything
+		{"/foo", "/foobar", false}, // segment-boundary check
+		{"/foo", "/foo", false},    // strict ancestor
+		{"/", "/anything", true},   // root contains everything
 		{"/foo/bar", "/foo/bar/baz", true},
 		{"/foo/bar", "/foo/bar2", false},
 	}
@@ -178,16 +182,17 @@ func TestBuildLotTree_PathContainment(t *testing.T) {
 			tree := buildLotTree(rootSeed(100), makeAds(c.paths...), "https://fed.example/")
 			require.NotNil(t, tree)
 			for childPath, parentName := range c.expectParent {
-				node := childByName(tree, childPath)
-				require.NotNilf(t, node, "expected node %q to exist", childPath)
+				node := childByPath(tree, childPath)
+				require.NotNilf(t, node, "expected node for path %q to exist", childPath)
 				require.Lenf(t, node.lot.Parents, 1, "node %q should have exactly one parent", childPath)
-				assert.Equalf(t, parentName, node.lot.Parents[0],
-					"node %q parent mismatch", childPath)
+				assert.Truef(t, parentNameMatches(tree, node.lot.Parents[0], parentName),
+					"node %q parent mismatch: got %q, expected lot at path %q",
+					childPath, node.lot.Parents[0], parentName)
 			}
 			// Negative: monitoring path should never appear in tree.
 			for _, p := range c.paths {
 				if p == "/pelican/monitoring/probe" {
-					assert.Nil(t, childByName(tree, "/pelican/monitoring/probe"))
+					assert.Nil(t, childByPath(tree, "/pelican/monitoring/probe"))
 				}
 			}
 		})
@@ -199,8 +204,8 @@ func TestAllocateQuotas_TopLevel(t *testing.T) {
 	tree := buildLotTree(rootSeed(6), makeAds("/foo", "/bar"), "https://fed.example/")
 	allocateQuotas(tree)
 
-	foo := childByName(tree, "/foo")
-	bar := childByName(tree, "/bar")
+	foo := childByPath(tree, "/foo")
+	bar := childByPath(tree, "/bar")
 	require.NotNil(t, foo)
 	require.NotNil(t, bar)
 	assert.InDelta(t, 3.0, *foo.lot.MPA.DedicatedGB, 1e-9)
@@ -228,9 +233,9 @@ func TestAllocateQuotas_NPlusOneRule(t *testing.T) {
 		makeAds("/foo", "/foo/bar", "/foo/baz"), "https://fed.example/")
 	allocateQuotas(tree)
 
-	foo := childByName(tree, "/foo")
-	bar := childByName(tree, "/foo/bar")
-	baz := childByName(tree, "/foo/baz")
+	foo := childByPath(tree, "/foo")
+	bar := childByPath(tree, "/foo/bar")
+	baz := childByPath(tree, "/foo/baz")
 	require.NotNil(t, foo)
 	require.NotNil(t, bar)
 	require.NotNil(t, baz)
@@ -245,10 +250,10 @@ func TestAllocateQuotas_NPlusOneRule(t *testing.T) {
 
 	// Sum of grandchildren's attribution to /foo = 6 < 9 (axiom 1 satisfied
 	// with room to spare, which is the (N+1) rule's purpose).
-	require.Contains(t, bar.lot.ParentAttributions, "/foo")
-	require.Contains(t, baz.lot.ParentAttributions, "/foo")
-	assert.InDelta(t, 3.0, *bar.lot.ParentAttributions["/foo"].DedicatedGB, 1e-9)
-	assert.InDelta(t, 3.0, *baz.lot.ParentAttributions["/foo"].DedicatedGB, 1e-9)
+	require.Contains(t, bar.lot.ParentAttributions, foo.lot.LotName)
+	require.Contains(t, baz.lot.ParentAttributions, foo.lot.LotName)
+	assert.InDelta(t, 3.0, *bar.lot.ParentAttributions[foo.lot.LotName].DedicatedGB, 1e-9)
+	assert.InDelta(t, 3.0, *baz.lot.ParentAttributions[foo.lot.LotName].DedicatedGB, 1e-9)
 }
 
 func TestAllocateQuotas_AxiomOneSatisfied(t *testing.T) {
@@ -295,12 +300,16 @@ func TestFlattenTreeForCreation_PreOrder(t *testing.T) {
 	allocateQuotas(tree)
 	flat := flattenTreeForCreation(tree)
 
-	// Build a name -> position map and assert every parent precedes its
-	// children. This is the only contract downstream lotman_add_lot relies
-	// on.
+	// Build a path -> position map (lot names are now UUIDs, so we key on
+	// the namespace path stored in paths[0].Path). Root has no path entries
+	// and keeps its literal name. Assert every parent precedes its children.
 	pos := map[string]int{}
 	for i, lot := range flat {
-		pos[lot.LotName] = i
+		key := lot.LotName
+		if len(lot.Paths) > 0 {
+			key = lot.Paths[0].Path
+		}
+		pos[key] = i
 	}
 	require.Contains(t, pos, "root")
 	require.Contains(t, pos, "/a")

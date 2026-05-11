@@ -228,7 +228,12 @@ type Config struct {
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
 		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
+		LotRetention time.Duration `mapstructure:"lotretention" yaml:"LotRetention"`
+		MaxLotLifetime time.Duration `mapstructure:"maxlotlifetime" yaml:"MaxLotLifetime"`
+		MinFillerWidth time.Duration `mapstructure:"minfillerwidth" yaml:"MinFillerWidth"`
 		PolicyDefinitions any `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
+		RenewalCheckInterval time.Duration `mapstructure:"renewalcheckinterval" yaml:"RenewalCheckInterval"`
+		SchedulingHorizon time.Duration `mapstructure:"schedulinghorizon" yaml:"SchedulingHorizon"`
 	} `mapstructure:"lotman" yaml:"Lotman"`
 	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 	Monitoring struct {
@@ -696,7 +701,12 @@ type configWithType struct {
 		EnabledPolicy struct { Type string; Value string }
 		LibLocation struct { Type string; Value string }
 		LotHome struct { Type string; Value string }
+		LotRetention struct { Type string; Value time.Duration }
+		MaxLotLifetime struct { Type string; Value time.Duration }
+		MinFillerWidth struct { Type string; Value time.Duration }
 		PolicyDefinitions struct { Type string; Value any }
+		RenewalCheckInterval struct { Type string; Value time.Duration }
+		SchedulingHorizon struct { Type string; Value time.Duration }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {

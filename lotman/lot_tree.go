@@ -79,6 +79,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -186,9 +188,15 @@ func buildLotTree(rootLot Lot, nsAds []server_structs.NamespaceAdV2, federationI
 			}
 		}
 
+		// Lot names are now opaque UUIDs (rather than the namespace path).
+		// The human-readable namespace path lives only on `paths[].Path`,
+		// which lotman uses for its longest-prefix path resolution. Decoupling
+		// the lot name from its path lets us mint a fresh successor lot when
+		// renewing without colliding with the still-live predecessor that
+		// owns the same path during the overlap window.
 		node := &lotTreeNode{
 			lot: Lot{
-				LotName: ns.path,
+				LotName: uuid.NewString(),
 				Owner:   ns.issuer,
 				Parents: []string{parent.lot.LotName},
 				Paths: []LotPath{{
@@ -362,8 +370,10 @@ func flattenTreeForCreation(root *lotTreeNode) []Lot {
 	walk = func(n *lotTreeNode) {
 		out = append(out, n.lot)
 		// Stable child ordering helps tests and reproducible logs.
+		// Sort by primary path (paths[0].Path) when present, falling back
+		// to LotName so root and lots without paths keep deterministic order.
 		sort.Slice(n.children, func(i, j int) bool {
-			return n.children[i].lot.LotName < n.children[j].lot.LotName
+			return childSortKey(n.children[i]) < childSortKey(n.children[j])
 		})
 		for _, c := range n.children {
 			walk(c)
@@ -371,4 +381,42 @@ func flattenTreeForCreation(root *lotTreeNode) []Lot {
 	}
 	walk(root)
 	return out
+}
+
+// childSortKey returns the sort key for sibling ordering. Namespace lots
+// have their first declared path; root/default and other path-less lots
+// fall through to their LotName (a UUID for namespace lots, fixed for root).
+func childSortKey(n *lotTreeNode) string {
+	if len(n.lot.Paths) > 0 {
+		return n.lot.Paths[0].Path
+	}
+	return n.lot.LotName
+}
+
+// findLotNodeByPath walks the tree depth-first and returns the first node
+// whose paths[0].Path matches the supplied namespace path. Used by tests
+// (and renewal) to find the UUID-named lot for a known namespace.
+func findLotNodeByPath(root *lotTreeNode, nsPath string) *lotTreeNode {
+	if root == nil {
+		return nil
+	}
+	nsPath = normaliseLotPath(nsPath)
+	var walk func(n *lotTreeNode) *lotTreeNode
+	walk = func(n *lotTreeNode) *lotTreeNode {
+		if n == nil {
+			return nil
+		}
+		for _, p := range n.lot.Paths {
+			if normaliseLotPath(p.Path) == nsPath {
+				return n
+			}
+		}
+		for _, c := range n.children {
+			if found := walk(c); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	return walk(root)
 }

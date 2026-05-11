@@ -181,7 +181,7 @@ func TestLotmanNewBindings(t *testing.T) {
 	t.Run("GetLotsPastExp", func(t *testing.T) {
 		// The configured expiration_time for test-1 and test-2 is 12345ms
 		// since the epoch -- decades in the past.
-		expired, err := GetLotsPastExp(false)
+		expired, err := GetLotsPastExp(false, false)
 		require.NoError(t, err)
 		assert.Contains(t, expired, "test-1")
 		assert.Contains(t, expired, "test-2")
@@ -189,7 +189,7 @@ func TestLotmanNewBindings(t *testing.T) {
 
 	t.Run("GetLotsPastDel", func(t *testing.T) {
 		// deletion_time was 123456ms -- also long past.
-		past, err := GetLotsPastDel(false)
+		past, err := GetLotsPastDel(false, false)
 		require.NoError(t, err)
 		assert.Contains(t, past, "test-1")
 	})
@@ -198,17 +198,17 @@ func TestLotmanNewBindings(t *testing.T) {
 		// No usage reported -> nothing is past dedicated quota. We mainly want
 		// to confirm the binding round-trips without error and respects the
 		// hierarchical flag.
-		_, err := GetLotsPastDed(true, false, true)
+		_, err := GetLotsPastDed(true, false, false, true)
 		require.NoError(t, err)
 	})
 
 	t.Run("GetLotsPastOpp", func(t *testing.T) {
-		_, err := GetLotsPastOpp(true, false, false)
+		_, err := GetLotsPastOpp(true, false, false, false)
 		require.NoError(t, err)
 	})
 
 	t.Run("GetLotsPastObj", func(t *testing.T) {
-		_, err := GetLotsPastObj(true, false, false)
+		_, err := GetLotsPastObj(true, false, false, false)
 		require.NoError(t, err)
 	})
 

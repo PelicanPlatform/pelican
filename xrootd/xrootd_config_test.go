@@ -868,3 +868,41 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, metrics.StatusOK.String(), status)
 }
+
+// purgeColdFilesAgeFromMaxLotLifetime is the small validator used by
+// ConfigXrootd to translate Lotman.MaxLotLifetime into the
+// pfc.diskusage purgecoldfiles age. xrootd accepts ages in [1h, 360d]
+// (see XrdPfcConfiguration.cc::a2tm); below or above that range the
+// directive silently rejects, so Pelican must reject at config time
+// rather than emit an unparsable directive.
+func TestPurgeColdFilesAgeFromMaxLotLifetime(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      time.Duration
+		want    string
+		wantErr string
+	}{
+		{"one hour minimum accepted", time.Hour, "3600s", ""},
+		{"one day accepted", 24 * time.Hour, "86400s", ""},
+		{"week accepted", 7 * 24 * time.Hour, "604800s", ""},
+		{"360 days maximum accepted", 360 * 24 * time.Hour, "31104000s", ""},
+
+		{"30 minutes rejected", 30 * time.Minute, "", "minimum allowed value of 1h"},
+		{"59 minutes rejected", 59 * time.Minute, "", "minimum allowed value of 1h"},
+		{"361 days rejected", 361 * 24 * time.Hour, "", "maximum allowed value of 360d"},
+		{"1 year rejected", 365 * 24 * time.Hour, "", "maximum allowed value of 360d"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := purgeColdFilesAgeFromMaxLotLifetime(tc.in)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
