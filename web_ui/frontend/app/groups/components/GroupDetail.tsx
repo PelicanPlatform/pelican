@@ -869,9 +869,9 @@ const AuthTemplateEligibleRow: React.FC<{
       </Box>
       <Typography variant='caption' color='text.secondary'>
         When eligible, this group&apos;s name is honored by
-        Issuer.AuthorizationTemplates and Server.*AdminGroups config.
-        Off keeps the group usable in collection ACLs and shares
-        without granting it any operator-level authority.
+        Issuer.AuthorizationTemplates and Server.*AdminGroups config. Off keeps
+        the group usable in collection ACLs and shares without granting it any
+        operator-level authority.
       </Typography>
     </Box>
   );

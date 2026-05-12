@@ -111,8 +111,8 @@ func TestIntersectWithUserScopes(t *testing.T) {
 			return nil
 		})
 		caps := []string{
-			token_scopes.Server_Admin.String(),       // user-grantable
-			token_scopes.Monitoring_Scrape.String(),  // not user-grantable
+			token_scopes.Server_Admin.String(),      // user-grantable
+			token_scopes.Monitoring_Scrape.String(), // not user-grantable
 		}
 		got := intersectWithUserScopes(caps, "")
 		assert.ElementsMatch(t, caps, got,
@@ -125,9 +125,9 @@ func TestIntersectWithUserScopes(t *testing.T) {
 		// strips them. Non-grantable scopes still pass through.
 		withMockEffectiveScopes(t, nil)
 		caps := []string{
-			token_scopes.Server_Admin.String(),       // user-grantable — must drop
-			token_scopes.Monitoring_Scrape.String(),  // not user-grantable — must keep
-			token_scopes.Wlcg_Storage_Read.String(),  // data-plane — must keep
+			token_scopes.Server_Admin.String(),      // user-grantable — must drop
+			token_scopes.Monitoring_Scrape.String(), // not user-grantable — must keep
+			token_scopes.Wlcg_Storage_Read.String(), // data-plane — must keep
 		}
 		got := intersectWithUserScopes(caps, "u-carol")
 		want := []string{
@@ -182,7 +182,7 @@ func TestValidateScopesForCreator(t *testing.T) {
 		})
 		err := validateScopesForCreator([]string{
 			token_scopes.Server_UserAdmin.String(), // not held — must error
-			token_scopes.Server_Admin.String(),  // not held — must error
+			token_scopes.Server_Admin.String(),     // not held — must error
 			token_scopes.Server_CollectionAdmin.String(),
 			token_scopes.Monitoring_Scrape.String(),
 		}, "u-alice")

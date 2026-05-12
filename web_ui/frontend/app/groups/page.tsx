@@ -136,8 +136,7 @@ const Page = () => {
                 // grant it; otherwise the server would clamp to false
                 // anyway, but elide the field to keep the wire body
                 // tidy.
-                ...(canSetAuthTemplateEligible &&
-                newGroupAuthTemplateEligible
+                ...(canSetAuthTemplateEligible && newGroupAuthTemplateEligible
                   ? { authTemplateEligible: true }
                   : {}),
               }),
@@ -443,12 +442,15 @@ const Page = () => {
                   }
                   label='Auth-template eligible'
                 />
-                <Typography variant='caption' color='text.secondary' display='block'>
+                <Typography
+                  variant='caption'
+                  color='text.secondary'
+                  display='block'
+                >
                   Allow this group&apos;s name to match
-                  Issuer.AuthorizationTemplates and Server.*AdminGroups
-                  config. Off by default — only enable for groups whose
-                  name should be honored by those operator-controlled
-                  surfaces.
+                  Issuer.AuthorizationTemplates and Server.*AdminGroups config.
+                  Off by default — only enable for groups whose name should be
+                  honored by those operator-controlled surfaces.
                 </Typography>
               </Box>
             )}
@@ -525,8 +527,8 @@ const EmptyGroupList: React.FC<{
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
         If you&rsquo;re expecting to be in a group, ask its owner or
-        administrator to send you an invite link. You can also create
-        your own group to use in collection ACLs and shares.
+        administrator to send you an invite link. You can also create your own
+        group to use in collection ACLs and shares.
       </Typography>
       {canCreate && (
         <Button variant='outlined' onClick={onCreate}>

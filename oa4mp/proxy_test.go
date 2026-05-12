@@ -228,7 +228,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-relative", "/data/team")
 		seedACL(t, db, "col-relative", "team-readers", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"team-readers"}, "/data")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"team-readers"}, "/data")
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/team",
 			"per-namespace issuer must emit a namespace-relative storage scope")
@@ -246,7 +246,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-outside", "/other/place")
 		seedACL(t, db, "col-outside", "team-readers", database.AclRoleWrite, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"team-readers"}, "/data")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"team-readers"}, "/data")
 		require.NoError(t, err)
 		assert.NotContains(t, scopes, "storage.read:/other/place")
 		assert.NotContains(t, scopes, "storage.modify:/other/place")
@@ -263,7 +263,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		seedCollection(t, db, "col-root", "/data")
 		seedACL(t, db, "col-root", "team-readers", database.AclRoleRead, nil)
 
-		scopes, _, err := GetUserCollectionScopes(db, "alice", []string{"team-readers"}, "/data")
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", []string{"team-readers"}, "/data")
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/",
 			"collection at namespace root should grant storage.read:/")

@@ -1040,9 +1040,9 @@ const OnboardForm: React.FC = () => {
           </Typography>
           <Typography variant='body2' color='text.secondary' mb={2}>
             Configure the access and management of the collection. For each
-            permission, either create a fresh group OR attach an existing
-            one. Disable rows you don&apos;t need; more can be added later
-            from the collection&apos;s page.
+            permission, either create a fresh group OR attach an existing one.
+            Disable rows you don&apos;t need; more can be added later from the
+            collection&apos;s page.
           </Typography>
           <Stack spacing={2}>
             {groups.map((g, i) => (

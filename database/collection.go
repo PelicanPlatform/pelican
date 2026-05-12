@@ -231,12 +231,12 @@ type Collection struct {
 	// not declaring it on the struct keeps GORM AutoMigrate from
 	// trying to recreate it as a non-partial index in tests that
 	// rely on AutoMigrate alone.
-	ParentCollectionID   string               `gorm:"not null;default:''" json:"parentCollectionId,omitempty"`
-	CreatedAt            time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt            time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
-	Members              []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
-	ACLs                 []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
-	Metadata             []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
+	ParentCollectionID string               `gorm:"not null;default:''" json:"parentCollectionId,omitempty"`
+	CreatedAt          time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt          time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	Members            []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
+	ACLs               []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
+	Metadata           []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
 }
 
 type CollectionMember struct {
@@ -405,16 +405,16 @@ const (
 // See ValidateIdentifier for the character class enforced on Name.
 // DisplayName has the laxer ValidateDisplayName ruleset.
 type Group struct {
-	ID                  string        `gorm:"primaryKey" json:"id"`
-	Name                string        `gorm:"not null;unique" json:"name"`
-	DisplayName         string        `gorm:"not null;default:''" json:"displayName"`
-	Description         string        `json:"description"`
-	CreatedBy           string        `gorm:"not null" json:"createdBy"`
-	CreatorAuthMethod   AuthMethod    `gorm:"not null;default:''" json:"creatorAuthMethod"`
-	CreatorAuthMethodID string        `gorm:"not null;default:''" json:"creatorAuthMethodId,omitempty"`
-	OwnerID             string        `gorm:"not null;default:''" json:"ownerId"`
-	AdminID             string        `gorm:"not null;default:''" json:"adminId"`
-	AdminType           AdminType     `gorm:"not null;default:''" json:"adminType"`
+	ID                  string     `gorm:"primaryKey" json:"id"`
+	Name                string     `gorm:"not null;unique" json:"name"`
+	DisplayName         string     `gorm:"not null;default:''" json:"displayName"`
+	Description         string     `json:"description"`
+	CreatedBy           string     `gorm:"not null" json:"createdBy"`
+	CreatorAuthMethod   AuthMethod `gorm:"not null;default:''" json:"creatorAuthMethod"`
+	CreatorAuthMethodID string     `gorm:"not null;default:''" json:"creatorAuthMethodId,omitempty"`
+	OwnerID             string     `gorm:"not null;default:''" json:"ownerId"`
+	AdminID             string     `gorm:"not null;default:''" json:"adminId"`
+	AdminType           AdminType  `gorm:"not null;default:''" json:"adminType"`
 	// AuthTemplateEligible gates whether this group is allowed to
 	// match against Issuer.AuthorizationTemplates and the
 	// Server.*AdminGroups config lists at runtime. Group creation is
@@ -431,7 +431,7 @@ type Group struct {
 	// every insert with a zero Go value, defeating the create-time
 	// non-admin clamp ("AuthTemplateEligible: false" would round-trip
 	// as true).
-	AuthTemplateEligible bool          `gorm:"not null" json:"authTemplateEligible"`
+	AuthTemplateEligible bool `gorm:"not null" json:"authTemplateEligible"`
 	// CreatedForCollectionID marks groups minted alongside a specific
 	// collection during the onboarding flow. The redemption path of a
 	// collection-ownership invite cascades the transfer to every group
