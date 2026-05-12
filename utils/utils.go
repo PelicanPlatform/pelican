@@ -321,6 +321,7 @@ func ParseBytes(sizeStr string) (uint64, error) {
 // SanitizePrometheusLabel ensures a string is valid UTF-8 so it can be safely
 // used as a Prometheus label value without causing a panic. Any invalid UTF-8
 // byte sequences are replaced with the Unicode replacement character (U+FFFD).
+// Returns a valid UTF-8 string safe for use as a Prometheus label value.
 func SanitizePrometheusLabel(s string) string {
 	return strings.ToValidUTF8(s, "\uFFFD")
 }
