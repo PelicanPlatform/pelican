@@ -1370,7 +1370,7 @@ func handlePacket(packet []byte) error {
 				var oldWriteBytes uint64 = 0
 				if xferRecord != nil {
 					userRecord := sessions.Get(xferRecord.Value().UserId)
-					labels["path"] = xferRecord.Value().Path
+					labels["path"] = utils.SanitizePrometheusLabel(xferRecord.Value().Path)
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
@@ -1378,11 +1378,11 @@ func handlePacket(packet []byte) error {
 						} else {
 							labels["network"] = maskedIP
 						}
-						labels["ap"] = userRecord.Value().AuthenticationProtocol
-						labels["dn"] = userRecord.Value().DN
-						labels["role"] = userRecord.Value().Role
-						labels["org"] = userRecord.Value().Org
-						labels["proj"] = userRecord.Value().Project
+						labels["ap"] = utils.SanitizePrometheusLabel(userRecord.Value().AuthenticationProtocol)
+						labels["dn"] = utils.SanitizePrometheusLabel(userRecord.Value().DN)
+						labels["role"] = utils.SanitizePrometheusLabel(userRecord.Value().Role)
+						labels["org"] = utils.SanitizePrometheusLabel(userRecord.Value().Org)
+						labels["proj"] = utils.SanitizePrometheusLabel(userRecord.Value().Project)
 					}
 					oldReadvSegs = xferRecord.Value().ReadvSegs
 					oldReadOps = xferRecord.Value().ReadOps
@@ -1559,7 +1559,7 @@ func handlePacket(packet []byte) error {
 				if item != nil {
 					record = item.Value()
 					userRecord := sessions.Get(record.UserId)
-					labels["path"] = record.Path
+					labels["path"] = utils.SanitizePrometheusLabel(record.Path)
 					logFields["filePath"] = record.Path
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
@@ -1568,15 +1568,15 @@ func handlePacket(packet []byte) error {
 						} else {
 							labels["network"] = maskedIP
 						}
-						labels["ap"] = userRecord.Value().AuthenticationProtocol
+						labels["ap"] = utils.SanitizePrometheusLabel(userRecord.Value().AuthenticationProtocol)
 						logFields["authProtocol"] = userRecord.Value().AuthenticationProtocol
-						labels["dn"] = userRecord.Value().DN
+						labels["dn"] = utils.SanitizePrometheusLabel(userRecord.Value().DN)
 						logFields["dn"] = userRecord.Value().DN
-						labels["role"] = userRecord.Value().Role
+						labels["role"] = utils.SanitizePrometheusLabel(userRecord.Value().Role)
 						logFields["role"] = userRecord.Value().Role
-						labels["org"] = userRecord.Value().Org
+						labels["org"] = utils.SanitizePrometheusLabel(userRecord.Value().Org)
 						logFields["org"] = userRecord.Value().Org
-						labels["proj"] = userRecord.Value().Project
+						labels["proj"] = utils.SanitizePrometheusLabel(userRecord.Value().Project)
 						logFields["project"] = userRecord.Value().Project
 					}
 				}

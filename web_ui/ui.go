@@ -59,6 +59,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -707,7 +708,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 
 // Map gin routes for Prometheus metrics to reduce metric cardinality
 func mapPrometheusPath(c *gin.Context) string {
-	url := c.Request.URL.Path
+	url := utils.SanitizePrometheusLabel(c.Request.URL.Path)
 	// Frontend static resources
 	if strings.HasPrefix(url, "/view/_next/") {
 		url = "/view/_next/:resource"

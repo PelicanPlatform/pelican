@@ -34,6 +34,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -476,6 +477,21 @@ func TestMapPrometheusPath(t *testing.T) {
 
 		get = mapPrometheusPath(c)
 		assert.Equal(t, "/api/v1.0/director/origin/foo/bar/:path", get)
+	})
+
+	t.Run("sanitize-non-utf8-object-path", func(t *testing.T) {
+		// Simulate an attack using overlong UTF-8 encodings (e.g. \xc0\x2e for '.')
+		// The raw path /api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file triggers a
+		// Prometheus panic when used as a label value without sanitization.
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		// Inject non-UTF8 bytes directly into the parsed URL path
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file"
+		c.Request = req
+
+		get := mapPrometheusPath(c)
+		// The result must be valid UTF-8 so Prometheus won't panic
+		assert.True(t, utf8.ValidString(get), "result must be valid UTF-8")
 	})
 }
 
