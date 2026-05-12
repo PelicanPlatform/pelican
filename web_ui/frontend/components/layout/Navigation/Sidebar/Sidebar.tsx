@@ -51,10 +51,7 @@ export const Sidebar = ({
           zIndex: 2,
         }}
       >
-        <Box
-          height={`calc(100vh - ${topOffset}px)`}
-          display={'flex'}
-        >
+        <Box height={`calc(100vh - ${topOffset}px)`} display={'flex'}>
           <Box
             className={styles.header}
             style={{

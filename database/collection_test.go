@@ -368,8 +368,8 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		// transferred to a third party.
 		require.NoError(t, db.Create(&Group{
 			ID: "g-alpha-team", Name: "alpha-team",
-			CreatedBy: "owner-2",
-			OwnerID:   "third-party",
+			CreatedBy:              "owner-2",
+			OwnerID:                "third-party",
 			CreatedForCollectionID: "col-alpha",
 		}).Error)
 

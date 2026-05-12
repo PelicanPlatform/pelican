@@ -423,10 +423,7 @@ const CollectionCard: React.FC<{
             UI gate just hides a button that would always 409.
           */}
           {canCreateShare && (
-            <IconButton
-              title='Create share'
-              onClick={() => setShareOpen(true)}
-            >
+            <IconButton title='Create share' onClick={() => setShareOpen(true)}>
               <ShareIcon />
             </IconButton>
           )}
@@ -642,10 +639,10 @@ const CreateShareDialog: React.FC<{
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Alert severity='info'>
             A share is a child collection that delegates a subset of{' '}
-            <strong>{parent.name}</strong>&apos;s access to whoever you
-            grant ACLs to. Access is impersonated as you, the share
-            owner, and is automatically clamped to whatever access you
-            currently hold on {parent.name}.
+            <strong>{parent.name}</strong>&apos;s access to whoever you grant
+            ACLs to. Access is impersonated as you, the share owner, and is
+            automatically clamped to whatever access you currently hold on{' '}
+            {parent.name}.
           </Alert>
           <TextField
             label='Share name'

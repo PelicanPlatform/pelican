@@ -429,9 +429,9 @@ const EditForm: React.FC<{ collectionID: string }> = ({ collectionID }) => {
           label='Allow users to create shares'
         />
         <Typography variant='caption' color='text.secondary' display='block'>
-          When on, anyone with read access to this collection can mint
-          a single-use &quot;share&quot; link that delegates a subset of
-          their access to a third party. Off by default.
+          When on, anyone with read access to this collection can mint a
+          single-use &quot;share&quot; link that delegates a subset of their
+          access to a third party. Off by default.
         </Typography>
       </Paper>
 
