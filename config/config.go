@@ -2013,6 +2013,51 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return errors.New("If Cache.EnableLotman is true, the following Cache parameters must also be set: HighWaterMark, LowWaterMark, " +
 				"FilesBaseSize, FilesNominalSize, FilesMaxSize")
 		}
+		// Lotman boundary checks. These were previously scattered across
+		// the lotman package and xrootd config builder; consolidating
+		// them here means an operator sees one batch of errors at boot
+		// rather than discovering them only when the renewal scheduler
+		// or xrootd config is built.
+		const (
+			minPurgeAge = time.Hour
+			maxPurgeAge = 360 * 24 * time.Hour
+		)
+		if maxLife := param.Lotman_MaxLotLifetime.GetDuration(); maxLife > 0 {
+			// pfc.diskusage purgecoldfiles age must be in [1h, 360d]
+			// because Lotman.MaxLotLifetime is propagated verbatim to
+			// that xrootd directive when Cache.EnableLotman is true.
+			if maxLife < minPurgeAge {
+				return errors.Errorf("%s (%s) is below the minimum allowed value of 1h",
+					param.Lotman_MaxLotLifetime.GetName(), maxLife)
+			}
+			if maxLife > maxPurgeAge {
+				return errors.Errorf("%s (%s) exceeds the maximum allowed value of 360d",
+					param.Lotman_MaxLotLifetime.GetName(), maxLife)
+			}
+		}
+		// SchedulingHorizon should be ≥ DefaultLotExpirationLifetime and
+		// ≥ RenewalCheckInterval. Warn (don't reject) — the runtime
+		// planner additionally clamps up so a misconfigured value
+		// degrades gracefully rather than producing a coverage gap.
+		horizon := param.Lotman_SchedulingHorizon.GetDuration()
+		defLife := param.Lotman_DefaultLotExpirationLifetime.GetDuration()
+		interval := param.Lotman_RenewalCheckInterval.GetDuration()
+		if horizon > 0 && defLife > 0 && horizon < defLife {
+			log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
+				param.Lotman_SchedulingHorizon.GetName(), horizon,
+				param.Lotman_DefaultLotExpirationLifetime.GetName(), defLife,
+				defLife,
+				param.Lotman_SchedulingHorizon.GetName(),
+				param.Lotman_DefaultLotExpirationLifetime.GetName())
+		}
+		if horizon > 0 && interval > 0 && horizon < interval {
+			log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
+				param.Lotman_SchedulingHorizon.GetName(), horizon,
+				param.Lotman_RenewalCheckInterval.GetName(), interval,
+				interval,
+				param.Lotman_SchedulingHorizon.GetName(),
+				param.Lotman_RenewalCheckInterval.GetName())
+		}
 	}
 
 	if currentServers.IsEnabled(server_structs.DirectorType) {

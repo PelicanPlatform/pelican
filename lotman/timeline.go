@@ -33,11 +33,11 @@
 //	nextGap(timeline, now)    — given a sorted timeline, return the first
 //	                            point at or after `now` that is NOT
 //	                            covered by any lot in the timeline.
-//	listAllLotsFull()         — fetch every lot from the lotman DB as
-//	                            full Lot structs (FFI-side helper).
 //
 // All time values are Unix milliseconds. The data plane is intentionally
-// pure so it can be unit-tested with synthetic Lot slices.
+// pure so it can be unit-tested with synthetic Lot slices. The FFI-side
+// helpers that fetch the actual Lot population from the lotman DB live in
+// scoped_query.go (renewal/GC ticks) so timeline.go has zero FFI surface.
 
 package lotman
 
@@ -165,29 +165,7 @@ func nextHole(timeline []Lot, cursor int64) (holeStart, holeEnd int64, ok bool) 
 	return pos, sentinelEnd, true
 }
 
-// listAllLotsFull returns every lot in the lotman DB as a fully-populated
-// Lot struct, fetching each one via lotman_get_lot_as_json. Reclaimed
-// lots are included so callers can compute reclamation-aware GC eligibility.
-// Returns nil, nil on an empty DB.
-//
-// This is an FFI helper, not a pure function: the rest of timeline.go is
-// pure and unit-testable with synthetic slices, while production callers
-// reach the real database through this entry point.
-func listAllLotsFull() ([]Lot, error) {
-	names, err := ListAllLots()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Lot, 0, len(names))
-	for _, n := range names {
-		l, err := GetLot(n, false)
-		if err != nil {
-			return nil, err
-		}
-		if l == nil {
-			continue
-		}
-		out = append(out, *l)
-	}
-	return out, nil
-}
+// listAllLotsFull was removed in favour of the window-aware scoped queries
+// in scoped_query.go (getActiveLotsForRenewal / GC's GetLotsPastDel call).
+// The legacy O(all rows) scan was the renewal scheduler's biggest scaling
+// pain point; both ticks now scope work to O(active subtree size).

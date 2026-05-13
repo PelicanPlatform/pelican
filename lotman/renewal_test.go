@@ -65,10 +65,10 @@ func TestRenewExpiringLots_NoExistingLots_MintsForEveryNamespace(t *testing.T) {
 	ads := adsForRenewal("/a", "/b")
 
 	prop := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, prop.NewLots, 2)
+	require.Len(t, prop.newLots, 2)
 
 	got := map[string]bool{}
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		require.NotEmpty(t, l.LotName, "new lots must have a UUID name")
 		require.Len(t, l.Paths, 1)
 		got[l.Paths[0].Path] = true
@@ -87,7 +87,7 @@ func TestRenewExpiringLots_CoverageInsidePeriod_NoNewLot(t *testing.T) {
 	// Existing lot covers [now-1h, now+24h) -> no gap inside [now, now+1h).
 	existing := []Lot{makeLot("u1", "/a", now-int64(60*60*1000), now+int64(24*60*60*1000))}
 	prop := renewExpiringLots(cfg, ads, existing)
-	assert.Empty(t, prop.NewLots)
+	assert.Empty(t, prop.newLots)
 }
 
 func TestRenewExpiringLots_GapAtNow_MintsSuccessor(t *testing.T) {
@@ -97,8 +97,8 @@ func TestRenewExpiringLots_GapAtNow_MintsSuccessor(t *testing.T) {
 	// Existing lot expired before now; coverage should restart at now.
 	existing := []Lot{makeLot("u1", "/a", 0, now-1)}
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 1)
-	assert.Equal(t, now, prop.NewLots[0].MPA.CreationTime.Value)
+	require.Len(t, prop.newLots, 1)
+	assert.Equal(t, now, prop.newLots[0].MPA.CreationTime.Value)
 }
 
 func TestRenewExpiringLots_GapInsidePeriod_CreationAtPredecessorExpiration(t *testing.T) {
@@ -108,9 +108,9 @@ func TestRenewExpiringLots_GapInsidePeriod_CreationAtPredecessorExpiration(t *te
 	predExp := now + int64(30*60*1000) // expires in 30 min, inside the 1h window.
 	existing := []Lot{makeLot("u1", "/a", now-1000, predExp)}
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 1)
+	require.Len(t, prop.newLots, 1)
 	// New lot must start at the predecessor's expiration to avoid overlap.
-	assert.Equal(t, predExp, prop.NewLots[0].MPA.CreationTime.Value)
+	assert.Equal(t, predExp, prop.newLots[0].MPA.CreationTime.Value)
 }
 
 func TestRenewExpiringLots_MonitoringPathSkipped(t *testing.T) {
@@ -118,8 +118,8 @@ func TestRenewExpiringLots_MonitoringPathSkipped(t *testing.T) {
 	cfg := defaultRenewalCfg(now)
 	ads := adsForRenewal("/a", "/pelican/monitoring/probe")
 	prop := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, prop.NewLots, 1)
-	assert.Equal(t, "/a", prop.NewLots[0].Paths[0].Path)
+	require.Len(t, prop.newLots, 1)
+	assert.Equal(t, "/a", prop.newLots[0].Paths[0].Path)
 }
 
 func TestRenewExpiringLots_Idempotent(t *testing.T) {
@@ -128,11 +128,11 @@ func TestRenewExpiringLots_Idempotent(t *testing.T) {
 	ads := adsForRenewal("/a")
 
 	first := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, first.NewLots, 1)
+	require.Len(t, first.newLots, 1)
 
 	// Second pass: feed the freshly-minted lot back as existing.
-	second := renewExpiringLots(cfg, ads, first.NewLots)
-	assert.Empty(t, second.NewLots)
+	second := renewExpiringLots(cfg, ads, first.newLots)
+	assert.Empty(t, second.newLots)
 }
 
 func TestRenewExpiringLots_LifetimeClampedToMax(t *testing.T) {
@@ -141,16 +141,16 @@ func TestRenewExpiringLots_LifetimeClampedToMax(t *testing.T) {
 	cfg.DefaultLifetimeMs = 2 * cfg.MaxLifetimeMs
 	ads := adsForRenewal("/a")
 	prop := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, prop.NewLots, 1)
-	span := prop.NewLots[0].MPA.ExpirationTime.Value - prop.NewLots[0].MPA.CreationTime.Value
+	require.Len(t, prop.newLots, 1)
+	span := prop.newLots[0].MPA.ExpirationTime.Value - prop.newLots[0].MPA.CreationTime.Value
 	assert.Equal(t, cfg.MaxLifetimeMs, span)
 }
 
 func TestRenewExpiringLots_EmptyConfig_NoOp(t *testing.T) {
 	cfg := renewalConfig{NowMs: 0, PeriodMs: 0, DefaultLifetimeMs: 0}
 	prop := renewExpiringLots(cfg, adsForRenewal("/a"), nil)
-	assert.Empty(t, prop.NewLots)
-	assert.NotEmpty(t, prop.Skips)
+	assert.Empty(t, prop.newLots)
+	assert.NotEmpty(t, prop.skips)
 }
 
 // Axiom-3 clamping: a child successor whose default lifetime would exceed
@@ -180,9 +180,9 @@ func TestRenewExpiringLots_ChildClampedToExistingParentExpiration(t *testing.T) 
 	// Find the FIRST /a/b successor — it must be clamped to the
 	// existing parent's window.
 	var child *Lot
-	for i := range prop.NewLots {
-		if prop.NewLots[i].Paths[0].Path == "/a/b" {
-			child = &prop.NewLots[i]
+	for i := range prop.newLots {
+		if prop.newLots[i].Paths[0].Path == "/a/b" {
+			child = &prop.newLots[i]
 			break
 		}
 	}
@@ -209,10 +209,10 @@ func TestRenewExpiringLots_ChildClampedToPlannedParentSuccessor(t *testing.T) {
 		makeLot("u-child", "/a/b", now-int64(60*60*1000), now-1000),
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 2)
+	require.Len(t, prop.newLots, 2)
 
 	var parent, child Lot
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		if l.Paths[0].Path == "/a" {
 			parent = l
 		} else {
@@ -244,9 +244,9 @@ func TestRenewExpiringLots_SkippedWhenParentWindowGivesNoRoom(t *testing.T) {
 		makeLot("u-parent-old", "/a", now-int64(2*60*60*1000), now-1000), // expired
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	assert.Empty(t, prop.NewLots, "child cannot fit inside an already-expired parent window")
-	require.NotEmpty(t, prop.Skips)
-	assert.Equal(t, "/a/b", prop.Skips[0].NamespacePath)
+	assert.Empty(t, prop.newLots, "child cannot fit inside an already-expired parent window")
+	require.NotEmpty(t, prop.skips)
+	assert.Equal(t, "/a/b", prop.skips[0].NamespacePath)
 }
 
 // horizonRenewalCfg returns a renewalConfig with the new
@@ -289,11 +289,11 @@ func TestRenewExpiringLots_MultiFillFillsEveryHoleInsideHorizon(t *testing.T) {
 		makeLot("L3", "/a", now+30*hour, now+33*hour),
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 3, "three internal holes must yield three successors")
+	require.Len(t, prop.newLots, 3, "three internal holes must yield three successors")
 
 	// Each successor must start at its hole's left edge and end no
 	// later than the hole's right edge (no overlap with existing lots).
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		create := l.MPA.CreationTime.Value
 		expire := l.MPA.ExpirationTime.Value
 		assert.GreaterOrEqual(t, create, now)
@@ -328,8 +328,8 @@ func TestRenewExpiringLots_GapTrimmingClampsExpirationToHoleEnd(t *testing.T) {
 		makeLot("L-future", "/a", now+2*hour, now+25*hour),
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 1)
-	got := prop.NewLots[0]
+	require.Len(t, prop.newLots, 1)
+	got := prop.newLots[0]
 	assert.Equal(t, now, got.MPA.CreationTime.Value)
 	assert.Equal(t, now+2*hour, got.MPA.ExpirationTime.Value,
 		"expiration must be trimmed to hole_end to avoid same-path overlap")
@@ -349,7 +349,7 @@ func TestRenewExpiringLots_HorizonRefusal_DefersHolesBeyondHorizon(t *testing.T)
 		makeLot("L-now", "/a", now-hour, now+50*hour), // covers [now, now+48h]
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	assert.Empty(t, prop.NewLots, "no holes inside horizon → no successors")
+	assert.Empty(t, prop.newLots, "no holes inside horizon → no successors")
 }
 
 // Narrow-gap skip: a hole strictly narrower than MinFillerWidth must be
@@ -371,10 +371,10 @@ func TestRenewExpiringLots_NarrowGapSkipped(t *testing.T) {
 		makeLot("L-future", "/a", now+5*minute, now+25*hour),
 	}
 	prop := renewExpiringLots(cfg, ads, existing)
-	assert.Empty(t, prop.NewLots, "sub-MinFillerWidth gap must not be filled")
-	require.NotEmpty(t, prop.Skips)
+	assert.Empty(t, prop.newLots, "sub-MinFillerWidth gap must not be filled")
+	require.NotEmpty(t, prop.skips)
 	found := false
-	for _, s := range prop.Skips {
+	for _, s := range prop.skips {
 		if s.NamespacePath == "/a" {
 			found = true
 			break
@@ -397,13 +397,13 @@ func TestAllocateEpochAwareQuotas_TopLevelEqualShare(t *testing.T) {
 	ads := adsForRenewal("/a", "/b", "/c") // three siblings under root
 
 	prop := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, prop.NewLots, 3)
+	require.Len(t, prop.newLots, 3)
 
 	allocateEpochAwareQuotas(&prop, nil, ads, cfg)
 
 	// Top-level divisor = N = 3, share = 1000/3 ≈ 333.33.
 	want := 1000.0 / 3.0
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		require.NotNil(t, l.MPA.DedicatedGB, "lot %s missing dedicated_GB", l.LotName)
 		assert.InDelta(t, want, *l.MPA.DedicatedGB, 0.01,
 			"lot %s for %q got %.2f, want ~%.2f",
@@ -423,10 +423,10 @@ func TestAllocateEpochAwareQuotas_NoRootCapacity_StampsZero(t *testing.T) {
 	ads := adsForRenewal("/a")
 
 	prop := renewExpiringLots(cfg, ads, nil)
-	require.Len(t, prop.NewLots, 1)
+	require.Len(t, prop.newLots, 1)
 	allocateEpochAwareQuotas(&prop, nil, ads, cfg)
-	require.NotNil(t, prop.NewLots[0].MPA.DedicatedGB)
-	assert.Equal(t, 0.0, *prop.NewLots[0].MPA.DedicatedGB)
+	require.NotNil(t, prop.newLots[0].MPA.DedicatedGB)
+	assert.Equal(t, 0.0, *prop.newLots[0].MPA.DedicatedGB)
 }
 
 // rootDedicatedGB pulls the dedicated_GB off the root lot in the
@@ -543,12 +543,12 @@ func TestAllocateEpochAwareQuotas_MixedExistingAndPlannedSiblings(t *testing.T) 
 	prop := renewExpiringLots(cfg, ads, existing)
 	// /x is already covered by the existing lot inside the horizon, so
 	// the planner mints only the three new top-level paths.
-	require.Len(t, prop.NewLots, 3, "planner should mint /a, /b, /c (not /x)")
+	require.Len(t, prop.newLots, 3, "planner should mint /a, /b, /c (not /x)")
 
 	allocateEpochAwareQuotas(&prop, existing, ads, cfg)
 
 	want := (1000.0 - 400.0) / 3.0 // = 200
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		require.NotNil(t, l.MPA.DedicatedGB)
 		assert.InDelta(t, want, *l.MPA.DedicatedGB, 0.01,
 			"lot %s for %q got %.2f, want %.2f (residual / nNew, not residual / (nNew+nExisting))",
@@ -576,13 +576,13 @@ func TestAllocateEpochAwareQuotas_DeeperHierarchyDivisor(t *testing.T) {
 	ads := adsForRenewal("/a", "/a/b", "/a/c")
 	prop := renewExpiringLots(cfg, ads, existing)
 	// Only the two children are minted; /a is already covered.
-	require.Len(t, prop.NewLots, 2)
+	require.Len(t, prop.newLots, 2)
 
 	allocateEpochAwareQuotas(&prop, existing, ads, cfg)
 
 	// Parent has 900; two new children + 1 reserve share = 3-way split.
 	want := 900.0 / 3.0
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		require.NotNil(t, l.MPA.DedicatedGB)
 		assert.InDelta(t, want, *l.MPA.DedicatedGB, 0.01,
 			"deeper-level lot %s for %q got %.2f, want %.2f (parent/3, leaving one reserve share)",
@@ -609,8 +609,8 @@ func TestAllocateEpochAwareQuotas_MultiEpoch_MinShareWins(t *testing.T) {
 
 	// Pre-seed a planned-this-tick peer /b that is active only for the
 	// first half of /a's window. We bypass the planner and inject the
-	// peer directly into prop.NewLots so we can control its window.
-	prop := RenewalProposal{}
+	// peer directly into prop.newLots so we can control its window.
+	prop := renewalProposal{}
 	half := int64(12 * hour)
 	create := now
 	expireA := now + 24*hour
@@ -632,7 +632,7 @@ func TestAllocateEpochAwareQuotas_MultiEpoch_MinShareWins(t *testing.T) {
 			ExpirationTime: &Int64FromFloat{Value: expireB},
 		},
 	}
-	prop.NewLots = []Lot{a, b}
+	prop.newLots = []Lot{a, b}
 
 	allocateEpochAwareQuotas(&prop, nil, nil, cfg)
 
@@ -641,7 +641,7 @@ func TestAllocateEpochAwareQuotas_MultiEpoch_MinShareWins(t *testing.T) {
 	// be the answer if the divisor incorrectly counted /b's window in
 	// epoch 2 too).
 	var aDed float64 = -1
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		if l.Paths[0].Path == "/a" {
 			require.NotNil(t, l.MPA.DedicatedGB)
 			aDed = *l.MPA.DedicatedGB
@@ -669,12 +669,12 @@ func TestAllocateEpochAwareQuotas_ExistingZeroQuotaSibling_DoesNotInflateDivisor
 	existing := []Lot{makeLotWithDed("uuid-z", "/z", now-hour, now+48*hour, 0.0)}
 	ads := adsForRenewal("/a", "/b", "/c", "/z")
 	prop := renewExpiringLots(cfg, ads, existing)
-	require.Len(t, prop.NewLots, 3) // /z is already covered
+	require.Len(t, prop.newLots, 3) // /z is already covered
 
 	allocateEpochAwareQuotas(&prop, existing, ads, cfg)
 
 	want := 900.0 / 3.0 // existing /z contributes 0 bytes AND 0 to divisor
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		require.NotNil(t, l.MPA.DedicatedGB)
 		assert.InDelta(t, want, *l.MPA.DedicatedGB, 0.01)
 	}
@@ -852,7 +852,7 @@ func TestValidateLotUpdateLifetime_NoFFIBranches(t *testing.T) {
 // from MPA.CreationTime.Value and building the planned-this-tick
 // sibling map from the input slice. This test guards against subtle
 // wiring regressions (e.g. someone passing 0 as the create time, or
-// forgetting to feed prop.NewLots into the planned-parent index).
+// forgetting to feed prop.newLots into the planned-parent index).
 func TestAssignSuccessorParents_WiresParentAndCreateTime(t *testing.T) {
 	const hour = int64(60 * 60 * 1000)
 	now := int64(100 * hour)

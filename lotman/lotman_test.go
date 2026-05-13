@@ -955,6 +955,58 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 	}
 }
 
+// TestComputeRootDedicatedGB_ClampsToHWM verifies that the root lot's
+// dedicated quota is clamped down to Cache.HighWaterMark and
+// Cache.FilesMaxSize when those would be lower than raw disk total,
+// since xrootd will purge once usage exceeds those thresholds.
+func TestComputeRootDedicatedGB_ClampsToHWM(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	totalDisk := gigabytesToBytes(1000.0) // 1 TB
+
+	t.Run("no disk falls back to HWM as absolute bytes", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
+		got := computeRootDedicatedGB(0)
+		require.InDelta(t, 100.0, got, 0.001)
+	})
+
+	t.Run("HWM percent clamps below disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("90"))
+		got := computeRootDedicatedGB(totalDisk)
+		// 90% of 1000 GB = 900 GB
+		require.InDelta(t, 900.0, got, 0.001)
+	})
+
+	t.Run("HWM byte value clamps below disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("500g"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 500.0, got, 0.001)
+	})
+
+	t.Run("HWM higher than disk uses disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("100"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 1000.0, got, 0.001)
+	})
+
+	t.Run("FilesMaxSize clamps below HWM-clamped disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("90"))
+		require.NoError(t, param.Cache_FilesMaxSize.Set("250g"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 250.0, got, 0.001)
+	})
+}
+
 // TestStrictHierarchyContextSet verifies that InitLotman installs the
 // strict-hierarchy execution context (PR-2): the three flags
 // strict_hierarchy, contraction_policy, and admin_override must each be

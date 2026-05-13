@@ -77,28 +77,29 @@ func GetPolicyMap() (map[string]PurgePolicy, error) {
 // The following stubs mirror the high-level wrappers added in
 // lotman_linux.go so callers compile on non-Linux platforms.
 
-func IsRoot(string) (bool, error)                                          { return false, errUnsupported }
-func LotExists(string) (bool, error)                                       { return false, errUnsupported }
-func ListAllLots() ([]string, error)                                       { return nil, errUnsupported }
-func GetChildrenNames(string, bool, bool) ([]string, error)                { return nil, errUnsupported }
-func GetParentNames(string, bool, bool) ([]string, error)                  { return nil, errUnsupported }
-func GetOwners(string, bool) ([]string, error)                             { return nil, errUnsupported }
-func GetLotsFromDir(string, bool, int64) ([]string, error)                 { return nil, errUnsupported }
-func GetLotsPastExp(bool, bool) ([]string, error)                          { return nil, errUnsupported }
-func GetLotsPastDel(bool, bool) ([]string, error)                          { return nil, errUnsupported }
-func GetLotsPastDed(bool, bool, bool, bool) ([]string, error)              { return nil, errUnsupported }
-func GetLotsPastOpp(bool, bool, bool, bool) ([]string, error)              { return nil, errUnsupported }
-func GetLotsPastObj(bool, bool, bool, bool) ([]string, error)              { return nil, errUnsupported }
-func ReclaimLot(string, int64, string, string) (int, error)                { return 0, errUnsupported }
-func UpdateLotUsage(string, bool, string) error                            { return errUnsupported }
-func UpdateLotUsageByDir(string, bool, int64, string) error                { return errUnsupported }
-func GetPolicyAttributes(PolicyAttrsRequest) (*RestrictiveMPA, error)      { return nil, errUnsupported }
-func GetLotDirs(string, bool) ([]LotPath, error)                           { return nil, errUnsupported }
-func GetLotUsage(UsageRequest) (*LotUsage, error)                          { return nil, errUnsupported }
+func IsRoot(string) (bool, error)                                     { return false, errUnsupported }
+func LotExists(string) (bool, error)                                  { return false, errUnsupported }
+func ListAllLots() ([]string, error)                                  { return nil, errUnsupported }
+func GetChildrenNames(string, bool, bool) ([]string, error)           { return nil, errUnsupported }
+func GetParentNames(string, bool, bool) ([]string, error)             { return nil, errUnsupported }
+func GetOwners(string, bool) ([]string, error)                        { return nil, errUnsupported }
+func GetLotsFromDir(string, bool, int64) ([]string, error)            { return nil, errUnsupported }
+func GetLotsForPath(string, bool, int64, int64, bool) ([]Lot, error)  { return nil, errUnsupported }
+func GetLotsPastExp(int64, bool, bool) ([]string, error)              { return nil, errUnsupported }
+func GetLotsPastDel(int64, bool, bool) ([]string, error)              { return nil, errUnsupported }
+func GetLotsPastDed(bool, bool, bool, bool) ([]string, error)         { return nil, errUnsupported }
+func GetLotsPastOpp(bool, bool, bool, bool) ([]string, error)         { return nil, errUnsupported }
+func GetLotsPastObj(bool, bool, bool, bool) ([]string, error)         { return nil, errUnsupported }
+func ReclaimLot(string, int64, string, string) (int, error)           { return 0, errUnsupported }
+func UpdateLotUsage(string, bool, string) error                       { return errUnsupported }
+func UpdateLotUsageByDir(string, bool, int64, string) error           { return errUnsupported }
+func GetPolicyAttributes(PolicyAttrsRequest) (*RestrictiveMPA, error) { return nil, errUnsupported }
+func GetLotDirs(string, bool) ([]LotPath, error)                      { return nil, errUnsupported }
+func GetLotUsage(UsageRequest) (*LotUsage, error)                     { return nil, errUnsupported }
 func GetAvailableCapacity(string, int64, int64) (*AvailableCapacity, error) {
 	return nil, errUnsupported
 }
-func SetContextInt(string, int) error  { return errUnsupported }
+func SetContextInt(string, int) error   { return errUnsupported }
 func GetContextInt(string) (int, error) { return 0, errUnsupported }
 func RemoveLot(string, bool, bool, bool, bool, string) error {
 	return errUnsupported

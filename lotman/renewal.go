@@ -29,11 +29,16 @@
 // lot covering EVERY uncovered region inside the scheduling horizon
 // [now, now+SchedulingHorizon).
 //
-// The scheduler ONLY mints new lots. It never updates an existing lot —
-// every reservation is immutable after creation. Renewal is exclusively
-// the act of producing one or more successor lots whose paths[].Path
-// matches the predecessor's, but whose UUID, creation_time,
-// expiration_time, and deletion_time are fresh.
+// The scheduler ONLY mints new lots. It never updates an existing lot's
+// reservation semantics (creation_time, expiration_time, deletion_time,
+// dedicated_GB and other quota fields are treated as immutable once a
+// lot is created). The xrootd-lotman purge plugin separately mutates
+// usage accounting (current_usage, current_files, etc.) on every
+// read/write — those mutations are orthogonal to the planner's
+// reservation set. Renewal is exclusively the act of producing one or
+// more successor lots whose paths[].Path matches the predecessor's,
+// but whose UUID, creation_time, expiration_time, and deletion_time
+// are fresh.
 //
 // ## Multi-fill within the horizon
 //
@@ -60,10 +65,10 @@
 //	                  capped overall at MaxLotLifetime
 //
 // Gaps narrower than Lotman.MinFillerWidth are left unfilled and a
-// SkipReason is emitted so operators can audit. The default value of
+// skipReason is emitted so operators can audit. The default value of
 // Lotman.MinFillerWidth is 0, which means every gap is filled.
 //
-// ## Horizon refusal
+// ## Horizon refusal (and successor lifetime vs horizon)
 //
 // Successors whose computed creation_time falls beyond now+SchedulingHorizon
 // are NOT minted on this tick; they will be planned on a future tick once
@@ -71,11 +76,32 @@
 // scheduling decisions tied to a meaningful look-ahead window and lets the
 // system absorb federation-ad churn before committing to a new reservation.
 //
-// ## Parent clamping (axiom 3)
+// If the successor's creation_time is inside the horizon but its
+// DefaultLotExpirationLifetime would push expiration_time past it, the
+// lot IS created with the FULL default lifetime (not clipped to the
+// horizon end). The horizon bounds when a lot is _started_, not when it
+// ends — once the planner has committed to a successor, the rest of
+// its window is determined by DefaultLotExpirationLifetime, the
+// effective parent's expiration_time, and MaxLotLifetime.
+//
+// ## Race conditions with external reservations
+//
+// The planner takes a snapshot of `existing` lots at tick start. If an
+// external API (anything other than this planner) creates a lot between
+// the snapshot and our CreateLot calls, lotman's strict_hierarchy
+// enforcement may reject our proposal. CreateLot errors are logged and
+// skipped; the next tick's snapshot will see the new lot and the
+// planner naturally converges. Today Pelican only mints lots from this
+// scheduler, so this is mainly a defensive note for future external
+// callers; a lotman-side advisory lock per path could be added if this
+// becomes a real problem.
+//
+// ## Parent clamping (lotman "axiom 3": child time window ⊆ parent)
 //
 // Each successor's window is clipped to the effective parent segment
-// active at the would-be creation_time, so lotman's axiom 3 always
-// holds:
+// active at the would-be creation_time, so lotman's third axiom
+// always holds. In Pelican-internal terms: a child lot may not be
+// active outside the lifetime of its parent.
 //
 //	child.creation_time   ≥ parent.creation_time
 //	child.expiration_time ≤ parent.expiration_time
@@ -102,8 +128,11 @@
 // where divisor_e is N+1 for top-level paths (sharing root's pool with
 // no reserve) and N+2 for deeper paths (one extra share kept by the
 // parent as reserve, matching lot_tree.go::distribute). Taking the
-// minimum across epochs guarantees axiom 1 (Σ children ≤ parent) holds
-// at every instant the successor will exist. See epoch.go for details.
+// minimum across epochs guarantees lotman's first axiom —
+// Σ children.dedicated_GB ≤ parent.dedicated_GB — holds at every
+// instant the successor will exist. (See lotman's documentation on
+// hierarchical quota invariants for the formal statement.)
+// See epoch.go for details.
 //
 // ## Lot names
 //
@@ -112,13 +141,13 @@
 // # Lot garbage collector (LaunchLotGcRoutine)
 //
 // Lots whose deletion_time has been in the past for at least
-// Lotman.LotRetention (default 60 days) can be physically removed from
+// Lotman.LotRecordRetention (default 60 days) can be physically removed from
 // the lotman database. This is the only code path in Pelican that ever
 // calls lotman_remove_lot. A lot is assumed to have been reclaimed by
 // the storage layer at or before its deletion_time, so deletion_time
 // alone is the GC trigger:
 //
-//	GC if now − deletion_time ≥ LotRetention
+//	GC if now − deletion_time ≥ LotRecordRetention
 //
 // The retention window gives operators a forensics window during which
 // historical lot metadata is still inspectable. The GC routine runs at
@@ -149,14 +178,14 @@ import (
 // coverage to decay).
 var renewalSawAdsOnce atomic.Bool
 
-// SkipReason explains why a particular renewal action was not taken.
-// Returned in RenewalProposal.Skips so callers (and tests) can audit.
-type SkipReason struct {
+// skipReason explains why a particular renewal action was not taken.
+// Returned in renewalProposal.skips so callers (and tests) can audit.
+type skipReason struct {
 	NamespacePath string
 	Reason        string
 }
 
-// RenewalProposal is the fully-precomputed action set the renewal
+// renewalProposal is the fully-precomputed action set the renewal
 // scheduler will apply on a single tick. Splitting "decide" from "apply"
 // keeps the scheduler unit-testable and lets the caller log/audit the
 // plan before committing.
@@ -164,9 +193,9 @@ type SkipReason struct {
 // The planner only ever proposes new lots. It never proposes mutations
 // of existing lots — every reservation is immutable after creation, and
 // the way to keep coverage going is to mint a fresh successor.
-type RenewalProposal struct {
-	NewLots []Lot
-	Skips   []SkipReason
+type renewalProposal struct {
+	newLots []Lot
+	skips   []skipReason
 }
 
 // renewalConfig captures the tunables threaded into the pure scheduler.
@@ -190,8 +219,8 @@ type renewalConfig struct {
 
 // renewExpiringLots is the pure planner used by LaunchRenewalRoutine.
 // It receives the federation's current namespace ads and the full set of
-// existing lots (typically obtained via listAllLotsFull) and produces a
-// RenewalProposal describing what should change. No FFI calls happen
+// existing lots (typically obtained via getActiveLotsForRenewal) and produces a
+// renewalProposal describing what should change. No FFI calls happen
 // here, so the planner is unit-testable with synthetic Lot slices.
 //
 // # Multi-fill semantics
@@ -235,11 +264,11 @@ type renewalConfig struct {
 // The planner does NOT extend existing lots. Every lot is immutable
 // after creation; renewal is exclusively the job of minting fresh
 // successors.
-func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2, existing []Lot) RenewalProposal {
-	prop := RenewalProposal{}
+func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2, existing []Lot) renewalProposal {
+	prop := renewalProposal{}
 
 	if cfg.PeriodMs <= 0 || cfg.DefaultLifetimeMs <= 0 {
-		prop.Skips = append(prop.Skips, SkipReason{Reason: "period or default lifetime <= 0"})
+		prop.skips = append(prop.skips, skipReason{Reason: "period or default lifetime <= 0"})
 		return prop
 	}
 	if cfg.MaxLifetimeMs > 0 && cfg.DefaultLifetimeMs > cfg.MaxLifetimeMs {
@@ -329,7 +358,7 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2,
 				// The parent will have no live lot at `create`.
 				// Advance past this hole; perhaps the next hole
 				// (after the next existing same-path lot) is covered.
-				prop.Skips = append(prop.Skips, SkipReason{
+				prop.skips = append(prop.skips, skipReason{
 					NamespacePath: p,
 					Reason:        "no parent segment covers candidate creation_time; deferring",
 				})
@@ -369,7 +398,7 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2,
 				continue
 			}
 			if cfg.MinFillerWidthMs > 0 && width < cfg.MinFillerWidthMs {
-				prop.Skips = append(prop.Skips, SkipReason{
+				prop.skips = append(prop.skips, skipReason{
 					NamespacePath: p,
 					Reason:        "filler width below Lotman.MinFillerWidth; default lot will absorb the gap",
 				})
@@ -396,21 +425,31 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2,
 				del = expire
 			}
 
+			// Lotman's new_lot_schema requires opportunistic_GB and
+			// max_num_objects to be present on every CreateLot call,
+			// even though Pelican does not currently manage either
+			// axis. Stamp the unbounded sentinel (-1) so the schema
+			// is satisfied without imposing a real cap; if/when
+			// Pelican grows policy for these axes the allocator can
+			// overwrite these defaults before apply.
+			unboundedOpp := float64(-1)
 			newLot := Lot{
 				LotName: uuid.NewString(),
 				Owner:   issuer,
 				// Parent UUID is filled in by the apply step.
 				Paths: []LotPath{{Path: p, Recursive: true}},
 				MPA: &MPA{
-					CreationTime:   &Int64FromFloat{Value: create},
-					ExpirationTime: &Int64FromFloat{Value: expire},
-					DeletionTime:   &Int64FromFloat{Value: del},
-					// Storage quotas are stamped by allocateEpochAwareQuotas
+					CreationTime:    &Int64FromFloat{Value: create},
+					ExpirationTime:  &Int64FromFloat{Value: expire},
+					DeletionTime:    &Int64FromFloat{Value: del},
+					OpportunisticGB: &unboundedOpp,
+					MaxNumObjects:   &Int64FromFloat{Value: -1},
+					// dedicated_GB is stamped by allocateEpochAwareQuotas
 					// after every path's timing has been planned.
 				},
 			}
-			prop.NewLots = append(prop.NewLots, newLot)
-			ref := &prop.NewLots[len(prop.NewLots)-1]
+			prop.newLots = append(prop.newLots, newLot)
+			ref := &prop.newLots[len(prop.newLots)-1]
 			plannedByPath[p] = append(plannedByPath[p], ref)
 
 			// Advance cursor past the just-planned successor. Continue
@@ -507,6 +546,14 @@ func parentNamespacePath(path string, existing []Lot, planned map[string][]*Lot)
 		if c == target {
 			return
 		}
+		// The synthetic root lot owns "/" (which normalises to "")
+		// and is non-expiring; treat it as "no real parent" so the
+		// planner falls into its top-level branch (empty timeline,
+		// no axiom-3 clamp) instead of looking for a parent segment
+		// that does not exist.
+		if c == "" || c == "/" {
+			return
+		}
 		if pathContains(c, target) && len(c) > bestLen {
 			bestPath = c
 			bestLen = len(c)
@@ -599,24 +646,10 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 	if interval <= 0 {
 		interval = time.Hour
 	}
-	// Startup-time validation of Lotman.SchedulingHorizon. The runtime
-	// planner will defensively clamp again, but doing it here lets the
-	// operator see one warning at boot rather than one warning per tick
-	// for the lifetime of the process. Clamping is "up": shrinking
-	// horizon below DefaultLotExpirationLifetime makes every tick mint
-	// a lot whose end exceeds the horizon, and shrinking it below the
-	// tick interval causes the planner to keep re-minting the same
-	// lots back-to-back.
-	horizon := param.Lotman_SchedulingHorizon.GetDuration()
-	defLife := param.Lotman_DefaultLotExpirationLifetime.GetDuration()
-	if horizon > 0 && defLife > 0 && horizon < defLife {
-		log.Warnf("Lotman.SchedulingHorizon (%s) is shorter than Lotman.DefaultLotExpirationLifetime (%s); the planner will treat the horizon as %s. Consider raising Lotman.SchedulingHorizon to at least Lotman.DefaultLotExpirationLifetime.",
-			horizon, defLife, defLife)
-	}
-	if horizon > 0 && horizon < interval {
-		log.Warnf("Lotman.SchedulingHorizon (%s) is shorter than Lotman.RenewalCheckInterval (%s); the planner will treat the horizon as %s. Consider raising Lotman.SchedulingHorizon to at least Lotman.RenewalCheckInterval.",
-			horizon, interval, interval)
-	}
+	// SchedulingHorizon validation runs at config load
+	// (config/config.go); the runtime planner additionally clamps
+	// defensively per-tick so a stale config can't produce a coverage
+	// gap.
 	go func() {
 		log.Infof("Starting Lotman renewal routine; interval=%s", interval)
 		ticker := time.NewTicker(interval)
@@ -653,6 +686,18 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 //     `successorCreate`.
 //  4. If no ancestor covers `successorCreate`, attach to "root". This is
 //     the same branch first-ever lots take.
+//
+// Worked example. We are choosing a parent for a successor on
+// `/a/b/c` whose creation_time is `*` below. The two candidate
+// ancestors are `/a/b` and `/a`; only `/a/b` has a planned-this-tick
+// successor, while `/a` has only an existing lot that covers `*`:
+//
+//	time →                     *
+//	/a/b/c (successor)         [---)
+//	/a/b   planned-this-tick   [-------)        ← chosen (rule 2)
+//	/a/b   existing            [---)            (does not cover *)
+//	/a     existing            [-------------)  (would match rule 3)
+//	root   ──always covers──   [────────────)   (rule 4 fallback)
 //
 // Pure / data-only: no FFI calls, safe to unit-test.
 func resolveSuccessorParent(path string, successorCreate int64, existing []Lot, planned map[string][]*Lot) string {
@@ -735,16 +780,20 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAdV2, perio
 		return
 	}
 
-	existing, err := listAllLotsFull()
+	nowMs := time.Now().UnixMilli()
+	horizonMs := param.Lotman_SchedulingHorizon.GetDuration().Milliseconds()
+
+	adPaths := dedupeNamespacePaths(ads)
+	existing, err := getActiveLotsForRenewal(adPaths, nowMs, nowMs+horizonMs)
 	if err != nil {
 		log.Warnf("Lotman renewal: failed to enumerate lots: %v", err)
 		return
 	}
 
 	cfg := renewalConfig{
-		NowMs:             time.Now().UnixMilli(),
+		NowMs:             nowMs,
 		PeriodMs:          period.Milliseconds(),
-		HorizonMs:         param.Lotman_SchedulingHorizon.GetDuration().Milliseconds(),
+		HorizonMs:         horizonMs,
 		MinFillerWidthMs:  param.Lotman_MinFillerWidth.GetDuration().Milliseconds(),
 		DefaultLifetimeMs: param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds(),
 		DefaultDeletionMs: param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds(),
@@ -754,7 +803,7 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAdV2, perio
 	}
 
 	prop := renewExpiringLots(cfg, ads, existing)
-	if len(prop.NewLots) == 0 {
+	if len(prop.newLots) == 0 {
 		log.Debug("Lotman renewal: nothing to do")
 		return
 	}
@@ -772,9 +821,9 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAdV2, perio
 	// resolver's `successorCreate` argument; planned-this-tick siblings
 	// → its `planned` map) is exercised by tests rather than relying on
 	// the call site being correct by inspection.
-	assignSuccessorParents(prop.NewLots, existing)
+	assignSuccessorParents(prop.newLots, existing)
 
-	for _, l := range prop.NewLots {
+	for _, l := range prop.newLots {
 		if err := CreateLot(&l, federationIssuer); err != nil {
 			log.Warnf("Lotman renewal: failed to create lot for %q: %v", l.Paths[0].Path, err)
 		} else {
@@ -815,7 +864,7 @@ func assignSuccessorParents(newLots []Lot, existing []Lot) {
 }
 
 // LaunchLotGcRoutine starts a background ticker that periodically removes
-// lots whose deletion_time + LotRetention has passed. It returns
+// lots whose deletion_time + LotRecordRetention has passed. It returns
 // immediately; the goroutine exits when ctx is done. The cadence is
 // fixed at 24 hours.
 func LaunchLotGcRoutine(ctx context.Context) {
@@ -896,7 +945,7 @@ const (
 	gcOverridePolicy     = false
 )
 
-// runGcTick removes any lot whose deletion_time was at least LotRetention
+// runGcTick removes any lot whose deletion_time was at least LotRecordRetention
 // ago. Failures are logged and swallowed.
 func runGcTick() {
 	federationIssuer, err := getFederationIssuer()
@@ -904,15 +953,13 @@ func runGcTick() {
 		log.Warnf("Lotman GC: cannot determine federation issuer; skipping tick: %v", err)
 		return
 	}
-	retention := param.Lotman_LotRetention.GetDuration()
+	retention := param.Lotman_LotRecordRetention.GetDuration()
 
-	existing, err := listAllLotsFull()
+	names, err := getGcCandidates(time.Now().UnixMilli(), retention)
 	if err != nil {
-		log.Warnf("Lotman GC: failed to enumerate lots: %v", err)
+		log.Warnf("Lotman GC: failed to enumerate GC candidates: %v", err)
 		return
 	}
-
-	names := gcEligibleLots(existing, time.Now().UnixMilli(), retention)
 	for _, name := range names {
 		if err := RemoveLot(name, gcReassignOrphans, gcReassignNonOrphans, gcAssignPolicy, gcOverridePolicy, federationIssuer); err != nil {
 			log.Warnf("Lotman GC: failed to remove lot %s: %v", name, err)

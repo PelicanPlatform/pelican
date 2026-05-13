@@ -228,7 +228,7 @@ type Config struct {
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
 		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
-		LotRetention time.Duration `mapstructure:"lotretention" yaml:"LotRetention"`
+		LotRecordRetention time.Duration `mapstructure:"lotrecordretention" yaml:"LotRecordRetention"`
 		MaxLotLifetime time.Duration `mapstructure:"maxlotlifetime" yaml:"MaxLotLifetime"`
 		MinFillerWidth time.Duration `mapstructure:"minfillerwidth" yaml:"MinFillerWidth"`
 		PolicyDefinitions any `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
@@ -701,7 +701,7 @@ type configWithType struct {
 		EnabledPolicy struct { Type string; Value string }
 		LibLocation struct { Type string; Value string }
 		LotHome struct { Type string; Value string }
-		LotRetention struct { Type string; Value time.Duration }
+		LotRecordRetention struct { Type string; Value time.Duration }
 		MaxLotLifetime struct { Type string; Value time.Duration }
 		MinFillerWidth struct { Type string; Value time.Duration }
 		PolicyDefinitions struct { Type string; Value any }

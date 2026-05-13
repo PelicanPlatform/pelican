@@ -876,31 +876,22 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 // directive silently rejects, so Pelican must reject at config time
 // rather than emit an unparsable directive.
 func TestPurgeColdFilesAgeFromMaxLotLifetime(t *testing.T) {
+	// Domain validation has moved to config/config.go; this test
+	// pins only the formatter behaviour. See TestValidateLotmanConfig
+	// (or equivalent) in pelican/config for [1h, 360d] rejection.
 	cases := []struct {
-		name    string
-		in      time.Duration
-		want    string
-		wantErr string
+		name string
+		in   time.Duration
+		want string
 	}{
-		{"one hour minimum accepted", time.Hour, "3600s", ""},
-		{"one day accepted", 24 * time.Hour, "86400s", ""},
-		{"week accepted", 7 * 24 * time.Hour, "604800s", ""},
-		{"360 days maximum accepted", 360 * 24 * time.Hour, "31104000s", ""},
-
-		{"30 minutes rejected", 30 * time.Minute, "", "minimum allowed value of 1h"},
-		{"59 minutes rejected", 59 * time.Minute, "", "minimum allowed value of 1h"},
-		{"361 days rejected", 361 * 24 * time.Hour, "", "maximum allowed value of 360d"},
-		{"1 year rejected", 365 * 24 * time.Hour, "", "maximum allowed value of 360d"},
+		{"one hour minimum accepted", time.Hour, "3600s"},
+		{"one day accepted", 24 * time.Hour, "86400s"},
+		{"week accepted", 7 * 24 * time.Hour, "604800s"},
+		{"360 days maximum accepted", 360 * 24 * time.Hour, "31104000s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := purgeColdFilesAgeFromMaxLotLifetime(tc.in)
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.wantErr)
-				assert.Empty(t, got)
-				return
-			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})

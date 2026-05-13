@@ -90,9 +90,18 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-// allocateEpochAwareQuotas stamps dedicated_GB (and, when a sane parent
-// figure is available, opportunistic_GB and max_num_objects) on every
-// lot in `prop.NewLots` using min-over-epochs feasibility.
+// allocateEpochAwareQuotas stamps dedicated_GB on every lot in
+// `prop.newLots` using min-over-epochs feasibility.
+//
+// max_num_objects and opportunistic_GB are pre-stamped to the
+// unbounded sentinel (-1) by renewExpiringLots itself: lotman's
+// new_lot_schema requires both fields to be present on every
+// CreateLot call, so we cannot leave them nil even though
+// pelican+xrootd-lotman does not currently consume either axis. Using
+// -1 (unbounded) keeps lots schema-valid without imposing a real cap;
+// once the xrootd-lotman purge plugin learns to honour either field,
+// the allocator can overwrite these defaults from the same
+// min-over-epochs analysis used for dedicated_GB.
 //
 // `existing` is the set of lots already in the lotman DB at the start
 // of this tick. `cfg.RootDedicatedGB` is the total capacity available
@@ -101,21 +110,29 @@ import (
 // The function never reduces a lot's window — only its quotas. If no
 // feasible non-zero quota exists for a lot in some epoch, that lot is
 // stamped with dedicated_GB=0 (zero-capacity sentinel) and a warning is
-// logged. A zero-capacity lot is a valid lotman record; it just means
-// "no bytes promised here", which lets coverage exist without
-// over-committing storage. Callers may choose to drop such lots; the
-// current behaviour stamps them so the timeline remains continuous.
-func allocateEpochAwareQuotas(prop *RenewalProposal, existing []Lot, fedAds []server_structs.NamespaceAdV2, cfg renewalConfig) {
-	if prop == nil || len(prop.NewLots) == 0 {
+// logged. A zero-capacity lot is a valid lotman record; it carries no
+// dedicated promise but still defines a paths/owner/window for
+// accounting and lets the timeline stay continuous, which lot_tree.go
+// relies on for hierarchy invariants. The data attributed to such a
+// lot is accounted to the default lot at purge time. Operators may
+// alert on the warning above and re-tune quotas; the alternative —
+// silently dropping the lot — would create a coverage gap that the
+// next tick would just refill.
+func allocateEpochAwareQuotas(prop *renewalProposal, existing []Lot, fedAds []server_structs.NamespaceAdV2, cfg renewalConfig) {
+	if prop == nil || len(prop.newLots) == 0 {
 		return
 	}
-	_ = fedAds // reserved for future per-namespace policy overrides
+	_ = fedAds // reserved for future per-namespace overrides; once the
+	// director starts populating lot-policy fields on
+	// server_structs.NamespaceAdV2, this allocator will read them here
+	// to override defaults like the (N+1)/(N+2) divisor or per-NS
+	// dedicated/opportunistic ratios.
 
 	// Group new lots by namespace path; later we walk them parent-first
 	// so a child sees its parent's already-stamped quotas.
 	newByPath := map[string][]*Lot{}
-	for i := range prop.NewLots {
-		l := &prop.NewLots[i]
+	for i := range prop.newLots {
+		l := &prop.newLots[i]
 		if len(l.Paths) == 0 {
 			continue
 		}

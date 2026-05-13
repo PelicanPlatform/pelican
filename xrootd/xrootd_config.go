@@ -135,6 +135,13 @@ type (
 		// to pfc.diskusage's purgecoldfiles directive. Sourced from
 		// Lotman.MaxLotLifetime so files untouched for longer than the maximum
 		// lot lifetime are evicted independently of the high watermark.
+		// This is a drainage mechanism: without it, the renewal scheduler's
+		// continuous re-issuance of successor lots over advertised namespace
+		// paths would keep every cached file associated with a live lot, and
+		// the watermark-driven eviction loop would never reclaim long-cold
+		// files on caches that stay below the high watermark. In other
+		// words, perpetually-extended lots could otherwise accrue unused
+		// cruft indefinitely; this knob lets pfc evict that cruft.
 		PurgeColdFilesAge string
 	}
 
@@ -1492,28 +1499,12 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 
 // purgeColdFilesAgeFromMaxLotLifetime renders Lotman.MaxLotLifetime into
 // the xrootd-formatted age string consumed by the pfc.diskusage
-// purgecoldfiles directive (e.g. "604800s"), enforcing the directive's
-// own [1h, 360d] domain. Returns an error rather than a clamp because
-// a misconfigured cap is exactly the case where silent fallback would
-// hide the bug from operators.
-//
-// Extracted from ConfigXrootd so the validation can be unit-tested
-// without spinning up the entire xrootd config builder.
+// purgecoldfiles directive (e.g. "604800s"). The [1h, 360d] domain
+// check has been moved to config/config.go so the operator sees the
+// rejection at boot rather than mid-startup of the xrootd config
+// builder; this function is now a pure formatter and assumes its input
+// is already in range.
 func purgeColdFilesAgeFromMaxLotLifetime(maxLotLifetime time.Duration) (string, error) {
-	const (
-		minAge = time.Hour
-		maxAge = 360 * 24 * time.Hour
-	)
-	if maxLotLifetime < minAge {
-		return "", errors.Errorf(
-			"Lotman.MaxLotLifetime (%s) is below the minimum allowed value of 1h",
-			maxLotLifetime)
-	}
-	if maxLotLifetime > maxAge {
-		return "", errors.Errorf(
-			"Lotman.MaxLotLifetime (%s) exceeds the maximum allowed value of 360d",
-			maxLotLifetime)
-	}
 	return strconv.FormatInt(int64(maxLotLifetime.Seconds()), 10) + "s", nil
 }
 

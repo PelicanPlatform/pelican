@@ -181,7 +181,7 @@ func TestLotmanNewBindings(t *testing.T) {
 	t.Run("GetLotsPastExp", func(t *testing.T) {
 		// The configured expiration_time for test-1 and test-2 is 12345ms
 		// since the epoch -- decades in the past.
-		expired, err := GetLotsPastExp(false, false)
+		expired, err := GetLotsPastExp(time.Now().UnixMilli(), false, false)
 		require.NoError(t, err)
 		assert.Contains(t, expired, "test-1")
 		assert.Contains(t, expired, "test-2")
@@ -189,7 +189,7 @@ func TestLotmanNewBindings(t *testing.T) {
 
 	t.Run("GetLotsPastDel", func(t *testing.T) {
 		// deletion_time was 123456ms -- also long past.
-		past, err := GetLotsPastDel(false, false)
+		past, err := GetLotsPastDel(time.Now().UnixMilli(), false, false)
 		require.NoError(t, err)
 		assert.Contains(t, past, "test-1")
 	})

@@ -86,8 +86,8 @@ Lotman:
   MaxLotLifetime: "168h"
   RenewalCheckInterval: "1h"
   SchedulingHorizon: "48h"
-  MinFillerWidth: "0"
-  LotRetention: "1440h"
+  MinFillerWidth: "0s"
+  LotRecordRetention: "1440h"
   PolicyDefinitions:
     - PolicyName: "fairshare"
       DivideUnallocated: true
