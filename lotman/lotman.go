@@ -25,8 +25,6 @@
 package lotman
 
 import (
-	"context"
-
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -60,8 +58,9 @@ type (
 	UsageRequest       struct{ LotName string }
 )
 
-func RegisterLotman(ctx context.Context, router *gin.RouterGroup) {
+func RegisterLotsAPI(router *gin.RouterGroup) error {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
+	return nil
 }
 
 func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {

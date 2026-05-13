@@ -215,6 +215,12 @@ description: >-
 issuedBy: ["origin"]
 acceptedBy: ["cache"]
 ---
+name: "lot.reclaim"
+description: >-
+  For reclaiming (releasing) a lot reservation in a cache
+issuedBy: ["origin"]
+acceptedBy: ["cache"]
+---
 ############################
 #    Collection Scopes     #
 ############################

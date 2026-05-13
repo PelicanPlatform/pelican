@@ -253,7 +253,9 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 		// Register the web endpoints
 		if param.Lotman_EnableAPI.GetBool() {
 			log.Debugln("Registering Lotman API")
-			lotman.RegisterLotman(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
+			if err := lotman.RegisterLotsAPI(engine.Group("/", web_ui.ServerHeaderMiddleware)); err != nil {
+				return nil, errors.Wrap(err, "failed to register lotman API")
+			}
 		}
 
 		// Pelican now nests namespace lots by path-prefix containment, so

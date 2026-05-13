@@ -64,6 +64,7 @@ const (
 	Lot_Read TokenScope = "lot.read"
 	Lot_Modify TokenScope = "lot.modify"
 	Lot_Delete TokenScope = "lot.delete"
+	Lot_Reclaim TokenScope = "lot.reclaim"
 )
 
 func (s TokenScope) String() string {
