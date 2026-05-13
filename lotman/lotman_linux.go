@@ -1212,8 +1212,9 @@ func setLotmanContextFlags() error {
 	return nil
 }
 
-// minLotmanVersion is the earliest lotman release that supports
-// strict_hierarchy with parent_attributions (lotman PR #43 / v0.0.5).
+// minLotmanVersion is the earliest lotman release that exposes every
+// FFI symbol Pelican's lotman integration registers below. Bump this
+// whenever a new symbol is added to InitLotman.
 const minLotmanVersion = "v0.0.5"
 
 // checkLotmanVersionCompatibility returns true when the loaded libLotMan.so

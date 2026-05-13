@@ -938,6 +938,33 @@ func gcEligibleLots(existing []Lot, nowMs int64, retention time.Duration) []stri
 // cascade does not orphan downstream lots) and the latter two false
 // (we are not propagating policy and never want to override safety
 // checks on a routine GC).
+//
+// On the option of collapsing this loop into a single recursive
+// subtree delete: under strict_hierarchy lotman enforces
+// child.deletion_time ≤ parent.deletion_time, so any past-deletion
+// parent transitively implies all of its descendants are also past-
+// deletion. That means lotman_remove_lots_recursive on each subtree
+// root in `names` would, in principle, delete the same set without
+// needing orphan reassignment. We deliberately keep the per-lot loop
+// for three reasons:
+//
+//  1. Per-lot logging is operationally valuable — each removed lot
+//     gets its own audit line, which simplifies forensics when a lot
+//     disappears unexpectedly.
+//  2. Detecting "subtree roots" inside `names` is itself extra logic
+//     (group by parent_uuid, drop entries whose parent is also in the
+//     set) that offsets most of the simplification, and it has to be
+//     redone every tick.
+//  3. assignLTBRParentsToOrphans=true keeps GC correct even if some
+//     future external lot writer (or a transient invariant violation)
+//     ever lands a non-past-deletion child under a past-deletion
+//     parent. The recursive form would happily sweep that child away.
+//     The defensive cost is a few extra FFI calls per tick on what is
+//     already a daily cadence.
+//
+// If lotman ever exposes a "remove all lots whose deletion_time +
+// retention ≤ now" primitive (lotman-side equivalent of getGcCandidates
+// + RemoveLot fused into one C call), revisit this loop.
 const (
 	gcReassignOrphans    = true
 	gcReassignNonOrphans = true
@@ -947,6 +974,16 @@ const (
 
 // runGcTick removes any lot whose deletion_time was at least LotRecordRetention
 // ago. Failures are logged and swallowed.
+//
+// Concurrency note: this is the only Pelican code path that calls
+// RemoveLot. Pelican does not currently expose any user-facing API
+// (HTTP, CLI, or otherwise) that creates, updates, or deletes lots
+// outside the renewal scheduler and this GC, so there is no in-process
+// race to worry about today. If a future PR adds such an API — for
+// example, an operator endpoint to mint or rescind reservations —
+// concurrent writers may race against this tick (and against
+// runRenewalTick) at the lotman C layer. lotman currently exposes no
+// per-path advisory lock
 func runGcTick() {
 	federationIssuer, err := getFederationIssuer()
 	if err != nil || federationIssuer == "" {
@@ -987,8 +1024,8 @@ func validateLotLifetime(l *Lot) error {
 	span := l.MPA.ExpirationTime.Value - l.MPA.CreationTime.Value
 	if span > maxLifetime {
 		return errors.Errorf(
-			"lot %s expiration_time exceeds Lotman.MaxLotLifetime (%dms requested, max %dms)",
-			l.LotName, span, maxLifetime)
+			"lot %s expiration_time exceeds %s (%dms requested, max %dms)",
+			l.LotName, param.Lotman_MaxLotLifetime.GetName(), span, maxLifetime)
 	}
 	return nil
 }
