@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -517,6 +517,13 @@ func sendMyAd(ctx context.Context) {
 		AdvertiseUrl: adUrl,
 	}
 	directorAd.Initialize(name)
+
+	// Insert the current director's ad into directorAds so that its
+	// lifetime is independent of any gossip round-trip through a peer.
+	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	directorAdMutex.Lock()
+	updateInternalDirectorCache(ctx, egrp, directorAd)
+	directorAdMutex.Unlock()
 
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
