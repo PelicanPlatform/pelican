@@ -1900,7 +1900,7 @@ description: |+
   of completed files hits the high water mark, files will be deleted until the usage hits the
   low water mark.
 type: int
-default: 95
+default: 89
 components: ["localcache"]
 ---
 name: LocalCache.LowWaterMarkPercentage
@@ -1910,6 +1910,136 @@ description: |+
   low water mark.
 type: int
 default: 85
+components: ["localcache"]
+---
+name: LocalCache.FDCacheSize
+description: |+
+  Maximum number of file descriptors the persistent cache keeps open for
+  disk-backed objects.  Cached descriptors are shared across concurrent
+  readers and avoid repeated open/close syscalls.  Set to 0 to disable
+  the cache entirely (every read opens a fresh descriptor).
+type: int
+default: 500
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.MemoryCacheSize
+description: |+
+  Size of the in-memory block cache for the local cache module.
+  When enabled, objects are cached in memory in addition to on disk,
+  which can significantly improve performance for frequently accessed objects
+  because disk objects are encrypted and require decryption on each access,
+  while memory cache pages are stored decrypted, avoiding repeated decryption.
+  Set to "0" to disable the memory cache (default).
+  Accepts a plain number of bytes or a human-readable value with suffix
+  (e.g. "8GB", "512MB", "1TB").
+  This parameter is used when running in local cache mode.
+  For a full cache server, use Cache.MemoryCacheSize instead.
+type: string
+default: "0"
+hidden: false
+components: ["localcache"]
+---
+name: LocalCache.PrefetchTimeout
+description: |+
+  The maximum time to wait for a prefetch operation to complete before giving up.
+  If a prefetch takes longer than this timeout, the operation is abandoned and the
+  client is expected to retry later.
+type: duration
+default: 10s
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.MaxConcurrentPrefetch
+description: |+
+  The maximum number of concurrent prefetch operations allowed.
+  This limits how many blocks can be prefetched in parallel to avoid overwhelming
+  the upstream server or local resources.
+type: int
+default: 5
+components: ["localcache"]
+---
+name: LocalCache.DefaultMaxAge
+description: |+
+  The default freshness lifetime for cached objects when the origin server does not
+  provide explicit Cache-Control headers. This value determines how long an object
+  can be served from cache before revalidating with the origin.
+  Setting this higher reduces origin load but may serve slightly stale data.
+  Setting this lower ensures fresher data but increases origin requests.
+type: duration
+default: 24h
+components: ["localcache"]
+---
+name: LocalCache.RevalidationJitter
+description: |+
+  A percentage (0-100) of random jitter to apply to revalidation times to prevent
+  thundering herd problems. When multiple clients access the same object, jitter
+  ensures they don't all revalidate simultaneously.
+  For example, with DefaultMaxAge=24h and RevalidationJitter=10, objects will be
+  revalidated between 21.6h and 24h after caching (90% to 100% of max age).
+type: int
+default: 10
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.StorageDirs
+description: |+
+  A list of storage directory configurations for persistent cache object storage.
+  Each entry describes a directory path and its per-directory size and eviction settings.
+  When not set, the cache stores objects under the LocalCache.DataLocation directory
+  using global size and watermark settings.
+  A UUID file is placed in each directory so that storage IDs remain stable even if
+  paths are reordered or changed.
+
+  Each entry is an object with the following keys:
+
+  - **Path** (string, required): absolute path to the storage directory.
+  - **MaxSize** (string, optional): maximum size for this directory (e.g. "100GB").
+    When omitted or "0", auto-detected from the filesystem.
+  - **HighWaterMarkPercentage** (int, optional): eviction trigger threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.HighWaterMarkPercentage is used.
+  - **LowWaterMarkPercentage** (int, optional): eviction target threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.LowWaterMarkPercentage is used.
+
+  Example YAML:
+  ```yaml
+  LocalCache:
+    StorageDirs:
+      - Path: /mnt/nvme/cache
+        MaxSize: 500GB
+        HighWaterMarkPercentage: 89
+        LowWaterMarkPercentage: 85
+      - Path: /mnt/hdd/cache
+        MaxSize: 2TB
+  ```
+
+  For backward compatibility, a plain list of strings (directory paths) is also
+  accepted and treated as entries with only Path set.
+type: object
+default: none
+components: ["localcache"]
+---
+name: LocalCache.ChunkSize
+description: |+
+  The target chunk size for splitting large objects across multiple storage directories.
+  When multiple storage directories are configured (via LocalCache.StorageDirs), objects
+  larger than the chunk size will be split into multiple chunk files distributed across
+  the directories to improve I/O parallelism and load balance storage utilization.
+
+  Chunking is automatically disabled when only one storage directory is configured,
+  as there would be no benefit to splitting files.
+
+  The value can be specified with units (e.g., "64MB", "256MB", "1GB").
+  Set to "0" or "disabled" to disable chunking entirely.
+
+  Reducing the maximum chunk size causes large objects to go across more directories and,
+  ideally, increase overall throughput for a single object.  Going below 64MB is discouraged.
+
+  Objects smaller than the chunk size are stored in a single file.
+type: string
+default: 512MB
 components: ["localcache"]
 ---
 ############################
@@ -2125,7 +2255,7 @@ description: |+
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
 type: string
-default: 90
+default: 85
 components: ["cache"]
 ---
 name: Cache.HighWaterMark
@@ -2140,7 +2270,7 @@ description: |+
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
 type: string
-default: 95
+default: 89
 components: ["cache"]
 ---
 name: Cache.FilesMaxSize
@@ -4099,7 +4229,7 @@ description: |+
   The storage usage percentage threshold at which a warning health status is reported.
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
-default: 80
+default: 92
 hidden: true
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
@@ -4108,7 +4238,7 @@ description: |+
   The storage usage percentage threshold at which a critical health status is reported.
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
-default: 90
+default: 97
 hidden: true
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---

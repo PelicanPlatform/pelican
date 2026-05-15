@@ -73,8 +73,8 @@ Cache:
   EnablePrefetch: true
   SelfTest: true
   SelfTestInterval: 15s
-  LowWatermark: 90
-  HighWaterMark: 95
+  LowWatermark: 85
+  HighWaterMark: 89
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
   DisableClientX509: true
@@ -90,7 +90,9 @@ Lotman:
       DiscoverPrefixes: true
       MergeLocalWithDiscovered: false
 LocalCache:
-  HighWaterMarkPercentage: 95
+  DefaultMaxAge: 24h
+  FDCacheSize: 500
+  HighWaterMarkPercentage: 89
   LowWaterMarkPercentage: 85
 Origin:
   DirectorTest: true
@@ -133,8 +135,8 @@ Monitoring:
   LabelValueLengthLimit: 2048
   SampleLimit: 200
   StorageHealthCheckInterval: 5m
-  StorageWarningThreshold: 80
-  StorageCriticalThreshold: 90
+  StorageWarningThreshold: 92
+  StorageCriticalThreshold: 97
 Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
