@@ -521,15 +521,15 @@ func TestExtraCfg(t *testing.T) {
 		// Files are processed in lexicographic order,
 		// so ensure that their names come after "config.yaml".
 		backupFiles := map[string]string{
-			"extra_config.yaml.swp":        "TestVal: from-swp",
-			"extra_config.yaml~":           "TestVal: from-tilde",
-			"extra_config.yaml.bak":        "TestVal: from-bak",
-			"extra_config.yaml.rpmsave":    "TestVal: from-rpmsave",
-			"extra_config.yaml.rpmnew":     "TestVal: from-rpmnew",
-			"extra_config.yaml.dpkg-old":   "TestVal: from-dpkg-old",
-			"extra_config.yaml.dpkg-dist":  "TestVal: from-dpkg-dist",
-			"extra_config.yaml.cfsave":     "TestVal: from-cfsave",
-			"extra_config":                 "TestVal: from-noext",
+			"extra_config.yaml.swp":       "TestVal: from-swp",
+			"extra_config.yaml~":          "TestVal: from-tilde",
+			"extra_config.yaml.bak":       "TestVal: from-bak",
+			"extra_config.yaml.rpmsave":   "TestVal: from-rpmsave",
+			"extra_config.yaml.rpmnew":    "TestVal: from-rpmnew",
+			"extra_config.yaml.dpkg-old":  "TestVal: from-dpkg-old",
+			"extra_config.yaml.dpkg-dist": "TestVal: from-dpkg-dist",
+			"extra_config.yaml.cfsave":    "TestVal: from-cfsave",
+			"extra_config":                "TestVal: from-noext",
 		}
 		for name, content := range backupFiles {
 			err = os.WriteFile(filepath.Join(dir1, name), []byte(content), 0644)
