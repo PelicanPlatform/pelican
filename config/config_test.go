@@ -518,15 +518,18 @@ func TestExtraCfg(t *testing.T) {
 		require.NoError(t, err)
 
 		// Each backup variant carries a conflicting value that must NOT be loaded.
+		// Files are processed in lexicographic order,
+		// so ensure that their names come after "config.yaml".
 		backupFiles := map[string]string{
-			"config.yaml~":       "TestVal: from-tilde",
-			"config.yaml.bak":    "TestVal: from-bak",
-			"config.rpmsave":     "TestVal: from-rpmsave",
-			"config.rpmnew":      "TestVal: from-rpmnew",
-			"config.dpkg-old":    "TestVal: from-dpkg-old",
-			"config.dpkg-dist":   "TestVal: from-dpkg-dist",
-			"config.cfsave":      "TestVal: from-cfsave",
-			"config.noextension": "TestVal: from-noext",
+			"extra_config.yaml.swp":    "TestVal: from-swp",
+			"extra_config.yaml~":       "TestVal: from-tilde",
+			"extra_config.yaml.bak":    "TestVal: from-bak",
+			"extra_config.rpmsave":     "TestVal: from-rpmsave",
+			"extra_config.rpmnew":      "TestVal: from-rpmnew",
+			"extra_config.dpkg-old":    "TestVal: from-dpkg-old",
+			"extra_config.dpkg-dist":   "TestVal: from-dpkg-dist",
+			"extra_config.cfsave":      "TestVal: from-cfsave",
+			"extra_config.noextension": "TestVal: from-noext",
 		}
 		for name, content := range backupFiles {
 			err = os.WriteFile(filepath.Join(dir1, name), []byte(content), 0644)
