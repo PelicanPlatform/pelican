@@ -914,6 +914,14 @@ func setupTranslation() error {
 	})
 }
 
+// isSupportedConfigExt returns whether the file extension of path
+// corresponds to a format that Pelican's config parser understands
+// and considers to be a "real" file and not a backup.
+func isSupportedConfigExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
 // If the config file defines a "ConfigLocations" key and a list of corresponding directories, we parse all the yaml
 // files in those directories according to directory-scoped lexicographical order. This allows users/admins to split
 // their configuration across multiple directories/files.
@@ -942,7 +950,7 @@ func handleContinuedCfg() error {
 			if err != nil {
 				return err
 			}
-			if !d.IsDir() && path != "." {
+			if !d.IsDir() && path != "." && isSupportedConfigExt(path) {
 				configFiles = append(configFiles, path)
 			}
 			return nil
