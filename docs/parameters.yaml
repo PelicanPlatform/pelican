@@ -4058,7 +4058,6 @@ description: |+
   The interval at which the server checks filesystem storage consumption for health monitoring.
 type: duration
 default: 5m
-hidden: true
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.StorageWarningThreshold
@@ -4067,7 +4066,6 @@ description: |+
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
 default: 80
-hidden: true
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.StorageCriticalThreshold
@@ -4076,7 +4074,6 @@ description: |+
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
 default: 90
-hidden: true
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 ############################
