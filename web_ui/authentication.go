@@ -642,10 +642,11 @@ func loginHandler(ctx *gin.Context) {
 // Handle initial code-based login for admin
 func initLoginHandler(ctx *gin.Context) {
 	if hasConfiguredAdmins() {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Activation code login is not available",
-		})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Code-based login is not available",
+			})
 		return
 	}
 	db := authDB.Load()

@@ -342,10 +342,7 @@ func TestShouldSkipActivationFlow(t *testing.T) {
 
 	t.Run("true-with-authdb-set", func(t *testing.T) {
 		setupTestAuthDB(t)
-		t.Cleanup(func() {
-			cleanupAuthDB()
-			server_utils.ResetTestState()
-		})
+		t.Cleanup(server_utils.ResetTestState)
 		assert.True(t, shouldSkipActivationFlow())
 	})
 
