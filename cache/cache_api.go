@@ -152,6 +152,119 @@ func cleanupOldFilesInDir(dirPath string, keepCount int) error {
 	return nil
 }
 
+// HandleDirectorEvictRequest handles eviction requests from the director. When the director
+// completes a successful cache health test, it asks the cache to evict the previous test file
+// via this endpoint. The cache then calls its own xrdhttp-pelican evict API using a locally-
+// minted token, matching the self-test authorization pattern (see xrootd/self_monitor.go).
+//
+// This avoids modifying the cache's scitokens configuration to trust the federation issuer,
+// since the cache already trusts its own issuer for the /pelican/monitoring namespace.
+func HandleDirectorEvictRequest(ctx *gin.Context) {
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.FederationIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
+	})
+	if !ok || err != nil {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Failed to verify the token: ", err),
+		})
+		return
+	}
+
+	var reqBody struct {
+		Path string `json:"path"`
+	}
+	if err := ctx.ShouldBindJSON(&reqBody); err != nil || reqBody.Path == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Missing or invalid 'path' in request body",
+		})
+		return
+	}
+
+	// Validate the path is under the monitoring namespace to prevent arbitrary evictions
+	if !strings.HasPrefix(reqBody.Path, server_utils.MonitoringBaseNs+"/") {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Path must be under " + server_utils.MonitoringBaseNs,
+		})
+		return
+	}
+
+	if err := evictViaLocalPlugin(ctx.Request.Context(), reqBody.Path); err != nil {
+		log.Warningf("Failed to evict director test file %s: %v", reqBody.Path, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Eviction failed: " + err.Error(),
+		})
+		return
+	}
+
+	log.Debugf("Successfully evicted director test file via local plugin: %s", reqBody.Path)
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "Eviction successful",
+	})
+}
+
+// evictViaLocalPlugin calls the cache's own xrdhttp-pelican evict API with a locally-minted
+// token. This mirrors how the cache self-test (xrootd/self_monitor.go generateFileTestScitoken)
+// accesses its own XRootD port using the server's own issuer, which is already trusted by the
+// cache's scitokens configuration.
+func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	if issuerUrl == "" {
+		return errors.New("Server_ExternalWebUrl is empty; cannot mint evict token")
+	}
+
+	tokenCfg := token.NewWLCGToken()
+	tokenCfg.Lifetime = time.Minute
+	tokenCfg.Issuer = issuerUrl
+	tokenCfg.Subject = "cache"
+	tokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
+	tokenCfg.AddAudienceAny()
+
+	tok, err := tokenCfg.CreateToken()
+	if err != nil {
+		return errors.Wrap(err, "failed to create evict token")
+	}
+
+	cacheUrl := param.Cache_Url.GetString()
+	if cacheUrl == "" {
+		return errors.New("Cache.Url is empty; cannot call evict API")
+	}
+
+	evictUrl, err := url.Parse(cacheUrl)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse Cache.Url")
+	}
+	evictUrl.Path = "/pelican/api/v1.0/evict"
+	q := evictUrl.Query()
+	q.Set("path", testFilePath)
+	q.Set("authz", "Bearer "+tok)
+	evictUrl.RawQuery = q.Encode()
+
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, evictUrl.String(), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create evict request")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to send evict request")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("evict API returned status %d: %s", resp.StatusCode, string(body))
+}
+
 // Periodically scan the directorTest directory to clean up test files.
 // Handles both legacy flat files and daily-nested subdirectories (YYYY-MM-DD/).
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
