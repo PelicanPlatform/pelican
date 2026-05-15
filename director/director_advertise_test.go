@@ -51,17 +51,9 @@ func TestDirectorShutdown(t *testing.T) {
 	dirAd := &server_structs.DirectorAd{}
 	dirAd.Initialize("fake-director")
 
-	// firstContactCh is closed once the fake director has been
-	// queried at least once, confirming the initial discovery round
-	// has run successfully.
-	firstContactCh := make(chan struct{}, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Debugln("Fake director received", req.Method, "for path", req.URL.Path)
 		if req.Method == "GET" && req.URL.Path == "/api/v1.0/director/directors" {
-			select {
-			case firstContactCh <- struct{}{}:
-			default:
-			}
 			// Set Expiration dynamically per-response so the entry in directorAds
 			// has a short, finite lifetime. Without this, Initialize above stamps
 			// the ad with the default expiration time (15m).
@@ -90,12 +82,17 @@ func TestDirectorShutdown(t *testing.T) {
 	require.NoError(t, param.Server_AdLifetime.SetString("300ms"))
 	fed_test_utils.NewFedTest(t, "")
 
-	// Wait for at least one successful discovery contact before simulating shutdown.
-	select {
-	case <-firstContactCh:
-	case <-time.After(10 * time.Second):
-		t.Fatal("fake director was never contacted during discovery")
-	}
+	// Confirm the fake director's ad is visible in directorEndpoints
+	// before simulating its shutdown.
+	require.Eventually(t, func() bool {
+		for _, ad := range server_utils.GetDirectorAds() {
+			if ad.AdvertiseUrl == ts.URL {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 50*time.Millisecond,
+		"fake director should appear in directorEndpoints after initial contact")
 
 	// Close the listener to simulate a real peer shutdown (connection refused).
 	ts.Close()
