@@ -147,13 +147,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 	}
 
-	// Register OIDC metadata endpoints
-	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(server_structs.DirectorType) {
-		OIDCAPIGroup := engine.Group("/", web_ui.ServerHeaderMiddleware, web_ui.ReadOnlyMiddleware)
-		server_utils.RegisterOIDCAPI(OIDCAPIGroup, false)
-	}
-
 	// Handle XRootD-specific initialization
 	if useXRootD {
 		configPath, err := xrootd.ConfigXrootd(ctx, true)
