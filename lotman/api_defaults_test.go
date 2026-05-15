@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -49,26 +49,52 @@ func TestApplyCreateLotDefaults_FillsAllOmittedFields(t *testing.T) {
 	resetForDefaults(t)
 
 	now := time.Unix(1_700_000_000, 0)
+	ded := float64(5)
 	req := &CreateLotRequest{
-		LotName: "test",
-		Paths:   []LotPath{{Path: "/foo", Recursive: true}},
+		LotName:               "test",
+		Paths:                 []LotPathInput{{Path: "/foo", Recursive: true}},
+		ManagementPolicyAttrs: &MPAInput{DedicatedGB: &ded},
 	}
 	require.NoError(t, applyCreateLotDefaults(req, now))
 
-	require.NotNil(t, req.MPA)
-	require.NotNil(t, req.MPA.DedicatedGB)
-	assert.Equal(t, float64(-1), *req.MPA.DedicatedGB, "DedicatedGB should default to -1 sentinel")
-	require.NotNil(t, req.MPA.OpportunisticGB)
-	assert.Equal(t, float64(-1), *req.MPA.OpportunisticGB, "OpportunisticGB should default to -1 sentinel")
-	require.NotNil(t, req.MPA.MaxNumObjects)
-	assert.Equal(t, int64(-1), req.MPA.MaxNumObjects.Value, "MaxNumObjects should default to -1 sentinel")
+	mpa := req.ManagementPolicyAttrs
+	require.NotNil(t, mpa)
+	require.NotNil(t, mpa.DedicatedGB)
+	assert.Equal(t, float64(5), *mpa.DedicatedGB, "caller-supplied DedicatedGB is preserved")
+	require.NotNil(t, mpa.OpportunisticGB)
+	assert.Equal(t, float64(-1), *mpa.OpportunisticGB, "OpportunisticGB should default to -1 sentinel")
+	require.NotNil(t, mpa.MaxNumObjects)
+	assert.Equal(t, int64(-1), *mpa.MaxNumObjects, "MaxNumObjects should default to -1 sentinel")
 
-	require.NotNil(t, req.MPA.CreationTime)
-	assert.Equal(t, now.UnixMilli(), req.MPA.CreationTime.Value)
-	require.NotNil(t, req.MPA.ExpirationTime)
-	assert.Equal(t, now.UnixMilli()+(168*time.Hour).Milliseconds(), req.MPA.ExpirationTime.Value)
-	require.NotNil(t, req.MPA.DeletionTime)
-	assert.Equal(t, now.UnixMilli()+(336*time.Hour).Milliseconds(), req.MPA.DeletionTime.Value)
+	require.NotNil(t, mpa.CreationTimeMs)
+	assert.Equal(t, now.UnixMilli(), *mpa.CreationTimeMs)
+	require.NotNil(t, mpa.ExpirationTimeMs)
+	assert.Equal(t, now.UnixMilli()+(168*time.Hour).Milliseconds(), *mpa.ExpirationTimeMs)
+	require.NotNil(t, mpa.DeletionTimeMs)
+	assert.Equal(t, now.UnixMilli()+(336*time.Hour).Milliseconds(), *mpa.DeletionTimeMs)
+}
+
+func TestApplyCreateLotDefaults_RequiresManagementPolicyAttrs(t *testing.T) {
+	resetForDefaults(t)
+	req := &CreateLotRequest{
+		LotName: "test",
+		Paths:   []LotPathInput{{Path: "/foo"}},
+	}
+	err := applyCreateLotDefaults(req, time.Now())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "managementPolicyAttrs")
+}
+
+func TestApplyCreateLotDefaults_RequiresDedicatedGB(t *testing.T) {
+	resetForDefaults(t)
+	req := &CreateLotRequest{
+		LotName:               "test",
+		Paths:                 []LotPathInput{{Path: "/foo"}},
+		ManagementPolicyAttrs: &MPAInput{},
+	}
+	err := applyCreateLotDefaults(req, time.Now())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dedicatedGB")
 }
 
 func TestApplyCreateLotDefaults_PreservesCallerProvidedValues(t *testing.T) {
@@ -76,77 +102,94 @@ func TestApplyCreateLotDefaults_PreservesCallerProvidedValues(t *testing.T) {
 
 	ded := float64(42)
 	opp := float64(7)
+	maxObj := int64(100)
+	creation := int64(1000)
+	expiration := int64(2000)
+	deletion := int64(3000)
 	req := &CreateLotRequest{
 		LotName: "test",
-		Paths:   []LotPath{{Path: "/foo"}},
-		MPA: &MPA{
-			DedicatedGB:     &ded,
-			OpportunisticGB: &opp,
-			MaxNumObjects:   &Int64FromFloat{Value: 100},
-			CreationTime:    &Int64FromFloat{Value: 1000},
-			ExpirationTime:  &Int64FromFloat{Value: 2000},
-			DeletionTime:    &Int64FromFloat{Value: 3000},
+		Paths:   []LotPathInput{{Path: "/foo"}},
+		ManagementPolicyAttrs: &MPAInput{
+			DedicatedGB:      &ded,
+			OpportunisticGB:  &opp,
+			MaxNumObjects:    &maxObj,
+			CreationTimeMs:   &creation,
+			ExpirationTimeMs: &expiration,
+			DeletionTimeMs:   &deletion,
 		},
 	}
 	require.NoError(t, applyCreateLotDefaults(req, time.Now()))
 
-	assert.Equal(t, float64(42), *req.MPA.DedicatedGB)
-	assert.Equal(t, float64(7), *req.MPA.OpportunisticGB)
-	assert.Equal(t, int64(100), req.MPA.MaxNumObjects.Value)
-	assert.Equal(t, int64(1000), req.MPA.CreationTime.Value)
-	assert.Equal(t, int64(2000), req.MPA.ExpirationTime.Value)
-	assert.Equal(t, int64(3000), req.MPA.DeletionTime.Value)
+	mpa := req.ManagementPolicyAttrs
+	assert.Equal(t, float64(42), *mpa.DedicatedGB)
+	assert.Equal(t, float64(7), *mpa.OpportunisticGB)
+	assert.Equal(t, int64(100), *mpa.MaxNumObjects)
+	assert.Equal(t, int64(1000), *mpa.CreationTimeMs)
+	assert.Equal(t, int64(2000), *mpa.ExpirationTimeMs)
+	assert.Equal(t, int64(3000), *mpa.DeletionTimeMs)
 }
 
 func TestApplyCreateLotDefaults_RejectsBadOrdering(t *testing.T) {
 	resetForDefaults(t)
+	ded := float64(1)
 
 	t.Run("creation >= expiration", func(t *testing.T) {
+		creation := int64(5000)
+		expiration := int64(5000)
+		deletion := int64(6000)
 		req := &CreateLotRequest{
 			LotName: "test",
-			Paths:   []LotPath{{Path: "/foo"}},
-			MPA: &MPA{
-				CreationTime:   &Int64FromFloat{Value: 5000},
-				ExpirationTime: &Int64FromFloat{Value: 5000},
-				DeletionTime:   &Int64FromFloat{Value: 6000},
+			Paths:   []LotPathInput{{Path: "/foo"}},
+			ManagementPolicyAttrs: &MPAInput{
+				DedicatedGB:      &ded,
+				CreationTimeMs:   &creation,
+				ExpirationTimeMs: &expiration,
+				DeletionTimeMs:   &deletion,
 			},
 		}
 		err := applyCreateLotDefaults(req, time.Now())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "creation_time")
+		assert.Contains(t, err.Error(), "creationTimeMs")
 	})
 
 	t.Run("expiration > deletion", func(t *testing.T) {
+		creation := int64(1000)
+		expiration := int64(5000)
+		deletion := int64(4000)
 		req := &CreateLotRequest{
 			LotName: "test",
-			Paths:   []LotPath{{Path: "/foo"}},
-			MPA: &MPA{
-				CreationTime:   &Int64FromFloat{Value: 1000},
-				ExpirationTime: &Int64FromFloat{Value: 5000},
-				DeletionTime:   &Int64FromFloat{Value: 4000},
+			Paths:   []LotPathInput{{Path: "/foo"}},
+			ManagementPolicyAttrs: &MPAInput{
+				DedicatedGB:      &ded,
+				CreationTimeMs:   &creation,
+				ExpirationTimeMs: &expiration,
+				DeletionTimeMs:   &deletion,
 			},
 		}
 		err := applyCreateLotDefaults(req, time.Now())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expiration_time")
+		assert.Contains(t, err.Error(), "expirationTimeMs")
 	})
 }
 
 func TestApplyCreateLotDefaults_OverridesZeroTimestamps(t *testing.T) {
 	resetForDefaults(t)
 	now := time.Unix(1_700_000_000, 0)
-	zero := Int64FromFloat{Value: 0}
+	ded := float64(1)
+	zero := int64(0)
 	req := &CreateLotRequest{
 		LotName: "test",
-		Paths:   []LotPath{{Path: "/foo"}},
-		MPA: &MPA{
-			CreationTime:   &zero,
-			ExpirationTime: &zero,
-			DeletionTime:   &zero,
+		Paths:   []LotPathInput{{Path: "/foo"}},
+		ManagementPolicyAttrs: &MPAInput{
+			DedicatedGB:      &ded,
+			CreationTimeMs:   &zero,
+			ExpirationTimeMs: &zero,
+			DeletionTimeMs:   &zero,
 		},
 	}
 	require.NoError(t, applyCreateLotDefaults(req, now))
-	assert.NotEqual(t, int64(0), req.MPA.CreationTime.Value)
-	assert.NotEqual(t, int64(0), req.MPA.ExpirationTime.Value)
-	assert.NotEqual(t, int64(0), req.MPA.DeletionTime.Value)
+	mpa := req.ManagementPolicyAttrs
+	assert.NotEqual(t, int64(0), *mpa.CreationTimeMs)
+	assert.NotEqual(t, int64(0), *mpa.ExpirationTimeMs)
+	assert.NotEqual(t, int64(0), *mpa.DeletionTimeMs)
 }

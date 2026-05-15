@@ -1752,6 +1752,229 @@ definitions:
         type: string
         description: Human-readable status message or error description
 
+  LotPathInput:
+    type: object
+    description: A path covered by a lot reservation.
+    required:
+      - path
+    properties:
+      path:
+        type: string
+        description: Filesystem path covered by the lot.
+      recursive:
+        type: boolean
+        description: When true, the lot covers this path and all descendants.
+  LotPathView:
+    type: object
+    description: A path covered by a lot reservation, as returned to clients.
+    properties:
+      path:
+        type: string
+      recursive:
+        type: boolean
+  MPAInput:
+    type: object
+    description: |
+      Management Policy Attributes for a lot reservation. dedicatedGB is required
+      on creation; other fields are filled in with defaults when omitted.
+    required:
+      - dedicatedGB
+    properties:
+      dedicatedGB:
+        type: number
+        format: double
+        description: Guaranteed cache capacity in GB.
+      opportunisticGB:
+        type: number
+        format: double
+        description: Opportunistic cache capacity in GB. -1 means unbounded.
+      maxNumObjects:
+        type: integer
+        format: int64
+        description: Maximum number of cached objects. -1 means unbounded.
+      creationTimeMs:
+        type: integer
+        format: int64
+        description: Creation time in milliseconds since the Unix epoch.
+      expirationTimeMs:
+        type: integer
+        format: int64
+        description: Expiration time in milliseconds since the Unix epoch.
+      deletionTimeMs:
+        type: integer
+        format: int64
+        description: Deletion time in milliseconds since the Unix epoch.
+  ParentAttributionInput:
+    type: object
+    description: How much of a parent lot's MPA budget this lot consumes.
+    properties:
+      dedicatedGB:
+        type: number
+        format: double
+      opportunisticGB:
+        type: number
+        format: double
+      maxNumObjects:
+        type: integer
+        format: int64
+  CreateLotRequest:
+    type: object
+    required:
+      - paths
+      - managementPolicyAttrs
+    properties:
+      lotName:
+        type: string
+        description: Optional caller-supplied name. If omitted the server mints a UUID-v4 reservation identifier.
+      paths:
+        type: array
+        items:
+          $ref: "#/definitions/LotPathInput"
+      managementPolicyAttrs:
+        $ref: "#/definitions/MPAInput"
+      parentAttributions:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/ParentAttributionInput"
+  PatchLotRequest:
+    type: object
+    description: Partial update for an existing lot. At least one of managementPolicyAttrs or parentAttributions must be supplied.
+    properties:
+      managementPolicyAttrs:
+        $ref: "#/definitions/MPAInput"
+      parentAttributions:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/ParentAttributionInput"
+  ReclaimLotRequest:
+    type: object
+    properties:
+      reason:
+        type: string
+        description: Optional human-readable reason for reclaiming the lot.
+  ReclaimLotResponse:
+    type: object
+    properties:
+      reservationId:
+        type: string
+      status:
+        type: string
+        enum: [reclaimed, alreadyReclaimed]
+      reclaimedAtMs:
+        type: integer
+        format: int64
+      reason:
+        type: string
+  Reservation:
+    type: object
+    description: Public projection of a lot used in API responses.
+    properties:
+      reservationId:
+        type: string
+      lotName:
+        type: string
+      owner:
+        type: string
+      parents:
+        type: array
+        items:
+          type: string
+      paths:
+        type: array
+        items:
+          $ref: "#/definitions/LotPathView"
+      managementPolicyAttrs:
+        $ref: "#/definitions/MPAInput"
+      status:
+        type: string
+        enum: [active, expired, deleted, reclaimed]
+  AvailableCapacityResponse:
+    type: object
+    properties:
+      lotName:
+        type: string
+      dedicatedGB:
+        type: number
+        format: double
+      opportunisticGB:
+        type: number
+        format: double
+  UsageAxisFloatView:
+    type: object
+    properties:
+      total:
+        type: number
+        format: double
+      selfContrib:
+        type: number
+        format: double
+      childrenContrib:
+        type: number
+        format: double
+  UsageAxisIntView:
+    type: object
+    properties:
+      total:
+        type: integer
+        format: int64
+      selfContrib:
+        type: integer
+        format: int64
+      childrenContrib:
+        type: integer
+        format: int64
+  LotUsageResponse:
+    type: object
+    properties:
+      lotName:
+        type: string
+      dedicatedGB:
+        $ref: "#/definitions/UsageAxisFloatView"
+      opportunisticGB:
+        $ref: "#/definitions/UsageAxisFloatView"
+      totalGB:
+        $ref: "#/definitions/UsageAxisFloatView"
+      numObjects:
+        $ref: "#/definitions/UsageAxisIntView"
+      gbBeingWritten:
+        $ref: "#/definitions/UsageAxisFloatView"
+      objectsBeingWritten:
+        $ref: "#/definitions/UsageAxisIntView"
+  PolicyAxisFloatView:
+    type: object
+    properties:
+      lotName:
+        type: string
+      value:
+        type: number
+        format: double
+  PolicyAxisIntView:
+    type: object
+    properties:
+      lotName:
+        type: string
+      value:
+        type: integer
+        format: int64
+  LotPolicyResponse:
+    type: object
+    description: For each MPA axis, identifies which ancestor lot's policy is the binding constraint.
+    properties:
+      lotName:
+        type: string
+      dedicatedGB:
+        $ref: "#/definitions/PolicyAxisFloatView"
+      opportunisticGB:
+        $ref: "#/definitions/PolicyAxisFloatView"
+      maxNumObjects:
+        $ref: "#/definitions/PolicyAxisIntView"
+      creationTimeMs:
+        $ref: "#/definitions/PolicyAxisIntView"
+      expirationTimeMs:
+        $ref: "#/definitions/PolicyAxisIntView"
+      deletionTimeMs:
+        $ref: "#/definitions/PolicyAxisIntView"
+
 tags:
   - name: auth
     description: Authentication APIs for all servers
@@ -5689,3 +5912,219 @@ paths:
           description: Internal server error — purge failed
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /api/v1.0/lots:
+    post:
+      tags: ["lots"]
+      summary: Create a new lot reservation
+      description: |
+        Creates a lot under the parent determined by its first path. Owner is
+        derived from the auth context (namespace issuer for bearer tokens,
+        federation issuer for admin cookies); Parents are derived from the path.
+        If lotName is omitted, the server mints a UUID-v4 reservation identifier.
+      consumes: [application/json]
+      produces: [application/json]
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/CreateLotRequest"
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: "#/definitions/Reservation"
+        "400": { description: Bad Request }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal Server Error }
+  /api/v1.0/lots/by-path:
+    get:
+      tags: ["lots"]
+      summary: List lot reservations covering a filesystem path
+      produces: [application/json]
+      parameters:
+        - in: query
+          name: path
+          required: true
+          type: string
+        - in: query
+          name: recursive
+          required: false
+          type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Reservation"
+        "400": { description: Bad Request }
+        "401": { description: Unauthorized }
+  /api/v1.0/lots/by-path/capacity:
+    get:
+      tags: ["lots"]
+      summary: Get available capacity for a filesystem path
+      description: Public endpoint. Reports remaining capacity for the lot covering `path`.
+      produces: [application/json]
+      parameters:
+        - in: query
+          name: path
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/AvailableCapacityResponse"
+        "400": { description: Bad Request }
+        "404": { description: Not Found }
+  /api/v1.0/lots/{lotName}:
+    parameters:
+      - in: path
+        name: lotName
+        required: true
+        type: string
+    get:
+      tags: ["lots"]
+      summary: Get a lot reservation by name
+      produces: [application/json]
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/Reservation"
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+    patch:
+      tags: ["lots"]
+      summary: Modify a lot's MPA and/or parent attributions
+      consumes: [application/json]
+      produces: [application/json]
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/PatchLotRequest"
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/Reservation"
+        "400": { description: Bad Request }
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+    delete:
+      tags: ["lots"]
+      summary: Delete a lot reservation
+      produces: [application/json]
+      responses:
+        "204": { description: No Content }
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+  /api/v1.0/lots/{lotName}/children:
+    get:
+      tags: ["lots"]
+      summary: List child lots of a lot
+      produces: [application/json]
+      parameters:
+        - in: path
+          name: lotName
+          required: true
+          type: string
+        - in: query
+          name: recursive
+          required: false
+          type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Reservation"
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+  /api/v1.0/lots/{lotName}/usage:
+    get:
+      tags: ["lots"]
+      summary: Get the lot's current usage on each MPA axis
+      produces: [application/json]
+      parameters:
+        - in: path
+          name: lotName
+          required: true
+          type: string
+        - in: query
+          name: dedicatedGB
+          required: false
+          type: boolean
+        - in: query
+          name: opportunisticGB
+          required: false
+          type: boolean
+        - in: query
+          name: totalGB
+          required: false
+          type: boolean
+        - in: query
+          name: numObjects
+          required: false
+          type: boolean
+        - in: query
+          name: gbBeingWritten
+          required: false
+          type: boolean
+        - in: query
+          name: objectsBeingWritten
+          required: false
+          type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/LotUsageResponse"
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+  /api/v1.0/lots/{lotName}/policy:
+    get:
+      tags: ["lots"]
+      summary: Get the binding policy for a lot
+      description: Returns, per MPA axis, the ancestor lot whose policy is binding.
+      produces: [application/json]
+      parameters:
+        - in: path
+          name: lotName
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/LotPolicyResponse"
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }
+  /api/v1.0/lots/{lotName}/reclaim:
+    post:
+      tags: ["lots"]
+      summary: Reclaim a lot (mark deleted, evict associated objects)
+      consumes: [application/json]
+      produces: [application/json]
+      parameters:
+        - in: path
+          name: lotName
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: false
+          schema:
+            $ref: "#/definitions/ReclaimLotRequest"
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/ReclaimLotResponse"
+        "401": { description: Unauthorized }
+        "404": { description: Not Found }

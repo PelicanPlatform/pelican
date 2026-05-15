@@ -54,6 +54,16 @@ type (
 	RestrictiveMPA    struct{}
 	AvailableCapacity struct{}
 
+	// Lot is a placeholder so that signatures returning []Lot (e.g.
+	// GetLotsForPath) compile on non-Linux platforms. Any non-Linux
+	// caller that actually constructs or inspects this will hit the
+	// errUnsupported returned by the surrounding wrappers.
+	Lot struct {
+		LotName string
+		Owner   string
+		Paths   []LotPath
+	}
+
 	PolicyAttrsRequest struct{ LotName string }
 	UsageRequest       struct{ LotName string }
 )

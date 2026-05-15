@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -111,7 +111,7 @@ func TestExtractScopes(t *testing.T) {
 	})
 }
 
-func TestTokenSignedByAuthorizedCaller(t *testing.T) {
+func TestVerifyTokenSignedByAnyIssuer(t *testing.T) {
 	// Spin up a tiny issuer that publishes openid-configuration + JWKS.
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestTokenSignedByAuthorizedCaller(t *testing.T) {
 
 	t.Run("accepts-token-from-listed-issuer", func(t *testing.T) {
 		signed := mintToken(token_scopes.Lot_Read.String())
-		ok, parsed, err := tokenSignedByAuthorizedCaller(signed, []string{srv.URL})
+		ok, parsed, err := verifyTokenSignedByAnyIssuer(signed, []string{srv.URL})
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, parsed)
@@ -167,20 +167,20 @@ func TestTokenSignedByAuthorizedCaller(t *testing.T) {
 		// Use a URL that does not serve the JWKS so the lookup fails.
 		bogus, _ := url.Parse(srv.URL)
 		bogus.Host = "127.0.0.1:1" // unlikely to be reachable
-		ok, _, err := tokenSignedByAuthorizedCaller(signed, []string{bogus.String()})
+		ok, _, err := verifyTokenSignedByAnyIssuer(signed, []string{bogus.String()})
 		require.Error(t, err)
 		require.False(t, ok)
 	})
 
 	t.Run("rejects-malformed-token", func(t *testing.T) {
-		ok, _, err := tokenSignedByAuthorizedCaller("not-a-jwt", []string{srv.URL})
+		ok, _, err := verifyTokenSignedByAnyIssuer("not-a-jwt", []string{srv.URL})
 		require.Error(t, err)
 		require.False(t, ok)
 	})
 
 	t.Run("empty-caller-list", func(t *testing.T) {
 		signed := mintToken(token_scopes.Lot_Read.String())
-		ok, _, err := tokenSignedByAuthorizedCaller(signed, nil)
+		ok, _, err := verifyTokenSignedByAnyIssuer(signed, nil)
 		require.Error(t, err)
 		require.False(t, ok)
 	})
@@ -310,7 +310,7 @@ func TestLotToReservation(t *testing.T) {
 	assert.Equal(t, "abc", r.ReservationID)
 	assert.Equal(t, "https://issuer.example", r.Owner)
 	assert.Equal(t, []string{"root"}, r.Parents)
-	assert.Equal(t, []LotPath{{Path: "/foo", Recursive: true}}, r.Paths)
+	assert.Equal(t, []LotPathView{{Path: "/foo", Recursive: true}}, r.Paths)
 	assert.Equal(t, ReservationStatusActive, r.Status)
 	require.NotNil(t, r.DedicatedGB)
 	assert.Equal(t, float64(10), *r.DedicatedGB)

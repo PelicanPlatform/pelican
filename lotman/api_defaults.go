@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -28,20 +28,21 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// applyCreateLotDefaults fills in MPA fields the caller omitted with the
-// same sentinel/derived values that Pelican uses elsewhere (configLotTimestamps,
-// the renewal scheduler, schema validators). This keeps the REST surface
-// consistent with internally-minted lots: callers only need to supply lot_name
-// and paths to get a valid lot.
+// applyCreateLotDefaults validates required fields on a CreateLotRequest and
+// fills in the timestamp / opportunistic / max-objects fields the caller
+// omitted. The dedicated-GB quota is intentionally NOT defaulted: a
+// reservation without an explicit size budget would either be unbounded
+// (dangerous, since lotman gives away the whole federation budget by
+// default) or zero-sized (useless), so neither is a reasonable default.
 //
 // Defaulting rules (in order):
-//   - MPA itself: created if nil.
-//   - DedicatedGB: -1.0 (unbounded; the federation budget gates this).
-//   - OpportunisticGB: -1.0 (unbounded sentinel).
-//   - MaxNumObjects: -1 (unbounded sentinel).
-//   - CreationTime: now (in ms since epoch).
-//   - ExpirationTime: now + Lotman.DefaultLotExpirationLifetime.
-//   - DeletionTime: now + Lotman.DefaultLotDeletionLifetime.
+//   - ManagementPolicyAttrs (alias MPA): MUST be supplied. DedicatedGB
+//     within it MUST also be supplied; an error is returned otherwise.
+//   - OpportunisticGB: -1.0 (unbounded sentinel) when omitted.
+//   - MaxNumObjects: -1 (unbounded sentinel) when omitted.
+//   - CreationTimeMs: now when omitted or zero.
+//   - ExpirationTimeMs: now + Lotman.DefaultLotExpirationLifetime when omitted or zero.
+//   - DeletionTimeMs: now + Lotman.DefaultLotDeletionLifetime when omitted or zero.
 //
 // `now` is injected so tests can pin the wall clock and so callers that
 // already captured a timestamp upstream get a consistent value across all
@@ -50,44 +51,48 @@ func applyCreateLotDefaults(req *CreateLotRequest, now time.Time) error {
 	if req == nil {
 		return errors.New("nil CreateLotRequest")
 	}
-	if req.MPA == nil {
-		req.MPA = &MPA{}
+	if req.ManagementPolicyAttrs == nil {
+		return errors.New("managementPolicyAttrs is required")
+	}
+	mpa := req.ManagementPolicyAttrs
+	if mpa.DedicatedGB == nil {
+		return errors.New("managementPolicyAttrs.dedicatedGB is required")
 	}
 	defaultUnbounded := float64(-1)
 
-	if req.MPA.DedicatedGB == nil {
+	if mpa.OpportunisticGB == nil {
 		v := defaultUnbounded
-		req.MPA.DedicatedGB = &v
+		mpa.OpportunisticGB = &v
 	}
-	if req.MPA.OpportunisticGB == nil {
-		v := defaultUnbounded
-		req.MPA.OpportunisticGB = &v
-	}
-	if req.MPA.MaxNumObjects == nil {
-		req.MPA.MaxNumObjects = &Int64FromFloat{Value: -1}
+	if mpa.MaxNumObjects == nil {
+		v := int64(-1)
+		mpa.MaxNumObjects = &v
 	}
 
 	nowMs := now.UnixMilli()
-	if req.MPA.CreationTime == nil || req.MPA.CreationTime.Value == 0 {
-		req.MPA.CreationTime = &Int64FromFloat{Value: nowMs}
+	if mpa.CreationTimeMs == nil || *mpa.CreationTimeMs == 0 {
+		v := nowMs
+		mpa.CreationTimeMs = &v
 	}
-	if req.MPA.ExpirationTime == nil || req.MPA.ExpirationTime.Value == 0 {
+	if mpa.ExpirationTimeMs == nil || *mpa.ExpirationTimeMs == 0 {
 		expLife := param.Lotman_DefaultLotExpirationLifetime.GetDuration()
-		req.MPA.ExpirationTime = &Int64FromFloat{Value: nowMs + expLife.Milliseconds()}
+		v := nowMs + expLife.Milliseconds()
+		mpa.ExpirationTimeMs = &v
 	}
-	if req.MPA.DeletionTime == nil || req.MPA.DeletionTime.Value == 0 {
+	if mpa.DeletionTimeMs == nil || *mpa.DeletionTimeMs == 0 {
 		delLife := param.Lotman_DefaultLotDeletionLifetime.GetDuration()
-		req.MPA.DeletionTime = &Int64FromFloat{Value: nowMs + delLife.Milliseconds()}
+		v := nowMs + delLife.Milliseconds()
+		mpa.DeletionTimeMs = &v
 	}
 
 	// Sanity: lotman strictly enforces creation < expiration <= deletion.
-	if req.MPA.CreationTime.Value >= req.MPA.ExpirationTime.Value {
-		return errors.Errorf("creation_time (%d) must be < expiration_time (%d)",
-			req.MPA.CreationTime.Value, req.MPA.ExpirationTime.Value)
+	if *mpa.CreationTimeMs >= *mpa.ExpirationTimeMs {
+		return errors.Errorf("creationTimeMs (%d) must be < expirationTimeMs (%d)",
+			*mpa.CreationTimeMs, *mpa.ExpirationTimeMs)
 	}
-	if req.MPA.ExpirationTime.Value > req.MPA.DeletionTime.Value {
-		return errors.Errorf("expiration_time (%d) must be <= deletion_time (%d)",
-			req.MPA.ExpirationTime.Value, req.MPA.DeletionTime.Value)
+	if *mpa.ExpirationTimeMs > *mpa.DeletionTimeMs {
+		return errors.Errorf("expirationTimeMs (%d) must be <= deletionTimeMs (%d)",
+			*mpa.ExpirationTimeMs, *mpa.DeletionTimeMs)
 	}
 
 	return nil

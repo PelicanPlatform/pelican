@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -79,11 +79,19 @@ func getBearerToken(ctx *gin.Context) string {
 	return ""
 }
 
-// tokenSignedByAuthorizedCaller checks that strToken is signed by one of the
-// listed authorized callers (each identified by an issuer URL whose JWKS we
-// fetch). On success, returns true together with the parsed token.
-func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers []string) (bool, *jwt.Token, error) {
-	for _, owner := range authorizedCallers {
+// verifyTokenSignedByAnyIssuer is a low-level signature primitive: it walks
+// the supplied issuer URL list, fetches each issuer's JWKS, and returns the
+// first parsed token whose signature verifies against one of those keys.
+//
+// This function intentionally answers ONLY the question "is this token
+// signed by one of these issuers?". It is unaware of the operation being
+// authorized; the caller (requireAuth, requireAuthForPath,
+// requireAuthForCreate) is responsible for picking the appropriate set of
+// candidate issuers (the lot's owners for modify, the path's parents'
+// owners for path-keyed reads, the parent lot's owners for create) and
+// for checking the token's scope claim against the operation.
+func verifyTokenSignedByAnyIssuer(strToken string, candidateIssuers []string) (bool, *jwt.Token, error) {
+	for _, owner := range candidateIssuers {
 		kSet, err := registry_jwks.GetJWKSFromIssUrl(owner)
 		if err != nil {
 			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
@@ -96,14 +104,25 @@ func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers []string) 
 		}
 		return true, &tok, nil
 	}
-	return false, nil, errors.New("token not signed by any of the owners of any parent lot")
+	return false, nil, errors.New("token not signed by any candidate issuer")
 }
 
 // resolveParentsForPath returns the lot names that should serve as parents
 // for a new lot covering the given filesystem path, using lotman's
-// path-derived lookup. If lotman returns the synthetic "default" lot the
-// effective parent is "root" (every Pelican-managed lot ultimately roots
-// there). The returned slice always has at least one entry.
+// path-derived lookup. Two synthetic rootly lots exist alongside any
+// operator-defined hierarchy:
+//
+//   - "root":    every operator-defined lot ultimately roots here.
+//   - "default": catches paths not aligned with any explicit lot. It is
+//     its own self-parent (a rootly lot in lotman's terms).
+//
+// When lotman returns no covering lots for `path`, or returns the synthetic
+// "default" lot, we report "root" as the effective parent: every
+// Pelican-managed lot ultimately roots there, and using "default" as the
+// parent of an arbitrary new lot would drag it under default's bounded
+// budgets. The returned slice always has at least one entry. (Note:
+// capacity endpoints query "default" directly when appropriate, rather
+// than going through this resolver — see getAvailableCapacity.)
 func resolveParentsForPath(path string) ([]string, error) {
 	errMsg := make([]byte, 2048)
 	lots := unsafe.Pointer(nil)
@@ -142,12 +161,7 @@ func resolveOwnerForPath(path string) (string, error) {
 		return "", errors.Wrap(err, errPrefix+"the director's object path could not be constructed")
 	}
 
-	httpClient := &http.Client{
-		Transport: config.GetTransport(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	httpClient := config.GetClientNoRedirect()
 	req, err := http.NewRequest("GET", directorUrl.String(), nil)
 	if err != nil {
 		return "", errors.Wrap(err, errPrefix+"the director request could not be created")
@@ -213,6 +227,9 @@ func authorizedCallersForPath(path string) ([]string, error) {
 // the lot's parents (or, when the parent is "root", the federation issuer)
 // and contains the lot.create scope.
 func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
+	if lot == nil || len(lot.Paths) == 0 {
+		return false, errors.New("lot must include at least one path")
+	}
 	path := lot.Paths[0].Path
 	log.Debugf("Attempting to add lot for path: %s", path)
 
@@ -248,7 +265,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 		}
 	}
 
-	signed, tok, err := tokenSignedByAuthorizedCaller(strToken, authorizedCallers)
+	signed, tok, err := verifyTokenSignedByAnyIssuer(strToken, authorizedCallers)
 	if err != nil || !signed {
 		if err == nil {
 			err = errors.New("token not signed by any authorized caller")
@@ -372,7 +389,7 @@ func requireAuth(ctx *gin.Context, lotName string, requiredScope token_scopes.To
 		return nil, false
 	}
 
-	signed, parsedTok, err := tokenSignedByAuthorizedCaller(strToken, *authzCallers)
+	signed, parsedTok, err := verifyTokenSignedByAnyIssuer(strToken, *authzCallers)
 	if err != nil || !signed {
 		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -430,7 +447,7 @@ func requireAuthForPath(ctx *gin.Context, path string, requiredScope token_scope
 		return nil, false
 	}
 
-	signed, parsedTok, err := tokenSignedByAuthorizedCaller(strToken, callers)
+	signed, parsedTok, err := verifyTokenSignedByAnyIssuer(strToken, callers)
 	if err != nil || !signed {
 		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

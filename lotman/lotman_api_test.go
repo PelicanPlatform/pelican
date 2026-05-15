@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -56,6 +56,11 @@ func setupLotsAPI(t *testing.T) (*gin.Engine, *http.Cookie, func()) {
 	t.Helper()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
+	// Always restore config state at end-of-test, even if a sub-test panics or
+	// returns early. This must run BEFORE the lotman teardown closure (Cleanup
+	// stack is LIFO) so that nothing tries to use the in-test config after we
+	// reset it.
+	t.Cleanup(server_utils.ResetTestState)
 	gin.SetMode(gin.TestMode)
 
 	disc := getMockDiscoveryHost()
@@ -178,9 +183,9 @@ func TestLotsAPI_AdminCookie_Reads(t *testing.T) {
 	t.Run("get one", func(t *testing.T) {
 		rec := doRequest(t, eng, http.MethodGet, "/api/v1.0/lots/test-1", cookie, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var lot Lot
-		require.NoError(t, json.NewDecoder(rec.Body).Decode(&lot))
-		assert.Equal(t, "test-1", lot.LotName)
+		var resv Reservation
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resv))
+		assert.Equal(t, "test-1", resv.ReservationID)
 	})
 
 	t.Run("get children", func(t *testing.T) {
@@ -195,15 +200,15 @@ func TestLotsAPI_AdminCookie_Reads(t *testing.T) {
 	t.Run("policy", func(t *testing.T) {
 		rec := doRequest(t, eng, http.MethodGet, "/api/v1.0/lots/test-1/policy", cookie, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var rmpa RestrictiveMPA
-		require.NoError(t, json.NewDecoder(rec.Body).Decode(&rmpa))
-		assert.NotEmpty(t, rmpa.DedicatedGB.LotName)
+		var pol LotPolicyResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&pol))
+		assert.NotEmpty(t, pol.DedicatedGB.LotName)
 	})
 
 	t.Run("usage", func(t *testing.T) {
 		rec := doRequest(t, eng, http.MethodGet, "/api/v1.0/lots/test-1/usage", cookie, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var usage LotUsage
+		var usage LotUsageResponse
 		require.NoError(t, json.NewDecoder(rec.Body).Decode(&usage))
 		_ = usage
 	})
@@ -211,15 +216,15 @@ func TestLotsAPI_AdminCookie_Reads(t *testing.T) {
 	t.Run("by-path", func(t *testing.T) {
 		rec := doRequest(t, eng, http.MethodGet, "/api/v1.0/lots/by-path?path=/test-1", cookie, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var lots []Lot
-		require.NoError(t, json.NewDecoder(rec.Body).Decode(&lots))
-		require.NotEmpty(t, lots)
+		var resvs []Reservation
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resvs))
+		require.NotEmpty(t, resvs)
 	})
 
 	t.Run("capacity is public", func(t *testing.T) {
 		rec := doRequest(t, eng, http.MethodGet, "/api/v1.0/lots/by-path/capacity?path=/test-1", nil, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var ac AvailableCapacity
+		var ac AvailableCapacityResponse
 		require.NoError(t, json.NewDecoder(rec.Body).Decode(&ac))
 		_ = ac
 	})
@@ -243,12 +248,12 @@ func TestLotsAPI_CreateLot_AdminCookie(t *testing.T) {
 	// No lot_name supplied: the server must mint a UUID and return it.
 	t.Run("uuid-minted", func(t *testing.T) {
 		body := CreateLotRequest{
-			Paths: []LotPath{{Path: "/test-1/auto", Recursive: true}},
-			MPA: &MPA{
-				DedicatedGB:    &ded,
-				CreationTime:   &Int64FromFloat{Value: now},
-				ExpirationTime: &Int64FromFloat{Value: expiration},
-				DeletionTime:   &Int64FromFloat{Value: deletion},
+			Paths: []LotPathInput{{Path: "/test-1/auto", Recursive: true}},
+			ManagementPolicyAttrs: &MPAInput{
+				DedicatedGB:      &ded,
+				CreationTimeMs:   &now,
+				ExpirationTimeMs: &expiration,
+				DeletionTimeMs:   &deletion,
 			},
 		}
 		rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots", cookie, body)
@@ -276,12 +281,12 @@ func TestLotsAPI_CreateLot_AdminCookie(t *testing.T) {
 	t.Run("explicit-name", func(t *testing.T) {
 		body := CreateLotRequest{
 			LotName: "explicit-name-lot",
-			Paths:   []LotPath{{Path: "/test-1/explicit", Recursive: true}},
-			MPA: &MPA{
-				DedicatedGB:    &ded,
-				CreationTime:   &Int64FromFloat{Value: now},
-				ExpirationTime: &Int64FromFloat{Value: expiration},
-				DeletionTime:   &Int64FromFloat{Value: deletion},
+			Paths:   []LotPathInput{{Path: "/test-1/explicit", Recursive: true}},
+			ManagementPolicyAttrs: &MPAInput{
+				DedicatedGB:      &ded,
+				CreationTimeMs:   &now,
+				ExpirationTimeMs: &expiration,
+				DeletionTimeMs:   &deletion,
 			},
 		}
 		rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots", cookie, body)
@@ -296,8 +301,8 @@ func TestLotsAPI_CreateLot_AdminCookie(t *testing.T) {
 	// unbounded children).
 	t.Run("mpa-defaults-applied", func(t *testing.T) {
 		body := CreateLotRequest{
-			Paths: []LotPath{{Path: "/test-1/defaults", Recursive: true}},
-			MPA:   &MPA{DedicatedGB: &ded},
+			Paths:                 []LotPathInput{{Path: "/test-1/defaults", Recursive: true}},
+			ManagementPolicyAttrs: &MPAInput{DedicatedGB: &ded},
 		}
 		rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots", cookie, body)
 		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
@@ -311,12 +316,16 @@ func TestLotsAPI_CreateLot_AdminCookie(t *testing.T) {
 	// Bad MPA (creation >= expiration) is rejected with 400 BEFORE
 	// touching lotman.
 	t.Run("bad-mpa-rejected", func(t *testing.T) {
+		creation := int64(200)
+		exp := int64(100)
+		del := int64(300)
 		body := CreateLotRequest{
-			Paths: []LotPath{{Path: "/test-1/bad", Recursive: true}},
-			MPA: &MPA{
-				CreationTime:   &Int64FromFloat{Value: 200},
-				ExpirationTime: &Int64FromFloat{Value: 100},
-				DeletionTime:   &Int64FromFloat{Value: 300},
+			Paths: []LotPathInput{{Path: "/test-1/bad", Recursive: true}},
+			ManagementPolicyAttrs: &MPAInput{
+				DedicatedGB:      &ded,
+				CreationTimeMs:   &creation,
+				ExpirationTimeMs: &exp,
+				DeletionTimeMs:   &del,
 			},
 		}
 		rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots", cookie, body)
@@ -336,10 +345,11 @@ func TestLotsAPI_AdminCookie_Modify(t *testing.T) {
 	defer teardown()
 
 	ded := float64(50)
+	maxObj := int64(84)
 	body := PatchLotRequest{
-		MPA: &MPA{
+		ManagementPolicyAttrs: &MPAInput{
 			DedicatedGB:   &ded,
-			MaxNumObjects: &Int64FromFloat{Value: 84},
+			MaxNumObjects: &maxObj,
 		},
 	}
 	rec := doRequest(t, eng, http.MethodPatch, "/api/v1.0/lots/test-1", cookie, body)
@@ -364,9 +374,10 @@ func TestLotsAPI_AdminCookie_Modify(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, existing.MPA)
 		require.NotNil(t, existing.MPA.DeletionTime)
+		newExp := existing.MPA.DeletionTime.Value + 1000
 		body := PatchLotRequest{
-			MPA: &MPA{
-				ExpirationTime: &Int64FromFloat{Value: existing.MPA.DeletionTime.Value + 1000},
+			ManagementPolicyAttrs: &MPAInput{
+				ExpirationTimeMs: &newExp,
 			},
 		}
 		rec := doRequest(t, eng, http.MethodPatch, "/api/v1.0/lots/test-1", cookie, body)
@@ -400,8 +411,8 @@ func TestLotsAPI_Reclaim_IgnoresClientTimestamp(t *testing.T) {
 
 	// Send an arbitrary (and clearly-bogus) timestamp claim.
 	rawBody := map[string]any{
-		"reason":          "tampering attempt",
-		"reclaimed_at_ms": int64(0), // year 1970
+		"reason":         "tampering attempt",
+		"reclaimedAtMs":  int64(0), // year 1970
 	}
 	before := time.Now().UnixMilli()
 	rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots/test-2/reclaim", cookie, rawBody)

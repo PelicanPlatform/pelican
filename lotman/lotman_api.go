@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -73,12 +73,25 @@ func computeReservationStatus(lot *Lot, nowMs int64) ReservationStatus {
 	return ReservationStatusActive
 }
 
+// projectLotPaths converts internal LotPath records to their camelCase
+// public projection.
+func projectLotPaths(in []LotPath) []LotPathView {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]LotPathView, len(in))
+	for i, p := range in {
+		out[i] = LotPathView{Path: p.Path, Recursive: p.Recursive, LotName: p.LotName}
+	}
+	return out
+}
+
 // lotToReservation projects a lotman Lot record onto the stable public
 // Reservation contract.
 func lotToReservation(lot *Lot, nowMs int64) Reservation {
 	r := Reservation{
 		ReservationID: lot.LotName,
-		Paths:         lot.Paths,
+		Paths:         projectLotPaths(lot.Paths),
 		Owner:         lot.Owner,
 		Parents:       lot.Parents,
 		Status:        computeReservationStatus(lot, nowMs),
@@ -101,6 +114,116 @@ func lotToReservation(lot *Lot, nowMs int64) Reservation {
 		}
 	}
 	return r
+}
+
+// mpaInputToInternal converts the camelCase MPAInput accepted on the wire
+// into the snake-cased lotman MPA struct used to talk to the C library.
+// Nil-safe; nil in -> nil out.
+func mpaInputToInternal(in *MPAInput) *MPA {
+	if in == nil {
+		return nil
+	}
+	out := &MPA{
+		DedicatedGB:     in.DedicatedGB,
+		OpportunisticGB: in.OpportunisticGB,
+	}
+	if in.MaxNumObjects != nil {
+		out.MaxNumObjects = &Int64FromFloat{Value: *in.MaxNumObjects}
+	}
+	if in.CreationTimeMs != nil {
+		out.CreationTime = &Int64FromFloat{Value: *in.CreationTimeMs}
+	}
+	if in.ExpirationTimeMs != nil {
+		out.ExpirationTime = &Int64FromFloat{Value: *in.ExpirationTimeMs}
+	}
+	if in.DeletionTimeMs != nil {
+		out.DeletionTime = &Int64FromFloat{Value: *in.DeletionTimeMs}
+	}
+	return out
+}
+
+// parentAttributionsInputToInternal converts the camelCase request map to
+// the lotman-internal map shape.
+func parentAttributionsInputToInternal(in map[string]ParentAttributionInput) map[string]ParentAttribution {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]ParentAttribution, len(in))
+	for k, v := range in {
+		pa := ParentAttribution{DedicatedGB: v.DedicatedGB, OpportunisticGB: v.OpportunisticGB}
+		if v.MaxNumObjects != nil {
+			pa.MaxNumObjects = &Int64FromFloat{Value: *v.MaxNumObjects}
+		}
+		out[k] = pa
+	}
+	return out
+}
+
+// pathInputsToInternal converts the request-side path list to the
+// lotman-internal LotPath list.
+func pathInputsToInternal(in []LotPathInput) []LotPath {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]LotPath, len(in))
+	for i, p := range in {
+		out[i] = LotPath{Path: p.Path, Recursive: p.Recursive}
+	}
+	return out
+}
+
+// projectAvailableCapacity converts the lotman-internal capacity record to
+// its camelCase public response shape.
+func projectAvailableCapacity(in *AvailableCapacity) AvailableCapacityResponse {
+	return AvailableCapacityResponse{
+		AvailableDedicatedGB:     in.AvailableDedicatedGB,
+		AvailableOpportunisticGB: in.AvailableOpportunisticGB,
+		AvailableMaxNumObjects:   in.AvailableMaxNumObjects,
+		AvailableTotalGB:         in.AvailableTotalGB,
+		PeakDedicatedGB:          in.PeakDedicatedGB,
+		PeakOpportunisticGB:      in.PeakOpportunisticGB,
+		PeakMaxNumObjects:        in.PeakMaxNumObjects,
+		PeakTotalGB:              in.PeakTotalGB,
+	}
+}
+
+// projectLotUsage converts the lotman-internal usage record to its
+// camelCase response shape, dropping axes the caller opted out of (zero
+// totals collapse to omit).
+func projectLotUsage(in *LotUsage) LotUsageResponse {
+	floatView := func(m UsageMapFloat) *UsageAxisFloatView {
+		if m.Total == 0 && m.SelfContrib == 0 && m.ChildrenContrib == 0 {
+			return nil
+		}
+		return &UsageAxisFloatView{SelfContrib: m.SelfContrib, ChildrenContrib: m.ChildrenContrib, Total: m.Total}
+	}
+	intView := func(m UsageMapInt) *UsageAxisIntView {
+		if m.Total.Value == 0 && m.SelfContrib.Value == 0 && m.ChildrenContrib.Value == 0 {
+			return nil
+		}
+		return &UsageAxisIntView{SelfContrib: m.SelfContrib.Value, ChildrenContrib: m.ChildrenContrib.Value, Total: m.Total.Value}
+	}
+	return LotUsageResponse{
+		GBBeingWritten:      floatView(in.GBBeingWritten),
+		ObjectsBeingWritten: intView(in.ObjectsBeingWritten),
+		DedicatedGB:         floatView(in.DedicatedGB),
+		OpportunisticGB:     floatView(in.OpportunisticGB),
+		NumObjects:          intView(in.NumObjects),
+		TotalGB:             floatView(in.TotalGB),
+	}
+}
+
+// projectRestrictiveMPA converts the lotman-internal RestrictiveMPA to its
+// camelCase response shape.
+func projectRestrictiveMPA(in *RestrictiveMPA) LotPolicyResponse {
+	return LotPolicyResponse{
+		DedicatedGB:      PolicyAxisFloatView{LotName: in.DedicatedGB.LotName, Value: in.DedicatedGB.Value},
+		OpportunisticGB:  PolicyAxisFloatView{LotName: in.OpportunisticGB.LotName, Value: in.OpportunisticGB.Value},
+		MaxNumObjects:    PolicyAxisIntView{LotName: in.MaxNumObjects.LotName, Value: in.MaxNumObjects.Value.Value},
+		CreationTimeMs:   PolicyAxisIntView{LotName: in.CreationTime.LotName, Value: in.CreationTime.Value.Value},
+		ExpirationTimeMs: PolicyAxisIntView{LotName: in.ExpirationTime.LotName, Value: in.ExpirationTime.Value.Value},
+		DeletionTimeMs:   PolicyAxisIntView{LotName: in.DeletionTime.LotName, Value: in.DeletionTime.Value.Value},
+	}
 }
 
 // listLots handles GET /api/v1.0/lots. It returns the names of all lots
@@ -182,11 +305,11 @@ func createLot(ctx *gin.Context) {
 		return
 	}
 	if err := applyCreateLotDefaults(&req, time.Now()); err != nil {
-		abortWithErr(ctx, http.StatusBadRequest, "invalid MPA fields", err)
+		abortWithErr(ctx, http.StatusBadRequest, "invalid managementPolicyAttrs", err)
 		return
 	}
 	// Mint a UUID reservation identifier when the caller didn't supply one.
-	// Per the API contract, callers should treat the returned reservation_id
+	// Per the API contract, callers should treat the returned reservationId
 	// as the canonical handle.
 	if req.LotName == "" {
 		req.LotName = uuid.NewString()
@@ -194,9 +317,9 @@ func createLot(ctx *gin.Context) {
 
 	lot := Lot{
 		LotName:            req.LotName,
-		Paths:              req.Paths,
-		MPA:                req.MPA,
-		ParentAttributions: req.ParentAttributions,
+		Paths:              pathInputsToInternal(req.Paths),
+		MPA:                mpaInputToInternal(req.ManagementPolicyAttrs),
+		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
 	res, ok := requireAuthForCreate(ctx, &lot)
 	if !ok {
@@ -221,12 +344,12 @@ func createLot(ctx *gin.Context) {
 
 // getLot handles GET /api/v1.0/lots/:lotName.
 //
-// @Summary Get a lot's full record
+// @Summary Get a lot's full record as a Reservation projection
 // @Tags lots
 // @Produce json
 // @Param lotName path string true "Lot name"
 // @Param recursive query bool false "Include descendant aggregation (default false)"
-// @Success 200 {object} Lot
+// @Success 200 {object} Reservation
 // @Failure 401 {object} server_structs.SimpleApiResp
 // @Failure 403 {object} server_structs.SimpleApiResp
 // @Failure 404 {object} server_structs.SimpleApiResp
@@ -250,7 +373,7 @@ func getLot(ctx *gin.Context) {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to fetch lot", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, lot)
+	ctx.JSON(http.StatusOK, lotToReservation(lot, time.Now().UnixMilli()))
 }
 
 // patchLot handles PATCH /api/v1.0/lots/:lotName.
@@ -281,32 +404,33 @@ func patchLot(ctx *gin.Context) {
 		abortWithErr(ctx, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
-	if req.MPA == nil && req.ParentAttributions == nil {
-		abortWithErr(ctx, http.StatusBadRequest, "PATCH body must include at least one of management_policy_attrs or parent_attributions", nil)
+	if req.ManagementPolicyAttrs == nil && req.ParentAttributions == nil {
+		abortWithErr(ctx, http.StatusBadRequest, "PATCH body must include at least one of managementPolicyAttrs or parentAttributions", nil)
 		return
 	}
 	res, ok := requireAuth(ctx, lotName, token_scopes.Lot_Modify)
 	if !ok {
 		return
 	}
+	internalMPA := mpaInputToInternal(req.ManagementPolicyAttrs)
 	// Validate MPA timestamp ordering against the post-PATCH state. Any
 	// timestamp the caller didn't supply is read from the existing lot
 	// so we can detect a partial update that would invert the ordering.
-	if req.MPA != nil {
+	if internalMPA != nil {
 		existing, err := GetLot(lotName, false)
 		if err != nil {
 			abortWithErr(ctx, http.StatusInternalServerError, "failed to fetch lot for validation", err)
 			return
 		}
-		if err := validatePatchedMPA(existing.MPA, req.MPA); err != nil {
+		if err := validatePatchedMPA(existing.MPA, internalMPA); err != nil {
 			abortWithErr(ctx, http.StatusBadRequest, "invalid MPA timestamps", err)
 			return
 		}
 	}
 	upd := LotUpdate{
 		LotName:            lotName,
-		MPA:                req.MPA,
-		ParentAttributions: req.ParentAttributions,
+		MPA:                internalMPA,
+		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
 	if err := UpdateLot(&upd, res.caller); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to update lot", err)
@@ -486,13 +610,13 @@ func getLotChildren(ctx *gin.Context) {
 // @Tags lots
 // @Produce json
 // @Param lotName path string true "Lot name"
-// @Param dedicated_GB query bool false "Include dedicated_GB axis (default true)"
-// @Param opportunistic_GB query bool false "Include opportunistic_GB axis (default true)"
-// @Param total_GB query bool false "Include total_GB axis (default true)"
-// @Param num_objects query bool false "Include num_objects axis (default true)"
-// @Param GB_being_written query bool false "Include GB_being_written axis (default true)"
-// @Param objects_being_written query bool false "Include objects_being_written axis (default true)"
-// @Success 200 {object} LotUsage
+// @Param dedicatedGB query bool false "Include dedicatedGB axis (default true)"
+// @Param opportunisticGB query bool false "Include opportunisticGB axis (default true)"
+// @Param totalGB query bool false "Include totalGB axis (default true)"
+// @Param numObjects query bool false "Include numObjects axis (default true)"
+// @Param gbBeingWritten query bool false "Include gbBeingWritten axis (default true)"
+// @Param objectsBeingWritten query bool false "Include objectsBeingWritten axis (default true)"
+// @Success 200 {object} LotUsageResponse
 // @Failure 401 {object} server_structs.SimpleApiResp
 // @Failure 403 {object} server_structs.SimpleApiResp
 // @Failure 500 {object} server_structs.SimpleApiResp
@@ -506,7 +630,7 @@ func getLotUsage(ctx *gin.Context) {
 	if _, ok := requireAuth(ctx, lotName, token_scopes.Lot_Read); !ok {
 		return
 	}
-	// Default-true per-axis flags: opt-out via ?dedicated_GB=false etc.
+	// Default-true per-axis flags: opt-out via ?dedicatedGB=false etc.
 	axisOn := func(name string) *bool {
 		v := true
 		if raw := ctx.Query(name); raw == "false" {
@@ -516,19 +640,19 @@ func getLotUsage(ctx *gin.Context) {
 	}
 	req := UsageRequest{
 		LotName:             lotName,
-		DedicatedGB:         axisOn("dedicated_GB"),
-		OpportunisticGB:     axisOn("opportunistic_GB"),
-		TotalGB:             axisOn("total_GB"),
-		NumObjects:          axisOn("num_objects"),
-		GBBeingWritten:      axisOn("GB_being_written"),
-		ObjectsBeingWritten: axisOn("objects_being_written"),
+		DedicatedGB:         axisOn("dedicatedGB"),
+		OpportunisticGB:     axisOn("opportunisticGB"),
+		TotalGB:             axisOn("totalGB"),
+		NumObjects:          axisOn("numObjects"),
+		GBBeingWritten:      axisOn("gbBeingWritten"),
+		ObjectsBeingWritten: axisOn("objectsBeingWritten"),
 	}
 	usage, err := GetLotUsage(req)
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to fetch usage", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, usage)
+	ctx.JSON(http.StatusOK, projectLotUsage(usage))
 }
 
 // getLotPolicy handles GET /api/v1.0/lots/:lotName/policy. Returns the
@@ -544,7 +668,7 @@ func getLotUsage(ctx *gin.Context) {
 // @Tags lots
 // @Produce json
 // @Param lotName path string true "Lot name"
-// @Success 200 {object} RestrictiveMPA
+// @Success 200 {object} LotPolicyResponse
 // @Failure 401 {object} server_structs.SimpleApiResp
 // @Failure 403 {object} server_structs.SimpleApiResp
 // @Failure 500 {object} server_structs.SimpleApiResp
@@ -572,7 +696,7 @@ func getLotPolicy(ctx *gin.Context) {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to fetch policy attributes", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, rmpa)
+	ctx.JSON(http.StatusOK, projectRestrictiveMPA(rmpa))
 }
 
 // listLotsByPath handles GET /api/v1.0/lots/by-path. Returns the lots
@@ -582,15 +706,15 @@ func getLotPolicy(ctx *gin.Context) {
 // answer "what reservations cover my path?" without holding a federation-
 // signed token.
 //
-// @Summary List lots that cover a path
+// @Summary List reservations that cover a path
 // @Tags lots
 // @Produce json
 // @Param path query string true "Path to look up"
 // @Param recursive query bool false "Include lots whose paths are recursive descendants (default false)"
-// @Param include_reclaimed query bool false "Include lots already marked reclaimed (default false)"
-// @Param from_ms query integer false "Start of the time window (ms since epoch); 0 = now"
-// @Param to_ms query integer false "End of the time window (ms since epoch); 0 = from_ms+1"
-// @Success 200 {array} Lot
+// @Param includeReclaimed query bool false "Include lots already marked reclaimed (default false)"
+// @Param fromMs query integer false "Start of the time window (ms since epoch); 0 = now"
+// @Param toMs query integer false "End of the time window (ms since epoch); 0 = fromMs+1"
+// @Success 200 {array} Reservation
 // @Failure 400 {object} server_structs.SimpleApiResp
 // @Failure 401 {object} server_structs.SimpleApiResp
 // @Failure 403 {object} server_structs.SimpleApiResp
@@ -611,7 +735,12 @@ func listLotsByPath(ctx *gin.Context) {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to enumerate lots for path", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, lots)
+	nowMs := time.Now().UnixMilli()
+	out := make([]Reservation, len(lots))
+	for i := range lots {
+		out[i] = lotToReservation(&lots[i], nowMs)
+	}
+	ctx.JSON(http.StatusOK, out)
 }
 
 // normalizeWindow returns a non-empty (strictly increasing) [from, to)
@@ -637,9 +766,9 @@ func normalizeWindow(from, to int64) (int64, int64) {
 // @Tags lots
 // @Produce json
 // @Param path query string true "Path whose owning lot's children should be queried"
-// @Param from_ms query integer false "Start of the window (ms since epoch); 0 = now"
-// @Param to_ms query integer false "End of the window (ms since epoch); 0 = from_ms+1"
-// @Success 200 {object} AvailableCapacity
+// @Param fromMs query integer false "Start of the window (ms since epoch); 0 = now"
+// @Param toMs query integer false "End of the window (ms since epoch); 0 = fromMs+1"
+// @Success 200 {object} AvailableCapacityResponse
 // @Failure 400 {object} server_structs.SimpleApiResp
 // @Failure 404 {object} server_structs.SimpleApiResp
 // @Failure 500 {object} server_structs.SimpleApiResp
@@ -661,30 +790,16 @@ func getAvailableCapacity(ctx *gin.Context) {
 		abortWithErr(ctx, http.StatusNotFound, "no lot covers the supplied path", nil)
 		return
 	}
+	// The owning lot may be the synthetic "default" lot, which is itself a
+	// rootly lot (a self-parent alongside "root"). Query its capacity
+	// directly rather than redirecting to "root".
 	parent := lots[0].LotName
-	if parent == "default" {
-		// "default" means the path isn't tracked by any explicit lot;
-		// fall back to root for headroom queries.
-		parent = "root"
-	}
 	cap, err := GetAvailableCapacity(parent, from, to)
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to fetch available capacity", err)
 		return
 	}
-	// Always shape the response into the typed AvailableCapacity struct
-	// so the public contract is stable even if lotman starts returning
-	// additional fields.
-	ctx.JSON(http.StatusOK, AvailableCapacity{
-		AvailableDedicatedGB:     cap.AvailableDedicatedGB,
-		AvailableOpportunisticGB: cap.AvailableOpportunisticGB,
-		AvailableMaxNumObjects:   cap.AvailableMaxNumObjects,
-		AvailableTotalGB:         cap.AvailableTotalGB,
-		PeakDedicatedGB:          cap.PeakDedicatedGB,
-		PeakOpportunisticGB:      cap.PeakOpportunisticGB,
-		PeakMaxNumObjects:        cap.PeakMaxNumObjects,
-		PeakTotalGB:              cap.PeakTotalGB,
-	})
+	ctx.JSON(http.StatusOK, projectAvailableCapacity(cap))
 }
 
 // RegisterLotsAPI wires the /api/v1.0/lots/* surface onto router.
