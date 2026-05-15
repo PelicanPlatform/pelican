@@ -818,23 +818,18 @@ func setupTranslation() error {
 	})
 }
 
+// isSupportedConfigExt returns whether the file extension of path
+// corresponds to a format that Pelican's config parser understands
+// and considers to be a "real" file and not a backup.
+func isSupportedConfigExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
 // If the config file defines a "ConfigLocations" key and a list of corresponding directories, we parse all the yaml
 // files in those directories according to directory-scoped lexicographical order. This allows users/admins to split
 // their configuration across multiple directories/files.
 //
-// isSupportedConfigExt reports whether the file extension of name is one of
-// the formats that Pelican's config parser understands. Only files that pass
-// this check are loaded from a ConfigLocations directory; everything else
-// (editor backup files such as "~" or ".bak", package-manager saves such as
-// ".rpmsave"/".rpmnew", etc.) is silently skipped.
-//
-// If Pelican ever gains support for an additional config format (e.g. TOML),
-// add the corresponding extension here.
-func isSupportedConfigExt(name string) bool {
-	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".yaml" || ext == ".yml"
-}
-
 // Config merging is handled by viper. For more information, see https://pkg.go.dev/github.com/spf13/viper#MergeConfig
 func handleContinuedCfg() error {
 	cfgDirs := viper.GetStringSlice("ConfigLocations")
