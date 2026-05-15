@@ -20,6 +20,10 @@ package cache
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,11 +31,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // Check for the sentinel file
@@ -267,12 +276,26 @@ func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
 
 // Periodically scan the directorTest directory to clean up test files.
 // Handles both legacy flat files and daily-nested subdirectories (YYYY-MM-DD/).
+//
+// This serves as a backup cleanup mechanism. The primary cleanup is performed by the
+// director, which asks the cache to evict old test files via the cache web API endpoint
+// POST /api/v1.0/cache/evictTestFile (see HandleDirectorEvictRequest). This local cleanup
+// catches files that the director failed to evict (e.g., due to network issues or director restarts).
+//
+// Note: when Server.DropPrivileges is true, this function is a no-op because the Pelican
+// process cannot delete files owned by the xrootd user. In that case, the director-side
+// evict API is the only cleanup path.
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
+	// Skip if drop privileges is enabled, because Director test files are owned by the xrootd user.
+	// The unprivileged pelican user does not have permission to remove them.
+	if param.Server_DropPrivileges.GetBool() {
+		return
+	}
 	dirTestPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
 	server_utils.LaunchWatcherMaintenance(ctx,
 		[]string{dirTestPath},
 		"cache director-based health test clean up",
-		time.Minute,
+		time.Hour,
 		func(notifyEvent bool) error {
 			return cleanupDirectorTestFiles(dirTestPath)
 		},
