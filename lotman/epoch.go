@@ -477,6 +477,13 @@ func topLevelSiblings(self string, effective map[string][]Lot) []string {
 			if d == c || d == "" {
 				continue
 			}
+			// The synthetic "/" root lot is the parent pool, not a
+			// real namespace ancestor. Treating it as an ancestor
+			// here would mark every real path as non-top-level and
+			// hide all sibling competition from the allocator.
+			if d == "/" {
+				continue
+			}
 			if pathContains(d, c) {
 				isTop = false
 				break

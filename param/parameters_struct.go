@@ -226,6 +226,7 @@ type Config struct {
 		DefaultLotExpirationLifetime time.Duration `mapstructure:"defaultlotexpirationlifetime" yaml:"DefaultLotExpirationLifetime"`
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
+		GarbageCollectionInterval time.Duration `mapstructure:"garbagecollectioninterval" yaml:"GarbageCollectionInterval"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
 		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
 		LotRecordRetention time.Duration `mapstructure:"lotrecordretention" yaml:"LotRecordRetention"`
@@ -699,6 +700,7 @@ type configWithType struct {
 		DefaultLotExpirationLifetime struct { Type string; Value time.Duration }
 		EnableAPI struct { Type string; Value bool }
 		EnabledPolicy struct { Type string; Value string }
+		GarbageCollectionInterval struct { Type string; Value time.Duration }
 		LibLocation struct { Type string; Value string }
 		LotHome struct { Type string; Value string }
 		LotRecordRetention struct { Type string; Value time.Duration }

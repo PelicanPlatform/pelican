@@ -868,7 +868,11 @@ func assignSuccessorParents(newLots []Lot, existing []Lot) {
 // immediately; the goroutine exits when ctx is done. The cadence is
 // fixed at 24 hours.
 func LaunchLotGcRoutine(ctx context.Context) {
-	const interval = 24 * time.Hour
+	interval := param.Lotman_GarbageCollectionInterval.GetDuration()
+	if interval <= 0 {
+		log.Warningf("Lotman GC: invalid interval %s; falling back to 24h", interval)
+		interval = 24 * time.Hour
+	}
 	go func() {
 		log.Infof("Starting Lotman GC routine; interval=%s", interval)
 		ticker := time.NewTicker(interval)

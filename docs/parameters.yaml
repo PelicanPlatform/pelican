@@ -4780,6 +4780,17 @@ type: duration
 default: 1440h
 components: ["cache"]
 ---
+name: Lotman.GarbageCollectionInterval
+description: |+
+  How often the Lotman garbage collector wakes up to remove expired lot records. On each tick, the collector removes all lots whose
+  deletion_time has passed and whose database record has been retained for at least ${Lotman.LotRecordRetention}.
+
+   Smaller values make the system more responsive to metadata cleanup at the cost of more wakeups.
+type: duration
+hidden: true
+default: 1h
+components: ["cache"]
+---
 name: Topology.DisableDowntime
 description: |+
   When enabled, no longer retrieve downtime information for origins and caches from Topology

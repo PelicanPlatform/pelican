@@ -273,6 +273,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Lotman.DefaultLotExpirationLifetime": false,
 	"Lotman.EnableAPI": false,
 	"Lotman.EnabledPolicy": false,
+	"Lotman.GarbageCollectionInterval": false,
 	"Lotman.LibLocation": false,
 	"Lotman.LotHome": false,
 	"Lotman.LotRecordRetention": false,
@@ -1077,6 +1078,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
+	"Lotman.GarbageCollectionInterval": func(c *Config) time.Duration { return c.Lotman.GarbageCollectionInterval },
 	"Lotman.LotRecordRetention": func(c *Config) time.Duration { return c.Lotman.LotRecordRetention },
 	"Lotman.MaxLotLifetime": func(c *Config) time.Duration { return c.Lotman.MaxLotLifetime },
 	"Lotman.MinFillerWidth": func(c *Config) time.Duration { return c.Lotman.MinFillerWidth },
@@ -1380,6 +1382,7 @@ var allParameterNames = []string{
 	"Lotman.DefaultLotExpirationLifetime",
 	"Lotman.EnableAPI",
 	"Lotman.EnabledPolicy",
+	"Lotman.GarbageCollectionInterval",
 	"Lotman.LibLocation",
 	"Lotman.LotHome",
 	"Lotman.LotRecordRetention",
@@ -2008,6 +2011,7 @@ var (
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
+	Lotman_GarbageCollectionInterval = DurationParam{"Lotman.GarbageCollectionInterval"}
 	Lotman_LotRecordRetention = DurationParam{"Lotman.LotRecordRetention"}
 	Lotman_MaxLotLifetime = DurationParam{"Lotman.MaxLotLifetime"}
 	Lotman_MinFillerWidth = DurationParam{"Lotman.MinFillerWidth"}
@@ -2445,6 +2449,7 @@ func init() {
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
+		"Lotman.GarbageCollectionInterval": Lotman_GarbageCollectionInterval,
 		"Lotman.LotRecordRetention": Lotman_LotRecordRetention,
 		"Lotman.MaxLotLifetime": Lotman_MaxLotLifetime,
 		"Lotman.MinFillerWidth": Lotman_MinFillerWidth,

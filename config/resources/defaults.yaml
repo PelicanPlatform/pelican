@@ -88,6 +88,7 @@ Lotman:
   SchedulingHorizon: "48h"
   MinFillerWidth: "0s"
   LotRecordRetention: "1440h"
+  GarbageCollectionInterval: "1h"
   PolicyDefinitions:
     - PolicyName: "fairshare"
       DivideUnallocated: true

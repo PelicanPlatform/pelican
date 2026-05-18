@@ -412,6 +412,8 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 	errMsg := make([]byte, 2048)
 	cParents := unsafe.Pointer(nil)
 
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	// Get immediate parents (including self to determine rootliness). We'll use them to determine owners
 	// who are allowed to manipulate, and thus delete, the lot
 	ret := LotmanGetLotParents(lotName, false, true, &cParents, &errMsg)
@@ -916,7 +918,13 @@ func topoSort(lotMap map[string]Lot) ([]Lot, error) {
 // Lotman's database needs to be updated.
 // Quirks in Lotman (sorry y'all) mean that we need to do this in a few steps across different
 // update structs.
-func updateLotIfNeeded(existingLot *Lot, newLot *Lot, caller string) error {
+//
+// If asAdmin is true, the MPA update portion runs with admin_override=true so
+// it can contract a lot's reserved quota. This is required when the cache
+// administrator reduces a configured size (e.g. Cache.FilesMaxSize lowered
+// from gigabytes to megabytes); lotman's contraction_policy=always blocks
+// such reductions on principal lots unless admin_override is set.
+func updateLotIfNeeded(existingLot *Lot, newLot *Lot, caller string, asAdmin bool) error {
 	lotUpdate, lotAddition, lotPathRemoval, lotParentRemoval, err := getLotUpdateJSONs(existingLot, newLot)
 	if err != nil {
 		return errors.Wrap(err, "error getting lot update JSONs")
@@ -924,7 +932,11 @@ func updateLotIfNeeded(existingLot *Lot, newLot *Lot, caller string) error {
 
 	// Send our update objects to Lotman
 	if lotUpdate != nil {
-		if err := UpdateLot(lotUpdate, caller); err != nil {
+		updateFn := UpdateLot
+		if asAdmin {
+			updateFn = UpdateLotAsAdmin
+		}
+		if err := updateFn(lotUpdate, caller); err != nil {
 			return errors.Wrap(err, "error updating lot")
 		}
 	}
@@ -952,7 +964,16 @@ func updateLotIfNeeded(existingLot *Lot, newLot *Lot, caller string) error {
 
 // A helper function used to either populate the database with a newly-initialized lot or update an existing one
 // based on the contents of the newly-initialized lot.
-func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIssuer string) (bool, error) {
+//
+// asAdmin enables admin_override on the underlying MPA update so the call
+// can succeed even when the new MPA contracts the existing one. The root
+// lot specifically is always updated as admin because it tracks the cache's
+// physical capacity (Cache.HighWaterMark / Cache.FilesMaxSize), which is by
+// definition admin-controlled. If contraction would violate strict_hierarchy
+// because existing descendants still hold reservations, those descendants
+// are reclaimed first so the renewal tick can re-plan them against the new
+// budget.
+func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIssuer string, asAdmin bool) (bool, error) {
 	errMsg := make([]byte, 2048)
 	ret := LotmanLotExists(lotName, &errMsg)
 	if ret < 0 {
@@ -1005,10 +1026,27 @@ func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIs
 					return false, fmt.Errorf("unable to get lot %s to check for updates: %v", lotName, err)
 				}
 
-				err = updateLotIfNeeded(existingLot, &lot, federationIssuer)
+				err = updateLotIfNeeded(existingLot, &lot, federationIssuer, asAdmin)
 				if err != nil {
-					log.Errorf("Unable to update lot %s: %v", lotName, err)
-					return false, fmt.Errorf("unable to update lot %s: %v", lotName, err)
+					// On a contraction-policy or hierarchy-violation
+					// failure for an admin-controlled lot (notably root),
+					// the cache admin has reduced the configured size in
+					// pelican.yaml; we cannot honour any descendant
+					// reservations that exceed the new budget. Reclaim
+					// every non-sentinel descendant so the renewal tick
+					// can re-plan against the new MPA, then retry.
+					if asAdmin && shouldReclaimForUpdate(err) {
+						if rclErr := reclaimDescendantsForContraction(lotName, federationIssuer); rclErr != nil {
+							log.Errorf("Unable to reclaim descendants of %s after contraction conflict: %v", lotName, rclErr)
+							return false, fmt.Errorf("unable to reclaim descendants of %s after contraction conflict: %v", lotName, rclErr)
+						}
+						log.Warnf("Reclaimed descendants of %s to accommodate admin-driven MPA contraction; retrying update", lotName)
+						err = updateLotIfNeeded(existingLot, &lot, federationIssuer, true)
+					}
+					if err != nil {
+						log.Errorf("Unable to update lot %s: %v", lotName, err)
+						return false, fmt.Errorf("unable to update lot %s: %v", lotName, err)
+					}
 				}
 				return true, nil
 			}
@@ -1016,6 +1054,79 @@ func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIs
 	}
 
 	return false, nil
+}
+
+// filterAdsAlreadyScheduled returns the subset of `adsFromFed` whose
+// namespace path is NOT already covered by an active non-sentinel lot
+// in the init scheduling window [nowMs, nowMs+DefaultLifetime).
+//
+// On restart, the lots minted by previous Pelican processes still live
+// in the lotman SQLite DB and already protect their namespace paths
+// for the rest of their lifetime. If init unconditionally mints fresh
+// UUID lots for those same paths, the new lot's [now, now+lifetime)
+// window overlaps the predecessor's, and the combined per-instant
+// dedicated_GB across siblings exceeds the parent root capacity --
+// lotman's strict_hierarchy enforcement (axiom 1) then rejects the
+// new lot with:
+//
+//	Hierarchy violation: peak concurrent dedicated_GB across children
+//	of parent lot 'root' is X, which exceeds the parent's
+//	dedicated_GB allocation of Y.
+//
+// Skipping namespaces that are already covered defers their
+// (re-)scheduling to the renewal tick, which is the component
+// responsible for minting back-to-back successor lots without
+// overlap.
+//
+// On a fresh DB (very first startup) lotman has no path index yet and
+// GetLotsForPath may return either an empty list or an error; both
+// outcomes are treated as "not covered" so init proceeds normally.
+func filterAdsAlreadyScheduled(adsFromFed []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+	nowMs := time.Now().UnixMilli()
+	windowEndMs := nowMs + param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds()
+
+	out := make([]server_structs.NamespaceAdV2, 0, len(adsFromFed))
+	for _, ad := range adsFromFed {
+		path := normaliseLotPath(ad.Path)
+		if path == "" || path == "/" {
+			// Path-less / root-shadowing ads are dropped by
+			// buildLotTree anyway; pass them through here so
+			// downstream handling is unchanged.
+			out = append(out, ad)
+			continue
+		}
+
+		// recursive=true returns the path's owner plus its ancestors.
+		// includeReclaimed=false: a reclaimed lot is dead capacity and
+		// does not contribute to the axiom-1 sum, so its path may safely
+		// be re-scheduled.
+		lots, err := GetLotsForPath(path, true, nowMs, windowEndMs, false)
+		if err != nil {
+			// Most commonly a fresh DB with no path index. Be
+			// permissive: treat as not-covered so the first-ever
+			// startup still creates init lots.
+			log.Debugf("Lotman init: GetLotsForPath(%q) failed (likely fresh DB), proceeding to schedule init lot: %v", path, err)
+			out = append(out, ad)
+			continue
+		}
+
+		covered := false
+		for _, l := range lots {
+			// "root" and "default" are sentinel container lots and
+			// don't represent real prior scheduling of the path.
+			if l.LotName == "root" || l.LotName == "default" {
+				continue
+			}
+			covered = true
+			break
+		}
+		if covered {
+			log.Infof("Lotman init: namespace %q already has an active lot covering the planning window; deferring scheduling to the renewal tick", path)
+			continue
+		}
+		out = append(out, ad)
+	}
+	return out
 }
 
 // Initialize the lot configurations based on provided policy, discovered namespaces,
@@ -1070,6 +1181,15 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 
 	var lotMap map[string]Lot
 	if discoverPrefixes {
+		// Drop namespaces whose path is already covered by an active
+		// non-sentinel lot in the init planning window. Their previous
+		// init lots (and any renewal successors minted on prior runs)
+		// still protect the path; allocating a fresh init lot on top
+		// would overlap and trip lotman's axiom-1 admission check. The
+		// renewal tick is the component responsible for extending
+		// coverage past the existing lots' expiration.
+		nsAds = filterAdsAlreadyScheduled(nsAds)
+
 		// Build a nested lot graph from discovered namespace ads. The root
 		// lot's per-axis quota is supplied here so the recursive (N+1)
 		// allocator has something concrete to subdivide; the synthesised
@@ -1360,14 +1480,20 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		return false
 	}
 
-	// Init/update the default lot, which must exist _before_ any other lots can be touched
-	defaultInitialized, err := ensureLotExistsOrUpdate("default", initializedLots, federationIssuer)
+	// Init/update the default lot, which must exist _before_ any other lots can be touched.
+	// The default lot is auto-derived from cache config; treat it as admin-controlled.
+	defaultInitialized, err := ensureLotExistsOrUpdate("default", initializedLots, federationIssuer, true)
 	if err != nil {
 		return false
 	}
 
 	// Init/update the root lot, which is a container we use to make sure all lots have a federation-owned parent.
-	rootInitialized, err := ensureLotExistsOrUpdate("root", initializedLots, federationIssuer)
+	// Root's MPA tracks the cache's physical capacity (Cache.HighWaterMark /
+	// Cache.FilesMaxSize); when the admin lowers those, lotman's
+	// contraction_policy=always would otherwise block the resulting root
+	// update. Pass asAdmin=true so the update honours admin-driven
+	// reductions, and reclaim any descendants that no longer fit.
+	rootInitialized, err := ensureLotExistsOrUpdate("root", initializedLots, federationIssuer, true)
 	if err != nil {
 		return false
 	}
@@ -1381,7 +1507,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// Now instantiate any other lots that are in the config
 	for _, lot := range initializedLots {
 		if lot.LotName != "default" && lot.LotName != "root" {
-			initialized, err := ensureLotExistsOrUpdate(lot.LotName, initializedLots, federationIssuer)
+			initialized, err := ensureLotExistsOrUpdate(lot.LotName, initializedLots, federationIssuer, false)
 			if err != nil {
 				return false
 			}
@@ -1479,6 +1605,8 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 	outputBuf := make([]byte, 4096)
 	errMsg := make([]byte, 2048)
 
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetLotJSON(lotName, recursive, &outputBuf, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -1548,6 +1676,101 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 		return fmt.Errorf("error updating lot: %s", string(errMsg))
 	}
 
+	return nil
+}
+
+// UpdateLotAsAdmin is UpdateLot with admin_override=true active for the
+// duration of the call. lotman's contraction_policy=always rejects any
+// MPA update that shrinks dedicated_GB, opportunistic_GB, max_num_objects,
+// or shortens the lifetime axes unless admin_override is set. The cache's
+// own InitLotman pathway needs that escape hatch when the admin reduces
+// configured cache sizing in pelican.yaml -- the root/default lots derive
+// their quotas from those settings and must therefore be allowed to
+// contract.
+func UpdateLotAsAdmin(lotUpdate *LotUpdate, caller string) error {
+	if err := validateLotUpdateLifetime(lotUpdate); err != nil {
+		return err
+	}
+	updateJSON, err := json.Marshal(*lotUpdate)
+	if err != nil {
+		return errors.Wrap(err, "error marshalling lot JSON")
+	}
+
+	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret := LotmanSetContextStr("caller", caller, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf("error setting caller for admin lot update: %s", string(errMsg))
+	}
+	if ret = LotmanSetContextStr("admin_override", "true", &errMsg); ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf("error enabling admin_override for lot update: %s", string(errMsg))
+	}
+	defer func() {
+		restoreErr := make([]byte, 2048)
+		_ = LotmanSetContextStr("admin_override", "false", &restoreErr)
+	}()
+
+	ret = LotmanUpdateLot(string(updateJSON), &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf("error updating lot as admin: %s", string(errMsg))
+	}
+
+	return nil
+}
+
+// shouldReclaimForUpdate inspects err to decide whether a failed
+// admin-mode lot update can be recovered by reclaiming the lot's
+// descendants. We retry on:
+//   - contraction_policy rejections (admin_override should have made
+//     this impossible, but lotman wording varies between releases so
+//     we match defensively), and
+//   - strict_hierarchy peak-concurrent-quota violations, which fire
+//     when descendants still hold reservations that exceed the new
+//     parent MPA.
+func shouldReclaimForUpdate(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Contraction policy") ||
+		strings.Contains(msg, "contraction policy") ||
+		strings.Contains(msg, "Hierarchy violation") ||
+		strings.Contains(msg, "hierarchy violation")
+}
+
+// reclaimDescendantsForContraction removes every non-sentinel descendant
+// of parentLot from the lotman DB. Lotman's strict_hierarchy enforcement
+// continues to consult reclaimed (soft-deleted) rows when validating an
+// MPA update, so reclamation alone is insufficient -- the only way to
+// free a parent's quota for contraction is to actually remove the
+// children. After removal, the renewal tick re-plans coverage for any
+// still-advertised namespaces against the new budget.
+//
+// The "default" and "root" sentinel lots are explicitly preserved.
+// RemoveLot internally sets admin_override=true, so children with
+// contraction_policy=always can still be deleted.
+func reclaimDescendantsForContraction(parentLot, caller string) error {
+	children, err := GetChildrenNames(parentLot, true, false)
+	if err != nil {
+		return errors.Wrapf(err, "failed to enumerate descendants of %s", parentLot)
+	}
+	for _, name := range children {
+		if name == "default" || name == "root" || name == parentLot {
+			continue
+		}
+		// assignLTBRParentsToOrphans=true so any grand-children get
+		// hooked up to the next-surviving ancestor (typically root)
+		// instead of being orphaned. assignPolicyToChildren=false
+		// because we're tearing the subtree down entirely.
+		if rmErr := RemoveLot(name, true, true, false, false, caller); rmErr != nil {
+			return errors.Wrapf(rmErr, "failed to remove descendant lot %s", name)
+		}
+		log.Infof("Removed descendant lot %s ahead of %s MPA contraction", name, parentLot)
+	}
 	return nil
 }
 
@@ -1716,6 +1939,8 @@ func drainStringList(p *unsafe.Pointer) []string {
 
 // IsRoot reports whether lotName names a root lot (only self-parent).
 func IsRoot(lotName string) (bool, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	ret := LotmanIsRoot(lotName, &errMsg)
 	if ret < 0 {
@@ -1727,6 +1952,8 @@ func IsRoot(lotName string) (bool, error) {
 
 // LotExists reports whether a lot with the given name exists in the lotman DB.
 func LotExists(lotName string) (bool, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	ret := LotmanLotExists(lotName, &errMsg)
 	if ret < 0 {
@@ -1737,7 +1964,17 @@ func LotExists(lotName string) (bool, error) {
 }
 
 // ListAllLots returns every lot name currently stored in the lotman DB.
+//
+// Holds callerMutex even though the operation is conceptually a read:
+// lotman's strict_hierarchy implementation funnels every C-side call
+// through the same shared SQLite handle, and concurrent access produces
+// intermittent "bad parameter or other API misuse" / "out of memory"
+// errors from SQLite. The mutex is the single chokepoint that keeps
+// Pelican's renewal-tick / GC-tick / HTTP-handler goroutines from
+// stepping on each other.
 func ListAllLots() ([]string, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := LotmanListAllLots(&out, &errMsg)
@@ -1750,8 +1987,10 @@ func ListAllLots() ([]string, error) {
 
 // GetChildrenNames returns the names of lotName's children. If recursive is
 // true, all transitive descendants are returned. If getSelf is true, lotName
-// is included when it self-parents.
+// is included when it self-parents. See ListAllLots for the locking note.
 func GetChildrenNames(lotName string, recursive, getSelf bool) ([]string, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := LotmanGetLotChildren(lotName, recursive, getSelf, &out, &errMsg)
@@ -1763,8 +2002,11 @@ func GetChildrenNames(lotName string, recursive, getSelf bool) ([]string, error)
 }
 
 // GetParentNames returns the names of lotName's parents. If recursive is
-// true, all transitive ancestors are returned.
+// true, all transitive ancestors are returned. See ListAllLots for the
+// locking note.
 func GetParentNames(lotName string, recursive, getSelf bool) ([]string, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := LotmanGetLotParents(lotName, recursive, getSelf, &out, &errMsg)
@@ -1776,8 +2018,11 @@ func GetParentNames(lotName string, recursive, getSelf bool) ([]string, error) {
 }
 
 // GetOwners returns the owner identities recorded for lotName. If recursive
-// is true, owners of all ancestor lots are unioned in.
+// is true, owners of all ancestor lots are unioned in. See ListAllLots for
+// the locking note.
 func GetOwners(lotName string, recursive bool) ([]string, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := LotmanGetLotOwners(lotName, recursive, &out, &errMsg)
@@ -1792,11 +2037,13 @@ func GetOwners(lotName string, recursive bool) ([]string, error) {
 // supplied wall-clock time (Unix milliseconds). queryTimeMs of 0 means "now".
 // If recursive is true, every parent lot is also returned. The result is
 // non-empty for every legal input: paths not tied to any lot resolve to the
-// "default" lot.
+// "default" lot. See ListAllLots for the locking note.
 func GetLotsFromDir(dir string, recursive bool, queryTimeMs int64) ([]string, error) {
 	if queryTimeMs == 0 {
 		queryTimeMs = time.Now().UnixMilli()
 	}
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := LotmanGetLotsFromDir(dir, recursive, queryTimeMs, &out, &errMsg)
@@ -1827,6 +2074,8 @@ func GetLotsForPath(path string, recursive bool, timeLoMs, timeHiMs int64, inclu
 	// is harmless.
 	output := make([]byte, 65536)
 	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetLotsForPath(path, recursive, timeLoMs, timeHiMs, includeReclaimed, &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -1841,7 +2090,18 @@ func GetLotsForPath(path string, recursive bool, timeLoMs, timeHiMs int64, inclu
 }
 
 // pastLotsHelper centralises the past-quota query pattern.
+//
+// Acquires callerMutex because lotman's get_lots_past_* C entrypoints
+// invoke update_db_children_usage() under the hood, which walks every
+// lot and rewrites their cached usage rows. That is a SQLite write
+// session, not a pure read, so it must be serialised against
+// concurrent CreateLot/UpdateLot/RemoveLot calls from the renewal
+// goroutine. Without the lock SQLite returns intermittent
+// "bad parameter or other API misuse" or "out of memory" errors and
+// the GC tick silently drops every collection cycle.
 func pastLotsHelper(name string, fn func(*unsafe.Pointer, *[]byte) int32) ([]string, error) {
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	errMsg := make([]byte, 2048)
 	out := unsafe.Pointer(nil)
 	ret := fn(&out, &errMsg)
@@ -1991,6 +2251,8 @@ func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
 	}
 	errMsg := make([]byte, 2048)
 	output := make([]byte, 4096)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetPolicyAttributes(string(reqJSON), &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -2009,6 +2271,8 @@ func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
 func GetLotDirs(lotName string, recursive bool) ([]LotPath, error) {
 	errMsg := make([]byte, 2048)
 	output := make([]byte, 4096)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetLotDirs(lotName, recursive, &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -2031,6 +2295,8 @@ func GetLotUsage(req UsageRequest) (*LotUsage, error) {
 	}
 	errMsg := make([]byte, 2048)
 	output := make([]byte, 4096)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetLotUsage(string(reqJSON), &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
@@ -2052,6 +2318,8 @@ func GetLotUsage(req UsageRequest) (*LotUsage, error) {
 func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*AvailableCapacity, error) {
 	errMsg := make([]byte, 2048)
 	output := make([]byte, 4096)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
 	ret := LotmanGetAvailableCapacity(parentLotName, startTimeMs, endTimeMs, &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
