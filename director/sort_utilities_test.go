@@ -769,7 +769,7 @@ func TestGetClientCoordinate(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-				coord := getClientCoordinate(ctx, tc.addr, nil)
+			coord := getClientCoordinate(ctx, tc.addr, nil)
 			assert.Equal(t, tc.expectedCoord.Source, coord.Source)
 			if tc.expectedCoord.Source != server_structs.CoordinateSourceRandom {
 				// For non-random sources, check full equality

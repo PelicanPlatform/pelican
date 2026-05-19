@@ -227,7 +227,7 @@ type (
 	}
 
 	XPelHeaderName string
-	XPelHeader interface {
+	XPelHeader     interface {
 		GetName() string
 		ParseRawHeader(*http.Header) error
 	}
@@ -392,10 +392,10 @@ func (x *XPelCoordinate) ParseRawHeader(header *http.Header) error {
 func (x XPelNs) GetName() string {
 	return string(XPelicanNamespaceHeaderName)
 }
-func (x *XPelNs)ParseRawHeader(header *http.Header) error {
+func (x *XPelNs) ParseRawHeader(header *http.Header) error {
 	raw := header.Values(x.GetName())
 	if len(raw) == 0 {
-		return errors.Errorf("No %s header found.", x.GetName())
+		return errors.Errorf("no %s header found.", x.GetName())
 	}
 	keyDict := utils.HeaderParser(raw[0])
 	x.Namespace = keyDict["namespace"]

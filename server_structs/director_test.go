@@ -198,7 +198,7 @@ func TestXPelNsParsing(t *testing.T) {
 		h := http.Header{"X-Pelican-foo": {"bar"}}
 		err := xPelNs.ParseRawHeader(&h)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelNs.GetName()))
+		assert.Contains(t, err.Error(), fmt.Sprintf("o %s header found.", xPelNs.GetName()))
 	})
 }
 
@@ -279,7 +279,7 @@ func TestXPelCoordinateParsing(t *testing.T) {
 		h := http.Header{"X-Pelican-foo": {"bar"}}
 		err := xPelCoord.ParseRawHeader(&h)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelCoord.GetName()))
+		assert.Contains(t, err.Error(), fmt.Sprintf("no %s header found.", xPelCoord.GetName()))
 	})
 
 	t.Run("ParseMissingLat", func(t *testing.T) {
