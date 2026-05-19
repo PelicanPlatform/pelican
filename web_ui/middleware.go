@@ -28,9 +28,9 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 // documentation, RawPath is only set when the encoded form of Path differs
 // from the default encoding, so it is typically empty.
 func sanitizePathMiddleware(ctx *gin.Context) {
-	ctx.Request.URL.Path = utils.SanitizePrometheusLabel(ctx.Request.URL.Path)
+	ctx.Request.URL.Path = utils.EnsureValidUTF8(ctx.Request.URL.Path)
 	if ctx.Request.URL.RawPath != "" {
-		ctx.Request.URL.RawPath = utils.SanitizePrometheusLabel(ctx.Request.URL.RawPath)
+		ctx.Request.URL.RawPath = utils.EnsureValidUTF8(ctx.Request.URL.RawPath)
 	}
 	ctx.Next()
 }
