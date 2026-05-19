@@ -23,12 +23,15 @@ import (
 	_ "embed"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -766,7 +769,7 @@ func TestGetClientCoordinate(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			coord := getClientCoordinate(ctx, tc.addr)
+				coord := getClientCoordinate(ctx, tc.addr, nil)
 			assert.Equal(t, tc.expectedCoord.Source, coord.Source)
 			if tc.expectedCoord.Source != server_structs.CoordinateSourceRandom {
 				// For non-random sources, check full equality
@@ -781,3 +784,55 @@ func TestGetClientCoordinate(t *testing.T) {
 		})
 	}
 }
+
+// makeGinCtxWithHeader builds a minimal gin.Context whose Request carries the given header value.
+func makeGinCtxWithHeader(headerName, headerValue string) *gin.Context {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(headerName, headerValue)
+	c.Request = req
+	return c
+}
+
+// TestGetClientCoordinateFromHeader verifies that a well-formed X-Pelican-Coordinate header
+// takes highest precedence over all other coordinate sources.
+func TestGetClientCoordinateFromHeader(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+	setUpRandAssignmentCache(t)
+
+	ctx := context.Background()
+
+	t.Run("ValidHeaderTakesPrecedenceOverMaxMind", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "lat=43.0739,long=-89.3848")
+		// Use an IP that would normally resolve via MaxMind.
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+		assert.InDelta(t, 43.0739, coord.Lat, 1e-9)
+		assert.InDelta(t, -89.3848, coord.Long, 1e-9)
+		assert.Equal(t, uint16(0), coord.AccuracyRadius)
+	})
+
+	t.Run("ValidHeaderTakesPrecedenceOverOverride", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "lat=10.0,long=20.0")
+		coord := getClientCoordinate(ctx, ipFromOverride, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+		assert.InDelta(t, 10.0, coord.Lat, 1e-9)
+		assert.InDelta(t, 20.0, coord.Long, 1e-9)
+	})
+
+	t.Run("MalformedHeaderFallsThroughToNextSource", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "not-valid-at-all")
+		// The IP resolves fine via MaxMind, so we should get a MaxMind coordinate.
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceMaxMind), coord.Source)
+	})
+
+	t.Run("NilGinCtxStillWorks", func(t *testing.T) {
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, nil)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceMaxMind), coord.Source)
+	})
+}
+

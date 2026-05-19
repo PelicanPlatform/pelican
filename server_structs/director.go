@@ -222,9 +222,17 @@ type (
 		AuthorizationEndpoint string   `json:"authorization_endpoint,omitempty"`
 	}
 
+	XPelHeaderName string
 	XPelHeader interface {
 		GetName() string
-		ParseRawHeader(*http.Response) error
+		ParseRawHeader(*http.Header) error
+	}
+
+	// A coordinate override supplied by Clients in the X-Pelican-Coordinate header.
+	// This is used when Clients want to provide their own geolocation information to the Director
+	// (e.g. for testing, or if they have more accurate information than MaxMind).
+	XPelCoordinate struct {
+		Coordinate Coordinate
 	}
 
 	XPelAuth struct {
@@ -306,6 +314,7 @@ const (
 	CoordinateSourceOverride = "override"
 	CoordinateSourceRandom   = "random"
 	CoordinateSourceMaxMind  = "maxmind"
+	CoordinateSourceDeclared = "declared"
 )
 
 const (
@@ -324,11 +333,63 @@ const (
 // We chose -1 to avoid the default value (0) of the int64 type
 const IndefiniteEndTime int64 = -1
 
-func (x XPelNs) GetName() string {
-	return "X-Pelican-Namespace"
+const (
+	XPelicanCoordinateHeaderName      XPelHeaderName = "X-Pelican-Coordinate"
+	XPelicanNamespaceHeaderName       XPelHeaderName = "X-Pelican-Namespace"
+	XPelicanAuthHeaderName            XPelHeaderName = "X-Pelican-Authorization"
+	XPelicanTokenGenerationHeaderName XPelHeaderName = "X-Pelican-Token-Generation"
+)
+
+func (x XPelCoordinate) GetName() string {
+	return string(XPelicanCoordinateHeaderName)
 }
-func (x *XPelNs) ParseRawResponse(resp *http.Response) error {
-	raw := resp.Header.Values(x.GetName())
+func (x *XPelCoordinate) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
+	if len(raw) == 0 {
+		return errors.Errorf("no %s header found.", x.GetName())
+	}
+
+	// Assume there's only one value here.
+	keyDict := utils.HeaderParser(raw[0])
+
+	latStr, exists := keyDict["lat"]
+	if !exists {
+		return errors.Errorf("no latitude found in %s header", x.GetName())
+	}
+
+	longStr, exists := keyDict["long"]
+	if !exists {
+		return errors.Errorf("no longitude found in %s header", x.GetName())
+	}
+
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		return errors.Errorf("failed to parse latitude %s from %s header: %v", latStr, x.GetName(), err)
+	}
+	long, err := strconv.ParseFloat(longStr, 64)
+	if err != nil {
+		return errors.Errorf("failed to parse longitude %s from %s header: %v", longStr, x.GetName(), err)
+	}
+
+	if err := utils.ValidateLatLong(lat, long); err != nil {
+		return errors.Errorf("invalid coordinates from %s header: %v", x.GetName(), err)
+	}
+
+	x.Coordinate.Lat = lat
+	x.Coordinate.Long = long
+	x.Coordinate.Source = CoordinateSourceDeclared
+	// When the the client or server declares its own coordinate, we assume they've
+	// provided exactly the coordinate they want.
+	x.Coordinate.AccuracyRadius = 0
+
+	return nil
+}
+
+func (x XPelNs) GetName() string {
+	return string(XPelicanNamespaceHeaderName)
+}
+func (x *XPelNs)ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
 	if len(raw) == 0 {
 		return errors.Errorf("No %s header found.", x.GetName())
 	}
@@ -342,11 +403,11 @@ func (x *XPelNs) ParseRawResponse(resp *http.Response) error {
 }
 
 func (x XPelAuth) GetName() string {
-	return "X-Pelican-Authorization"
+	return string(XPelicanAuthHeaderName)
 }
-func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
+func (x *XPelAuth) ParseRawHeader(header *http.Header) error {
 	// If the director provides an auth header, raw will have an array of length 1.
-	raw := resp.Header.Values(x.GetName())
+	raw := header.Values(x.GetName())
 	if len(raw) > 0 {
 		x.Issuers = make([]*url.URL, 0)
 		// clean up the string and split it by commas to fetch each issuer. Can't use
@@ -357,7 +418,7 @@ func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
 			issuerUrlStr := strings.TrimPrefix(issuer, "issuer=")
 			issuerUrl, err := url.Parse(issuerUrlStr)
 			if err != nil {
-				return errors.Errorf("Failed to parse issuer URL %s from Director's %s header: %v", issuerUrlStr, x.GetName(), err)
+				return errors.Errorf("failed to parse issuer URL %s from Director's %s header: %v", issuerUrlStr, x.GetName(), err)
 			}
 			x.Issuers = append(x.Issuers, issuerUrl)
 		}
@@ -366,10 +427,10 @@ func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
 }
 
 func (x XPelTokGen) GetName() string {
-	return "X-Pelican-Token-Generation"
+	return string(XPelicanTokenGenerationHeaderName)
 }
-func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
-	raw := resp.Header.Values(x.GetName())
+func (x *XPelTokGen) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
 	if len(raw) > 0 {
 		// Parse issuer, for now assuming a single value but eventually may be multiple
 		x.Issuers = make([]*url.URL, 0)

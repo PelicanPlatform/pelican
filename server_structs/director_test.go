@@ -175,11 +175,8 @@ func TestValidTokenStrategy(t *testing.T) {
 func TestXPelNsParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Namespace": {"namespace=foo, require-token=true, collections-url=https://collections-url.org"},
-			},
-		})
+		h := http.Header{"X-Pelican-Namespace": {"namespace=foo, require-token=true, collections-url=https://collections-url.org"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, "foo", xPelNs.Namespace)
 		assert.True(t, xPelNs.RequireToken)
@@ -188,11 +185,8 @@ func TestXPelNsParsing(t *testing.T) {
 
 	t.Run("ParseMissingCollectionsUrl", func(t *testing.T) { // Signifies origins that don't enable listings
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Namespace": {"namespace=foo, require-token=true"},
-			},
-		})
+		h := http.Header{"X-Pelican-Namespace": {"namespace=foo, require-token=true"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, "foo", xPelNs.Namespace)
 		assert.True(t, xPelNs.RequireToken)
@@ -201,11 +195,8 @@ func TestXPelNsParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"bar"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"bar"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelNs.GetName()))
 	})
@@ -214,11 +205,8 @@ func TestXPelNsParsing(t *testing.T) {
 func TestXPelAuthParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelAuth := XPelAuth{}
-		err := xPelAuth.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Authorization": {"issuer=https://issuer1.com, issuer=https://issuer2.com"},
-			},
-		})
+		h := http.Header{"X-Pelican-Authorization": {"issuer=https://issuer1.com, issuer=https://issuer2.com"}}
+		err := xPelAuth.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Len(t, xPelAuth.Issuers, 2)
 		assert.Equal(t, "https://issuer1.com", xPelAuth.Issuers[0].String())
@@ -227,11 +215,8 @@ func TestXPelAuthParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelAuth := XPelAuth{}
-		err := xPelAuth.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"foo"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"foo"}}
+		err := xPelAuth.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(xPelAuth.Issuers))
 	})
@@ -240,11 +225,8 @@ func TestXPelAuthParsing(t *testing.T) {
 func TestXPelTokGenParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com, base-path=/foo/bar"},
-			},
-		})
+		h := http.Header{"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com, base-path=/foo/bar"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
 		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
@@ -257,11 +239,8 @@ func TestXPelTokGenParsing(t *testing.T) {
 
 	t.Run("ParseMissingBasePath", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com"},
-			},
-		})
+		h := http.Header{"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
 		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
@@ -273,16 +252,66 @@ func TestXPelTokGenParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"foo"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"foo"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, StrategyType(""), xPelTokGen.Strategy)
 		assert.Equal(t, uint(0), xPelTokGen.MaxScopeDepth)
 		assert.Len(t, xPelTokGen.Issuers, 0)
 		assert.Len(t, xPelTokGen.BasePaths, 0)
+	})
+}
+
+func TestXPelCoordinateParsing(t *testing.T) {
+	t.Run("ParseValidCoordinate", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=43.0739,long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.NoError(t, err)
+		assert.InDelta(t, 43.0739, xPelCoord.Coordinate.Lat, 1e-9)
+		assert.InDelta(t, -89.3848, xPelCoord.Coordinate.Long, 1e-9)
+		assert.Equal(t, CoordinateSource(CoordinateSourceDeclared), xPelCoord.Coordinate.Source)
+		assert.Equal(t, uint16(0), xPelCoord.Coordinate.AccuracyRadius)
+	})
+
+	t.Run("ParseMissingHeader", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-foo": {"bar"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelCoord.GetName()))
+	})
+
+	t.Run("ParseMissingLat", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "latitude")
+	})
+
+	t.Run("ParseMissingLong", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=43.0739"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "longitude")
+	})
+
+	t.Run("ParseInvalidLat", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=not-a-number,long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "latitude")
+	})
+
+	t.Run("ParseOutOfBoundsCoordinates", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=91,long=0"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid coordinates")
 	})
 }
 

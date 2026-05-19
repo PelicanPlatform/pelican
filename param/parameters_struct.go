@@ -150,6 +150,7 @@ type Config struct {
 		TopologyUrl string `mapstructure:"topologyurl" yaml:"TopologyUrl"`
 	} `mapstructure:"federation" yaml:"Federation"`
 	GeoIPOverrides any `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
+	GeoLocation string `mapstructure:"geolocation" yaml:"GeoLocation"`
 	Issuer struct {
 		AccessTokenLifetime time.Duration `mapstructure:"accesstokenlifetime" yaml:"AccessTokenLifetime"`
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
@@ -635,6 +636,7 @@ type configWithType struct {
 		TopologyUrl struct { Type string; Value string }
 	}
 	GeoIPOverrides struct { Type string; Value any }
+	GeoLocation struct { Type string; Value string }
 	Issuer struct {
 		AccessTokenLifetime struct { Type string; Value time.Duration }
 		AuthenticationSource struct { Type string; Value string }

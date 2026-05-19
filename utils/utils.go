@@ -317,3 +317,40 @@ func ParseBytes(sizeStr string) (uint64, error) {
 	}
 	return num, nil
 }
+
+// ParseGeoLocationString parses a "lat,lon" string (e.g. "43.0739,-89.3848") into
+// its component float64 values, validating the range via ValidateLatLong.
+func ParseCoordinateStr(s string) (lat, long float64, err error) {
+	parts := strings.SplitN(s, ",", 2)
+	if len(parts) != 2 {
+		return 0, 0, errors.Errorf("coordinate value %q is not in the expected \"lat,lon\" format", s)
+	}
+	lat, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return 0, 0, errors.Errorf("failed to parse latitude from coordinate value %q: %v", s, err)
+	}
+	long, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return 0, 0, errors.Errorf("failed to parse longitude from coordinate value %q: %v", s, err)
+	}
+	if err = ValidateLatLong(lat, long); err != nil {
+		return 0, 0, errors.Errorf("invalid coordinates in value %q: %v", s, err)
+	}
+	return lat, long, nil
+}
+
+// Validate the contents of a lat/lon coordinate pair, returning an error if the coordinates are out of bounds
+func ValidateLatLong(lat, long float64) error {
+	// Only return an error after checking both components so that we can report all issues with the provided coordinates at once
+	var errStrings []string
+	if lat < -90 || lat > 90 {
+		errStrings = append(errStrings, fmt.Sprintf("latitude %f is out of bounds (must be between -90 and 90)", lat))
+	}
+	if long < -180 || long > 180 {
+		errStrings = append(errStrings, fmt.Sprintf("longitude %f is out of bounds (must be between -180 and 180)", long))
+	}
+	if len(errStrings) > 0 {
+		return errors.New(strings.Join(errStrings, "; "))
+	}
+	return nil
+}
