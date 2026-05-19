@@ -22,9 +22,11 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 
 // sanitizePathMiddleware sanitizes the request URL path before it reaches any
 // downstream handler or metrics middleware. Any non-UTF-8 byte sequences in
-// the path (and raw path, if set) are replaced with the Unicode replacement
-// character (U+FFFD). This prevents panics in Prometheus label collection,
-// which requires valid UTF-8 strings.
+// the path are replaced with the Unicode replacement character (U+FFFD). This
+// prevents panics in Prometheus label collection, which requires valid UTF-8
+// strings. RawPath is only sanitized when non-empty; per Go's net/url
+// documentation, RawPath is only set when the encoded form of Path differs
+// from the default encoding, so it is typically empty.
 func sanitizePathMiddleware(ctx *gin.Context) {
 	ctx.Request.URL.Path = utils.SanitizePrometheusLabel(ctx.Request.URL.Path)
 	if ctx.Request.URL.RawPath != "" {
