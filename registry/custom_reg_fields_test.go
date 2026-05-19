@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,6 +29,10 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestGetCachedOptions(t *testing.T) {
@@ -201,5 +206,77 @@ func TestConvertCustomRegFields(t *testing.T) {
 		require.Equal(t, 1, len(regField))
 		assert.Equal(t, "Department Name", regField[0].DisplayedName)
 		assert.Equal(t, "custom_fields.department_name", regField[0].Name)
+	})
+}
+
+func TestInitInstConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	resetInstField := func() {
+		for idx, field := range registrationFields {
+			if field.Name == "admin_metadata.institution" {
+				registrationFields[idx].OptionsUrl = ""
+				registrationFields[idx].Options = nil
+			}
+		}
+	}
+
+	t.Run("api-down-does-not-fail-startup", func(t *testing.T) {
+		t.Cleanup(func() {
+			server_utils.ResetTestState()
+			optionsCache.DeleteAll()
+			resetInstField()
+		})
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer ts.Close()
+
+		require.NoError(t, param.Registry_InstitutionsUrl.Set(ts.URL))
+
+		err := InitInstConfig(context.Background(), nil)
+		require.NoError(t, err, "registry startup must not fail when institution API is unreachable")
+
+		for _, field := range registrationFields {
+			if field.Name == "admin_metadata.institution" {
+				assert.Equal(t, ts.URL, field.OptionsUrl, "OptionsUrl should be set for on-demand fetching")
+				assert.Empty(t, field.Options, "Options should be empty when API is down at startup")
+				return
+			}
+		}
+		t.Fatal("admin_metadata.institution not found in registrationFields")
+	})
+
+	t.Run("api-up-populates-options", func(t *testing.T) {
+		t.Cleanup(func() {
+			server_utils.ResetTestState()
+			optionsCache.DeleteAll()
+			resetInstField()
+		})
+
+		mockInsts := []registrationFieldOption{{Name: "University of Foo", ID: "001"}}
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			res, err := json.Marshal(mockInsts)
+			require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(res)
+		}))
+		defer ts.Close()
+
+		require.NoError(t, param.Registry_InstitutionsUrl.Set(ts.URL))
+
+		err := InitInstConfig(context.Background(), nil)
+		require.NoError(t, err)
+
+		for _, field := range registrationFields {
+			if field.Name == "admin_metadata.institution" {
+				assert.Equal(t, ts.URL, field.OptionsUrl)
+				assert.EqualValues(t, mockInsts, field.Options)
+				return
+			}
+		}
+		t.Fatal("admin_metadata.institution not found in registrationFields")
 	})
 }
