@@ -343,6 +343,13 @@ func getProjectLabel(ctx context.Context) (project string) {
 // 1. Configured GeoIP Overrides
 // 2. MaxMind Lookups
 func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coordinate, err error) {
+	// If the server declared its own coordinate via GeoLocation config (propagated
+	// through the ad), use it at highest precedence — before GeoIP overrides or MaxMind.
+	if sAd.Coordinate.Source == server_structs.CoordinateSourceDeclared {
+		log.Tracef("Using server-declared coordinate for %s (lat=%f long=%f)", sAd.Name, sAd.Coordinate.Lat, sAd.Coordinate.Long)
+		return sAd.Coordinate, nil
+	}
+
 	// Get the IP from the server ad's hostname
 	hostname := sAd.URL.Hostname()
 	addr, err := getIPFromHostname(hostname)

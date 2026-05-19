@@ -68,6 +68,21 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 	}
 	ad.Initialize(name)
 
+	if geoStr := param.GeoLocation.GetString(); geoStr != "" {
+		if lat, long, err := utils.ParseCoordinateStr(geoStr); err == nil {
+			coord := server_structs.Coordinate{
+				Lat:    lat,
+				Long:   long,
+				Source: server_structs.CoordinateSourceDeclared,
+				// The service has given us a coordinate, so we assume no accuracy radius
+				AccuracyRadius: 0,
+			}
+			ad.Coordinate = &coord
+		} else {
+			log.Warningf("Ignoring invalid %s value %q: %v", param.GeoLocation.GetName(), geoStr, err)
+		}
+	}
+
 	// Extract prefixes from namespace ads for broker configuration
 	var prefixes []string
 	for _, nsAd := range nsAds {

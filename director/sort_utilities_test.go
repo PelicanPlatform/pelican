@@ -836,3 +836,22 @@ func TestGetClientCoordinateFromHeader(t *testing.T) {
 	})
 }
 
+// TestGetServerCoordinateDeclared verifies that a server ad with a pre-populated
+// Coordinate (Source == CoordinateSourceDeclared) is used without any GeoIP lookup.
+func TestGetServerCoordinateDeclared(t *testing.T) {
+	// No MaxMind or override stubs needed — declared coordinate must win outright.
+	sAd := server_structs.ServerAd{URL: mustUrl("cache.example.com")}
+	sAd.Initialize("declared-cache")
+	sAd.Coordinate = server_structs.Coordinate{
+		Lat:    43.0739,
+		Long:   -89.3848,
+		Source: server_structs.CoordinateSourceDeclared,
+	}
+
+	coord, err := getServerCoordinate(sAd)
+	assert.NoError(t, err)
+	assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+	assert.InDelta(t, 43.0739, coord.Lat, 1e-9)
+	assert.InDelta(t, -89.3848, coord.Long, 1e-9)
+	assert.Equal(t, uint16(0), coord.AccuracyRadius)
+}

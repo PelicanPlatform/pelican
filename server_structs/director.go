@@ -176,6 +176,10 @@ type (
 		BrokerURL      string `json:"broker-url,omitempty"`
 		DataURL        string `json:"data-url" binding:"required"`
 		WebURL         string `json:"web-url,omitempty"`
+		// Coordinate allows a server to declare its own geolocation, which takes
+		// highest priority over GeoIP overrides and MaxMind lookups on the director.
+		// Set this via the GeoLocation config parameter ("lat,lon" string).
+		Coordinate *Coordinate `json:"coordinate,omitempty"`
 		// TODO: Deprecate top level "Origin" caps -- each namespace should have its own caps that
 		// express what the origin is willing to do on the namespace's behalf. This helps us work
 		// around the lack of a concept for "globally-defined" namespaces.
