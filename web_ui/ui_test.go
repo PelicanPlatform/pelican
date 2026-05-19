@@ -478,20 +478,49 @@ func TestMapPrometheusPath(t *testing.T) {
 		get = mapPrometheusPath(c)
 		assert.Equal(t, "/api/v1.0/director/origin/foo/bar/:path", get)
 	})
+}
 
-	t.Run("sanitize-non-utf8-object-path", func(t *testing.T) {
-		// Simulate an attack using overlong UTF-8 encodings (e.g. \xc0\x2e for '.')
-		// The raw path /api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file triggers a
-		// Prometheus panic when used as a label value without sanitization.
-		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+func TestSanitizePathMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("non-utf8-path-is-sanitized", func(t *testing.T) {
+		// Simulate the overlong UTF-8 encoding attack seen in the Director panic.
+		// The raw path /api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file triggers
+		// a Prometheus panic when used as a label value without sanitization.
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
 		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
-		// Inject non-UTF8 bytes directly into the parsed URL path
 		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file"
 		c.Request = req
 
-		get := mapPrometheusPath(c)
-		// The result must be valid UTF-8 so Prometheus won't panic
-		assert.True(t, utf8.ValidString(get), "result must be valid UTF-8")
+		sanitizePathMiddleware(c)
+
+		assert.True(t, utf8.ValidString(c.Request.URL.Path), "path must be valid UTF-8 after middleware")
+	})
+
+	t.Run("non-utf8-raw-path-is-sanitized", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./file"
+		req.URL.RawPath = "/api/v1.0/director/object/\xc0.\xc0./file"
+		c.Request = req
+
+		sanitizePathMiddleware(c)
+
+		assert.True(t, utf8.ValidString(c.Request.URL.Path), "path must be valid UTF-8 after middleware")
+		assert.True(t, utf8.ValidString(c.Request.URL.RawPath), "raw path must be valid UTF-8 after middleware")
+	})
+
+	t.Run("valid-utf8-path-passes-through-unchanged", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar.txt", nil)
+		c.Request = req
+
+		sanitizePathMiddleware(c)
+
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar.txt", c.Request.URL.Path)
 	})
 }
 

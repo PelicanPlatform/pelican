@@ -13,10 +13,24 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+}
+
+// sanitizePathMiddleware sanitizes the request URL path before it reaches any
+// downstream handler or metrics middleware. Any non-UTF-8 byte sequences in
+// the path (and raw path, if set) are replaced with the Unicode replacement
+// character (U+FFFD). This prevents panics in Prometheus label collection,
+// which requires valid UTF-8 strings.
+func sanitizePathMiddleware(ctx *gin.Context) {
+	ctx.Request.URL.Path = utils.SanitizePrometheusLabel(ctx.Request.URL.Path)
+	if ctx.Request.URL.RawPath != "" {
+		ctx.Request.URL.RawPath = utils.SanitizePrometheusLabel(ctx.Request.URL.RawPath)
+	}
+	ctx.Next()
 }
 
 // ReadOnlyMiddleware blocks unsafe ( state changing ) requests when the server is in read-only mode

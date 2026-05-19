@@ -59,7 +59,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -708,7 +707,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 
 // Map gin routes for Prometheus metrics to reduce metric cardinality
 func mapPrometheusPath(c *gin.Context) string {
-	url := utils.SanitizePrometheusLabel(c.Request.URL.Path)
+	url := c.Request.URL.Path
 	// Frontend static resources
 	if strings.HasPrefix(url, "/view/_next/") {
 		url = "/view/_next/:resource"
@@ -933,6 +932,7 @@ func GetEngine() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	engine.Use(sanitizePathMiddleware)
 
 	// Configure trusted proxies for accurate client IP detection.
 	// By default, trust no proxies so ctx.ClientIP() returns the
