@@ -1914,7 +1914,7 @@ description: |+
   of completed files hits the high water mark, files will be deleted until the usage hits the
   low water mark.
 type: int
-default: 95
+default: 89
 components: ["localcache"]
 ---
 name: LocalCache.LowWaterMarkPercentage
@@ -2023,7 +2023,7 @@ description: |+
     StorageDirs:
       - Path: /mnt/nvme/cache
         MaxSize: 500GB
-        HighWaterMarkPercentage: 95
+        HighWaterMarkPercentage: 89
         LowWaterMarkPercentage: 85
       - Path: /mnt/hdd/cache
         MaxSize: 2TB
@@ -2269,7 +2269,7 @@ description: |+
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
 type: string
-default: 90
+default: 85
 components: ["cache"]
 ---
 name: Cache.HighWaterMark
@@ -2284,7 +2284,7 @@ description: |+
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
 type: string
-default: 95
+default: 89
 components: ["cache"]
 ---
 name: Cache.FilesMaxSize
@@ -4278,7 +4278,7 @@ description: |+
   The storage usage percentage threshold at which a warning health status is reported.
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
-default: 80
+default: 92
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.StorageCriticalThreshold
@@ -4286,7 +4286,7 @@ description: |+
   The storage usage percentage threshold at which a critical health status is reported.
   The value should be between 0 and 100 representing the percentage of storage used.
 type: int
-default: 90
+default: 97
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 ############################
