@@ -25,6 +25,8 @@
 package lotman
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -112,4 +114,12 @@ func SetContextInt(string, int) error   { return errUnsupported }
 func GetContextInt(string) (int, error) { return 0, errUnsupported }
 func RemoveLot(string, bool, bool, bool, bool, string) error {
 	return errUnsupported
+}
+
+func LaunchRenewalRoutine(_ context.Context, _ func() []server_structs.NamespaceAdV2) {
+	log.Warningln("LotMan is not supported on this platform. Skipping renewal routine...")
+}
+
+func LaunchLotGcRoutine(_ context.Context) {
+	log.Warningln("LotMan is not supported on this platform. Skipping lot GC routine...")
 }
