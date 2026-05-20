@@ -97,7 +97,7 @@ var (
 	// PR #52 to let callers reason about future or past states of the ledger
 	// (preview which lots will be expired/deletable by some timestamp). Pass
 	// wall-clock now() in milliseconds for the historical "as of now" semantics.
-	// `include_reclaimed` was added in v0.0.5+; cleanup loops should pass false
+	// `include_reclaimed` was added in v0.1.0; cleanup loops should pass false
 	// to avoid repeatedly draining lots that have already been reclaimed.
 	LotmanGetLotsPastExp func(queryTimeMs int64, recursive bool, includeReclaimed bool, output *unsafe.Pointer, errMsg *[]byte) int32
 	LotmanGetLotsPastDel func(queryTimeMs int64, recursive bool, includeReclaimed bool, output *unsafe.Pointer, errMsg *[]byte) int32
@@ -105,7 +105,7 @@ var (
 	LotmanGetLotsPastOpp func(recursiveQuota bool, recursiveChildren bool, includeReclaimed bool, output *unsafe.Pointer, hierarchical bool, errMsg *[]byte) int32
 	LotmanGetLotsPastObj func(recursiveQuota bool, recursiveChildren bool, includeReclaimed bool, output *unsafe.Pointer, hierarchical bool, errMsg *[]byte) int32
 
-	// Reclamation ledger (lotman v0.0.5+). LotmanReclaimLot records that the
+	// Reclamation ledger (lotman v0.1.0+). LotmanReclaimLot records that the
 	// caller (typically the purge plugin) is no longer attributing bytes to
 	// the named lot subtree; downstream past_* queries with
 	// include_reclaimed=false ignore reclaimed lots.
@@ -1335,7 +1335,8 @@ func setLotmanContextFlags() error {
 // minLotmanVersion is the earliest lotman release that exposes every
 // FFI symbol Pelican's lotman integration registers below. Bump this
 // whenever a new symbol is added to InitLotman.
-const minLotmanVersion = "v0.0.5"
+const minLotmanVersion = "v0.1.0"
+const maxLotmanVersion = "v0.2.0"
 
 // checkLotmanVersionCompatibility returns true when the loaded libLotMan.so
 // is new enough to support Pelican's strict-hierarchy lot layout, and false
@@ -1351,6 +1352,11 @@ func checkLotmanVersionCompatibility() bool {
 	if semver.Compare(v, minLotmanVersion) < 0 {
 		log.Errorf("Installed lotman version %s is too old; Pelican requires lotman >= %s. "+
 			"Please upgrade libLotMan.so and restart.", v, minLotmanVersion)
+		return false
+	}
+	if semver.Compare(v, maxLotmanVersion) >= 0 {
+		log.Errorf("Installed lotman version %s is too new; Pelican supports lotman < %s. "+
+			"Please downgrade libLotMan.so and restart.", v, maxLotmanVersion)
 		return false
 	}
 	return true

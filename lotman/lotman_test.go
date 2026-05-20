@@ -1043,7 +1043,7 @@ func TestStrictHierarchyContextSet(t *testing.T) {
 
 // TestLotmanVersionCompatibility verifies that checkLotmanVersionCompatibility
 // accepts the version string returned by the currently loaded libLotMan.so
-// (which must be >= v0.0.5 to support strict_hierarchy + parent_attributions).
+// (which must be >= v0.1.0 to support strict_hierarchy + parent_attributions).
 func TestLotmanVersionCompatibility(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
