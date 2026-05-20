@@ -1,6 +1,7 @@
 package origin
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -252,14 +253,68 @@ type MetadataValue struct {
 }
 
 type GrantAclReq struct {
-	GroupID   string     `json:"groupId"`
+	// GroupID uses the legacy snake_case tag for marshaling so that the CLI client
+	// remains compatible with older servers. The custom UnmarshalJSON below accepts
+	// both "group_id" (legacy) and "groupId" (new) so that new servers can handle
+	// requests from any client version.
+	GroupID   string     `json:"group_id"`
 	Role      string     `json:"role"`
-	ExpiresAt *time.Time `json:"expiresAt"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// UnmarshalJSON accepts both legacy snake_case and new camelCase field names so
+// that a new server can process requests from old and new clients alike.
+func (r *GrantAclReq) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		GroupID      string     `json:"groupId"`
+		GroupIDOld   string     `json:"group_id"`
+		Role         string     `json:"role"`
+		ExpiresAt    *time.Time `json:"expiresAt"`
+		ExpiresAtOld *time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Role = raw.Role
+	// Prefer new camelCase field; fall back to legacy snake_case.
+	r.GroupID = raw.GroupID
+	if r.GroupID == "" {
+		r.GroupID = raw.GroupIDOld
+	}
+	r.ExpiresAt = raw.ExpiresAt
+	if r.ExpiresAt == nil {
+		r.ExpiresAt = raw.ExpiresAtOld
+	}
+	return nil
 }
 
 type RevokeAclReq struct {
-	GroupID string `json:"groupId"`
+	// GroupID uses the legacy snake_case tag for marshaling so that the CLI client
+	// remains compatible with older servers. The custom UnmarshalJSON below accepts
+	// both "group_id" (legacy) and "groupId" (new) so that new servers can handle
+	// requests from any client version.
+	GroupID string `json:"group_id"`
 	Role    string `json:"role"`
+}
+
+// UnmarshalJSON accepts both legacy snake_case and new camelCase field names so
+// that a new server can process requests from old and new clients alike.
+func (r *RevokeAclReq) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		GroupID    string `json:"groupId"`
+		GroupIDOld string `json:"group_id"`
+		Role       string `json:"role"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Role = raw.Role
+	// Prefer new camelCase field; fall back to legacy snake_case.
+	r.GroupID = raw.GroupID
+	if r.GroupID == "" {
+		r.GroupID = raw.GroupIDOld
+	}
+	return nil
 }
 
 type AddCollectionMembersReq struct {
@@ -279,6 +334,33 @@ type ListCollectionRes struct {
 	Namespace   string `json:"namespace"`
 }
 
+// UnmarshalJSON accepts both legacy "owner_id" and new "ownerId" so that the CLI
+// client can parse responses from both old and new servers.
+func (r *ListCollectionRes) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		OwnerID     string `json:"ownerId"`
+		OwnerIDOld  string `json:"owner_id"`
+		Description string `json:"description"`
+		Visibility  string `json:"visibility"`
+		Namespace   string `json:"namespace"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ID = raw.ID
+	r.Name = raw.Name
+	r.Description = raw.Description
+	r.Visibility = raw.Visibility
+	r.Namespace = raw.Namespace
+	r.OwnerID = raw.OwnerID
+	if r.OwnerID == "" {
+		r.OwnerID = raw.OwnerIDOld
+	}
+	return nil
+}
+
 type GetCollectionRes struct {
 	ID          string                   `json:"id"`
 	Name        string                   `json:"name"`
@@ -291,6 +373,52 @@ type GetCollectionRes struct {
 	Metadata    map[string]string        `json:"metadata"`
 	CreatedAt   time.Time                `json:"createdAt"`
 	UpdatedAt   time.Time                `json:"updatedAt"`
+}
+
+// UnmarshalJSON accepts both legacy snake_case ("owner_id", "created_at", "updated_at")
+// and new camelCase names so that the CLI client can parse responses from both old
+// and new servers.
+func (r *GetCollectionRes) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID           string                   `json:"id"`
+		Name         string                   `json:"name"`
+		OwnerID      string                   `json:"ownerId"`
+		OwnerIDOld   string                   `json:"owner_id"`
+		Description  string                   `json:"description"`
+		Visibility   string                   `json:"visibility"`
+		Namespace    string                   `json:"namespace"`
+		Members      []string                 `json:"members"`
+		ACLs         []database.CollectionACL `json:"acls"`
+		Metadata     map[string]string        `json:"metadata"`
+		CreatedAt    time.Time                `json:"createdAt"`
+		CreatedAtOld time.Time                `json:"created_at"`
+		UpdatedAt    time.Time                `json:"updatedAt"`
+		UpdatedAtOld time.Time                `json:"updated_at"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ID = raw.ID
+	r.Name = raw.Name
+	r.Description = raw.Description
+	r.Visibility = raw.Visibility
+	r.Namespace = raw.Namespace
+	r.Members = raw.Members
+	r.ACLs = raw.ACLs
+	r.Metadata = raw.Metadata
+	r.OwnerID = raw.OwnerID
+	if r.OwnerID == "" {
+		r.OwnerID = raw.OwnerIDOld
+	}
+	r.CreatedAt = raw.CreatedAt
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = raw.CreatedAtOld
+	}
+	r.UpdatedAt = raw.UpdatedAt
+	if r.UpdatedAt.IsZero() {
+		r.UpdatedAt = raw.UpdatedAtOld
+	}
+	return nil
 }
 
 func handleListCollections(ctx *gin.Context) {
