@@ -264,6 +264,7 @@ type GrantAclReq struct {
 
 // UnmarshalJSON accepts both legacy snake_case and new camelCase field names so
 // that a new server can process requests from old and new clients alike.
+// When both forms are present, the camelCase field takes precedence.
 func (r *GrantAclReq) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		GroupID      string     `json:"groupId"`
@@ -299,6 +300,7 @@ type RevokeAclReq struct {
 
 // UnmarshalJSON accepts both legacy snake_case and new camelCase field names so
 // that a new server can process requests from old and new clients alike.
+// When both forms are present, the camelCase field takes precedence.
 func (r *RevokeAclReq) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		GroupID    string `json:"groupId"`
@@ -336,6 +338,7 @@ type ListCollectionRes struct {
 
 // UnmarshalJSON accepts both legacy "owner_id" and new "ownerId" so that the CLI
 // client can parse responses from both old and new servers.
+// When both forms are present, the camelCase field takes precedence.
 func (r *ListCollectionRes) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		ID          string `json:"id"`
@@ -377,7 +380,7 @@ type GetCollectionRes struct {
 
 // UnmarshalJSON accepts both legacy snake_case ("owner_id", "created_at", "updated_at")
 // and new camelCase names so that the CLI client can parse responses from both old
-// and new servers.
+// and new servers. When both forms are present, the camelCase field takes precedence.
 func (r *GetCollectionRes) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		ID           string                   `json:"id"`
@@ -390,10 +393,10 @@ func (r *GetCollectionRes) UnmarshalJSON(data []byte) error {
 		Members      []string                 `json:"members"`
 		ACLs         []database.CollectionACL `json:"acls"`
 		Metadata     map[string]string        `json:"metadata"`
-		CreatedAt    time.Time                `json:"createdAt"`
-		CreatedAtOld time.Time                `json:"created_at"`
-		UpdatedAt    time.Time                `json:"updatedAt"`
-		UpdatedAtOld time.Time                `json:"updated_at"`
+		CreatedAt    *time.Time               `json:"createdAt"`
+		CreatedAtOld *time.Time               `json:"created_at"`
+		UpdatedAt    *time.Time               `json:"updatedAt"`
+		UpdatedAtOld *time.Time               `json:"updated_at"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -406,17 +409,21 @@ func (r *GetCollectionRes) UnmarshalJSON(data []byte) error {
 	r.Members = raw.Members
 	r.ACLs = raw.ACLs
 	r.Metadata = raw.Metadata
+	// Prefer new camelCase field; fall back to legacy snake_case.
 	r.OwnerID = raw.OwnerID
 	if r.OwnerID == "" {
 		r.OwnerID = raw.OwnerIDOld
 	}
-	r.CreatedAt = raw.CreatedAt
-	if r.CreatedAt.IsZero() {
-		r.CreatedAt = raw.CreatedAtOld
+	// Use pointer types to reliably distinguish "field absent" from "zero time".
+	if raw.CreatedAt != nil {
+		r.CreatedAt = *raw.CreatedAt
+	} else if raw.CreatedAtOld != nil {
+		r.CreatedAt = *raw.CreatedAtOld
 	}
-	r.UpdatedAt = raw.UpdatedAt
-	if r.UpdatedAt.IsZero() {
-		r.UpdatedAt = raw.UpdatedAtOld
+	if raw.UpdatedAt != nil {
+		r.UpdatedAt = *raw.UpdatedAt
+	} else if raw.UpdatedAtOld != nil {
+		r.UpdatedAt = *raw.UpdatedAtOld
 	}
 	return nil
 }
