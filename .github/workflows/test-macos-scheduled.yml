@@ -10,6 +10,8 @@ jobs:
   run-tests:
     name: Test
     uses: ./.github/workflows/test-macos.yml
+    with:
+      race_detection: true
 
   analyze-runs:
     name: Analyze Runs

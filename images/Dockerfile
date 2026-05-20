@@ -768,7 +768,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -o pipefail
 
   # Install packages for building Pelican.
-  dnf install -y git make
+  # gcc is also needed to enable the Go race detector (-race flag).
+  dnf install -y gcc git make
 
   # Install HTCondor for integration tests, but forcibly remove the
   # Pelican packages that it pulls in so that there is zero chance tests
