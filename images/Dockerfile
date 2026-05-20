@@ -73,8 +73,8 @@ ARG TOMCAT_GID=10443
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
-ARG LOTMAN_SRC_BUILD=false
-ARG LOTMAN_VER=0.0.4
+ARG LOTMAN_SRC_BUILD=true
+ARG LOTMAN_VER=0.1.0
 ARG LOTMAN_RELEASE=
 # ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
@@ -84,8 +84,8 @@ ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.6.2
 ARG XRDCL_PELICAN_RELEASE=
 # ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_LOTMAN_SRC_BUILD=false
-ARG XROOTD_LOTMAN_VER=0.0.5
+ARG XROOTD_LOTMAN_SRC_BUILD=true
+ARG XROOTD_LOTMAN_VER=0.1.0
 ARG XROOTD_LOTMAN_RELEASE=
 # ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
