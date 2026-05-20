@@ -393,7 +393,7 @@ func TestCollectionsAPI(t *testing.T) {
 		collectionID := createColResp["id"]
 		require.NotEmpty(t, collectionID)
 
-		// 3. Grant the group read access to the collection
+		// 3. Grant the group read access to the collection (using legacy snake_case field name)
 		grantAclReq := map[string]string{"group_id": groupID, "role": "read"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
@@ -423,8 +423,8 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
-		// 6. Grant the group write access to the collection
-		grantAclReq = map[string]string{"group_id": groupID, "role": "write"}
+		// 6. Grant the group write access to the collection (using new camelCase field name)
+		grantAclReq = map[string]string{"groupId": groupID, "role": "write"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections/"+collectionID+"/acl", bytes.NewReader(body))
@@ -462,7 +462,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
 
-		// 9. Grant owner access to the group
+		// 9. Grant owner access to the group (using legacy snake_case field name)
 		grantAclReq = map[string]string{"group_id": groupID, "role": "owner"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
