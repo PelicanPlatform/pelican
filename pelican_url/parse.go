@@ -181,9 +181,21 @@ func validateOsdfStashUrl(parsedUrl *url.URL) error {
 
 func validatePelicanUrl(parsedUrl *url.URL) error {
 	if parsedUrl.Host == "" {
-		return error_codes.NewParameterError(
-			fmt.Errorf("pelican URL '%s' is invalid because it has no host", parsedUrl.String()),
-		)
+		errMsg := fmt.Sprintf("pelican URL '%s' is invalid because it has no host", parsedUrl.String())
+		// If the path is non-empty, the user likely used pelican:/// (three slashes) instead of
+		// pelican:// (two slashes). Extract the first path segment as the likely intended host
+		// and suggest the corrected form.
+		if parsedUrl.Path != "" {
+			pathParts := strings.SplitN(strings.TrimPrefix(parsedUrl.Path, "/"), "/", 2)
+			if len(pathParts) > 0 && pathParts[0] != "" {
+				remainingPath := ""
+				if len(pathParts) > 1 {
+					remainingPath = "/" + pathParts[1]
+				}
+				errMsg = fmt.Sprintf("%s; did you mean 'pelican://%s%s'?", errMsg, pathParts[0], remainingPath)
+			}
+		}
+		return error_codes.NewParameterError(fmt.Errorf("%s", errMsg))
 	}
 	return nil
 }
