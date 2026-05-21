@@ -823,6 +823,12 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 		lastScitokensSuccess: time.Now(),
 		lastDirectorRefresh:  time.Time{}, // Zero time so first refresh is always allowed
 	}
+	// Seed the component health to a fresh baseline mirroring the grace-baseline
+	// times above. Without this, any stale `Critical` status left by a previous
+	// run (or a previous test in the same process) would remain visible until
+	// the first maintenance cycle finishes, racing observers that read the
+	// health metric immediately after launch.
+	metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusOK, "Xrootd maintenance routine starting; awaiting first cycle")
 	// Capture timeout and auto-shutdown config at launch time to avoid race conditions with Viper resets in tests
 	configTimeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
 	autoShutdownEnabled := param.Xrootd_AutoShutdownEnabled.GetBool()

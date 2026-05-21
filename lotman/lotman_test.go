@@ -61,10 +61,30 @@ func findPolicyIndex(policyName string, policies []PurgePolicy) int {
 	return -1
 }
 
+// lotmanTestOpts controls optional behaviour of setupLotmanFromConf.
+type lotmanTestOpts struct {
+	clearCacheDataLocations bool
+}
+
+type lotmanTestOption func(*lotmanTestOpts)
+
+// withoutCacheDataLocations forces Cache.DataLocations to an empty slice
+// before InitLotman runs, exercising the HighWaterMark fallback path in
+// computeRootDedicatedGB. Use only for tests that specifically validate
+// that fallback; the default helper points DataLocations at a tmpdir so
+// the disk-usage probe finds a real, accessible filesystem path.
+func withoutCacheDataLocations() lotmanTestOption {
+	return func(o *lotmanTestOpts) { o.clearCacheDataLocations = true }
+}
+
 // Initialize Lotman
 // If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
 // so that underlying metadata discovery can happen against the mock discovery host
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2) (bool, func()) {
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2, opts ...lotmanTestOption) (bool, func()) {
+	o := lotmanTestOpts{}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
@@ -116,6 +136,18 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	require.NoError(t, err)
 
 	require.NoError(t, param.Lotman_LotHome.Set(tmpPath))
+	// Always override Cache.DataLocations so InitLotman's disk-usage probe
+	// never touches the real default path ("/run/pelican/cache/data"),
+	// which does not exist in CI environments. Tests that need to exercise
+	// the HighWaterMark fallback in computeRootDedicatedGB must opt in
+	// explicitly via withoutCacheDataLocations(); we can't honour a
+	// caller-set value here because param.IsSet() returns true even when
+	// only the default is in play.
+	if o.clearCacheDataLocations {
+		require.NoError(t, param.Cache_DataLocations.Set([]string{}))
+	} else {
+		require.NoError(t, param.Cache_DataLocations.Set([]string{tmpPath}))
+	}
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
@@ -155,13 +187,12 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestGoodInit", func(t *testing.T) {
 		require.NoError(t, param.Logging_Level.Set("debug"))
-		require.NoError(t, param.Cache_DataLocations.Set([]string{}))
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
 		require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil)
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil, withoutCacheDataLocations())
 		defer cleanup()
 		require.True(t, success)
 
@@ -1073,12 +1104,11 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	require.NoError(t, param.Cache_DataLocations.Set([]string{}))
 	server := getMockDiscoveryHost()
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
 	nsAds := makeAds("/a", "/a/b", "/c")
-	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", server.URL, nsAds)
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", server.URL, nsAds, withoutCacheDataLocations())
 	defer cleanup()
 	require.True(t, success)
 

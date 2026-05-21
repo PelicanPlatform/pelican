@@ -861,12 +861,66 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 
 	LaunchXrootdMaintenance(ctx, cacheServer, 20*time.Millisecond)
 
-	// Give the maintenance loop a couple of cycles
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the maintenance loop to converge to a steady state. Use
+	// require.Eventually instead of a fixed Sleep so slow CI runners
+	// don't observe the status before the first cycle has completed.
+	require.Eventually(t, func() bool {
+		status, err := metrics.GetComponentStatus(metrics.OriginCache_ConfigUpdates)
+		if err != nil {
+			return false
+		}
+		return status == metrics.StatusOK.String()
+	}, 2*time.Second, 20*time.Millisecond,
+		"config-updates health should converge to OK with valid authfile and scitokens inputs")
+}
 
+// TestLaunchXrootdMaintenanceSeedsHealthStatus is a regression test for
+// the bug where TestConfigUpdatesHealthOKWhenFresh would observe the
+// "critical" status left behind by a previous test (the metrics package's
+// in-memory map is process-global and not reset by server_utils.ResetTestState).
+//
+// LaunchXrootdMaintenance must seed OriginCache_ConfigUpdates to OK
+// immediately on entry so observers reading the metric before the first
+// maintenance cycle completes don't see stale state from a prior run.
+func TestLaunchXrootdMaintenanceSeedsHealthStatus(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	dir := t.TempDir()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	// Simulate a prior test having left the health metric in Critical.
+	metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates,
+		metrics.StatusCritical, "leftover from a previous test run")
 	status, err := metrics.GetComponentStatus(metrics.OriginCache_ConfigUpdates)
 	require.NoError(t, err)
-	assert.Equal(t, metrics.StatusOK.String(), status)
+	require.Equal(t, metrics.StatusCritical.String(), status,
+		"precondition: stale Critical status must be visible before launch")
+
+	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.Cache_RunLocation.Set(dir))
+	authfilePath := filepath.Join(dir, "authfile")
+	require.NoError(t, os.WriteFile(authfilePath, []byte("u * /.well-known lr\n"), 0600))
+	require.NoError(t, param.Xrootd_Authfile.Set(authfilePath))
+	scitokensPath := filepath.Join(dir, "scitokens.cfg")
+	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensPath))
+	test_utils.MockFederationRoot(t, nil, nil)
+	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
+
+	// Launch the maintenance routine with a very long tick so the first
+	// maintenance cycle has not run by the time we read the status. The
+	// status must already be OK from the seed write.
+	LaunchXrootdMaintenance(ctx, &cache.CacheServer{}, 10*time.Minute)
+
+	status, err = metrics.GetComponentStatus(metrics.OriginCache_ConfigUpdates)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusOK.String(), status,
+		"LaunchXrootdMaintenance must seed the health metric to OK so observers do not see stale Critical state from a prior test")
 }
 
 // purgeColdFilesAgeFromMaxLotLifetime is the small validator used by
