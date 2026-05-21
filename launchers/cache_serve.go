@@ -258,10 +258,6 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 			}
 		}
 
-		// Pelican now nests namespace lots by path-prefix containment, so
-		// the cache feeds the full namespace ad list straight into lotman.
-		// FilterTopLevelPrefixes (used previously to flatten the list) is
-		// no longer needed here.
 		// Bind the c library funcs to Go, instantiate lots, set up the Lotman database, etc
 		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
 			return nil, errors.New("Failed to initialize lotman")
