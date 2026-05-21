@@ -1128,34 +1128,47 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	return cfg, nil
 }
 
+// BuildCacheNamespaceAds returns the cache's director-advertised namespace ads, augmented
+// with a monitoring-namespace issuer when Cache.SelfTest is enabled. The monitoring issuer
+// authorizes locally-minted tokens the cache uses for self-tests and for evicting director
+// test files via the local xrdhttp-pelican evict API. Centralizing this here ensures both
+// the startup write and the runtime EmitScitokensConfig path produce the same scitokens.cfg.
+func BuildCacheNamespaceAds(cacheServer *cache.CacheServer) ([]server_structs.NamespaceAdV2, error) {
+	directorAds := cacheServer.GetNamespaceAds()
+	if !param.Cache_SelfTest.GetBool() {
+		return directorAds, nil
+	}
+	serverIssuerStr, err := config.GetServerIssuerURL()
+	if err != nil {
+		return nil, errors.Wrapf(err, "could not determine server's issuer URL when generating scitokens config. Is '%s' set?", param.Server_IssuerUrl.GetName())
+	}
+	serverIssuer, err := url.Parse(serverIssuerStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not parse server's issuer URL when generating scitokens config")
+	}
+	cacheIssuer := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
+		Path: server_utils.MonitoringBaseNs,
+		Issuer: []server_structs.TokenIssuer{
+			{
+				BasePaths: []string{server_utils.MonitoringBaseNs},
+				IssuerUrl: *serverIssuer,
+			},
+		},
+	}
+	return append(directorAds, cacheIssuer), nil
+}
+
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if _, ok := server.(*origin.OriginServer); ok {
 		return WriteOriginScitokensConfig(false)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
-		directorAds := cacheServer.GetNamespaceAds()
-		if param.Cache_SelfTest.GetBool() {
-			serverIssuerStr, err := config.GetServerIssuerURL()
-			if err != nil {
-				return errors.Wrapf(err, "could not determine server's issuer URL when generating scitokens config. Is '%s' set?", param.Server_IssuerUrl.GetName())
-			}
-			serverIssuer, err := url.Parse(serverIssuerStr)
-			if err != nil {
-				return errors.Wrap(err, "could not parse server's issuer URL when generating scitokens config")
-			}
-			cacheIssuer := server_structs.NamespaceAdV2{
-				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
-				Path: server_utils.MonitoringBaseNs,
-				Issuer: []server_structs.TokenIssuer{
-					{
-						BasePaths: []string{server_utils.MonitoringBaseNs},
-						IssuerUrl: *serverIssuer,
-					},
-				},
-			}
-			directorAds = append(directorAds, cacheIssuer)
+		nsAds, err := BuildCacheNamespaceAds(cacheServer)
+		if err != nil {
+			return err
 		}
-		return WriteCacheScitokensConfig(directorAds, false)
+		return WriteCacheScitokensConfig(nsAds, false)
 	} else {
 		return errors.New("internal error: server object is neither cache nor origin")
 	}

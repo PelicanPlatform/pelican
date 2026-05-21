@@ -476,8 +476,11 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
+		nsAds, err := BuildCacheNamespaceAds(cacheServer)
 		if err != nil {
+			return errors.Wrap(err, "failed to build cache namespace ads for scitokens configuration")
+		}
+		if err := WriteCacheScitokensConfig(nsAds, true); err != nil {
 			return errors.Wrap(err, "failed to create scitokens configuration for the cache")
 		}
 	}
