@@ -66,16 +66,18 @@ var dateSubdirPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // directorTestFilePattern matches the only path shape the eviction endpoint should ever accept:
 //
-//	<MonitoringBaseNs>/<DirectorTestDir>/YYYY-MM-DD/director-test-<suffix>
+//	<MonitoringBaseNs>/<DirectorTestDir>/<director-id>/YYYY-MM-DD/director-test-<suffix>
 //
-// The suffix is left unconstrained so that both ".txt" and ".cinfo" files are
-// accepted. Matching against a strict pattern (rather than a prefix check) rejects
-// path-traversal attempts like "/pelican/monitoring/../../etc/passwd", double slashes,
-// and any filename outside the director-test naming convention.
+// The director-id is a non-empty path segment (typically the director's hostname) that
+// keeps multiple directors from colliding under a shared cache. The suffix is left
+// unconstrained so that both ".txt" and ".cinfo" files are accepted. Matching against
+// a strict pattern (rather than a prefix check) rejects path-traversal attempts like
+// "/pelican/monitoring/../../etc/passwd", double slashes, and any filename outside the
+// director-test naming convention.
 var directorTestFilePattern = regexp.MustCompile(
 	`^` + regexp.QuoteMeta(server_utils.MonitoringBaseNs) +
 		`/` + regexp.QuoteMeta(server_utils.DirectorTestDir) +
-		`/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
+		`/[^/]+/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
 		`-[^/]+$`)
 
 // removeTestFile deletes a single director-test file. When Server.DropPrivileges is
@@ -130,12 +132,11 @@ func fsToNamespacePath(fsPath string) (string, error) {
 }
 
 // cleanupDirectorTestFiles removes old director test files from the directorTest directory.
-// It handles both legacy flat files (director-test-*.txt directly in directorTest/) and
-// daily-nested subdirectories (directorTest/YYYY-MM-DD/director-test-*.txt).
-//
-// For daily subdirectories: removes all directories older than today entirely, and within
-// today's directory keeps only the two most recent files (test file + .cinfo).
-// For legacy flat files: removes all if they exist.
+// It handles two layouts:
+//   - Legacy flat files: directorTest/director-test-*.txt (pre-PR, swept entirely).
+//   - Per-director daily-nested: directorTest/<id>/YYYY-MM-DD/director-test-*.txt
+//     (current). Per-director subtrees are recursed into; within each, day-dirs older
+//     than today are removed wholesale and today's dir is trimmed to the latest 2 files.
 //
 // Under Server.DropPrivileges, removals are routed through the cache's evict API
 // (see removeTestFile / removeTestDir) since the pelican process cannot directly
@@ -159,32 +160,17 @@ func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 
 	todayStr := time.Now().Format("2006-01-02")
 
-	// Collect legacy flat files (director-test-* files sitting directly in directorTest/)
 	var legacyFiles []os.DirEntry
 	for _, entry := range entries {
 		if entry.IsDir() {
-			// Handle date subdirectories
-			if !dateSubdirPattern.MatchString(entry.Name()) {
-				continue
+			// Per-director subtree: directorTest/<id>/YYYY-MM-DD/...
+			idDirPath := filepath.Join(dirTestPath, entry.Name())
+			if err := cleanupDirectorIDSubtree(ctx, idDirPath, todayStr); err != nil {
+				log.WithError(err).Warnf("Failed to clean up director subtree: %s", idDirPath)
 			}
-			subdirPath := filepath.Join(dirTestPath, entry.Name())
-			if entry.Name() < todayStr {
-				// Remove entire old day directories
-				if err := removeTestDir(ctx, subdirPath); err != nil {
-					log.WithError(err).Warnf("Failed to remove old director test directory: %s", subdirPath)
-				}
-			} else if entry.Name() == todayStr {
-				// Clean today's directory, keeping only the latest 2 files
-				if err := cleanupOldFilesInDir(ctx, subdirPath, 2); err != nil {
-					log.WithError(err).Warnf("Failed to clean up today's director test directory: %s", subdirPath)
-				}
-			}
-			// Future-dated directories are left alone (shouldn't happen, but be safe)
-		} else {
-			// Collect legacy flat files with the director-test prefix
-			if strings.HasPrefix(entry.Name(), server_utils.DirectorTest.String()) {
-				legacyFiles = append(legacyFiles, entry)
-			}
+		} else if strings.HasPrefix(entry.Name(), server_utils.DirectorTest.String()) {
+			// Collect legacy flat files (director-test-* files sitting directly in directorTest/)
+			legacyFiles = append(legacyFiles, entry)
 		}
 	}
 
@@ -198,6 +184,34 @@ func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 		}
 	}
 
+	return nil
+}
+
+// cleanupDirectorIDSubtree applies the daily-nested cleanup logic inside a single
+// director's subtree (directorTest/<id>/YYYY-MM-DD/...). Day-directories older than
+// today are removed wholesale; today's directory is trimmed to the latest 2 files
+// (test file + .cinfo). The "keep 2" rule applies per-director, so multiple directors
+// probing the same cache can each retain their most recent file independently.
+func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) error {
+	entries, err := os.ReadDir(idDirPath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !dateSubdirPattern.MatchString(entry.Name()) {
+			continue
+		}
+		dateDir := filepath.Join(idDirPath, entry.Name())
+		if entry.Name() < todayStr {
+			if err := removeTestDir(ctx, dateDir); err != nil {
+				log.WithError(err).Warnf("Failed to remove old director test directory: %s", dateDir)
+			}
+		} else if entry.Name() == todayStr {
+			if err := cleanupOldFilesInDir(ctx, dateDir, 2); err != nil {
+				log.WithError(err).Warnf("Failed to clean up today's director test directory: %s", dateDir)
+			}
+		}
+	}
 	return nil
 }
 

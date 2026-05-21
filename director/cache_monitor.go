@@ -34,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -43,14 +44,20 @@ import (
 // workflow than the origin tests. We can't reuse server_utils.RunTests(), but we want to keep common
 // pieces together.
 //
-// Returns the namespace-relative test file path (e.g. /pelican/monitoring/directorTest/2025-01-24/director-test-...txt)
-// so the caller can evict it from the cache after the test cycle.
+// Returns the namespace-relative test file path (e.g.
+// /pelican/monitoring/directorTest/<director-hostname>/2025-01-24/director-test-...txt)
+// so the caller can evict it from the cache after the test cycle. The per-director
+// subdirectory keeps multiple directors' test files from colliding under a shared cache.
 func runCacheTest(ctx context.Context, cacheUrl url.URL) (testFilePath string, err error) {
 	now := time.Now()
 	nowStr := now.Format(time.RFC3339)
 	dayStr := now.Format("2006-01-02")
+	directorID := param.Server_Hostname.GetString()
+	if directorID == "" {
+		return "", errors.Errorf("%s is empty; cannot construct director test file path", param.Server_Hostname.GetName())
+	}
 	dirMonPath := path.Join(server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
-	testFilePath = path.Join(dirMonPath, dayStr, server_utils.DirectorTest.String()+"-"+nowStr+".txt")
+	testFilePath = path.Join(dirMonPath, directorID, dayStr, server_utils.DirectorTest.String()+"-"+nowStr+".txt")
 	cacheUrl = *cacheUrl.JoinPath(testFilePath)
 	client := config.GetClient()
 	req, reqErr := http.NewRequestWithContext(ctx, "GET", cacheUrl.String(), nil)

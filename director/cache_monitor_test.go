@@ -29,19 +29,21 @@ import (
 )
 
 // TestCacheTestFilePath verifies that runCacheTest constructs the correct
-// daily-nested test file path format: /pelican/monitoring/directorTest/YYYY-MM-DD/director-test-<RFC3339>.txt
+// per-director daily-nested test file path format:
+// /pelican/monitoring/directorTest/<director-id>/YYYY-MM-DD/director-test-<RFC3339>.txt
 func TestCacheTestFilePath(t *testing.T) {
 	now := time.Now()
 	dayStr := now.Format("2006-01-02")
+	directorID := "director-1.example.com"
 	dirMonPath := path.Join(server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
 
 	// Verify the path components match the expected format
-	expectedPrefix := path.Join(dirMonPath, dayStr, server_utils.DirectorTest.String()+"-")
-	assert.Contains(t, expectedPrefix, "/pelican/monitoring/directorTest/"+dayStr+"/director-test-")
+	expectedPrefix := path.Join(dirMonPath, directorID, dayStr, server_utils.DirectorTest.String()+"-")
+	assert.Contains(t, expectedPrefix, "/pelican/monitoring/directorTest/"+directorID+"/"+dayStr+"/director-test-")
 
-	// Verify the file extension
-	testFilePath := path.Join(dirMonPath, dayStr, server_utils.DirectorTest.String()+"-"+now.Format(time.RFC3339)+".txt")
+	// Verify the file extension and per-director segment
+	testFilePath := path.Join(dirMonPath, directorID, dayStr, server_utils.DirectorTest.String()+"-"+now.Format(time.RFC3339)+".txt")
 	assert.Contains(t, testFilePath, ".txt")
-	assert.Contains(t, testFilePath, dayStr+"/")
+	assert.Contains(t, testFilePath, "/"+directorID+"/"+dayStr+"/")
 	assert.Contains(t, testFilePath, "director-test-")
 }
