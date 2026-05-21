@@ -802,71 +802,82 @@ func TestDeleteRegistrationByID_RemovesDowntimes(t *testing.T) {
 	})
 }
 
-// TestLoggingNamespaceAutoApprovalCondition verifies that getServerByID correctly returns
-// the registration status of the parent origin, which is the key input to the auto-approval
-// logic in keySignChallengeCommit.
-func TestLoggingNamespaceAutoApprovalCondition(t *testing.T) {
+// TestApplyLoggingNamespaceAutoApproval verifies the helper extracted from
+// keySignChallengeCommit that auto-approves logging namespace registrations
+// when Registry.EnableAutoLoggingRegistration is true.
+func TestApplyLoggingNamespaceAutoApproval(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	t.Run("ApprovedOriginEnablesAutoApproval", func(t *testing.T) {
-		ns := server_structs.Registration{
-			Prefix: "/origins/auto-approve-test.edu",
-			Pubkey: "pubkey-auto",
+	t.Run("ApprovedOriginAutoApprovesLoggingNS", func(t *testing.T) {
+		originNs := server_structs.Registration{
+			Prefix: "/origins/approved-auto-test.edu",
+			Pubkey: "pubkey-approved",
 			AdminMetadata: server_structs.AdminMetadata{
-				SiteName: "AutoApproveOrigin",
+				SiteName: "ApprovedAutoOrigin",
 				Status:   server_structs.RegApproved,
 			},
 		}
-		require.NoError(t, AddRegistration(&ns))
+		require.NoError(t, AddRegistration(&originNs))
 
-		// Look up the server as keySignChallengeCommit would
-		server, err := getServerByRegistrationID(ns.ID)
+		server, err := getServerByRegistrationID(originNs.ID)
 		require.NoError(t, err)
-		require.NotEmpty(t, server.ID)
+		require.NotEmpty(t, server.ID, "origin registration should have created a server record")
 
-		// Simulate the auto-approval condition
-		serverReg, err := getServerByID(server.ID)
-		require.NoError(t, err)
-		require.NotNil(t, serverReg)
-
-		hasApprovedRegistration := false
-		for _, reg := range serverReg.Registration {
-			if reg.AdminMetadata.Status == server_structs.RegApproved {
-				hasApprovedRegistration = true
-				break
-			}
-		}
-		assert.True(t, hasApprovedRegistration, "Origin with RegApproved should enable logging namespace auto-approval")
-	})
-
-	t.Run("PendingOriginDoesNotEnableAutoApproval", func(t *testing.T) {
-		ns := server_structs.Registration{
-			Prefix: "/origins/pending-logging-test.edu",
-			Pubkey: "pubkey-pending",
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(server.ID),
 			AdminMetadata: server_structs.AdminMetadata{
-				SiteName: "PendingOrigin",
+				SiteName: "ApprovedAutoOrigin",
 				Status:   server_structs.RegPending,
 			},
 		}
-		require.NoError(t, AddRegistration(&ns))
+		applyLoggingNamespaceAutoApproval(server.ID, &loggingNs)
 
-		server, err := getServerByRegistrationID(ns.ID)
+		assert.Equal(t, server_structs.RegApproved, loggingNs.AdminMetadata.Status)
+		assert.Equal(t, "system", loggingNs.AdminMetadata.ApproverID)
+		assert.False(t, loggingNs.AdminMetadata.ApprovedAt.IsZero())
+	})
+
+	t.Run("PendingOriginDoesNotAutoApproveLoggingNS", func(t *testing.T) {
+		originNs := server_structs.Registration{
+			Prefix: "/origins/pending-auto-test.edu",
+			Pubkey: "pubkey-pending",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "PendingAutoOrigin",
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		server, err := getServerByRegistrationID(originNs.ID)
 		require.NoError(t, err)
 		require.NotEmpty(t, server.ID)
 
-		serverReg, err := getServerByID(server.ID)
-		require.NoError(t, err)
-		require.NotNil(t, serverReg)
-
-		hasApprovedRegistration := false
-		for _, reg := range serverReg.Registration {
-			if reg.AdminMetadata.Status == server_structs.RegApproved {
-				hasApprovedRegistration = true
-				break
-			}
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(server.ID),
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "PendingAutoOrigin",
+				Status:   server_structs.RegPending,
+			},
 		}
-		assert.False(t, hasApprovedRegistration, "Pending origin should not enable logging namespace auto-approval")
+		applyLoggingNamespaceAutoApproval(server.ID, &loggingNs)
+
+		assert.Equal(t, server_structs.RegPending, loggingNs.AdminMetadata.Status,
+			"pending origin should not trigger auto-approval")
+	})
+
+	t.Run("UnknownServerIDDoesNotAutoApprove", func(t *testing.T) {
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer("notfound"),
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "Ghost",
+				Status:   server_structs.RegPending,
+			},
+		}
+		applyLoggingNamespaceAutoApproval("notfound", &loggingNs)
+
+		assert.Equal(t, server_structs.RegPending, loggingNs.AdminMetadata.Status,
+			"unknown server ID should not trigger auto-approval")
 	})
 }

@@ -266,6 +266,41 @@ func keySignChallengeInit(data *registrationData) (map[string]interface{}, error
 	return res, nil
 }
 
+// applyLoggingNamespaceAutoApproval auto-approves ns if the origin server
+// identified by serverID already has an approved registration.  It mutates
+// ns.AdminMetadata in place on success.  The serverID must be a non-empty
+// 7-character ID from the servers table (the suffix after LoggingNamespacePrefix).
+func applyLoggingNamespaceAutoApproval(serverID string, ns *server_structs.Registration) {
+	// serverID should never be empty here: the only caller extracts it via
+	// LoggingNamespaceServerID, which rejects empty IDs and returns ok=false.
+	// An empty ID reaching this point indicates a programming error.
+	if serverID == "" {
+		log.Errorf("applyLoggingNamespaceAutoApproval called with empty serverID; this is a bug")
+		return
+	}
+	serverReg, err := getServerByID(serverID)
+	if err != nil {
+		log.Errorf("Failed to look up server by ID %q for logging namespace auto-approval: %v", serverID, err)
+		return
+	}
+	// getServerByID returns &ServerRegistration{} (ID == "") when the server is
+	// not found (ErrRecordNotFound), and a non-nil populated struct on success.
+	if serverReg.ID == "" {
+		log.Warningf("Server ID %q not found in registry; skipping auto-approval of logging namespace", serverID)
+		return
+	}
+	for _, reg := range serverReg.Registration {
+		if reg.AdminMetadata.Status == server_structs.RegApproved {
+			ns.AdminMetadata.Status = server_structs.RegApproved
+			ns.AdminMetadata.ApproverID = "system"
+			ns.AdminMetadata.ApprovedAt = time.Now()
+			log.Debugf("Auto-approving logging namespace because origin server %s is approved", serverID)
+			return
+		}
+	}
+	log.Debugf("Skipping logging namespace auto-approval: origin server %s has no approved registration", serverID)
+}
+
 // Add namespace prefix if the request passed client and server verification for nonce.
 // It returns whether registration is created, the response data, and an error if any
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map[string]interface{}, error) {
@@ -448,32 +483,15 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 
 	// Tag logging namespace registrations so the auto-approval logic and API filters
 	// can identify them without parsing the prefix string.
-	if strings.HasPrefix(data.Prefix, server_structs.LoggingNamespacePrefix+"/") {
+	if serverID, ok := server_structs.LoggingNamespaceServerID(data.Prefix); ok {
 		if ns.CustomFields == nil {
 			ns.CustomFields = make(map[string]interface{})
 		}
 		ns.CustomFields[server_structs.RegistrationTypeKey] = server_structs.LoggingRegistrationType
 
-		// Auto-approve logging namespaces when the associated origin is already approved and
-		// auto-registration is enabled. The server ID is the suffix after the logging prefix.
+		// Auto-approve when the associated origin is already approved and auto-registration is enabled.
 		if param.Registry_EnableAutoLoggingRegistration.GetBool() {
-			serverID := strings.TrimPrefix(data.Prefix, server_structs.LoggingNamespacePrefix+"/")
-			if serverID != "" {
-				serverReg, err := getServerByID(serverID)
-				if err != nil {
-					log.Errorf("Failed to look up server by ID %q for logging namespace auto-approval: %v", serverID, err)
-				} else if serverReg != nil {
-					for _, reg := range serverReg.Registration {
-						if reg.AdminMetadata.Status == server_structs.RegApproved {
-							ns.AdminMetadata.Status = server_structs.RegApproved
-							ns.AdminMetadata.ApproverID = "system"
-							ns.AdminMetadata.ApprovedAt = time.Now()
-							log.Debugf("Auto-approving logging namespace %s because origin server %s is approved", data.Prefix, serverID)
-							break
-						}
-					}
-				}
-			}
+			applyLoggingNamespaceAutoApproval(serverID, &ns)
 		}
 	}
 
