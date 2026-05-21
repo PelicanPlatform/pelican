@@ -332,11 +332,10 @@ func TestMultiKeysRegistration(t *testing.T) {
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 }
+
 func TestRegisterLoggingNamespaceWithRetry_NoopWhenDisabled(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	t.Cleanup(func() {
-		server_utils.ResetTestState()
-	})
+	t.Cleanup(server_utils.ResetTestState)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() {
@@ -351,4 +350,76 @@ func TestRegisterLoggingNamespaceWithRetry_NoopWhenDisabled(t *testing.T) {
 	err := RegisterLoggingNamespaceWithRetry(ctx, egrp)
 	require.NoError(t, err, "RegisterLoggingNamespaceWithRetry should be a no-op when LogExports.Enabled is false")
 	require.Equal(t, goroutinesBefore, runtime.NumGoroutine(), "no goroutines should have been launched")
+}
+
+// TestRegisterLoggingNamespaceWithRetry_WhenEnabled verifies that when
+// Logging.LogExports.Enabled is true, RegisterLoggingNamespaceWithRetry
+// registers /pelican/logging/{Server.ID} in the registry.
+func TestRegisterLoggingNamespaceWithRetry_WhenEnabled(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(server_utils.ResetTestState)
+
+	tempConfigDir, err := os.MkdirTemp("", "test-logging-ns-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	}()
+
+	server_utils.ResetTestState()
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempConfigDir, "issuer-keys")))
+	test_utils.MockFederationRoot(t, nil, nil)
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	require.NoError(t, database.InitServerDatabase(server_structs.RegistryType))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	registry.RegisterRegistryAPI(engine.Group("/"))
+	svr := httptest.NewServer(engine)
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Xrootd_Sitename.Set("test-logging-origin"))
+	// Server_ExternalWebUrl's host is used by GetServerMetadata to derive the
+	// origin prefix (/origins/{host}) for the server metadata lookup.
+	const originHost = "testhost.example"
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://"+originHost))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	// Register the origin prefix so a Server record (with ID) is created in
+	// the registry.  RegisterLoggingNamespaceWithRetry needs that ID.
+	originPrefix := server_structs.GetOriginNs(originHost)
+	require.NoError(t, RegisterNamespaceWithRetry(ctx, egrp, originPrefix))
+
+	// Enable log exports and register the logging namespace.
+	require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+	require.NoError(t, RegisterLoggingNamespaceWithRetry(ctx, egrp))
+
+	// Get the server ID by querying the registry.
+	tr := config.GetTransport()
+	httpClient := &http.Client{Transport: tr}
+	serverResp, err := httpClient.Get(svr.URL + "/api/v1.0/registry/server" + originPrefix)
+	require.NoError(t, err)
+	defer serverResp.Body.Close()
+	require.Equal(t, http.StatusOK, serverResp.StatusCode)
+	serverBody, err := io.ReadAll(serverResp.Body)
+	require.NoError(t, err)
+	var serverMeta server_structs.ServerRegistration
+	require.NoError(t, json.Unmarshal(serverBody, &serverMeta))
+	require.NotEmpty(t, serverMeta.ID, "origin server should have an ID after registration")
+
+	// Verify the logging namespace registration exists.
+	loggingPrefix := server_structs.LoggingNamespaceForServer(serverMeta.ID)
+	loggingResp, err := httpClient.Get(svr.URL + "/api/v1.0/registry" + loggingPrefix)
+	require.NoError(t, err)
+	defer loggingResp.Body.Close()
+	assert.Equal(t, http.StatusOK, loggingResp.StatusCode,
+		"logging namespace %s should be registered after RegisterLoggingNamespaceWithRetry", loggingPrefix)
 }
