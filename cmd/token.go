@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -199,7 +200,7 @@ func issuerMatchesKey(issuer string, kidSet map[string]struct{}) (bool, error) {
 // Given a Pelican resource and a set of KIDs, discover issuers from the Director
 // and return the first whose JWKS contains a key matching one of the input KIDs
 //
-// This is use to handle multi-issuer namespaces where it may not be obvious to the user
+// This is used to handle multi-issuer namespaces where it may not be obvious to the user
 // which issuer aligns with their signing key.
 func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]struct{}) (string, error) {
 	if len(directorInfo.XPelAuthHdr.Issuers) == 0 {
@@ -236,6 +237,66 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 	return "", errors.Errorf("none of the issuers discovered at the director match your signing key; issuers that were checked: %s",
 		combineUrls(directorInfo.XPelAuthHdr.Issuers))
 }
+
+// Given a Director's redirect response, re-query the Director's UI endpoint to get the full namespace ad information.
+// This can be used later to determine what capabilities the namespace supports in comparison with the requested
+// token scopes.
+func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.NamespaceAdV2Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return server_structs.NamespaceAdV2Response{}, errors.Wrap(err, "unable to get federation info from config")
+	}
+
+	client := config.GetClient()
+
+	reqURL := strings.TrimRight(fedInfo.DirectorEndpoint, "/") + "/api/v1.0/director_ui/namespaces"
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+			"failed to create request for Director server lookup at %s", reqURL)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+			"failed to query Director for server ads at %s", reqURL)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return server_structs.NamespaceAdV2Response{}, errors.Errorf(
+			"Director server lookup at %s returned status code %d",
+			reqURL,
+			response.StatusCode,
+		)
+	}
+
+	// Parse the response body into a slice of server ads
+	var nsAds []server_structs.NamespaceAdV2Response
+	err = json.NewDecoder(response.Body).Decode(&nsAds)
+	if err != nil {
+		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+			"failed to decode Director response for namespace ads at %s", reqURL)
+	}
+
+	namespace := directorInfo.XPelNsHdr.Namespace
+	// Find the first server advertising this namespace
+	for _, nsAd := range nsAds {
+		if path.Clean(nsAd.Path) == path.Clean(namespace) {
+			return nsAd, nil
+		}
+	}
+
+	return server_structs.NamespaceAdV2Response{}, errors.Errorf(
+		"no namespace advertisement found for namespace %s",
+		namespace,
+	)
+}
+
 
 // Create a token using the provided flags/args
 func createToken(cmd *cobra.Command, args []string) error {
@@ -308,6 +369,9 @@ func createToken(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Grab the namespace ad from the Director -- we'll use this later to validate token scopes.
+	nsAd, err := getNsAd(directorInfo)
+
 	// Handle any raw scopes early -- may be useful for developers/admin who want to create arbitrarily-scoped tokens,
 	// and early handling lets us use this as another mechanism to avoid scope paths.
 	rawScopes, err := cmd.Flags().GetStringArray("raw-scope")
@@ -338,24 +402,77 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 	log.Debugf("Using path %s for token scopes", sPath)
 
-	// Load the key and create a set of KIDs; we'll later check it against any issuers we may discover/be provided
+	// Start constructing the token scopes early -- we'll validate the scopes requested by the user
+	// against what we think the namespace supports later.
+	read, _ := cmd.Flags().GetBool("read")
+	write, _ := cmd.Flags().GetBool("write")
+	modify, _ := cmd.Flags().GetBool("modify")
+	stage, _ := cmd.Flags().GetBool("stage")
+
+	scopes := []token_scopes.TokenScope{}
+
+	// For each scope we want to add, check against the Director's opinion of which scopes are supported for this resource.
+	// Log an error for any requested scopes that aren't supported, but still add them to the token in case the user knows something we don't.
+	if read {
+		if nsAd.Caps.PublicReads {
+			// Read access is not behind token auth
+			log.Warningf("Director indicates that the resource at %s is publicly readable so a token is not actually required to read it, but the --read flag was provided; adding read scope to token anyway", rawUrl)
+		} else if !nsAd.Caps.Reads {
+			log.Warningf("Director indicates that the resource at %s does not support read operations, but --read flag was provided; adding read scope to token anyway", rawUrl)
+		}
+		scopes = append(scopes, tokenProfile.ReadScope(sPath))
+	}
+	if write {
+		if !nsAd.Caps.Writes {
+			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --write flag was provided; adding write scope to token anyway", rawUrl)
+		 }
+		scopes = append(scopes, tokenProfile.WriteScope(sPath))
+	}
+	if modify {
+		if !nsAd.Caps.Writes {
+			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --modify flag was provided; adding modify scope to token anyway", rawUrl)
+		}
+		scopes = append(scopes, tokenProfile.ModifyScope(sPath))
+	}
+	if stage {
+		scopes = append(scopes, tokenProfile.StageScope(sPath))
+	}
+	tokenConfig.AddScopes(scopes...)
+
+	if len(scopes)+len(rawScopes) == 0 {
+		log.Warningf("Detected creation of a token without any capabilities. Use flags like --read, --write, --modify, or --stage to add capabilities to the token.")
+	}
+
+	// Load the local signing key's public JWKS. We use the key IDs (KIDs) later to
+	// match our signing key against issuers discovered from the Director.
 	var myJWKS jwk.Set
 	keyPath, err := cmd.Flags().GetString("private-key")
+	var keyLoadErr error
 	if err != nil {
 		return errors.Wrap(err, "unable to get private key path")
 	} else if keyPath == "" {
 		myJWKS, err = config.GetIssuerPublicJWKS()
 		if err != nil {
-			return errors.Wrap(err, "unable to get issuer public JWKS from default locations")
+			keyLoadErr = errors.Wrap(err, "unable to load signing key from default location")
 		} else if myJWKS == nil {
-			return errors.New("internal error: config.GetIssuerPublicJWKS() returned nil")
+			keyLoadErr = errors.New("internal error: config.GetIssuerPublicJWKS() returned nil")
 		}
 	} else {
 		myJWKS, err = config.GetIssuerPublicJWKS(keyPath)
 		if err != nil {
-			return errors.Wrapf(err, "unable to get issuer public JWKS from %s", keyPath)
+			keyLoadErr = errors.Wrapf(err, "unable to load signing key from %s", keyPath)
 		}
 	}
+
+	if keyLoadErr != nil {
+		// If the namespace doesn't require protected reads and doesn't support writes,
+		// a token probably isn't needed at all — give the user a more helpful hint.
+		if !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+			return errors.Wrapf(keyLoadErr, "failed to load a local signing key; note that the Director reports namespace '%s' does not require auth for reads and does not support writes, so you may not need a token", nsAd.Path)
+		}
+		return keyLoadErr
+	}
+
 
 	kidSet := make(map[string]struct{}, myJWKS.Len())
 	it := myJWKS.Keys(context.Background())
@@ -369,7 +486,18 @@ func createToken(cmd *cobra.Command, args []string) error {
 		// from the Director
 		issuer, err = getIssuer(directorInfo, kidSet)
 		if err != nil {
-			return errors.Wrapf(err, "unable to determine issuer for resource %s; you may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
+			// If the namespace doesn't require protected reads and it doesn't support writes, there will likely have been no issuer to discover.
+			// In that case, we warn that the user probably doesn't need to create a token in the first place, but we provide instructions for
+			// supplying an issuer if they know better than we do.
+			if !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+				return errors.Wrapf(err, "unable to determine issuer for resource %s. This is likely because the Director reports that this namespace does not require token issuance for reads and does not support writes. Are you sure you need a token? You may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
+			} else if len(directorInfo.XPelAuthHdr.Issuers) > 0 {
+				// Issuers were discovered but none match the local signing key — the inner error already
+				// describes this clearly; avoid the misleading "unable to determine issuer" phrasing.
+				return errors.Wrapf(err, "no issuer for resource %s matches your signing key; re-run with '--issuer <issuer URL>' to specify one, or ensure you are using the correct private key", rawUrl)
+			} else {
+				return errors.Wrapf(err, "unable to determine issuer for resource %s; you may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
+			}
 		}
 	} else {
 		// If an issuer is provided, check whether it matches the signing key
@@ -383,32 +511,6 @@ func createToken(cmd *cobra.Command, args []string) error {
 		}
 	}
 	tokenConfig.Issuer = issuer
-
-	// Add token scopes for object manipulation
-	read, _ := cmd.Flags().GetBool("read")
-	write, _ := cmd.Flags().GetBool("write")
-	modify, _ := cmd.Flags().GetBool("modify")
-	stage, _ := cmd.Flags().GetBool("stage")
-
-	scopes := []token_scopes.TokenScope{}
-
-	if read {
-		scopes = append(scopes, tokenProfile.ReadScope(sPath))
-	}
-	if write {
-		scopes = append(scopes, tokenProfile.WriteScope(sPath))
-	}
-	if modify {
-		scopes = append(scopes, tokenProfile.ModifyScope(sPath))
-	}
-	if stage {
-		scopes = append(scopes, tokenProfile.StageScope(sPath))
-	}
-	tokenConfig.AddScopes(scopes...)
-
-	if len(scopes)+len(rawScopes) == 0 {
-		log.Warningf("Detected creation of a token without any capabilities. Use flags like --read, --write, --modify, or --stage to add capabilities to the token.")
-	}
 
 	// Set token lifetime — either via --expiration (RFC3339) or --lifetime (seconds).
 	// expirationStr was already validated above; here we just compute the duration.
