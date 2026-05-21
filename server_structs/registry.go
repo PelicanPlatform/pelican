@@ -164,6 +164,28 @@ func (reg *Registration) IsLoggingNamespace() bool {
 	return ok && s == LoggingRegistrationType
 }
 
+// LoggingNamespaceForServer returns the full logging namespace path for the
+// given server ID, i.e. LoggingNamespacePrefix + "/" + serverID.
+func LoggingNamespaceForServer(serverID string) string {
+	return LoggingNamespacePrefix + "/" + serverID
+}
+
+// LoggingNamespaceServerID extracts the server ID embedded in a logging
+// namespace prefix (e.g. "/pelican/logging/abc1234" → "abc1234", true).
+// Returns "", false if prefix is not a direct child of LoggingNamespacePrefix
+// or has an empty server-ID segment.
+func LoggingNamespaceServerID(prefix string) (string, bool) {
+	const loggingParent = LoggingNamespacePrefix + "/"
+	if !strings.HasPrefix(prefix, loggingParent) {
+		return "", false
+	}
+	id := strings.TrimPrefix(prefix, loggingParent)
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
 func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
