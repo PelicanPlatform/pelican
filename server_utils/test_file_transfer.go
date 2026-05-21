@@ -60,8 +60,8 @@ const (
 	DirectorTest   TestType = "director-test" // Director-based object transfer test
 )
 
-const MonitoringBaseNs string = "/pelican/monitoring"   // The base namespace for monitoring objects
-const DirectorTestDir string = "directorTest"           // Subdirectory under MonitoringBaseNs for director test files
+const MonitoringBaseNs string = "/pelican/monitoring" // The base namespace for monitoring objects
+const DirectorTestDir string = "directorTest"         // Subdirectory under MonitoringBaseNs for director test files
 
 const (
 	SelfTestBody     string = "This object was created by the Pelican self-test functionality"

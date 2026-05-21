@@ -19,6 +19,7 @@
 package cache
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,13 +83,13 @@ func createTestFile(t *testing.T, dir, name string) {
 
 func TestCleanupDirectorTestFiles(t *testing.T) {
 	t.Run("nonexistent-dir-is-noop", func(t *testing.T) {
-		err := cleanupDirectorTestFiles(filepath.Join(t.TempDir(), "does-not-exist"))
+		err := cleanupDirectorTestFiles(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"))
 		assert.NoError(t, err)
 	})
 
 	t.Run("empty-dir-is-noop", func(t *testing.T) {
 		dirTestPath := t.TempDir()
-		err := cleanupDirectorTestFiles(dirTestPath)
+		err := cleanupDirectorTestFiles(context.Background(), dirTestPath)
 		assert.NoError(t, err)
 	})
 
@@ -116,7 +117,7 @@ func TestCleanupDirectorTestFiles(t *testing.T) {
 		createTestFile(t, todayDir, "director-test-"+todayStr+"T10:00:00Z.txt")
 		createTestFile(t, todayDir, "director-test-"+todayStr+"T10:00:00Z.txt.cinfo")
 
-		err := cleanupDirectorTestFiles(dirTestPath)
+		err := cleanupDirectorTestFiles(context.Background(), dirTestPath)
 		require.NoError(t, err)
 
 		// Old day directories should be gone
@@ -144,7 +145,7 @@ func TestCleanupDirectorTestFiles(t *testing.T) {
 		createTestFile(t, dirTestPath, "director-test-2025-01-12T10:00:00Z.txt")
 		createTestFile(t, dirTestPath, "director-test-2025-01-12T10:00:00Z.txt.cinfo")
 
-		err := cleanupDirectorTestFiles(dirTestPath)
+		err := cleanupDirectorTestFiles(context.Background(), dirTestPath)
 		require.NoError(t, err)
 
 		entries, err := os.ReadDir(dirTestPath)
@@ -168,7 +169,7 @@ func TestCleanupDirectorTestFiles(t *testing.T) {
 		createTestFile(t, todayDir, "director-test-"+todayStr+"T10:00:00Z.txt")
 		createTestFile(t, todayDir, "director-test-"+todayStr+"T10:00:00Z.txt.cinfo")
 
-		err := cleanupDirectorTestFiles(dirTestPath)
+		err := cleanupDirectorTestFiles(context.Background(), dirTestPath)
 		require.NoError(t, err)
 
 		// All legacy flat files should be removed
@@ -196,7 +197,7 @@ func TestCleanupDirectorTestFiles(t *testing.T) {
 		require.NoError(t, os.Mkdir(otherDir, 0755))
 		createTestFile(t, otherDir, "somefile.txt")
 
-		err := cleanupDirectorTestFiles(dirTestPath)
+		err := cleanupDirectorTestFiles(context.Background(), dirTestPath)
 		require.NoError(t, err)
 
 		// The non-date dir should still exist
@@ -211,7 +212,7 @@ func TestCleanupOldFilesInDir(t *testing.T) {
 		createTestFile(t, dir, "director-test-2025-01-10T10:00:00Z.txt")
 		createTestFile(t, dir, "director-test-2025-01-10T10:00:00Z.txt.cinfo")
 
-		err := cleanupOldFilesInDir(dir, 2)
+		err := cleanupOldFilesInDir(context.Background(), dir, 2)
 		require.NoError(t, err)
 
 		entries, err := os.ReadDir(dir)
@@ -226,7 +227,7 @@ func TestCleanupOldFilesInDir(t *testing.T) {
 		createTestFile(t, dir, "director-test-2025-01-10T10:00:00Z.txt")
 		createTestFile(t, dir, "director-test-2025-01-10T11:00:00Z.txt")
 
-		err := cleanupOldFilesInDir(dir, 2)
+		err := cleanupOldFilesInDir(context.Background(), dir, 2)
 		require.NoError(t, err)
 
 		entries, err := os.ReadDir(dir)
