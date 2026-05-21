@@ -411,8 +411,8 @@ func TestLotsAPI_Reclaim_IgnoresClientTimestamp(t *testing.T) {
 
 	// Send an arbitrary (and clearly-bogus) timestamp claim.
 	rawBody := map[string]any{
-		"reason":         "tampering attempt",
-		"reclaimedAtMs":  int64(0), // year 1970
+		"reason":        "tampering attempt",
+		"reclaimedAtMs": int64(0), // year 1970
 	}
 	before := time.Now().UnixMilli()
 	rec := doRequest(t, eng, http.MethodPost, "/api/v1.0/lots/test-2/reclaim", cookie, rawBody)

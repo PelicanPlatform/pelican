@@ -42,10 +42,10 @@ func TestTopLevelSiblingsExcludesSyntheticRoot(t *testing.T) {
 // top-level sibling set.
 func TestTopLevelSiblingsRespectsTrueAncestors(t *testing.T) {
 	effective := map[string][]Lot{
-		"/":            nil,
-		"/foo":         nil,
-		"/foo/bar":     nil, // child of /foo, not top-level
-		"/baz":         nil,
+		"/":        nil,
+		"/foo":     nil,
+		"/foo/bar": nil, // child of /foo, not top-level
+		"/baz":     nil,
 	}
 	got := topLevelSiblings("/foo", effective)
 	want := []string{"/baz"}
