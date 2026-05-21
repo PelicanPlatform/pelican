@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -40,24 +40,26 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// Test for a director disappearing
+// TestDirectorShutdown verifies that a peer director which was previously
+// known disappears from directorEndpoints after it shuts down (connection
+// refused).
 func TestDirectorShutdown(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	var listDirectorCount atomic.Int32
 	dirAd := &server_structs.DirectorAd{}
 	dirAd.Initialize("fake-director")
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Debugln("Fake director received", req.Method, "for path", req.URL.Path)
 		if req.Method == "GET" && req.URL.Path == "/api/v1.0/director/directors" {
-			newVal := listDirectorCount.Add(1)
-			ads := make([]server_structs.DirectorAd, 0, 1)
-			if newVal == 1 {
-				ads = append(ads, *dirAd)
-			}
-			buf, err := json.Marshal(ads)
+			// Set Expiration dynamically per-response so the entry in directorAds
+			// has a short, finite lifetime. Without this, Initialize above stamps
+			// the ad with the default expiration time (15m).
+			adCopy := *dirAd
+			adCopy.Expiration = time.Now().Add(param.Server_AdLifetime.GetDuration())
+			buf, err := json.Marshal([]server_structs.DirectorAd{adCopy})
 			require.NoError(t, err)
 			w.Header().Add("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -74,11 +76,42 @@ func TestDirectorShutdown(t *testing.T) {
 	require.NoError(t, param.Server_DirectorUrls.Set([]string{ts.URL}))
 	defer ts.Close()
 
-	require.NoError(t, param.Server_AdLifetime.SetString("100ms"))
+	// AdLifetime of 300ms: discovery ticker fires every ~100ms; the
+	// fake-director ad expires after 300ms, giving the test comfortable
+	// margins.
+	require.NoError(t, param.Server_AdLifetime.SetString("300ms"))
 	fed_test_utils.NewFedTest(t, "")
-	time.Sleep(time.Duration(110 * time.Millisecond))
+
+	// Confirm the fake director's ad is visible in directorEndpoints
+	// before simulating its shutdown.
+	require.Eventually(t, func() bool {
+		for _, ad := range server_utils.GetDirectorAds() {
+			if ad.AdvertiseUrl == ts.URL {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 50*time.Millisecond,
+		"fake director should appear in directorEndpoints after initial contact")
+
+	// Close the listener to simulate a real peer shutdown (connection refused).
+	ts.Close()
+
+	// After shutdown, every subsequent discovery attempt for ts.URL will
+	// fail at the transport level.
+	require.Eventually(t, func() bool {
+		for _, ad := range server_utils.GetDirectorAds() {
+			if ad.AdvertiseUrl == ts.URL {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 50*time.Millisecond,
+		"fake director should disappear from directorEndpoints after shutdown")
+
+	// Only the local director's own self-entry should remain.
 	ads := server_utils.GetDirectorAds()
-	assert.Equal(t, 1, len(ads), "Unexpected directors showing up in response: %+v", ads)
+	assert.Equal(t, 1, len(ads), "only local director should remain after peer shutdown, got: %+v", ads)
 }
 
 // Significantly decrease the ad lifetime; ensure forwarding from director and

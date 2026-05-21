@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -117,6 +117,7 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 
 	// For each statically-defined endpoint, query it for all its known directors
 	var allErrors error = nil
+	contacted := make(map[string]bool)
 	for endpoint := range endpointsTemp {
 		var directorUrl *url.URL
 		directorUrl, err = url.Parse(endpoint)
@@ -148,9 +149,14 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 			allErrors = errors.Join(allErrors, err)
 			continue
 		}
+		contacted[endpoint] = true
+		now := time.Now()
 		for _, directorEndpoint := range directorResponse {
 			existingAd := endpointMap[directorEndpoint.AdvertiseUrl]
 			if directorEndpoint.Name == "" {
+				continue
+			}
+			if !directorEndpoint.Expiration.IsZero() && now.After(directorEndpoint.Expiration) {
 				continue
 			}
 			if after := directorEndpoint.After(existingAd); existingAd.Name == "" || after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
@@ -159,17 +165,30 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		}
 	}
 
+	// Ensure every seed we successfully contacted but that no peer
+	// reported is kept in endpointMap as a synthetic entry. A seed may
+	// legitimately omit its own URL from its /directors response
+	// (e.g., it is an older director that still relies on getting its
+	// own ad back from a peer).
+	for endpoint := range contacted {
+		if _, ok := endpointMap[endpoint]; !ok {
+			endpointMap[endpoint] = server_structs.DirectorAd{AdvertiseUrl: endpoint}
+		}
+	}
+
 	// No endpoints were found and the federation director endpoint is nil
 	if len(endpointMap) == 0 && fed.DirectorEndpoint == "" {
 		newError := errors.New("failed to find director endpoint")
 		err = errors.Join(newError, allErrors)
 	} else if len(endpointMap) == 0 { // Fall back to director endpoint
+		err = nil
 		endpoints = []server_structs.DirectorAd{
 			{
 				AdvertiseUrl: fed.DirectorEndpoint,
 			},
 		}
 	} else { // ad discovery succeeded, so use that
+		err = nil
 		endpoints = make([]server_structs.DirectorAd, 0, len(endpointMap))
 		for _, ad := range endpointMap {
 			endpoints = append(endpoints, ad)
