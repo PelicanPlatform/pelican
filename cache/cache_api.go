@@ -296,6 +296,11 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 // token. This mirrors how the cache self-test (xrootd/self_monitor.go generateFileTestScitoken)
 // accesses its own XRootD port using the server's own issuer, which is already trusted by the
 // cache's scitokens configuration.
+//
+// Note: a 200 OK response means xrootd's PFC has accepted the file as a purge candidate, not
+// that the on-disk file has been unlinked. PFC defers physical removal to its periodic purge
+// thread, which is gated by the configured disk-usage thresholds (pfc.diskusage). Under low
+// cache pressure the data and meta blocks may persist for some time after a successful evict.
 func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
 	issuerUrl, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -375,7 +380,7 @@ func LaunchDirectorTestFileCleanup(ctx context.Context) {
 	server_utils.LaunchWatcherMaintenance(ctx,
 		[]string{dirTestPath},
 		"cache director-based health test clean up",
-		time.Hour,
+		time.Minute,
 		func(notifyEvent bool) error {
 			return cleanupDirectorTestFiles(ctx, dirTestPath)
 		},
