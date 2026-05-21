@@ -283,7 +283,8 @@ func handleWebUIAuth(ctx *gin.Context) {
 	}
 
 	// Handle initialization.
-	// If the web UI is not yet initialized, redirect to the initialization page.
+	// If the web UI is not yet initialized and no admin identities
+	// are pre-configured, redirect to the initialization page.
 	if strings.HasPrefix(requestPath, "/initialization") {
 		if shouldSkipActivationFlow() {
 			ctx.Redirect(http.StatusFound, "/view/")
@@ -755,7 +756,9 @@ func waitUntilLogin(ctx context.Context) error {
 
 	if shouldSkipActivationFlow() {
 		// Remove any stale activation file left from a previous run.
-		_ = os.Remove(activationFile)
+		if activationFile != "" {
+			_ = os.Remove(activationFile)
+		}
 		return nil
 	}
 	sigs := make(chan os.Signal, 1)
@@ -770,8 +773,10 @@ func waitUntilLogin(ctx context.Context) error {
 	}
 
 	defer func() {
-		if err := os.Remove(activationFile); err != nil {
-			log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
+		if activationFile != "" {
+			if err := os.Remove(activationFile); err != nil {
+				log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
+			}
 		}
 	}()
 	for {
