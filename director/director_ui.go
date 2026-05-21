@@ -106,43 +106,8 @@ type (
 		IOLoad                 float64                     `json:"ioLoad"`
 		StatusWeight           float64                     `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
 		StatusWeightLastUpdate int64                       `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
-		Namespaces             []NamespaceAdV2Response     `json:"namespaces"`
+		Namespaces             []server_structs.NamespaceAdV2Response     `json:"namespaces"`
 		Version                string                      `json:"version"`
-	}
-
-	// TokenIssuerResponse creates a response struct for TokenIssuer
-	TokenIssuerResponse struct {
-		BasePaths       []string `json:"basePaths"`
-		RestrictedPaths []string `json:"restrictedPaths"`
-		IssuerUrl       string   `json:"issuer"`
-	}
-
-	// TokenGenResponse creates a response struct for TokenGen
-	TokenGenResponse struct {
-		Strategy         server_structs.StrategyType `json:"strategy"`
-		VaultServer      string                      `json:"vaultServer"`
-		MaxScopeDepth    uint                        `json:"maxScopeDepth"`
-		CredentialIssuer string                      `json:"issuer"`
-	}
-
-	// NamespaceAdV2Response creates a response struct for NamespaceAdV2
-	NamespaceAdV2Response struct {
-		Path         string                      `json:"path"`
-		Caps         server_structs.Capabilities `json:"capabilities"`
-		Generation   []TokenGenResponse          `json:"tokenGeneration"`
-		Issuer       []TokenIssuerResponse       `json:"tokenIssuer"`
-		FromTopology bool                        `json:"fromTopology"`
-	}
-
-	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
-	NamespaceAdV2MappedResponse struct {
-		Path         string                      `json:"path"`
-		Caps         server_structs.Capabilities `json:"capabilities"`
-		Generation   []TokenGenResponse          `json:"tokenGeneration"`
-		Issuer       []TokenIssuerResponse       `json:"tokenIssuer"`
-		FromTopology bool                        `json:"fromTopology"`
-		Origins      []string                    `json:"origins"`
-		Caches       []string                    `json:"caches"`
 	}
 
 	statRequest struct {
@@ -200,14 +165,14 @@ func listServers(ctx *gin.Context) {
 }
 
 // Convert NamespaceAdV2 to namespaceResponse
-func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2Response {
-	res := NamespaceAdV2Response{
+func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) server_structs.NamespaceAdV2Response {
+	res := server_structs.NamespaceAdV2Response{
 		Path:         ns.Path,
 		Caps:         ns.Caps,
 		FromTopology: ns.FromTopology,
 	}
 	for _, gen := range ns.Generation {
-		res.Generation = append(res.Generation, TokenGenResponse{
+		res.Generation = append(res.Generation, server_structs.TokenGenResponse{
 			Strategy:         gen.Strategy,
 			VaultServer:      gen.VaultServer,
 			MaxScopeDepth:    gen.MaxScopeDepth,
@@ -215,7 +180,7 @@ func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2Resp
 		})
 	}
 	for _, issuer := range ns.Issuer {
-		res.Issuer = append(res.Issuer, TokenIssuerResponse{
+		res.Issuer = append(res.Issuer, server_structs.TokenIssuerResponse{
 			BasePaths:       issuer.BasePaths,
 			RestrictedPaths: issuer.RestrictedPaths,
 			IssuerUrl:       issuer.IssuerUrl.String(),
@@ -225,9 +190,9 @@ func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2Resp
 }
 
 // namespaceAdV2ToMappedResponse converts a NamespaceAdV2 to a NamespaceAdV2MappedResponse
-func namespaceAdV2ToMappedResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2MappedResponse {
+func namespaceAdV2ToMappedResponse(ns *server_structs.NamespaceAdV2) server_structs.NamespaceAdV2MappedResponse {
 	nsRes := namespaceAdV2ToResponse(ns)
-	return NamespaceAdV2MappedResponse{
+	return server_structs.NamespaceAdV2MappedResponse{
 		Path:       nsRes.Path,
 		Caps:       nsRes.Caps,
 		Generation: nsRes.Generation,
@@ -365,7 +330,7 @@ func listServerNamespaces(ctx *gin.Context) {
 		})
 		return
 	}
-	var nsRes []NamespaceAdV2Response
+	var nsRes []server_structs.NamespaceAdV2Response
 	for _, n := range server.NamespaceAds {
 		nsRes = append(nsRes, namespaceAdV2ToResponse(&n))
 	}
@@ -373,9 +338,9 @@ func listServerNamespaces(ctx *gin.Context) {
 }
 
 // Get list of all namespaces as a response
-func listNamespaceResponses() []NamespaceAdV2MappedResponse {
+func listNamespaceResponses() []server_structs.NamespaceAdV2MappedResponse {
 
-	namespaceMap := make(map[string]NamespaceAdV2MappedResponse)
+	namespaceMap := make(map[string]server_structs.NamespaceAdV2MappedResponse)
 
 	for _, a := range listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
 		s := a.ServerAd

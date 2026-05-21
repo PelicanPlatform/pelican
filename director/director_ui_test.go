@@ -233,12 +233,12 @@ func TestGetServer(t *testing.T) {
 	require.True(t, serverAds.Has(mockOriginServerAd.URL.String()))
 	require.True(t, serverAds.Has(mockCacheServerAd.URL.String()))
 
-	expectedListOriginResNss := []NamespaceAdV2Response{}
+	expectedListOriginResNss := []server_structs.NamespaceAdV2Response{}
 	for _, ns := range mockOriginNamespace {
 		expectedListOriginResNss = append(expectedListOriginResNss, namespaceAdV2ToResponse(&ns))
 	}
 
-	expectedListCacheResNss := []NamespaceAdV2Response{}
+	expectedListCacheResNss := []server_structs.NamespaceAdV2Response{}
 	for _, ns := range mockCacheNamespace {
 		expectedListCacheResNss = append(expectedListCacheResNss, namespaceAdV2ToResponse(&ns))
 	}
@@ -325,7 +325,7 @@ func TestGetServer(t *testing.T) {
 		require.Equal(t, 200, w.Code)
 
 		// Check the data
-		var got []NamespaceAdV2Response
+		var got []server_structs.NamespaceAdV2Response
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		require.NoError(t, err)
 		require.Equal(t, len(mockOriginNamespace), len(got))
@@ -393,13 +393,13 @@ func TestGetNamespaces(t *testing.T) {
 		require.Equal(t, 200, w.Code)
 
 		// Check the data
-		var got []NamespaceAdV2MappedResponse
+		var got []server_structs.NamespaceAdV2MappedResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		require.NoError(t, err)
 		require.Equal(t, len(mockOriginNamespace)+len(mockCacheNamespace), len(got))
 
 		// Create the list of expected responses we should see by adding origin/cache names
-		var expected []NamespaceAdV2MappedResponse
+		var expected []server_structs.NamespaceAdV2MappedResponse
 		for _, ns := range mockOriginNamespace {
 			nsRes := namespaceAdV2ToMappedResponse(&ns)
 			nsRes.Origins = append(nsRes.Origins, mockOriginServerAd.Name)
@@ -443,13 +443,13 @@ func TestGetNamespaces(t *testing.T) {
 		require.Equal(t, 200, w.Code)
 
 		// Check the data
-		var got []NamespaceAdV2MappedResponse
+		var got []server_structs.NamespaceAdV2MappedResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		require.NoError(t, err)
 		require.Equal(t, len(mockNamespaceSet0)+len(mockNamespaceSet1), len(got))
 
 		// Create the list of expected responses we should see by adding origin/cache names
-		expected := make(map[string]NamespaceAdV2MappedResponse)
+		expected := make(map[string]server_structs.NamespaceAdV2MappedResponse)
 		for _, ns := range append(mockNamespaceSet1, mockNamespaceSet0...) {
 			nsRes := namespaceAdV2ToMappedResponse(&ns)
 			nsRes.Origins = append(nsRes.Origins, mockOriginServerAd.Name)
