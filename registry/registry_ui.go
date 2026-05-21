@@ -887,10 +887,7 @@ func deleteNamespace(ctx *gin.Context) {
 
 func listServersHandler(ctx *gin.Context) {
 	nameQuery := ctx.Query("name")
-	var (
-		servers []server_structs.ServerRegistration
-		err     error
-	)
+	var servers []server_structs.ServerRegistration
 	if nameQuery != "" {
 		server, lookupErr := getServerByName(nameQuery)
 		if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
@@ -904,14 +901,14 @@ func listServersHandler(ctx *gin.Context) {
 			servers = []server_structs.ServerRegistration{*server}
 		}
 	} else {
-		servers, err = listServers()
-	}
-	if err != nil {
-		log.Error(err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to list servers"})
-		return
+		var err error
+		if servers, err = listServers(); err != nil {
+			log.Error(err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to list servers"})
+			return
+		}
 	}
 	ctx.JSON(http.StatusOK, servers)
 }

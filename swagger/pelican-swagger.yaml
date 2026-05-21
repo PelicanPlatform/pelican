@@ -3140,6 +3140,12 @@ paths:
       description: Public API to get all registered servers (origins and caches) in the registry
       produces:
         - application/json
+      parameters:
+        - name: name
+          in: query
+          description: Filter results to the single server with this name. Returns an empty array if no match is found.
+          required: false
+          type: string
       responses:
         "200":
           description: OK
