@@ -22,13 +22,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
+	pelican_url "github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -245,4 +251,224 @@ func TestGetIssuer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mockDirectorNsEndpoint starts a test HTTP server that serves the Director UI
+// namespaces endpoint (/api/v1.0/director_ui/namespaces) with the provided
+// namespace ads. It injects the server URL directly into the federation config
+// so that getNsAd can reach it, and resets federation state on cleanup.
+func mockDirectorNsEndpoint(t *testing.T, nsAds []server_structs.NamespaceAdV2Response) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1.0/director_ui/namespaces" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(nsAds))
+	}))
+	t.Cleanup(func() {
+		server.Close()
+		config.ResetFederationForTest()
+	})
+	config.ResetFederationForTest()
+	config.SetFederation(pelican_url.FederationDiscovery{
+		DirectorEndpoint:  server.URL,
+		DiscoveryEndpoint: server.URL,
+	})
+	return server.URL
+}
+
+func TestGetNsAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(config.ResetFederationForTest)
+
+	// A minimal namespace ad used across several cases.
+	readNs := server_structs.NamespaceAdV2Response{
+		Path: "/test/prefix",
+		Caps: server_structs.Capabilities{Reads: true, Writes: false},
+	}
+	writeNs := server_structs.NamespaceAdV2Response{
+		Path: "/write/prefix",
+		Caps: server_structs.Capabilities{Reads: true, Writes: true},
+	}
+	publicNs := server_structs.NamespaceAdV2Response{
+		Path: "/public/prefix",
+		Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
+	}
+
+	testCases := []struct {
+		name        string
+		nsAds       []server_structs.NamespaceAdV2Response
+		namespace   string // what the DirectorResponse reports as the namespace
+		expectError bool
+		expectCaps  server_structs.Capabilities
+		expectPath  string
+	}{
+		{
+			name:        "matching namespace found",
+			nsAds:       []server_structs.NamespaceAdV2Response{readNs, writeNs},
+			namespace:   "/test/prefix",
+			expectError: false,
+			expectCaps:  readNs.Caps,
+			expectPath:  readNs.Path,
+		},
+		{
+			name:        "matching namespace with trailing slash normalised",
+			nsAds:       []server_structs.NamespaceAdV2Response{readNs},
+			namespace:   "/test/prefix/",
+			expectError: false,
+			expectCaps:  readNs.Caps,
+			expectPath:  readNs.Path,
+		},
+		{
+			name:        "write-capable namespace found",
+			nsAds:       []server_structs.NamespaceAdV2Response{writeNs},
+			namespace:   "/write/prefix",
+			expectError: false,
+			expectCaps:  writeNs.Caps,
+			expectPath:  writeNs.Path,
+		},
+		{
+			name:        "public-read namespace found",
+			nsAds:       []server_structs.NamespaceAdV2Response{publicNs},
+			namespace:   "/public/prefix",
+			expectError: false,
+			expectCaps:  publicNs.Caps,
+			expectPath:  publicNs.Path,
+		},
+		{
+			name:        "namespace not in Director response",
+			nsAds:       []server_structs.NamespaceAdV2Response{readNs},
+			namespace:   "/does/not/exist",
+			expectError: true,
+		},
+		{
+			name:        "empty namespace list",
+			nsAds:       []server_structs.NamespaceAdV2Response{},
+			namespace:   "/test/prefix",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDirectorNsEndpoint(t, tc.nsAds)
+
+			directorInfo := server_structs.DirectorResponse{}
+			directorInfo.XPelNsHdr.Namespace = tc.namespace
+
+			got, err := getNsAd(directorInfo)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectPath, got.Path)
+				assert.Equal(t, tc.expectCaps, got.Caps)
+			}
+		})
+	}
+}
+
+func TestGetNsAdHTTPErrors(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("director returns non-200", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		t.Cleanup(func() {
+			server.Close()
+			config.ResetFederationForTest()
+		})
+		config.ResetFederationForTest()
+		config.SetFederation(pelican_url.FederationDiscovery{
+			DirectorEndpoint:  server.URL,
+			DiscoveryEndpoint: server.URL,
+		})
+
+		directorInfo := server_structs.DirectorResponse{}
+		directorInfo.XPelNsHdr.Namespace = "/test/prefix"
+
+		_, err := getNsAd(directorInfo)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "500")
+	})
+
+	t.Run("director returns invalid JSON", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("not valid json"))
+		}))
+		t.Cleanup(func() {
+			server.Close()
+			config.ResetFederationForTest()
+		})
+		config.ResetFederationForTest()
+		config.SetFederation(pelican_url.FederationDiscovery{
+			DirectorEndpoint:  server.URL,
+			DiscoveryEndpoint: server.URL,
+		})
+
+		directorInfo := server_structs.DirectorResponse{}
+		directorInfo.XPelNsHdr.Namespace = "/test/prefix"
+
+		_, err := getNsAd(directorInfo)
+		require.Error(t, err)
+	})
+
+	t.Run("director unreachable", func(t *testing.T) {
+		t.Cleanup(config.ResetFederationForTest)
+		config.ResetFederationForTest()
+		config.SetFederation(pelican_url.FederationDiscovery{
+			DirectorEndpoint:  "http://127.0.0.1:1",
+			DiscoveryEndpoint: "http://127.0.0.1:1",
+		})
+
+		directorInfo := server_structs.DirectorResponse{}
+		directorInfo.XPelNsHdr.Namespace = "/test/prefix"
+
+		_, err := getNsAd(directorInfo)
+		require.Error(t, err)
+	})
+}
+
+func TestGetIssuerErrorMessages(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	jwksStr, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+	jwks, err := jwk.ParseString(jwksStr)
+	require.NoError(t, err)
+
+	mockIssuerUrl := test_utils.MockIssuer(t, &jwks)
+	mockIssuer, err := url.Parse(mockIssuerUrl)
+	require.NoError(t, err)
+
+	// A KID set that will never match the mock issuer's keys.
+	nonMatchingKidSet := map[string]struct{}{"notarealkid": {}}
+
+	t.Run("issuers found but none match key mentions issuers checked", func(t *testing.T) {
+		directorInfo := server_structs.DirectorResponse{}
+		directorInfo.XPelAuthHdr.Issuers = []*url.URL{mockIssuer}
+
+		_, err := getIssuer(directorInfo, nonMatchingKidSet)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), mockIssuerUrl,
+			"error should name the issuer(s) that were checked")
+		assert.True(t,
+			strings.Contains(err.Error(), "match") || strings.Contains(err.Error(), "signing key"),
+			"error should indicate the key-mismatch nature of the failure")
+	})
+
+	t.Run("no issuers in director response mentions namespace", func(t *testing.T) {
+		directorInfo := server_structs.DirectorResponse{}
+		directorInfo.XPelNsHdr.Namespace = "/my/namespace"
+		directorInfo.XPelAuthHdr.Issuers = []*url.URL{}
+
+		_, err := getIssuer(directorInfo, nonMatchingKidSet)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "/my/namespace")
+	})
 }
