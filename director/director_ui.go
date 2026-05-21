@@ -88,26 +88,26 @@ type (
 		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
 		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
 		// accessing protected objects and URL for public objects.
-		AuthURL                string                      `json:"authUrl"`
-		BrokerURL              string                      `json:"brokerUrl"`
-		URL                    string                      `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL                 string                      `json:"webUrl"` // This is server's Web interface and API
-		Type                   string                      `json:"type"`
-		Coordinate             server_structs.Coordinate   `json:"coordinate"`
-		Latitude               float64                     `json:"latitude"`
-		Longitude              float64                     `json:"longitude"`
-		Caps                   server_structs.Capabilities `json:"capabilities"`
-		Filtered               bool                        `json:"filtered"`
-		FilteredType           string                      `json:"filteredType"`
-		Downtimes              []server_structs.Downtime   `json:"downtimes"`
-		FromTopology           bool                        `json:"fromTopology"`
-		HealthStatus           HealthTestStatus            `json:"healthStatus"`
-		ServerStatus           string                      `json:"serverStatus"` // see comment in listServerResponse
-		IOLoad                 float64                     `json:"ioLoad"`
-		StatusWeight           float64                     `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
-		StatusWeightLastUpdate int64                       `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
-		Namespaces             []server_structs.NamespaceAdV2Response     `json:"namespaces"`
-		Version                string                      `json:"version"`
+		AuthURL                string                                 `json:"authUrl"`
+		BrokerURL              string                                 `json:"brokerUrl"`
+		URL                    string                                 `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL                 string                                 `json:"webUrl"` // This is server's Web interface and API
+		Type                   string                                 `json:"type"`
+		Coordinate             server_structs.Coordinate              `json:"coordinate"`
+		Latitude               float64                                `json:"latitude"`
+		Longitude              float64                                `json:"longitude"`
+		Caps                   server_structs.Capabilities            `json:"capabilities"`
+		Filtered               bool                                   `json:"filtered"`
+		FilteredType           string                                 `json:"filteredType"`
+		Downtimes              []server_structs.Downtime              `json:"downtimes"`
+		FromTopology           bool                                   `json:"fromTopology"`
+		HealthStatus           HealthTestStatus                       `json:"healthStatus"`
+		ServerStatus           string                                 `json:"serverStatus"` // see comment in listServerResponse
+		IOLoad                 float64                                `json:"ioLoad"`
+		StatusWeight           float64                                `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64                                  `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Namespaces             []server_structs.NamespaceAdV2Response `json:"namespaces"`
+		Version                string                                 `json:"version"`
 	}
 
 	statRequest struct {
