@@ -361,7 +361,7 @@ func TestParse(t *testing.T) {
 			dOpts:     []DiscoveryOption{},
 			pOpts:     []ParseOption{},
 			pUrl:      &PelicanURL{Scheme: "pelican", RawScheme: "pelican", Host: "bad-director.com", Path: "/foo/bar"},
-			errString: "pelican URL 'pelican:///foo/bar' is invalid because it has no host",
+			errString: "pelican URL 'pelican:///foo/bar' is invalid because it has no host; did you mean 'pelican://foo/bar'?",
 		},
 
 		// OSDF/Stash scheme tests. Most of the underlying machinery is shared, so only testing the things that are more likely
