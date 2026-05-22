@@ -66,6 +66,11 @@ const (
 	Authz  TokenSource = "AuthzQueryParameter" // "authz" query parameter
 )
 
+// ClockSkewLeeway is the tolerance applied to JWT temporal claim validation
+// (iat, nbf, exp).
+// A value of 60s matches the WLCG Common JWT Profile recommendation.
+const ClockSkewLeeway = 60 * time.Second
+
 const (
 	FederationIssuer TokenIssuer = "FederationIssuer"
 	LocalIssuer      TokenIssuer = "LocalIssuer"
@@ -324,6 +329,48 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	ctx.Set("AuthMethod", "registered-server-token")
 
 	return nil
+}
+
+// UnsafeParseClaims parses a JWT string without verifying the signature
+// or validating time-based claims (iat, nbf, exp).
+// The returned token carries no security guarantees and must never be used
+// for authorization decisions.
+func UnsafeParseClaims(tokenStr string) (jwt.Token, error) {
+	return jwt.Parse([]byte(tokenStr), jwt.WithVerify(false), jwt.WithValidate(false))
+}
+
+// VerifyWithKeyset verifies tokenStr's signature against jwks
+// and then validates its claims with ClockSkewLeeway applied.
+//
+// Additional jwt.ValidateOption values
+// (e.g., scope validators, jwt.WithAudience, jwt.WithClaimValue)
+// can be passed via opts;
+// they are evaluated in the same jwt.Validate call
+// as the skew-tolerant time checks
+// so that every claim check benefits from ClockSkewLeeway.
+//
+// The skew option is appended after any caller-supplied opts;
+// callers cannot override it with WithAcceptableSkew(0).
+func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
+	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
+	if err != nil {
+		return nil, err
+	}
+	// Build the final option slice with a defensive copy
+	// to avoid mutating the caller's backing array.
+	// WithResetValidators(false) and WithAcceptableSkew are appended last
+	// so that callers
+	// cannot disable the default temporal validators or shrink the skew window.
+	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+2)
+	validateOpts = append(validateOpts, opts...)
+	validateOpts = append(validateOpts,
+		jwt.WithResetValidators(false),
+		jwt.WithAcceptableSkew(ClockSkewLeeway),
+	)
+	if err := jwt.Validate(tok, validateOpts...); err != nil {
+		return nil, err
+	}
+	return tok, nil
 }
 
 // Check token authentication with token obtained from authOption.Sources, found the first

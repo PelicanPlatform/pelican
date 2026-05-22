@@ -20,12 +20,19 @@ package token
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -415,4 +422,181 @@ func TestGetAuthzEscaped(t *testing.T) {
 	ctx = &gin.Context{Request: req}
 	escapedToken = GetAuthzEscaped(ctx)
 	assert.Equal(t, escapedToken, "tokenstring")
+}
+
+// makeTestKeyset generates a fresh ECDSA P-256 key pair for use in tests.
+// It returns the private key (for signing) and a JWKS containing only the
+// public key (for verification).
+func makeTestKeyset(t *testing.T) (jwk.Key, jwk.Set) {
+	t.Helper()
+	privRaw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	privKey, err := jwk.FromRaw(privRaw)
+	require.NoError(t, err)
+	require.NoError(t, privKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, privKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	pubKey, err := privKey.PublicKey()
+	require.NoError(t, err)
+	pubSet := jwk.NewSet()
+	require.NoError(t, pubSet.AddKey(pubKey))
+	return privKey, pubSet
+}
+
+// makeSignedToken creates a signed JWT with the given iat, nbf, and exp times.
+func makeSignedToken(t *testing.T, privKey jwk.Key, iat, nbf, exp time.Time) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().
+		IssuedAt(iat).
+		NotBefore(nbf).
+		Expiration(exp).
+		Subject("test-subject").
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// TestUnsafeParseClaims verifies that UnsafeParseClaims extracts claims
+// from tokens whose time claims would normally fail validation.
+func TestUnsafeParseClaims(t *testing.T) {
+	privKey, _ := makeTestKeyset(t)
+	now := time.Now()
+
+	// Token with iat/nbf two hours in the future and exp two hours in the past.
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(2*time.Hour),
+		now.Add(2*time.Hour),
+		now.Add(-2*time.Hour),
+	)
+
+	tok, err := UnsafeParseClaims(tokenStr)
+	require.NoError(t, err, "UnsafeParseClaims should succeed regardless of time claims")
+	assert.Equal(t, "test-subject", tok.Subject())
+}
+
+// TestVerifyWithKeyset_IatNbfWithinLeeway confirms that a token
+// whose iat and nbf are in the future but within ClockSkewLeeway is accepted.
+func TestVerifyWithKeyset_IatNbfWithinLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.NoError(t, err, "token with iat/nbf within leeway should be accepted")
+}
+
+// TestVerifyWithKeyset_IatNbfExceedsLeeway confirms that a token
+// whose iat and nbf exceed ClockSkewLeeway is rejected.
+func TestVerifyWithKeyset_IatNbfExceedsLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.Error(t, err, "token with iat/nbf exceeding leeway should be rejected")
+}
+
+// TestVerifyWithKeyset_ExpWithinLeeway confirms that a token
+// whose exp is in the past but within ClockSkewLeeway is accepted.
+func TestVerifyWithKeyset_ExpWithinLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-skew),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.NoError(t, err, "token expired within leeway should be accepted")
+}
+
+// TestVerifyWithKeyset_ExpExceedsLeeway confirms that a token
+// whose exp exceeds ClockSkewLeeway in the past is rejected.
+func TestVerifyWithKeyset_ExpExceedsLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-skew),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.Error(t, err, "token expired beyond leeway should be rejected")
+}
+
+// TestVerifyWithKeyset_CallerSkewCannotShrinkLeeway confirms that
+// a caller passing WithAcceptableSkew(0) does not override ClockSkewLeeway —
+// a token within ClockSkewLeeway must still be accepted.
+func TestVerifyWithKeyset_CallerSkewCannotShrinkLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet, jwt.WithAcceptableSkew(0))
+	assert.NoError(t, err, "caller WithAcceptableSkew(0) must not reduce the effective leeway below ClockSkewLeeway")
+}
+
+// TestVerifyWithKeyset_CallerSkewCannotExpandLeeway confirms that
+// a caller passing a large WithAcceptableSkew does not suppress a real rejection —
+// a token beyond ClockSkewLeeway must still be rejected.
+func TestVerifyWithKeyset_CallerSkewCannotExpandLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet, jwt.WithAcceptableSkew(2*time.Hour))
+	assert.Error(t, err, "caller WithAcceptableSkew(2h) must not expand the effective leeway beyond ClockSkewLeeway")
+}
+
+// TestVerifyWithKeyset_WrongKeyRejected confirms
+// that a token signed with a different key is rejected,
+// verifying that the signature check is active.
+func TestVerifyWithKeyset_WrongKeyRejected(t *testing.T) {
+	_, pubSet := makeTestKeyset(t)
+	wrongPrivKey, _ := makeTestKeyset(t) // different key pair
+
+	now := time.Now()
+	tokenStr := makeSignedToken(t, wrongPrivKey, now, now, now.Add(10*time.Minute))
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.Error(t, err, "token signed with wrong key should be rejected")
 }
