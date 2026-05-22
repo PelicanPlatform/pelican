@@ -16,6 +16,52 @@ Pelican included metrics from built-in [gin](https://gin-gonic.com/) web server,
 
 Pelican also has a set of built-in metrics to monitor Pelican server's status, listed below.
 
+## Scrape Pelican Metrics with an External Prometheus
+
+If you operate a separate Prometheus instance and want it to scrape metrics from one or more Pelican services (for example, to collect federation-wide metrics into a central monitoring stack), you can point that Prometheus at the Pelican `/metrics` endpoint. Because `/metrics` is authenticated by default, you must issue a Pelican API key for the scraping job and configure Prometheus to send it as a bearer credential.
+
+### Generate an API key
+
+Use `pelican apikey generate` on the Pelican server you want to scrape. The key must include the `monitoring.scrape` scope, which grants access to the `/metrics` endpoint. (The separate `monitoring.query` scope is only needed when issuing PromQL queries against `/api/v1.0/prometheus`; it does not grant access to `/metrics`.)
+
+```bash copy
+pelican apikey generate \
+  --scopes "monitoring.scrape" \
+  --expiration "2038-01-19T03:14:07Z" \
+  --server https://<server-web-url>
+```
+
+* `--scopes`: must include `monitoring.scrape` for scraping `/metrics`. To allow the same key to also run PromQL queries, use `--scopes "monitoring.scrape,monitoring.query"`.
+* `--expiration`: RFC3339 timestamp at which the key stops being valid.
+* `--server`: must match the Pelican server's `Server.ExternalWebUrl`. When that value is not set explicitly, it falls back to `https://<Server.Hostname>[:<WebPort>]`, with the default `:443` port stripped. If the server is reachable by multiple hostnames (for example, both an A record and a CNAME), use the hostname the server is actually configured with; a mismatch will be rejected.
+
+The command prints the API key to standard output. Save it to a file that the scraping Prometheus instance can read (for example, `/etc/prometheus/secrets/pelican-apikey`) and restrict the file's permissions; treat it as a credential.
+
+> **Note**: An API key is validated against the database of the server that issued it. If the configured hostname is a CNAME that may fail over to a different deployment, the key will not be accepted by the failover target. Re-issue the key against the failover server, or generate it on each backing deployment ahead of time.
+
+### Configure the scrape job
+
+Add a job similar to the following to your Prometheus configuration:
+
+```yaml filename="prometheus.yml"
+scrape_configs:
+  - job_name: pelican
+    metrics_path: /metrics
+    scheme: https
+    static_configs:
+      - targets: ['<server-hostname>:<server-web-port>']
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/pelican-apikey
+```
+
+* `metrics_path` is `/metrics`, which is also the Prometheus default.
+* `scheme` must be `https`; Pelican does not serve metrics over plain HTTP.
+* `targets` should be the same `host[:port]` you used for `--server` (without the `https://` scheme). For a server reachable on the default HTTPS port, the `:443` suffix can be omitted.
+* `authorization.credentials_file` should point to the file containing the API key value, with no `Bearer ` prefix or trailing newline. To inline the secret instead of reading it from a file, use `credentials: <api-key>` in place of `credentials_file`. (Older Prometheus syntax exposes the equivalent `bearer_token` / `bearer_token_file` fields; the `authorization` block is the current preferred form.)
+
+After reloading Prometheus, the new target should appear as `UP` on the Prometheus `/targets` page. If the target instead reports a `403`, double-check that the API key was issued with the `monitoring.scrape` scope and that the `--server` value used when generating the key matched the Pelican server's `Server.ExternalWebUrl`.
+
 ### Counter Metrics
 
 Many metrics in this documentation are **counters** (typically identified by names ending in `_total` or `_count`). Counter metrics are monotonically increasing values that accumulate over time. Important notes about counters:
