@@ -29,7 +29,6 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -196,12 +195,12 @@ func nsAdsAuthzEqual(old, new []server_structs.NamespaceAdV2) bool {
 	return true
 }
 
-func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
-	if token == "" {
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+	if tokenStr == "" {
 		return
 	}
 
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		err = errors.Wrap(err, "failed to parse incoming JWT when authorizing request")
 		return
@@ -235,14 +234,9 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 		}
 		return
 	}
-	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(item.set))
+	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
 	if err != nil {
-		return
-	}
-
-	err = jwt.Validate(tok)
-	if err != nil {
-		err = errors.Wrap(err, "unable to get resource scopes because validation failed")
+		err = errors.Wrap(err, "unable to get resource scopes because verification failed")
 		return
 	}
 
