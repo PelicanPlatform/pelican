@@ -317,16 +317,23 @@ func UnsafeParseClaims(tokenStr string) (jwt.Token, error) {
 // VerifyWithKeysetStrict verifies tokenStr's signature against jwks
 // and then validates its claims with no clock-skew leeway.
 //
-// WithResetValidators(false) is appended after any caller-supplied opts
-// so that callers cannot disable the default temporal validators.
+// The following options are appended after any caller-supplied opts
+// so that callers cannot weaken the strict temporal validation:
+//   - WithResetValidators(false): callers cannot disable the default validators
+//   - WithClock(jwt.ClockFunc(time.Now)): callers cannot shift the clock
+//   - WithAcceptableSkew(0): callers cannot add skew tolerance
 func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to verify token signature")
 	}
-	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+1)
+	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+3)
 	validateOpts = append(validateOpts, opts...)
-	validateOpts = append(validateOpts, jwt.WithResetValidators(false))
+	validateOpts = append(validateOpts,
+		jwt.WithResetValidators(false),
+		jwt.WithClock(jwt.ClockFunc(time.Now)),
+		jwt.WithAcceptableSkew(0),
+	)
 	if err := jwt.Validate(tok, validateOpts...); err != nil {
 		return nil, errors.Wrap(err, "failed to validate token claims")
 	}
@@ -336,8 +343,11 @@ func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateO
 // VerifyWithKeyset verifies tokenStr's signature against jwks
 // and then validates its claims with ClockSkewLeeway applied.
 //
-// The skew option is appended after any caller-supplied opts
-// so that callers cannot override it with WithAcceptableSkew(0).
+// The following options are appended after any caller-supplied opts
+// so that callers cannot weaken the intended leeway contract:
+//   - WithResetValidators(false): callers cannot disable the default validators
+//   - WithClock(jwt.ClockFunc(time.Now)): callers cannot shift the clock
+//   - WithAcceptableSkew(ClockSkewLeeway): callers cannot shrink or expand the window
 func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {
@@ -345,13 +355,11 @@ func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption)
 	}
 	// Build the final option slice with a defensive copy
 	// to avoid mutating the caller's backing array.
-	// WithResetValidators(false) and WithAcceptableSkew are appended last
-	// so that callers
-	// cannot disable the default temporal validators or shrink the skew window.
-	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+2)
+	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+3)
 	validateOpts = append(validateOpts, opts...)
 	validateOpts = append(validateOpts,
 		jwt.WithResetValidators(false),
+		jwt.WithClock(jwt.ClockFunc(time.Now)),
 		jwt.WithAcceptableSkew(ClockSkewLeeway),
 	)
 	if err := jwt.Validate(tok, validateOpts...); err != nil {
