@@ -37,6 +37,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	pelican_url "github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -458,6 +461,23 @@ func makeSignedToken(t *testing.T, privKey jwk.Key, iat, nbf, exp time.Time) str
 	return string(signed)
 }
 
+// makeSignedTokenWithIssuer creates a signed JWT with the given iat, nbf, exp times,
+// and an explicit issuer.
+func makeSignedTokenWithIssuer(t *testing.T, privKey jwk.Key, iat, nbf, exp time.Time, issuer string) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().
+		IssuedAt(iat).
+		NotBefore(nbf).
+		Expiration(exp).
+		Subject("test-subject").
+		Issuer(issuer).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
 // TestUnsafeParseClaims verifies that UnsafeParseClaims extracts claims
 // from tokens whose time claims would normally fail validation.
 func TestUnsafeParseClaims(t *testing.T) {
@@ -599,4 +619,107 @@ func TestVerifyWithKeyset_WrongKeyRejected(t *testing.T) {
 
 	_, err := VerifyWithKeyset(tokenStr, pubSet)
 	assert.Error(t, err, "token signed with wrong key should be rejected")
+}
+
+// TestVerify_AcceptsSkewedLocalToken verifies that Verify accepts a token
+// whose iat and nbf are slightly in the future (within ClockSkewLeeway)
+// when the LocalIssuer check is used.
+// Tokens from a remote issuer whose clock is up to ClockSkewLeeway ahead
+// must not be rejected by the local server.
+func TestVerify_AcceptsSkewedLocalToken(t *testing.T) {
+	// Set up an isolated config state.
+	t.Cleanup(func() { config.ResetConfig() })
+	config.ResetConfig()
+
+	issuerURL := "https://issuer.example.com:8443"
+	kDir := t.TempDir()
+
+	require.NoError(t, param.Server_ExternalWebUrl.Set(issuerURL))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+
+	// Generate a real key in kDir so GetIssuerPublicJWKS can read it.
+	privKey, err := config.GeneratePEM(kDir)
+	require.NoError(t, err)
+
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // iat/nbf halfway into the future — within tolerance
+
+	tokenStr := makeSignedTokenWithIssuer(t, privKey,
+		now.Add(skew), now.Add(skew), now.Add(10*time.Minute),
+		issuerURL,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, "/test", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	_, ok, verifyErr := Verify(c, AuthOption{
+		Sources: []TokenSource{Header},
+		Issuers: []TokenIssuer{LocalIssuer},
+	})
+	assert.NoError(t, verifyErr, "Verify should not return an error for a token whose iat/nbf are within ClockSkewLeeway")
+	assert.True(t, ok, "Verify should accept a token whose iat/nbf are within ClockSkewLeeway")
+}
+
+// TestVerify_AcceptsSkewedRegisteredServerToken confirms
+// that Verify accepts a registered-server token
+// whose iat and nbf are slightly in the future (within ClockSkewLeeway)
+// when the RegisteredServer check is used.
+func TestVerify_AcceptsSkewedRegisteredServerToken(t *testing.T) {
+	t.Cleanup(func() {
+		// Clear the resolver so other tests are not affected.
+		RegisterServerJWKSResolver(nil)
+		config.ResetConfig()
+		config.ResetFederationForTest()
+	})
+	config.ResetConfig()
+	config.ResetFederationForTest()
+
+	registryURL := "https://registry.example.com:9999"
+	privKey, pubSet := makeTestKeyset(t)
+
+	// Register a JWKS resolver that returns our test public key for any server ID.
+	RegisterServerJWKSResolver(func(_ *gin.Context, _ string) (jwk.Set, error) {
+		return pubSet, nil
+	})
+
+	// Configure the federation so checkRegisteredServer can resolve the registry host.
+	config.SetFederation(pelican_url.FederationDiscovery{
+		RegistryEndpoint: registryURL,
+	})
+
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	// Build a token whose audience is the registry host:port.
+	tok, err := jwt.NewBuilder().
+		IssuedAt(now.Add(skew)).
+		NotBefore(now.Add(skew)).
+		Expiration(now.Add(10 * time.Minute)).
+		Subject("test-server").
+		Audience([]string{"registry.example.com:9999"}).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	tokenStr := string(signed)
+
+	req, err := http.NewRequest(http.MethodGet, "/test", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	_, ok, verifyErr := Verify(c, AuthOption{
+		Sources: []TokenSource{Header},
+		Issuers: []TokenIssuer{RegisteredServer},
+	})
+	assert.NoError(t, verifyErr, "Verify should not return an error for a token whose iat/nbf are within ClockSkewLeeway")
+	assert.True(t, ok, "Verify should accept a registered-server token whose iat/nbf are within ClockSkewLeeway")
 }

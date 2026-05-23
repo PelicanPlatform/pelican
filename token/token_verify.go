@@ -132,7 +132,7 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		fedURL = dirURL
 	}
 
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	token, err := UnsafeParseClaims(strToken)
 	if err != nil {
 		return err
 	}
@@ -160,15 +160,10 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return errors.Wrap(err, "Failed to get federation's public JWKS")
 	}
 
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
-
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by federation's key")
-	}
-
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
-	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
+	parsed, err := VerifyWithKeyset(strToken, jwks, jwt.WithValidator(scopeValidator))
+	if err != nil {
+		return errors.Wrap(err, "Failed to verify federation JWT signature or claims")
 	}
 
 	c.Set("User", parsed.Subject())
@@ -194,7 +189,7 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 // The expected issuer comes from config.GetLocalIssuerUrl() which accounts
 // for the co-located origin+director case.
 func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	token, err := UnsafeParseClaims(strToken)
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
 	}
@@ -215,15 +210,10 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 		return errors.Wrap(err, "Failed to load issuer server's public key")
 	}
 
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
-
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
-	}
-
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
-	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
+	parsed, err := VerifyWithKeyset(strToken, jwks, jwt.WithValidator(scopeValidator))
+	if err != nil {
+		return errors.Wrap(err, "Failed to verify local issuer JWT signature or claims")
 	}
 
 	c.Set("User", parsed.Subject())
@@ -248,8 +238,8 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 // Verify a token against a registered server's public key
 // The token's subject should identify the server (i.e. server id)
 func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
-	// First parse token without verification to extract claims
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	// Parse without verification to extract claims for keyset lookup.
+	token, err := UnsafeParseClaims(strToken)
 	if err != nil {
 		return errors.Wrap(err, "invalid JWT")
 	}
@@ -262,7 +252,7 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	// Expose subject for downstream handlers (e.g., ownership checks)
 	ctx.Set("TokenSubject", subject)
 
-	// Look up the server's public key set and metadata based on the the server id in the token subject
+	// Look up the server's public key set based on the server id in the token subject.
 	jwks, resolved, err := resolveRegisteredServerJWKS(ctx, subject)
 	if err != nil {
 		return errors.Wrap(err, "failed to resolve registered server JWKS")
@@ -271,18 +261,7 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 		return errors.New("no JWKS resolver is configured; unable to lookup registered server's key set")
 	}
 
-	// Now verify the token with the server's public key
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
-	if err != nil {
-		return errors.Wrap(err, "failed to verify JWT with server's registered key set")
-	}
-
-	// Validate expiration and other standard claims
-	if err := jwt.Validate(parsed); err != nil {
-		return errors.Wrap(err, "token validation failed")
-	}
-
-	// Validate audience. The audience should be Registry's host:port.
+	// Resolve the registry URL to derive the expected audience before verification.
 	federationInfo, err := config.GetFederation(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "failed to get federation information")
@@ -291,25 +270,19 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	if registryURL == "" {
 		return errors.New("registry URL is not set")
 	}
-	url, parseErr := url.Parse(registryURL)
+	parsedRegistryURL, parseErr := url.Parse(registryURL)
 	if parseErr != nil {
 		return errors.Wrapf(parseErr, "failed to parse registry URL %s", registryURL)
 	}
-	isAudienceValid := false
-	log.Tracef("Token audience: %v; Registry's 'host:port': %s", parsed.Audience(), url.Host)
-	for _, audience := range parsed.Audience() {
-		if audience == url.Host {
-			isAudienceValid = true
-			break
-		}
-	}
-	if !isAudienceValid {
-		return errors.New(fmt.Sprintf("failed to verify the audience of the token. Require %s", url.Host))
-	}
 
+	// Trace-log the pre-verification audience and scope claims for debugging.
+	// These come from the unsafe parse and are not yet trusted.
+	log.Tracef("Token audience: %v; Registry's 'host:port': %s", token.Audience(), parsedRegistryURL.Host)
+
+	validateOpts := []jwt.ValidateOption{jwt.WithAudience(parsedRegistryURL.Host)}
 	if len(expectedScopes) > 0 {
-		// Log the token scope for debugging
-		if scopeAny, present := parsed.Get("scope"); present {
+		// Log the token scope for debugging.
+		if scopeAny, present := token.Get("scope"); present {
 			if scopeStr, ok := scopeAny.(string); ok {
 				log.Tracef("Token scope: %s; expected scopes: %v", scopeStr, expectedScopes)
 			} else {
@@ -318,14 +291,16 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 		} else {
 			log.Tracef("Token has no 'scope' claim; expected scopes: %v", expectedScopes)
 		}
-		// Validate scopes
 		scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
-		if err := jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
-		}
+		validateOpts = append(validateOpts, jwt.WithValidator(scopeValidator))
 	}
 
-	// Set context variables for downstream handlers
+	// Verify the token (signature, timestamps, audience, scopes).
+	if _, err = VerifyWithKeyset(strToken, jwks, validateOpts...); err != nil {
+		return errors.Wrap(err, "failed to verify registered-server JWT signature or claims")
+	}
+
+	// Set context variables for downstream handlers.
 	ctx.Set("AuthMethod", "registered-server-token")
 
 	return nil
