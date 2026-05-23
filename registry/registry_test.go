@@ -409,6 +409,47 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	})
 }
 
+func TestDeleteNamespaceHandlerTokenErrorStatusCodes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mockJWKS, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+	require.NoError(t, insertMockDBData([]server_structs.Registration{
+		{
+			Prefix: "/foo",
+			Pubkey: mockJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Status: server_structs.RegApproved,
+			},
+		},
+	}))
+
+	router := gin.New()
+	router.DELETE("/*wildcard", deleteNamespaceHandler)
+
+	t.Run("malformed-authorization-header-returns-400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodDelete, "/foo", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "bad-header-value")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("invalid-token-returns-401", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodDelete, "/foo", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer this-is-not-a-jwt")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
 func TestCompareJwks(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

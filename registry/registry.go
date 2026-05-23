@@ -784,8 +784,22 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	*  TODO: Should we also investigate checking for the token in the url, in case we
 	*		 need that option at a later point?
 	 */
-	authHeader := ctx.GetHeader("Authorization")
-	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+	authHeader := strings.TrimSpace(ctx.GetHeader("Authorization"))
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "authorization header must use Bearer token format"})
+		log.Errorln("Malformed authorization header for namespace deletion")
+		return
+	}
+	delTokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if delTokenStr == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "authorization header must include a bearer token"})
+		log.Errorln("Missing bearer token for namespace deletion")
+		return
+	}
 
 	// Have the token, now we need to load the JWKS for the prefix
 	originJwks, _, err := getRegistrationJwksByPrefix(prefix)
@@ -800,7 +814,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	// Use the JWKS to verify the token -- verification means signature integrity
 	parsed, err := jwt.Parse([]byte(delTokenStr), jwt.WithKeySet(originJwks))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "server could not verify/parse the provided deletion token"})
 		log.Errorf("Failed to parse the token: %v", err)
@@ -810,7 +824,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
 
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "server could not validate the provided deletion token"})
 		log.Errorf("Failed to validate the token: %v", err)
