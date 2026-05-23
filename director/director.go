@@ -36,7 +36,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -746,7 +745,7 @@ func validateClientToken(ctx *gin.Context, requestId uuid.UUID) (int, error) {
 	// Parse the token without signature verification — we only need the expiration claim.
 	// Not all bearer tokens are JWTs (e.g., opaque tokens, SciTokens v1); if parsing
 	// fails, treat the token as valid and let the origin/cache decide.
-	parsed, err := jwt.Parse([]byte(rawToken), jwt.WithVerify(false), jwt.WithValidate(false))
+	parsed, err := token.UnsafeParseClaims(rawToken)
 	if err != nil {
 		return http.StatusOK, nil
 	}
