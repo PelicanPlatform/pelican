@@ -351,7 +351,7 @@ func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateO
 func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to verify token signature")
 	}
 	// Build the final option slice with a defensive copy
 	// to avoid mutating the caller's backing array.
@@ -363,7 +363,7 @@ func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption)
 		jwt.WithAcceptableSkew(ClockSkewLeeway),
 	)
 	if err := jwt.Validate(tok, validateOpts...); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to validate token claims")
 	}
 	return tok, nil
 }

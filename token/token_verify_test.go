@@ -531,6 +531,7 @@ func TestVerifyWithKeyset_IatNbfExceedsLeeway(t *testing.T) {
 
 	_, err := VerifyWithKeyset(tokenStr, pubSet)
 	assert.Error(t, err, "token with iat/nbf exceeding leeway should be rejected")
+	assert.ErrorContains(t, err, "failed to validate token claims")
 }
 
 // TestVerifyWithKeyset_ExpWithinLeeway confirms that a token
@@ -650,6 +651,18 @@ func TestKeysetVerifyFunctions_WrongKeyRejected(t *testing.T) {
 			assert.Error(t, err, "%s should reject a token signed with a different key", tc.name)
 		})
 	}
+}
+
+func TestVerifyWithKeyset_WrapsSignatureVerificationError(t *testing.T) {
+	_, pubSet := makeTestKeyset(t)
+	wrongPrivKey, _ := makeTestKeyset(t)
+
+	now := time.Now()
+	tokenStr := makeSignedToken(t, wrongPrivKey, now, now, now.Add(10*time.Minute))
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to verify token signature")
 }
 
 // TestKeysetVerifyFunctions_CallerCannotShiftClock confirms that all helpers
