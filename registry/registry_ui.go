@@ -597,28 +597,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 
-				accessJWT, err := jwt.Parse(
-					[]byte(accessToken),
-					jwt.WithKeySet(jwks),
-					jwt.WithVerify(true),
-				)
-				if err != nil {
+				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+				if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
+					log.Errorf("Failed to verify access token: %v", err)
 					ctx.JSON(http.StatusForbidden,
 						server_structs.SimpleApiResp{
 							Status: server_structs.RespFailed,
 							Msg:    fmt.Sprint("Invalid access token: ", err),
 						})
 					return
-				}
-
-				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
-				if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
-					log.Errorf("Failed to verify the scope of the token: %v", err)
-					ctx.JSON(http.StatusForbidden,
-						server_structs.SimpleApiResp{
-							Status: server_structs.RespFailed,
-							Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
-						})
 				}
 
 				if ns.AdminMetadata.UserID == "" {
@@ -755,28 +742,15 @@ func getNamespace(ctx *gin.Context) {
 			return
 		}
 
-		accessJWT, err := jwt.Parse(
-			[]byte(accessToken),
-			jwt.WithKeySet(jwks),
-			jwt.WithVerify(true),
-		)
-		if err != nil {
+		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+		if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
+			log.Errorf("Failed to verify access token: %v", err)
 			ctx.JSON(http.StatusForbidden,
 				server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprint("Invalid access token: ", err),
 				})
 			return
-		}
-
-		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
-		if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
-			log.Errorf("Failed to verify the scope of the token: %v", err)
-			ctx.JSON(http.StatusForbidden,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
-				})
 		}
 	}
 

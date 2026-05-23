@@ -211,7 +211,7 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 	}
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
-	parsed, err := VerifyWithKeyset(strToken, jwks, jwt.WithValidator(scopeValidator))
+	parsed, err := VerifyWithKeysetStrict(strToken, jwks, jwt.WithValidator(scopeValidator))
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify local issuer JWT signature or claims")
 	}
@@ -314,18 +314,30 @@ func UnsafeParseClaims(tokenStr string) (jwt.Token, error) {
 	return jwt.Parse([]byte(tokenStr), jwt.WithVerify(false), jwt.WithValidate(false))
 }
 
+// VerifyWithKeysetStrict verifies tokenStr's signature against jwks
+// and then validates its claims with no clock-skew leeway.
+//
+// WithResetValidators(false) is appended after any caller-supplied opts
+// so that callers cannot disable the default temporal validators.
+func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
+	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to verify token signature")
+	}
+	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+1)
+	validateOpts = append(validateOpts, opts...)
+	validateOpts = append(validateOpts, jwt.WithResetValidators(false))
+	if err := jwt.Validate(tok, validateOpts...); err != nil {
+		return nil, errors.Wrap(err, "failed to validate token claims")
+	}
+	return tok, nil
+}
+
 // VerifyWithKeyset verifies tokenStr's signature against jwks
 // and then validates its claims with ClockSkewLeeway applied.
 //
-// Additional jwt.ValidateOption values
-// (e.g., scope validators, jwt.WithAudience, jwt.WithClaimValue)
-// can be passed via opts;
-// they are evaluated in the same jwt.Validate call
-// as the skew-tolerant time checks
-// so that every claim check benefits from ClockSkewLeeway.
-//
-// The skew option is appended after any caller-supplied opts;
-// callers cannot override it with WithAcceptableSkew(0).
+// The skew option is appended after any caller-supplied opts
+// so that callers cannot override it with WithAcceptableSkew(0).
 func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {

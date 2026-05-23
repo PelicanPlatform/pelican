@@ -61,7 +61,7 @@ func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers *[]string)
 			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
 			continue
 		}
-		tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
+		tok, err = token.VerifyWithKeyset(strToken, *kSet)
 		if err != nil {
 			log.Debugf("Token verification failed with owner %s: %v -- skipping", owner, err)
 			continue
@@ -126,7 +126,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 			return false, errors.Wrap(err, "Error getting JWKS from issuer URL")
 		}
 
-		tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
+		tok, err = token.VerifyWithKeyset(strToken, *kSet)
 		if err != nil {
 			return false, errors.Wrap(err, "Error parsing token")
 		}
@@ -158,7 +158,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 				log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
 				continue
 			}
-			tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
+			tok, err = token.VerifyWithKeyset(strToken, *kSet)
 			if err != nil {
 				log.Debugf("Token verification failed with owner %s: %v -- skipping", owner, err)
 				continue
@@ -348,8 +348,8 @@ func uiCreateLot(ctx *gin.Context) {
 
 	// TODO: Figure out the best way to inform the user that we ignore any owner or parent they set, because we handle that internally.
 
-	token := token.GetAuthzEscaped(ctx)
-	if token == "" {
+	tokenStr := token.GetAuthzEscaped(ctx)
+	if tokenStr == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -362,7 +362,7 @@ func uiCreateLot(ctx *gin.Context) {
 	// need to handle a case where the lot for /foo/bar/baz is created before /foo/bar. Currently, if these are the
 	// first two lots we create with this endpoint, then both will be set to have "root" as a parent, and we'd like
 	// /foo/bar/baz to be modified to have /foo/bar as a parent. This gets complicated, so let's punt on it for now.
-	ok, err := VerifyNewLotToken(&lot, token)
+	ok, err := VerifyNewLotToken(&lot, tokenStr)
 
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
@@ -385,13 +385,14 @@ func uiCreateLot(ctx *gin.Context) {
 	// For creating lots, the Lotman caller must be set to an owner of a parent. Since the incoming token
 	// was presumably signed by someone with the necessary permissions, we can use the token's issuer as the
 	// Lotman caller.
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to parse token while determining Lotman Caller",
 		})
+		return
 	}
 	caller := tok.Issuer()
 
@@ -485,8 +486,8 @@ func uiUpdateLot(ctx *gin.Context) {
 		lotUpdate.Paths = nil
 	}
 
-	token := token.GetAuthzEscaped(ctx)
-	if token == "" {
+	tokenStr := token.GetAuthzEscaped(ctx)
+	if tokenStr == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -495,7 +496,7 @@ func uiUpdateLot(ctx *gin.Context) {
 		return
 	}
 
-	ok, err := VerifyLotModTokens(lotUpdate.LotName, token, LotUpdateAction)
+	ok, err := VerifyLotModTokens(lotUpdate.LotName, tokenStr, LotUpdateAction)
 
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
@@ -518,13 +519,14 @@ func uiUpdateLot(ctx *gin.Context) {
 	// For updating lots, the Lotman caller must be set to an owner of a parent. Since the incoming token
 	// was presumably signed by someone with the necessary permissions, we can use the token's issuer as the
 	// Lotman caller.
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to parse token while determining Lotman Caller",
 		})
+		return
 	}
 
 	caller := tok.Issuer()
@@ -555,8 +557,8 @@ func uiDeleteLot(ctx *gin.Context) {
 		return
 	}
 
-	token := token.GetAuthzEscaped(ctx)
-	if token == "" {
+	tokenStr := token.GetAuthzEscaped(ctx)
+	if tokenStr == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -565,7 +567,7 @@ func uiDeleteLot(ctx *gin.Context) {
 		return
 	}
 
-	ok, err := VerifyLotModTokens(lotName, token, LotDeleteAction)
+	ok, err := VerifyLotModTokens(lotName, tokenStr, LotDeleteAction)
 
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
@@ -588,13 +590,14 @@ func uiDeleteLot(ctx *gin.Context) {
 	// For creating lots, the Lotman caller must be set to an owner of a parent. Since the incoming token
 	// was presumably signed by someone with the necessary permissions, we can use the token's issuer as the
 	// Lotman caller.
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to parse token while determining Lotman Caller",
 		})
+		return
 	}
 	caller := tok.Issuer()
 
