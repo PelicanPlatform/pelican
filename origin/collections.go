@@ -117,7 +117,9 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		return false
 	}
 
-	parsed, err := token.VerifyWithKeyset(tokenStr, jwks)
+	// Self-issued token: this server both signs and verifies it,
+	// so no inter-server clock skew is possible.
+	parsed, err := token.VerifyWithKeysetStrict(tokenStr, jwks)
 	if err != nil {
 		log.Debugf("verifyCollectionScope: Failed to verify token signature or claims: %v", err)
 		return false

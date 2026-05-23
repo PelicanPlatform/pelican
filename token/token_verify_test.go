@@ -621,12 +621,11 @@ func TestVerifyWithKeyset_WrongKeyRejected(t *testing.T) {
 	assert.Error(t, err, "token signed with wrong key should be rejected")
 }
 
-// TestVerify_AcceptsSkewedLocalToken verifies that Verify accepts a token
-// whose iat and nbf are slightly in the future (within ClockSkewLeeway)
+// TestVerify_RejectsSkewedLocalToken confirms
+// that Verify rejects a locally-issued token
+// whose iat and nbf are slightly in the future
 // when the LocalIssuer check is used.
-// Tokens from a remote issuer whose clock is up to ClockSkewLeeway ahead
-// must not be rejected by the local server.
-func TestVerify_AcceptsSkewedLocalToken(t *testing.T) {
+func TestVerify_RejectsSkewedLocalToken(t *testing.T) {
 	// Set up an isolated config state.
 	t.Cleanup(func() { config.ResetConfig() })
 	config.ResetConfig()
@@ -642,7 +641,7 @@ func TestVerify_AcceptsSkewedLocalToken(t *testing.T) {
 	require.NoError(t, err)
 
 	now := time.Now()
-	skew := ClockSkewLeeway / 2 // iat/nbf halfway into the future — within tolerance
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window (when not local)
 
 	tokenStr := makeSignedTokenWithIssuer(t, privKey,
 		now.Add(skew), now.Add(skew), now.Add(10*time.Minute),
@@ -657,12 +656,11 @@ func TestVerify_AcceptsSkewedLocalToken(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 
-	_, ok, verifyErr := Verify(c, AuthOption{
+	_, ok, _ := Verify(c, AuthOption{
 		Sources: []TokenSource{Header},
 		Issuers: []TokenIssuer{LocalIssuer},
 	})
-	assert.NoError(t, verifyErr, "Verify should not return an error for a token whose iat/nbf are within ClockSkewLeeway")
-	assert.True(t, ok, "Verify should accept a token whose iat/nbf are within ClockSkewLeeway")
+	assert.False(t, ok, "Verify should reject a locally-issued token with a future iat/nbf: no skew tolerance for self-signed tokens")
 }
 
 // TestVerify_AcceptsSkewedRegisteredServerToken confirms

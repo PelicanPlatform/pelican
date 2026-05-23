@@ -31,7 +31,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
@@ -135,14 +134,14 @@ func configureAuthDB() error {
 // Uses early-exit pattern for cleaner flow control.
 func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string, userId string, groups []string, err error) {
 	// Parse token without verification first to check issuer
-	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		return "", "", nil, err
 	}
 
 	// Verify issuer matches local issuer
 	localIssuer := config.GetLocalIssuerUrl()
-	if parsed.Issuer() != localIssuer {
+	if tok.Issuer() != localIssuer {
 		return "", "", nil, errors.New("token issuer does not match server URL")
 	}
 
@@ -152,12 +151,10 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		return "", "", nil, err
 	}
 
-	verified, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+	// Self-issued token: this server both signs and verifies it,
+	// so no inter-server clock skew is possible.
+	verified, err := token.VerifyWithKeysetStrict(tokenStr, jwks)
 	if err != nil {
-		return "", "", nil, err
-	}
-
-	if err = jwt.Validate(verified); err != nil {
 		return "", "", nil, err
 	}
 
@@ -242,8 +239,8 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 		}
 	}
 
-	var token string
-	token, err = ctx.Cookie("login")
+	var loginToken string
+	loginToken, err = ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
 			err = nil
@@ -252,7 +249,7 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 			return
 		}
 	}
-	if token == "" {
+	if loginToken == "" {
 		err = errors.New("Login cookie is empty")
 		return
 	}
@@ -260,11 +257,10 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if err != nil {
 		return
 	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
+	// Self-issued token: this server both signs and verifies it,
+	// so no inter-server clock skew is possible.
+	parsed, err := token.VerifyWithKeysetStrict(loginToken, jwks)
 	if err != nil {
-		return
-	}
-	if err = jwt.Validate(parsed); err != nil {
 		return
 	}
 	user = parsed.Subject()
