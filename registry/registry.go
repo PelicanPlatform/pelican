@@ -801,7 +801,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	// Use the JWKS to verify the token's signature, timestamps, and scope.
 	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
 	if _, err = token.VerifyWithKeyset(delTokenStr, originJwks, jwt.WithValidator(scopeValidator)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "server could not verify the provided deletion token"})
 		log.Errorf("Failed to verify the token: %v", err)
