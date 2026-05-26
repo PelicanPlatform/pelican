@@ -1739,20 +1739,26 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
 	// of Origin.StorageType to "posix" and Origin.SelfTest to true. After these defaults are applied,
 	// it becomes impossible to determine if the values are coming from the default settings or from user input.
-	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_StorageType.GetString() != "posix" {
-		updates := make(map[string]interface{})
-		if param.Origin_SelfTest.GetBool() {
-			log.Warningf("%s may not be enabled when the origin is configured with non-posix backends. Turning off...", param.Origin_SelfTest.GetName())
-			updates[param.Origin_SelfTest.GetName()] = false
-		}
-		if param.Origin_DirectorTest.GetBool() {
-			log.Warningf("%s may not be enabled when the origin is configured with non-posix backends. Turning off...", param.Origin_DirectorTest.GetName())
-			updates[param.Origin_DirectorTest.GetName()] = false
-		}
-		if len(updates) > 0 {
-			if err := param.MultiSet(updates); err != nil {
-				logging.FlushLogs(true)
-				return err
+	//
+	// Self-test and director-test write a probe file and read it back, so they require a
+	// POSIX-like backend (posix, posixv2). Disable them on remote-protocol backends.
+	if currentServers.IsEnabled(server_structs.OriginType) {
+		storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+		if !storageType.IsPosixLike() {
+			updates := make(map[string]interface{})
+			if param.Origin_SelfTest.GetBool() {
+				log.Warningf("%s may not be enabled when the origin is configured with non-POSIX-like backends. Turning off...", param.Origin_SelfTest.GetName())
+				updates[param.Origin_SelfTest.GetName()] = false
+			}
+			if param.Origin_DirectorTest.GetBool() {
+				log.Warningf("%s may not be enabled when the origin is configured with non-POSIX-like backends. Turning off...", param.Origin_DirectorTest.GetName())
+				updates[param.Origin_DirectorTest.GetName()] = false
+			}
+			if len(updates) > 0 {
+				if err := param.MultiSet(updates); err != nil {
+					logging.FlushLogs(true)
+					return err
+				}
 			}
 		}
 	}

@@ -36,6 +36,23 @@ func FileOwnerIDs(info os.FileInfo) (uid, gid int, err error) {
 	return int(stat.Uid), int(stat.Gid), nil
 }
 
+// FileVFSID returns the (device, inode) pair from a FileInfo's underlying
+// syscall.Stat_t, or (0, 0, false) when that's unavailable (e.g. synthesized
+// FileInfo values from afero memory-backed filesystems, or Windows).
+//
+// The (dev, ino) pair uniquely identifies a file on a single host: inodes
+// alone are only unique within a filesystem, so two files on separate volumes
+// (bind mounts, multiple exports on different disks, etc.) can share an
+// inode. Callers that need a stable per-file identifier should combine both
+// fields.
+func FileVFSID(info os.FileInfo) (dev, ino uint64, ok bool) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, false
+	}
+	return uint64(stat.Dev), uint64(stat.Ino), true
+}
+
 // SameFilesystem returns true if both paths reside on the same filesystem
 // (i.e. share the same device ID). This is important because rename(2) cannot
 // move files across filesystem boundaries (returns EXDEV).
