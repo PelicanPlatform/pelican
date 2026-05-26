@@ -38,6 +38,23 @@ var (
 	ErrUnknownOriginStorageType = errors.New("unknown origin storage type")
 )
 
+// IsPosixLike reports whether the storage type is a "POSIX-like" backend whose
+// data lives on a locally-mounted filesystem (as opposed to a remote-protocol
+// backend such as S3, HTTPS, Globus, SSH, or XRoot). POSIX-like backends share
+// behavior in several places: the origin can run its own self-test and the
+// director can probe it; atomic uploads (POSC) work because rename(2) is
+// available; checksum xattrs can be stored on local files; etc. New POSIX-like
+// backends should be added here rather than growing the list of `==` checks
+// scattered across the codebase.
+func (t OriginStorageType) IsPosixLike() bool {
+	switch t {
+	case OriginStoragePosix, OriginStoragePosixv2:
+		return true
+	default:
+		return false
+	}
+}
+
 // Convert a string to an OriginStorageType
 func ParseOriginStorageType(storageType string) (ost OriginStorageType, err error) {
 	switch storageType {

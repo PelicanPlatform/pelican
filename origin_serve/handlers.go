@@ -20,6 +20,8 @@ package origin_serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"html"
 	"io"
@@ -756,11 +758,18 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
 func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string, backend server_utils.OriginBackend) {
-	// Check if client requested checksums via Want-Digest header
+	// Check if client requested checksums via Want-Digest header. When the
+	// client does not specify, fall back to the first algorithm in
+	// Origin.DefaultChecksumTypes -- which itself defaults to CRC32C, matching
+	// the Pelican client's preferred algorithm. The previous behavior (always
+	// MD5) forced an extra hash pass on the server and caused HEAD responses
+	// to ignore the operator's DefaultChecksumTypes setting.
 	wantDigest := c.GetHeader("Want-Digest")
 	if wantDigest == "" {
-		// Default to MD5 if not specified
-		wantDigest = "md5"
+		wantDigest = string(ChecksumTypeCRC32C)
+		if cfg := param.Origin_DefaultChecksumTypes.GetStringSlice(); len(cfg) > 0 {
+			wantDigest = cfg[0]
+		}
 	}
 
 	// Ask the backend for digest values.  Backends that do not support
@@ -778,10 +787,43 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, req *http.R
 	handler.ServeHTTP(c.Writer, req)
 }
 
-// computeETag generates an ETag string based on file metadata (mtime and size).
-// This matches the default ETag format used by golang.org/x/net/webdav.
-func computeETag(modTime int64, size int64) string {
-	return fmt.Sprintf(`"%x%x"`, modTime, size)
+// computeETag generates an opaque, quoted ETag string that uniquely identifies
+// a specific instance of a file on disk.
+//
+// The ETag is the first 8 bytes of SHA-256 over (dev, inode, size, mtime),
+// rendered as 16 hex characters. The (dev, inode) pair is a VFS-level file
+// identifier: inodes alone are only unique within a single filesystem, so
+// including the device id keeps the ETag distinct when an origin exports
+// multiple volumes (separate disks, bind mounts, etc.) that happen to reuse
+// the same inode number. mtime ensures the ETag changes when a file is
+// rewritten in place. Size is folded in for cheap collision insurance.
+//
+// On platforms that don't expose a stable VFS id (Windows, or synthesized
+// FileInfo values such as afero's in-memory FS), the dev/inode portion is
+// omitted and only (size, mtime) feed the hash. The output width and shape
+// are unchanged in that case.
+//
+// The previous format -- size and mtime concatenated as a single hex blob --
+// matched the golang.org/x/net/webdav default but caused two different files
+// with the same size and mtime (common for empty/freshly-created files on
+// filesystems with second-precision mtime, or batches of fixed-size records)
+// to receive identical ETags. Mixing in the VFS id and running the tuple
+// through a hash fixes that.
+func computeETag(info os.FileInfo) string {
+	h := sha256.New()
+	var buf [8]byte
+	if dev, ino, ok := utils.FileVFSID(info); ok {
+		binary.BigEndian.PutUint64(buf[:], dev)
+		h.Write(buf[:])
+		binary.BigEndian.PutUint64(buf[:], ino)
+		h.Write(buf[:])
+	}
+	binary.BigEndian.PutUint64(buf[:], uint64(info.Size()))
+	h.Write(buf[:])
+	binary.BigEndian.PutUint64(buf[:], uint64(info.ModTime().UnixNano()))
+	h.Write(buf[:])
+	sum := h.Sum(nil)
+	return fmt.Sprintf(`"%x"`, sum[:8])
 }
 
 // handlePutWithETag handles PUT requests and returns the ETag of the newly
@@ -806,7 +848,7 @@ func handlePutWithETag(c *gin.Context, handler *webdav.Handler, req *http.Reques
 				normalizedPath = "."
 			}
 			if info, statErr := root.Stat(normalizedPath); statErr == nil {
-				etag := computeETag(info.ModTime().UnixNano(), info.Size())
+				etag := computeETag(info)
 				dw.Header().Set("ETag", etag)
 			}
 		}
@@ -896,8 +938,11 @@ func handleGetWithETag(c *gin.Context, handler *webdav.Handler, req *http.Reques
 	}
 
 	modTime := info.ModTime()
-	// Compute ETag based on mtime and size (same as WebDAV default)
-	etag := computeETag(modTime.UnixNano(), info.Size())
+	// Compute ETag from inode + size + mtime so that two files with the same
+	// size and modification timestamp (e.g. batches of fixed-size records, or
+	// freshly-created files on a filesystem with second-precision mtime) still
+	// receive distinct ETags.
+	etag := computeETag(info)
 	lastModifiedStr := modTime.UTC().Format(http.TimeFormat)
 
 	// Check for conditional request (If-None-Match) - takes precedence per RFC 7232
