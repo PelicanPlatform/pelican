@@ -60,6 +60,7 @@ var posixv2Reset func()
 var sshBackendReset func()
 var brokerReset func()
 var pelicanUrlReset func()
+var webUIReset func()
 
 // RegisterXrootdReset allows the xrootd package to provide a reset hook without introducing import cycles.
 func RegisterXrootdReset(fn func()) {
@@ -84,6 +85,11 @@ func RegisterBrokerReset(fn func()) {
 // RegisterPelicanUrlReset allows the pelican_url package to provide a reset hook without introducing import cycles.
 func RegisterPelicanUrlReset(fn func()) {
 	pelicanUrlReset = fn
+}
+
+// RegisterWebUIReset allows the web_ui package to provide a reset hook without introducing import cycles.
+func RegisterWebUIReset(fn func()) {
+	webUIReset = fn
 }
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -362,6 +368,9 @@ func ResetTestState() {
 	}
 	if pelicanUrlReset != nil {
 		pelicanUrlReset()
+	}
+	if webUIReset != nil {
+		webUIReset()
 	}
 	ResetOriginExports()
 	logging.ResetLogFlush()
