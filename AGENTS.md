@@ -46,19 +46,50 @@ Pelican is a data federation platform that allows users to serve and access data
 
 ## Code Organization
 
+- `api_token/` - API token creation and validation
 - `broker/` - Broker service implementation
+- `byte_rate/` - Byte rate tracking utilities
 - `cache/` - Cache server implementation
 - `client/` - Client-side code for data transfers
+- `client_agent/` - Background client agent for data transfer operations
 - `cmd/` - CLI commands using Cobra
 - `config/` - Configuration management
 - `daemon/` - Daemon utilities
 - `database/` - Database models and migrations
 - `director/` - Director service for federation coordination
 - `docs/` - Documentation and parameter definitions (use one sentence per line for markdown files)
+- `e2e_fed_tests/` - End-to-end federation tests
+- `error_codes/` - Error code definitions and helpers
+- `features/` - Feature/version compatibility definitions and generated metadata
+- `fed_test_utils/` - Shared utilities for federation tests
+- `generate/` - Code generation tools (error codes, Next.js assets, etc.)
+- `htb/` - Hierarchical token bucket (rate limiting)
+- `identity/` - Identity lookup and caching
+- `launcher_utils/` - Utilities for service startup and namespace registration
+- `launchers/` - Service launcher implementations (cache, director, origin, registry)
+- `local_cache/` - Local (single-node) cache implementation
+- `logging/` - Logging level management utilities
+- `lotman/` - Lot (storage quota) management
+- `metrics/` - Prometheus metrics for all services
+- `mock/` - Mock implementations for testing
+- `oa4mp/` - OA4MP OAuth server proxy
+- `oauth2/` - OAuth 2.0 device auth and DCRP flows
 - `origin/` - Origin server implementation
+- `origin_serve/` - Origin serving logic and authorization
+- `p11proxy/` - PKCS#11 proxy
+- `param/` - Typed configuration parameter wrappers around Viper
+- `pelican_url/` - Pelican URL parsing and federation discovery
 - `registry/` - Registry service for namespace management
+- `server_structs/` - Shared server data structures (API responses, auth, DB models)
 - `server_utils/` - Shared utilities for server components
+- `ssh_posixv2/` - SSH POSIX v2 authentication backend
+- `swagger/` - OpenAPI/Swagger specification files
+- `test_utils/` - Shared utilities for unit tests
 - `token/` - Token generation and validation
+- `token_scopes/` - Token scope definitions and utilities
+- `utils/` - General utility functions (crypto, HTTP, etc.)
+- `version/` - Version information
+- `web_ui/` - Go backend for the embedded web UI (API handlers, auth/session, middleware, static asset serving)
 - `web_ui/frontend/` - Next.js web interface
 - `xrootd/` - XRootD integration
 
@@ -102,14 +133,30 @@ make web-build
 
 **Go tests:**
 
+Many packages use `client` and `server` build tags to gate tests. Running `go test ./...` without tags skips those tests. For Go tests, Linux and macOS CI runs client and server tests in separate passes:
+
 ```bash
-go test ./...
+go test -tags client ./...
+go test -tags server ./...
 ```
 
-**Test individual modules:**
+For Go tests on Windows, CI runs only client-tagged tests:
 
 ```bash
-cd director && go test
+go test -tags client ./...
+```
+
+To run the widest possible set of unit tests locally (a superset of both CI passes), use:
+
+```bash
+go test -tags "client server" ./...
+```
+
+**Test individual modules (use whichever tags apply to that module):**
+
+```bash
+go test -tags client ./cmd/
+go test -tags server ./cmd/
 ```
 
 **Frontend tests:**
