@@ -33,7 +33,7 @@ jobs:
         include:
           - binary_name: pelican
             coverprofile: coverage.out
-            tags: ""
+            tags: client
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
