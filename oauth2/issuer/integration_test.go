@@ -438,11 +438,13 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	var discovery map[string]interface{}
 	require.NoError(t, json.Unmarshal(body, &discovery))
 
+	serviceURI := ServiceURIForNamespace(IssuerURL(), testNamespace)
+
 	assert.Equal(t, IssuerURLForNamespace(testNamespace), discovery["issuer"])
-	assert.NotEmpty(t, discovery["token_endpoint"])
-	assert.NotEmpty(t, discovery["authorization_endpoint"])
-	assert.NotEmpty(t, discovery["device_authorization_endpoint"])
-	assert.NotEmpty(t, discovery["jwks_uri"])
+	assert.Equal(t, serviceURI+"/token", discovery["token_endpoint"])
+	assert.Equal(t, serviceURI+"/authorize", discovery["authorization_endpoint"])
+	assert.Equal(t, serviceURI+"/device_authorization", discovery["device_authorization_endpoint"])
+	assert.Equal(t, serviceURI+"/.well-known/issuer.jwks", discovery["jwks_uri"])
 
 	// Verify that the advertised signing algorithm matches the actual key type.
 	// This is critical: if the discovery document says RS256 but we sign with ES256,
@@ -565,6 +567,60 @@ func TestIntegrationCORSHeaders(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
 	})
+}
+
+// TestIntegrationNamespaceJWKS verifies that each namespace issuer
+// serves its own JWKS endpoint at .well-known/issuer.jwks.
+func TestIntegrationNamespaceJWKS(t *testing.T) {
+	_, ts := setupIntegration(t)
+	httpClient := ts.Client()
+
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+	resp, err := httpClient.Get(url)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(body, &raw), "response should be valid JSON")
+
+	keys, ok := raw["keys"].([]interface{})
+	require.True(t, ok, "JWKS should have a 'keys' array")
+	require.NotEmpty(t, keys, "JWKS should contain at least one key")
+
+	for i, k := range keys {
+		km, ok := k.(map[string]interface{})
+		require.True(t, ok, "key %d should be a JSON object", i)
+		assert.NotEmpty(t, km["kid"], "key %d should have a kid", i)
+		assert.NotEmpty(t, km["kty"], "key %d should have a kty", i)
+	}
+
+	// The test setup registers no per-namespace IssuerJwks,
+	// so the namespace JWKS must contain exactly the server-level keys.
+	serverSet, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	serverKIDs := make([]string, 0, serverSet.Len())
+	for it := serverSet.Keys(t.Context()); it.Next(t.Context()); {
+		serverKIDs = append(serverKIDs, it.Pair().Value.(jwk.Key).KeyID())
+	}
+	nsKIDs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		km, ok := k.(map[string]interface{})
+		require.True(t, ok)
+		nsKIDs = append(nsKIDs, km["kid"].(string))
+	}
+	assert.ElementsMatch(t, serverKIDs, nsKIDs)
+
+	// POST to the same URL should fail (JWKS is read-only).
+	resp2, err := httpClient.Post(url, "application/json", nil)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.GreaterOrEqual(t, resp2.StatusCode, http.StatusBadRequest,
+		"POST to the JWKS endpoint should return an HTTP error")
 }
 
 func TestIntegrationTokenIntrospection(t *testing.T) {
@@ -1241,7 +1297,6 @@ func TestDiscoveryEndpointsReachable(t *testing.T) {
 
 	// Map of endpoint keys to their expected HTTP method.
 	// POST-only endpoints return 404 for GET in Gin, so we must use POST.
-	// jwks_uri is served by a different component, so we skip it.
 	endpointMethods := map[string]string{
 		"authorization_endpoint":        "GET",
 		"token_endpoint":                "POST",
@@ -1250,6 +1305,7 @@ func TestDiscoveryEndpointsReachable(t *testing.T) {
 		"registration_endpoint":         "POST",
 		"revocation_endpoint":           "POST",
 		"introspection_endpoint":        "POST",
+		"jwks_uri":                      "GET",
 	}
 
 	for key, method := range endpointMethods {
