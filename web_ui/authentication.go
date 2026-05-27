@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -538,6 +538,7 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 		Scopes:  []token_scopes.TokenScope{requiredScope},
 	})
 	if !ok || err != nil {
+		log.Warningf("Failed to verify %s token for downtime %s from %s: %v", requiredScope, ctx.Request.Method, ctx.ClientIP(), err)
 		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprint("Failed to verify the token: ", err),

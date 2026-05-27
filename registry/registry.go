@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -804,7 +804,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "server could not verify the provided deletion token"})
-		log.Errorf("Failed to verify the token: %v", err)
+		log.Errorf("Failed to verify deletion token for prefix %q: %v", prefix, err)
 		return
 	}
 

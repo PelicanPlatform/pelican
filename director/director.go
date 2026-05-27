@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -1317,7 +1317,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
-				log.Warningln("Failed to verify token:", err)
+				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), adV2.Name, registryPrefix, err)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
@@ -1350,7 +1350,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				} else {
-					log.Warningln("Failed to verify token:", err)
+					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), adV2.Name, err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),

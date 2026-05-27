@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -599,7 +599,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
 				if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
-					log.Errorf("Failed to verify access token: %v", err)
+					log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
 					ctx.JSON(http.StatusForbidden,
 						server_structs.SimpleApiResp{
 							Status: server_structs.RespFailed,
@@ -744,7 +744,7 @@ func getNamespace(ctx *gin.Context) {
 
 		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
 		if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
-			log.Errorf("Failed to verify access token: %v", err)
+			log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
 			ctx.JSON(http.StatusForbidden,
 				server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
