@@ -353,7 +353,7 @@ func TestStashPluginMain(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		defer tempFile.Close()
 
-		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -480,7 +480,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	require.NoError(t, err, "Error writing to temp token file")
 	tempToken.Close()
 
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 	tempDir, err := os.MkdirTemp("", "TempDir")
 	require.NoError(t, err, "Error creating temp dir")
 	defer os.RemoveAll(tempDir)

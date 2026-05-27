@@ -127,7 +127,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
@@ -323,7 +323,7 @@ func TestCopyAuth(t *testing.T) {
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
@@ -482,7 +482,7 @@ func TestGetPublicRead(t *testing.T) {
 			assert.NoError(t, err, "Error writing to temp file")
 			tempFile.Close()
 
-			require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+			require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -529,7 +529,7 @@ func TestObjectStat(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// Make directories for test within origin exports
 	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
@@ -613,7 +613,7 @@ func TestObjectStat(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
@@ -649,7 +649,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -690,7 +690,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -721,7 +721,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -812,7 +812,7 @@ func TestObjectList(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// Make directories for test within origin exports
 	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
@@ -1006,7 +1006,7 @@ func TestTokenGenerate(t *testing.T) {
 	tempFile.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// Set path for object to upload/download
 	for _, export := range fed.Exports {
@@ -1052,7 +1052,7 @@ func TestPrestage(t *testing.T) {
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	// Set path for object to upload/download
 	for _, export := range fed.Exports {
@@ -1135,7 +1135,7 @@ func TestPrestageWithAPI(t *testing.T) {
 	tempToken, _ := getTempToken(t)
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
-	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
+	require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
 
 	oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)
