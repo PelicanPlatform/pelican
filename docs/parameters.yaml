@@ -952,6 +952,14 @@ description: |+
       When set, only these templates are used for scope calculation in this namespace;
       the global templates are ignored entirely (no merging).
       The template format is the same as `Issuer.AuthorizationTemplates`.
+  - IssuerJwks: [OPTIONAL] Path to a JWKS-formatted file containing additional
+      public keys to include in this namespace's per-namespace JWKS endpoint.
+      These keys are merged with the server's exported public key set
+      (see `Server.IssuerJwks` for details on that key set).
+      If unset, only the server's exported public key set is served.
+      This field mirrors `Server.IssuerJwks` but is scoped to a single export.
+      It only takes effect when the origin uses the embedded OAuth2 issuer
+      and the export requires authorization.
 
     Example:
 
@@ -969,6 +977,7 @@ description: |+
             - actions: ["read"]
               prefix: /data/$GROUP
               groups: ["/physics"]
+          IssuerJwks: /etc/pelican/extra-keys/ns.jwks
     ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
