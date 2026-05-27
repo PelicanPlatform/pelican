@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
@@ -146,6 +147,8 @@ func handleDispatch(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationRead(provider)(ctx)
+	case action == ".well-known/issuer.jwks" && ctx.Request.Method == http.MethodGet:
+		handleNamespaceJWKS(provider)(ctx)
 	case action == ".well-known/openid-configuration":
 		handleIssuerDiscovery(provider)(ctx)
 	default:
@@ -193,6 +196,34 @@ func handleDispatchDelete(ctx *gin.Context) {
 	}
 }
 
+// handleNamespaceJWKS serves the public-key JWKS
+// for a per-namespace issuer endpoint.
+func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		key, err := config.GetIssuerPublicJWKS()
+		if err != nil {
+			log.Errorf("Failed to load server's public key for namespace %s: %v",
+				provider.Namespace, err)
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to load public key",
+			})
+			return
+		}
+		jsonData, err := json.MarshalIndent(key, "", "  ")
+		if err != nil {
+			log.Errorf("Failed to marshal public key for namespace %s: %v",
+				provider.Namespace, err)
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to marshal public key",
+			})
+			return
+		}
+		jsonData = append(jsonData, '\n')
+		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
+		ctx.Data(http.StatusOK, "application/json", jsonData)
+	}
+}
+
 // handleIssuerDiscovery returns the OIDC discovery document scoped to the issuer
 // prefix so that the health-check in launcher.go works identically for both
 // OA4MP and the embedded issuer.
@@ -210,7 +241,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":                      IssuerURL() + "/.well-known/issuer.jwks",
+			"jwks_uri":                      serviceURI + "/.well-known/issuer.jwks",
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
