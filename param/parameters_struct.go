@@ -173,12 +173,20 @@ type Config struct {
 	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
 	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
+		ChunkSize string `mapstructure:"chunksize" yaml:"ChunkSize"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
+		DefaultMaxAge time.Duration `mapstructure:"defaultmaxage" yaml:"DefaultMaxAge"`
+		FDCacheSize int `mapstructure:"fdcachesize" yaml:"FDCacheSize"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
+		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
+		MemoryCacheSize string `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
+		PrefetchTimeout time.Duration `mapstructure:"prefetchtimeout" yaml:"PrefetchTimeout"`
+		RevalidationJitter int `mapstructure:"revalidationjitter" yaml:"RevalidationJitter"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		Size string `mapstructure:"size" yaml:"Size"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
+		StorageDirs any `mapstructure:"storagedirs" yaml:"StorageDirs"`
 	} `mapstructure:"localcache" yaml:"LocalCache"`
 	Logging struct {
 		Cache struct {
@@ -628,12 +636,20 @@ type configWithType struct {
 	IssuerKey struct { Type string; Value string }
 	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
+		ChunkSize struct { Type string; Value string }
 		DataLocation struct { Type string; Value string }
+		DefaultMaxAge struct { Type string; Value time.Duration }
+		FDCacheSize struct { Type string; Value int }
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
+		MaxConcurrentPrefetch struct { Type string; Value int }
+		MemoryCacheSize struct { Type string; Value string }
+		PrefetchTimeout struct { Type string; Value time.Duration }
+		RevalidationJitter struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		Size struct { Type string; Value string }
 		Socket struct { Type string; Value string }
+		StorageDirs struct { Type string; Value any }
 	}
 	Logging struct {
 		Cache struct {

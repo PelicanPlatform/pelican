@@ -228,12 +228,20 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.UserStripDomain": false,
 	"IssuerKey": false,
 	"IssuerKeysDirectory": false,
+	"LocalCache.ChunkSize": false,
 	"LocalCache.DataLocation": false,
+	"LocalCache.DefaultMaxAge": false,
+	"LocalCache.FDCacheSize": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
+	"LocalCache.MaxConcurrentPrefetch": false,
+	"LocalCache.MemoryCacheSize": false,
+	"LocalCache.PrefetchTimeout": false,
+	"LocalCache.RevalidationJitter": false,
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
+	"LocalCache.StorageDirs": false,
 	"Logging.Cache.Http": true,
 	"Logging.Cache.Lotman": true,
 	"Logging.Cache.Ofs": true,
@@ -573,7 +581,9 @@ var stringAccessors = map[string]func(*Config) string{
 	"Issuer.QDLLocation": func(c *Config) string { return c.Issuer.QDLLocation },
 	"Issuer.ScitokensServerLocation": func(c *Config) string { return c.Issuer.ScitokensServerLocation },
 	"Issuer.TomcatLocation": func(c *Config) string { return c.Issuer.TomcatLocation },
+	"LocalCache.ChunkSize": func(c *Config) string { return c.LocalCache.ChunkSize },
 	"LocalCache.DataLocation": func(c *Config) string { return c.LocalCache.DataLocation },
+	"LocalCache.MemoryCacheSize": func(c *Config) string { return c.LocalCache.MemoryCacheSize },
 	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
 	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
 	"LocalCache.Socket": func(c *Config) string { return c.LocalCache.Socket },
@@ -806,8 +816,11 @@ var intAccessors = map[string]func(*Config) int{
 	"Director.MaxStatResponse": func(c *Config) int { return c.Director.MaxStatResponse },
 	"Director.MinStatResponse": func(c *Config) int { return c.Director.MinStatResponse },
 	"Director.StatConcurrencyLimit": func(c *Config) int { return c.Director.StatConcurrencyLimit },
+	"LocalCache.FDCacheSize": func(c *Config) int { return c.LocalCache.FDCacheSize },
 	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
+	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
+	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
 	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
 	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
 	"Monitoring.LabelNameLengthLimit": func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
@@ -1042,6 +1055,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
 	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
 	"Issuer.RefreshTokenGracePeriod": func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
+	"LocalCache.DefaultMaxAge": func(c *Config) time.Duration { return c.LocalCache.DefaultMaxAge },
+	"LocalCache.PrefetchTimeout": func(c *Config) time.Duration { return c.LocalCache.PrefetchTimeout },
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
@@ -1294,12 +1309,20 @@ var allParameterNames = []string{
 	"Issuer.UserStripDomain",
 	"IssuerKey",
 	"IssuerKeysDirectory",
+	"LocalCache.ChunkSize",
 	"LocalCache.DataLocation",
+	"LocalCache.DefaultMaxAge",
+	"LocalCache.FDCacheSize",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
+	"LocalCache.MaxConcurrentPrefetch",
+	"LocalCache.MemoryCacheSize",
+	"LocalCache.PrefetchTimeout",
+	"LocalCache.RevalidationJitter",
 	"LocalCache.RunLocation",
 	"LocalCache.Size",
 	"LocalCache.Socket",
+	"LocalCache.StorageDirs",
 	"Logging.Cache.Http",
 	"Logging.Cache.Lotman",
 	"Logging.Cache.Ofs",
@@ -1612,7 +1635,9 @@ var (
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
 	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_MemoryCacheSize = StringParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
@@ -1789,8 +1814,11 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_FDCacheSize = IntParam{"LocalCache.FDCacheSize"}
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
+	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
+	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
 	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
@@ -1932,6 +1960,8 @@ var (
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
+	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
@@ -1973,6 +2003,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
@@ -2046,7 +2077,9 @@ func init() {
 		"Issuer.QDLLocation": Issuer_QDLLocation,
 		"Issuer.ScitokensServerLocation": Issuer_ScitokensServerLocation,
 		"Issuer.TomcatLocation": Issuer_TomcatLocation,
+		"LocalCache.ChunkSize": LocalCache_ChunkSize,
 		"LocalCache.DataLocation": LocalCache_DataLocation,
+		"LocalCache.MemoryCacheSize": LocalCache_MemoryCacheSize,
 		"LocalCache.RunLocation": LocalCache_RunLocation,
 		"LocalCache.Size": LocalCache_Size,
 		"LocalCache.Socket": LocalCache_Socket,
@@ -2217,8 +2250,11 @@ func init() {
 		"Director.MaxStatResponse": Director_MaxStatResponse,
 		"Director.MinStatResponse": Director_MinStatResponse,
 		"Director.StatConcurrencyLimit": Director_StatConcurrencyLimit,
+		"LocalCache.FDCacheSize": LocalCache_FDCacheSize,
 		"LocalCache.HighWaterMarkPercentage": LocalCache_HighWaterMarkPercentage,
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
+		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
+		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
 		"MinimumDownloadSpeed": MinimumDownloadSpeed,
 		"Monitoring.LabelLimit": Monitoring_LabelLimit,
 		"Monitoring.LabelNameLengthLimit": Monitoring_LabelNameLengthLimit,
@@ -2351,6 +2387,8 @@ func init() {
 		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
 		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
 		"Issuer.RefreshTokenGracePeriod": Issuer_RefreshTokenGracePeriod,
+		"LocalCache.DefaultMaxAge": LocalCache_DefaultMaxAge,
+		"LocalCache.PrefetchTimeout": LocalCache_PrefetchTimeout,
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
@@ -2389,6 +2427,7 @@ func init() {
 		"GeoIPOverrides": GeoIPOverrides,
 		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
 		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,
+		"LocalCache.StorageDirs": LocalCache_StorageDirs,
 		"Lotman.PolicyDefinitions": Lotman_PolicyDefinitions,
 		"Origin.Exports": Origin_Exports,
 		"Registry.CustomRegistrationFields": Registry_CustomRegistrationFields,
