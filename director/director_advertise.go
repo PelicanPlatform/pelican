@@ -550,7 +550,6 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 		return
 	}
 
-	info := &directorInfo{}
 	if directorAd.Name == "" {
 		log.Debugln("Received director ad with empty name, skipping update")
 		return
@@ -565,7 +564,14 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 	} else if adTTL <= 0 {
 		return
 	}
+	fwdCtx, cancel := context.WithCancel(ctx)
+	info := &directorInfo{
+		ad:            directorAd,
+		cancel:        cancel,
+		forwardAdChan: make(chan *forwardAdInfo, 5),
+	}
 	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
+		cancel()
 		if item.Value() != nil {
 			if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
 				item.Value().ad = directorAd
@@ -584,10 +590,6 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 			}
 		}
 	} else {
-		info.ad = directorAd
-		var fwdCtx context.Context
-		fwdCtx, info.cancel = context.WithCancel(ctx)
-		info.forwardAdChan = make(chan *forwardAdInfo, 5)
 		go info.launchForwardAds(fwdCtx, egrp)
 	}
 }
