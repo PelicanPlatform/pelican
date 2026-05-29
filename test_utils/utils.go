@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -592,7 +592,7 @@ func SetupTestLogging(t testing.TB) func() {
 // surfaces the originating call site to make test output readable.
 func formatEntry(entry *logrus.Entry) string {
 	loc := ""
-	if entry.HasCaller() && entry.Caller != nil {
+	if entry.Caller != nil {
 		loc = fmt.Sprintf("%s:%d: ", filepath.Base(entry.Caller.File), entry.Caller.Line)
 	}
 
