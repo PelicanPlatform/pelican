@@ -253,20 +253,24 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 		// Register the web endpoints
 		if param.Lotman_EnableAPI.GetBool() {
 			log.Debugln("Registering Lotman API")
-			lotman.RegisterLotman(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
+			if err := lotman.RegisterLotsAPI(engine.Group("/", web_ui.ServerHeaderMiddleware)); err != nil {
+				return nil, errors.Wrap(err, "failed to register lotman API")
+			}
 		}
-
-		// Until https://github.com/PelicanPlatform/lotman/issues/24 is closed, we can only really logic over
-		// top-level prefixes because enumerating all object "directories" under a given federation prefix is
-		// infeasible, but is currently the only way to nest namespaces in Lotman such that a sub namespace
-		// can be associated with a top-level prefix.
-		// To that end, we need to filter out any nested namespaces from the cache server's namespace ads.
-		uniqueTopPrefixes := server_utils.FilterTopLevelPrefixes(cacheServer.GetNamespaceAds())
 
 		// Bind the c library funcs to Go, instantiate lots, set up the Lotman database, etc
-		if success := lotman.InitLotman(uniqueTopPrefixes); !success {
+		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
 			return nil, errors.New("Failed to initialize lotman")
 		}
+
+		// Background loops:
+		//   - LaunchRenewalRoutine periodically extends per-namespace lot
+		//     coverage so no namespace is left without an active lot.
+		//   - LaunchLotGcRoutine periodically removes lots whose
+		//     deletion_time + Lotman.LotRecordRetention has passed.
+		// Both exit when ctx is done.
+		lotman.LaunchRenewalRoutine(ctx, cacheServer.GetNamespaceAds)
+		lotman.LaunchLotGcRoutine(ctx)
 	}
 
 	// Don't perform Broker operations for site-local caches.

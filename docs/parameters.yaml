@@ -4655,8 +4655,8 @@ description: |+
   ```yaml
   Lotman:
     EnabledPolicy: "fairshare"
-    DefaultLotExpirationLifetime: "2016h"
-    DefaultLotDeletionLifetime: "4032h"
+    DefaultLotExpirationLifetime: "24h"
+    DefaultLotDeletionLifetime: "48h"
     PolicyDefinitions:
     - PolicyName: "fairshare"
       DivideUnallocated: true
@@ -4680,7 +4680,7 @@ description: |+
 
   This value is fed to Lotman as a unix timestamp in microseconds, adjusted from the current time.
 type: duration
-default: 2016h
+default: 24h
 components: ["cache"]
 ---
 name: Lotman.DefaultLotDeletionLifetime
@@ -4695,7 +4695,100 @@ description: |+
 
   This value is fed to Lotman as a unix timestamp in microseconds, adjusted from the current time.
 type: duration
-default: 4032h
+default: 48h
+components: ["cache"]
+---
+name: Lotman.MaxLotLifetime
+description: |+
+  The maximum lifetime any lot may have, computed as expiration_time - creation_time.
+  Lots created or updated with a span exceeding this value are rejected by
+  the Pelican CreateLot/UpdateLot wrappers, and the renewal scheduler clamps
+  any auto-minted lot's lifetime to this value.
+
+  When ${Cache.EnableLotman} is true, this value is also propagated to the
+  cache's xrootd configuration as the `purgecoldfiles <age>` argument of
+  `pfc.diskusage`. This ensures cached files untouched for longer than
+  ${Lotman.MaxLotLifetime} are evicted by the pfc purge plugin regardless of
+  the cache's fill level. Without this, the renewal scheduler's continuous
+  re-issuance of successor lots over advertised namespace paths would keep
+  every cached file associated with a live lot, and watermark-driven
+  eviction would never run on a cache that stays below the high watermark.
+
+  Because this value is passed directly to xrootd's `purgecoldfiles`
+  directive, it must fall within the range that xrootd accepts for that
+  directive: [1h, 360d]. Values outside this range are rejected at cache
+  startup with a configuration error.
+type: duration
+default: 168h
+components: ["cache"]
+---
+name: Lotman.RenewalCheckInterval
+description: |+
+  How often the Lotman renewal scheduler wakes up. On each tick the
+  scheduler walks every advertised namespace and ensures lot coverage
+  extends out to ${Lotman.SchedulingHorizon}, minting one or more fresh
+  successor lots per path as needed. Smaller values make the system more
+  responsive to namespace churn at the cost of more wakeups.
+type: duration
+default: 1h
+components: ["cache"]
+---
+name: Lotman.SchedulingHorizon
+description: |+
+  How far into the future the renewal scheduler is willing to mint lots.
+  Each tick fills every uncovered region of every advertised namespace
+  inside [now, now+${Lotman.SchedulingHorizon}) with back-to-back successor lots.
+  Lots whose creation_time would fall beyond this horizon are deferred
+  to a later tick. Larger values reduce the chance that a missed tick
+  produces a coverage lapse, at the cost of a longer wait before a
+  newly-discovered namespace receives its fair share of capacity (since
+  earlier reservations cannot be contracted).
+
+  Should be ≥ ${Lotman.DefaultLotExpirationLifetime} and ≥
+  ${Lotman.RenewalCheckInterval}. Out-of-range values produce a warning at
+  startup; the runtime planner additionally clamps the effective
+  horizon up to those minima on every tick so a misconfiguration cannot
+  cause coverage thrash.
+type: duration
+default: 48h
+components: ["cache"]
+---
+name: Lotman.MinFillerWidth
+description: |+
+  Smallest gap the renewal scheduler will bother to fill with a lot.
+  When two existing lots leave a hole shorter than this, the planner
+  records a Skip rather than mint a degenerate filler lot. Bytes that
+  arrive during such a sub-threshold gap are accounted to the default
+  lot. Set to 0s (the default) to fill every gap regardless of width.
+type: duration
+default: 0s
+components: ["cache"]
+---
+name: Lotman.LotRecordRetention
+description: |+
+  How long a lot's database row is retained after its deletion_time has
+  passed. The lot garbage collector removes a lot once
+    now ≥ deletion_time + ${Lotman.LotRecordRetention}.
+  This gives operators a forensics window during which historical lot
+  metadata is still inspectable after the lot's data is gone. A lot is
+  assumed to have been reclaimed by the storage layer at or before its
+  deletion_time, so this single bound suffices. Default is 60 days.
+  Note: this controls only how long the lot record (database row) is
+  kept; the underlying cached data is removed independently by the
+  xrootd-lotman purge plugin once the lot is past its deletion_time.
+type: duration
+default: 1440h
+components: ["cache"]
+---
+name: Lotman.GarbageCollectionInterval
+description: |+
+  How often the Lotman garbage collector wakes up to remove expired lot records. On each tick, the collector removes all lots whose
+  deletion_time has passed and whose database record has been retained for at least ${Lotman.LotRecordRetention}.
+
+   Smaller values make the system more responsive to metadata cleanup at the cost of more wakeups.
+type: duration
+hidden: true
+default: 1h
 components: ["cache"]
 ---
 name: Topology.DisableDowntime

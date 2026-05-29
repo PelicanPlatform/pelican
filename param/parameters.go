@@ -273,9 +273,15 @@ var runtimeConfigurableMap = map[string]bool{
 	"Lotman.DefaultLotExpirationLifetime": false,
 	"Lotman.EnableAPI": false,
 	"Lotman.EnabledPolicy": false,
+	"Lotman.GarbageCollectionInterval": false,
 	"Lotman.LibLocation": false,
 	"Lotman.LotHome": false,
+	"Lotman.LotRecordRetention": false,
+	"Lotman.MaxLotLifetime": false,
+	"Lotman.MinFillerWidth": false,
 	"Lotman.PolicyDefinitions": false,
+	"Lotman.RenewalCheckInterval": false,
+	"Lotman.SchedulingHorizon": false,
 	"MinimumDownloadSpeed": false,
 	"Monitoring.AggregatePrefixes": false,
 	"Monitoring.DataLocation": false,
@@ -1072,6 +1078,12 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
+	"Lotman.GarbageCollectionInterval": func(c *Config) time.Duration { return c.Lotman.GarbageCollectionInterval },
+	"Lotman.LotRecordRetention": func(c *Config) time.Duration { return c.Lotman.LotRecordRetention },
+	"Lotman.MaxLotLifetime": func(c *Config) time.Duration { return c.Lotman.MaxLotLifetime },
+	"Lotman.MinFillerWidth": func(c *Config) time.Duration { return c.Lotman.MinFillerWidth },
+	"Lotman.RenewalCheckInterval": func(c *Config) time.Duration { return c.Lotman.RenewalCheckInterval },
+	"Lotman.SchedulingHorizon": func(c *Config) time.Duration { return c.Lotman.SchedulingHorizon },
 	"Monitoring.DataRetention": func(c *Config) time.Duration { return c.Monitoring.DataRetention },
 	"Monitoring.StorageHealthCheckInterval": func(c *Config) time.Duration { return c.Monitoring.StorageHealthCheckInterval },
 	"Monitoring.TokenExpiresIn": func(c *Config) time.Duration { return c.Monitoring.TokenExpiresIn },
@@ -1370,9 +1382,15 @@ var allParameterNames = []string{
 	"Lotman.DefaultLotExpirationLifetime",
 	"Lotman.EnableAPI",
 	"Lotman.EnabledPolicy",
+	"Lotman.GarbageCollectionInterval",
 	"Lotman.LibLocation",
 	"Lotman.LotHome",
+	"Lotman.LotRecordRetention",
+	"Lotman.MaxLotLifetime",
+	"Lotman.MinFillerWidth",
 	"Lotman.PolicyDefinitions",
+	"Lotman.RenewalCheckInterval",
+	"Lotman.SchedulingHorizon",
 	"MinimumDownloadSpeed",
 	"Monitoring.AggregatePrefixes",
 	"Monitoring.DataLocation",
@@ -1993,6 +2011,12 @@ var (
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
+	Lotman_GarbageCollectionInterval = DurationParam{"Lotman.GarbageCollectionInterval"}
+	Lotman_LotRecordRetention = DurationParam{"Lotman.LotRecordRetention"}
+	Lotman_MaxLotLifetime = DurationParam{"Lotman.MaxLotLifetime"}
+	Lotman_MinFillerWidth = DurationParam{"Lotman.MinFillerWidth"}
+	Lotman_RenewalCheckInterval = DurationParam{"Lotman.RenewalCheckInterval"}
+	Lotman_SchedulingHorizon = DurationParam{"Lotman.SchedulingHorizon"}
 	Monitoring_DataRetention = DurationParam{"Monitoring.DataRetention"}
 	Monitoring_StorageHealthCheckInterval = DurationParam{"Monitoring.StorageHealthCheckInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
@@ -2425,6 +2449,12 @@ func init() {
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
+		"Lotman.GarbageCollectionInterval": Lotman_GarbageCollectionInterval,
+		"Lotman.LotRecordRetention": Lotman_LotRecordRetention,
+		"Lotman.MaxLotLifetime": Lotman_MaxLotLifetime,
+		"Lotman.MinFillerWidth": Lotman_MinFillerWidth,
+		"Lotman.RenewalCheckInterval": Lotman_RenewalCheckInterval,
+		"Lotman.SchedulingHorizon": Lotman_SchedulingHorizon,
 		"Monitoring.DataRetention": Monitoring_DataRetention,
 		"Monitoring.StorageHealthCheckInterval": Monitoring_StorageHealthCheckInterval,
 		"Monitoring.TokenExpiresIn": Monitoring_TokenExpiresIn,

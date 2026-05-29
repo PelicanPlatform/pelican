@@ -1,8 +1,8 @@
-//go:build ignore && linux && !ppc64le
+//go:build linux && !ppc64le
 
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -41,7 +40,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -63,15 +61,41 @@ func findPolicyIndex(policyName string, policies []PurgePolicy) int {
 	return -1
 }
 
+// lotmanTestOpts controls optional behaviour of setupLotmanFromConf.
+type lotmanTestOpts struct {
+	clearCacheDataLocations bool
+}
+
+type lotmanTestOption func(*lotmanTestOpts)
+
+// withoutCacheDataLocations forces Cache.DataLocations to an empty slice
+// before InitLotman runs, exercising the HighWaterMark fallback path in
+// computeRootDedicatedGB. Use only for tests that specifically validate
+// that fallback; the default helper points DataLocations at a tmpdir so
+// the disk-usage probe finds a real, accessible filesystem path.
+func withoutCacheDataLocations() lotmanTestOption {
+	return func(o *lotmanTestOpts) { o.clearCacheDataLocations = true }
+}
+
 // Initialize Lotman
 // If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
 // so that underlying metadata discovery can happen against the mock discovery host
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2) (bool, func()) {
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2, opts ...lotmanTestOption) (bool, func()) {
+	o := lotmanTestOpts{}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
 	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
 	require.NoError(t, param.Logging_Level.Set("debug"))
+	// The newer lotman library strictly enforces creation_time < expiration_time
+	// when storing a lot. The auto-created `default` and `root` lots derive
+	// their timestamps from these params, so we must ensure non-zero defaults
+	// regardless of whether the embedded yaml is loaded.
+	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.Set(168*time.Hour))
+	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.Set(168*time.Hour))
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -112,6 +136,18 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	require.NoError(t, err)
 
 	require.NoError(t, param.Lotman_LotHome.Set(tmpPath))
+	// Always override Cache.DataLocations so InitLotman's disk-usage probe
+	// never touches the real default path ("/run/pelican/cache/data"),
+	// which does not exist in CI environments. Tests that need to exercise
+	// the HighWaterMark fallback in computeRootDedicatedGB must opt in
+	// explicitly via withoutCacheDataLocations(); we can't honour a
+	// caller-set value here because param.IsSet() returns true even when
+	// only the default is in play.
+	if o.clearCacheDataLocations {
+		require.NoError(t, param.Cache_DataLocations.Set([]string{}))
+	} else {
+		require.NoError(t, param.Cache_DataLocations.Set([]string{tmpPath}))
+	}
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
@@ -151,13 +187,12 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestGoodInit", func(t *testing.T) {
 		require.NoError(t, param.Logging_Level.Set("debug"))
-		require.NoError(t, param.Cache_DataLocations.Set([]string{}))
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
 		require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil)
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil, withoutCacheDataLocations())
 		defer cleanup()
 		require.True(t, success)
 
@@ -177,8 +212,12 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, "default", defaultLot.LotName)
 		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
-		require.Equal(t, 0.0, *(defaultLot.MPA.DedicatedGB))
-		require.Equal(t, int64(0), (defaultLot.MPA.MaxNumObjects.Value))
+		// default has literal-zero storage quotas (lotman PR #46 reserves -1
+		// for unbounded). Any usage of default puts it over-quota and the
+		// purge plugin reclaims it on the next cycle.
+		require.Equal(t, float64(0), *(defaultLot.MPA.DedicatedGB))
+		require.Equal(t, float64(0), *(defaultLot.MPA.OpportunisticGB))
+		require.Equal(t, int64(0), defaultLot.MPA.MaxNumObjects.Value)
 
 		rootOutput := make([]byte, 4096)
 		ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
@@ -193,8 +232,14 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, "root", rootLot.LotName)
 		require.Equal(t, server.URL, rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
-		require.Equal(t, 0.0, *(rootLot.MPA.DedicatedGB))
-		require.Equal(t, int64(0), (rootLot.MPA.MaxNumObjects.Value))
+		// root's dedicatedGB is set to the full cache disk space; when no
+		// disks are detected (as in this test) it falls back to
+		// Cache.HighWaterMark, which setupLotmanFromConf sets to "100g".
+		// Opportunistic and object quotas are unbounded (-1 sentinel,
+		// lotman PR #46).
+		require.InDelta(t, float64(100), *(rootLot.MPA.DedicatedGB), 1e-6)
+		require.Equal(t, float64(-1), *(rootLot.MPA.OpportunisticGB))
+		require.Equal(t, int64(-1), rootLot.MPA.MaxNumObjects.Value)
 	})
 }
 
@@ -258,7 +303,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "root", test1Lot.Parents[0])
 	require.Equal(t, 1.11, *(test1Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test1Lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1", test1Lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/", test1Lot.Paths[0].Path)
 	require.False(t, test1Lot.Paths[0].Recursive)
 
 	// Finally test-2
@@ -277,7 +323,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "test-1", test2Lot.Parents[0])
 	require.Equal(t, 1.11, *(test2Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test2Lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1/test-2", test2Lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/test-2/", test2Lot.Paths[0].Path)
 	require.True(t, test2Lot.Paths[0].Recursive)
 }
 
@@ -341,7 +388,8 @@ func TestGetLot(t *testing.T) {
 	require.Contains(t, lot.Owners, "https://another-fake-federation.com")
 	require.Equal(t, 1.11, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1/test-2", lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1/test-2/", lot.Paths[0].Path)
 	require.True(t, lot.Paths[0].Recursive)
 }
 
@@ -354,8 +402,11 @@ func TestUpdateLot(t *testing.T) {
 	defer cleanup()
 	require.True(t, success)
 
-	// Update the test-1 lot
-	dedicatedGB := float64(999.0)
+	// Update the test-1 lot. Under strict_hierarchy a child's DedicatedGB
+	// cannot exceed its parent's (root), which is derived from
+	// Cache.HighWaterMark ("100g" in tests). Use 50 GB: clearly different
+	// from the initial 1.11 and well within root's 100 GB ceiling.
+	dedicatedGB := float64(50.0)
 	lotUpdate := LotUpdate{
 		LotName: "test-1",
 		MPA: &MPA{
@@ -382,7 +433,8 @@ func TestUpdateLot(t *testing.T) {
 	require.Equal(t, "test-1", lot.LotName)
 	require.Equal(t, dedicatedGB, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(84), lot.MPA.MaxNumObjects.Value)
-	require.Equal(t, "/test-1-updated", lot.Paths[0].Path)
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	require.Equal(t, "/test-1-updated/", lot.Paths[0].Path)
 	require.False(t, lot.Paths[0].Recursive)
 }
 
@@ -399,10 +451,21 @@ func TestAddToLot(t *testing.T) {
 		Path:      "/a/new/path",
 		Recursive: true,
 	}
+	// default has zero storage MPAs (lotman PR #46), so we must explicitly
+	// attribute 0 of test-1's quota to default; root absorbs the full
+	// child MPA (test-1 is configured with 1.11 / 2.22 / 42).
+	zeroDed := float64(0)
+	zeroOpp := float64(0)
+	childDed := float64(1.11)
+	childOpp := float64(2.22)
 	addition := LotAddition{
 		LotName: "test-1",
 		Paths:   []LotPath{newLotPath},
 		Parents: []string{"default"},
+		ParentAttributions: map[string]ParentAttribution{
+			"default": {DedicatedGB: &zeroDed, OpportunisticGB: &zeroOpp, MaxNumObjects: &Int64FromFloat{Value: 0}},
+			"root":    {DedicatedGB: &childDed, OpportunisticGB: &childOpp, MaxNumObjects: &Int64FromFloat{Value: 42}},
+		},
 	}
 
 	err := AddToLot(&addition, server.URL)
@@ -411,6 +474,8 @@ func TestAddToLot(t *testing.T) {
 	// -- this lets us do the comparison later, as `GetLot()`` sets this value but
 	// `AddToLot()`` doesn't accept it
 	newLotPath.LotName = "test-1"
+	// Newer lotman normalises lot paths with a trailing slash on retrieval.
+	newLotPath.Path = "/a/new/path/"
 
 	// Now check that the addition was successful
 	lot, err := GetLot("test-1", false)
@@ -431,9 +496,19 @@ func TestRemoveLotParents(t *testing.T) {
 
 	// First add default lot as parent to test-1, then remove it. We do this
 	// because lotman won't let us remove _all_ parents.
+	// default has zero storage MPAs (lotman PR #46), so attribute 0 to it
+	// and the full child MPA to root.
+	zeroDed := float64(0)
+	zeroOpp := float64(0)
+	childDed := float64(1.11)
+	childOpp := float64(2.22)
 	addition := LotAddition{
 		LotName: "test-1",
 		Parents: []string{"default"},
+		ParentAttributions: map[string]ParentAttribution{
+			"default": {DedicatedGB: &zeroDed, OpportunisticGB: &zeroOpp, MaxNumObjects: &Int64FromFloat{Value: 0}},
+			"root":    {DedicatedGB: &childDed, OpportunisticGB: &childOpp, MaxNumObjects: &Int64FromFloat{Value: 42}},
+		},
 	}
 	err := AddToLot(&addition, server.URL)
 	require.NoError(t, err, "Failed to add to lot")
@@ -911,314 +986,195 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 	}
 }
 
-// If so configured, we'll divide unallocated space between lot's dedicated GB and
-// opportunistict GB values. This test ensures the calculations are correct and that
-// hardcoded configuration isn't modified.
-// I don't test for errors here because the internal functions capable of generating
-// errors are tested elsewhere (e.g. convertWatermarkToBytes)
-func TestDivideRemainingSpace(t *testing.T) {
+// TestComputeRootDedicatedGB_ClampsToHWM verifies that the root lot's
+// dedicated quota is clamped down to Cache.HighWaterMark and
+// Cache.FilesMaxSize when those would be lower than raw disk total,
+// since xrootd will purge once usage exceeds those thresholds.
+func TestComputeRootDedicatedGB_ClampsToHWM(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	dedGB := float64(10.0)
-	oppGB := float64(1.5)
 
-	createLotMap := func() map[string]Lot {
-		return map[string]Lot{
-			"lot1": {
-				LotName: "lot1",
-				MPA: &MPA{
-					DedicatedGB:     &dedGB,
-					OpportunisticGB: &oppGB,
-				},
-			},
-			"lot2": {
-				LotName: "lot2",
-				MPA:     &MPA{},
-			},
-			"lot3": {
-				LotName: "lot3",
-				MPA: &MPA{
-					DedicatedGB: &dedGB,
-				},
-			},
-			"lot4": {
-				LotName: "lot4",
-				MPA: &MPA{
-					OpportunisticGB: &oppGB, // hardcoded values should be respected
-				},
-			},
-		}
-	}
+	totalDisk := gigabytesToBytes(1000.0) // 1 TB
 
-	lotMap := createLotMap()
-	totalDiskSpaceB := uint64(30000000000) // 30GB
-	require.NoError(t, param.Cache_HighWaterMark.Set("25g"))
-	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
-	require.NoError(t, err)
-	// dedGB divisions should sum to HWM
-	require.Equal(t, 10.0, *lotMap["lot1"].MPA.DedicatedGB)
-	require.Equal(t, 2.5, *lotMap["lot2"].MPA.DedicatedGB)
-	require.Equal(t, 10.0, *lotMap["lot3"].MPA.DedicatedGB)
-	require.Equal(t, 2.5, *lotMap["lot4"].MPA.DedicatedGB)
-	// oppGB should be HWM - dedGB unless hardcoded
-	require.Equal(t, 1.5, *lotMap["lot1"].MPA.OpportunisticGB)
-	require.Equal(t, 22.5, *lotMap["lot2"].MPA.OpportunisticGB)
-	require.Equal(t, 15.0, *lotMap["lot3"].MPA.OpportunisticGB)
-	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
+	t.Run("no disk falls back to HWM as absolute bytes", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
+		got := computeRootDedicatedGB(0)
+		require.InDelta(t, 100.0, got, 0.001)
+	})
 
-	// Now make sure we this allocation fails if sum of dedGB is lower than HWM
-	require.NoError(t, param.Cache_HighWaterMark.Set("1g"))
-	lotMap = createLotMap()
-	err = divideRemainingSpace(&lotMap, totalDiskSpaceB)
-	require.Error(t, err)
+	t.Run("HWM percent clamps below disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("90"))
+		got := computeRootDedicatedGB(totalDisk)
+		// 90% of 1000 GB = 900 GB
+		require.InDelta(t, 900.0, got, 0.001)
+	})
+
+	t.Run("HWM byte value clamps below disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("500g"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 500.0, got, 0.001)
+	})
+
+	t.Run("HWM higher than disk uses disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("100"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 1000.0, got, 0.001)
+	})
+
+	t.Run("FilesMaxSize clamps below HWM-clamped disk total", func(t *testing.T) {
+		server_utils.ResetTestState()
+		defer server_utils.ResetTestState()
+		require.NoError(t, param.Cache_HighWaterMark.Set("90"))
+		require.NoError(t, param.Cache_FilesMaxSize.Set("250g"))
+		got := computeRootDedicatedGB(totalDisk)
+		require.InDelta(t, 250.0, got, 0.001)
+	})
 }
 
-// Pretty straightforward -- tests should make sure we can grab viper config and use it when
-// setting lot timestamps if they're not pre-configured.
-func TestConfigLotTimestamps(t *testing.T) {
+// TestStrictHierarchyContextSet verifies that InitLotman installs the
+// strict-hierarchy execution context (PR-2): the three flags
+// strict_hierarchy, contraction_policy, and admin_override must each be
+// readable via lotman_get_context_str with the documented values after a
+// successful init.
+func TestStrictHierarchyContextSet(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	now := time.Now().UnixMilli()
-	require.NoError(t, param.Lotman_DefaultLotExpirationLifetime.SetString("24h"))
-	require.NoError(t, param.Lotman_DefaultLotDeletionLifetime.SetString("48h"))
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanStrictHierCtx", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
 
-	defaultExpiration := now + 24*60*60*1000 // 24 hours in milliseconds
-	defaultDeletion := now + 48*60*60*1000   // 48 hours in milliseconds
-
-	// Helper function to create a lot with optional timestamps
-	createLot := func(creationTime, expirationTime, deletionTime *Int64FromFloat) Lot {
-		return Lot{
-			MPA: &MPA{
-				CreationTime:   creationTime,
-				ExpirationTime: expirationTime,
-				DeletionTime:   deletionTime,
-			},
-		}
-	}
-
-	// Define the test cases
-	testCases := []struct {
-		name           string
-		lotMap         map[string]Lot
-		expectedLotMap map[string]Lot
+	cases := []struct {
+		key, want string
 	}{
-		{
-			name: "Lots with missing timestamps",
-			lotMap: map[string]Lot{
-				"lot1": createLot(nil, nil, nil),
-				"lot2": createLot(&Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}),
-			},
-			expectedLotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
-				"lot2": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
-			},
-		},
-		{
-			name: "Lots with existing timestamps",
-			lotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
-			},
-			expectedLotMap: map[string]Lot{
-				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
-			},
-		},
+		{"strict_hierarchy", "true"},
+		{"contraction_policy", "always"},
+		{"admin_override", "false"},
 	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			configLotTimestamps(&tc.lotMap)
-
-			for lotName, lot := range tc.lotMap {
-				expectedLot, exists := tc.expectedLotMap[lotName]
-				require.True(t, exists)
-
-				// Use delta comparisons for timestamps to account for small skews
-				// that occur between creation of expected test lot and actual lot. This
-				// happens infrequently in GHA runners, but still causes test failures.
-				if expectedLot.MPA.CreationTime != nil && lot.MPA.CreationTime != nil {
-					assert.InDelta(t, expectedLot.MPA.CreationTime.Value, lot.MPA.CreationTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected creation time to be set")
-				}
-				if expectedLot.MPA.ExpirationTime != nil && lot.MPA.ExpirationTime != nil {
-					assert.InDelta(t, expectedLot.MPA.ExpirationTime.Value, lot.MPA.ExpirationTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected expiration time to be set")
-				}
-				if expectedLot.MPA.DeletionTime != nil && lot.MPA.DeletionTime != nil {
-					assert.InDelta(t, expectedLot.MPA.DeletionTime.Value, lot.MPA.DeletionTime.Value, 2.0)
-				} else {
-					assert.Fail(t, "Expected deletion time to be set")
-				}
-			}
-		})
+	for _, c := range cases {
+		out := make([]byte, 256)
+		errMsg := make([]byte, 2048)
+		ret := LotmanGetContextStr(c.key, &out, &errMsg)
+		if ret != 0 {
+			trimBuf(&errMsg)
+			t.Fatalf("LotmanGetContextStr(%s) failed: %s", c.key, string(errMsg))
+		}
+		trimBuf(&out)
+		assert.Equal(t, c.want, string(out), "context flag %s should be %q", c.key, c.want)
 	}
 }
 
-func TestConfigLotsFromFedPrefixes(t *testing.T) {
+// TestLotmanVersionCompatibility verifies that checkLotmanVersionCompatibility
+// accepts the version string returned by the currently loaded libLotMan.so
+// (which must be >= v0.1.0 to support strict_hierarchy + parent_attributions).
+func TestLotmanVersionCompatibility(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanVersionCheck", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	assert.True(t, checkLotmanVersionCompatibility(),
+		"installed lotman version %q must be >= %s", LotmanVersion(), minLotmanVersion)
+}
+
+// TestInitLotmanNestedNamespaces drives the full PR-3/PR-4 path-prefix
+// nesting pipeline through a real lotman_add_lot call. Three namespaces
+// are submitted: /a, /a/b, and /c. Expected lot tree:
+//
+//	root -> /a -> /a/b
+//	root -> /c
+//
+// The test confirms (1) parent linkage stored by lotman matches the tree
+// computed by buildLotTree, (2) per-axis ParentAttributions written via
+// lotman_add_lot are honoured by lotman_get_lot_as_json, and (3) the
+// (N+1) allocator yields the documented quotas at each level.
+func TestInitLotmanNestedNamespaces(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	fedInfo, err := config.GetFederation(context.Background())
-	require.NoError(t, err)
-	discUrl := fedInfo.DiscoveryEndpoint
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
-	issuer1Str := "https://issuer1.com"
-	issuer1, _ := url.Parse(issuer1Str)
-	issuer2Str := "https://issuer2.com"
-	issuer2, _ := url.Parse(issuer2Str)
-	testCases := []struct {
-		name             string
-		nsAds            []server_structs.NamespaceAdV2
-		federationIssuer string
-		directorUrl      string
-		expectedLotMap   map[string]Lot
-		expectedError    string
-	}{
-		{
-			name: "Valid namespaces",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer1},
-					},
-				},
-				{
-					Path: "/namespace2",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer2},
-					},
-				},
-			},
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace1": {
-					LotName: "/namespace1",
-					Owner:   issuer1Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace1",
-							Recursive: true,
-						},
-					},
-				},
-				"/namespace2": {
-					LotName: "/namespace2",
-					Owner:   issuer2Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace2",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Skip monitoring namespaces",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/pelican/monitoring/namespace1",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer1},
-					},
-				},
-				{
-					Path: "/namespace2",
-					Issuer: []server_structs.TokenIssuer{
-						{IssuerUrl: *issuer2},
-					},
-				},
-			},
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace2": {
-					LotName: "/namespace2",
-					Owner:   issuer2Str,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace2",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Discovery endpoint used as federation issuer",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-				},
-			},
-			// In production, the discovery endpoint is always populated (even when
-			// bootstrapped via the Director URL). Verify it's used as the lot owner.
-			federationIssuer: discUrl,
-			directorUrl:      "https://dne-director.com",
-			expectedLotMap: map[string]Lot{
-				"/namespace1": {
-					LotName: "/namespace1",
-					Owner:   discUrl,
-					Parents: []string{"root"},
-					Paths: []LotPath{
-						{
-							Path:      "/namespace1",
-							Recursive: true,
-						},
-					},
-				},
-			},
-			expectedError: "",
-		},
-		{
-			name: "Unresolvable issuer triggers error",
-			nsAds: []server_structs.NamespaceAdV2{
-				{
-					Path: "/namespace1",
-				},
-			},
-			federationIssuer: "",
-			directorUrl:      "",
-			expectedLotMap:   map[string]Lot{},
-			expectedError:    "unable to determine the federation's discovery endpoint/issuer for lot ownership",
-		},
+	nsAds := makeAds("/a", "/a/b", "/c")
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", server.URL, nsAds, withoutCacheDataLocations())
+	defer cleanup()
+	require.True(t, success)
+
+	// Lots are named with v4 UUIDs internally; resolve UUID names by
+	// asking lotman which lot owns the namespace path right now.
+	nowMs := time.Now().UnixMilli()
+	nameForPath := func(p string) string {
+		owners, err := GetLotsFromDir(p, false, nowMs)
+		require.NoErrorf(t, err, "GetLotsFromDir(%q)", p)
+		require.NotEmptyf(t, owners, "no lot owns %q", p)
+		// owners[0] is the most-specific lot for the path.
+		return owners[0]
 	}
 
-	// Run the test cases
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			config.ResetFederationForTest()
-			fed := pelican_url.FederationDiscovery{
-				// Most of these aren't actually used by the test, but to prevent auto discovery
-				// and needing to spin up a separate mock discovery server, set them all.
-				DiscoveryEndpoint: tc.federationIssuer,
-				DirectorEndpoint:  tc.directorUrl,
-				RegistryEndpoint:  "https://dne-registry.com",
-				JwksUri:           "https://dne-jwks.com",
-				BrokerEndpoint:    "https://dne-broker.com",
-			}
-			config.SetFederation(fed)
-
-			lotMap, err := configLotsFromFedPrefixes(tc.nsAds)
-			if tc.expectedError == "" {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.expectedError)
-			}
-			assert.Equal(t, tc.expectedLotMap, lotMap)
-		})
+	getLot := func(name string) Lot {
+		buf := make([]byte, 8192)
+		errBuf := make([]byte, 2048)
+		ret := LotmanGetLotJSON(name, false, &buf, &errBuf)
+		if ret != 0 {
+			trimBuf(&errBuf)
+			t.Fatalf("get lot %q failed: %s", name, string(errBuf))
+		}
+		trimBuf(&buf)
+		var l Lot
+		require.NoErrorf(t, json.Unmarshal(buf, &l), "unmarshal %q: %s", name, string(buf))
+		return l
 	}
+
+	aName := nameForPath("/a")
+	bName := nameForPath("/a/b")
+	cName := nameForPath("/c")
+	a := getLot(aName)
+	b := getLot(bName)
+	c := getLot(cName)
+
+	// Parent linkage as computed by buildLotTree.
+	assert.Equal(t, []string{"root"}, a.Parents)
+	assert.Equal(t, []string{aName}, b.Parents)
+	assert.Equal(t, []string{"root"}, c.Parents)
+
+	// (N+1) allocator: root has HighWaterMark=100GB (no Cache.DataLocations
+	// set, so HWM is the fallback root quota) and 2 top-level children
+	// /a and /c, so each gets 100/2 = 50 GB.
+	require.NotNil(t, a.MPA.DedicatedGB)
+	require.NotNil(t, c.MPA.DedicatedGB)
+	assert.InDelta(t, 50.0, *a.MPA.DedicatedGB, 1e-9)
+	assert.InDelta(t, 50.0, *c.MPA.DedicatedGB, 1e-9)
+
+	// /a then has 1 child, divisor = N+1 = 2, so /a/b gets 50/2 = 25 GB.
+	require.NotNil(t, b.MPA.DedicatedGB)
+	assert.InDelta(t, 25.0, *b.MPA.DedicatedGB, 1e-9)
+
+	// ParentAttributions wired through to lotman: each child's attribution
+	// equals its own dedicated quota (axiom 1 trivially satisfied).
+	require.Contains(t, a.ParentAttributions, "root")
+	require.Contains(t, b.ParentAttributions, aName)
+	require.Contains(t, c.ParentAttributions, "root")
+	assert.InDelta(t, 50.0, *a.ParentAttributions["root"].DedicatedGB, 1e-9)
+	assert.InDelta(t, 25.0, *b.ParentAttributions[aName].DedicatedGB, 1e-9)
+	assert.InDelta(t, 50.0, *c.ParentAttributions["root"].DedicatedGB, 1e-9)
+
+	// Sentinel propagation (root.opportunistic = -1, root.max_num_objects = -1):
+	// lotman PR #46 accepts -1 verbatim as "unbounded" for both MPAs and
+	// parent attributions.
+	require.NotNil(t, a.MPA.OpportunisticGB)
+	assert.Equal(t, float64(-1), *a.MPA.OpportunisticGB)
+	require.NotNil(t, a.MPA.MaxNumObjects)
+	assert.Equal(t, int64(-1), a.MPA.MaxNumObjects.Value)
 }

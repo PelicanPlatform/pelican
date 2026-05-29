@@ -226,9 +226,15 @@ type Config struct {
 		DefaultLotExpirationLifetime time.Duration `mapstructure:"defaultlotexpirationlifetime" yaml:"DefaultLotExpirationLifetime"`
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
+		GarbageCollectionInterval time.Duration `mapstructure:"garbagecollectioninterval" yaml:"GarbageCollectionInterval"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
 		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
+		LotRecordRetention time.Duration `mapstructure:"lotrecordretention" yaml:"LotRecordRetention"`
+		MaxLotLifetime time.Duration `mapstructure:"maxlotlifetime" yaml:"MaxLotLifetime"`
+		MinFillerWidth time.Duration `mapstructure:"minfillerwidth" yaml:"MinFillerWidth"`
 		PolicyDefinitions any `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
+		RenewalCheckInterval time.Duration `mapstructure:"renewalcheckinterval" yaml:"RenewalCheckInterval"`
+		SchedulingHorizon time.Duration `mapstructure:"schedulinghorizon" yaml:"SchedulingHorizon"`
 	} `mapstructure:"lotman" yaml:"Lotman"`
 	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 	Monitoring struct {
@@ -694,9 +700,15 @@ type configWithType struct {
 		DefaultLotExpirationLifetime struct { Type string; Value time.Duration }
 		EnableAPI struct { Type string; Value bool }
 		EnabledPolicy struct { Type string; Value string }
+		GarbageCollectionInterval struct { Type string; Value time.Duration }
 		LibLocation struct { Type string; Value string }
 		LotHome struct { Type string; Value string }
+		LotRecordRetention struct { Type string; Value time.Duration }
+		MaxLotLifetime struct { Type string; Value time.Duration }
+		MinFillerWidth struct { Type string; Value time.Duration }
 		PolicyDefinitions struct { Type string; Value any }
+		RenewalCheckInterval struct { Type string; Value time.Duration }
+		SchedulingHorizon struct { Type string; Value time.Duration }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {

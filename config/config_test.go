@@ -1454,3 +1454,89 @@ func TestConfigFileBootstrapping(t *testing.T) {
 		})
 	}
 }
+
+// setupCacheLotmanPrereqs configures the cache-side parameters that
+// InitServer's Cache.EnableLotman block requires before it inspects
+// Lotman-specific bounds. Tests that exercise the Lotman boundary
+// validators in InitServer should call this first, then override the
+// specific Lotman.* parameter under test.
+func setupCacheLotmanPrereqs(t *testing.T) {
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.Cache_EnableLotman.Set(true))
+	require.NoError(t, param.Cache_LowWatermark.Set("80"))
+	require.NoError(t, param.Cache_HighWaterMark.Set("90"))
+	require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
+	require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
+	require.NoError(t, param.Cache_FilesMaxSize.Set("3g"))
+}
+
+// Lotman.MaxLotLifetime is propagated verbatim to the xrootd
+// pfc.diskusage purgecoldfiles directive when Cache.EnableLotman is
+// true; xrootd accepts ages only in [1h, 360d]. InitServer must reject
+// out-of-range values before xrootd ever sees them.
+func TestInitServerRejectsLotmanMaxLotLifetimeBelowMinimum(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	mockFederationRoot(t)
+	setupCacheLotmanPrereqs(t)
+	require.NoError(t, param.Lotman_MaxLotLifetime.Set(30*time.Minute))
+
+	err := InitServer(context.Background(), server_structs.CacheType)
+	require.Error(t, err)
+	require.ErrorContains(t, err, param.Lotman_MaxLotLifetime.GetName())
+	require.ErrorContains(t, err, "1h")
+}
+
+func TestInitServerRejectsLotmanMaxLotLifetimeAboveMaximum(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	mockFederationRoot(t)
+	setupCacheLotmanPrereqs(t)
+	// 361 days is one day past the 360d ceiling.
+	require.NoError(t, param.Lotman_MaxLotLifetime.Set(361*24*time.Hour))
+
+	err := InitServer(context.Background(), server_structs.CacheType)
+	require.Error(t, err)
+	require.ErrorContains(t, err, param.Lotman_MaxLotLifetime.GetName())
+	require.ErrorContains(t, err, "360d")
+}
+
+func TestInitServerAcceptsLotmanMaxLotLifetimeAtBounds(t *testing.T) {
+	cases := []struct {
+		name string
+		val  time.Duration
+	}{
+		{"min-1h", time.Hour},
+		{"default-168h", 168 * time.Hour},
+		{"max-360d", 360 * 24 * time.Hour},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			mockFederationRoot(t)
+			setupCacheLotmanPrereqs(t)
+			require.NoError(t, param.Lotman_MaxLotLifetime.Set(tc.val))
+
+			// May still fail downstream for unrelated reasons (this is
+			// a cache-type init without xrootd config in place); the
+			// only assertion is that the Lotman boundary check did not
+			// reject the value.
+			err := InitServer(context.Background(), server_structs.CacheType)
+			if err != nil {
+				require.NotContains(t, err.Error(), "exceeds the maximum allowed value")
+				require.NotContains(t, err.Error(), "is below the minimum allowed value")
+			}
+		})
+	}
+}

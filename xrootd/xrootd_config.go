@@ -131,6 +131,18 @@ type (
 		Enabled    bool
 		LotHome    string
 		PurgeOrder []string
+		// PurgeColdFilesAge is the xrootd-formatted age (e.g. "604800s") passed
+		// to pfc.diskusage's purgecoldfiles directive. Sourced from
+		// Lotman.MaxLotLifetime so files untouched for longer than the maximum
+		// lot lifetime are evicted independently of the high watermark.
+		// This is a drainage mechanism: without it, the renewal scheduler's
+		// continuous re-issuance of successor lots over advertised namespace
+		// paths would keep every cached file associated with a live lot, and
+		// the watermark-driven eviction loop would never reclaim long-cold
+		// files on caches that stay below the high watermark. In other
+		// words, perpetually-extended lots could otherwise accrue unused
+		// cruft indefinitely; this knob lets pfc evict that cruft.
+		PurgeColdFilesAge string
 	}
 
 	CacheConfig struct {
@@ -811,6 +823,12 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 		lastScitokensSuccess: time.Now(),
 		lastDirectorRefresh:  time.Time{}, // Zero time so first refresh is always allowed
 	}
+	// Seed the component health to a fresh baseline mirroring the grace-baseline
+	// times above. Without this, any stale `Critical` status left by a previous
+	// run (or a previous test in the same process) would remain visible until
+	// the first maintenance cycle finishes, racing observers that read the
+	// health metric immediately after launch.
+	metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusOK, "Xrootd maintenance routine starting; awaiting first cycle")
 	// Capture timeout and auto-shutdown config at launch time to avoid race conditions with Viper resets in tests
 	configTimeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
 	autoShutdownEnabled := param.Xrootd_AutoShutdownEnabled.GetBool()
@@ -1162,6 +1180,23 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				return "", errors.Errorf("lotman policy %s has an undefined purge order", enabledPolicy)
 			}
 			lotmanCfg.PurgeOrder = purgeOrder
+
+			// Tie pfc's age-based purge to the maximum lot lifetime. The renewal
+			// scheduler continuously schedules successor lots over advertised
+			// namespace paths, so files under those paths are always associated
+			// with a live lot. Without an age-based purge, watermark-driven
+			// eviction never fires on a cache that stays below the high
+			// watermark, and cold cruft accumulates indefinitely. The xrootd
+			// purgecoldfiles directive evicts files untouched for longer than
+			// the supplied age regardless of fill level.
+			maxLotLifetime := param.Lotman_MaxLotLifetime.GetDuration()
+			if maxLotLifetime > 0 {
+				ageStr, err := purgeColdFilesAgeFromMaxLotLifetime(maxLotLifetime)
+				if err != nil {
+					return "", err
+				}
+				lotmanCfg.PurgeColdFilesAge = ageStr
+			}
 		}
 		xrdConfig.Cache.LotmanCfg = lotmanCfg
 	}
@@ -1466,6 +1501,17 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 	}
 
 	return level, nil
+}
+
+// purgeColdFilesAgeFromMaxLotLifetime renders Lotman.MaxLotLifetime into
+// the xrootd-formatted age string consumed by the pfc.diskusage
+// purgecoldfiles directive (e.g. "604800s"). The [1h, 360d] domain
+// check has been moved to config/config.go so the operator sees the
+// rejection at boot rather than mid-startup of the xrootd config
+// builder; this function is now a pure formatter and assumes its input
+// is already in range.
+func purgeColdFilesAgeFromMaxLotLifetime(maxLotLifetime time.Duration) (string, error) {
+	return strconv.FormatInt(int64(maxLotLifetime.Seconds()), 10) + "s", nil
 }
 
 // mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones

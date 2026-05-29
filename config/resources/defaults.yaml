@@ -81,8 +81,14 @@ Cache:
   EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
-  DefaultLotExpirationLifetime: "2016h"
-  DefaultLotDeletionLifetime: "4032h"
+  DefaultLotExpirationLifetime: "24h"
+  DefaultLotDeletionLifetime: "48h"
+  MaxLotLifetime: "168h"
+  RenewalCheckInterval: "1h"
+  SchedulingHorizon: "48h"
+  MinFillerWidth: "0s"
+  LotRecordRetention: "1440h"
+  GarbageCollectionInterval: "1h"
   PolicyDefinitions:
     - PolicyName: "fairshare"
       DivideUnallocated: true
