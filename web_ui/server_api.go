@@ -453,13 +453,14 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 	if id == "" {
 		return errors.New("downtime ID is required")
 	}
+	reqCtx := ctx.Request.Context()
 
 	// Only mirror downtime to Registry when this server is an Origin or Cache
 	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
 		return nil
 	}
 
-	fed, err := config.GetFederation(ctx)
+	fed, err := config.GetFederation(reqCtx)
 	if err != nil || fed.RegistryEndpoint == "" {
 		return errors.Wrap(err, "failed to load federation configuration")
 	}
@@ -516,7 +517,7 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 		}
 	}
 	tr := config.GetTransport()
-	if _, err := utils.MakeRequest(ctx, tr, regURL.String(), method, data, headers); err != nil {
+	if _, err := utils.MakeRequest(reqCtx, tr, regURL.String(), method, data, headers); err != nil {
 		return errors.Wrapf(err, "failed to mirror downtime to registry at %s", regURL.String())
 	}
 
