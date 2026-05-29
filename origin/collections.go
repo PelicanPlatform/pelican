@@ -94,8 +94,8 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		return false
 	}
 
-	// Parse token (without verification first to check issuer)
-	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	// Parse token without verification first to check issuer
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		log.Debugf("verifyCollectionScope: Failed to parse token (no verify): %v", err)
 		return false
@@ -117,15 +117,11 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		return false
 	}
 
-	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+	// Self-issued token: this server both signs and verifies it,
+	// so no inter-server clock skew is possible.
+	parsed, err := token.VerifyWithKeysetStrict(tokenStr, jwks)
 	if err != nil {
-		log.Debugf("verifyCollectionScope: Failed to parse token with signature verification: %v", err)
-		return false
-	}
-
-	// Basic validation
-	if err := jwt.Validate(parsed); err != nil {
-		log.Debugf("verifyCollectionScope: Token validation failed: %v", err)
+		log.Debugf("verifyCollectionScope: Failed to verify token signature or claims: %v", err)
 		return false
 	}
 

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -597,28 +597,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 
-				accessJWT, err := jwt.Parse(
-					[]byte(accessToken),
-					jwt.WithKeySet(jwks),
-					jwt.WithVerify(true),
-				)
-				if err != nil {
+				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+				if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
+					log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
 					ctx.JSON(http.StatusForbidden,
 						server_structs.SimpleApiResp{
 							Status: server_structs.RespFailed,
 							Msg:    fmt.Sprint("Invalid access token: ", err),
 						})
 					return
-				}
-
-				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
-				if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
-					log.Errorf("Failed to verify the scope of the token: %v", err)
-					ctx.JSON(http.StatusForbidden,
-						server_structs.SimpleApiResp{
-							Status: server_structs.RespFailed,
-							Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
-						})
 				}
 
 				if ns.AdminMetadata.UserID == "" {
@@ -755,28 +742,15 @@ func getNamespace(ctx *gin.Context) {
 			return
 		}
 
-		accessJWT, err := jwt.Parse(
-			[]byte(accessToken),
-			jwt.WithKeySet(jwks),
-			jwt.WithVerify(true),
-		)
-		if err != nil {
+		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+		if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
+			log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
 			ctx.JSON(http.StatusForbidden,
 				server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprint("Invalid access token: ", err),
 				})
 			return
-		}
-
-		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
-		if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
-			log.Errorf("Failed to verify the scope of the token: %v", err)
-			ctx.JSON(http.StatusForbidden,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
-				})
 		}
 	}
 
