@@ -111,12 +111,14 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+			err = nil
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 		metadata, err = getServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
+			err = nil
 		}
 	}
 
