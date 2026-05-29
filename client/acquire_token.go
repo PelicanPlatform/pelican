@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -1070,10 +1070,14 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	}
 	tc.AddResourceScopes(scopes...)
 
-	err = key.Set("kid", keyId)
+	signingKey, err := key.Clone()
 	if err != nil {
 		return
 	}
-	tkn, err = tc.CreateTokenWithKey(key)
+	err = signingKey.Set("kid", keyId)
+	if err != nil {
+		return
+	}
+	tkn, err = tc.CreateTokenWithKey(signingKey)
 	return
 }
