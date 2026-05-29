@@ -592,7 +592,7 @@ func SetupTestLogging(t testing.TB) func() {
 // surfaces the originating call site to make test output readable.
 func formatEntry(entry *logrus.Entry) string {
 	loc := ""
-	if entry.HasCaller() && entry.Caller != nil {
+	if entry.Caller != nil {
 		loc = fmt.Sprintf("%s:%d: ", filepath.Base(entry.Caller.File), entry.Caller.Line)
 	}
 
