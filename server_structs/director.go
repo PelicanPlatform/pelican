@@ -689,6 +689,17 @@ func (ad *Advertisement) GetIOLoad() float64 {
 	return ad.IOLoad
 }
 
+// GetServerAd returns a copy of the embedded ServerAd taken under the
+// advertisement's read lock. This is the required, race-free way to read the
+// ServerAd out of an Advertisement: reading adItem.Value().ServerAd (or
+// otherwise copying the embedded ServerAd directly) is prohibited because it
+// races with SetIOLoad and any other mutation guarded by the lock.
+func (ad *Advertisement) GetServerAd() ServerAd {
+	ad.RLock()
+	defer ad.RUnlock()
+	return ad.ServerAd
+}
+
 func ServerAdsToServerNameURL(ads []ServerAd) (output string) {
 	for _, ad := range ads {
 		output += ad.Name + ":" + ad.URL.String() + "\n"

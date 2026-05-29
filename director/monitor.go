@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -181,7 +181,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 			log.Infof("The Director doesn't have any advertisements for server with URL %s. Stopping director tests.", serverUrlStr)
 			return false
 		}
-		currentServerAd := adItem.Value().ServerAd
+		currentServerAd := adItem.Value().GetServerAd()
 
 		// Check if the server is in downtime by checking the filteredServers map
 		if isServerInDowntime(currentServerAd.Name) {
