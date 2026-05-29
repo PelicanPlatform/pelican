@@ -2276,8 +2276,8 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if err := GenerateSessionSecret(); err != nil {
 		return err
 	}
-	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
-	setupTransport()
+	// After we know we have the certs we need, call initTransport (which uses those certs for its TLSConfig)
+	initTransport()
 
 	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
 	// of http handlers by calling config.GetCSRFHandler()
@@ -2432,9 +2432,7 @@ func ResetConfig() {
 	logging.ResetLogFlush()
 
 	// Clear cached transport object
-	onceTransport = sync.Once{}
-	transport = nil
-	basicTransport = nil
+	resetTransport()
 
 	// Clear cached SSRF transport object
 	ResetSSRFTransportForTest()
