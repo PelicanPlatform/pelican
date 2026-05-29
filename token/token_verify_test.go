@@ -20,16 +20,26 @@ package token
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	pelican_url "github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -415,4 +425,469 @@ func TestGetAuthzEscaped(t *testing.T) {
 	ctx = &gin.Context{Request: req}
 	escapedToken = GetAuthzEscaped(ctx)
 	assert.Equal(t, escapedToken, "tokenstring")
+}
+
+// makeTestKeyset generates a fresh ECDSA P-256 key pair for use in tests.
+// It returns the private key (for signing) and a JWKS containing only the
+// public key (for verification).
+func makeTestKeyset(t *testing.T) (jwk.Key, jwk.Set) {
+	t.Helper()
+	privRaw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	privKey, err := jwk.FromRaw(privRaw)
+	require.NoError(t, err)
+	require.NoError(t, privKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, privKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	pubKey, err := privKey.PublicKey()
+	require.NoError(t, err)
+	pubSet := jwk.NewSet()
+	require.NoError(t, pubSet.AddKey(pubKey))
+	return privKey, pubSet
+}
+
+// makeSignedToken creates a signed JWT with the given iat, nbf, and exp times.
+func makeSignedToken(t *testing.T, privKey jwk.Key, iat, nbf, exp time.Time) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().
+		IssuedAt(iat).
+		NotBefore(nbf).
+		Expiration(exp).
+		Subject("test-subject").
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// makeSignedTokenWithIssuer creates a signed JWT with the given iat, nbf, exp times,
+// and an explicit issuer.
+func makeSignedTokenWithIssuer(t *testing.T, privKey jwk.Key, iat, nbf, exp time.Time, issuer string) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().
+		IssuedAt(iat).
+		NotBefore(nbf).
+		Expiration(exp).
+		Subject("test-subject").
+		Issuer(issuer).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// TestUnsafeParseClaims verifies that UnsafeParseClaims extracts claims
+// from tokens whose time claims would normally fail validation.
+func TestUnsafeParseClaims(t *testing.T) {
+	privKey, _ := makeTestKeyset(t)
+	now := time.Now()
+
+	// Token with iat/nbf two hours in the future and exp two hours in the past.
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(2*time.Hour),
+		now.Add(2*time.Hour),
+		now.Add(-2*time.Hour),
+	)
+
+	tok, err := UnsafeParseClaims(tokenStr)
+	require.NoError(t, err, "UnsafeParseClaims should succeed regardless of time claims")
+	assert.Equal(t, "test-subject", tok.Subject())
+}
+
+// TestVerifyWithKeyset_IatNbfWithinLeeway confirms that a token
+// whose iat and nbf are in the future but within ClockSkewLeeway is accepted.
+func TestVerifyWithKeyset_IatNbfWithinLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.NoError(t, err, "token with iat/nbf within leeway should be accepted")
+}
+
+// TestVerifyWithKeyset_IatNbfExceedsLeeway confirms that a token
+// whose iat and nbf exceed ClockSkewLeeway is rejected.
+func TestVerifyWithKeyset_IatNbfExceedsLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.Error(t, err, "token with iat/nbf exceeding leeway should be rejected")
+}
+
+// TestVerifyWithKeyset_ExpWithinLeeway confirms that a token
+// whose exp is in the past but within ClockSkewLeeway is accepted.
+func TestVerifyWithKeyset_ExpWithinLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-skew),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.NoError(t, err, "token expired within leeway should be accepted")
+}
+
+// TestVerifyWithKeyset_ExpExceedsLeeway confirms that a token
+// whose exp exceeds ClockSkewLeeway in the past is rejected.
+func TestVerifyWithKeyset_ExpExceedsLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-skew),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet)
+	assert.Error(t, err, "token expired beyond leeway should be rejected")
+}
+
+// TestVerifyWithKeyset_CallerSkewCannotShrinkLeeway confirms that
+// a caller passing WithAcceptableSkew(0) does not override ClockSkewLeeway —
+// a token within ClockSkewLeeway must still be accepted.
+func TestVerifyWithKeyset_CallerSkewCannotShrinkLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet, jwt.WithAcceptableSkew(0))
+	assert.NoError(t, err, "caller WithAcceptableSkew(0) must not reduce the effective leeway below ClockSkewLeeway")
+}
+
+// TestVerifyWithKeyset_CallerSkewCannotExpandLeeway confirms that
+// a caller passing a large WithAcceptableSkew does not suppress a real rejection —
+// a token beyond ClockSkewLeeway must still be rejected.
+func TestVerifyWithKeyset_CallerSkewCannotExpandLeeway(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway + 2*time.Minute // well beyond the acceptance window
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeyset(tokenStr, pubSet, jwt.WithAcceptableSkew(2*time.Hour))
+	assert.Error(t, err, "caller WithAcceptableSkew(2h) must not expand the effective leeway beyond ClockSkewLeeway")
+}
+
+// keysetVerifyFunctions lists the keyset-based verification helpers so that
+// shared-behavior tests can exercise each in a single table-driven test.
+// Tests where the helpers differ (e.g., skew tolerance) must remain separate;
+// only behaviors that are identical across all helpers belong here.
+var keysetVerifyFunctions = []struct {
+	name string
+	fn   func(string, jwk.Set, ...jwt.ValidateOption) (jwt.Token, error)
+}{
+	{"VerifyWithKeyset", VerifyWithKeyset},
+	{"VerifyWithKeysetStrict", VerifyWithKeysetStrict},
+}
+
+// TestKeysetVerifyFunctions_AcceptValidToken confirms that all helpers
+// accept a well-formed token with current timestamps.
+func TestKeysetVerifyFunctions_AcceptValidToken(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	tokenStr := makeSignedToken(t, privKey, now, now, now.Add(10*time.Minute))
+
+	for _, tc := range keysetVerifyFunctions {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.fn(tokenStr, pubSet)
+			assert.NoError(t, err, "%s should accept a token with current timestamps", tc.name)
+		})
+	}
+}
+
+// TestKeysetVerifyFunctions_WrongKeyRejected confirms that all helpers
+// reject a token signed with a key not in the provided JWKS,
+// verifying that the signature check is active in each.
+func TestKeysetVerifyFunctions_WrongKeyRejected(t *testing.T) {
+	_, pubSet := makeTestKeyset(t)
+	wrongPrivKey, _ := makeTestKeyset(t) // different key pair
+
+	now := time.Now()
+	tokenStr := makeSignedToken(t, wrongPrivKey, now, now, now.Add(10*time.Minute))
+
+	for _, tc := range keysetVerifyFunctions {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.fn(tokenStr, pubSet)
+			assert.Error(t, err, "%s should reject a token signed with a different key", tc.name)
+		})
+	}
+}
+
+// TestKeysetVerifyFunctions_CallerCannotShiftClock confirms that all helpers
+// reject a caller-supplied backdated clock.
+//
+// The token has already expired (exp well beyond ClockSkewLeeway),
+// and the caller passes a clock shifted back far enough that the token
+// would appear unexpired if the caller's clock were honored.
+// All helpers must reject because they override the clock with real time.
+func TestKeysetVerifyFunctions_CallerCannotShiftClock(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	// Token issued and valid in the past;
+	// expired 5 minutes ago, well beyond ClockSkewLeeway.
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-5*time.Minute),
+	)
+	// A clock shifted back 8 minutes: from its perspective, exp is in the future.
+	backdatedClock := jwt.ClockFunc(func() time.Time {
+		return now.Add(-8 * time.Minute)
+	})
+
+	for _, tc := range keysetVerifyFunctions {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.fn(tokenStr, pubSet, jwt.WithClock(backdatedClock))
+			assert.Error(t, err, "%s should reject the expired token even with a backdated caller clock", tc.name)
+		})
+	}
+}
+
+// TestVerify_RejectsSkewedLocalToken confirms
+// that Verify rejects a locally-issued token
+// whose iat and nbf are slightly in the future (within ClockSkewLeeway)
+// when the LocalIssuer check is used.
+func TestVerify_RejectsSkewedLocalToken(t *testing.T) {
+	// Set up an isolated config state.
+	t.Cleanup(func() { config.ResetConfig() })
+	config.ResetConfig()
+
+	issuerURL := "https://issuer.example.com:8443"
+	kDir := t.TempDir()
+
+	require.NoError(t, param.Server_ExternalWebUrl.Set(issuerURL))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+
+	// Generate a real key in kDir so GetIssuerPublicJWKS can read it.
+	privKey, err := config.GeneratePEM(kDir)
+	require.NoError(t, err)
+
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window (when not local)
+
+	tokenStr := makeSignedTokenWithIssuer(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+		issuerURL,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, "/test", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	_, ok, _ := Verify(c, AuthOption{
+		Sources: []TokenSource{Header},
+		Issuers: []TokenIssuer{LocalIssuer},
+	})
+	assert.False(t, ok, "Verify should reject a locally-issued token with a future iat/nbf: no skew tolerance for self-signed tokens")
+}
+
+// TestVerify_AcceptsSkewedRegisteredServerToken confirms
+// that Verify accepts a registered-server token
+// whose iat and nbf are slightly in the future (within ClockSkewLeeway)
+// when the RegisteredServer check is used.
+func TestVerify_AcceptsSkewedRegisteredServerToken(t *testing.T) {
+	t.Cleanup(func() {
+		// Clear the resolver so other tests are not affected.
+		RegisterServerJWKSResolver(nil)
+		config.ResetConfig()
+		config.ResetFederationForTest()
+	})
+	config.ResetConfig()
+	config.ResetFederationForTest()
+
+	registryURL := "https://registry.example.com:9999"
+	privKey, pubSet := makeTestKeyset(t)
+
+	// Register a JWKS resolver that returns our test public key for any server ID.
+	RegisterServerJWKSResolver(func(_ *gin.Context, _ string) (jwk.Set, error) {
+		return pubSet, nil
+	})
+
+	// Configure the federation so checkRegisteredServer can resolve the registry host.
+	config.SetFederation(pelican_url.FederationDiscovery{
+		RegistryEndpoint: registryURL,
+	})
+
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window
+
+	// Build a token whose audience is the registry host:port.
+	tok, err := jwt.NewBuilder().
+		IssuedAt(now.Add(skew)).
+		NotBefore(now.Add(skew)).
+		Expiration(now.Add(10 * time.Minute)).
+		Subject("test-server").
+		Audience([]string{"registry.example.com:9999"}).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
+	require.NoError(t, err)
+	tokenStr := string(signed)
+
+	req, err := http.NewRequest(http.MethodGet, "/test", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	_, ok, verifyErr := Verify(c, AuthOption{
+		Sources: []TokenSource{Header},
+		Issuers: []TokenIssuer{RegisteredServer},
+	})
+	assert.NoError(t, verifyErr, "Verify should not return an error for a token whose iat/nbf are within ClockSkewLeeway")
+	assert.True(t, ok, "Verify should accept a registered-server token whose iat/nbf are within ClockSkewLeeway")
+}
+
+// TestVerifyWithKeysetStrict_RejectsSkewedIatNbf confirms that
+// VerifyWithKeysetStrict rejects a token whose iat and nbf are in the future,
+// even when the skew is within ClockSkewLeeway.
+func TestVerifyWithKeysetStrict_RejectsSkewedIatNbf(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window (when not strict)
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeysetStrict(tokenStr, pubSet)
+	assert.Error(t, err, "VerifyWithKeysetStrict should reject a token whose iat/nbf are in the future")
+}
+
+// TestVerifyWithKeysetStrict_RejectsSlightlyExpiredToken confirms that
+// VerifyWithKeysetStrict rejects a token that expired a few moments ago,
+// even when the gap is within ClockSkewLeeway.
+func TestVerifyWithKeysetStrict_RejectsSlightlyExpiredToken(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	pastSkew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window (when not strict)
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-2*time.Minute),
+		now.Add(-2*time.Minute),
+		now.Add(-pastSkew),
+	)
+
+	_, err := VerifyWithKeysetStrict(tokenStr, pubSet)
+	assert.Error(t, err, "VerifyWithKeysetStrict should reject a token that has recently expired")
+}
+
+// TestVerifyWithKeysetStrict_CallerCannotAddSkew confirms that
+// a caller passing jwt.WithAcceptableSkew(ClockSkewLeeway)
+// to VerifyWithKeysetStrict does not widen the acceptance window.
+func TestVerifyWithKeysetStrict_CallerCannotAddSkew(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // half the leeway — safely inside the acceptance window (when not strict)
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, err := VerifyWithKeysetStrict(tokenStr, pubSet, jwt.WithAcceptableSkew(ClockSkewLeeway))
+	assert.Error(t, err, "caller WithAcceptableSkew must not add skew tolerance to VerifyWithKeysetStrict")
+}
+
+// TestKeysetVerifyFunctions_CallerCannotResetValidators confirms that
+// all helpers neutralize a caller-supplied WithResetValidators(true).
+// If honored, that option would disable all default temporal validators,
+// causing a clearly-expired token to be accepted.
+func TestKeysetVerifyFunctions_CallerCannotResetValidators(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	// Token expired 5 minutes ago — clearly invalid even with ClockSkewLeeway.
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(-10*time.Minute),
+		now.Add(-10*time.Minute),
+		now.Add(-5*time.Minute),
+	)
+
+	for _, tc := range keysetVerifyFunctions {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.fn(tokenStr, pubSet, jwt.WithResetValidators(true))
+			assert.Error(t, err, "%s should reject expired token even when caller passes WithResetValidators(true)", tc.name)
+		})
+	}
+}
+
+// TestSkewedTokenAcceptedByVerifyWithKeysetButRejectedByStrict is the primary
+// cross-path regression test for the clock-skew fix (issue #3254).
+// It constructs a single token with iat/nbf in the near future (within ClockSkewLeeway)
+// and asserts that:
+//   - VerifyWithKeyset accepts it (cross-server skew tolerance), and
+//   - VerifyWithKeysetStrict rejects it (self-issued, zero-skew path).
+func TestSkewedTokenAcceptedByVerifyWithKeysetButRejectedByStrict(t *testing.T) {
+	privKey, pubSet := makeTestKeyset(t)
+	now := time.Now()
+	skew := ClockSkewLeeway / 2 // within leeway for cross-server; out of tolerance for strict
+
+	tokenStr := makeSignedToken(t,
+		privKey,
+		now.Add(skew),
+		now.Add(skew),
+		now.Add(10*time.Minute),
+	)
+
+	_, withSkewErr := VerifyWithKeyset(tokenStr, pubSet)
+	assert.NoError(t, withSkewErr, "VerifyWithKeyset should accept a token within ClockSkewLeeway (cross-server path)")
+
+	_, strictErr := VerifyWithKeysetStrict(tokenStr, pubSet)
+	assert.Error(t, strictErr, "VerifyWithKeysetStrict should reject the same token (self-issued path, zero skew)")
 }

@@ -28,7 +28,6 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -127,12 +126,54 @@ func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
 	return nil
 }
 
-func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
-	if token == "" {
+// nsAdsAuthzEqual reports whether two namespace-ad slices are semantically
+// identical for authorization purposes (paths, capabilities, and issuer
+// configuration).
+func nsAdsAuthzEqual(old, new []server_structs.NamespaceAdV2) bool {
+	if len(old) != len(new) {
+		return false
+	}
+	// Build map keyed by path for O(n) comparison.
+	oldByPath := make(map[string]int, len(old))
+	for i := range old {
+		oldByPath[old[i].Path] = i
+	}
+	for i := range new {
+		oi, ok := oldByPath[new[i].Path]
+		if !ok {
+			return false
+		}
+		o := &old[oi]
+		n := &new[i]
+		if o.Caps.PublicReads != n.Caps.PublicReads ||
+			o.Caps.Reads != n.Caps.Reads ||
+			o.Caps.Writes != n.Caps.Writes {
+			return false
+		}
+		if len(o.Issuer) != len(n.Issuer) {
+			return false
+		}
+		for j := range o.Issuer {
+			if o.Issuer[j].IssuerUrl.String() != n.Issuer[j].IssuerUrl.String() {
+				return false
+			}
+			if !slices.Equal(o.Issuer[j].BasePaths, n.Issuer[j].BasePaths) {
+				return false
+			}
+			if !slices.Equal(o.Issuer[j].RestrictedPaths, n.Issuer[j].RestrictedPaths) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+	if tokenStr == "" {
 		return
 	}
 
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		err = errors.Wrap(err, "failed to parse incoming JWT when authorizing request")
 		return
@@ -166,14 +207,9 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 		}
 		return
 	}
-	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(item.set))
+	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
 	if err != nil {
-		return
-	}
-
-	err = jwt.Validate(tok)
-	if err != nil {
-		err = errors.Wrap(err, "unable to get resource scopes because validation failed")
+		err = errors.Wrap(err, "unable to get resource scopes because verification failed")
 		return
 	}
 

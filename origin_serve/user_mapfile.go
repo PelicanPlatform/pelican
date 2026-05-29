@@ -28,8 +28,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/token"
 )
 
 // MapfileRule represents a single rule in the mapfile for username mapping
@@ -274,7 +275,7 @@ func (um *UserMapper) ExtractUserInfo(tokenClaims map[string]interface{}, reques
 // Returns a userInfo struct suitable for caching with token authorization information
 func (um *UserMapper) MapTokenToUser(tokenStr string) *userInfo {
 	// Parse token without verification (it should have been verified upstream by getAcls)
-	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
 		log.Debugf("Failed to parse token for user mapping: %v", err)
 		return &userInfo{User: "nobody", Groups: []string{}}

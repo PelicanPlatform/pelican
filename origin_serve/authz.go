@@ -29,7 +29,6 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -200,14 +199,14 @@ func (ac *authConfig) updateConfig(exports []server_utils.OriginExport) error {
 	return nil
 }
 
-func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
-	if token == "" {
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+	if tokenStr == "" {
 		return
 	}
 
-	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false))
+	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {
-		// Failed to parse token - mark as unverified since we couldn't verify it
+		// Failed to parse token — mark as unverified since we couldn't verify it
 		tokenErr := NewTokenValidationError("failed to parse incoming JWT when authorizing request").
 			WithVerified(false).
 			WithDetails(err.Error())
@@ -217,8 +216,31 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 	issuer = tok.Issuer()
 
 	issuers := ac.issuers.Load()
-	if !(*issuers)[issuer] {
-		// Token was parsed without verification (jwt.WithVerify(false)), so issuer is unverified
+	trusted := (*issuers)[issuer]
+
+	// The federation's discovery endpoint is also a trusted issuer.
+	// We check it dynamically here rather than storing it in ac.issuers
+	// because the discovery URL may not yet be known when updateConfig
+	// runs at startup (the discovery server may start after the origin),
+	// particularly in unit tests.
+	//
+	// We also accept DirectorEndpoint because the director may create
+	// federation tokens before the canonical discovery URL has been
+	// established.  This is safe because the origin's own issuer URL
+	// is now a distinct sub-path when co-located with the director.
+	if !trusted {
+		if fedInfo, fedErr := config.GetFederation(context.Background()); fedErr == nil {
+			if fedInfo.DiscoveryEndpoint != "" && issuer == fedInfo.DiscoveryEndpoint {
+				trusted = true
+			} else if fedInfo.DirectorEndpoint != "" && issuer == fedInfo.DirectorEndpoint {
+				trusted = true
+			}
+		}
+	}
+
+	if !trusted {
+		// The issuer was read from an unverified token, so it is unverified at this point
+		trustedList := slices.Sorted(maps.Keys(*issuers))
 		tokenErr := NewTokenValidationError("token issuer is not one of the trusted issuers").
 			WithIssuer(issuer).
 			WithVerified(false).
@@ -249,24 +271,12 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 		}
 		return
 	}
-	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(item.set))
+	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
 	if err != nil {
-		// Token signature verification failed - mark as unverified
-		tokenErr := NewTokenValidationError("failed to verify token signature").
+		// Token signature or claims validation failed — mark as unverified
+		tokenErr := NewTokenValidationError("failed to verify token signature or claims").
 			WithVerified(false).
-			WithDetails(err.Error())
-		err = tokenErr
-		return
-	}
-
-	err = jwt.Validate(tok)
-	if err != nil {
-		// Token was cryptographically verified but validation (exp, nbf, etc) failed
-		// Mark as verified since we successfully checked the signature
-		tokenErr := NewTokenValidationError("unable to get resource scopes because validation failed").
-			WithVerified(true).
 			WithIssuer(issuer).
-			WithSubject(tok.Subject()).
 			WithDetails(err.Error())
 		err = tokenErr
 		return
@@ -361,30 +371,35 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 	return
 }
 
-func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], token string) *ttlcache.Item[string, cachedTokenInfo] {
-	acls, err := ac.getAcls(token)
+func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tokenStr string) *ttlcache.Item[string, cachedTokenInfo] {
+	acls, err := ac.getAcls(tokenStr)
 	if err != nil {
 		// If the token is not a valid one signed by a known issuer, do not keep it in memory (avoids a DoS)
 		log.Warningln("Rejecting invalid token:", err)
 		return nil
 	}
 
-	// Extract issuer from the token
+	// Extract issuer from the token (claims are unverified at this point; used only for logging)
 	issuer := ""
-	if tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false)); err == nil {
+	if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
 		issuer = tok.Issuer()
 	}
 
 	// Extract user information from the token at cache time (only once)
 	// Use the UserMapper to map JWT claims to local users/groups
-	userInfo := ac.userMapper.MapTokenToUser(token)
+	userInfo := ac.userMapper.MapTokenToUser(tokenStr)
+	if userInfo == nil {
+		// No mapfile rule matched and no default user configured; reject the token.
+		log.Warningln("Rejecting token: no mapfile rule matched and no default user configured")
+		return nil
+	}
 
 	info := cachedTokenInfo{
 		Scopes:   acls,
 		UserInfo: userInfo,
 		Issuer:   issuer,
 	}
-	item := cache.Set(token, info, ttlcache.DefaultTTL)
+	item := cache.Set(tokenStr, info, ttlcache.DefaultTTL)
 	return item
 }
 
