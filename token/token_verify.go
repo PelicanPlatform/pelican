@@ -307,7 +307,7 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 }
 
 // UnsafeParseClaims parses a JWT string without verifying the signature
-// or validating time-based claims (iat, nbf, exp).
+// or validating any claims (iat, nbf, exp, etc.).
 // The returned token carries no security guarantees and must never be used
 // for authorization decisions.
 func UnsafeParseClaims(tokenStr string) (jwt.Token, error) {
