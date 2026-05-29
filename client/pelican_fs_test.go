@@ -793,11 +793,10 @@ func TestPelicanFS_StressTest(t *testing.T) {
 			close(stopChan)
 		}()
 
-		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 		for g := 0; g < numGoroutines; g++ {
 			go func(goroutineID int) {
 				defer func() { done <- struct{}{} }()
+				rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(goroutineID)))
 
 				for {
 					select {
