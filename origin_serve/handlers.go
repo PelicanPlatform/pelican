@@ -30,6 +30,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 )
 
 var (
+	handlersMu          sync.Mutex
 	backends            map[string]server_utils.OriginBackend
 	webdavHandlers      map[string]*webdav.Handler
 	exportPrefixMap     map[string]string // Maps federation prefix to storage prefix
@@ -186,6 +188,9 @@ func init() {
 
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
+	handlersMu.Lock()
+	defer handlersMu.Unlock()
+
 	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
@@ -662,6 +667,9 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 // and the origin's file serving. Otherwise, handlers are registered directly at the
 // federation prefix for standalone origins.
 func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
+	handlersMu.Lock()
+	defer handlersMu.Unlock()
+
 	// Prevent double registration when both director and POSIXv2 origin are running
 	if handlersRegistered {
 		log.Debug("POSIXv2 handlers already registered, skipping")
