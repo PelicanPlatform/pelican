@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -22,7 +22,6 @@ import (
 	"net"
 	"net/url"
 	"strconv"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -65,7 +64,7 @@ func UpdateConfigFromListener(ln net.Listener) {
 						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
 					}
 				}
-				fedDiscoveryOnce = &sync.Once{}
+				ResetFederationForTest()
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
 			} else {
 				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)
