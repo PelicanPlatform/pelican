@@ -21,6 +21,7 @@
 package lotman
 
 import (
+	"context"
 	"net/url"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -55,10 +57,8 @@ import (
 //     reclaimed (so it no longer counts against hierarchy enforcement).
 func TestInitSurvivesRootContraction(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-
-	server := getMockDiscoveryHost()
-	defer server.Close()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	server_utils.ResetTestState()
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
 	// First boot: large cache + one namespace ad so a descendant lot is
 	// minted alongside root/default.
@@ -69,7 +69,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 
 	require.NoError(t, param.Cache_FilesMaxSize.Set("100g"))
 	success, cleanup := setupLotmanFromConf(t, false, "LotmanRootContractionFirst",
-		server.URL, ads)
+		param.Federation_DiscoveryUrl.GetString(), ads)
 	defer cleanup()
 	require.True(t, success, "initial InitLotman must succeed")
 

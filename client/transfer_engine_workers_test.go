@@ -33,9 +33,9 @@ import (
 // Client.WorkerCount by default and can be overridden explicitly (as the cache
 // does with Cache.WorkerCount).
 func TestNewTransferEngineWorkerCount(t *testing.T) {
-	test_utils.InitClient(t, map[param.Param]any{
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
 		param.Client_WorkerCount: 3,
-	})
+	}))
 
 	t.Run("default uses Client.WorkerCount", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())

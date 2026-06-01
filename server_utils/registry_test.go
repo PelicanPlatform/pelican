@@ -26,16 +26,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils/registry_jwks"
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	ResetTestState()
-	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
-	require.NoError(t, config.InitClient())
+	test_utils.InitClientForTest(t)
 
 	require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.com:8446"))
 	url, err := registry_jwks.GetNSIssuerURL("/test-prefix")
@@ -46,9 +43,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	ResetTestState()
-	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
-	require.NoError(t, config.InitClient())
+	test_utils.InitClientForTest(t)
 
 	registry := test_utils.RegistryMockup(t, "/test-prefix")
 	defer registry.Close()

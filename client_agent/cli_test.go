@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -37,7 +37,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
@@ -135,8 +134,8 @@ func TestCLIAsyncGet(t *testing.T) {
 	// Set up client API server with proper temp directory handling
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
@@ -309,8 +308,8 @@ func TestCLIAsyncPut(t *testing.T) {
 	serverStart := time.Now()
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
@@ -428,8 +427,8 @@ func TestCLIAsyncPrestage(t *testing.T) {
 	// Set up client API server
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
@@ -582,8 +581,8 @@ func TestCLIJobCommands(t *testing.T) {
 	// Set up client API server
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)

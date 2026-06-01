@@ -202,9 +202,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	// unknown prefixes.
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
-
-	err = config.InitServer(ctx, modules)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, modules)
 
 	// Read in any config we may have set
 	var importedConf any

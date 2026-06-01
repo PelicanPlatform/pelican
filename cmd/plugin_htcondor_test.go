@@ -22,9 +22,7 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -133,13 +131,16 @@ Origin:
 	federationHost := param.Server_Hostname.GetString()
 	federationPort := param.Server_WebPort.GetInt()
 	federationURL := fmt.Sprintf("pelican://%s:%d", federationHost, federationPort)
+	tlsCAPath := param.Server_TLSCACertificateFile.GetString()
+	require.NotEmpty(t, tlsCAPath)
+
+	// The CA cert is created 0640; the HTCondor slot user needs to
+	// read it, so make it world-readable.
+	require.NoError(t, os.Chmod(tlsCAPath, 0644))
 
 	// Poll for director health
 	deadline := time.Now().Add(30 * time.Second)
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	healthClient := &http.Client{Transport: transport}
+	healthClient := config.GetClient()
 	for time.Now().Before(deadline) {
 		resp, err := healthClient.Get(fmt.Sprintf("https://%s:%d/api/v1.0/health", federationHost, federationPort))
 		if err == nil && resp.StatusCode == 200 {
@@ -239,11 +240,11 @@ transfer_output_remaps = "test-output.txt=%s"
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
 
-# Configure Pelican plugin via job ad attribute to skip TLS verification
-+PelicanCfg_TLSSkipVerify = true
+# Configure Pelican plugin to trust the federation CA.
++PelicanCfg_Server_TLSCACertificateFile = "%s"
 
 queue
-`, scriptPath, jobDir, jobDir, jobDir, federationURL, testFilename1, federationURL, testFilename2, outputFile)
+`, scriptPath, jobDir, jobDir, jobDir, federationURL, testFilename1, federationURL, testFilename2, outputFile, tlsCAPath)
 
 	require.NoError(t, os.WriteFile(submitFile, []byte(submitContent), 0644))
 	t.Logf("Submit file created: %s", submitFile)
