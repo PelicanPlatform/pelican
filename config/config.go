@@ -1205,6 +1205,14 @@ func initConfigInternalImpl(logLevel log.Level) {
 	// tracker to reflect that.
 	st.RecordEnvVarSources()
 
+	// Re-resolve defaults that interpolate ${Cache.StorageLocation}. The
+	// generated SetParameterDefaults substitutes Cache.StorageLocation into
+	// Cache.{DataLocations,MetaLocations,NamespaceLocation} at SetDefault
+	// time, so a user override of Cache.StorageLocation leaves the dependent
+	// defaults pointing at the original path. If those dependent keys came
+	// from SourceDefault, recompute them from the current StorageLocation.
+	refreshCacheStorageDependentDefaults(viper.GetViper(), st)
+
 	// Now that defaults + config files + env (including continued configs) have
 	// been applied to viper, refresh the cached param config struct used by
 	// generated accessors.
@@ -1475,6 +1483,35 @@ func ComputeExternalWebUrl(v *viper.Viper) error {
 	}
 
 	return nil
+}
+
+// refreshCacheStorageDependentDefaults recomputes the defaults for
+// Cache.DataLocations, Cache.MetaLocations, and Cache.NamespaceLocation when
+// they came from SourceDefault. The generated SetParameterDefaults bakes in
+// the value of Cache.StorageLocation at SetDefault time, which is before user
+// config is merged. A user override of Cache.StorageLocation otherwise leaves
+// these dependent paths pointing at the original default storage location.
+func refreshCacheStorageDependentDefaults(v *viper.Viper, st *SourceTracker) {
+	storageLoc := v.GetString(param.Cache_StorageLocation.GetName())
+	if storageLoc == "" {
+		return
+	}
+	isDefaultSource := func(key string) bool {
+		if st == nil {
+			return true
+		}
+		src, ok := st.Get(strings.ToLower(key))
+		return !ok || src.Type == SourceDefault
+	}
+	if name := param.Cache_DataLocations.GetName(); isDefaultSource(name) {
+		v.SetDefault(name, []string{filepath.Join(storageLoc, "data")})
+	}
+	if name := param.Cache_MetaLocations.GetName(); isDefaultSource(name) {
+		v.SetDefault(name, []string{filepath.Join(storageLoc, "meta")})
+	}
+	if name := param.Cache_NamespaceLocation.GetName(); isDefaultSource(name) {
+		v.SetDefault(name, filepath.Join(storageLoc, "namespace"))
+	}
 }
 
 // Set all defaults relevant to servers (defaults can be set only for active servers)
