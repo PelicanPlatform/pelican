@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -332,7 +333,20 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 				host = param.Server_Hostname.GetString()
 			}
 			currentPort := cacheUrl.Port()
-			if currentPort == "" || currentPort == "0" {
+			// Cache.Url's generated default is "https://${Server.Hostname}:${Cache.Port}"
+			// resolved at SetDefault time, so an operator who later sets Cache.Port=0
+			// (ephemeral) still ends up with a default Cache.Url that bakes in the
+			// original Cache.Port default (e.g. :8442). Trust SourceTracker: if the
+			// user didn't set Cache.Url, we own the port and should always rewrite it
+			// to match what XRootD actually bound to.
+			rewrite := currentPort == "" || currentPort == "0"
+			if !rewrite {
+				src, hasSrc := config.GetSourceTracker().Get(strings.ToLower(param.Cache_Url.GetName()))
+				if !hasSrc || src.Type == config.SourceDefault {
+					rewrite = true
+				}
+			}
+			if rewrite {
 				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
 				if err := param.Cache_Url.Set(cacheUrl.String()); err != nil {
 					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
