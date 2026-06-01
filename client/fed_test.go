@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, University of Nebraska-Lincoln
+ * Copyright (C) 2026, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -896,7 +896,7 @@ func TestObjectList(t *testing.T) {
 // func TestObjectList405Error(t *testing.T) {
 // 	server_utils.ResetTestState()
 // 	defer server_utils.ResetTestState()
-// 	test_utils.InitClient(t, nil)
+// 	test_utils.InitClientForTest(t)
 
 // 	var storageName string
 
@@ -934,7 +934,7 @@ func TestObjectList(t *testing.T) {
 func TestClientUnpack(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	test_utils.InitClient(t, nil)
+	test_utils.InitClientForTest(t)
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 	export := fed.Exports[0]

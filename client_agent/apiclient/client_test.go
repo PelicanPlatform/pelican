@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -31,7 +31,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
@@ -39,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -105,8 +105,8 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 	socketPath := serverConfig.SocketPath
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(cancel)
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)

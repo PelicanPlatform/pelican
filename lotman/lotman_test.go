@@ -26,8 +26,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
+
 	"os"
 	"strings"
 	"testing"
@@ -124,12 +123,11 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 		// Update the policy in viper
 		policies[policyIndex] = policy
 		require.NoError(t, param.Lotman_PolicyDefinitions.Set(policies))
-	} else {
-		// If we're not reading from the embedded yaml, grab the
-		// default configuration. We need _some_ configuration to work.
-		require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-		_ = config.InitServer(context.Background(), server_structs.CacheType)
 	}
+	// Caller is responsible for having called test_utils.InitServerForTest
+	// (typically with WithLazyFederationMock) before invoking this helper;
+	// without that, Federation.DiscoveryUrl will be empty and lot ownership
+	// cannot be determined.
 
 	tmpPathPattern := name + "*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
@@ -155,24 +153,6 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	}
 }
 
-// Create a mock discovery host that returns the servers URL as the value for each pelican-configuration key
-func getMockDiscoveryHost() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/pelican-configuration" {
-			w.Header().Set("Content-Type", "application/json")
-			serverURL := r.Host
-			response := fmt.Sprintf(`{
-  "director_endpoint": "https://%s/osdf-director.osg-htc.org",
-  "namespace_registration_endpoint": "https://%s/osdf-registry.osg-htc.org",
-  "jwks_uri": "https://%s/osdf/public_signing_key.jwks"
-}`, serverURL, serverURL, serverURL)
-			_, _ = w.Write([]byte(response))
-		} else {
-			http.NotFound(w, r)
-		}
-	}))
-}
-
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -180,19 +160,18 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestBadInit", func(t *testing.T) {
 		// We haven't set various bits needed to create the lots, like discovery URL
+		test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType)
 		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit", "", nil)
 		defer cleanup()
 		require.False(t, success)
 	})
 
+	server_utils.ResetTestState()
 	t.Run("TestGoodInit", func(t *testing.T) {
 		require.NoError(t, param.Logging_Level.Set("debug"))
-		server := getMockDiscoveryHost()
-		// Set the Federation.DiscoveryUrl to the test server's URL
-		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
-		require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+		test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil, withoutCacheDataLocations())
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", param.Federation_DiscoveryUrl.GetString(), nil, withoutCacheDataLocations())
 		defer cleanup()
 		require.True(t, success)
 
@@ -210,7 +189,7 @@ func TestLotmanInit(t *testing.T) {
 		err := json.Unmarshal(defaultOutput, &defaultLot)
 		require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
 		require.Equal(t, "default", defaultLot.LotName)
-		require.Equal(t, server.URL, defaultLot.Owner)
+		require.Equal(t, param.Federation_DiscoveryUrl.GetString(), defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
 		// default has literal-zero storage quotas (lotman PR #46 reserves -1
 		// for unbounded). Any usage of default puts it over-quota and the
@@ -230,7 +209,7 @@ func TestLotmanInit(t *testing.T) {
 		err = json.Unmarshal(rootOutput, &rootLot)
 		require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
 		require.Equal(t, "root", rootLot.LotName)
-		require.Equal(t, server.URL, rootLot.Owner)
+		require.Equal(t, param.Federation_DiscoveryUrl.GetString(), rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
 		// root's dedicatedGB is set to the full cache disk space; when no
 		// disks are detected (as in this test) it falls back to
@@ -246,9 +225,8 @@ func TestLotmanInit(t *testing.T) {
 func TestLotmanInitFromConfig(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -267,7 +245,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	err := json.Unmarshal(defaultOutput, &defaultLot)
 	require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
 	require.Equal(t, "default", defaultLot.LotName)
-	require.Equal(t, server.URL, defaultLot.Owner)
+	require.Equal(t, param.Federation_DiscoveryUrl.GetString(), defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
 
 	// Now root
@@ -282,7 +260,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	err = json.Unmarshal(rootOutput, &rootLot)
 	require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
 	require.Equal(t, "root", rootLot.LotName)
-	require.Equal(t, server.URL, rootLot.Owner)
+	require.Equal(t, param.Federation_DiscoveryUrl.GetString(), rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
 	require.Equal(t, "/", rootLot.Paths[0].Path)
 	require.False(t, rootLot.Paths[0].Recursive)
@@ -347,9 +325,8 @@ func TestGetLotmanLib(t *testing.T) {
 func TestGetAuthzCallers(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -358,7 +335,7 @@ func TestGetAuthzCallers(t *testing.T) {
 	authzedCallers, err := GetAuthorizedCallers("test-2")
 	require.NoError(t, err, "Failed to get authorized callers")
 	require.Equal(t, 2, len(*authzedCallers))
-	require.Contains(t, *authzedCallers, server.URL)
+	require.Contains(t, *authzedCallers, param.Federation_DiscoveryUrl.GetString())
 	require.Contains(t, *authzedCallers, "https://different-fake-federation.com")
 
 	// test with a non-existent lot
@@ -369,9 +346,8 @@ func TestGetAuthzCallers(t *testing.T) {
 func TestGetLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -383,7 +359,7 @@ func TestGetLot(t *testing.T) {
 	require.Contains(t, lot.Parents, "root")
 	require.Contains(t, lot.Parents, "test-1")
 	require.Equal(t, 3, len(lot.Owners))
-	require.Contains(t, lot.Owners, server.URL)
+	require.Contains(t, lot.Owners, param.Federation_DiscoveryUrl.GetString())
 	require.Contains(t, lot.Owners, "https://different-fake-federation.com")
 	require.Contains(t, lot.Owners, "https://another-fake-federation.com")
 	require.Equal(t, 1.11, *(lot.MPA.DedicatedGB))
@@ -396,9 +372,8 @@ func TestGetLot(t *testing.T) {
 func TestUpdateLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -424,7 +399,7 @@ func TestUpdateLot(t *testing.T) {
 		},
 	}
 
-	err := UpdateLot(&lotUpdate, server.URL)
+	err := UpdateLot(&lotUpdate, param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to update lot")
 
 	// Now check that the update was successful
@@ -441,9 +416,8 @@ func TestUpdateLot(t *testing.T) {
 func TestAddToLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -468,7 +442,7 @@ func TestAddToLot(t *testing.T) {
 		},
 	}
 
-	err := AddToLot(&addition, server.URL)
+	err := AddToLot(&addition, param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to add to lot")
 	// Only after adding values to the lot do we set the lot name
 	// -- this lets us do the comparison later, as `GetLot()`` sets this value but
@@ -488,9 +462,8 @@ func TestAddToLot(t *testing.T) {
 func TestRemoveLotParents(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -510,7 +483,7 @@ func TestRemoveLotParents(t *testing.T) {
 			"root":    {DedicatedGB: &childDed, OpportunisticGB: &childOpp, MaxNumObjects: &Int64FromFloat{Value: 42}},
 		},
 	}
-	err := AddToLot(&addition, server.URL)
+	err := AddToLot(&addition, param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to add to lot")
 	// Now check that the addition was successful
 	lot, err := GetLot("test-1", false)
@@ -524,7 +497,7 @@ func TestRemoveLotParents(t *testing.T) {
 		LotName: "test-1",
 		Parents: []string{"default"},
 	}
-	err = RemoveLotParents(&removal, server.URL)
+	err = RemoveLotParents(&removal, param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to remove lot parents")
 	// Now check that the removal was successful
 	lot, err = GetLot("test-1", false)
@@ -537,9 +510,8 @@ func TestRemoveLotParents(t *testing.T) {
 func TestRemoveLotPaths(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -548,7 +520,7 @@ func TestRemoveLotPaths(t *testing.T) {
 		Paths: []string{"/test-1"},
 	}
 
-	err := RemoveLotPaths(&removal, server.URL)
+	err := RemoveLotPaths(&removal, param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to remove lot paths")
 	// Now check that the removal was successful
 	lot, err := GetLot("test-1", false)
@@ -560,14 +532,13 @@ func TestRemoveLotPaths(t *testing.T) {
 func TestDeleteLotsRec(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
 	// Delete test-1, then verify both it and test-2 are gone
-	err := DeleteLotsRecursive("test-1", server.URL)
+	err := DeleteLotsRecursive("test-1", param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err, "Failed to delete lot")
 
 	// Now check that the delete was successful
@@ -1046,9 +1017,8 @@ func TestComputeRootDedicatedGB_ClampsToHWM(t *testing.T) {
 func TestStrictHierarchyContextSet(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanStrictHierCtx", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanStrictHierCtx", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -1078,9 +1048,8 @@ func TestStrictHierarchyContextSet(t *testing.T) {
 func TestLotmanVersionCompatibility(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanVersionCheck", server.URL, nil)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanVersionCheck", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -1104,11 +1073,10 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
 	nsAds := makeAds("/a", "/a/b", "/c")
-	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", server.URL, nsAds, withoutCacheDataLocations())
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanNested", param.Federation_DiscoveryUrl.GetString(), nsAds, withoutCacheDataLocations())
 	defer cleanup()
 	require.True(t, success)
 

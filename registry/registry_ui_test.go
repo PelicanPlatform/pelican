@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -77,10 +77,9 @@ func TestListNamespaces(t *testing.T) {
 	require.NoError(t, param.ConfigDir.Set(dirName))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	require.NoError(t, param.Origin_Port.Set(0))
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
+	err := config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 
 	router := gin.Default()

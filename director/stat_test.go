@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -833,7 +833,6 @@ func TestCache(t *testing.T) {
 
 	require.NoError(t, param.Reset())
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	var reqCounter atomic.Int32
 
@@ -876,7 +875,7 @@ func TestCache(t *testing.T) {
 	)
 	initMockStatUtils()
 	t.Cleanup(cleanupMock)
-	require.NoError(t, initServerForTest(t, context.Background(), server_structs.DirectorType))
+	initServerForTest(t, context.Background(), server_structs.DirectorType)
 
 	t.Run("repeated-cache-access-found", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -967,14 +966,9 @@ func TestSendHeadReq(t *testing.T) {
 	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType.String()}
 	mockOriginAd.URL = *realServerUrl
 
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-
-	err = initServerForTest(t, context.Background(), server_structs.DirectorType)
-	require.NoError(t, err)
+	initServerForTest(t, context.Background(), server_structs.DirectorType)
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())

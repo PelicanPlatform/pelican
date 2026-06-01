@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -446,7 +446,7 @@ func TestLargeFile(t *testing.T) {
 		param.Client_MaximumDownloadSpeed:     40 * 1024 * 1024,
 		param.Transport_ResponseHeaderTimeout: "60s",
 	}
-	test_utils.InitClient(t, clientConfig)
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(clientConfig))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -101,9 +101,8 @@ func TestDowntime(t *testing.T) {
 	fInfo := &pelican_url.FederationDiscovery{
 		RegistryEndpoint: mockRegistry.URL,
 	}
-	test_utils.MockFederationRoot(t, fInfo, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(fInfo, nil))
 
 	r := setupRouter()
 	activeDowntime := server_structs.Downtime{
@@ -130,7 +129,7 @@ func TestDowntime(t *testing.T) {
 		CreatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 		UpdatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 	}
-	err = database.InsertMockDowntime(activeDowntime)
+	err := database.InsertMockDowntime(activeDowntime)
 	assert.NoError(t, err)
 	err = database.InsertMockDowntime(pastDowntime)
 	assert.NoError(t, err)

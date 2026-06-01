@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -44,17 +43,16 @@ func TestResetPassword(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, param.ConfigDir.Set(dirName))
 	require.NoError(t, param.Server_WebPort.Set(8444))
 	require.NoError(t, param.Origin_Port.Set(8443))
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	rootCmd.SetArgs([]string{"origin", "web-ui", "reset-password", "--stdin"})
 	byteBuffer := bytes.NewReader([]byte("1234"))
 	rootCmd.SetIn(byteBuffer)
-	err = rootCmd.Execute()
+	err := rootCmd.Execute()
 	require.NoError(t, err)
 
 	fileName := param.Server_UIPasswordFile.GetString()

@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -255,9 +255,8 @@ func TestCreateFedTok(t *testing.T) {
 				JwksUri:           "https://dne-jwks.com",
 				BrokerEndpoint:    "https://dne-broker.com",
 			}
+			initServerForTest(t, c, server_structs.RegistryType) // Helps us populate the keys directory with a signing key
 			config.SetFederation(fed)
-			err := initServerForTest(t, c, server_structs.RegistryType) // Helps us populate the keys directory with a signing key
-			require.NoError(t, err)
 
 			allowedPrefixesForCaches.Store(&tc.allowedPrefixes)
 			rInfo := requestInfo{

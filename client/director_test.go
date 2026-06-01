@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -113,10 +113,10 @@ func TestQueryDirector(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// This test assumes the debugging level is at debug or higher
-	test_utils.InitClient(t, map[param.Param]any{
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
 		param.Client_DirectorRetries: 3,
 		param.Logging_Level:          "debug",
-	})
+	}))
 
 	type testCase struct {
 		name             string
@@ -335,10 +335,10 @@ func TestDirectorDecisionInfo(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[param.Param]any{
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
 		param.Client_DirectorRetries: 1,
 		param.Logging_Level:          "warning", // not debug, so header is not set by default
-	})
+	}))
 
 	redirectInfoJSON := `{"clientInfo":{"coordinate":{"lat":43.07,"long":-89.41},"ipAddr":"1.2.3.4"},"serversInfo":{"cache1.example.com":{"coordinate":{"lat":40.0,"long":-88.0},"redirectWeights":{"distanceWeight":0.8,"ioLoadWeight":0.1,"statusWeight":0.05,"availabilityWeight":0.05}}},"directorSortMethod":"distance"}`
 
@@ -449,10 +449,10 @@ func TestQueryDirectorDebugHeaderPercentage(t *testing.T) {
 	// which sets logrus's global level to TraceLevel so that filter hooks see every
 	// message. Before the fix, log.IsLevelEnabled(log.DebugLevel) would return true
 	// here even though the configured level is "warning".
-	test_utils.InitClient(t, map[param.Param]any{
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
 		param.Client_DirectorRetries: 1,
 		param.Logging_Level:          "warning",
-	})
+	}))
 
 	const pct = 20
 	require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(pct))
@@ -503,10 +503,10 @@ func TestDirectorTimeout(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[param.Param]any{
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
 		param.Client_DirectorRetries: 1, // Only try once to avoid long waits
 		param.Debug:                  true,
-	})
+	}))
 
 	// Use a non-routable IP address that will cause a dial timeout
 	// 192.0.2.1 is from TEST-NET-1 (RFC 5737), guaranteed to not be routable

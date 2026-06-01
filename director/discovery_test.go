@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -127,13 +127,11 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
 			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl, RegistryEndpoint: tc.regUrl}
+			test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
+				param.Federation_DirectorUrl: tc.dirUrl,
+				param.Federation_RegistryUrl: tc.regUrl,
+			}))
 			test_utils.MockFederationRoot(t, &fedInfo, nil)
-			test_utils.InitClient(t, map[param.Param]any{
-				param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
-				param.Federation_DirectorUrl:  tc.dirUrl,
-				param.Federation_RegistryUrl:  tc.regUrl,
-				param.TLSSkipVerify:           true,
-			})
 
 			// Enable federation metadata hosting for the test -- must be done _after_
 			// the test client initialization because that function blows out any existing params
@@ -201,12 +199,10 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
 			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl}
+			test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
+				param.Federation_DirectorUrl: tc.dirUrl,
+			}))
 			test_utils.MockFederationRoot(t, &fedInfo, nil)
-			test_utils.InitClient(t, map[param.Param]any{
-				param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
-				param.Federation_DirectorUrl:  tc.dirUrl,
-				param.TLSSkipVerify:           true,
-			})
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/test"+oidcDiscoveryPath, nil)

@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -19,9 +19,7 @@
 package pelican_url
 
 import (
-	"crypto/tls"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -261,12 +259,7 @@ func TestParse(t *testing.T) {
 	discUrl, err := url.Parse(discServer.URL)
 	require.NoError(t, err)
 
-	// Create an insecure client to skip tls stuff in some tests. Note we can't use Pelican's
-	// TLSSkipVerify, because that comes from config and can't be imported here.
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
+	client := discServer.Client()
 
 	oldDiscovery, err := SetOsdfDiscoveryHost(discUrl.Host)
 	require.NoError(t, err)

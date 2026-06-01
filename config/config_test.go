@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/pelicanplatform/pelican/config/configtest"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -59,8 +60,16 @@ func testConfigContext(t *testing.T) (ctx context.Context) {
 	return
 }
 
+func initTransportTLSForTest(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, param.ConfigDir.Set(dir))
+	configtest.InitServerTLSForTest(t, dir)
+	require.NoError(t, GenerateCACert())
+	ResetTransport()
+}
+
 // Set up a mock discovery endpoint that uses its own URL as the discovery URL.
-// Note that this is a scaled back version of test_utils.MockFederationRoot to avoid import cycles.
+// Note that this is a scaled-back version of test_utils.MockFederationRoot to avoid import cycles.
 func mockFederationRoot(t *testing.T) string {
 	responseHandler := func(w http.ResponseWriter, r *http.Request) {
 		// We only understand GET requests
@@ -101,12 +110,20 @@ func mockFederationRoot(t *testing.T) string {
 		}
 	}
 
-	server := httptest.NewTLSServer(http.HandlerFunc(responseHandler))
+	initTransportTLSForTest(t, t.TempDir())
+	server := configtest.NewTLSServerForTest(t, http.HandlerFunc(responseHandler))
 
-	// Cleanup, cleanup, everybody do your share!
-	t.Cleanup(server.Close)
-
-	require.NoError(t, param.TLSSkipVerify.Set(true))
+	// Clear the four OpaqueParam federation URL fields via their viper keys; the
+	// resulting override values (empty strings) have higher priority than file config
+	// and therefore survive any subsequent MergeInConfig call. This prevents
+	// /etc/pelican/pelican.yaml from populating DirectorUrl/RegistryUrl/etc. and
+	// causing discoverFederationImpl to short-circuit without querying the mock.
+	// Note: this is a manual equivalent of test_utils.ClearFederationURLsForTest,
+	// which cannot be used here due to the import cycle between config and test_utils.
+	require.NoError(t, param.Set(param.Federation_DirectorUrl, ""))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, ""))
+	require.NoError(t, param.Set(param.Federation_JwkUrl, ""))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, ""))
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
 	return server.URL
@@ -121,7 +138,6 @@ func configureTransportTestDefaults(t *testing.T) {
 	require.NoError(t, param.Transport_ResponseHeaderTimeout.Set(time.Second*10))
 	require.NoError(t, param.Transport_DialerTimeout.Set(time.Second*1))
 	require.NoError(t, param.Transport_DialerKeepAlive.Set(time.Second*30))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 }
 
@@ -578,6 +594,14 @@ func TestDeprecationHandling(t *testing.T) {
 	require.NoError(t, param.ConfigDir.Set(tmpConfigDirPath))
 	require.NoError(t, param.Logging_Level.Set("Warning"))
 
+	// Write an empty pelican.yaml so that InitConfigInternal
+	// uses this file and never falls through to any ambient pelican.yaml
+	// on the host.
+	// Without this, an ambient config may set Server.TLSCertificateChain
+	// to an existing certificate before handleDeprecatedConfig runs,
+	// causing it to silently skip the deprecated-key propagation we are testing.
+	require.NoError(t, os.WriteFile(filepath.Join(tmpConfigDirPath, "pelican.yaml"), []byte{}, 0600))
+
 	// Set the deprecated config parameter `Server.TLSCertificate`.
 	// This parameter is replaced by the new `Server.TLSCertificateChain`.
 	require.NoError(t, param.Server_TLSCertificate.Set(tlsCertPath))
@@ -733,9 +757,31 @@ func TestInitServerUrl(t *testing.T) {
 	})
 	initConfig := func() {
 		ResetConfig()
-		mockFederationRoot(t)
+		// Clear the four OpaqueParam federation URL fields so that
+		// discoverFederationImpl does not short-circuit. The empty override
+		// values survive the subsequent MergeInConfig inside InitServer.
+		// (Equivalent to test_utils.ClearFederationURLsForTest, but reproduced
+		// here to avoid the config↔test_utils import cycle.)
+		require.NoError(t, param.Set(param.Federation_DirectorUrl, ""))
+		require.NoError(t, param.Set(param.Federation_RegistryUrl, ""))
+		require.NoError(t, param.Set(param.Federation_JwkUrl, ""))
+		require.NoError(t, param.Set(param.Federation_BrokerUrl, ""))
+		// Minimal discovery server that returns only a DiscoveryEndpoint.
+		// Director/registry/broker endpoints are left empty so InitServer fills
+		// them from Server_Hostname + Server_WebPort — which is what this test
+		// is exercising.
 		tempDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(tempDir))
+		initTransportTLSForTest(t, tempDir)
+		srv := configtest.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/.well-known/pelican-configuration" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{}`))
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(srv.URL))
 	}
 
 	initDirectoryConfig := func() {

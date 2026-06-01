@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -66,6 +66,7 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	defer server.Close()
 
 	// Set up federation discovery with registry pointing to our mock server.
+	test_utils.InitClientForTest(t)
 	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
 		RegistryEndpoint: server.URL,
 	}, nil)
