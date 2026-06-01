@@ -60,5 +60,5 @@ func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 
 	keyLoc, err := registry_jwks.GetJWKSURLFromIssuerURL(url)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
+	assert.Equal(t, "https://registry.test:1234/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
