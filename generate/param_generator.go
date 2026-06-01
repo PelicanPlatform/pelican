@@ -441,7 +441,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 					buf.WriteString("\t} else if isRoot {\n")
 				}
 				writeSetDefault(&buf, pd, pd.rootDefault, "\t\t")
-				first = false
 			}
 			if hasDef {
 				buf.WriteString("\t} else {\n")
