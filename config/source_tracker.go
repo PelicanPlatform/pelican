@@ -57,6 +57,17 @@ type SourceTracker struct {
 
 var globalSourceTracker = &SourceTracker{sources: make(map[string]ConfigSource)}
 
+func init() {
+	// Track programmatic param.Set / param.MultiSet calls so handleDeprecatedConfig
+	// can distinguish them from defaults. Without this hook, every key on this
+	// branch is recorded as SourceDefault (the generated SetParameterDefaults
+	// registers a default for nearly every key), making it impossible to tell
+	// whether a deprecated key's replacement was set by the user.
+	param.SetHook = func(key string) {
+		globalSourceTracker.Record(strings.ToLower(key), ConfigSource{Type: SourceDynamic})
+	}
+}
+
 // GetSourceTracker returns the global singleton source tracker.
 func GetSourceTracker() *SourceTracker {
 	return globalSourceTracker
@@ -95,6 +106,23 @@ func (st *SourceTracker) Reset() {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.sources = make(map[string]ConfigSource)
+}
+
+// ResetPreservingDynamic clears all recorded sources except entries marked
+// SourceDynamic. Dynamic entries come from programmatic param.Set / param.MultiSet
+// calls made before InitConfig runs (typically by tests). They must survive
+// re-initialization so that handleDeprecatedConfig can distinguish a user-set
+// replacement key from a generator-emitted default.
+func (st *SourceTracker) ResetPreservingDynamic() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	preserved := make(map[string]ConfigSource)
+	for k, v := range st.sources {
+		if v.Type == SourceDynamic {
+			preserved[k] = v
+		}
+	}
+	st.sources = preserved
 }
 
 // snapshotViperKeys returns the set of all keys currently known to viper on the

@@ -40,6 +40,13 @@ var (
 	callbacks   map[string]ConfigCallback
 	callbackMux sync.RWMutex
 	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
+
+	// SetHook, if non-nil, is invoked from MultiSet for each key being set.
+	// The config package registers a hook here so the SourceTracker can
+	// distinguish programmatic Set calls from defaults. Kept as a plain
+	// variable (no sync) because it is set once at package init from
+	// config.init and read only afterward.
+	SetHook func(key string)
 )
 
 // ConfigCallback is a function that is called when configuration changes.
@@ -510,6 +517,9 @@ func MultiSet(keyValues map[string]any) error {
 	// Set all values in viper
 	for key, value := range keyValues {
 		viper.Set(key, value)
+		if SetHook != nil {
+			SetHook(key)
+		}
 	}
 
 	// Create new config from updated viper
