@@ -369,13 +369,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		}
 		pd := byName[name]
 
-		// Skip object-type params — their defaults are complex structures
-		// (nested maps/slices) that cannot be reliably serialized as Go literals.
-		// They are typically "none" or "[]" and handled specially in Go code.
-		if pd.pType == "object" {
-			continue
-		}
-
 		// Skip deprecated params — their defaults should not be set via
 		// SetParameterDefaults because viper.IsSet returns true for SetDefault
 		// values, which would break the deprecation migration logic in
@@ -539,7 +532,69 @@ func isNoneValue(pType string, v any) bool {
 			return len(slice) == 0
 		}
 	}
+	// For object types, treat empty sequence or empty map as "no default"
+	// for the same reason: avoid making viper.IsSet return true.
+	if pType == "object" {
+		if slice, ok := v.([]any); ok {
+			return len(slice) == 0
+		}
+		if m, ok := v.(map[string]any); ok {
+			return len(m) == 0
+		}
+	}
 	return false
+}
+
+// goLiteral renders an arbitrary YAML-decoded value (string / bool / int /
+// float64 / []any / map[string]any) as a Go source-level expression suitable
+// for use as the second argument to v.SetDefault. Used for object-type
+// parameter defaults where the value is a nested map/slice structure that
+// can't be expressed as a typed Go slice literal.
+func goLiteral(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "nil"
+	case string:
+		return fmt.Sprintf("%q", x)
+	case bool:
+		return fmt.Sprintf("%t", x)
+	case int:
+		return fmt.Sprintf("%d", x)
+	case float64:
+		if x == float64(int(x)) {
+			return fmt.Sprintf("%d", int(x))
+		}
+		return fmt.Sprintf("%v", x)
+	case []any:
+		var sb strings.Builder
+		sb.WriteString("[]any{")
+		for i, e := range x {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(goLiteral(e))
+		}
+		sb.WriteString("}")
+		return sb.String()
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var sb strings.Builder
+		sb.WriteString("map[string]any{")
+		for i, k := range keys {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(&sb, "%q: %s", k, goLiteral(x[k]))
+		}
+		sb.WriteString("}")
+		return sb.String()
+	default:
+		return fmt.Sprintf("%#v", v)
+	}
 }
 
 // writeSetDefault emits Go source code for a single v.SetDefault() call
@@ -570,9 +625,18 @@ func isNoneValue(pType string, v any) bool {
 // drift out of sync with the YAML source.
 //
 // The type switch handles string, bool, int, float64, and []any (string
-// slices). Object-type params are excluded upstream in GenDefaults.
+// slices). Object-type params (nested maps/slices) are rendered via
+// goLiteral before the switch.
 func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, indent string) {
 	paramVar := fmt.Sprintf("param.%s.GetName()", pd.varName)
+
+	// Object-type params have nested map/slice defaults that don't fit any
+	// fixed Go slice element type. Emit them via goLiteral, which renders
+	// arbitrary nested []any / map[string]any structures.
+	if pd.pType == "object" {
+		fmt.Fprintf(buf, "%sv.SetDefault(%s, %s)\n", indent, paramVar, goLiteral(tier.raw))
+		return
+	}
 
 	// Check if we need string interpolation
 	hasParamRefs := len(tier.paramRefs) > 0
