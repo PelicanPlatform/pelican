@@ -55,6 +55,17 @@ func UpdateConfigFromListener(ln net.Listener) {
 						log.WithError(err).Warn("Failed to update Federation.DirectorUrl from listener")
 					}
 				}
+				curAdvUrl := param.Director_AdvertiseUrl.GetString()
+				if curAdvUrl == serverUrlStr || curAdvUrl == "" {
+					if err := param.Director_AdvertiseUrl.Set(newUrlStr); err != nil {
+						log.WithError(err).Warn("Failed to update Director.AdvertiseUrl from listener")
+					}
+				} else if parsed, perr := url.Parse(curAdvUrl); perr == nil && parsed.Port() == "0" {
+					parsed.Host = parsed.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
+					if err := param.Director_AdvertiseUrl.Set(parsed.String()); err != nil {
+						log.WithError(err).Warn("Failed to update Director.AdvertiseUrl from listener")
+					}
+				}
 				if viper.GetString("Federation.RegistryUrl") == serverUrlStr {
 					if err := param.Set(param.Federation_RegistryUrl, newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.RegistryUrl from listener")
