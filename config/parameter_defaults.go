@@ -400,6 +400,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Lotman_MaxLotLifetime.GetName(), "168h")
 	// Lotman.MinFillerWidth
 	v.SetDefault(param.Lotman_MinFillerWidth.GetName(), "0s")
+	// Lotman.PolicyDefinitions
+	v.SetDefault(param.Lotman_PolicyDefinitions.GetName(), []any{map[string]any{"DiscoverPrefixes": true, "DivideUnallocated": true, "MergeLocalWithDiscovered": false, "PolicyName": "fairshare", "PurgeOrder": []any{"del", "exp", "opp", "ded"}}})
 	// Lotman.RenewalCheckInterval
 	v.SetDefault(param.Lotman_RenewalCheckInterval.GetName(), "1h")
 	// Lotman.SchedulingHorizon
