@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
 )
 
 var setGinTestModeOnce sync.Once
@@ -174,7 +174,7 @@ func TestValidateRequest(t *testing.T) {
 
 func parseJWT(tokenString string) (scopes []string, issuer string, err error) {
 	// Parse without verification
-	tok, err := token.UnsafeParseClaims(tokenString)
+	tok, err := jwt.ParseInsecure([]byte(tokenString))
 	if err != nil {
 		return nil, "", err
 	}

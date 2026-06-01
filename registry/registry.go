@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -54,7 +54,6 @@ import (
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -823,13 +822,23 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 		return
 	}
 
-	// Use the JWKS to verify the token's signature, timestamps, and scope.
-	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
-	if _, err = token.VerifyWithKeyset(delTokenStr, originJwks, jwt.WithValidator(scopeValidator)); err != nil {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+	// Use the JWKS to verify the token -- verification means signature integrity
+	parsed, err := jwt.Parse([]byte(delTokenStr), jwt.WithKeySet(originJwks))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "server could not verify the provided deletion token"})
-		log.Errorf("Failed to verify deletion token for prefix %q: %v", prefix, err)
+			Msg:    "server could not verify/parse the provided deletion token"})
+		log.Errorf("Failed to parse the token: %v", err)
+		return
+	}
+
+	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
+
+	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server could not validate the provided deletion token"})
+		log.Errorf("Failed to validate the token: %v", err)
 		return
 	}
 

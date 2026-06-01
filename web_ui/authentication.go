@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -31,6 +31,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
@@ -134,14 +135,14 @@ func configureAuthDB() error {
 // Uses early-exit pattern for cleaner flow control.
 func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string, userId string, groups []string, err error) {
 	// Parse token without verification first to check issuer
-	tok, err := token.UnsafeParseClaims(tokenStr)
+	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
 	if err != nil {
 		return "", "", nil, err
 	}
 
 	// Verify issuer matches local issuer
-	localIssuer := config.GetLocalIssuerUrl()
-	if tok.Issuer() != localIssuer {
+	serverURL := param.Server_ExternalWebUrl.GetString()
+	if parsed.Issuer() != serverURL {
 		return "", "", nil, errors.New("token issuer does not match server URL")
 	}
 
@@ -151,10 +152,12 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		return "", "", nil, err
 	}
 
-	// Self-issued token: this server both signs and verifies it,
-	// so no inter-server clock skew is possible.
-	verified, err := token.VerifyWithKeysetStrict(tokenStr, jwks)
+	verified, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
 	if err != nil {
+		return "", "", nil, err
+	}
+
+	if err = jwt.Validate(verified); err != nil {
 		return "", "", nil, err
 	}
 
@@ -239,8 +242,8 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 		}
 	}
 
-	var loginToken string
-	loginToken, err = ctx.Cookie("login")
+	var token string
+	token, err = ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
 			err = nil
@@ -249,7 +252,7 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 			return
 		}
 	}
-	if loginToken == "" {
+	if token == "" {
 		err = errors.New("Login cookie is empty")
 		return
 	}
@@ -257,10 +260,11 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if err != nil {
 		return
 	}
-	// Self-issued token: this server both signs and verifies it,
-	// so no inter-server clock skew is possible.
-	parsed, err := token.VerifyWithKeysetStrict(loginToken, jwks)
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
 	if err != nil {
+		return
+	}
+	if err = jwt.Validate(parsed); err != nil {
 		return
 	}
 	user = parsed.Subject()
@@ -538,7 +542,6 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 		Scopes:  []token_scopes.TokenScope{requiredScope},
 	})
 	if !ok || err != nil {
-		log.Warningf("Failed to verify %s token for downtime %s from %s: %v", requiredScope, ctx.Request.Method, ctx.ClientIP(), err)
 		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprint("Failed to verify the token: ", err),

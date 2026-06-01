@@ -488,7 +488,7 @@ func (tg *tokenGenerator) Get() (token string, err error) {
 // Given jwtSerialized, a serialized JWT, return whether or not the scopes
 // would authorize the given objectName based on the information in dirResp.
 func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
-	tok, err := token.UnsafeParseClaims(jwtSerialized)
+	tok, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		log.Warningln("Failed to parse token:", err)
 		return false
@@ -702,32 +702,28 @@ func isValidSciScope(authz string, operation config.TokenOperation) bool {
 //
 // If valid, then the function also returns the expiration time.
 func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
-	tok, err := token.UnsafeParseClaims(jwtSerialized)
+	token, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false))
 	if err != nil {
 		log.Warningln("Failed to parse token:", err)
 		return
 	}
 
-	// Zero-skew validation is intentional here.
-	// Applying a leeway could allow the client to reuse a token
-	// that is just about to expire
-	// and might already be rejected by the server.
-	if err := jwt.Validate(tok); err != nil {
+	if err := jwt.Validate(token); err != nil {
 		log.Warningln("Token is invalid:", err)
-		return false, tok.Expiration()
+		return false, token.Expiration()
 	}
 
 	valid = true
-	expiry = tok.Expiration()
+	expiry = token.Expiration()
 	return
 }
 
 func tokenIsExpired(jwtSerialized string) (expired bool, expiry time.Time, err error) {
-	tok, err := token.UnsafeParseClaims(jwtSerialized)
+	token, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		return
 	}
-	return tok.Expiration().Before(time.Now()), tok.Expiration(), nil
+	return token.Expiration().Before(time.Now()), token.Expiration(), nil
 }
 
 func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {

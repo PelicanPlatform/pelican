@@ -158,8 +158,8 @@ func createToken(namespace, subject, audience string, desiredScope token_scopes.
 	return
 }
 
-func getCacheHostnameFromToken(tokenBytes []byte) (hostname string, err error) {
-	tok, err := token.UnsafeParseClaims(string(tokenBytes))
+func getCacheHostnameFromToken(token []byte) (hostname string, err error) {
+	tok, err := jwt.Parse(token, jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		return
 	}
@@ -178,15 +178,21 @@ func getCacheHostnameFromToken(tokenBytes []byte) (hostname string, err error) {
 
 // Given a token and a namespace prefix, determine if it has the desired scope
 // and audience.
-func verifyToken(ctx context.Context, tokenStr, namespace, audience string, requiredScope token_scopes.TokenScope) (ok bool, err error) {
+func verifyToken(ctx context.Context, token, namespace, audience string, requiredScope token_scopes.TokenScope) (ok bool, err error) {
 	issuerUrl, keyset, err := getRegistryIssuerInfo(ctx, namespace)
 	if err != nil {
 		err = errors.Wrapf(err, "failed to get issuer info for namespace %s", namespace)
 		return
 	}
 
+	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse token")
+		return
+	}
+
 	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{requiredScope}, false)
-	_, err = token.VerifyWithKeyset(tokenStr, keyset,
+	err = jwt.Validate(tok,
 		jwt.WithAudience(audience),
 		jwt.WithValidator(scopeValidator),
 		jwt.WithClaimValue("iss", issuerUrl),
@@ -194,7 +200,7 @@ func verifyToken(ctx context.Context, tokenStr, namespace, audience string, requ
 	if err == nil {
 		ok = true
 	} else {
-		err = errors.Wrap(err, "failed to verify token")
+		err = errors.Wrap(err, "failed to validate token")
 	}
 	return
 }

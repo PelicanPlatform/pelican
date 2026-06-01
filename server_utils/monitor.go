@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -110,7 +110,6 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
 	})
 	if !ok || err != nil {
-		log.Warningf("Failed to verify director test report token from %s: %v", ctx.ClientIP(), err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprint("Failed to verify the token: ", err),

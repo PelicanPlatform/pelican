@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -245,8 +246,8 @@ func (server *CacheServer) GetFedTokLocation() string {
 // Given a token, calculate the lifetime of the token
 func calcTokLifetime(tok string) (time.Duration, error) {
 	// I think verificationless parsing is fine here, because we already assume a strong
-	// trust relationship with the Director, and if it's been compromised, we have bigger problems.
-	parsedTok, err := token.UnsafeParseClaims(tok)
+	// trust relationship with the Director, and if its been compromised, we have bigger problems.
+	parsedTok, err := jwt.ParseInsecure([]byte(tok))
 	if err != nil {
 		return 0, err
 	}

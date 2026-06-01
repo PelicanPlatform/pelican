@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -247,9 +248,9 @@ func TestCreateToken(t *testing.T) {
 	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
-	tok, err := UnsafeParseClaims(token)
+	jwt, err := jwt.ParseString(token, jwt.WithVerify(false))
 	require.NoError(t, err)
-	val, found := tok.Get("foo")
+	val, found := jwt.Get("foo")
 	assert.True(t, found)
 	assert.Equal(t, "bar", val)
 

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,7 +45,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
 )
 
 //go:embed resources/both-public.yml
@@ -260,7 +260,7 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 			require.NoError(t, err, "Failed to get cache's advertisement token")
 			require.NotEmpty(t, tokStr, "Got an empty token")
 
-			tok, err := token.UnsafeParseClaims(tokStr)
+			tok, err := jwt.ParseInsecure([]byte(tokStr))
 			require.NoError(t, err, "Failed to parse token")
 			// The fed-test utility uses a separate HTTP server for hosting federation metadata,
 			// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint

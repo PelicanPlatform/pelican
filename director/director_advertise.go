@@ -164,7 +164,6 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorAdvertise},
 	})
 	if !ok || err != nil {
-		log.Warningf("Failed to verify director advertise token from %s: %v", ctx.ClientIP(), err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprint("Failed to verify the token: ", err),

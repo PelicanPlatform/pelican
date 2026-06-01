@@ -30,13 +30,14 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -105,8 +106,8 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func verifyAdvertiseToken(ctx context.Context, tokenStr, namespace string) (bool, error) {
-	issuerUrl, err := registry_jwks.GetNSIssuerURL(namespace)
+func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
+	issuerUrl, err := server_utils.GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get issuer for namespace "+namespace)
 	}
@@ -150,7 +151,7 @@ func verifyAdvertiseToken(ctx context.Context, tokenStr, namespace string) (bool
 		namespaceKeys.Set(keyLoc, keyset, param.Director_AdvertisementTTL.GetDuration())
 	}
 
-	tok, err := token.VerifyWithKeyset(tokenStr, keyset)
+	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))
 	if err != nil {
 		return false, err
 	}
