@@ -881,10 +881,14 @@ func handleDeprecatedConfig() {
 					log.Warningf("The configuration key %q is being deprecated. While your setting for debug logging has been applied, you should set %q to 'debug' to achieve this behavior in the future.", param.Debug.GetName(), param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
-						// Check if the user explicitly set the replacement key (via
-						// config file, env var, or v.Set).
+						// Check if the user explicitly set the replacement key. viper.IsSet
+						// returns true for values set via config file, env var, flag, or
+						// viper.Set (including param.Set/MultiSet), but not for SetDefault.
+						// We also accept any SourceTracker entry whose type is non-default
+						// (e.g. web UI config writes), in case the value was set through a
+						// path that doesn't go through the viper override layer.
 						repSource, hasSource := GetSourceTracker().Get(strings.ToLower(rep))
-						userSetReplacement := hasSource && repSource.Type != SourceDefault
+						userSetReplacement := viper.IsSet(rep) || (hasSource && repSource.Type != SourceDefault)
 						if userSetReplacement {
 							log.Warningf("The configuration key %q is deprecated. The value from its replacement %q will be used instead, and the value of the deprecated configuration key %q will be ignored.", deprecated, rep, deprecated)
 						} else {
