@@ -262,12 +262,18 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	if isOSDF {
 		v.SetDefault(param.Federation_TopologyUrl.GetName(), "https://topology.opensciencegrid.org")
 	}
+	// Issuer.AccessTokenLifetime
+	v.SetDefault(param.Issuer_AccessTokenLifetime.GetName(), "1h")
 	// Issuer.AuthenticationSource
 	v.SetDefault(param.Issuer_AuthenticationSource.GetName(), "OIDC")
+	// Issuer.AuthorizationCodeLifetime
+	v.SetDefault(param.Issuer_AuthorizationCodeLifetime.GetName(), "10m")
 	// Issuer.DynamicClientStaleTimeout
 	v.SetDefault(param.Issuer_DynamicClientStaleTimeout.GetName(), "336h")
 	// Issuer.DynamicClientUnusedTimeout
 	v.SetDefault(param.Issuer_DynamicClientUnusedTimeout.GetName(), "1h")
+	// Issuer.IDTokenLifetime
+	v.SetDefault(param.Issuer_IDTokenLifetime.GetName(), "1h")
 	// Issuer.OIDCAuthenticationUserClaim
 	v.SetDefault(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "sub")
 	// Issuer.OIDCGroupClaim
@@ -284,6 +290,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_QDLLocation.GetName(), "/opt/qdl")
 	// Issuer.RefreshTokenGracePeriod
 	v.SetDefault(param.Issuer_RefreshTokenGracePeriod.GetName(), "5m")
+	// Issuer.RefreshTokenLifetime
+	v.SetDefault(param.Issuer_RefreshTokenLifetime.GetName(), "168h")
 	// Issuer.ScitokensServerLocation
 	v.SetDefault(param.Issuer_ScitokensServerLocation.GetName(), "/opt/scitokens-server")
 	// Issuer.TomcatLocation
