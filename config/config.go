@@ -179,9 +179,6 @@ var (
 
 	onceValidate sync.Once
 
-	// Guard so InitConfigInternal runs at most once per process (reset by ResetConfig).
-	initConfigOnce sync.Once
-
 	// English translator
 	translator *ut.Translator
 
@@ -881,14 +878,14 @@ func handleDeprecatedConfig() {
 					log.Warningf("The configuration key %q is being deprecated. While your setting for debug logging has been applied, you should set %q to 'debug' to achieve this behavior in the future.", param.Debug.GetName(), param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
-						// Check if the user explicitly set the replacement key. viper.IsSet
-						// returns true for values set via config file, env var, flag, or
-						// viper.Set (including param.Set/MultiSet), but not for SetDefault.
-						// We also accept any SourceTracker entry whose type is non-default
-						// (e.g. web UI config writes), in case the value was set through a
-						// path that doesn't go through the viper override layer.
+						// Determine whether the user explicitly set the replacement key.
+						// viper.IsSet returns true for defaults as well as overrides on
+						// this branch (the generated SetParameterDefaults registers a
+						// default for nearly every key), so we cannot rely on it alone.
+						// Trust SourceTracker: a non-default source means the user (or
+						// the web UI) set the replacement explicitly.
 						repSource, hasSource := GetSourceTracker().Get(strings.ToLower(rep))
-						userSetReplacement := viper.IsSet(rep) || (hasSource && repSource.Type != SourceDefault)
+						userSetReplacement := hasSource && repSource.Type != SourceDefault
 						if userSetReplacement {
 							log.Warningf("The configuration key %q is deprecated. The value from its replacement %q will be used instead, and the value of the deprecated configuration key %q will be ignored.", deprecated, rep, deprecated)
 						} else {
@@ -1095,10 +1092,8 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-// It is idempotent: subsequent calls after the first are no-ops. Call
-// ResetConfig() to allow re-initialization (tests only).
 func InitConfigInternal(logLevel log.Level) {
-	initConfigOnce.Do(func() { initConfigInternalImpl(logLevel) })
+	initConfigInternalImpl(logLevel)
 }
 
 func initConfigInternalImpl(logLevel log.Level) {
@@ -1160,7 +1155,7 @@ func initConfigInternalImpl(logLevel log.Level) {
 
 	// Source tracking: snapshot before config file merge so we can diff after.
 	st := GetSourceTracker()
-	st.Reset()
+	st.ResetPreservingDynamic()
 
 	// Record all keys currently in viper as defaults. Later stages (config
 	// file merges, env var binding) will overwrite relevant entries via the
@@ -1426,8 +1421,25 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 // by client commands that need to determine the server's web URL.
 // It sets the default based on Server.Hostname and Server.WebPort if not already configured.
 func ComputeExternalWebUrl(v *viper.Viper) error {
-	// Only compute if not already set
-	if !v.IsSet(param.Server_ExternalWebUrl.GetName()) {
+	// The generated SetParameterDefaults registers a default of the form
+	// "https://${Server.Hostname}:${Server.WebPort}" for Server.ExternalWebUrl,
+	// resolved at SetDefault time. When the operator (or a test) requested an
+	// ephemeral port by setting Server.WebPort=0, that default ends up as
+	// ".../host:0" — a placeholder that needs to be replaced by a concrete URL
+	// before it leaks into scitokens issuers, director ads, etc. Treat such a
+	// default-derived port-0 URL as "not yet computed".
+	currentVal := v.GetString(param.Server_ExternalWebUrl.GetName())
+	stalePortZeroDefault := false
+	if currentVal != "" {
+		if parsed, err := url.Parse(currentVal); err == nil && parsed.Port() == "0" {
+			src, hasSrc := GetSourceTracker().Get(strings.ToLower(param.Server_ExternalWebUrl.GetName()))
+			if !hasSrc || src.Type == SourceDefault {
+				stalePortZeroDefault = true
+			}
+		}
+	}
+
+	if !v.IsSet(param.Server_ExternalWebUrl.GetName()) || stalePortZeroDefault {
 		// Get or set default hostname
 		hostname := v.GetString(param.Server_Hostname.GetName())
 		if hostname == "" {
@@ -2371,8 +2383,6 @@ func ResetConfig() {
 
 	warnDeprecatedOnce = sync.Once{}
 	warnDebugOnce = sync.Once{}
-
-	initConfigOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 	enabledServers.Clear()
