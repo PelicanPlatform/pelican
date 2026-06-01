@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -36,7 +36,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -746,7 +745,7 @@ func validateClientToken(ctx *gin.Context, requestId uuid.UUID) (int, error) {
 	// Parse the token without signature verification — we only need the expiration claim.
 	// Not all bearer tokens are JWTs (e.g., opaque tokens, SciTokens v1); if parsing
 	// fails, treat the token as valid and let the origin/cache decide.
-	parsed, err := jwt.Parse([]byte(rawToken), jwt.WithVerify(false), jwt.WithValidate(false))
+	parsed, err := token.UnsafeParseClaims(rawToken)
 	if err != nil {
 		return http.StatusOK, nil
 	}
@@ -1292,7 +1291,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
-				log.Warningln("Failed to verify token:", err)
+				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), adV2.Name, registryPrefix, err)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
@@ -1325,7 +1324,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				} else {
-					log.Warningln("Failed to verify token:", err)
+					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), adV2.Name, err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
