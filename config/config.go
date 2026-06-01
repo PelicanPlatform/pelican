@@ -1635,8 +1635,8 @@ func ApplyLogLevelInheritance(v *viper.Viper) {
 	specialInfoSubLoggers := map[string]string{
 		param.Logging_Origin_Scitokens.GetName(): "fatal",
 		param.Logging_Origin_Xrootd.GetName():    "info",
-		param.Logging_Cache_Scitokens.GetName():   "fatal",
-		param.Logging_Cache_Pfc.GetName():         "info",
+		param.Logging_Cache_Scitokens.GetName():  "fatal",
+		param.Logging_Cache_Pfc.GetName():        "info",
 	}
 
 	isPinned := func(key string) bool {
@@ -1963,7 +1963,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// in the future.
 		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
 			!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, " +
+			return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, "+
 				"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
 				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
