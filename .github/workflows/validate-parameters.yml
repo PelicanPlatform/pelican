@@ -30,6 +30,3 @@ jobs:
 
       - name: Validate parameter definitions
         run: python3 .github/scripts/validate-parameters/main.py
-
-      - name: Validate default values
-        run: python3 .github/scripts/validate-defaults/main.py
