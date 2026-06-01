@@ -278,6 +278,13 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	err = os.WriteFile(outputPath, outputData, 0644)
 	require.NoError(t, err, "error writing out temporary config file for fed test")
 
+	// Merge the overridden config (with real storage paths replacing /<SHOULD BE OVERRIDDEN>)
+	// directly into viper. The earlier viper.MergeConfig call loaded the original resource YAML
+	// with placeholder paths. initConfigOnce prevents InitConfigInternal from re-running when
+	// LaunchModules calls InitServer, so the config file written above would never be loaded
+	// via that path. Merging here ensures GetOriginExports sees the real storage paths.
+	require.NoError(t, viper.MergeConfig(strings.NewReader(string(outputData))), "error merging overridden config into viper")
+
 	require.NoError(t, param.SetRaw("config", outputPath))
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
