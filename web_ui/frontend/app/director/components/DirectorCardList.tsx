@@ -147,7 +147,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
         data={filteredData}
         Card={DirectorCard}
         cardProps={cardProps}
-        keyGetter={(o) => o.server.name}
+        keyGetter={(o) => `${o.server.name}:${o.server.url}`}
       />
     </Box>
   );
