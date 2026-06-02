@@ -248,10 +248,19 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		instCacheTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
 		institutions, err := getCachedOptions(param.Registry_InstitutionsUrl.GetString(), instCacheTTL)
 		if err != nil {
-			return err
+			// Don't block startup on an unavailable institution API.
+			// OptionsUrl is still set above, so once that API recovers, subsequent
+			// requests (getNamespaceRegFields, validateInstitution, listInstitutions)
+			// will fetch and cache the list normally. Until then, those endpoints
+			// should return errors for institution-dependent operations.
+			log.Warningf(
+				"Failed to fetch institutions from %s during startup: %v. "+
+					"Registry will start without a pre-populated institutions list.",
+				param.Registry_InstitutionsUrl.GetString(), err,
+			)
+		} else {
+			registrationFields[instRegIdx].Options = institutions
 		}
-
-		registrationFields[instRegIdx].Options = institutions
 	}
 
 	if isUnique, err := checkUniqueOptions(institutions); !isUnique {

@@ -324,6 +324,7 @@ func getNamespaceRegFields(ctx *gin.Context) {
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("failed to get options from optionsUrl %s for key %s", field.OptionsUrl, field.Name),
 					})
+				return
 			}
 			registrationFields[idx].Options = options
 		}
