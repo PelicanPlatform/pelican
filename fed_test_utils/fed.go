@@ -280,26 +280,23 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	require.NoError(t, param.SetRaw("config", outputPath))
 
-	servers, _, err := launchers.LaunchModules(ctx, modules)
-	require.NoError(t, err)
-
-	ft.Pids = make([]int, 0, 2)
-	for _, server := range servers {
-		ft.Pids = append(ft.Pids, server.GetPids()...)
-	}
-
-	var discoveryServer *httptest.Server
-	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
-	// servers, because they populate the param values we use to set the metadata.
+	// Create the federation discovery server before launching the
+	// modules. An XRootD origin bakes the federation issuer into its
+	// static SciTokens configuration at launch, so the federation's
+	// discovery endpoint must already be known; otherwise the origin
+	// never learns the issuer and rejects federation tokens.
 	//
-	// The handler also serves /.well-known/openid-configuration and
-	// /.well-known/issuer.jwks so that the discovery URL can act as an
-	// OIDC-compatible issuer.  In production the Director serves both the
-	// pelican and OIDC discovery documents at the same host:port.  In the
-	// test harness the discovery endpoint is a separate httptest.Server,
-	// so without the OIDC endpoints any federation token whose issuer is
-	// this URL would fail verification (the verifier fetches the issuer's
-	// openid-configuration to locate the JWKS).
+	// The handler reads server parameters lazily, at request time, so
+	// the discovery server can be created before the launched servers
+	// have resolved their final URLs.
+	//
+	// The handler also serves an OIDC discovery document so the
+	// discovery URL can act as an OIDC-compatible issuer: a verifier
+	// fetches the issuer's openid-configuration to locate its JWKS. In
+	// production the Director hosts both the Pelican and OIDC
+	// documents; here the discovery endpoint is a separate server that
+	// must provide them itself.
+	var discoveryServer *httptest.Server
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/pelican-configuration":
@@ -371,7 +368,21 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	t.Cleanup(discoveryServer.Close)
 
-	// Set the discovery URL in both viper and the global fed info object
+	// Publish the discovery URL before launch so the origin adopts
+	// it as the federation issuer in its SciTokens configuration.
+	// Only the parameter is set here; the cached federation info is
+	// finalized after launch, below.
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(discoveryServer.URL))
+
+	servers, _, err := launchers.LaunchModules(ctx, modules)
+	require.NoError(t, err)
+
+	ft.Pids = make([]int, 0, 2)
+	for _, server := range servers {
+		ft.Pids = append(ft.Pids, server.GetPids()...)
+	}
+
+	// Finalize the discovery URL in both viper and the global fed info object
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(discoveryServer.URL))
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "error getting federation info")
