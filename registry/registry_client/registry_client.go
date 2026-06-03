@@ -107,20 +107,39 @@ func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint
 }
 
 func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, accessToken string, prefix string, siteName string) error {
-	publicKey, err := privateKey.PublicKey()
+	// Advertise every issuer key this server holds so the registry records the full
+	// set in a single registration (covers keys already on disk before startup).
+	allKeys, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		return errors.Wrapf(err, "failed to generate public key for namespace registration")
+		return errors.Wrap(err, "failed to get issuer public JWKS")
 	}
-	err = jwk.AssignKeyID(publicKey)
+
+	// The registry verifies proof-of-possession against the key at index 0 only
+	// (see registry.validateJwks), but GetIssuerPublicJWKS returns keys in
+	// non-deterministic map-iteration order. Rebuild the set so the key we sign the
+	// challenge with is first.
+	signingPub, err := privateKey.PublicKey()
 	if err != nil {
-		return errors.Wrap(err, "failed to assign key ID to public key")
+		return errors.Wrap(err, "failed to derive signing public key")
 	}
-	if err = publicKey.Set("alg", "ES256"); err != nil {
-		return errors.Wrap(err, "failed to assign signature algorithm to public key")
+	if err = jwk.AssignKeyID(signingPub); err != nil {
+		return errors.Wrap(err, "failed to assign key ID to signing public key")
+	}
+	if err = signingPub.Set(jwk.AlgorithmKey, "ES256"); err != nil {
+		return errors.Wrap(err, "failed to assign algorithm to signing public key")
 	}
 	keySet := jwk.NewSet()
-	if err = keySet.AddKey(publicKey); err != nil {
-		return errors.Wrap(err, "failed to add public key to new JWKS")
+	if err = keySet.AddKey(signingPub); err != nil {
+		return errors.Wrap(err, "failed to add signing public key to JWKS")
+	}
+	for i := 0; i < allKeys.Len(); i++ {
+		key, ok := allKeys.Key(i)
+		if !ok || key.KeyID() == signingPub.KeyID() {
+			continue // skip the signing key, already at index 0
+		}
+		if err = keySet.AddKey(key); err != nil {
+			return errors.Wrapf(err, "failed to add public key %s to JWKS", key.KeyID())
+		}
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
