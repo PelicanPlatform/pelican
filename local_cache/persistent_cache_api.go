@@ -379,6 +379,14 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
 		w.Header().Set("Accept-Ranges", "bytes")
+		// Relay checksums as an RFC 3230 Digest header so clients can verify
+		// downloads -- they fetch checksums via HEAD. This applies whether the
+		// object is cached (checksums from metadata) or not (checksums from the
+		// origin's stat response); without it a client's WithRequireChecksum
+		// download through the cache has nothing to verify against.
+		if digest := formatDigestHeader(result.Checksums); digest != "" {
+			w.Header().Set("Digest", digest)
+		}
 		if result.Meta != nil {
 			if result.Meta.ETag != "" {
 				w.Header().Set("ETag", result.Meta.ETag)
@@ -580,12 +588,23 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 
 	http.ServeContent(wrappedWriter, r, objectPath, modTime, wrappedReader)
 
+	// After the body has streamed, surface any post-download verification
+	// failure -- e.g. an origin/local checksum mismatch detected only after
+	// the body fully arrives from the origin -- in the trailer.  This blocks
+	// only for full-object reads (where the client was already waiting for
+	// the whole download); for partial range reads it returns immediately so
+	// a tiny range of a multi-GB object doesn't have to wait for the rest of
+	// the backing fill to complete.  See RangeReader.WaitForCompletion.
+	verifyErr := reader.WaitForCompletion(r.Context())
+
 	if sendTrailer {
 		trailerVal := "200: OK"
 		if writeErr != nil {
 			trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
 		} else if readErr != nil {
 			trailerVal = fmt.Sprintf("%d: %s", 500, readErr)
+		} else if verifyErr != nil {
+			trailerVal = fmt.Sprintf("%d: %s", 500, verifyErr)
 		}
 		w.Header().Set("X-Transfer-Status", trailerVal)
 	}

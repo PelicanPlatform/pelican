@@ -3326,6 +3326,13 @@ func parseDigestHeader(header http.Header, fields log.Fields) (result []Checksum
 	}
 	for _, val := range header.Values("Digest") {
 		for _, entry := range strings.Split(val, ",") {
+			// Per RFC 7230 §7, list elements may be separated by a comma
+			// followed by optional whitespace (e.g. "md5=...., crc32c=....").
+			// Trim it so the algorithm name doesn't carry a leading space.
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
 			info := strings.SplitN(entry, "=", 2)
 			if len(info) != 2 {
 				continue

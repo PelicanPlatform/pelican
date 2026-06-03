@@ -27,7 +27,9 @@ package fed_tests
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/pkg/xattr"
@@ -60,28 +62,45 @@ func TestPosixv2_MultiuserPreservesChecksums(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	storage := t.TempDir()
-	skipUnlessXattrs(t, storage)
-	// Multiuser switches to the request's UID for I/O, so the storage dir must
-	// be writable by that user.
-	require.NoError(t, os.Chmod(storage, 0o777))
-
-	originConfig := fmt.Sprintf(`
+	// NewFedTest ignores the StoragePrefix below and creates its own export
+	// root via os.MkdirTemp("") -- i.e. directly under os.TempDir() (/tmp on
+	// Linux). That shallow location matters for multiuser: alice must be able
+	// to traverse every ancestor of the export root, which works for /tmp
+	// (mode 1777) but not for a deeply-nested t.TempDir() hierarchy whose
+	// intermediate directories aren't world-traversable.
+	originConfig := `
 Origin:
   StorageType: posixv2
   Multiuser: true
   ScitokensMapSubject: true
   Exports:
     - FederationPrefix: /test
-      StoragePrefix: %s
+      StoragePrefix: /this-is-overridden-by-NewFedTest
       Capabilities: ["Reads", "Writes", "Listings"]
 Director:
   MinStatResponse: 1
   MaxStatResponse: 1
-`, storage)
+`
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
+
+	// Probe xattr support on the *actual* export root, not a separate
+	// t.TempDir() that may live on a different filesystem.
+	skipUnlessXattrs(t, ft.Exports[0].StoragePrefix)
+
+	// The export root NewFedTest created is mode 0755. In multiuser mode the
+	// origin switches to the request's UID (alice) for I/O, so it must be
+	// writable by that user. Rather than making it world-writable, hand
+	// ownership to alice and keep the restrictive 0755 permissions -- only
+	// alice (and root) can then write.
+	aliceUser, err := user.Lookup("alice")
+	require.NoError(t, err)
+	aliceUID, err := strconv.Atoi(aliceUser.Uid)
+	require.NoError(t, err)
+	aliceGID, err := strconv.Atoi(aliceUser.Gid)
+	require.NoError(t, err)
+	require.NoError(t, os.Chown(ft.Exports[0].StoragePrefix, aliceUID, aliceGID))
 
 	content := []byte("multiuser POSIXv2 should still cache checksums")
 
@@ -113,7 +132,7 @@ Director:
 	assert.Equal(t, expectedCRC32CHex(content), got)
 
 	// The xattr lands on the underlying file regardless of which UID owns it.
-	backendFile := filepath.Join(storage, "alice.bin")
+	backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "alice.bin")
 	xattrData, err := xattr.Get(backendFile, "user.XrdCks.crc32c")
 	require.NoError(t, err, "CRC32C xattr should be present under multiuser POSIXv2")
 	assert.NotEmpty(t, xattrData)

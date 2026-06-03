@@ -4725,3 +4725,47 @@ func TestMetadataChannelByteRange(t *testing.T) {
 		t.Fatal("expected metadata on channel but none was sent")
 	}
 }
+
+// TestFetchChecksumParsesMultipleDigests verifies that fetchChecksum parses
+// every entry in a multi-digest RFC 3230 Digest header, including when the
+// server separates entries with ", " (comma + optional whitespace, permitted
+// by RFC 7230 §7).  This guards against a regression where a leading space
+// caused every entry after the first to be treated as an unknown algorithm and
+// dropped.
+func TestFetchChecksumParsesMultipleDigests(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// md5 (base64) + crc32c (hex) + crc32 (hex) + sha (base64), comma-SPACE
+	// separated.
+	const digestHeader = "md5=67pYXTv4sRZpetpg60PJgg==, crc32c=574a2bf2, crc32=e59f820e, sha=zJWslQTLm4LKR9NF/ksIOV5Rfag="
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodHead, r.Method, "fetchChecksum should use HEAD")
+		w.Header().Set("Digest", digestHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL + "/test/object.bin")
+	require.NoError(t, err)
+
+	got, err := fetchChecksum(context.Background(), KnownChecksumTypes(), u, "", "")
+	require.NoError(t, err)
+
+	byAlg := make(map[ChecksumType][]byte, len(got))
+	for _, ci := range got {
+		byAlg[ci.Algorithm] = ci.Value
+	}
+
+	// All four algorithms must be present.
+	require.Contains(t, byAlg, AlgMD5, "md5 should parse")
+	require.Contains(t, byAlg, AlgCRC32C, "crc32c must survive the ', ' separator")
+	require.Contains(t, byAlg, AlgCRC32, "crc32 must survive the ', ' separator")
+	require.Contains(t, byAlg, AlgSHA1, "sha must survive the ', ' separator")
+
+	// Spot-check decoded values: crc32c is hex 574a2bf2 -> 4 big-endian bytes.
+	assert.Equal(t, []byte{0x57, 0x4a, 0x2b, 0xf2}, byAlg[AlgCRC32C])
+	// md5 is a 16-byte digest; sha1 is 20 bytes.
+	assert.Len(t, byAlg[AlgMD5], 16)
+	assert.Len(t, byAlg[AlgSHA1], 20)
+}

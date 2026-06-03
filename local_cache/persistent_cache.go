@@ -37,6 +37,7 @@ package local_cache
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -104,16 +105,58 @@ func clientChecksumsToCache(result *client.TransferResults) []Checksum {
 		client.AlgCRC32C: ChecksumCRC32C,
 	}
 
+	// Server-supplied checksums take precedence over client-computed ones for
+	// the same algorithm (they carry OriginVerified), so add them first and
+	// skip any algorithm we've already recorded. This avoids emitting the same
+	// algorithm twice in the Digest header (e.g. crc32c from both sources).
 	var out []Checksum
-	for _, ci := range result.ServerChecksums {
-		if ct, ok := algMap[ci.Algorithm]; ok {
-			out = append(out, Checksum{Type: ct, Value: ci.Value, OriginVerified: true})
+	seen := make(map[ChecksumType]struct{})
+	add := func(alg client.ChecksumType, value []byte, originVerified bool) {
+		ct, ok := algMap[alg]
+		if !ok {
+			return
 		}
+		if _, dup := seen[ct]; dup {
+			return
+		}
+		seen[ct] = struct{}{}
+		out = append(out, Checksum{Type: ct, Value: value, OriginVerified: originVerified})
+	}
+	for _, ci := range result.ServerChecksums {
+		add(ci.Algorithm, ci.Value, true)
 	}
 	for _, ci := range result.ClientChecksums {
-		if ct, ok := algMap[ci.Algorithm]; ok {
-			out = append(out, Checksum{Type: ct, Value: ci.Value})
+		add(ci.Algorithm, ci.Value, false)
+	}
+	return out
+}
+
+// statChecksumsToCache converts the checksum map returned by client.DoStat
+// (HTTP digest name -> hex-encoded value) into the local cache schema.  These
+// come from the origin's HEAD response, so they are marked OriginVerified.
+// Unrecognised algorithms and malformed hex are silently skipped.
+func statChecksumsToCache(checksums map[string]string) []Checksum {
+	if len(checksums) == 0 {
+		return nil
+	}
+	nameMap := map[string]ChecksumType{
+		"md5":    ChecksumMD5,
+		"sha":    ChecksumSHA1,
+		"crc32":  ChecksumCRC32,
+		"crc32c": ChecksumCRC32C,
+	}
+	var out []Checksum
+	for name, hexVal := range checksums {
+		ct, ok := nameMap[name]
+		if !ok {
+			continue
 		}
+		raw, err := hex.DecodeString(hexVal)
+		if err != nil {
+			log.Debugf("Skipping malformed %s checksum %q from origin stat: %v", name, hexVal, err)
+			continue
+		}
+		out = append(out, Checksum{Type: ct, Value: raw, OriginVerified: true})
 	}
 	return out
 }
@@ -992,6 +1035,23 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		return nil, err
 	}
 
+	// If a download is backing this reader, expose its terminal state so
+	// the serving path can fail the response with an X-Transfer-Status
+	// trailer when verification (e.g. an origin/local checksum mismatch)
+	// fails.  The error is set by AdoptTransfer's onExit, which fires after
+	// the body has been fully streamed.  See RangeReader.WaitForCompletion
+	// for the full-vs-partial blocking policy.
+	if res.dl != nil {
+		dl := res.dl
+		rr.completionDone = dl.completionDone
+		rr.completionErr = func() error {
+			if err, _ := dl.completionErr.Load().(error); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
 	rr.onClose = func() {
 		if dlClientDone != nil {
 			dlClientDone()
@@ -1171,6 +1231,10 @@ func (pc *PersistentCache) StatCachedOnly(objectPath, token string) (uint64, err
 type HeadResult struct {
 	ContentLength int64
 	Meta          *CacheMetadata // non-nil when the object is cached
+	// Checksums carries the object's digests for the RFC 3230 Digest header.
+	// Populated from cached metadata on a hit, or from the origin's stat
+	// response on a miss, so a HEAD always relays a Digest when one is known.
+	Checksums []Checksum
 }
 
 // HeadObject returns metadata for an object without triggering a download.
@@ -1196,16 +1260,22 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 			return nil, errors.Wrap(mErr, "failed to check cache")
 		}
 		if meta != nil {
-			return &HeadResult{ContentLength: meta.ContentLength, Meta: meta}, nil
+			return &HeadResult{ContentLength: meta.ContentLength, Meta: meta, Checksums: meta.Checksums}, nil
 		}
 	}
 
-	// Not cached — query the origin for size only.
+	// Not cached — query the origin for size and checksums so the HEAD
+	// response can still carry a Digest header (clients fetch checksums via
+	// HEAD before/independent of downloading).
 	dUrl := *pc.directorURL
 	dUrl.Path = objectPath
 	dUrl.Scheme = "pelican"
 
-	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	opts := []client.TransferOption{
+		client.WithToken(token),
+		client.WithCacheEmbeddedClientMode(),
+		client.WithRequestChecksums(client.KnownChecksumTypes()),
+	}
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
@@ -1214,7 +1284,12 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 		return nil, err
 	}
 
-	return &HeadResult{ContentLength: statInfo.Size}, nil
+	// The object isn't cached, so we leave Meta nil (no ETag/Cache-Control
+	// synthesized) but still relay any origin-provided checksums as a Digest.
+	return &HeadResult{
+		ContentLength: statInfo.Size,
+		Checksums:     statChecksumsToCache(statInfo.Checksums),
+	}, nil
 }
 
 // ErrNotCached is returned when an object is not in the cache
@@ -2018,6 +2093,22 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			}
 			if err != nil {
 				dl.completionErr.Store(err)
+				// The download finished but failed verification (e.g. the
+				// origin's reported digest doesn't match the bytes we
+				// received).  By the time we get here, BlockWriter.Close has
+				// already fired onComplete -- which unconditionally marked
+				// the instance Completed and stored the latest-ETag mapping.
+				// Tear that down now so the poisoned object is not served as
+				// a cache hit to future requests; the next request will miss
+				// and re-fetch from the origin.
+				if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
+					log.Warnf("Failed to evict failed-verification instance %s: %v",
+						dl.instanceHash, delErr)
+				}
+				if delErr := pc.db.DeleteLatestETag(dl.objectHash); delErr != nil {
+					log.Warnf("Failed to clear latest-ETag for failed-verification %s: %v",
+						dl.objectHash, delErr)
+				}
 			}
 			close(dl.completionDone)
 		},
@@ -2312,7 +2403,12 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 			}
 		}
 
-		// Persist any checksums the transfer client collected.
+		// Persist any checksums the transfer client collected.  For adopted
+		// (disk) transfers the checksums usually aren't known yet at this
+		// point -- they're persisted by the fetcher when the transfer result
+		// arrives (see BlockFetcherV2.AdoptTransfer).  This remains as a
+		// best-effort fast path for any flow that does set dl.checksums
+		// before completion.
 		if len(w.dl.checksums) > 0 {
 			checksumMeta := &CacheMetadata{Checksums: w.dl.checksums}
 			if err := w.pc.storage.MergeMetadata(w.dl.instanceHash, checksumMeta); err != nil {
