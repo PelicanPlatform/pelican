@@ -331,3 +331,83 @@ func TestMultiKeysRegistration(t *testing.T) {
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 }
+
+// TestRegistrationOldKeyStillInKeyset verifies that when a namespace was registered
+// under a key that is still present in the issuer keyset but is no longer the active
+// (lexicographically-first) key, registerNamespacePrep treats the namespace as
+// already registered instead of failing with "already registered under a different key".
+func TestRegistrationOldKeyStillInKeyset(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	tempConfigDir, err := os.MkdirTemp("", "test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+
+	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
+	// function overrides the IssuerKeysDirectory value if not already set.
+	test_utils.MockFederationRoot(t, nil, nil)
+
+	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
+
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	require.NoError(t, database.InitServerDatabase(server_structs.RegistryType))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	registry.RegisterRegistryAPI(engine.Group("/"))
+	svr := httptest.NewServer(engine)
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	prefix := param.Origin_FederationPrefix.GetString()
+
+	// Register the namespace under the origin's current (and only) issuer key.
+	oldKey, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	require.False(t, isRegistered)
+	require.NoError(t, registerNamespaceImpl(oldKey, prefix, "mock_site_name", registerURL))
+
+	// Add a new key whose filename sorts before the original so it becomes the active
+	// key, while keeping the original (registered) key in the keyset.
+	newKeyPath := filepath.Join(keysDir, "00_active.pem")
+	require.NoError(t, config.GeneratePrivateKey(newKeyPath, elliptic.P256(), false))
+	keysChange, err := config.RefreshKeys()
+	require.NoError(t, err)
+	require.True(t, keysChange)
+
+	// The active key should now differ from the key the namespace was registered under,
+	// and both keys should be present in the keyset.
+	activeKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	require.NotEqual(t, oldKey.KeyID(), activeKey.KeyID())
+	require.Equal(t, 2, len(config.GetIssuerPrivateKeys()))
+
+	// The active key alone does NOT match the registry entry...
+	status, err := keyIsRegistered(activeKey, registerURL, prefix)
+	require.NoError(t, err)
+	require.Equal(t, keyMismatch, status)
+
+	// ...but registerNamespacePrep must still recognize the namespace as ours because
+	// the old key remains in the keyset. Before the keyset-wide check this returned a
+	// "registered under a different key" error.
+	_, _, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	require.True(t, isRegistered)
+}
