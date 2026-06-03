@@ -166,13 +166,10 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
 	}
 
-	/*
-	 * TODO: This section makes the assumption that the incoming jwks only contains a single
-	 *       key, a property that is enforced by the client at the origin. Eventually we need
-	 *       to support the addition of other keys in the jwks stored for the origin. There is
-	 *       a similar TODO listed in client_commands.go, as the choices made there mirror the
-	 *       choices made here.
-	 */
+	// The submitted JWKS may contain multiple keys, but we force the client to
+	// place the key it used to sign the key-sign challenge at index 0. We verify
+	// proof-of-possession against that key; any remaining keys are recorded as
+	// additional valid issuer keys for the namespace.
 	key, exists := clientJwks.Key(0)
 	if !exists {
 		return nil, errors.New("There was no key at index 0 in the request pubKey's JWKS. Something is wrong")

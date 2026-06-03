@@ -366,6 +366,90 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	require.Equal(t, expectedKids, actualKids)
 }
 
+// TestNamespaceRegisterRecordsAllPubKeys verifies that when an origin already holds
+// multiple issuer keys on disk (e.g. keys present before process startup), a single
+// NamespaceRegister call records the public keys of ALL of them in the registry, not
+// just the key used to sign the registration challenge.
+func TestNamespaceRegisterRecordsAllPubKeys(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	svr := registryMockup(ctx, t, "NamespaceRegisterRecordsAllPubKeys")
+	defer func() {
+		err := database.ShutdownDB()
+		assert.NoError(t, err)
+		svr.CloseClientConnections()
+		svr.Close()
+	}()
+
+	// Simulate an origin with several issuer keys already present on disk.
+	issuerKeysDir := param.IssuerKeysDirectory.GetString()
+	config.ResetIssuerPrivateKeys()
+	os.RemoveAll(issuerKeysDir)
+	require.Len(t, config.GetIssuerPrivateKeys(), 0)
+
+	for i := 0; i < 3; i++ {
+		_, err := config.GeneratePEM(issuerKeysDir)
+		require.NoError(t, err)
+	}
+	_, err := config.RefreshKeys()
+	require.NoError(t, err)
+
+	allKeys := config.GetIssuerPrivateKeys()
+	require.Len(t, allKeys, 3)
+
+	// Deliberately sign with a key that is NOT the current issuer key, so the test
+	// fails if NamespaceRegister does not place the signing key at index 0 (the
+	// registry verifies proof-of-possession against the first key only).
+	currentKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	var signingKey jwk.Key
+	for kid, key := range allKeys {
+		if kid != currentKey.KeyID() {
+			signingKey = key
+			break
+		}
+	}
+	require.NotNil(t, signingKey)
+	require.NotEqual(t, currentKey.KeyID(), signingKey.KeyID())
+
+	prefix := "/mascot/bucky"
+	err = registry_client.NamespaceRegister(signingKey, svr.URL+"/api/v1.0/registry", "", prefix, "mock_site_name")
+	require.NoError(t, err)
+
+	// The registry should have recorded the public keys of every local issuer key.
+	ns, err := getRegistrationByPrefix(prefix)
+	require.NoError(t, err)
+
+	expectedKids := make([]string, 0, len(allKeys))
+	for kid := range allKeys {
+		expectedKids = append(expectedKids, kid)
+	}
+	sort.Strings(expectedKids)
+
+	actualKids, err := getSortedKids(ctx, ns.Pubkey)
+	require.NoError(t, err)
+	require.Equal(t, expectedKids, actualKids)
+
+	// The signing key must be stored at index 0 so the registry's proof-of-possession
+	// check (which inspects only the first key) succeeds.
+	storedSet, err := jwk.Parse([]byte(ns.Pubkey))
+	require.NoError(t, err)
+	firstKey, ok := storedSet.Key(0)
+	require.True(t, ok)
+	require.Equal(t, signingKey.KeyID(), firstKey.KeyID())
+}
+
 func TestRegistryKeyChainingOSDF(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
