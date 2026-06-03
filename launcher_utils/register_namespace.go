@@ -237,20 +237,43 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 			return
 		}
 	}
-	keyStatus, err := keyIsRegistered(key, registrationUrl, prefix)
-	if err != nil {
-		err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
+
+	// If there are multiple keys, the active key (used to sign the key-sign challenge)
+	// can differ from the one the namespace was originally registered under, but an older key
+	// still present in the issuer keyset. Check every key in the keyset: if any of them matches,
+	// the namespace is ours.
+	allKeys := config.GetIssuerPrivateKeys()
+	if len(allKeys) == 0 {
+		err = errors.New("The in-memory keyset hasn't been populated yet")
 		return
 	}
-	switch keyStatus {
-	case keyMatch:
-		isRegistered = true
-		return
-	case keyMismatch:
+
+	mismatch := false
+	for _, candidate := range allKeys {
+		// Every key in the keyset is loaded via config.LoadSinglePEM, which assigns a
+		// key ID, so candidate.KeyID() is already non-empty here.
+		var status keyStatus
+		status, err = keyIsRegistered(candidate, registrationUrl, prefix)
+		if err != nil {
+			err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
+			return
+		}
+		switch status {
+		case keyMatch:
+			isRegistered = true
+			return
+		case noKeyPresent:
+			log.Infof("Namespace %v not registered; new registration will proceed\n", prefix)
+			return
+		case keyMismatch:
+			// This key doesn't match; keep trying the rest of the keyset.
+			mismatch = true
+		}
+	}
+
+	if mismatch {
 		err = errors.Errorf("Namespace %v already registered under a different key", prefix)
 		return
-	case noKeyPresent:
-		log.Infof("Namespace %v not registered; new registration will proceed\n", prefix)
 	}
 	return
 }
