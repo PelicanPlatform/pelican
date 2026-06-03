@@ -733,10 +733,29 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 					op.err = result.Error
 					log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
 				}
-				// Store checksums from the transfer result on the download
-				// so that onComplete can persist them in metadata.
-				if result != nil {
-					dw.dl.checksums = clientChecksumsToCache(result)
+				// Persist checksums from the transfer result into the cache
+				// metadata.  We must do this here -- when the result arrives
+				// -- rather than relying on the BlockWriter's onComplete
+				// callback: the client only knows the checksums after the
+				// body finishes downloading (it fetches the origin's Digest
+				// and finalizes its own hashes post-transfer), but onComplete
+				// fires the moment the final block is written, before the
+				// result is delivered.  Persisting here (via the additive
+				// MergeMetadata) guarantees a subsequent HEAD/GET can relay a
+				// Digest header.
+				//
+				// Skip on transfer error -- those checksums describe a body we
+				// are about to discard (see PersistentCache's AdoptTransfer
+				// onExit, which evicts the failed-verification instance).
+				if result != nil && result.Error == nil {
+					checksums := clientChecksumsToCache(result)
+					dw.dl.checksums = checksums
+					if len(checksums) > 0 {
+						if err := bf.storage.MergeMetadata(bf.instanceHash,
+							&CacheMetadata{Checksums: checksums}); err != nil {
+							log.Warnf("Failed to persist checksums for %s: %v", bf.instanceHash, err)
+						}
+					}
 				}
 				bf.notifyAllChunks(op)
 				return nil

@@ -33,7 +33,8 @@
 package fed_tests
 
 import (
-	"crypto/tls"
+	"crypto/md5"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -49,6 +50,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -59,19 +61,6 @@ import (
 func originServerURL() string {
 	return fmt.Sprintf("https://%s:%d",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-}
-
-// insecureClient is a non-redirecting http.Client that skips TLS verification,
-// suitable for talking directly to a test origin's self-signed cert.
-func insecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
 }
 
 // skipUnlessXattrs ensures the filesystem under tmpPath supports user xattrs,
@@ -95,6 +84,34 @@ func expectedCRC32CHex(content []byte) string {
 	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
 	_, _ = h.Write(content)
 	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+// expectedCRC32CRaw returns the 4-byte big-endian CRC32C digest of content,
+// in the same shape the client decodes into ChecksumInfo.Value.
+func expectedCRC32CRaw(content []byte) []byte {
+	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	_, _ = h.Write(content)
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, h.Sum32())
+	return buf
+}
+
+// expectedMD5Raw returns the raw 16-byte MD5 digest of content.
+func expectedMD5Raw(content []byte) []byte {
+	sum := md5.Sum(content)
+	return sum[:]
+}
+
+// summarizeChecksums turns a slice of ChecksumInfo into a logging-friendly
+// list of (algorithm name, byte count) pairs so test failures are diagnosable
+// without dumping raw digest bytes.
+func summarizeChecksums(cks []client.ChecksumInfo) []string {
+	out := make([]string, 0, len(cks))
+	for _, c := range cks {
+		out = append(out, fmt.Sprintf("%s(%d bytes)",
+			client.HttpDigestFromChecksum(c.Algorithm), len(c.Value)))
+	}
+	return out
 }
 
 // TestPosixv2_DefaultDigestIsCRC32C verifies that, with no explicit
@@ -129,7 +146,7 @@ Director:
 	require.NoError(t, os.WriteFile(backendFile, content, 0o644))
 
 	tok := getTempTokenForTest(t)
-	httpClient := insecureClient()
+	httpClient := config.GetClientNoRedirect()
 
 	req, err := http.NewRequest(http.MethodHead,
 		originServerURL()+"/api/v1.0/origin/data/test/default_crc32c.txt", nil)
@@ -229,11 +246,131 @@ Director:
 	assert.NotEmpty(t, xattrData)
 }
 
-// TestPosixv2_ETagDistinctForDifferentObjects is the E2E manifestation of the
-// reported bug: previously, the ETag of every POSIXv2 object "looked nearly
-// the same" because it was just `mtime|size` concatenated as hex. With the
-// inode included, two distinct files -- even with identical size and mtime --
-// have observably distinct ETags over the wire.
+// Download a POSIXv2-served object *through the cache* (V1 XRootD-based and
+// V2 Pelican-native) with WithRequireChecksum() so the client must successfully
+// verify the digest returned by the cache against the file it just downloaded.
+func TestPosixv2_DoGetVerifiesChecksum_ThroughCache(t *testing.T) {
+	cases := []struct {
+		name        string
+		enableV2    bool
+		description string
+	}{
+		{
+			name:        "V1_XRootD_cache",
+			enableV2:    false,
+			description: "Default cache implementation backed by XRootD",
+		},
+		{
+			name:        "V2_Pelican_cache",
+			enableV2:    true,
+			description: "Pelican-native cache implementation (Cache.EnableV2)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(test_utils.SetupTestLogging(t))
+			server_utils.ResetTestState()
+			t.Cleanup(server_utils.ResetTestState)
+
+			if tc.enableV2 {
+				require.NoError(t, param.Cache_EnableV2.Set(true))
+			}
+
+			storage := t.TempDir()
+			skipUnlessXattrs(t, storage)
+
+			originConfig := fmt.Sprintf(`
+Origin:
+  DefaultChecksumTypes: ["crc32c", "md5"]
+  Exports:
+    - FederationPrefix: /test
+      StoragePrefix: %s
+      Capabilities: ["PublicReads", "Writes", "Listings"]
+Director:
+  MinStatResponse: 1
+  MaxStatResponse: 1
+`, storage)
+
+			ft := fed_test_utils.NewFedTest(t, originConfig)
+			require.NotNil(t, ft)
+
+			content := []byte("POSIXv2 checksum-verify through " + tc.name + ": " +
+				strings.Repeat("x", 4096))
+
+			localDir := t.TempDir()
+			local := filepath.Join(localDir, "verify.bin")
+			require.NoError(t, os.WriteFile(local, content, 0o644))
+
+			objectURL := fmt.Sprintf("pelican://%s:%d/test/verify.bin",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+			tok := getTempTokenForTest(t)
+			_, err := client.DoPut(ft.Ctx, local, objectURL, false, client.WithToken(tok))
+			require.NoError(t, err)
+
+			// Download via the cache. WithRequireChecksum() makes the client
+			// return ErrServerChecksumMissing if no algorithm verified.
+			dst := filepath.Join(t.TempDir(), "got.bin")
+			results, err := client.DoGet(ft.Ctx, objectURL, dst, false,
+				client.WithToken(tok),
+				client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}),
+				client.WithRequireChecksum(),
+			)
+			require.NoError(t, err,
+				"%s: DoGet with WithRequireChecksum must succeed -- "+
+					"a failure indicates the cache failed to relay a verifiable digest "+
+					"from POSIXv2 to the client", tc.description)
+			require.NotEmpty(t, results)
+			r := results[0]
+
+			// Body must round-trip intact.
+			got, err := os.ReadFile(dst)
+			require.NoError(t, err)
+			require.Equal(t, content, got, "downloaded bytes must match uploaded bytes")
+
+			clientByAlg := map[client.ChecksumType][]byte{
+				client.AlgCRC32C: expectedCRC32CRaw(content),
+				client.AlgMD5:    expectedMD5Raw(content),
+			}
+
+			t.Logf("%s: cache returned digests: %v",
+				tc.name, summarizeChecksums(r.ServerChecksums))
+
+			// Both cache implementations must relay at least one digest from
+			// POSIXv2. (V1/XRootD computes its own digest of the served bytes;
+			// V2/Pelican relays the digests it persisted at download time.)
+			require.NotEmpty(t, r.ServerChecksums,
+				"%s: cache must relay at least one digest from POSIXv2 to the client", tc.name)
+
+			matched := 0
+			for _, sck := range r.ServerChecksums {
+				wantBytes, known := clientByAlg[sck.Algorithm]
+				if !known {
+					// SHA-1 / CRC32 are not asserted here, but log them
+					// so a future regression is easy to spot.
+					t.Logf("%s: cache returned %s digest of %d bytes (not asserted): %x",
+						tc.name, client.HttpDigestFromChecksum(sck.Algorithm),
+						len(sck.Value), sck.Value)
+					continue
+				}
+				assert.Equal(t, wantBytes, sck.Value,
+					"%s: %s digest from cache must equal locally-computed %s",
+					tc.name, client.HttpDigestFromChecksum(sck.Algorithm),
+					client.HttpDigestFromChecksum(sck.Algorithm))
+				matched++
+			}
+			assert.Greater(t, matched, 0,
+				"%s: at least one of CRC32C/MD5 should round-trip from POSIXv2 through the cache; "+
+					"got server entries: %v", tc.name, summarizeChecksums(r.ServerChecksums))
+		})
+	}
+}
+
+// Previously, the ETag of every POSIXv2 object looked the same because it was
+// just `mtime|size` concatenated as hex. With the inode included, two distinct
+// files -- even with identical size and mtime -- have observably distinct ETags
+// over the wire.
 func TestPosixv2_ETagDistinctForDifferentObjects(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -256,13 +393,15 @@ Director:
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
 
+	exportRoot := ft.Exports[0].StoragePrefix
+
 	// Three files: same size, two with the same mtime forced to a fixed value,
 	// one with a naturally-fresh mtime. The first two are the "collision" case
 	// that the old size+mtime ETag could not distinguish.
 	const sz = 5
-	a := filepath.Join(storage, "a.bin")
-	b := filepath.Join(storage, "b.bin")
-	c := filepath.Join(storage, "c.bin")
+	a := filepath.Join(exportRoot, "a.bin")
+	b := filepath.Join(exportRoot, "b.bin")
+	c := filepath.Join(exportRoot, "c.bin")
 	require.NoError(t, os.WriteFile(a, []byte("AAAAA"), 0o644))
 	require.NoError(t, os.WriteFile(b, []byte("BBBBB"), 0o644))
 	require.NoError(t, os.WriteFile(c, []byte("CCCCC"), 0o644))
@@ -274,7 +413,7 @@ Director:
 	require.Equal(t, int64(sz), mustSize(t, b))
 
 	tok := getTempTokenForTest(t)
-	httpClient := insecureClient()
+	httpClient := config.GetClientNoRedirect()
 
 	etagOf := func(name string) string {
 		t.Helper()
@@ -332,11 +471,12 @@ Director:
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
 
-	path := filepath.Join(storage, "etag_rt.bin")
+	// NewFedTest may rewrite the StoragePrefix; use the effective value.
+	path := filepath.Join(ft.Exports[0].StoragePrefix, "etag_rt.bin")
 	require.NoError(t, os.WriteFile(path, []byte("conditional payload"), 0o644))
 
 	tok := getTempTokenForTest(t)
-	httpClient := insecureClient()
+	httpClient := config.GetClientNoRedirect()
 
 	url := originServerURL() + "/api/v1.0/origin/data/test/etag_rt.bin"
 
@@ -371,8 +511,6 @@ Director:
 	assert.Equal(t, etag, resp2.Header.Get("ETag"),
 		"304 response should echo the matching ETag")
 }
-
-// ---- small helpers -----------------------------------------------------
 
 func mustSize(t *testing.T, path string) int64 {
 	t.Helper()
