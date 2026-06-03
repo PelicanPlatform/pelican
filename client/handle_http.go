@@ -2470,7 +2470,12 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				return errors.Wrap(err, "failed to parse source URL for recursive copy")
 			}
 			var statInfo FileInfo
-			if statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil); err != nil {
+			if job.job.srcDirResp.XPelNsHdr.CollectionsUrl != nil {
+				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
+			} else {
+				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
+			}
+			if err != nil {
 				return errors.Wrap(err, "failed to stat source path for recursive copy")
 			}
 
