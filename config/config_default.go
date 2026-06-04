@@ -37,7 +37,16 @@ func InitServerOSDefaults(v *viper.Viper) error {
 	tlscaFile := filepath.Join(v.GetString(param.ConfigBase.GetName()), "certificates", "tlsca.pem")
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tlscaFile)
 
-	tlscaKeyFile := filepath.Join(v.GetString(param.ConfigBase.GetName()), "certificates", "tlscakey.pem")
+	// Use the same CA key filename as the generated default in parameters.yaml
+	// (and as Linux, which relies solely on that default). Diverging here — e.g.
+	// "tlscakey.pem" — is fragile: this override is applied during
+	// SetServerDefaults, but the generated default ("tlsca.key") is (re)applied
+	// at InitConfig time via SetParameterDefaults/ApplyDerivedDefaults. Any
+	// config re-initialization would then revert Server.TLSCAKey to the
+	// generated value, leaving it pointing at a path where no key was written
+	// (the CA key having been generated under the diverging name). Keeping the
+	// names identical makes the value stable across every init path.
+	tlscaKeyFile := filepath.Join(v.GetString(param.ConfigBase.GetName()), "certificates", "tlsca.key")
 	v.SetDefault(param.Server_TLSCAKey.GetName(), tlscaKeyFile)
 
 	if err := os.MkdirAll(filepath.Dir(tlscaFile), 0755); err != nil {
