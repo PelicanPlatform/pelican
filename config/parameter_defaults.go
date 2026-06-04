@@ -898,6 +898,369 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Xrootd_SummaryMonitoringPort.GetName(), 9931)
 }
 
+// ApplyDerivedDefaults recomputes interpolated parameter defaults (those whose
+// values reference ${Param.Name}) from the current values of their dependencies.
+// Call this after all configuration layers (defaults, config files, env vars)
+// have been merged into v, so that user overrides of referenced parameters are
+// reflected in the dependent defaults. Parameters the user has explicitly set
+// (per the SourceTracker) are left untouched.
+func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+	st := GetSourceTracker()
+	isDefaultSource := func(key string) bool {
+		src, ok := st.Get(strings.ToLower(key))
+		return !ok || src.Type == SourceDefault
+	}
+	// Cache.FedTokenLocation
+	if isDefaultSource(param.Cache_FedTokenLocation.GetName()) {
+		{
+			val := "${ConfigBase}/cache-fed-token"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Cache_FedTokenLocation.GetName(), val)
+		}
+	}
+	// Cache.ClientStatisticsLocation
+	if isDefaultSource(param.Cache_ClientStatisticsLocation.GetName()) {
+		{
+			val := "${Cache.RunLocation}/xrootd.stats"
+			val = strings.ReplaceAll(val, "${Cache.RunLocation}", v.GetString(param.Cache_RunLocation.GetName()))
+			v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), val)
+		}
+	}
+	// Cache.DataLocations
+	if isDefaultSource(param.Cache_DataLocations.GetName()) {
+		{
+			vals := []string{"${Cache.StorageLocation}/data"}
+			for i, val := range vals {
+				val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
+				vals[i] = val
+			}
+			v.SetDefault(param.Cache_DataLocations.GetName(), vals)
+		}
+	}
+	// Cache.MetaLocations
+	if isDefaultSource(param.Cache_MetaLocations.GetName()) {
+		{
+			vals := []string{"${Cache.StorageLocation}/meta"}
+			for i, val := range vals {
+				val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
+				vals[i] = val
+			}
+			v.SetDefault(param.Cache_MetaLocations.GetName(), vals)
+		}
+	}
+	// Cache.NamespaceLocation
+	if isDefaultSource(param.Cache_NamespaceLocation.GetName()) {
+		{
+			val := "${Cache.StorageLocation}/namespace"
+			val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
+			v.SetDefault(param.Cache_NamespaceLocation.GetName(), val)
+		}
+	}
+	// Cache.Url
+	if isDefaultSource(param.Cache_Url.GetName()) {
+		{
+			val := "https://${Server.Hostname}:${Cache.Port}"
+			val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
+			val = strings.ReplaceAll(val, "${Cache.Port}", v.GetString(param.Cache_Port.GetName()))
+			v.SetDefault(param.Cache_Url.GetName(), val)
+		}
+	}
+	// Director.GeoIPLocation
+	if isDefaultSource(param.Director_GeoIPLocation.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		} else {
+			{
+				val := "${ConfigBase}/maxmind/GeoLite2-city.mmdb"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Director_GeoIPLocation.GetName(), val)
+			}
+		}
+	}
+	// IssuerKeysDirectory
+	if isDefaultSource(param.IssuerKeysDirectory.GetName()) {
+		{
+			val := "${ConfigBase}/issuer-keys"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.IssuerKeysDirectory.GetName(), val)
+		}
+	}
+	// LocalCache.DataLocation
+	if isDefaultSource(param.LocalCache_DataLocation.GetName()) {
+		{
+			val := "${LocalCache.RunLocation}/cache"
+			val = strings.ReplaceAll(val, "${LocalCache.RunLocation}", v.GetString(param.LocalCache_RunLocation.GetName()))
+			v.SetDefault(param.LocalCache_DataLocation.GetName(), val)
+		}
+	}
+	// LocalCache.Socket
+	if isDefaultSource(param.LocalCache_Socket.GetName()) {
+		{
+			val := "${LocalCache.RunLocation}/cache.sock"
+			val = strings.ReplaceAll(val, "${LocalCache.RunLocation}", v.GetString(param.LocalCache_RunLocation.GetName()))
+			v.SetDefault(param.LocalCache_Socket.GetName(), val)
+		}
+	}
+	// Lotman.LotHome
+	if isDefaultSource(param.Lotman_LotHome.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/lotman")
+		} else {
+			{
+				val := "${ConfigBase}"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Lotman_LotHome.GetName(), val)
+			}
+		}
+	}
+	// Monitoring.DataLocation
+	if isDefaultSource(param.Monitoring_DataLocation.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
+		} else {
+			{
+				val := "${ConfigBase}/monitoring/data"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Monitoring_DataLocation.GetName(), val)
+			}
+		}
+	}
+	// OIDC.ClientIDFile
+	if isDefaultSource(param.OIDC_ClientIDFile.GetName()) {
+		{
+			val := "${ConfigBase}/oidc-client-id"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.OIDC_ClientIDFile.GetName(), val)
+		}
+	}
+	// OIDC.ClientSecretFile
+	if isDefaultSource(param.OIDC_ClientSecretFile.GetName()) {
+		{
+			val := "${ConfigBase}/oidc-client-secret"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.OIDC_ClientSecretFile.GetName(), val)
+		}
+	}
+	// Origin.DbLocation
+	if isDefaultSource(param.Origin_DbLocation.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
+		} else {
+			{
+				val := "${ConfigBase}/origin.sqlite"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Origin_DbLocation.GetName(), val)
+			}
+		}
+	}
+	// Origin.FedTokenLocation
+	if isDefaultSource(param.Origin_FedTokenLocation.GetName()) {
+		{
+			val := "${ConfigBase}/origin-fed-token"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Origin_FedTokenLocation.GetName(), val)
+		}
+	}
+	// Origin.UploadTempLocation
+	if isDefaultSource(param.Origin_UploadTempLocation.GetName()) {
+		{
+			val := "${Origin.RunLocation}/in-progress"
+			val = strings.ReplaceAll(val, "${Origin.RunLocation}", v.GetString(param.Origin_RunLocation.GetName()))
+			v.SetDefault(param.Origin_UploadTempLocation.GetName(), val)
+		}
+	}
+	// Origin.Url
+	if isDefaultSource(param.Origin_Url.GetName()) {
+		{
+			val := "https://${Server.Hostname}:${Origin.Port}"
+			val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
+			val = strings.ReplaceAll(val, "${Origin.Port}", v.GetString(param.Origin_Port.GetName()))
+			v.SetDefault(param.Origin_Url.GetName(), val)
+		}
+	}
+	// Origin.TokenAudience
+	if isDefaultSource(param.Origin_TokenAudience.GetName()) {
+		{
+			val := "${Origin.Url}"
+			val = strings.ReplaceAll(val, "${Origin.Url}", v.GetString(param.Origin_Url.GetName()))
+			v.SetDefault(param.Origin_TokenAudience.GetName(), val)
+		}
+	}
+	// Server.DatabaseBackup.Location
+	if isDefaultSource(param.Server_DatabaseBackup_Location.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), "/var/lib/pelican/backups")
+		} else {
+			{
+				val := "${ConfigBase}/backups"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Server_DatabaseBackup_Location.GetName(), val)
+			}
+		}
+	}
+	// Server.DbLocation
+	if isDefaultSource(param.Server_DbLocation.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Server_DbLocation.GetName(), "/var/lib/pelican/pelican.sqlite")
+		} else {
+			{
+				val := "${ConfigBase}/pelican.sqlite"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Server_DbLocation.GetName(), val)
+			}
+		}
+	}
+	// Server.SessionSecretFile
+	if isDefaultSource(param.Server_SessionSecretFile.GetName()) {
+		{
+			val := "${ConfigBase}/session-secret"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_SessionSecretFile.GetName(), val)
+		}
+	}
+	// Server.TLSCACertificateFile
+	if isDefaultSource(param.Server_TLSCACertificateFile.GetName()) {
+		{
+			val := "${ConfigBase}/certificates/tlsca.pem"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_TLSCACertificateFile.GetName(), val)
+		}
+	}
+	// Server.TLSCAKey
+	if isDefaultSource(param.Server_TLSCAKey.GetName()) {
+		{
+			val := "${ConfigBase}/certificates/tlsca.key"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_TLSCAKey.GetName(), val)
+		}
+	}
+	// Server.TLSCertificateChain
+	if isDefaultSource(param.Server_TLSCertificateChain.GetName()) {
+		{
+			val := "${ConfigBase}/certificates/tls.crt"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_TLSCertificateChain.GetName(), val)
+		}
+	}
+	// Server.TLSKey
+	if isDefaultSource(param.Server_TLSKey.GetName()) {
+		{
+			val := "${ConfigBase}/certificates/tls.key"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_TLSKey.GetName(), val)
+		}
+	}
+	// Server.UIActivationCodeFile
+	if isDefaultSource(param.Server_UIActivationCodeFile.GetName()) {
+		{
+			val := "${ConfigBase}/server-web-activation-code"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_UIActivationCodeFile.GetName(), val)
+		}
+	}
+	// Server.UIPasswordFile
+	if isDefaultSource(param.Server_UIPasswordFile.GetName()) {
+		{
+			val := "${ConfigBase}/server-web-passwd"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_UIPasswordFile.GetName(), val)
+		}
+	}
+	// Server.WebConfigFile
+	if isDefaultSource(param.Server_WebConfigFile.GetName()) {
+		{
+			val := "${ConfigBase}/web-config.yaml"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_WebConfigFile.GetName(), val)
+		}
+	}
+	// Server.ExternalWebUrl
+	if isDefaultSource(param.Server_ExternalWebUrl.GetName()) {
+		{
+			val := "https://${Server.Hostname}:${Server.WebPort}"
+			val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
+			val = strings.ReplaceAll(val, "${Server.WebPort}", v.GetString(param.Server_WebPort.GetName()))
+			v.SetDefault(param.Server_ExternalWebUrl.GetName(), val)
+		}
+	}
+	// Director.AdvertiseUrl
+	if isDefaultSource(param.Director_AdvertiseUrl.GetName()) {
+		{
+			val := "${Server.ExternalWebUrl}"
+			val = strings.ReplaceAll(val, "${Server.ExternalWebUrl}", v.GetString(param.Server_ExternalWebUrl.GetName()))
+			v.SetDefault(param.Director_AdvertiseUrl.GetName(), val)
+		}
+	}
+	// Issuer.IssuerClaimValue
+	if isDefaultSource(param.Issuer_IssuerClaimValue.GetName()) {
+		{
+			val := "${Server.ExternalWebUrl}"
+			val = strings.ReplaceAll(val, "${Server.ExternalWebUrl}", v.GetString(param.Server_ExternalWebUrl.GetName()))
+			v.SetDefault(param.Issuer_IssuerClaimValue.GetName(), val)
+		}
+	}
+	// Shoveler.AMQPTokenLocation
+	if isDefaultSource(param.Shoveler_AMQPTokenLocation.GetName()) {
+		{
+			val := "${ConfigBase}/shoveler-token"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), val)
+		}
+	}
+	// Shoveler.QueueDirectory
+	if isDefaultSource(param.Shoveler_QueueDirectory.GetName()) {
+		if isRoot {
+			v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
+		} else {
+			{
+				val := "${ConfigBase}/shoveler/queue"
+				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+				v.SetDefault(param.Shoveler_QueueDirectory.GetName(), val)
+			}
+		}
+	}
+	// Xrootd.Authfile
+	if isDefaultSource(param.Xrootd_Authfile.GetName()) {
+		{
+			val := "${ConfigBase}/xrootd/authfile"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Xrootd_Authfile.GetName(), val)
+		}
+	}
+	// Xrootd.MacaroonsKeyFile
+	if isDefaultSource(param.Xrootd_MacaroonsKeyFile.GetName()) {
+		{
+			val := "${ConfigBase}/macaroons-secret"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), val)
+		}
+	}
+	// Xrootd.RobotsTxtFile
+	if isDefaultSource(param.Xrootd_RobotsTxtFile.GetName()) {
+		{
+			val := "${ConfigBase}/robots.txt"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Xrootd_RobotsTxtFile.GetName(), val)
+		}
+	}
+	// Xrootd.ScitokensConfig
+	if isDefaultSource(param.Xrootd_ScitokensConfig.GetName()) {
+		{
+			val := "${ConfigBase}/xrootd/scitokens.cfg"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Xrootd_ScitokensConfig.GetName(), val)
+		}
+	}
+	// Xrootd.Sitename
+	if isDefaultSource(param.Xrootd_Sitename.GetName()) {
+		{
+			val := "${Server.Hostname}"
+			val = strings.ReplaceAll(val, "${Server.Hostname}", v.GetString(param.Server_Hostname.GetName()))
+			v.SetDefault(param.Xrootd_Sitename.GetName(), val)
+		}
+	}
+}
+
 // ApplyClientDefaults overrides base defaults with client-specific values.
 // Call after SetParameterDefaults.
 func ApplyClientDefaults(v *viper.Viper) {
