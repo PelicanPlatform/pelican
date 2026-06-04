@@ -61,11 +61,18 @@ func initClientAndServerConfig(v *viper.Viper, opts ConfigLoadOptions) *param.Co
 	// should be independent of the user running the command.
 	if opts.Service != "" {
 		servicePath := filepath.Join("/etc", "pelican", fmt.Sprintf("pelican-%s.yaml", opts.Service))
+		// We deliberately write the "config" key on the GLOBAL viper rather than on
+		// `v`: InitConfigInternal (invoked below when v is the global instance)
+		// reads the entrypoint via viper.GetString("config") on the global viper,
+		// so the override has to live there to take effect.
 		if _, err := os.Stat(servicePath); err == nil {
 			viper.Set("config", servicePath)
 		} else {
 			fallback := filepath.Join("/etc", "pelican", "pelican.yaml")
-			log.Debugf("Service config %s not found, falling back to %s", servicePath, fallback)
+			// Surface the fallback at warn level: the user explicitly asked for a
+			// service via --service, so silently loading a different file would be
+			// surprising and could mask a missing/mis-installed service config.
+			log.Warnf("Service config %s not found, falling back to %s", servicePath, fallback)
 			viper.Set("config", fallback)
 		}
 	}

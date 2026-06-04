@@ -143,7 +143,7 @@ func init() {
 		if service != "" {
 			sType, err := server_structs.ServerTypeFromString(service)
 			if err != nil {
-				return fmt.Errorf("unsupported service %q; valid values are: cache, origin, director, registry", service)
+				return fmt.Errorf("unsupported service %q; currently supported services are: cache, origin, director, registry", service)
 			}
 			service = strings.ToLower(service) // normalize
 
@@ -152,7 +152,8 @@ func init() {
 				server_structs.DirectorType, server_structs.RegistryType:
 				// supported — fall through
 			case server_structs.LocalCacheType, server_structs.BrokerType:
-				return fmt.Errorf("--service %q is not yet implemented", service)
+				// Recognized by ServerTypeFromString but not yet wired up here.
+				return fmt.Errorf("--service %q is recognized but not yet implemented; currently supported services are: cache, origin, director, registry", service)
 			}
 
 			// The --config and --service commands are mutually exclusive. However,
