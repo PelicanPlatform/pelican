@@ -285,45 +285,6 @@ func TestDirectorRegistration(t *testing.T) {
 		namespaceKeys.DeleteAll()
 	}
 
-	t.Run("valid-token-V1", func(t *testing.T) {
-		c, r, w := setupContext()
-		pKey, token, _ := generateToken()
-		publicKey, err := jwk.PublicKeyOf(pKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-
-		setupJwksCache(t, "/foo/bar", publicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{
-			Name: "test",
-			URL:  "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV1{{
-				Path:   "/foo/bar",
-				Issuer: isurl,
-			}},
-		}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		// Check to see that the code exits with status code 200 after given it a good token
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-
-		get := serverAds.Get("https://or-url.org")
-		require.NotNil(t, get, "Coudln't find server in the director cache.")
-		getAd := get.Value()
-		assert.Equal(t, getAd.Name, ad.Name)
-		require.Len(t, getAd.NamespaceAds, 1)
-		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
-		teardown()
-	})
-
 	t.Run("valid-token-V2", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
@@ -364,46 +325,6 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
-	// Now repeat the above test, but with an invalid token
-	t.Run("invalid-token-V1", func(t *testing.T) {
-		c, r, w := setupContext()
-		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-		assert.NoError(t, err, "Error creating another private key")
-		_, token, _ := generateToken()
-
-		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", wrongPublicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{
-			Name: "test",
-			URL:  "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV1{
-				{
-					Path:   "/foo/bar",
-					Issuer: isurl,
-				},
-			}}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
-		body, _ := io.ReadAll(w.Result().Body)
-		assert.Contains(t, string(body), "Authorization token verification failed", "Failure wasn't because token verification failed")
-
-		namaspaceADs := listNamespacesFromOrigins()
-		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
-		teardown()
-	})
-
 	t.Run("invalid-token-V2", func(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
@@ -439,39 +360,6 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
-	t.Run("valid-token-with-web-url-V1", func(t *testing.T) {
-		c, r, w := setupContext()
-		pKey, token, _ := generateToken()
-		publicKey, err := jwk.PublicKeyOf(pKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{
-			URL:    "https://or-url.org",
-			WebURL: "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV1{
-				{
-					Path:   "/foo/bar",
-					Issuer: isurl,
-				},
-			}}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
-		teardown()
-	})
-
 	t.Run("valid-token-with-web-url-V2", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
@@ -497,32 +385,6 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
 		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
-		teardown()
-	})
-
-	// We want to ensure backwards compatibility for WebURL
-	t.Run("valid-token-without-web-url-V1", func(t *testing.T) {
-		c, r, w := setupContext()
-		pKey, token, _ := generateToken()
-		publicKey, err := jwk.PublicKeyOf(pKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{URL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.NotNil(t, 1, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
@@ -940,35 +802,6 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
-	t.Run("origin-storage-type-and-test-V1", func(t *testing.T) {
-		c, r, w := setupContext()
-		pKey, token, _ := generateToken()
-		publicKey, err := jwk.PublicKeyOf(pKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{URL: "https://v1-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		get := serverAds.Get("https://v1-url.org")
-		assert.NotNil(t, get, "Origin fail to register at serverAds")
-
-		getAd := get.Value()
-		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
-		assert.False(t, getAd.DisableDirectorTest)
-		teardown()
-	})
-
 	t.Run("origin-advertise-with-version-and-ua-test", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
@@ -1079,42 +912,6 @@ func TestDirectorRegistration(t *testing.T) {
 		getAd := get.Value()
 		assert.Equal(t, "unknown", getAd.Version)
 		teardown()
-	})
-
-	t.Run("origin-advertise-with-old-ad-test", func(t *testing.T) {
-		c, r, w := setupContext()
-		pKey, token, _ := generateToken()
-		publicKey, err := jwk.PublicKeyOf(pKey)
-		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
-
-		isurl := url.URL{}
-		isurl.Path = ts.URL
-
-		ad := server_structs.OriginAdvertiseV1{
-			Name: "test",
-			URL:  "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV1{{
-				Path:   "/foo/bar",
-				Issuer: isurl,
-			}},
-		}
-
-		jsonad, err := json.Marshal(ad)
-		assert.NoError(t, err, "Error marshalling OriginAdvertise")
-
-		setupRequest(c, r, jsonad, token, server_structs.OriginType)
-
-		r.ServeHTTP(w, c.Request)
-
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-
-		get := serverAds.Get("https://or-url.org")
-		require.NotNil(t, get, "Coudln't find server in the director cache.")
-		getAd := get.Value()
-		assert.Equal(t, "7.0.0", getAd.Version)
-		teardown()
-
 	})
 
 	t.Run("origin-advertise-with-mismatch-versions", func(t *testing.T) {
