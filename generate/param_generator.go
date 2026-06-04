@@ -419,32 +419,65 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		// for that parameter (viper.IsSet will return false).
 		fmt.Fprintf(&buf, "\t// %s\n", name)
 
-		needsBranch := hasRoot || hasOsdf
-		if needsBranch {
-			first := true
-			if hasOsdf {
-				buf.WriteString("\tif isOSDF {\n")
-				writeSetDefault(&buf, pd, pd.osdfDefault, "\t\t")
-				first = false
-			}
-			if hasRoot {
-				if first {
-					buf.WriteString("\tif isRoot {\n")
-				} else {
-					buf.WriteString("\t} else if isRoot {\n")
-				}
-				writeSetDefault(&buf, pd, pd.rootDefault, "\t\t")
-			}
-			if hasDef {
-				buf.WriteString("\t} else {\n")
-				writeSetDefault(&buf, pd, pd.def, "\t\t")
-			}
-			buf.WriteString("\t}\n")
-		} else {
-			writeSetDefault(&buf, pd, pd.def, "\t")
-		}
+		emitDefaultAssignment(&buf, pd, "\t")
 	}
 
+	buf.WriteString("}\n\n")
+
+	// Generate ApplyDerivedDefaults.
+	//
+	// SetParameterDefaults resolves every ${Param.Name} reference at startup,
+	// BEFORE user configuration (files, env vars, flags) is merged into viper.
+	// That means a parameter like Server.ExternalWebUrl, whose default is
+	// "https://${Server.Hostname}:${Server.WebPort}", is baked with the default
+	// web port even when the operator later sets a custom Server.WebPort. The
+	// same staleness affects every interpolated default and cascades through
+	// transitive references (e.g. Director.AdvertiseUrl = ${Server.ExternalWebUrl}).
+	//
+	// ApplyDerivedDefaults recomputes these interpolated defaults from the
+	// CURRENT value of their dependencies, in the same topological order, after
+	// all configuration has been merged. It only rewrites a parameter when that
+	// parameter still comes from a default source (per SourceTracker) — i.e. the
+	// user has not explicitly set it — so user overrides are never clobbered.
+	// Because viper's SetDefault overwrites the prior default (last write wins),
+	// and these params are read back via v.GetString in topological order, the
+	// recomputation cascades correctly through transitive dependencies.
+	//
+	// This single generated pass replaces the former hand-written per-parameter
+	// "refresh" hooks. Any new interpolated default added to parameters.yaml is
+	// covered automatically — there is no separate hook to remember to write.
+	buf.WriteString(`// ApplyDerivedDefaults recomputes interpolated parameter defaults (those whose
+// values reference ${Param.Name}) from the current values of their dependencies.
+// Call this after all configuration layers (defaults, config files, env vars)
+// have been merged into v, so that user overrides of referenced parameters are
+// reflected in the dependent defaults. Parameters the user has explicitly set
+// (per the SourceTracker) are left untouched.
+func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+	st := GetSourceTracker()
+	isDefaultSource := func(key string) bool {
+		src, ok := st.Get(strings.ToLower(key))
+		return !ok || src.Type == SourceDefault
+	}
+`)
+	for _, name := range sorted {
+		if seedParams[name] {
+			continue
+		}
+		pd := byName[name]
+		if pd.deprecated || !pd.hasBaseParamRefs() {
+			continue
+		}
+		hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+		hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+		hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
+		if !hasDef && !hasRoot && !hasOsdf {
+			continue
+		}
+		fmt.Fprintf(&buf, "\t// %s\n", name)
+		fmt.Fprintf(&buf, "\tif isDefaultSource(param.%s.GetName()) {\n", pd.varName)
+		emitDefaultAssignment(&buf, pd, "\t\t")
+		buf.WriteString("\t}\n")
+	}
 	buf.WriteString("}\n\n")
 
 	// Generate ApplyClientDefaults
@@ -594,6 +627,67 @@ func goLiteral(v any) string {
 		return sb.String()
 	default:
 		return fmt.Sprintf("%#v", v)
+	}
+}
+
+// hasBaseParamRefs reports whether any of the parameter's base tiers
+// (default, root_default, osdf_default) contains a ${Param.Name} reference.
+// Such parameters have interpolated defaults that must be recomputed after
+// user configuration is merged (see ApplyDerivedDefaults). Client/server tiers
+// are excluded because they are applied via ApplyClientDefaults /
+// ApplyServerDefaults at a later, well-defined point.
+func (pd *paramDefault) hasBaseParamRefs() bool {
+	for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault} {
+		if t != nil && len(t.paramRefs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// emitDefaultAssignment writes the v.SetDefault call(s) for a single parameter's
+// base tiers (default, root_default, osdf_default) at the given indent. When a
+// parameter declares environment-specific tiers, it emits an if/else-if/else
+// chain that selects the correct tier at runtime:
+//
+//	if isOSDF {
+//	    v.SetDefault(param.X.GetName(), <osdf_default>)
+//	} else if isRoot {
+//	    v.SetDefault(param.X.GetName(), <root_default>)
+//	} else {
+//	    v.SetDefault(param.X.GetName(), <default>)
+//	}
+//
+// Parameters with only a "default" tier yield a single unconditional call. This
+// helper is shared by SetParameterDefaults and ApplyDerivedDefaults so the two
+// emit identical tier-selection logic.
+func emitDefaultAssignment(buf *bytes.Buffer, pd *paramDefault, indent string) {
+	hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+	hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+	hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
+
+	if hasRoot || hasOsdf {
+		first := true
+		if hasOsdf {
+			fmt.Fprintf(buf, "%sif isOSDF {\n", indent)
+			writeSetDefault(buf, pd, pd.osdfDefault, indent+"\t")
+			first = false
+		}
+		if hasRoot {
+			if first {
+				fmt.Fprintf(buf, "%sif isRoot {\n", indent)
+			} else {
+				fmt.Fprintf(buf, "%s} else if isRoot {\n", indent)
+			}
+			writeSetDefault(buf, pd, pd.rootDefault, indent+"\t")
+		}
+		if hasDef {
+			fmt.Fprintf(buf, "%s} else {\n", indent)
+			writeSetDefault(buf, pd, pd.def, indent+"\t")
+		}
+		fmt.Fprintf(buf, "%s}\n", indent)
+	} else {
+		writeSetDefault(buf, pd, pd.def, indent)
 	}
 }
 
