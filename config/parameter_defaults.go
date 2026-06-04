@@ -498,6 +498,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_DefaultChecksumTypes.GetName(), []string{"crc32c"})
 	// Origin.DirectorTest
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
+	// Origin.DisableCopies
+	v.SetDefault(param.Origin_DisableCopies.GetName(), false)
 	// Origin.DisableDirectClients
 	v.SetDefault(param.Origin_DisableDirectClients.GetName(), false)
 	// Origin.DiskUsageCalculationDelay
@@ -689,6 +691,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_HealthMonitoringPublic.GetName(), false)
 	// Server.RegistrationRetryInterval
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
+	// Server.SSRFProtection.Disabled
+	v.SetDefault(param.Server_SSRFProtection_Disabled.GetName(), false)
+	// Server.SSRFProtection.SkipDefaultBlocks
+	v.SetDefault(param.Server_SSRFProtection_SkipDefaultBlocks.GetName(), false)
 	// Server.SessionSecretFile
 	{
 		val := "${ConfigBase}/session-secret"
