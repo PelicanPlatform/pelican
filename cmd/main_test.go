@@ -59,7 +59,16 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, ".")
+		// On Windows CI, build tags are restricted to "client" so we build
+		// the child binary with matching tags.  A client-only build covers
+		// all of the alias dispatch paths tested here (stashcp, *_plugin)
+		// and completes much faster than a full client+server build, keeping
+		// the test well within the 15-minute CI timeout.
+		buildTags := "client,server"
+		if runtime.GOOS == "windows" {
+			buildTags = "client"
+		}
+		buildCmd := exec.Command("go", "build", "-tags", buildTags, "-buildvcs=false", "-o", testPelicanBinary, ".")
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
 			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
