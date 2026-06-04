@@ -1026,6 +1026,21 @@ func SetWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
+// defaultTierContext returns the runtime context flags used to select which
+// default tier applies for parameters that declare environment-specific
+// defaults (root_default / osdf_default). It is the single source of truth for
+// the isRoot / isOSDF determination shared by SetParameterDefaults (via
+// SetBaseDefaultsInConfig) and ApplyDerivedDefaults.
+func defaultTierContext() (isRoot bool, isOSDF bool) {
+	isRoot = IsRootExecution()
+	prefix := GetPreferredPrefix()
+	isOSDF = prefix == OsdfPrefix
+	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
+		isOSDF = isOSDF || (prefix == "STASH")
+	}
+	return
+}
+
 // SetBaseDefaultsInConfig seeds the given Viper instance with all parameter
 // defaults derived from parameters.yaml. It first sets the "seed" values
 // (ConfigBase, Server.Hostname) that downstream defaults may reference, then
@@ -1033,12 +1048,7 @@ func SetWebConfigOverride(v *viper.Viper, configPath string) error {
 // in topologically-sorted dependency order.
 func SetBaseDefaultsInConfig(v *viper.Viper) {
 	// Determine runtime context for default tier selection.
-	isRoot := IsRootExecution()
-	prefix := GetPreferredPrefix()
-	isOSDF := prefix == OsdfPrefix
-	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
-		isOSDF = isOSDF || (prefix == "STASH")
-	}
+	isRoot, isOSDF := defaultTierContext()
 
 	// Set seed values that the generated SetParameterDefaults reads inline
 	// when resolving ${Param.Name} references. These must be set before the
@@ -1205,13 +1215,23 @@ func initConfigInternalImpl(logLevel log.Level) {
 	// tracker to reflect that.
 	st.RecordEnvVarSources()
 
-	// Re-resolve defaults that interpolate ${Cache.StorageLocation}. The
-	// generated SetParameterDefaults substitutes Cache.StorageLocation into
-	// Cache.{DataLocations,MetaLocations,NamespaceLocation} at SetDefault
-	// time, so a user override of Cache.StorageLocation leaves the dependent
-	// defaults pointing at the original path. If those dependent keys came
-	// from SourceDefault, recompute them from the current StorageLocation.
-	refreshCacheStorageDependentDefaults(viper.GetViper(), st)
+	// Recompute interpolated defaults now that all configuration layers
+	// (base defaults + config files + env vars) have been merged. The generated
+	// SetParameterDefaults resolves ${Param.Name} references at startup, BEFORE
+	// user config is loaded, so any default that interpolates a user-overridable
+	// param (e.g. Server.ExternalWebUrl = "https://${Server.Hostname}:${Server.WebPort}",
+	// Cache.DataLocations = "${Cache.StorageLocation}/data", or the transitive
+	// Director.AdvertiseUrl = "${Server.ExternalWebUrl}") would otherwise retain
+	// the value computed from the dependency's own default. ApplyDerivedDefaults
+	// re-resolves every interpolated default from the current dependency values,
+	// in topological order, but only for params the user has not explicitly set
+	// (per the SourceTracker). This is a single generated pass covering the whole
+	// class of interpolated defaults — there are no per-param refresh hooks to
+	// maintain.
+	{
+		isRoot, isOSDF := defaultTierContext()
+		ApplyDerivedDefaults(viper.GetViper(), isRoot, isOSDF)
+	}
 
 	// Now that defaults + config files + env (including continued configs) have
 	// been applied to viper, refresh the cached param config struct used by
@@ -1485,34 +1505,11 @@ func ComputeExternalWebUrl(v *viper.Viper) error {
 	return nil
 }
 
-// refreshCacheStorageDependentDefaults recomputes the defaults for
-// Cache.DataLocations, Cache.MetaLocations, and Cache.NamespaceLocation when
-// they came from SourceDefault. The generated SetParameterDefaults bakes in
-// the value of Cache.StorageLocation at SetDefault time, which is before user
-// config is merged. A user override of Cache.StorageLocation otherwise leaves
-// these dependent paths pointing at the original default storage location.
-func refreshCacheStorageDependentDefaults(v *viper.Viper, st *SourceTracker) {
-	storageLoc := v.GetString(param.Cache_StorageLocation.GetName())
-	if storageLoc == "" {
-		return
-	}
-	isDefaultSource := func(key string) bool {
-		if st == nil {
-			return true
-		}
-		src, ok := st.Get(strings.ToLower(key))
-		return !ok || src.Type == SourceDefault
-	}
-	if name := param.Cache_DataLocations.GetName(); isDefaultSource(name) {
-		v.SetDefault(name, []string{filepath.Join(storageLoc, "data")})
-	}
-	if name := param.Cache_MetaLocations.GetName(); isDefaultSource(name) {
-		v.SetDefault(name, []string{filepath.Join(storageLoc, "meta")})
-	}
-	if name := param.Cache_NamespaceLocation.GetName(); isDefaultSource(name) {
-		v.SetDefault(name, filepath.Join(storageLoc, "namespace"))
-	}
-}
+// refreshCacheStorageDependentDefaults was removed: its responsibility — re-
+// resolving Cache.{DataLocations,MetaLocations,NamespaceLocation} after a user
+// override of Cache.StorageLocation — is now handled generically by the
+// generated ApplyDerivedDefaults, which recomputes every interpolated default
+// (not just the cache storage ones) in topological order.
 
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
