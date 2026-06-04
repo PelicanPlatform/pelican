@@ -1192,24 +1192,15 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		}
 	}
 
-	ad := server_structs.OriginAdvertiseV1{}
 	adV2 := server_structs.OriginAdvertiseV2{}
-	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
+	err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
 	if err != nil {
-		// Failed binding to a V1 type, so should now check to see if it's a V2 type
-		adV2 = server_structs.OriginAdvertiseV2{}
-		err2 := ctx.ShouldBindBodyWith(&adV2, binding.JSON)
-		if err2 != nil {
-			log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err, "original V1 error is", err)
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid %s registration", sType),
-			})
-			return
-		}
-	} else {
-		// If the OriginAdvertisement is a V1 type, convert to a V2 type
-		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
+		log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration", sType),
+		})
+		return
 	}
 
 	// Check every namespace path to strip the trailing slash
@@ -1313,7 +1304,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		if err != nil {
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), adV2.Name, approvalErrMsg)})
 				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
