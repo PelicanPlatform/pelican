@@ -184,6 +184,138 @@ func (pd *paramDefault) allDeps() map[string]bool {
 	return deps
 }
 
+// topoSortParams returns the names of allParams ordered so that every
+// ${Param.Name} dependency appears before the parameters that reference it,
+// using Kahn's algorithm. Seed params (ConfigBase, Server.Hostname, RuntimeDir)
+// are treated as already-satisfied — their values are set externally before the
+// generated code runs — so they are excluded from the graph edges and may be
+// referenced freely without creating a missing-node error or a false cycle.
+//
+// The output is deterministic: ties are broken alphabetically by re-sorting the
+// ready queue on each step. This is O(n² log n), which is irrelevant for an
+// offline generator at ~400 parameters; if the count ever grows past ~2000,
+// switch the queue to a container/heap min-heap for O(n log n).
+//
+// An error is returned (rather than panicking) when the graph contains a cycle,
+// listing the parameters that could not be ordered, so callers can decide how to
+// surface it and so the logic is unit-testable in isolation.
+func topoSortParams(allParams []*paramDefault) ([]string, error) {
+	// Build adjacency list and in-degree. Edge: dep --> param (dep must be
+	// processed before param).
+	inDegree := make(map[string]int, len(allParams))
+	adj := make(map[string][]string)
+	for _, pd := range allParams {
+		inDegree[pd.name] = 0
+	}
+	for _, pd := range allParams {
+		count := 0
+		for dep := range pd.allDeps() {
+			// Seeds are set externally, so they impose no ordering constraint.
+			if !seedParams[dep] {
+				adj[dep] = append(adj[dep], pd.name)
+				count++
+			}
+		}
+		inDegree[pd.name] = count
+	}
+
+	var queue []string
+	for _, pd := range allParams {
+		if inDegree[pd.name] == 0 {
+			queue = append(queue, pd.name)
+		}
+	}
+	sort.Strings(queue)
+
+	var sorted []string
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, n)
+		neighbors := adj[n]
+		sort.Strings(neighbors)
+		for _, nb := range neighbors {
+			inDegree[nb]--
+			if inDegree[nb] == 0 {
+				queue = append(queue, nb)
+			}
+		}
+		// Re-sort for deterministic output after adding newly-ready nodes.
+		sort.Strings(queue)
+	}
+
+	if len(sorted) != len(allParams) {
+		var remaining []string
+		for _, pd := range allParams {
+			if inDegree[pd.name] != 0 {
+				remaining = append(remaining, pd.name)
+			}
+		}
+		sort.Strings(remaining)
+		return nil, fmt.Errorf("cycle detected in parameter defaults dependency graph; remaining params: %v", remaining)
+	}
+	return sorted, nil
+}
+
+// validateNoTierShadowing guards against a subtle ordering hazard in the
+// defaults pipeline. At runtime, defaults are applied in this sequence:
+//
+//	SetParameterDefaults  -> base tiers (default / root_default / osdf_default)
+//	ApplyDerivedDefaults  -> re-resolves base-tier ${Param.Name} interpolations
+//	                         once user config (files, env) has been merged
+//	ApplyServerDefaults /
+//	ApplyClientDefaults   -> server_default / client_default tier overrides
+//
+// Because the server/client tiers are applied AFTER ApplyDerivedDefaults, a
+// base-tier interpolation that depends on a parameter whose value is overridden
+// by a server_default or client_default tier would be computed from that
+// dependency's *base* default and never reflect the server/client override —
+// a silent staleness bug of exactly the kind the generated defaults are meant
+// to eliminate.
+//
+// Rather than allow that to slip in unnoticed, fail generation so the conflict
+// surfaces at build time. The fix, should it ever trigger, is to fold the
+// override into the base default (or drop the dependency), not to weaken this
+// check.
+func validateNoTierShadowing(allParams []*paramDefault, byName map[string]*paramDefault) error {
+	for _, pd := range allParams {
+		if pd.deprecated || !pd.hasBaseParamRefs() {
+			continue
+		}
+		// Collect only the base-tier refs, since those are what
+		// SetParameterDefaults and ApplyDerivedDefaults resolve.
+		refs := make(map[string]bool)
+		for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault} {
+			if t == nil {
+				continue
+			}
+			for _, r := range t.paramRefs {
+				refs[r] = true
+			}
+		}
+		for ref := range refs {
+			dep, ok := byName[ref]
+			if !ok {
+				// Dangling references are reported by topoSortParams as a cycle.
+				continue
+			}
+			if dep.clientDefault != nil && !isNoneValue(dep.pType, dep.clientDefault.raw) {
+				return fmt.Errorf("parameter %q interpolates ${%s}, which declares a client_default tier; "+
+					"ApplyClientDefaults runs after ApplyDerivedDefaults, so the interpolated value would ignore "+
+					"the client override. Fold the override into the base default or remove the dependency",
+					pd.name, ref)
+			}
+			if dep.serverDefault != nil && !isNoneValue(dep.pType, dep.serverDefault.raw) {
+				return fmt.Errorf("parameter %q interpolates ${%s}, which declares a server_default tier; "+
+					"ApplyServerDefaults runs after ApplyDerivedDefaults, so the interpolated value would ignore "+
+					"the server override. Fold the override into the base default or remove the dependency",
+					pd.name, ref)
+			}
+		}
+	}
+	return nil
+}
+
 // GenDefaults generates config/parameter_defaults.go, which contains three
 // functions that replace the former defaults.yaml + osdf.yaml file-loading
 // approach:
@@ -252,66 +384,22 @@ func GenDefaults() {
 		byName[pd.name] = pd
 	}
 
-	// Build adjacency list and in-degree for Kahn's algorithm.
-	// Edge: dep --> param (dep must be processed before param).
-	inDegree := make(map[string]int, len(allParams))
-	adj := make(map[string][]string)
-	for _, pd := range allParams {
-		inDegree[pd.name] = 0
-	}
-	for _, pd := range allParams {
-		deps := pd.allDeps()
-		// Only count deps on non-seed params (seeds are set externally)
-		count := 0
-		for dep := range deps {
-			if !seedParams[dep] {
-				adj[dep] = append(adj[dep], pd.name)
-				count++
-			}
-		}
-		inDegree[pd.name] = count
+	// Topologically sort parameters so that every ${Param.Name} dependency is
+	// emitted (and resolved) before the parameters that reference it. The sort
+	// lives in a pure, unit-tested helper (topoSortParams); a cycle there is a
+	// developer error in parameters.yaml, so surface it as a build-failing panic.
+	sorted, err := topoSortParams(allParams)
+	if err != nil {
+		panic(err)
 	}
 
-	// Kahn's algorithm — topological sort.
-	// We use sort.Strings(queue) after each insertion to maintain deterministic output
-	// ordering. This is O(n² log n) total, which is suboptimal compared to a min-heap
-	// (O(n log n)), but at ~400 parameters the difference is negligible for an offline
-	// code generator. If the parameter count ever grows past ~2000, consider switching
-	// to container/heap.
-	var queue []string
-	for _, pd := range allParams {
-		if inDegree[pd.name] == 0 {
-			queue = append(queue, pd.name)
-		}
-	}
-	// Sort initial queue for deterministic output
-	sort.Strings(queue)
-
-	var sorted []string
-	for len(queue) > 0 {
-		n := queue[0]
-		queue = queue[1:]
-		sorted = append(sorted, n)
-		neighbors := adj[n]
-		sort.Strings(neighbors)
-		for _, nb := range neighbors {
-			inDegree[nb]--
-			if inDegree[nb] == 0 {
-				queue = append(queue, nb)
-			}
-		}
-		// Re-sort queue for determinism after adding new items
-		sort.Strings(queue)
-	}
-	if len(sorted) != len(allParams) {
-		// Find the cycle
-		var remaining []string
-		for _, pd := range allParams {
-			if inDegree[pd.name] != 0 {
-				remaining = append(remaining, pd.name)
-			}
-		}
-		panic(fmt.Sprintf("cycle detected in parameter defaults dependency graph; remaining params: %v", remaining))
+	// Guard against the tier-shadowing ordering hazard: a base-tier interpolation
+	// must not depend on a parameter whose value is overridden by a server/client
+	// tier, because ApplyServerDefaults/ApplyClientDefaults run AFTER
+	// ApplyDerivedDefaults. Catching this at generation time keeps the
+	// "defaults-everywhere" design honest (see validateNoTierShadowing).
+	if err := validateNoTierShadowing(allParams, byName); err != nil {
+		panic(err)
 	}
 
 	// Generate the Go source file
