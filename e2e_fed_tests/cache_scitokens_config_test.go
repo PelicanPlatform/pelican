@@ -186,7 +186,7 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Failed to register empty origin advertisement")
 
 	// Wait for director to process the empty advertisement and remove /test namespace
-	namespacesUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/director/listNamespaces"
+	namespacesUrl := param.Server_ExternalWebUrl.GetString() + "/api/v2.0/director/listNamespaces"
 	require.Eventually(t, func() bool {
 		resp, err := httpClient.Get(namespacesUrl)
 		if err != nil {
