@@ -147,7 +147,7 @@ func globalDialContext(ctx context.Context, network, addr string) (net.Conn, err
 }
 
 func setupTransport() {
-	//Getting timeouts and other information from defaults.yaml
+	// Getting timeouts and other information from the parameter defaults
 	maxIdleConns := param.Transport_MaxIdleConns.GetInt()
 	idleConnTimeout := param.Transport_IdleConnTimeout.GetDuration()
 	transportTLSHandshakeTimeout := param.Transport_TLSHandshakeTimeout.GetDuration()

@@ -91,8 +91,8 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 
 	// Read token lifespans from config. The zero-checks guard against unit
 	// tests that call NewOIDCProvider directly without initializing viper
-	// via InitConfigInternal (which is the only place defaults.yaml is
-	// loaded); in those environments GetDuration returns 0.
+	// via InitConfigInternal (which is the only place the parameter defaults
+	// are applied); in those environments GetDuration returns 0.
 	accessTokenLifespan := param.Issuer_AccessTokenLifetime.GetDuration()
 	if accessTokenLifespan == 0 {
 		accessTokenLifespan = 1 * time.Hour

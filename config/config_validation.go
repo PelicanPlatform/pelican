@@ -46,8 +46,9 @@ func findFieldByTag(t reflect.Type, tagKey, tagValue string) (reflect.StructFiel
 func validateConfigKeys() []string {
 	possibleCfg := param.Config{}
 	unknownKeys := []string{}
-	// Get all currently-configured keys from Viper. This is a collection of default
-	// configurations (both set internally and in defaults.yaml) and user-provided config.
+	// Get all currently-configured keys from Viper. This is a collection of
+	// default configurations (set internally from the generated parameter
+	// defaults) and user-provided config.
 	keys := viper.AllKeys()
 
 	// Unfortunately viper.AllKeys() won't grab things that would otherwise be discovered as
