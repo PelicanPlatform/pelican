@@ -1571,6 +1571,33 @@ func SetServerDefaults(v *viper.Viper) error {
 		return err
 	}
 
+	v.SetDefault(param.Director_EnableFederationMetadataHosting.GetName(), true)
+	v.SetDefault(param.Director_CheckOriginPresence.GetName(), true)
+	v.SetDefault(param.Director_CheckCachePresence.GetName(), true)
+
+	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
+	v.SetDefault(param.Origin_EnableReads.GetName(), true)
+	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
+	v.SetDefault(param.Origin_EnableListings.GetName(), true)
+	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
+	v.SetDefault(param.Origin_DisableCopies.GetName(), false)
+	v.SetDefault(param.Origin_EnableAtomicUploads.GetName(), false)
+
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(v.GetString(param.Cache_RunLocation.GetName()), "xrootd.stats"))
+
+	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
+	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
+	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
+
+	// Set the default for Origin.UploadTempLocation
+	originStorageType, err := server_structs.ParseOriginStorageType(v.GetString(param.Origin_StorageType.GetName()))
+	if err != nil {
+		return err
+	}
+	if originStorageType == server_structs.OriginStoragePosix {
+		v.SetDefault(param.Origin_UploadTempLocation.GetName(), filepath.Join(v.GetString(param.Origin_RunLocation.GetName()), "in-progress"))
+	}
+
 	// Any platform-specific paths should go here
 	err = InitServerOSDefaults(v)
 	if err != nil {
