@@ -306,6 +306,15 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 	if isRegistered {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
 		log.Debugf("Origin already has prefix %v registered\n", prefix)
+		// Because the namespace is already registered, the all-keys initial registration
+		// below is skipped. If the issuer keyset gained keys while the server was down
+		// (e.g. a new .pem was added to the issuer-keys directory before this restart), the
+		// registry would still hold a stale subset of our keys. Reconcile by pushing the full
+		// public keyset; the registry no-ops when nothing changed. Best-effort: a failure here
+		// must not block startup, and the runtime key-refresh watcher will retry on changes.
+		if err := updateNamespacesPubKey(ctx, []string{prefix}); err != nil {
+			log.Warnf("Failed to reconcile registered issuer public keys for prefix %s: %v", prefix, err)
+		}
 		if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 			return errors.Wrapf(err, "failed to fetch registration status for the prefix %s", prefix)
 		}
