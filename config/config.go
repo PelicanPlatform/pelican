@@ -1620,6 +1620,12 @@ func SetServerDefaults(v *viper.Viper) error {
 	// We use v.Set (not v.SetDefault) because SetDefault is first-wins and
 	// would be silently ignored after the generator has already registered
 	// a default. This mirrors how ComputeExternalWebUrl strips :443.
+	//
+	// MAINTENANCE: this is a deliberately hand-maintained list. The :443
+	// normalization is a runtime transformation that can't be expressed in
+	// parameters.yaml (the generated pass only does literal ${...} substitution),
+	// so any new URL-valued parameter that should drop the implicit HTTPS port
+	// must be added to this slice explicitly.
 	for _, urlParam := range []param.StringParam{param.Origin_Url, param.Cache_Url, param.Origin_TokenAudience} {
 		original := v.GetString(urlParam.GetName())
 		if stripped := stripPort443(original); stripped != original {
