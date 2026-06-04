@@ -350,7 +350,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     xrootd-scitokens \
     xrootd-selinux \
     xrootd-voms \
-    xrdcl-http \
     \
     xrootd-devel \
     xrootd-client-devel \
