@@ -1,6 +1,6 @@
 {
   "name": "src",
-  "version": "7.25.1-rc.5",
+  "version": "7.25.1-docs.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
