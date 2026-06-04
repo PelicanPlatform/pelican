@@ -1589,14 +1589,6 @@ func discoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func listNamespacesV1(ctx *gin.Context) {
-	namespaceAdsV2 := listNamespacesFromOrigins()
-
-	namespaceAdsV1 := server_structs.ConvertNamespaceAdsV2ToV1(namespaceAdsV2)
-
-	ctx.JSON(http.StatusOK, namespaceAdsV1)
-}
-
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
 	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
@@ -1849,7 +1841,6 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/getFedToken", getFedToken)
-		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
