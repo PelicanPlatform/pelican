@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -414,5 +416,97 @@ func TestGenerateCertNoSpuriousCAKey(t *testing.T) {
 		// because it should not attempt to write any CA files
 		err := GenerateCert()
 		require.NoError(t, err, "GenerateCert should succeed with read-only dir when TLS cert+key exist")
+	})
+}
+
+func TestSigningAlgorithmForJWK(t *testing.T) {
+	t.Run("ec-p256-key", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.ES256, alg)
+	})
+
+	t.Run("ec-p384-key", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.ES384, alg)
+	})
+
+	t.Run("ec-p521-key", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.ES512, alg)
+	})
+
+	t.Run("rsa-key", func(t *testing.T) {
+		privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.RS256, alg)
+	})
+
+	t.Run("ec-public-key", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(&privKey.PublicKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.ES256, alg)
+	})
+
+	t.Run("rsa-public-key", func(t *testing.T) {
+		privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwkKey, err := jwk.FromRaw(&privKey.PublicKey)
+		require.NoError(t, err)
+
+		alg, err := SigningAlgorithmForJWK(jwkKey)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.RS256, alg)
+	})
+}
+
+func TestLoadSinglePEMAlgorithm(t *testing.T) {
+	t.Run("ecdsa-key-gets-ES256", func(t *testing.T) {
+		tempDir := t.TempDir()
+		keyFile := filepath.Join(tempDir, "ec.pem")
+		err := generatePrivateKey(keyFile, "ecdsa", "pkcs8")
+		require.NoError(t, err)
+
+		key, err := LoadSinglePEM(keyFile)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.KeyAlgorithmFrom(jwa.ES256), key.Algorithm())
+	})
+
+	t.Run("rsa-key-gets-RS256", func(t *testing.T) {
+		tempDir := t.TempDir()
+		keyFile := filepath.Join(tempDir, "rsa.pem")
+		err := generatePrivateKey(keyFile, "rsa", "pkcs8")
+		require.NoError(t, err)
+
+		key, err := LoadSinglePEM(keyFile)
+		require.NoError(t, err)
+		assert.Equal(t, jwa.KeyAlgorithmFrom(jwa.RS256), key.Algorithm())
 	})
 }
