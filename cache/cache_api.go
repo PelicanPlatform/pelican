@@ -95,10 +95,27 @@ func removeTestFile(ctx context.Context, fsPath string) error {
 	return evictViaLocalPlugin(ctx, nsPath)
 }
 
-// removeTestDir deletes every file in dirPath. With privileges, it uses os.RemoveAll
-// and removes the directory itself. Under DropPrivileges it evicts each file via the
-// API and leaves the now-empty directory in place — xrootd reaps empty dirs on its own.
-func removeTestDir(ctx context.Context, dirPath string) error {
+// cleanTestDir deletes every file under dirPath, which is an old day-directory being
+// removed wholesale. With privileges it uses os.RemoveAll, which wipes the directory
+// and everything below it. Under DropPrivileges it evicts each file via the API and
+// leaves the now-empty directories in place — xrootd reaps empty dirs on its own.
+//
+// Cost note in DropPrivileges mode: each file costs one evict call (a freshly minted WLCG
+// token plus one HTTP GET to the local xrootd evict endpoint) issued sequentially.
+// There is no batch/directory mode on that endpoint (it uses the xrdhttp-pelican
+// plugin, one path per call), so the per-file cost is intrinsic here. In normal
+// operation it is negligible: the maintenance loop runs every minute and trims today's
+// day-directory to the latest 2 files (see cleanupOldFilesInDir), so a directory has
+// aged out holding only ~6 files by the time it reaches cleanTestDir. The pathological
+// case is a maintenance loop that has been dead or failing for ~a day while xrootd kept
+// accepting the director's writes (15s health-test cadence => up to ~5760 test files,
+// plus .cinfo companions, in a single aged-out day-dir); the first recovered pass would
+// then fire thousands of sequential evict requests. That is slow but bounded and safe:
+// LaunchWatcherMaintenance runs maintenance synchronously in a single goroutine, so
+// passes never overlap or pile up, and the burst is self-limiting (the directory is gone
+// once it drains). Do NOT reuse this on an arbitrarily large or untrimmed directory under
+// DropPrivileges expecting it to be cheap. And there's room for optimization.
+func cleanTestDir(ctx context.Context, dirPath string) error {
 	if !param.Server_DropPrivileges.GetBool() {
 		return os.RemoveAll(dirPath)
 	}
@@ -108,10 +125,17 @@ func removeTestDir(ctx context.Context, dirPath string) error {
 	}
 	var firstErr error
 	for _, entry := range entries {
+		entryPath := filepath.Join(dirPath, entry.Name())
+		// Day-directories are expected to be flat. An unexpected nested directory shouldn't
+		// happen, but if one does we still recurse into it and evict its contents.
 		if entry.IsDir() {
-			continue // daily directories are flat; ignore unexpected nesting
+			log.Warnf("Unexpected nested directory %q under director-test day-directory; cleaning up its contents anyway", entryPath)
+			if err := cleanTestDir(ctx, entryPath); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
-		if err := removeTestFile(ctx, filepath.Join(dirPath, entry.Name())); err != nil && firstErr == nil {
+		if err := removeTestFile(ctx, entryPath); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -139,7 +163,7 @@ func fsToNamespacePath(fsPath string) (string, error) {
 //     than today are removed wholesale and today's dir is trimmed to the latest 2 files.
 //
 // Under Server.DropPrivileges, removals are routed through the cache's evict API
-// (see removeTestFile / removeTestDir) since the pelican process cannot directly
+// (see removeTestFile / cleanTestDir) since the pelican process cannot directly
 // delete xrootd-owned files.
 func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 	dirInfo, err := os.Stat(dirTestPath)
@@ -203,7 +227,7 @@ func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) e
 		}
 		dateDir := filepath.Join(idDirPath, entry.Name())
 		if entry.Name() < todayStr {
-			if err := removeTestDir(ctx, dateDir); err != nil {
+			if err := cleanTestDir(ctx, dateDir); err != nil {
 				log.WithError(err).Warnf("Failed to remove old director test directory: %s", dateDir)
 			}
 		} else if entry.Name() == todayStr {
