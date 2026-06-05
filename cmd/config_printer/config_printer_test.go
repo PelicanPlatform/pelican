@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -262,4 +263,52 @@ func TestFormatValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConfigCmdForwardsRootPersistentPreRun verifies that ConfigCmd's
+// PersistentPreRunE forwards to the root command's PersistentPreRunE. Cobra only
+// runs the most specific PersistentPreRunE in a command chain, so without this
+// forwarding the root hook (which honors the global --debug flag and calls
+// param.Refresh) would be silently shadowed for every `pelican config ...`
+// subcommand. It also confirms the self-recursion guard: when ConfigCmd is its
+// own root (as in the other tests here, which call ConfigCmd.Execute() directly)
+// the hook must not invoke itself.
+func TestConfigCmdForwardsRootPersistentPreRun(t *testing.T) {
+	// The --service validation reads the package-global `service`; keep it empty
+	// so this test exercises only the forwarding logic, and restore it after.
+	origService := service
+	service = ""
+	t.Cleanup(func() { service = origService })
+
+	t.Run("forwards to root hook when nested under a root", func(t *testing.T) {
+		rootCalled := 0
+		var rootSawCmd *cobra.Command
+		fakeRoot := &cobra.Command{
+			Use: "fakeroot",
+			PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+				rootCalled++
+				rootSawCmd = cmd
+				return nil
+			},
+		}
+		// Attach ConfigCmd under the fake root, then detach in cleanup so the
+		// other tests (which run ConfigCmd as its own root) are unaffected.
+		fakeRoot.AddCommand(ConfigCmd)
+		t.Cleanup(func() { fakeRoot.RemoveCommand(ConfigCmd) })
+		require.Same(t, fakeRoot, ConfigCmd.Root(), "precondition: ConfigCmd.Root() should be the fake root")
+
+		err := ConfigCmd.PersistentPreRunE(ConfigCmd, []string{})
+		require.NoError(t, err)
+		assert.Equal(t, 1, rootCalled, "root PersistentPreRunE should be invoked exactly once")
+		assert.Same(t, ConfigCmd, rootSawCmd, "the leaf command should be forwarded to the root hook unchanged")
+	})
+
+	t.Run("does not recurse when ConfigCmd is its own root", func(t *testing.T) {
+		// With no parent, ConfigCmd.Root() == ConfigCmd, so the guard must skip
+		// the forward call instead of invoking itself (which would stack overflow).
+		require.Nil(t, ConfigCmd.Parent(), "precondition: ConfigCmd should have no parent here")
+		require.Same(t, ConfigCmd, ConfigCmd.Root())
+		err := ConfigCmd.PersistentPreRunE(ConfigCmd, []string{})
+		require.NoError(t, err)
+	})
 }

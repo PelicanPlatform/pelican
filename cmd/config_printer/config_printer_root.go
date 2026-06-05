@@ -140,6 +140,25 @@ func init() {
 
 	// Validate --service value early, before any subcommand runs.
 	ConfigCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// Cobra invokes only the most specific PersistentPreRunE in the command
+		// chain unless cobra.EnableTraverseRunHooks is set (it is not). Defining
+		// this hook on ConfigCmd therefore shadows the root command's
+		// PersistentPreRunE, which honors the global --debug flag and refreshes
+		// the cached param config after flag parsing. Invoke the root hook
+		// explicitly so `pelican config ...` subcommands keep that behavior
+		// rather than silently dropping it. We forward the leaf cmd and args,
+		// exactly as cobra would when calling the root hook directly.
+		//
+		// The `root != ConfigCmd` guard prevents infinite recursion when
+		// ConfigCmd is executed as its own root (e.g. in unit tests that call
+		// ConfigCmd.Execute() directly): there is no separate root hook to honor
+		// in that case, so there is nothing to forward to.
+		if root := cmd.Root(); root != nil && root != ConfigCmd && root.PersistentPreRunE != nil {
+			if err := root.PersistentPreRunE(cmd, args); err != nil {
+				return err
+			}
+		}
+
 		if service != "" {
 			sType, err := server_structs.ServerTypeFromString(service)
 			if err != nil {
