@@ -68,6 +68,7 @@ type Server struct {
 	httpServer      *http.Server
 	router          *gin.Engine
 	transferManager *TransferManager
+	wallet          *WalletSession
 	ctx             context.Context
 	cancel          context.CancelFunc // Cancels server's internal context to signal shutdown
 	eg              *errgroup.Group
@@ -172,6 +173,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		pidFile:         pidFile,
 		router:          router,
 		transferManager: transferManager,
+		wallet:          NewWalletSession(),
 		ctx:             serverCtx,
 		cancel:          cancel,
 		eg:              eg,
@@ -212,6 +214,11 @@ func (s *Server) setupRoutes() {
 		api.POST("/stat", s.StatHandler)
 		api.POST("/list", s.ListHandler)
 		api.POST("/delete", s.DeleteHandler)
+
+		// Wallet (credential file) management
+		api.GET("/wallet/status", s.WalletStatusHandler)
+		api.POST("/wallet/open", s.OpenWalletHandler)
+		api.POST("/wallet/close", s.CloseWalletHandler)
 	}
 
 	// Health check
@@ -411,6 +418,11 @@ func (s *Server) Shutdown() error {
 
 	// Signal shutdown to background goroutines (idle monitor, etc.)
 	s.cancel()
+
+	// Lock the wallet, clearing any cached credential-file password.
+	if s.wallet != nil {
+		s.wallet.Close()
+	}
 
 	// Shutdown transfer manager
 	if err := s.transferManager.Shutdown(); err != nil {

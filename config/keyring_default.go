@@ -41,3 +41,14 @@ func SavePassword(password []byte) error {
 	savedPassword = true
 	return nil
 }
+
+// ForgetPassword clears any cached credential-file password from memory.
+// It is used to "lock" the wallet (e.g. by the client agent) without
+// restarting the process.
+func ForgetPassword() {
+	for i := range savedPasswordVal {
+		savedPasswordVal[i] = 0
+	}
+	savedPasswordVal = make([]byte, 0)
+	savedPassword = false
+}
