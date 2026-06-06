@@ -349,7 +349,47 @@ func (s *Server) Start() error {
 		log.Info("Idle timeout monitoring disabled (timeout not set)")
 	}
 
+	// Periodically refresh wallet credentials nearing expiry so that queued
+	// jobs always have a usable token by the time they run.
+	s.eg.Go(func() error {
+		return s.monitorWalletRefresh()
+	})
+
 	return nil
+}
+
+const (
+	// walletRefreshInterval is how often the agent checks the wallet for
+	// tokens nearing expiry.
+	walletRefreshInterval = 10 * time.Minute
+	// walletRefreshWindow is how far ahead of expiry a token is proactively
+	// refreshed.  It is kept comfortably larger than typical transfer
+	// durations so the background refresh and the per-transfer lazy refresh
+	// rarely act on the same credential at once.
+	walletRefreshWindow = 30 * time.Minute
+)
+
+// monitorWalletRefresh periodically refreshes wallet tokens nearing expiry
+// while the wallet is open.
+func (s *Server) monitorWalletRefresh() error {
+	ticker := time.NewTicker(walletRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		case <-ticker.C:
+			if !s.wallet.IsOpen() {
+				continue
+			}
+			n, err := s.wallet.RefreshExpiring(s.ctx, walletRefreshWindow)
+			if err != nil {
+				log.Debugf("Wallet credential refresh cycle failed: %v", err)
+			} else if n > 0 {
+				log.Infof("Refreshed %d transfer credential(s) nearing expiry", n)
+			}
+		}
+	}
 }
 
 // UpdateActivity records activity on the server
