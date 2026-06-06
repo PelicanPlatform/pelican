@@ -212,6 +212,23 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	err = viper.MergeConfig(strings.NewReader(originConfig))
 	require.NoError(t, err, "error reading config")
 
+	// Test federations always run on localhost, so server-initiated transfers
+	// (notably third-party copies) target private/loopback addresses. Both
+	// Pelican's SSRF-resistant transport and XRootD's TPC handler refuse such
+	// addresses by default. Skip the default SSRF blocks for the test fed so
+	// these copies succeed; the blocking behavior itself is covered by unit
+	// tests (see config/ssrf_transport_test.go). This must be set before the
+	// servers launch so it is baked into the generated XRootD config.
+	//
+	// Gate on the effective value rather than viper.IsSet: SSRFProtection.Disabled
+	// now ships a registered default, so IsSet is always true and would never let
+	// this fire. Only skip the default blocks when protection is still on (a test
+	// that disables SSRF entirely already reaches localhost).
+	if !viper.GetBool(param.Server_SSRFProtection_Disabled.GetName()) {
+		viper.Set(param.Server_SSRFProtection_SkipDefaultBlocks.GetName(), true)
+	}
+	config.ResetSSRFTransportForTest()
+
 	err = yaml.Unmarshal([]byte(originConfig), &importedConf)
 	require.NoError(t, err, "error unmarshalling into interface")
 
