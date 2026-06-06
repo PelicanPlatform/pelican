@@ -29,6 +29,8 @@ type Config struct {
 	Cache struct {
 		AllowedFederations []string `mapstructure:"allowedfederations" yaml:"AllowedFederations"`
 		Anycast struct {
+			AddressManagement string `mapstructure:"addressmanagement" yaml:"AddressManagement"`
+			Addresses []string `mapstructure:"addresses" yaml:"Addresses"`
 			BGP struct {
 				LocalASN int `mapstructure:"localasn" yaml:"LocalASN"`
 				LocalAddress string `mapstructure:"localaddress" yaml:"LocalAddress"`
@@ -38,6 +40,7 @@ type Config struct {
 				Port int `mapstructure:"port" yaml:"Port"`
 				RouterID string `mapstructure:"routerid" yaml:"RouterID"`
 			} `mapstructure:"bgp" yaml:"BGP"`
+			Device string `mapstructure:"device" yaml:"Device"`
 			Enable bool `mapstructure:"enable" yaml:"Enable"`
 			Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 			NextHop string `mapstructure:"nexthop" yaml:"NextHop"`
@@ -533,6 +536,8 @@ type configWithType struct {
 	Cache struct {
 		AllowedFederations struct { Type string; Value []string }
 		Anycast struct {
+			AddressManagement struct { Type string; Value string }
+			Addresses struct { Type string; Value []string }
 			BGP struct {
 				LocalASN struct { Type string; Value int }
 				LocalAddress struct { Type string; Value string }
@@ -542,6 +547,7 @@ type configWithType struct {
 				Port struct { Type string; Value int }
 				RouterID struct { Type string; Value string }
 			}
+			Device struct { Type string; Value string }
 			Enable struct { Type string; Value bool }
 			Hostname struct { Type string; Value string }
 			NextHop struct { Type string; Value string }

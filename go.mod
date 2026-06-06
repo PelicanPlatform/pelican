@@ -54,6 +54,7 @@ require (
 	github.com/tg123/go-htpasswd v1.2.1
 	github.com/thomas-tacquet/gormv2-logrus v1.2.3
 	github.com/vbauerster/mpb/v8 v8.6.1
+	github.com/vishvananda/netlink v1.2.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
@@ -125,7 +126,6 @@ require (
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/streadway/amqp v1.0.0 // indirect
-	github.com/vishvananda/netlink v1.2.1 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect

@@ -20,6 +20,8 @@ package launchers
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"time"
 
 	"github.com/pkg/errors"
@@ -27,9 +29,48 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/cache/bgp_advertise"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 )
+
+// directorRouteHintIP resolves an IP address for the federation's director, used
+// to determine (via netlink) which local device would route toward it.  Returns
+// nil if the director endpoint is unknown or cannot be resolved; in that case the
+// admin must set Cache.Anycast.Device explicitly.
+func directorRouteHintIP(ctx context.Context) net.IP {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil || fedInfo.DirectorEndpoint == "" {
+		return nil
+	}
+	host := fedInfo.DirectorEndpoint
+	if u, perr := url.Parse(fedInfo.DirectorEndpoint); perr == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return nil
+	}
+	return ips[0]
+}
+
+// newAnycastAddressManager builds the local-address manager from the
+// Cache.Anycast.* parameters, resolving the director IP for device auto-detection.
+func newAnycastAddressManager(ctx context.Context) (*bgp_advertise.AddressManager, error) {
+	mode, err := bgp_advertise.ParseManageMode(param.Cache_Anycast_AddressManagement.GetString())
+	if err != nil {
+		return nil, err
+	}
+	return bgp_advertise.NewAddressManager(bgp_advertise.AddressConfig{
+		Addresses:   param.Cache_Anycast_Addresses.GetStringSlice(),
+		Device:      param.Cache_Anycast_Device.GetString(),
+		RouteHintIP: directorRouteHintIP(ctx),
+		Mode:        mode,
+	})
+}
 
 // anycastConfigFromParams assembles the BGP advertiser configuration from the
 // Cache.Anycast.* parameters, applying defaults (the cache's external web URL as
@@ -98,11 +139,23 @@ func LaunchAnycastAdvertiser(ctx context.Context, egrp *errgroup.Group) error {
 	}
 	expectedSAN := param.Cache_Anycast_Hostname.GetString()
 
+	// Bind the anycast service address(es) on the local device first, so the
+	// kernel accepts packets for them before we draw traffic via BGP.
+	addrMgr, err := newAnycastAddressManager(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to configure anycast address management")
+	}
+	if err := addrMgr.Apply(); err != nil {
+		return errors.Wrap(err, "failed to apply anycast local addresses")
+	}
+
 	advertiser, err := bgp_advertise.New(cfg)
 	if err != nil {
+		_ = addrMgr.Cleanup()
 		return errors.Wrap(err, "failed to create anycast advertiser")
 	}
 	if err := advertiser.Start(ctx); err != nil {
+		_ = addrMgr.Cleanup()
 		return errors.Wrap(err, "failed to start anycast advertiser")
 	}
 
@@ -152,6 +205,10 @@ func LaunchAnycastAdvertiser(ctx context.Context, egrp *errgroup.Group) error {
 		defer func() {
 			if err := advertiser.Close(); err != nil {
 				log.WithError(err).Warn("Error closing anycast advertiser")
+			}
+			// Remove any anycast addresses Pelican added, after routes are withdrawn.
+			if err := addrMgr.Cleanup(); err != nil {
+				log.WithError(err).Warn("Error removing anycast local addresses")
 			}
 		}()
 		ticker := time.NewTicker(interval)

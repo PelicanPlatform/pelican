@@ -81,6 +81,7 @@ Cache:
   EnableEvictionMonitoring: true
   Anycast:
     ProbeInterval: 30s
+    AddressManagement: auto
     BGP:
       Port: 179
 Lotman:
