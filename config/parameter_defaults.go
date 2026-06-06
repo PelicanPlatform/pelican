@@ -538,6 +538,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
 	// Origin.EnableReads
 	v.SetDefault(param.Origin_EnableReads.GetName(), true)
+	// Origin.EnableTransferAPI
+	v.SetDefault(param.Origin_EnableTransferAPI.GetName(), false)
 	// Origin.EnableVoms
 	v.SetDefault(param.Origin_EnableVoms.GetName(), true)
 	// Origin.EnableWrites
@@ -836,6 +838,18 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Topology_DisableOriginX509.GetName(), false)
 	// Topology.DisableOrigins
 	v.SetDefault(param.Topology_DisableOrigins.GetName(), false)
+	// Transfer.CredentialIdleTimeout
+	v.SetDefault(param.Transfer_CredentialIdleTimeout.GetName(), "168h")
+	// Transfer.DbLocation
+	if isRoot {
+		v.SetDefault(param.Transfer_DbLocation.GetName(), "/var/lib/pelican/transfer.sqlite")
+	} else {
+		v.SetDefault(param.Transfer_DbLocation.GetName(), "$ConfigBase/transfer.sqlite")
+	}
+	// Transfer.EnableOAuth2Clients
+	v.SetDefault(param.Transfer_EnableOAuth2Clients.GetName(), false)
+	// Transfer.MaxConcurrentJobs
+	v.SetDefault(param.Transfer_MaxConcurrentJobs.GetName(), 5)
 	// Transport.BrokerEndpointCacheTTL
 	v.SetDefault(param.Transport_BrokerEndpointCacheTTL.GetName(), "2m")
 	// Transport.DialerKeepAlive
