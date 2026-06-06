@@ -174,6 +174,7 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 	// came from a login cookie would let the federation impersonate
 	// arbitrary local users. See the contract on extractUserFromBearerToken.
 	c.Set("User", parsed.Subject())
+	c.Set("VerifiedToken", parsed)
 
 	return nil
 }
@@ -210,6 +211,7 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 	}
 
 	c.Set("User", parsed.Subject())
+	c.Set("VerifiedToken", parsed)
 
 	// user_id and oidc_sub are user-identity claims. They are safe to
 	// extract HERE because checkLocalIssuer has already verified that
@@ -376,6 +378,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	token := ""
 	// Find token from the provided sources list, stop when found the first token
 	tokenFound := false
+	var foundSource TokenSource
 	for _, opt := range authOption.Sources {
 		if tokenFound {
 			break
@@ -388,6 +391,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				token = cookieToken
 				tokenFound = true
+				foundSource = Cookie
 			}
 		case Header:
 			headerToken := ctx.Request.Header["Authorization"]
@@ -398,6 +402,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				token, found = strings.CutPrefix(headerToken[0], "Bearer ")
 				if found {
 					tokenFound = true
+					foundSource = Header
 				}
 			}
 		case Authz:
@@ -407,6 +412,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				token = authzToken[0]
 				tokenFound = true
+				foundSource = Authz
 			}
 		default:
 			log.Error("Invalid/unsupported token source")
@@ -417,6 +423,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	if token == "" {
 		log.Debugf("Unauthorized. No token is present from the list of potential token positions: %v", authOption.Sources)
 		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
+	}
+
+	// Store the token source for VerifyAndExtract consumers
+	if tokenFound {
+		ctx.Set("TokenSource", string(foundSource))
 	}
 
 	compoundErr := make([]error, 0, 1)
@@ -476,6 +487,111 @@ func GetAuthzEscaped(ctx *gin.Context) (authzEscaped string) {
 		authzEscaped = url.QueryEscape(authzCookie)
 	}
 	return
+}
+
+// VerifyResult holds the results of token verification including the parsed
+// JWT and the source from which the token was obtained.
+type VerifyResult struct {
+	Token  jwt.Token
+	Source TokenSource
+}
+
+// VerifyAndExtract works like Verify but additionally returns the parsed JWT
+// and the token source. This avoids the need to re-parse the token after
+// verification in order to extract claims such as issuer, subject, or groups.
+func VerifyAndExtract(ctx *gin.Context, authOption AuthOption) (*VerifyResult, int, bool, error) {
+	status, ok, err := Verify(ctx, authOption)
+	if !ok {
+		return nil, status, false, err
+	}
+
+	result := &VerifyResult{}
+
+	if t, exists := ctx.Get("VerifiedToken"); exists {
+		result.Token = t.(jwt.Token)
+	}
+	if s, exists := ctx.Get("TokenSource"); exists {
+		result.Source = TokenSource(s.(string))
+	}
+
+	return result, status, true, nil
+}
+
+// ExtractGroups extracts group membership claims from a verified JWT.
+// It checks the provided claim names in order and returns groups from the
+// first claim that contains a list. This handles both WLCG tokens
+// (which use "wlcg.groups") and SciTokens (which may use a configurable
+// group claim).
+func ExtractGroups(tok jwt.Token, claimNames ...string) []string {
+	for _, claim := range claimNames {
+		groupsIface, ok := tok.Get(claim)
+		if !ok {
+			continue
+		}
+		switch groups := groupsIface.(type) {
+		case []interface{}:
+			result := make([]string, 0, len(groups))
+			for _, g := range groups {
+				if s, ok := g.(string); ok {
+					result = append(result, s)
+				}
+			}
+			if len(result) > 0 {
+				return result
+			}
+		case []string:
+			if len(groups) > 0 {
+				return groups
+			}
+		}
+	}
+	return nil
+}
+
+// CheckOriginIssuer verifies a token whose issuer claim matches Origin.Url.
+// This is used when Origin.Url differs from Server.ExternalWebUrl but the
+// origin uses the same signing key. It is a standalone function (not part of
+// the AuthChecker interface) intended for use by the transfer module.
+func CheckOriginIssuer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	originURL := param.Origin_Url.GetString()
+	if originURL == "" {
+		return errors.New("Origin.Url is not configured")
+	}
+
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	if err != nil {
+		return errors.Wrap(err, "invalid JWT")
+	}
+
+	if originURL != tok.Issuer() {
+		return errors.New(fmt.Sprintf("token issuer %s does not match Origin.Url %s", tok.Issuer(), originURL))
+	}
+
+	// The origin uses the same signing key as the server
+	jwks, err := config.GetIssuerPublicJWKS()
+	if err != nil {
+		return errors.Wrap(err, "failed to load server's public key for origin issuer check")
+	}
+
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
+	if err != nil {
+		return errors.Wrap(err, "failed to verify JWT with origin's key")
+	}
+
+	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
+	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+		return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
+	}
+
+	ctx.Set("User", parsed.Subject())
+	ctx.Set("VerifiedToken", parsed)
+
+	// Note: we intentionally do NOT extract user_id or oidc_sub here.
+	// Those claims are only trusted from the local issuer (checkLocalIssuer)
+	// where they originate from cookie-based auth.  An origin-issued token
+	// should not be allowed to assert arbitrary user_id or oidc_sub values.
+
+	return nil
 }
 
 // CheckApiTokenIssuerFunc is a hook for verifying API tokens against the database.
