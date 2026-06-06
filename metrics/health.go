@@ -82,6 +82,7 @@ const (
 	OriginCache_ConfigUpdates HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
 	Server_StorageHealth      HealthStatusComponent = "storage"        // Monitor filesystem storage consumption
 	Origin_SSHBackend         HealthStatusComponent = "ssh-backend"    // SSH POSIXv2 backend connection status
+	Cache_Anycast             HealthStatusComponent = "anycast"        // TCP anycast BGP route advertisement status
 )
 
 var (

@@ -410,81 +410,19 @@ func corsHeadersMiddleware(ginCtx *gin.Context) {
 // issued a request where token generation may be needed. This header informs the client
 // of the issuer that can be used to generate a token for the requested resource.
 func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
-	if len(namespaceAd.Issuer) != 0 {
-		issStrings := []string{}
-		for _, tokIss := range namespaceAd.Issuer {
-			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
-		}
-		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
-	}
+	server_structs.SetXAuthHeader(ginCtx.Writer.Header(), namespaceAd)
 }
 
 // Generates the X-Pelican-Token-Generation header (when applicable) for responses that have
 // issued a request where token generation may be needed.
 func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
-	if len(namespaceAd.Generation) != 0 {
-		tokenGen := ""
-		first := true
-		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
-		// to fix this because the token gen header uses the issuer URL from NamespaceAdV2.Generation.CredentialIssuer, whereas basepaths
-		// come from NamespaceAdV2.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
-		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
-		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
-		var basePath string
-		for _, issuer := range namespaceAd.Issuer {
-			if issuer.IssuerUrl.String() == namespaceAd.Generation[0].CredentialIssuer.String() {
-				if len(issuer.BasePaths) > 0 {
-					basePath = issuer.BasePaths[0]
-				}
-				break
-			}
-		}
-
-		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
-			string(namespaceAd.Generation[0].Strategy), basePath}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path"} {
-			hdrVal := hdrVals[idx]
-			if hdrVal == "" {
-				continue
-			} else if hdrKey == "max-scope-depth" && hdrVal == "0" {
-				// don't send a 0 max-scope-depth because it's malformed and probably means there should be no token generation header
-				continue
-			}
-			if !first {
-				tokenGen += ", "
-			}
-			first = false
-			tokenGen += hdrKey + "=" + hdrVal
-		}
-
-		if tokenGen != "" {
-			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
-		}
-	}
+	server_structs.SetXTokenGenHeader(ginCtx.Writer.Header(), namespaceAd)
 }
 
 // Generate the X-Pelican-Namespace header, which includes information about the namespace and whether token auth is required
 // for reading from this namespace
 func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) {
-	var collUrl string
-	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
-	for _, oAd := range oAds {
-		if oAd.Caps.Listings && bestNSAd.Caps.Listings {
-			if !bestNSAd.Caps.PublicReads && oAd.AuthURL != (url.URL{}) {
-				collUrl = oAd.AuthURL.String()
-				break
-			} else {
-				collUrl = oAd.URL.String()
-				break
-			}
-		}
-	}
-
-	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", bestNSAd.Path, !bestNSAd.Caps.PublicReads)
-	if collUrl != "" {
-		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
-	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
+	server_structs.SetXNamespaceHeader(ginCtx.Writer.Header(), oAds, bestNSAd)
 }
 
 // Generate the X-Pelican-Broker header using the first origin ad we find supporting

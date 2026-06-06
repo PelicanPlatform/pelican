@@ -205,6 +205,14 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 		}
 	}
 
+	// Launch the TCP anycast BGP advertiser if enabled.  Anycast is only
+	// supported by the persistent (V2) cache.
+	if param.Cache_Anycast_Enable.GetBool() {
+		if err := LaunchAnycastAdvertiser(ctx, egrp); err != nil {
+			return nil, errors.Wrap(err, "failed to launch anycast advertiser")
+		}
+	}
+
 	// Create wrapper server that embeds CacheServer for XRootDServer interface
 	pcServer := &persistentCacheServer{
 		PersistentCache: pc,
@@ -219,6 +227,13 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 
 // cacheServeWithXRootD launches the traditional XRootD-based cache
 func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
+	// TCP anycast advertisement requires director-style 403 token hints that are
+	// only emitted by the persistent (V2) cache.  Disable it for the XRootD cache.
+	if param.Cache_Anycast_Enable.GetBool() {
+		log.Warn("Cache.Anycast.Enable is set but the XRootD cache does not support TCP anycast; " +
+			"set Cache.EnableV2=true to use anycast. Anycast advertisement is disabled.")
+	}
+
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err

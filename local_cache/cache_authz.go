@@ -153,6 +153,17 @@ func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
 	return nil
 }
 
+// bestNamespaceAd returns the namespace ad whose path is the longest prefix of reqPath,
+// or nil if none of the cached namespace ads match.  It is used to build director-style
+// X-Pelican token-hint headers when the cache returns a 403 (e.g. as an anycast endpoint).
+func (ac *authConfig) bestNamespaceAd(reqPath string) *server_structs.NamespaceAdV2 {
+	namespaces := ac.ns.Load()
+	if namespaces == nil {
+		return nil
+	}
+	return server_structs.LongestNSMatch(reqPath, *namespaces)
+}
+
 // nsAdsAuthzEqual reports whether two namespace-ad slices are semantically
 // identical for authorization purposes (paths, capabilities, and issuer
 // configuration).

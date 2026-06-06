@@ -79,6 +79,10 @@ Cache:
   EnableTLSClientAuth: false
   DisableClientX509: true
   EnableEvictionMonitoring: true
+  Anycast:
+    ProbeInterval: 30s
+    BGP:
+      Port: 179
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "24h"

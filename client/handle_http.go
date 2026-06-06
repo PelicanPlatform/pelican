@@ -294,6 +294,7 @@ type (
 		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
 		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
 		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
+		anycastUrl         *url.URL                        // federation-wide TCP anycast endpoint, if advertised; used to route reads/writes through an anycast cache
 		dirResp            server_structs.DirectorResponse // Director response for non-copy transfers (download, upload, prestage)
 		destDirResp        server_structs.DirectorResponse // Director response for the copy destination
 		directorUrl        string
@@ -1600,6 +1601,38 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		tj.token.SetTokenLocation(tc.tokenLocation)
 	}
 
+	// If the federation advertises a TCP anycast endpoint, record it.  By default
+	// the director's geography/load/health-aware selection is preferred, and the
+	// anycast endpoint is used only as a fallback when the director is unreachable
+	// (see the director-failure handling below and buildUploadTransfers).
+	//
+	// When Client.PreferAnycast is set, the anycast endpoint is preferred up front:
+	// it is prepended to the object servers for downloads (so the client contacts it
+	// first, bypassing the director) and used as the write-through target for uploads.
+	// This should only be enabled for sites well-covered by the anycast group, since
+	// anycast routes by network topology and may send distant clients to a far cache.
+	if anycast := copyUrl.FedInfo.AnycastEndpoint; anycast != "" {
+		if anycastUrl, aerr := url.Parse(anycast); aerr == nil && anycastUrl.Host != "" {
+			tj.anycastUrl = anycastUrl
+			if !upload && param.Client_PreferAnycast.GetBool() {
+				hadPreferred := len(tj.prefObjServers) > 0
+				newPref := make([]*url.URL, 0, len(tj.prefObjServers)+2)
+				newPref = append(newPref, anycastUrl)
+				newPref = append(newPref, tj.prefObjServers...)
+				// When the user did not specify their own preferred caches, append the
+				// '+' sentinel so generateSortedObjServers still appends the
+				// director-discovered servers as fallback.
+				if !hadPreferred {
+					if plus, perr := url.Parse("+"); perr == nil {
+						newPref = append(newPref, plus)
+					}
+				}
+				tj.prefObjServers = newPref
+				log.Debugf("Client.PreferAnycast set; preferring anycast endpoint %s", anycastUrl.Host)
+			}
+		}
+	}
+
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
 	applyTokenOptions(tj.token, nil, upload, options)
@@ -1656,9 +1689,18 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
 	}
 	if err != nil {
-		// If director query failed but we have explicit caches, create a minimal response and continue
-		if len(tj.prefObjServers) > 0 {
-			log.Debugln("Director query failed but explicit caches provided, continuing with cache list")
+		// If the director is unreachable, fall back to the anycast endpoint (if
+		// advertised) so the transfer can still proceed -- a reachable anycast
+		// cache beats a hard failure even when it is not the geographically
+		// optimal choice.  For downloads we add it to the candidate list; uploads
+		// pick it up via buildUploadTransfers.
+		if tj.anycastUrl != nil && !upload && !containsURL(tj.prefObjServers, tj.anycastUrl) {
+			tj.prefObjServers = append(tj.prefObjServers, tj.anycastUrl)
+		}
+		// If director query failed but we have a fallback (explicit caches or an
+		// anycast endpoint), create a minimal response and continue.
+		if len(tj.prefObjServers) > 0 || (upload && tj.anycastUrl != nil) {
+			log.Debugln("Director query failed; continuing with fallback object servers (explicit caches and/or anycast)")
 			directorFailed = true
 			// Create minimal director response structure
 			dirResp = server_structs.DirectorResponse{
@@ -2327,7 +2369,31 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServ
 // Take a transfer job and produce one or more transfer file requests.
 // The transfer file requests are sent to be processed via the engine
 // buildUploadTransfers returns the transfer attempt for an upload job.
+// containsURL reports whether target appears (by string form) in the list.
+func containsURL(list []*url.URL, target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	for _, u := range list {
+		if u != nil && u.String() == target.String() {
+			return true
+		}
+	}
+	return false
+}
+
 func buildUploadTransfers(job *clientTransferJob, packOption string) ([]transferAttemptDetails, error) {
+	// Route the write through the anycast cache (which proxies the PUT/DELETE to
+	// the origin) when the client opts in (Client.PreferAnycast) or when the
+	// director was unreachable so no origin is available.  Otherwise prefer the
+	// director-supplied origin.
+	if job.job.anycastUrl != nil && job.job.anycastUrl.Host != "" &&
+		(param.Client_PreferAnycast.GetBool() || len(job.job.dirResp.ObjectServers) == 0) {
+		return []transferAttemptDetails{{
+			Url:        job.job.anycastUrl,
+			PackOption: packOption,
+		}}, nil
+	}
 	if len(job.job.dirResp.ObjectServers) == 0 {
 		return nil, errors.New("No origins found for upload")
 	}
@@ -3068,6 +3134,25 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
 			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
 		)
+
+		// If the endpoint returned a 403 with director-style token hints (e.g. a
+		// TCP anycast cache behaving like the director), learn what token is
+		// needed, acquire it, and retry this same endpoint once with the token.
+		// A 403 is returned before any body is written, so retrying is safe.
+		var hintErr *tokenHintError
+		if errors.As(err, &hintErr) && transfer.token != nil {
+			transfer.token.DirResp = &hintErr.dirResp
+			if redo, _ := transfer.token.recordAuthFailure(http.StatusForbidden); redo {
+				if newTok, tErr := transfer.token.Get(); tErr == nil && newTok != "" {
+					log.WithFields(fields).Debugln("Retrying with token after 403 token hint from", transferEndpoint.Url.Host)
+					tokenContents = newTok
+					attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err = downloadHTTP(
+						ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
+					)
+				}
+			}
+		}
+
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
 
@@ -3456,6 +3541,20 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - project: the project name to be used in the header identifying the transfer to the server.
 //   - metadataChan: optional channel to receive early transfer metadata (ETag, size, etc.) before data transfer.
 //
+// tokenHintError is returned by downloadHTTP when an object server (e.g. a TCP
+// anycast cache) responds with 403 and director-style X-Pelican-* headers
+// indicating that a token is required.  The embedded dirResp carries the parsed
+// token-hint information so the caller can acquire the right token and retry the
+// same endpoint.  It unwraps to the underlying authorization error so existing
+// error handling continues to work if no retry is attempted (or the retry fails).
+type tokenHintError struct {
+	dirResp server_structs.DirectorResponse
+	err     error
+}
+
+func (e *tokenHintError) Error() string { return e.err.Error() }
+func (e *tokenHintError) Unwrap() error { return e.err }
+
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
 func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
@@ -3631,7 +3730,18 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
 				pde.message = "Permission denied: " + trimmed
 			}
-			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(pde)
+			authErr := error_codes.NewAuthorizationError(pde)
+			// A cache acting as a TCP anycast endpoint returns the same
+			// X-Pelican-* token-hint headers the director would.  If those
+			// headers are present and indicate a token is required, surface a
+			// tokenHintError so the caller can acquire the right token and
+			// retry this same endpoint (reusing the director-response parser).
+			if resp.Header.Get(server_structs.XPelNs{}.GetName()) != "" {
+				if parsed, perr := ParseDirectorInfo(resp); perr == nil && parsed.XPelNsHdr.RequireToken {
+					return 0, 0, -1, serverVersion, "", &tokenHintError{dirResp: parsed, err: authErr}
+				}
+			}
+			return 0, 0, -1, serverVersion, "", authErr
 		}
 		sce := StatusCodeError(resp.StatusCode)
 		// Wrap StatusCodeError with appropriate PelicanError based on status code

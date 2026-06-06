@@ -173,10 +173,37 @@ func (etr *errorTrackingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// setTokenHintHeaders adds the director-style X-Pelican-* token-hint headers to hdr for the
+// namespace that best matches objectPath.  When the cache acts as a TCP anycast endpoint it
+// is contacted directly by clients (without a director redirect), so on a 403 it must tell the
+// client which issuer/strategy to use to obtain a token -- exactly as the director would in a
+// redirect response.  These headers are reused verbatim by the client's director-response
+// parser.  Headers must be set before WriteHeader is called.
+func (pc *PersistentCache) setTokenHintHeaders(hdr http.Header, objectPath string) {
+	nsAd := pc.ac.bestNamespaceAd(objectPath)
+	if nsAd == nil {
+		return
+	}
+	// Advertise this cache as the collections URL: the V2 cache proxies PROPFIND
+	// listings (and PUT/DELETE writes) to the origin on the same data endpoint, so
+	// directory listings can flow through the cache (e.g. the anycast endpoint)
+	// rather than requiring the client to fall back to the director/origin.
+	collUrl := param.Cache_Url.GetString()
+	if collUrl == "" {
+		collUrl = param.Server_ExternalWebUrl.GetString()
+	}
+	server_structs.SetXNamespaceHeaderWithCollections(hdr, collUrl, *nsAd)
+	server_structs.SetXAuthHeader(hdr, *nsAd)
+	server_structs.SetXTokenGenHeader(hdr, *nsAd)
+}
+
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
 // every log line emitted here is correlated with the original request.
-func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *log.Entry) {
+//
+// objectPath is used to attach director-style X-Pelican token-hint headers when the
+// failure is an authorization denial (see setTokenHintHeaders).
+func (pc *PersistentCache) handleError(w http.ResponseWriter, getErr error, objectPath string, sendTrailer bool, reqLog *log.Entry) {
 	// writeJSON is a small helper that sends a JSON object with "error" and
 	// "detail" keys.  It sets Content-Type before WriteHeader so Go does
 	// not fall back to content-sniffing.
@@ -195,11 +222,13 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	var authErr *AuthorizationError
 	if errors.As(getErr, &authErr) {
 		reqLog.WithField("reason", authErr.Reason).Warn("Authorization denied")
+		pc.setTokenHintHeaders(w.Header(), objectPath)
 		writeJSON(http.StatusForbidden, "authorization_denied", authErr.Reason)
 		return
 	} else if errors.Is(getErr, authorizationDenied) {
 		// Fallback for the plain sentinel (shouldn't happen with new code paths).
 		reqLog.Warn("Authorization denied (no detail available)")
+		pc.setTokenHintHeaders(w.Header(), objectPath)
 		writeJSON(http.StatusForbidden, "authorization_denied", "authorization denied")
 		return
 	} else if errors.Is(getErr, context.DeadlineExceeded) {
@@ -362,7 +391,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusGatewayTimeout)
 				return
 			} else if statErr != nil {
-				handleError(w, statErr, sendTrailer, reqLog)
+				pc.handleError(w, statErr, objectPath, sendTrailer, reqLog)
 				return
 			}
 			w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
@@ -374,7 +403,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		// Plain HEAD — stat only, no download.
 		result, headErr := pc.HeadObject(objectPath, bearerToken)
 		if headErr != nil {
-			handleError(w, headErr, sendTrailer, reqLog)
+			pc.handleError(w, headErr, objectPath, sendTrailer, reqLog)
 			return
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
@@ -413,7 +442,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusGatewayTimeout)
 			return
 		} else if statErr != nil {
-			handleError(w, statErr, sendTrailer, reqLog)
+			pc.handleError(w, statErr, objectPath, sendTrailer, reqLog)
 			return
 		}
 		// Object is cached — fall through to the normal GET path which will
@@ -476,7 +505,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		reader, meta, getErr = res.reader, res.meta, res.err
 	}
 	if getErr != nil {
-		handleError(w, getErr, sendTrailer, reqLog)
+		pc.handleError(w, getErr, objectPath, sendTrailer, reqLog)
 		return
 	}
 	defer reader.Close()
@@ -682,6 +711,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, bearerToken); !ok {
 		reqLog.WithField("reason", reason).Warn("PROPFIND authorization denied")
 		w.Header().Set("Content-Type", "application/json")
+		pc.setTokenHintHeaders(w.Header(), objectPath)
 		w.WriteHeader(http.StatusForbidden)
 		resp, _ := json.Marshal(map[string]string{"error": "authorization_denied", "reason": reason})
 		if _, err := w.Write(resp); err != nil {
@@ -813,6 +843,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	if ok, reason := pc.ac.authorize(requiredScope, objectPath, bearerToken); !ok {
 		reqLog.WithField("reason", reason).Warn("Write authorization denied")
 		w.Header().Set("Content-Type", "application/json")
+		pc.setTokenHintHeaders(w.Header(), objectPath)
 		w.WriteHeader(http.StatusForbidden)
 		resp, _ := json.Marshal(map[string]string{"error": "authorization_denied", "reason": reason})
 		if _, err := w.Write(resp); err != nil {

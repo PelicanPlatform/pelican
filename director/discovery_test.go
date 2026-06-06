@@ -152,6 +152,31 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			assert.Equal(t, tc.expectedReg, dis.RegistryEndpoint)
 		})
 	}
+
+	t.Run("anycast-endpoint-published", func(t *testing.T) {
+		server_utils.ResetTestState()
+		fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: mockDirUrlWoPort, RegistryEndpoint: mockRegUrlWoPort}
+		test_utils.MockFederationRoot(t, &fedInfo, nil)
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
+			param.Federation_DirectorUrl:  mockDirUrlWoPort,
+			param.Federation_RegistryUrl:  mockRegUrlWoPort,
+			param.TLSSkipVerify:           true,
+		})
+		require.NoError(t, param.Director_EnableFederationMetadataHosting.Set(true))
+		require.NoError(t, param.Director_AnycastUrl.Set("https://anycast.example.com"))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/test", nil)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, 200, w.Result().StatusCode)
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		dis := pelican_url.FederationDiscovery{}
+		require.NoError(t, json.Unmarshal(body, &dis))
+		assert.Equal(t, "https://anycast.example.com", dis.AnycastEndpoint)
+	})
 }
 
 func TestOidcDiscoveryHandler(t *testing.T) {

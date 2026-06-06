@@ -142,43 +142,7 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 // `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, the function should return
 // the namespace ad for `/foo/bar`.
 func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAdV2) *server_structs.NamespaceAdV2 {
-	// Normalize incoming path if needed --> adding the trailing / makes
-	// basic prefix matching safer
-	if !strings.HasSuffix(reqPath, "/") {
-		reqPath += "/"
-	}
-
-	var bestFedPrefix string
-	var bestNamespace *server_structs.NamespaceAdV2
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
-
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
-		}
-
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
-			continue
-		}
-
-		if bestFedPrefix == "" {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
-			continue
-		}
-
-		if len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
-			continue
-		}
-	}
-
-	return bestNamespace
+	return server_structs.LongestNSMatch(reqPath, namespaceAds)
 }
 
 // Given a request path, find all the ads that express willingness to work with

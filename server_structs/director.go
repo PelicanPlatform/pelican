@@ -20,6 +20,7 @@ package server_structs
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -414,6 +415,145 @@ func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
 		}
 	}
 	return nil
+}
+
+// SetXAuthHeader sets the X-Pelican-Authorization header (when applicable) on hdr. This
+// header informs the client of the issuer(s) that can be used to generate a token for the
+// requested resource.  It is the "write" counterpart to XPelAuth.ParseRawResponse and is
+// shared between the director (redirect responses) and the cache (403 responses).
+func SetXAuthHeader(hdr http.Header, namespaceAd NamespaceAdV2) {
+	if len(namespaceAd.Issuer) != 0 {
+		issStrings := []string{}
+		for _, tokIss := range namespaceAd.Issuer {
+			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
+		}
+		hdr[XPelAuth{}.GetName()] = issStrings
+	}
+}
+
+// SetXTokenGenHeader sets the X-Pelican-Token-Generation header (when applicable) on hdr,
+// describing how a client may generate a token for the requested resource.  Shared between
+// the director and the cache.
+func SetXTokenGenHeader(hdr http.Header, namespaceAd NamespaceAdV2) {
+	if len(namespaceAd.Generation) != 0 {
+		tokenGen := ""
+		first := true
+		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
+		// to fix this because the token gen header uses the issuer URL from NamespaceAdV2.Generation.CredentialIssuer, whereas basepaths
+		// come from NamespaceAdV2.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
+		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
+		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
+		var basePath string
+		for _, issuer := range namespaceAd.Issuer {
+			if issuer.IssuerUrl.String() == namespaceAd.Generation[0].CredentialIssuer.String() {
+				if len(issuer.BasePaths) > 0 {
+					basePath = issuer.BasePaths[0]
+				}
+				break
+			}
+		}
+
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
+			string(namespaceAd.Generation[0].Strategy), basePath}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path"} {
+			hdrVal := hdrVals[idx]
+			if hdrVal == "" {
+				continue
+			} else if hdrKey == "max-scope-depth" && hdrVal == "0" {
+				// don't send a 0 max-scope-depth because it's malformed and probably means there should be no token generation header
+				continue
+			}
+			if !first {
+				tokenGen += ", "
+			}
+			first = false
+			tokenGen += hdrKey + "=" + hdrVal
+		}
+
+		if tokenGen != "" {
+			hdr[XPelTokGen{}.GetName()] = []string{tokenGen}
+		}
+	}
+}
+
+// setXNamespaceHeader is the shared core that writes the X-Pelican-Namespace header
+// given an already-resolved collections URL (which may be empty).
+func setXNamespaceHeader(hdr http.Header, collUrl string, bestNSAd NamespaceAdV2) {
+	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", bestNSAd.Path, !bestNSAd.Caps.PublicReads)
+	if collUrl != "" {
+		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
+	}
+	hdr[XPelNs{}.GetName()] = []string{xPelicanNamespace}
+}
+
+// SetXNamespaceHeader sets the X-Pelican-Namespace header on hdr, including information about
+// the namespace and whether token auth is required for reading from it.  oAds (origin ads) are
+// only used to compute the optional collections-url; callers without origin ads may pass nil.
+// Used by the director, whose collections-url points at an origin.
+func SetXNamespaceHeader(hdr http.Header, oAds []ServerAd, bestNSAd NamespaceAdV2) {
+	var collUrl string
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	for _, oAd := range oAds {
+		if oAd.Caps.Listings && bestNSAd.Caps.Listings {
+			if !bestNSAd.Caps.PublicReads && oAd.AuthURL != (url.URL{}) {
+				collUrl = oAd.AuthURL.String()
+				break
+			} else {
+				collUrl = oAd.URL.String()
+				break
+			}
+		}
+	}
+	setXNamespaceHeader(hdr, collUrl, bestNSAd)
+}
+
+// SetXNamespaceHeaderWithCollections sets the X-Pelican-Namespace header using an explicit
+// collections URL rather than deriving one from origin ads.  A cache acting as an anycast
+// endpoint uses this to advertise itself as the collections URL (it proxies PROPFIND listings
+// to the origin), so directory listings flow through the same cache.  The collections URL is
+// only advertised when the namespace permits listings.
+func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSAd NamespaceAdV2) {
+	if !bestNSAd.Caps.Listings {
+		collUrl = ""
+	}
+	setXNamespaceHeader(hdr, collUrl, bestNSAd)
+}
+
+// LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
+// For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
+// ad for `/foo/bar`.  Returns nil if no ad matches.  Shared between the director's redirect
+// logic and the cache's token-hint logic.
+func LongestNSMatch(reqPath string, namespaceAds []NamespaceAdV2) *NamespaceAdV2 {
+	// Normalize incoming path if needed --> adding the trailing / makes
+	// basic prefix matching safer
+	if !strings.HasSuffix(reqPath, "/") {
+		reqPath += "/"
+	}
+
+	var bestFedPrefix string
+	var bestNamespace *NamespaceAdV2
+	for _, ns := range namespaceAds {
+		// Create a copy of ns to avoid reusing the loop variable
+		currentNS := ns
+
+		// Additionally normalize stored namespace paths
+		nsPath := currentNS.Path
+		if !strings.HasSuffix(currentNS.Path, "/") {
+			nsPath += "/"
+		}
+
+		if !strings.HasPrefix(reqPath, nsPath) {
+			// This namespace doesn't match the request path, skip it
+			continue
+		}
+
+		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
+			bestFedPrefix = nsPath
+			bestNamespace = &currentNS
+		}
+	}
+
+	return bestNamespace
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
