@@ -407,6 +407,7 @@ type (
 	identTransferOptionRequestId                struct{}
 	identTransferOptionTokenProvider            struct{}
 	identTransferOptionSourceTokenProvider      struct{}
+	identTransferOptionNonInteractive           struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -934,6 +935,15 @@ func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
 }
 
+// WithNonInteractive controls whether token acquisition may fall back to the
+// interactive OAuth2 device-code flow.  When enabled (true), acquisition uses
+// only cached, refreshable, or locally-generatable tokens and fails instead of
+// prompting.  This is intended for callers without a controlling terminal,
+// such as the client agent.
+func WithNonInteractive(enable bool) TransferOption {
+	return option.New(identTransferOptionNonInteractive{}, enable)
+}
+
 // WithSourceAcquireToken controls automatic token acquisition for the source
 // side of a transfer.  For get operations this is equivalent to WithAcquireToken;
 // for put operations it is a no-op.
@@ -981,6 +991,12 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 			token.EnableAcquire = val
 			if isCopy {
 				srcToken.EnableAcquire = val
+			}
+		case identTransferOptionNonInteractive{}:
+			val := opt.Value().(bool)
+			token.nonInteractive = val
+			if isCopy {
+				srcToken.nonInteractive = val
 			}
 		}
 	}

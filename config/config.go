@@ -157,6 +157,13 @@ type (
 	TokenGenerationOpts struct {
 		Operation    TokenOperation
 		DiscoveryURL string // Federation discovery URL for credential lookup
+		// NonInteractive, when true, forbids token acquisition flows that
+		// require user interaction (notably the OAuth2 device-code flow).
+		// Cached, refreshable, or locally-generatable tokens are still used;
+		// if none is available the acquisition fails instead of prompting.
+		// This is used by long-running daemons (e.g. the client agent) that
+		// have no controlling terminal.
+		NonInteractive bool
 	}
 
 	ContextKey string
