@@ -1,0 +1,38 @@
+---
+title: pelican transfer oauth client add
+---
+
+## pelican transfer oauth-client add
+
+Register a new OAuth2 client on the transfer server
+
+```
+pelican transfer oauth-client add [flags]
+```
+
+### Options
+
+```
+      --client-id string            OAuth2 client ID (required)
+      --client-secret-file string   Path to a file containing the OAuth2 client secret (required)
+  -h, --help                        help for add
+      --issuer-url string           Issuer URL for the OAuth2 provider (required)
+      --name string                 Name for the OAuth2 client (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       URL of the transfer server (e.g. https://transfer.example.com:8447)
+  -t, --token string        Path to a token file for authentication
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican transfer oauth-client](/commands-reference/transfer/oauth-client/)	 - Manage OAuth2 client registrations
