@@ -65,9 +65,9 @@ var (
 
 	//go:embed frontend/out/*
 	webAssets         embed.FS
-	serverPages       = []string{"director", "registry", "origin", "cache"}
-	publicAccessPages = []string{"director", "registry"}      // UI pages that allow unauthenticated users to access.
-	adminAccessPages  = []string{"config", "origin", "cache"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
+	serverPages       = []string{"director", "registry", "origin", "cache", "transfer"}
+	publicAccessPages = []string{"director", "registry"}                  // UI pages that allow unauthenticated users to access.
+	adminAccessPages  = []string{"config", "origin", "cache", "transfer"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
@@ -302,7 +302,8 @@ func handleWebUIRedirect(ctx *gin.Context) {
 		if (serverName == "director" && !config.IsServerEnabled(server_structs.DirectorType)) ||
 			(serverName == "registry" && !config.IsServerEnabled(server_structs.RegistryType)) ||
 			(serverName == "origin" && !config.IsServerEnabled(server_structs.OriginType)) ||
-			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) {
+			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) ||
+			(serverName == "transfer" && !config.IsServerEnabled(server_structs.TransferType)) {
 			file, _ := webAssets.ReadFile(notFoundFilePath)
 			ctx.Data(
 				http.StatusNotFound,
