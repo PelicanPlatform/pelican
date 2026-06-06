@@ -315,6 +315,7 @@ type (
 		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
 		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
 		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
+		anycastUrl         *url.URL                        // federation-wide TCP anycast endpoint, if advertised; used to route reads/writes through an anycast cache
 		dirResp            server_structs.DirectorResponse // Director response for non-copy transfers (download, upload, prestage)
 		destDirResp        server_structs.DirectorResponse // Director response for the copy destination
 		directorUrl        string
@@ -1301,10 +1302,24 @@ func applyJobOptions(tj *TransferJob, options []TransferOption) {
 			tj.cacheMode = opt.Value().(bool)
 		}
 	}
-	// The object servers the user picked are the ones whose token hints this
-	// job may act on (see canApplyTokenHint).  Recorded after the loop, so a
-	// per-job WithCaches has already replaced whatever the client was created
-	// with.
+	// Recorded after the loop, so a per-job WithCaches has already replaced
+	// whatever the client was created with.
+	tj.recordNamedObjServers()
+}
+
+// recordNamedObjServers tells the job's token generators which object servers
+// this transfer was pointed at on purpose, so that a token hint from one of them
+// may be acted on (see canApplyTokenHint).  Callers invoke it after changing the
+// preferred list.
+//
+// The anycast endpoint belongs here alongside the caches the user named, once
+// the transfer is actually routed to it.  It is not a host the user typed, but
+// the federation's discovery document names it, and that document is served by
+// the host they did type -- the same standing on which the client accepts the
+// director named there as the authority on which issuer to use.  Reaching it at
+// all is either opt-in (Client.PreferAnycast) or the last resort left when no
+// director answered.
+func (tj *TransferJob) recordNamedObjServers() {
 	tj.token.setNamedObjServers(tj.prefObjServers)
 	tj.srcToken.setNamedObjServers(tj.prefObjServers)
 }
@@ -1922,6 +1937,43 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	applyTokenOptions(tj.token, nil, upload, options)
 	applyJobOptions(tj, options)
 
+	// If the federation advertises a TCP anycast endpoint, record it.  By default
+	// the director's geography/load/health-aware selection is preferred, and the
+	// anycast endpoint is used only as a fallback when the director is unreachable
+	// (see the director-failure handling below and buildUploadTransfers).
+	//
+	// When Client.PreferAnycast is set, the anycast endpoint is preferred up front:
+	// it is prepended to the object servers for downloads (so the client contacts it
+	// first, bypassing the director) and used as the write-through target for uploads.
+	// This should only be enabled for sites well-covered by the anycast group, since
+	// anycast routes by network topology and may send distant clients to a far cache.
+	//
+	// This runs after the job options, which is where a per-job WithCaches list
+	// lands: prepending before that would put the anycast endpoint at the front
+	// of a list about to be replaced.
+	if anycast := copyUrl.FedInfo.AnycastEndpoint; anycast != "" {
+		if anycastUrl, aerr := url.Parse(anycast); aerr == nil && anycastUrl.Host != "" {
+			tj.anycastUrl = anycastUrl
+			if !upload && param.Client_PreferAnycast.GetBool() {
+				hadPreferred := len(tj.prefObjServers) > 0
+				newPref := make([]*url.URL, 0, len(tj.prefObjServers)+2)
+				newPref = append(newPref, anycastUrl)
+				newPref = append(newPref, tj.prefObjServers...)
+				// When the user did not specify their own preferred caches, append the
+				// '+' sentinel so generateSortedObjServers still appends the
+				// director-discovered servers as fallback.
+				if !hadPreferred {
+					if plus, perr := url.Parse("+"); perr == nil {
+						newPref = append(newPref, plus)
+					}
+				}
+				tj.prefObjServers = newPref
+				tj.recordNamedObjServers()
+				log.Debugf("Client.PreferAnycast set; preferring anycast endpoint %s", anycastUrl.Host)
+			}
+		}
+	}
+
 	// Handle options specific to direct (non-copy) transfers.
 	for _, option := range options {
 		switch option.Ident() {
@@ -1990,9 +2042,19 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
 	}
 	if err != nil {
-		// If director query failed but we have explicit caches, create a minimal response and continue
-		if len(tj.prefObjServers) > 0 {
-			log.Debugln("Director query failed but explicit caches provided, continuing with cache list")
+		// If the director is unreachable, fall back to the anycast endpoint (if
+		// advertised) so the transfer can still proceed -- a reachable anycast
+		// cache beats a hard failure even when it is not the geographically
+		// optimal choice.  For downloads we add it to the candidate list; uploads
+		// pick it up via buildUploadTransfers.
+		if tj.anycastUrl != nil && !upload && !containsURL(tj.prefObjServers, tj.anycastUrl) {
+			tj.prefObjServers = append(tj.prefObjServers, tj.anycastUrl)
+			tj.recordNamedObjServers()
+		}
+		// If director query failed but we have a fallback (explicit caches or an
+		// anycast endpoint), create a minimal response and continue.
+		if len(tj.prefObjServers) > 0 || (upload && tj.anycastUrl != nil) {
+			log.Debugln("Director query failed; continuing with fallback object servers (explicit caches and/or anycast)")
 			directorFailed = true
 			// Create minimal director response structure
 			dirResp = server_structs.DirectorResponse{
@@ -2685,7 +2747,31 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, direc
 // Take a transfer job and produce one or more transfer file requests.
 // The transfer file requests are sent to be processed via the engine
 // buildUploadTransfers returns the transfer attempt for an upload job.
+// containsURL reports whether target appears (by string form) in the list.
+func containsURL(list []*url.URL, target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	for _, u := range list {
+		if u != nil && u.String() == target.String() {
+			return true
+		}
+	}
+	return false
+}
+
 func buildUploadTransfers(job *clientTransferJob, packOption string) ([]transferAttemptDetails, error) {
+	// Route the write through the anycast cache (which proxies the PUT/DELETE to
+	// the origin) when the client opts in (Client.PreferAnycast) or when the
+	// director was unreachable so no origin is available.  Otherwise prefer the
+	// director-supplied origin.
+	if job.job.anycastUrl != nil && job.job.anycastUrl.Host != "" &&
+		(param.Client_PreferAnycast.GetBool() || len(job.job.dirResp.ObjectServers) == 0) {
+		return []transferAttemptDetails{{
+			Url:        job.job.anycastUrl,
+			PackOption: packOption,
+		}}, nil
+	}
 	if len(job.job.dirResp.ObjectServers) == 0 {
 		return nil, errors.New("No origins found for upload")
 	}
