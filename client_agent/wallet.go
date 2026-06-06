@@ -19,12 +19,15 @@
 package client_agent
 
 import (
+	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -47,6 +50,10 @@ var ErrWalletLocked = errors.New("wallet is locked")
 type WalletSession struct {
 	mu   sync.Mutex
 	open bool
+	// refreshMu serializes background refresh cycles. It is separate from mu
+	// so a long-running refresh (which makes network calls) does not block
+	// fast IsOpen/status checks on the transfer hot path.
+	refreshMu sync.Mutex
 }
 
 // NewWalletSession returns a locked wallet session.
@@ -105,6 +112,18 @@ func (w *WalletSession) Contents() (config.CredentialConfig, error) {
 		return config.CredentialConfig{}, ErrWalletLocked
 	}
 	return config.GetCredentialConfigContents()
+}
+
+// RefreshExpiring proactively refreshes stored tokens nearing expiry. It is a
+// no-op when the wallet is locked. Refresh cycles are serialized so they do
+// not overlap.
+func (w *WalletSession) RefreshExpiring(ctx context.Context, within time.Duration) (int, error) {
+	if !w.IsOpen() {
+		return 0, nil
+	}
+	w.refreshMu.Lock()
+	defer w.refreshMu.Unlock()
+	return client.RefreshExpiringCredentials(ctx, within)
 }
 
 // --- API types ---

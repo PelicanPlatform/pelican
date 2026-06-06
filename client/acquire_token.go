@@ -790,6 +790,46 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 
 // Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
+// refreshTokenEntry refreshes a single stored token in place using its prefix's
+// OAuth2 client registration and the given issuer's token endpoint. On success
+// it updates the entry's access token, expiration, and (when the issuer rotates
+// it) refresh token. It does NOT persist the change to disk. The OAuth2
+// refresh-token grant is non-interactive.
+func refreshTokenEntry(prefixEntry *config.PrefixEntry, tok *config.TokenEntry, issuer string) error {
+	if tok.RefreshToken == "" {
+		return errors.New("token has no refresh token")
+	}
+	issuerInfo, err := config.GetIssuerMetadata(issuer)
+	if err != nil {
+		return err
+	}
+	upstreamConfig := oauth2_upstream.Config{
+		ClientID:     prefixEntry.ClientID,
+		ClientSecret: prefixEntry.ClientSecret,
+		Endpoint: oauth2_upstream.Endpoint{
+			AuthURL:  issuerInfo.AuthURL,
+			TokenURL: issuerInfo.TokenURL,
+		},
+	}
+	upstreamToken := oauth2_upstream.Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		Expiry:       time.Unix(0, 0),
+	}
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, httpClient)
+	newToken, err := upstreamConfig.TokenSource(ctx, &upstreamToken).Token()
+	if err != nil {
+		return err
+	}
+	tok.AccessToken = newToken.AccessToken
+	tok.Expiration = newToken.Expiry.Unix()
+	if len(newToken.RefreshToken) != 0 {
+		tok.RefreshToken = newToken.RefreshToken
+	}
+	return nil
+}
+
 func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
 
 	log.Debugln("Acquiring a token from configuration and OAuth2")
@@ -887,37 +927,13 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 
 	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
-		upstreamToken := oauth2_upstream.Token{
-			AccessToken:  tokenToRefresh.AccessToken,
-			RefreshToken: tokenToRefresh.RefreshToken,
-			Expiry:       time.Unix(0, 0),
-		}
-		issuerInfo, err := config.GetIssuerMetadata(issuer)
-		if err == nil {
-			upstreamConfig := oauth2_upstream.Config{
-				ClientID:     prefixEntry.ClientID,
-				ClientSecret: prefixEntry.ClientSecret,
-				Endpoint: oauth2_upstream.Endpoint{
-					AuthURL:  issuerInfo.AuthURL,
-					TokenURL: issuerInfo.TokenURL,
-				}}
-			client := &http.Client{Transport: config.GetTransport()}
-			ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, client)
-			source := upstreamConfig.TokenSource(ctx, &upstreamToken)
-			newToken, err := source.Token()
-			if err != nil {
-				log.Warningln("Failed to renew an expired token:", err)
-			} else {
-				tokenToRefresh.AccessToken = newToken.AccessToken
-				tokenToRefresh.Expiration = newToken.Expiry.Unix()
-				if len(newToken.RefreshToken) != 0 {
-					tokenToRefresh.RefreshToken = newToken.RefreshToken
-				}
-				if err = config.SaveConfigContents(&osdfConfig); err != nil {
-					log.Warningln("Failed to save new token to configuration file:", err)
-				}
-				return newToken.AccessToken, nil
+		if err := refreshTokenEntry(prefixEntry, tokenToRefresh, issuer); err != nil {
+			log.Warningln("Failed to renew an expired token:", err)
+		} else {
+			if err = config.SaveConfigContents(&osdfConfig); err != nil {
+				log.Warningln("Failed to save new token to configuration file:", err)
 			}
+			return tokenToRefresh.AccessToken, nil
 		}
 	}
 
