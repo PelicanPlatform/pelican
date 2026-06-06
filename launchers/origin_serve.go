@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
@@ -276,6 +277,11 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		log.Debugf("Set Origin.Url to %s for POSIXv2 origin", externalWebUrl)
 
 		log.Info("POSIXv2 origin backend initialized successfully")
+	}
+
+	// Register the transfer API on the origin if enabled
+	if err := transfer.RegisterTransferAPIForOrigin(ctx, engine, egrp); err != nil {
+		return errors.Wrap(err, "failed to register transfer API on origin")
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")

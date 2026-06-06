@@ -40,6 +40,9 @@ Server:
   StartupTimeout: 10s
   UILoginRateLimit: 1
   UnprivilegedUser: pelican
+Transfer:
+  CredentialIdleTimeout: "168h"
+  MaxConcurrentJobs: 5
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"

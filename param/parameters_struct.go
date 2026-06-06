@@ -298,6 +298,7 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePublicReads bool `mapstructure:"enablepublicreads" yaml:"EnablePublicReads"`
 		EnableReads bool `mapstructure:"enablereads" yaml:"EnableReads"`
+		EnableTransferAPI bool `mapstructure:"enabletransferapi" yaml:"EnableTransferAPI"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EnableWrite bool `mapstructure:"enablewrite" yaml:"EnableWrite"`
 		EnableWrites bool `mapstructure:"enablewrites" yaml:"EnableWrites"`
@@ -470,6 +471,13 @@ type Config struct {
 		DisableOriginX509 bool `mapstructure:"disableoriginx509" yaml:"DisableOriginX509"`
 		DisableOrigins bool `mapstructure:"disableorigins" yaml:"DisableOrigins"`
 	} `mapstructure:"topology" yaml:"Topology"`
+	Transfer struct {
+		CredentialIdleTimeout time.Duration `mapstructure:"credentialidletimeout" yaml:"CredentialIdleTimeout"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		EnableOAuth2Clients bool `mapstructure:"enableoauth2clients" yaml:"EnableOAuth2Clients"`
+		EnabledGroups []string `mapstructure:"enabledgroups" yaml:"EnabledGroups"`
+		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
+	} `mapstructure:"transfer" yaml:"Transfer"`
 	Transport struct {
 		BrokerEndpointCacheTTL time.Duration `mapstructure:"brokerendpointcachettl" yaml:"BrokerEndpointCacheTTL"`
 		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
@@ -783,6 +791,7 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
+		EnableTransferAPI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }
 		EnableWrites struct { Type string; Value bool }
@@ -954,6 +963,13 @@ type configWithType struct {
 		DisableDowntime struct { Type string; Value bool }
 		DisableOriginX509 struct { Type string; Value bool }
 		DisableOrigins struct { Type string; Value bool }
+	}
+	Transfer struct {
+		CredentialIdleTimeout struct { Type string; Value time.Duration }
+		DbLocation struct { Type string; Value string }
+		EnableOAuth2Clients struct { Type string; Value bool }
+		EnabledGroups struct { Type string; Value []string }
+		MaxConcurrentJobs struct { Type string; Value int }
 	}
 	Transport struct {
 		BrokerEndpointCacheTTL struct { Type string; Value time.Duration }
