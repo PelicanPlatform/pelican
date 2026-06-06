@@ -208,6 +208,71 @@ func (c *APIClient) CancelJob(ctx context.Context, jobID string) error {
 	return nil
 }
 
+// WalletStatus returns the agent's credential-wallet status (whether it is
+// open and whether a credential file exists).
+func (c *APIClient) WalletStatus(ctx context.Context) (*client_agent.WalletStatusResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/wallet/status", nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create request")
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to send request")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var status client_agent.WalletStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, errors.Wrap(err, "failed to decode response")
+	}
+	return &status, nil
+}
+
+// OpenWallet unlocks the agent's credential wallet with the given password so
+// the agent can use and refresh stored credentials on the user's behalf.
+func (c *APIClient) OpenWallet(ctx context.Context, password string) error {
+	body, err := json.Marshal(client_agent.WalletOpenRequest{Password: password})
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal request")
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/wallet/open", bytes.NewBuffer(body))
+	if err != nil {
+		return errors.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to send request")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// CloseWallet locks the agent's credential wallet, clearing its cached password.
+func (c *APIClient) CloseWallet(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/wallet/close", nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create request")
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to send request")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // ListJobs lists all jobs with optional filtering
 func (c *APIClient) ListJobs(ctx context.Context, status string, limit, offset int) (*client_agent.JobListResponse, error) {
 	url := fmt.Sprintf("%s/jobs?limit=%d&offset=%d", c.baseURL, limit, offset)
