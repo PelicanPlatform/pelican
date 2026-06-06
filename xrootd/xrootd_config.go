@@ -104,6 +104,7 @@ type (
 		EnableListings      bool
 		DisableCopies       bool
 		EnableTPC           bool
+		AllowNonPublicTPC   bool
 		EnableAtomicUploads bool
 		SelfTest            bool
 		MonitoringPrefix    string
@@ -1213,6 +1214,12 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		}
 		xrdConfig.Origin.Exports = originExports
 		xrdConfig.Origin.EnableTPC = shouldEnableTPC(xrdConfig.Origin.DisableCopies, originExports)
+		// XRootD's TPC handler denies copies to/from loopback and private
+		// (RFC 1918) addresses by default as SSRF protection. Allow them only
+		// when Pelican's SSRF protection is disabled or its default blocks are
+		// skipped (e.g. for localhost test federations).
+		xrdConfig.Origin.AllowNonPublicTPC = param.Server_SSRFProtection_Disabled.GetBool() ||
+			param.Server_SSRFProtection_SkipDefaultBlocks.GetBool()
 		xrdConfig.Origin.MonitoringPrefix = server_utils.MonitoringBaseNs
 
 		switch xrdConfig.Origin.StorageType {
