@@ -54,6 +54,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/version"
 )
@@ -72,31 +73,90 @@ type (
 		RefreshToken string `yaml:"refresh_token,omitempty"`
 	}
 
-	PrefixEntry struct {
-		// OSDF namespace prefix
-		Prefix       string       `yaml:"prefix"`
-		ClientID     string       `yaml:"client_id"`
-		ClientSecret string       `yaml:"client_secret"`
-		Tokens       []TokenEntry `yaml:"tokens,omitempty"`
-
+	// ClientRegistration holds the DCRP client registration fields shared
+	// by both PrefixEntry and TransferServerEntry.  The yaml:",inline" tag
+	// flattens these fields into the parent in the serialized YAML so
+	// existing credential files remain compatible.
+	ClientRegistration struct {
+		// ClientID is the OAuth2 client ID registered via DCRP
+		ClientID string `yaml:"client_id"`
+		// ClientSecret is the OAuth2 client secret from DCRP
+		ClientSecret string `yaml:"client_secret"`
+		// ClientScopes records the scopes requested during DCRP registration
+		ClientScopes []string `yaml:"scopes,omitempty"`
 		// RFC 7592 fields for managing the dynamic client registration
 		RegistrationAccessToken string `yaml:"registration_access_token,omitempty"`
 		RegistrationClientURI   string `yaml:"registration_client_uri,omitempty"`
 	}
 
-	OSDFConfig struct {
-
-		// Top-level OSDF object
-		OSDF struct {
-			// List of OAuth2 client configurations
-			OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
-		} `yaml:"OSDF"`
+	PrefixEntry struct {
+		// OSDF namespace prefix
+		Prefix             string `yaml:"prefix"`
+		ClientRegistration `yaml:",inline"`
+		Tokens             []TokenEntry `yaml:"tokens,omitempty"`
 	}
+
+	// CredentialEntry records a bootstrapped credential on a transfer server,
+	// including which issuer it was obtained from and what storage scopes it
+	// was granted.  Multiple entries for the same issuer may exist when
+	// different operations require different scope sets (e.g. read-only vs
+	// read-write).
+	CredentialEntry struct {
+		// IssuerURL is the token issuer that granted this credential
+		IssuerURL string `yaml:"issuer_url"`
+		// CredentialID is the server-side credential identifier
+		CredentialID string `yaml:"credential_id"`
+		// Scopes lists the storage scopes this credential was bootstrapped with
+		// (e.g. "storage.read:/", "storage.modify:/", "storage.create:/")
+		Scopes []string `yaml:"scopes,omitempty"`
+	}
+
+	// TransferServerEntry stores information about a transfer server the CLI
+	// has previously interacted with, including the OAuth2 client registration
+	// and cached credential entries.
+	TransferServerEntry struct {
+		// ServerURL is the base URL of the transfer server
+		ServerURL          string `yaml:"server_url"`
+		ClientRegistration `yaml:",inline"`
+		// Tokens caches bearer tokens obtained from the transfer server's
+		// own issuer (typically with the pelican.transfer scope).
+		Tokens []TokenEntry `yaml:"tokens,omitempty"`
+		// Credentials lists bootstrapped credentials on this transfer server.
+		// Each entry records the issuer, credential ID, and scopes it was
+		// granted.  The lookup logic iterates over entries to find one that
+		// matches both the required issuer and scope set.
+		Credentials []CredentialEntry `yaml:"credentials,omitempty"`
+	}
+
+	// FederationCredentials holds credentials scoped to a particular
+	// federation (identified by its discovery URL).
+	FederationCredentials struct {
+		// List of OAuth2 client configurations for this federation
+		OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
+		// List of transfer server registrations for this federation
+		TransferServers []TransferServerEntry `yaml:"transfer_servers,omitempty"`
+	}
+
+	// CredentialConfig is the top-level credential configuration structure.
+	// The OSDF field is kept for backward compatibility with existing
+	// credential files; new per-federation credentials go in Federation.
+	CredentialConfig struct {
+		// Top-level OSDF object (backward compatibility)
+		OSDF FederationCredentials `yaml:"OSDF"`
+		// Federation maps discovery URLs to per-federation credentials
+		Federation map[string]*FederationCredentials `yaml:"Federation,omitempty"`
+	}
+
+	// OSDFConfig is a deprecated alias for CredentialConfig.
+	// It is kept so that existing code compiles; new code should use
+	// CredentialConfig directly.
+	OSDFConfig = CredentialConfig
 
 	TokenOperation int
 
 	TokenGenerationOpts struct {
-		Operation TokenOperation
+		Operation    TokenOperation
+		DiscoveryURL string // Federation discovery URL for credential lookup
 	}
 
 	ContextKey string
@@ -116,6 +176,168 @@ const (
 const (
 	EgrpKey ContextKey = "egrp"
 )
+
+// GetFederationCredentials returns the FederationCredentials for a given
+// discovery URL.  If a per-federation entry exists it is returned;
+// otherwise the legacy OSDF section is returned.
+func (c *CredentialConfig) GetFederationCredentials(discoveryURL string) *FederationCredentials {
+	if discoveryURL != "" && c.Federation != nil {
+		if fc, ok := c.Federation[discoveryURL]; ok {
+			return fc
+		}
+	}
+	return &c.OSDF
+}
+
+// GetPrefixEntry returns a pointer to the PrefixEntry with the given
+// prefix inside the federation identified by discoveryURL.  It first
+// searches the per-federation entry, then falls back to the legacy
+// OSDF section.  It returns nil if no matching entry exists in either.
+func (c *CredentialConfig) GetPrefixEntry(discoveryURL, prefix string) *PrefixEntry {
+	fc := c.GetFederationCredentials(discoveryURL)
+	for idx := range fc.OauthClient {
+		if fc.OauthClient[idx].Prefix == prefix {
+			return &fc.OauthClient[idx]
+		}
+	}
+	// If the federation-specific entry exists but didn't have the
+	// prefix, also search the legacy OSDF section as a fallback.
+	if fc != &c.OSDF {
+		for idx := range c.OSDF.OauthClient {
+			if c.OSDF.OauthClient[idx].Prefix == prefix {
+				return &c.OSDF.OauthClient[idx]
+			}
+		}
+	}
+	return nil
+}
+
+// GetTransferServerEntry returns a pointer to the TransferServerEntry
+// for the given server URL inside the federation identified by
+// discoveryURL.  It first searches the per-federation entry, then
+// falls back to the legacy OSDF section.  It returns nil if no
+// matching entry exists in either.
+func (c *CredentialConfig) GetTransferServerEntry(discoveryURL, serverURL string) *TransferServerEntry {
+	fc := c.GetFederationCredentials(discoveryURL)
+	for idx := range fc.TransferServers {
+		if fc.TransferServers[idx].ServerURL == serverURL {
+			return &fc.TransferServers[idx]
+		}
+	}
+	// If the federation-specific entry exists but didn't have the
+	// server, also search the legacy OSDF section as a fallback.
+	if fc != &c.OSDF {
+		for idx := range c.OSDF.TransferServers {
+			if c.OSDF.TransferServers[idx].ServerURL == serverURL {
+				return &c.OSDF.TransferServers[idx]
+			}
+		}
+	}
+	return nil
+}
+
+// FindCredential searches the TransferServerEntry's credentials for one that
+// matches the given issuer URL and contains all of the required scopes.
+// Returns the credential ID if found, or an empty string otherwise.
+func (e *TransferServerEntry) FindCredential(issuerURL string, requiredScopes []string) string {
+	for _, cred := range e.Credentials {
+		if cred.IssuerURL != issuerURL {
+			continue
+		}
+		if scopesContainAll(cred.Scopes, requiredScopes) {
+			return cred.CredentialID
+		}
+	}
+	return ""
+}
+
+// scopesContainAll returns true if every scope in required is covered
+// by at least one scope in have.  It uses hierarchical matching so
+// that, for example, "storage.read:/" in have satisfies a requirement
+// of "storage.read:/foo".
+func scopesContainAll(have, required []string) bool {
+	haveScopes := token_scopes.ParseResourceScopes(have)
+	reqScopes := token_scopes.ParseResourceScopes(required)
+	for _, req := range reqScopes {
+		covered := false
+		for _, h := range haveScopes {
+			if h.Contains(req) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
+}
+
+// FindOauthClient searches for a PrefixEntry matching the given prefix,
+// first in the section for discoveryURL (creating it if needed), then
+// falling back to the legacy OSDF section.
+// Returns the containing FederationCredentials and the index into
+// its OauthClient slice.  When no match is found, returns the
+// federation-specific section (where new entries should be appended)
+// and -1.
+func (c *CredentialConfig) FindOauthClient(discoveryURL, prefix string) (fc *FederationCredentials, idx int) {
+	fc = c.EnsureFederationCredentials(discoveryURL)
+	for i, entry := range fc.OauthClient {
+		if entry.Prefix == prefix {
+			return fc, i
+		}
+	}
+	if fc != &c.OSDF {
+		for i, entry := range c.OSDF.OauthClient {
+			if entry.Prefix == prefix {
+				return &c.OSDF, i
+			}
+		}
+	}
+	return fc, -1
+}
+
+// FindTransferServer searches for a TransferServerEntry matching the
+// given server URL, first in the section for discoveryURL (creating it
+// if needed), then falling back to the legacy OSDF section.
+// Returns the containing FederationCredentials and the index into
+// its TransferServers slice.  When no match is found, returns the
+// federation-specific section (where new entries should be appended)
+// and -1.
+func (c *CredentialConfig) FindTransferServer(discoveryURL, serverURL string) (fc *FederationCredentials, idx int) {
+	fc = c.EnsureFederationCredentials(discoveryURL)
+	for i := range fc.TransferServers {
+		if strings.TrimRight(fc.TransferServers[i].ServerURL, "/") == serverURL {
+			return fc, i
+		}
+	}
+	if fc != &c.OSDF {
+		for i := range c.OSDF.TransferServers {
+			if strings.TrimRight(c.OSDF.TransferServers[i].ServerURL, "/") == serverURL {
+				return &c.OSDF, i
+			}
+		}
+	}
+	return fc, -1
+}
+
+// EnsureFederationCredentials returns the FederationCredentials for a
+// given discovery URL, creating it if it does not yet exist.  When
+// discoveryURL is empty the legacy OSDF section is returned.
+func (c *CredentialConfig) EnsureFederationCredentials(discoveryURL string) *FederationCredentials {
+	if discoveryURL == "" {
+		return &c.OSDF
+	}
+	if c.Federation == nil {
+		c.Federation = make(map[string]*FederationCredentials)
+	}
+	fc, ok := c.Federation[discoveryURL]
+	if !ok {
+		fc = &FederationCredentials{}
+		c.Federation[discoveryURL] = fc
+	}
+	return fc
+}
 
 const (
 	TokenWrite TokenOperation = 1 << iota
@@ -316,6 +538,9 @@ func GetEnabledServerString(lowerCase bool) []string {
 	}
 	if enabledServers.IsEnabled(server_structs.RegistryType) {
 		servers = append(servers, server_structs.RegistryType.String())
+	}
+	if enabledServers.IsEnabled(server_structs.TransferType) {
+		servers = append(servers, server_structs.TransferType.String())
 	}
 	sort.Strings(servers)
 	if lowerCase {

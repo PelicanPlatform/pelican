@@ -31,6 +31,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
@@ -90,7 +91,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			input_config := config.OSDFConfig{}
+			input_config := config.CredentialConfig{}
 			err = yaml.Unmarshal(input_config_b, &input_config)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to parse config file:", err)
@@ -140,7 +141,8 @@ func printOauthConfig() {
 		fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 		os.Exit(1)
 	}
-	clientList := &config.OSDF.OauthClient
+	fc := config.GetFederationCredentials(param.Federation_DiscoveryUrl.GetString())
+	clientList := &fc.OauthClient
 	config_b, err := yaml.Marshal(&clientList)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to convert object to YAML:", err)
@@ -185,7 +187,10 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+			opts := config.TokenGenerationOpts{
+				Operation:    config.TokenRead,
+				DiscoveryURL: pUrl.FedInfo.DiscoveryEndpoint,
+			}
 			if httpMethod == http.MethodPut {
 				opts.Operation = config.TokenWrite
 			}
@@ -223,20 +228,13 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			hasPrefix := false
-			for _, entry := range input_config.OSDF.OauthClient {
-				if entry.Prefix == args[0] {
-					hasPrefix = true
-					break
-				}
-			}
-			if !hasPrefix {
-				newPrefix := config.PrefixEntry{Prefix: args[0]}
-				input_config.OSDF.OauthClient = append(input_config.OSDF.OauthClient, newPrefix)
-			} else {
+			fc, existingIdx := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+			if existingIdx >= 0 {
 				fmt.Fprintln(os.Stderr, "Prefix to add already exists")
 				return
 			}
+			newPrefix := config.PrefixEntry{Prefix: args[0]}
+			fc.OauthClient = append(fc.OauthClient, newPrefix)
 
 			err = config.SaveConfigContents(&input_config)
 			if err != nil {
@@ -258,18 +256,12 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			var existingPrefix *config.PrefixEntry
-			existingPrefix = nil
-			for idx := range input_config.OSDF.OauthClient {
-				if input_config.OSDF.OauthClient[idx].Prefix == args[0] {
-					existingPrefix = &input_config.OSDF.OauthClient[idx]
-					break
-				}
-			}
-			if existingPrefix == nil {
+			fc, existingIdx := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+			if existingIdx < 0 {
 				fmt.Fprintln(os.Stderr, "Prefix to set was not present")
 				os.Exit(1)
 			}
+			existingPrefix := &fc.OauthClient[existingIdx]
 
 			if args[1] == "client_id" {
 				existingPrefix.ClientID = args[2]
@@ -300,14 +292,15 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			prefix_list := input_config.OSDF.OauthClient
+			fc, _ := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+			prefix_list := fc.OauthClient
 			new_prefix_list := make([]config.PrefixEntry, 0, len(prefix_list)-1)
 			for _, entry := range prefix_list {
 				if entry.Prefix != args[0] {
 					new_prefix_list = append(new_prefix_list, entry)
 				}
 			}
-			input_config.OSDF.OauthClient = new_prefix_list
+			fc.OauthClient = new_prefix_list
 
 			err = config.SaveConfigContents(&input_config)
 			if err != nil {

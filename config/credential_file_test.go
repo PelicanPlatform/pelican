@@ -42,12 +42,14 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "test-creds.pem")
 
-		testConfig := &OSDFConfig{}
+		testConfig := &CredentialConfig{}
 		testConfig.OSDF.OauthClient = []PrefixEntry{
 			{
-				Prefix:       "/test/namespace",
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
+				Prefix: "/test/namespace",
+				ClientRegistration: ClientRegistration{
+					ClientID:     "test-client-id",
+					ClientSecret: "test-client-secret",
+				},
 			},
 		}
 
@@ -113,7 +115,7 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "nested", "dir", "test-creds.pem")
 
-		err := SaveConfigContentsToFile(&OSDFConfig{}, filePath, false)
+		err := SaveConfigContentsToFile(&CredentialConfig{}, filePath, false)
 		require.NoError(t, err)
 
 		_, err = os.Stat(filePath)
@@ -129,14 +131,16 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "test-creds.pem")
 
-		testConfig := &OSDFConfig{}
+		testConfig := &CredentialConfig{}
 		testConfig.OSDF.OauthClient = []PrefixEntry{
 			{
-				Prefix:                  "/test/roundtrip",
-				ClientID:                "roundtrip-client-id",
-				ClientSecret:            "roundtrip-client-secret",
-				RegistrationAccessToken: "roundtrip-rat",
-				RegistrationClientURI:   "https://example.com/oidc-cm/roundtrip-client-id",
+				Prefix: "/test/roundtrip",
+				ClientRegistration: ClientRegistration{
+					ClientID:                "roundtrip-client-id",
+					ClientSecret:            "roundtrip-client-secret",
+					RegistrationAccessToken: "roundtrip-rat",
+					RegistrationClientURI:   "https://example.com/oidc-cm/roundtrip-client-id",
+				},
 			},
 		}
 
@@ -185,7 +189,7 @@ func TestHasEncryptedPassword(t *testing.T) {
 		filePath := filepath.Join(tmpDir, "unencrypted.pem")
 
 		// Save without password
-		testConfig := &OSDFConfig{}
+		testConfig := &CredentialConfig{}
 		err := SaveConfigContentsToFile(testConfig, filePath, false)
 		require.NoError(t, err)
 

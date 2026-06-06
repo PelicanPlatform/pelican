@@ -91,6 +91,7 @@ type (
 		Sync                    *singleflight.Group
 		authFailureMu           sync.Mutex
 		consecutiveAuthFailures int
+		externalProvider        TokenProvider // optional external provider; if set, Get() delegates to it
 	}
 
 	// An object that iterates through the various possible tokens
@@ -152,6 +153,13 @@ func (tg *tokenGenerator) SetTokenLocation(tokenLocation string) {
 // evaluating all possible tokens
 func (tg *tokenGenerator) SetTokenName(name string) {
 	tg.TokenName = name
+}
+
+// SetExternalProvider configures an external TokenProvider that
+// the generator delegates to on every Get() call.  This bypasses
+// the built-in token acquisition logic entirely.
+func (tg *tokenGenerator) SetExternalProvider(provider TokenProvider) {
+	tg.externalProvider = provider
 }
 
 // Force the use of a specific token for the lifetime of the generator
@@ -425,7 +433,10 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
-		opts := config.TokenGenerationOpts{Operation: tg.Operation}
+		opts := config.TokenGenerationOpts{
+			Operation:    tg.Operation,
+			DiscoveryURL: tg.Destination.FedInfo.DiscoveryEndpoint,
+		}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
@@ -458,6 +469,11 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 //
 // Thread-safe
 func (tg *tokenGenerator) Get() (token string, err error) {
+	// If an external provider is configured, delegate entirely to it.
+	if tg.externalProvider != nil {
+		return tg.externalProvider.Get()
+	}
+
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
@@ -744,12 +760,13 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, errors.Errorf("issuer %s does not support dynamic client registration", issuerUrl)
 	}
 
+	scopes := []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"}
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		ResponseTypes:           []string{"code"},
 		ClientName:              "OSDF Command Line Client",
-		Scopes:                  []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
+		Scopes:                  scopes,
 	}}
 
 	resp, err := drcp.Register()
@@ -757,11 +774,14 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix:                  dirResp.XPelNsHdr.Namespace,
-		ClientID:                resp.ClientID,
-		ClientSecret:            resp.ClientSecret,
-		RegistrationAccessToken: resp.RegistrationAccessToken,
-		RegistrationClientURI:   resp.RegistrationClientURI,
+		Prefix: dirResp.XPelNsHdr.Namespace,
+		ClientRegistration: config.ClientRegistration{
+			ClientID:                resp.ClientID,
+			ClientSecret:            resp.ClientSecret,
+			ClientScopes:            scopes,
+			RegistrationAccessToken: resp.RegistrationAccessToken,
+			RegistrationClientURI:   resp.RegistrationClientURI,
+		},
 	}
 	return &newEntry, nil
 }
@@ -798,13 +818,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		return "", err
 	}
 
-	prefixIdx := -1
-	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == nsPrefix {
-			prefixIdx = idx
-			break
-		}
-	}
+	fc, prefixIdx := osdfConfig.FindOauthClient(opts.DiscoveryURL, nsPrefix)
 	var prefixEntry *config.PrefixEntry
 	newEntry := false
 	tryTokenGen := false
@@ -821,11 +835,11 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", err
 		}
-		osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, *prefixEntry)
-		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+		fc.OauthClient = append(fc.OauthClient, *prefixEntry)
+		prefixEntry = &fc.OauthClient[len(fc.OauthClient)-1]
 		newEntry = true
 	} else {
-		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
+		prefixEntry = &fc.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
 
 			// Similarly, here, generate a token before registering a new client.
@@ -840,7 +854,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				return "", err
 			}
-			osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+			fc.OauthClient[prefixIdx] = *prefixEntry
 			newEntry = true
 		}
 	}
@@ -923,7 +937,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
-		osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+		fc.OauthClient[prefixIdx] = *prefixEntry
 		if err = config.SaveConfigContents(&osdfConfig); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
