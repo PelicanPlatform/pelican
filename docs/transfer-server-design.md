@@ -10,13 +10,20 @@ The transfer server exposes the Pelican [`client_agent`](../client_agent/DESIGN-
 
 There are two distinct credential planes, and keeping them separate is the key to understanding the rest of this document:
 
-| Plane | Token | Who mints it | Who consumes it | Purpose | |-------|-------|--------------|-----------------|---------| | **Control plane** | `pelican.transfer`-scoped JWT | The transfer server's **own** issuer | The transfer server's auth middleware | Authenticate the *user* to the transfer API | | **Data plane** | Storage tokens (`storage.read:/…`, etc.) | **External** OAuth2 issuers (e.g. a federation's token issuer) | Origins / caches during a transfer | Authorize the *data movement* itself |
+- **Control plane** — a `pelican.transfer`-scoped JWT, minted by the transfer server's **own** issuer and consumed by the transfer server's auth middleware. It authenticates the *user* to the transfer API.
+- **Data plane** — storage tokens (`storage.read:/…`, etc.), minted by **external** OAuth2 issuers (e.g. a federation's token issuer) and consumed by origins/caches during a transfer. They authorize the *data movement* itself.
 
 The control-plane token answers "**who are you, and may you use this API?**". The data-plane credentials answer "**what storage are you allowed to touch?**". The OAuth2 machinery in this module exists almost entirely to acquire, encrypt, store, and later re-materialize data-plane credentials on the user's behalf.
 
 Source files (all under `transfer/`):
 
-| File | Responsibility | |------|----------------| | `transfer.go` | Module registration, route table, DB init, background cleanup | | `auth.go` | `TransferAuthMiddleware` — control-plane authentication & ownership | | `credentials.go` | Credential CRUD, decryption, dynamic `TokenProvider` | | `oauth_clients.go` | Per-issuer confidential OAuth client registry (CRUD) | | `bootstrap.go` | Credential **bootstrap** flows (token-exchange, auth-code) | | `handlers.go` | Transfer job submission/status; credential → transfer-option wiring | | `models.go` | GORM models and API request/response types |
+- `transfer.go` — module registration, route table, DB init, background cleanup
+- `auth.go` — `TransferAuthMiddleware`: control-plane authentication & ownership
+- `credentials.go` — credential CRUD, decryption, dynamic `TokenProvider`
+- `oauth_clients.go` — per-issuer confidential OAuth client registry (CRUD)
+- `bootstrap.go` — credential **bootstrap** flows (token-exchange, auth-code)
+- `handlers.go` — transfer job submission/status; credential → transfer-option wiring
+- `models.go` — GORM models and API request/response types
 
 The CLI counterpart lives in `cmd/transfer_*.go` (notably `cmd/transfer_bootstrap.go`).
 
@@ -109,7 +116,9 @@ This is the consumer of the `client.WithTokenProvider` / `client.WithSourceToken
 
 `handleGetAuthMethods` fetches the issuer's OIDC metadata (cached for 5 min by `globalIssuerCache`) and returns the methods that are *actually usable*:
 
-| Method | Advertised when… | |--------|------------------| | `token_exchange` | Issuer advertises the RFC 8693 grant **and** a registered confidential client for it exists | | `authorization_code` | Issuer has an authorization endpoint **and** a registered client for `authorization_code` exists | | `device_code` | Issuer has a device-authorization endpoint (the CLI can drive it directly) |
+- `token_exchange` — advertised when the issuer advertises the RFC 8693 grant **and** a registered confidential client for it exists.
+- `authorization_code` — advertised when the issuer has an authorization endpoint **and** a registered client for `authorization_code` exists.
+- `device_code` — advertised when the issuer has a device-authorization endpoint (the CLI can drive it directly).
 
 The per-issuer confidential clients are looked up by `findOAuthClientForGrant`, which filters `transfer_oauth_clients` by issuer + grant type and prefers clients whose registered `scopes` cover the requested scopes (falling back to clients with no recorded scopes).
 
@@ -218,7 +227,8 @@ Job submission ties the two planes together. `handleCreateTransferJob`:
 
 1. Calls `buildTransferOptionsWithCredentials`, which converts referenced credentials into **dynamic token providers** rather than baked-in strings:
 
-   | Request field | Client option | Meaning | |---------------|---------------|---------| | `source_credential_id` | `client.WithSourceTokenProvider` | Token for the **source** server (sent on the source HEAD/GET, and forwarded to the destination as `TransferHeaderAuthorization` for TPC pulls) | | `dest_credential_id` | `client.WithTokenProvider` | Token for the **destination** server (the primary `Authorization` header) |
+   - `source_credential_id` → `client.WithSourceTokenProvider`: token for the **source** server (sent on the source HEAD/GET, and forwarded to the destination as `TransferHeaderAuthorization` for TPC pulls).
+   - `dest_credential_id` → `client.WithTokenProvider`: token for the **destination** server (the primary `Authorization` header).
 
 1. Hands the transfers + options to the `client_agent.TransferManager`, and persists a `transfer_jobs` row (owner, credential references, request body).
 
@@ -269,11 +279,19 @@ users (existing)
 
 Public (no auth):
 
-| Method | Path | Handler | |--------|------|---------| | GET | `/api/v1.0/transfer/ping` | `handlePing` | | GET | `/api/v1.0/transfer/auth-methods` | `handleGetAuthMethods` | | GET | `/api/callback` | `HandleSharedCallback` | | GET | `/api/callback/start/:code` | `handleStartRedirect` |
+- `GET /api/v1.0/transfer/ping` → `handlePing`
+- `GET /api/v1.0/transfer/auth-methods` → `handleGetAuthMethods`
+- `GET /api/callback` → `HandleSharedCallback`
+- `GET /api/callback/start/:code` → `handleStartRedirect`
 
 Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 
-| Method | Path | Handler | |--------|------|---------| | POST/GET | `/credentials`, `/credentials/:id` (GET, DELETE) | credential CRUD | | POST | `/credentials/bootstrap/token-exchange` | `handleTokenExchangeBootstrap` | | POST | `/credentials/bootstrap/authcode` | `handleAuthCodeBootstrapStart` | | GET | `/credentials/bootstrap/authcode/:session_id` | `handleAuthCodeBootstrapPoll` | | POST/GET/DELETE | `/oauth-clients`, `/oauth-clients/:id` | OAuth client CRUD | | POST/GET/DELETE | `/jobs`, `/jobs/:job_id` | transfer job management |
+- `POST`/`GET` `/credentials` and `GET`/`DELETE` `/credentials/:id` — credential CRUD
+- `POST /credentials/bootstrap/token-exchange` — `handleTokenExchangeBootstrap`
+- `POST /credentials/bootstrap/authcode` — `handleAuthCodeBootstrapStart`
+- `GET /credentials/bootstrap/authcode/:session_id` — `handleAuthCodeBootstrapPoll`
+- `POST`/`GET`/`DELETE` `/oauth-clients` and `/oauth-clients/:id` — OAuth client CRUD
+- `POST`/`GET`/`DELETE` `/jobs` and `/jobs/:job_id` — transfer job management
 
 ## 9. Security & operational notes
 
@@ -286,7 +304,12 @@ Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 
 ## 10. Configuration parameters
 
-| Parameter | Default | Purpose | |-----------|---------|---------| | `Origin.EnableTransferAPI` | `false` | Enable the embedded transfer API on an origin | | `Transfer.EnableOAuth2Clients` | `false` | Allow OAuth client registration/management | | `Transfer.EnabledGroups` | (empty) | Restrict cookie/web-UI access to these `wlcg.groups` | | `Transfer.MaxConcurrentJobs` | `5` | Transfer-manager concurrency | | `Transfer.CredentialIdleTimeout` | `168h` | Idle credential cleanup threshold | | `Transfer.DbLocation` | (falls back to `Server.DbLocation`) | Transfer DB path |
+- `Origin.EnableTransferAPI` (default `false`) — enable the embedded transfer API on an origin.
+- `Transfer.EnableOAuth2Clients` (default `false`) — allow OAuth client registration/management.
+- `Transfer.EnabledGroups` (default empty) — restrict cookie/web-UI access to these `wlcg.groups`.
+- `Transfer.MaxConcurrentJobs` (default `5`) — transfer-manager concurrency.
+- `Transfer.CredentialIdleTimeout` (default `168h`) — idle credential cleanup threshold.
+- `Transfer.DbLocation` (falls back to `Server.DbLocation`) — transfer DB path.
 
 ## 11. Known limitations / future work
 
