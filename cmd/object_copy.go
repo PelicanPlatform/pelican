@@ -190,6 +190,22 @@ func copyMain(cmd *cobra.Command, args []string) {
 			}
 		}
 
+		// Warm the wallet (interactively) and open the agent's wallet so the
+		// agent can authorize both sides of the copy non-interactively. The
+		// sources need a read token and the destination a write token. Skipped
+		// when an explicit token file was provided.
+		if tokenLocation == "" {
+			warmItems := make([]asyncWarmItem, 0, len(source)+1)
+			for _, src := range source {
+				warmItems = append(warmItems, asyncWarmItem{url: src, write: false})
+			}
+			warmItems = append(warmItems, asyncWarmItem{url: dest, write: true})
+			if err := warmWalletForAsync(ctx, apiClient, warmItems); err != nil {
+				log.Errorln("Failed to prepare credentials for async transfer:", err)
+				os.Exit(1)
+			}
+		}
+
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {
