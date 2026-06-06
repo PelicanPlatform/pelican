@@ -39,6 +39,8 @@ var (
 // Server.Hostname, RuntimeDir) must already be set in viper via SetDefault
 // before calling this function, as dependent params read them inline.
 func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+	// Cache.Anycast.AddressManagement
+	v.SetDefault(param.Cache_Anycast_AddressManagement.GetName(), "auto")
 	// Cache.Anycast.BGP.LocalASN
 	v.SetDefault(param.Cache_Anycast_BGP_LocalASN.GetName(), 0)
 	// Cache.Anycast.BGP.PeerASN
