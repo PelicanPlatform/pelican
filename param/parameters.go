@@ -345,6 +345,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.EnableOIDC": false,
 	"Origin.EnablePublicReads": false,
 	"Origin.EnableReads": false,
+	"Origin.EnableTransferAPI": false,
 	"Origin.EnableVoms": false,
 	"Origin.EnableWrite": false,
 	"Origin.EnableWrites": false,
@@ -511,6 +512,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Topology.DisableDowntime": false,
 	"Topology.DisableOriginX509": false,
 	"Topology.DisableOrigins": false,
+	"Transfer.CredentialIdleTimeout": false,
+	"Transfer.DbLocation": false,
+	"Transfer.EnableOAuth2Clients": false,
+	"Transfer.EnabledGroups": false,
+	"Transfer.MaxConcurrentJobs": false,
 	"Transport.BrokerEndpointCacheTTL": false,
 	"Transport.DialerKeepAlive": false,
 	"Transport.DialerTimeout": false,
@@ -750,6 +756,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"StagePlugin.MountPrefix": func(c *Config) string { return c.StagePlugin.MountPrefix },
 	"StagePlugin.OriginPrefix": func(c *Config) string { return c.StagePlugin.OriginPrefix },
 	"StagePlugin.ShadowOriginPrefix": func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
+	"Transfer.DbLocation": func(c *Config) string { return c.Transfer.DbLocation },
 	"Xrootd.Authfile": func(c *Config) string { return c.Xrootd.Authfile },
 	"Xrootd.ConfigFile": func(c *Config) string { return c.Xrootd.ConfigFile },
 	"Xrootd.DetailedMonitoringHost": func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
@@ -827,6 +834,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Server.UserAdminGroups": func(c *Config) []string { return c.Server.UserAdminGroups },
 	"Server.UserAdminUsers": func(c *Config) []string { return c.Server.UserAdminUsers },
 	"Shoveler.OutputDestinations": func(c *Config) []string { return c.Shoveler.OutputDestinations },
+	"Transfer.EnabledGroups": func(c *Config) []string { return c.Transfer.EnabledGroups },
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
@@ -905,6 +913,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
 	"Shoveler.PortHigher": func(c *Config) int { return c.Shoveler.PortHigher },
 	"Shoveler.PortLower": func(c *Config) int { return c.Shoveler.PortLower },
+	"Transfer.MaxConcurrentJobs": func(c *Config) int { return c.Transfer.MaxConcurrentJobs },
 	"Transport.MaxIdleConns": func(c *Config) int { return c.Transport.MaxIdleConns },
 	"Xrootd.DetailedMonitoringPort": func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
 	"Xrootd.LocalMonitoringPort": func(c *Config) int { return c.Xrootd.LocalMonitoringPort },
@@ -1038,6 +1047,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableOIDC": func(c *Config) bool { return c.Origin.EnableOIDC },
 	"Origin.EnablePublicReads": func(c *Config) bool { return c.Origin.EnablePublicReads },
 	"Origin.EnableReads": func(c *Config) bool { return c.Origin.EnableReads },
+	"Origin.EnableTransferAPI": func(c *Config) bool { return c.Origin.EnableTransferAPI },
 	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
 	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
 	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
@@ -1067,6 +1077,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Topology.DisableDowntime": func(c *Config) bool { return c.Topology.DisableDowntime },
 	"Topology.DisableOriginX509": func(c *Config) bool { return c.Topology.DisableOriginX509 },
 	"Topology.DisableOrigins": func(c *Config) bool { return c.Topology.DisableOrigins },
+	"Transfer.EnableOAuth2Clients": func(c *Config) bool { return c.Transfer.EnableOAuth2Clients },
 	"Xrootd.AutoShutdownEnabled": func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
 	"Xrootd.EnableLocalMonitoring": func(c *Config) bool { return c.Xrootd.EnableLocalMonitoring },
 }
@@ -1160,6 +1171,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Server.GroupInviteLinkExpiration": func(c *Config) time.Duration { return c.Server.GroupInviteLinkExpiration },
 	"Server.RegistrationRetryInterval": func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
 	"Server.StartupTimeout": func(c *Config) time.Duration { return c.Server.StartupTimeout },
+	"Transfer.CredentialIdleTimeout": func(c *Config) time.Duration { return c.Transfer.CredentialIdleTimeout },
 	"Transport.BrokerEndpointCacheTTL": func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
 	"Transport.DialerKeepAlive": func(c *Config) time.Duration { return c.Transport.DialerKeepAlive },
 	"Transport.DialerTimeout": func(c *Config) time.Duration { return c.Transport.DialerTimeout },
@@ -1510,6 +1522,7 @@ var allParameterNames = []string{
 	"Origin.EnableOIDC",
 	"Origin.EnablePublicReads",
 	"Origin.EnableReads",
+	"Origin.EnableTransferAPI",
 	"Origin.EnableVoms",
 	"Origin.EnableWrite",
 	"Origin.EnableWrites",
@@ -1676,6 +1689,11 @@ var allParameterNames = []string{
 	"Topology.DisableDowntime",
 	"Topology.DisableOriginX509",
 	"Topology.DisableOrigins",
+	"Transfer.CredentialIdleTimeout",
+	"Transfer.DbLocation",
+	"Transfer.EnableOAuth2Clients",
+	"Transfer.EnabledGroups",
+	"Transfer.MaxConcurrentJobs",
 	"Transport.BrokerEndpointCacheTTL",
 	"Transport.DialerKeepAlive",
 	"Transport.DialerTimeout",
@@ -1888,6 +1906,7 @@ var (
 	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
+	Transfer_DbLocation = StringParam{"Transfer.DbLocation"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
 	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
@@ -1937,6 +1956,7 @@ var (
 	Server_UserAdminGroups = StringSliceParam{"Server.UserAdminGroups"}
 	Server_UserAdminUsers = StringSliceParam{"Server.UserAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
+	Transfer_EnabledGroups = StringSliceParam{"Transfer.EnabledGroups"}
 )
 
 var (
@@ -1987,6 +2007,7 @@ var (
 	Server_WebPort = IntParam{"Server.WebPort"}
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
+	Transfer_MaxConcurrentJobs = IntParam{"Transfer.MaxConcurrentJobs"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
 	Xrootd_LocalMonitoringPort = IntParam{"Xrootd.LocalMonitoringPort"}
@@ -2055,6 +2076,7 @@ var (
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
+	Origin_EnableTransferAPI = BoolParam{"Origin.EnableTransferAPI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
@@ -2084,6 +2106,7 @@ var (
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
+	Transfer_EnableOAuth2Clients = BoolParam{"Transfer.EnableOAuth2Clients"}
 	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
@@ -2149,6 +2172,7 @@ var (
 	Server_GroupInviteLinkExpiration = DurationParam{"Server.GroupInviteLinkExpiration"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
+	Transfer_CredentialIdleTimeout = DurationParam{"Transfer.CredentialIdleTimeout"}
 	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
@@ -2369,6 +2393,7 @@ func init() {
 		"StagePlugin.MountPrefix": StagePlugin_MountPrefix,
 		"StagePlugin.OriginPrefix": StagePlugin_OriginPrefix,
 		"StagePlugin.ShadowOriginPrefix": StagePlugin_ShadowOriginPrefix,
+		"Transfer.DbLocation": Transfer_DbLocation,
 		"Xrootd.Authfile": Xrootd_Authfile,
 		"Xrootd.ConfigFile": Xrootd_ConfigFile,
 		"Xrootd.DetailedMonitoringHost": Xrootd_DetailedMonitoringHost,
@@ -2415,6 +2440,7 @@ func init() {
 		"Server.UserAdminGroups": Server_UserAdminGroups,
 		"Server.UserAdminUsers": Server_UserAdminUsers,
 		"Shoveler.OutputDestinations": Shoveler_OutputDestinations,
+		"Transfer.EnabledGroups": Transfer_EnabledGroups,
 		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
 		"Cache.Concurrency": Cache_Concurrency,
 		"Cache.ConcurrencyDegradedThreshold": Cache_ConcurrencyDegradedThreshold,
@@ -2462,6 +2488,7 @@ func init() {
 		"Server.WebPort": Server_WebPort,
 		"Shoveler.PortHigher": Shoveler_PortHigher,
 		"Shoveler.PortLower": Shoveler_PortLower,
+		"Transfer.MaxConcurrentJobs": Transfer_MaxConcurrentJobs,
 		"Transport.MaxIdleConns": Transport_MaxIdleConns,
 		"Xrootd.DetailedMonitoringPort": Xrootd_DetailedMonitoringPort,
 		"Xrootd.LocalMonitoringPort": Xrootd_LocalMonitoringPort,
@@ -2524,6 +2551,7 @@ func init() {
 		"Origin.EnableOIDC": Origin_EnableOIDC,
 		"Origin.EnablePublicReads": Origin_EnablePublicReads,
 		"Origin.EnableReads": Origin_EnableReads,
+		"Origin.EnableTransferAPI": Origin_EnableTransferAPI,
 		"Origin.EnableVoms": Origin_EnableVoms,
 		"Origin.EnableWrite": Origin_EnableWrite,
 		"Origin.EnableWrites": Origin_EnableWrites,
@@ -2553,6 +2581,7 @@ func init() {
 		"Topology.DisableDowntime": Topology_DisableDowntime,
 		"Topology.DisableOriginX509": Topology_DisableOriginX509,
 		"Topology.DisableOrigins": Topology_DisableOrigins,
+		"Transfer.EnableOAuth2Clients": Transfer_EnableOAuth2Clients,
 		"Xrootd.AutoShutdownEnabled": Xrootd_AutoShutdownEnabled,
 		"Xrootd.EnableLocalMonitoring": Xrootd_EnableLocalMonitoring,
 		"Cache.DefaultCacheTimeout": Cache_DefaultCacheTimeout,
@@ -2615,6 +2644,7 @@ func init() {
 		"Server.GroupInviteLinkExpiration": Server_GroupInviteLinkExpiration,
 		"Server.RegistrationRetryInterval": Server_RegistrationRetryInterval,
 		"Server.StartupTimeout": Server_StartupTimeout,
+		"Transfer.CredentialIdleTimeout": Transfer_CredentialIdleTimeout,
 		"Transport.BrokerEndpointCacheTTL": Transport_BrokerEndpointCacheTTL,
 		"Transport.DialerKeepAlive": Transport_DialerKeepAlive,
 		"Transport.DialerTimeout": Transport_DialerTimeout,
