@@ -1394,7 +1394,7 @@ func handleAdminDispatch(ctx *gin.Context) {
 // subject to the client's configured scope allow-list.
 func isStandardScope(scope string) bool {
 	switch scope {
-	case "openid", "offline_access", "wlcg", "profile", "email":
+	case "openid", "offline_access", "wlcg", "profile", "email", "pelican.transfer":
 		return true
 	}
 	return false
