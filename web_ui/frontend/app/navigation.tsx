@@ -16,9 +16,11 @@ import {
   Public,
   Settings,
   Storage,
+  SwapHoriz,
   TripOrigin,
   Groups,
   Person,
+  VpnKey,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
 
@@ -209,6 +211,13 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Settings />,
       allowedRoles: ['admin'],
     },
+  ],
+  transfer: [
+    { title: 'Dashboard', href: '/transfer/', icon: <Dashboard /> },
+    { title: 'Jobs', href: '/transfer/jobs/', icon: <SwapHoriz /> },
+    { title: 'Credentials', href: '/transfer/credentials/', icon: <VpnKey /> },
+    { title: 'Config', href: '/config/', icon: <Build /> },
+    { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],
   shared: [
     { title: 'Origin', href: '/origin/', icon: <TripOrigin /> },
