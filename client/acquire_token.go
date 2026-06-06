@@ -86,6 +86,7 @@ type (
 		TokenName               string
 		Operation               config.TokenOperation
 		EnableAcquire           bool
+		nonInteractive          bool // if true, never fall back to interactive (device-code) acquisition
 		Token                   atomic.Pointer[tokenInfo]
 		Iterator                *tokenContentIterator
 		Sync                    *singleflight.Group
@@ -434,8 +435,9 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
 		opts := config.TokenGenerationOpts{
-			Operation:    tg.Operation,
-			DiscoveryURL: tg.Destination.FedInfo.DiscoveryEndpoint,
+			Operation:      tg.Operation,
+			DiscoveryURL:   tg.Destination.FedInfo.DiscoveryEndpoint,
+			NonInteractive: tg.nonInteractive,
 		}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
@@ -926,6 +928,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			log.Debugln("Successfully generated a new token from a local key")
 			return token, nil
 		}
+	}
+
+	// The only remaining option requires the interactive OAuth2 device-code
+	// flow. Callers without a controlling terminal (e.g. the client agent)
+	// set NonInteractive so we fail with an actionable error instead of
+	// blocking on a prompt the user will never see.
+	if opts.NonInteractive {
+		return "", error_codes.NewAuthorizationError(fmt.Errorf("no usable token in the wallet for %s and interactive acquisition is disabled; acquire credentials first (e.g. via the CLI)", destination.Path))
 	}
 
 	token, err := oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts)
