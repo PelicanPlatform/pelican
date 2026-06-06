@@ -29,7 +29,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // RefreshExpiringCredentials proactively refreshes stored OAuth2 tokens in the
@@ -55,7 +54,8 @@ func RefreshExpiringCredentials(ctx context.Context, within time.Duration) (int,
 	cutoff := time.Now().Add(within)
 	refreshed := 0
 
-	processFederation := func(discovery string, fc *config.FederationCredentials) {
+	// Credentials are stored per-federation, keyed by discovery URL.
+	for discovery, fc := range osdfConfig.Federation {
 		for pi := range fc.OauthClient {
 			entry := &fc.OauthClient[pi]
 			if !entryHasExpiringToken(entry, cutoff) {
@@ -66,6 +66,8 @@ func RefreshExpiringCredentials(ctx context.Context, within time.Duration) (int,
 				log.Debugf("Skipping credential refresh for prefix %q: %v", entry.Prefix, err)
 				continue
 			}
+			// Perform the (network) refreshes for this prefix in memory...
+			n := 0
 			for ti := range entry.Tokens {
 				tok := &entry.Tokens[ti]
 				if tok.RefreshToken == "" || time.Unix(tok.Expiration, 0).After(cutoff) {
@@ -75,23 +77,21 @@ func RefreshExpiringCredentials(ctx context.Context, within time.Duration) (int,
 					log.Debugf("Failed to refresh a token for prefix %q: %v", entry.Prefix, err)
 					continue
 				}
-				refreshed++
+				n++
 			}
+			if n == 0 {
+				continue
+			}
+			// ...then persist this prefix under the credential file lock,
+			// re-reading so concurrent changes to other prefixes are preserved.
+			if err := config.UpsertPrefixEntry(discovery, entry); err != nil {
+				log.Debugf("Failed to persist refreshed tokens for prefix %q: %v", entry.Prefix, err)
+				continue
+			}
+			refreshed += n
 		}
 	}
 
-	// Legacy top-level OSDF block (best-effort, using the configured federation)
-	// followed by the per-federation credentials keyed by discovery URL.
-	processFederation(param.Federation_DiscoveryUrl.GetString(), &osdfConfig.OSDF)
-	for discovery, fc := range osdfConfig.Federation {
-		processFederation(discovery, fc)
-	}
-
-	if refreshed > 0 {
-		if err := config.SaveConfigContents(&osdfConfig); err != nil {
-			return refreshed, errors.Wrap(err, "failed to save refreshed credentials")
-		}
-	}
 	return refreshed, nil
 }
 

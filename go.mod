@@ -22,6 +22,7 @@ require (
 	github.com/go-ini/ini v1.67.0
 	github.com/go-jose/go-jose/v3 v3.0.3
 	github.com/go-kit/log v0.2.1
+	github.com/gofrs/flock v0.12.1
 	github.com/google/go-p11-kit v0.4.0
 	github.com/gorilla/csrf v1.7.3
 	github.com/gorilla/websocket v1.5.0
@@ -85,7 +86,6 @@ require (
 	github.com/go-stomp/stomp/v3 v3.0.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gobuffalo/pop/v6 v6.1.1 // indirect
-	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect

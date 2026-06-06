@@ -901,7 +901,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 	if newEntry {
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 	}
@@ -930,7 +930,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err := refreshTokenEntry(prefixEntry, tokenToRefresh, issuer); err != nil {
 			log.Warningln("Failed to renew an expired token:", err)
 		} else {
-			if err = config.SaveConfigContents(&osdfConfig); err != nil {
+			if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 				log.Warningln("Failed to save new token to configuration file:", err)
 			}
 			return tokenToRefresh.AccessToken, nil
@@ -964,7 +964,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
 		fc.OauthClient[prefixIdx] = *prefixEntry
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
@@ -990,7 +990,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	Tokens := &prefixEntry.Tokens
 	*Tokens = append(*Tokens, *token)
 
-	if err = config.SaveConfigContents(&osdfConfig); err != nil {
+	if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 		log.Warningln("Failed to save new token to configuration file:", err)
 	}
 
