@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -159,15 +160,10 @@ func acquireOAuthToken(ctx context.Context, issuerUrl string, scopes []string) (
 	}
 
 	var prefixEntry *config.PrefixEntry
-	prefixIdx := -1
 
-	// Look for existing credentials for this issuer
-	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == issuerUrl {
-			prefixIdx = idx
-			prefixEntry = &osdfConfig.OSDF.OauthClient[idx]
-			break
-		}
+	fc, prefixIdx := osdfConfig.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), issuerUrl)
+	if prefixIdx >= 0 {
+		prefixEntry = &fc.OauthClient[prefixIdx]
 	}
 
 	// If no credentials found, register a new client
@@ -195,18 +191,21 @@ func acquireOAuthToken(ctx context.Context, issuerUrl string, scopes []string) (
 		}
 
 		newEntry := config.PrefixEntry{
-			Prefix:       issuerUrl,
-			ClientID:     resp.ClientID,
-			ClientSecret: resp.ClientSecret,
+			Prefix: issuerUrl,
+			ClientRegistration: config.ClientRegistration{
+				ClientID:     resp.ClientID,
+				ClientSecret: resp.ClientSecret,
+				ClientScopes: scopes,
+			},
 		}
 
 		if prefixIdx < 0 {
 			// Add new entry
-			osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, newEntry)
-			prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+			fc.OauthClient = append(fc.OauthClient, newEntry)
+			prefixEntry = &fc.OauthClient[len(fc.OauthClient)-1]
 		} else {
 			// Update existing entry
-			osdfConfig.OSDF.OauthClient[prefixIdx] = newEntry
+			fc.OauthClient[prefixIdx] = newEntry
 			prefixEntry = &newEntry
 		}
 

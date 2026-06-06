@@ -203,18 +203,17 @@ func createPasswordlessCredentialFile(nsPrefix string) (string, error) {
 	}
 
 	// Filter to only include the entry for this prefix
+	fc, matchIdx := osdfConfig.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), nsPrefix)
 	var filtered []config.PrefixEntry
-	for _, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == nsPrefix {
-			filtered = append(filtered, entry)
-			break
-		}
+	if matchIdx >= 0 {
+		filtered = append(filtered, fc.OauthClient[matchIdx])
 	}
 	if len(filtered) == 0 {
 		return "", errors.Errorf("no credential entry found for prefix %s", nsPrefix)
 	}
 	filteredConfig := config.OSDFConfig{}
-	filteredConfig.OSDF.OauthClient = filtered
+	filteredFC := filteredConfig.EnsureFederationCredentials(param.Federation_DiscoveryUrl.GetString())
+	filteredFC.OauthClient = filtered
 
 	// Create a new file in the same directory as the main credential file,
 	// named after the prefix so each prefix gets its own file.
