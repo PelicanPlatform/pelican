@@ -34,6 +34,7 @@ const (
 	RegistryType
 	BrokerType
 	LocalCacheType
+	TransferType
 )
 
 // Set sets a list of newServers to ServerType instance
@@ -81,6 +82,8 @@ func (sType ServerType) String() string {
 		return "Registry"
 	case BrokerType:
 		return "Broker"
+	case TransferType:
+		return "Transfer"
 	}
 	return "Unknown"
 }
@@ -104,6 +107,9 @@ func (sType *ServerType) SetString(name string) bool {
 		return true
 	case "broker":
 		*sType |= BrokerType
+		return true
+	case "transfer":
+		*sType |= TransferType
 		return true
 	}
 	return false
