@@ -128,6 +128,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_oauth_clients_user_name
 CREATE TABLE IF NOT EXISTS transfer_jobs (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    -- Correlation ID for the in-memory client_agent job. The transfer server
+    -- runs its TransferManager with an in-memory store (no `jobs` rows are
+    -- persisted), so this is a plain reference column, not a foreign key.
     agent_job_id TEXT,
     source_credential_id TEXT,
     dest_credential_id TEXT,
@@ -137,7 +140,6 @@ CREATE TABLE IF NOT EXISTS transfer_jobs (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (agent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
     FOREIGN KEY (source_credential_id) REFERENCES transfer_credentials(id) ON DELETE SET NULL,
     FOREIGN KEY (dest_credential_id) REFERENCES transfer_credentials(id) ON DELETE SET NULL
 );

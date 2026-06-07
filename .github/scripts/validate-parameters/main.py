@@ -17,6 +17,7 @@ ENUMERATIONS = {
         "origin",
         "plugin",
         "registry",
+        "transfer",
     ],
     "type": [
         "bool",

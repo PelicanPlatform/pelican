@@ -24,7 +24,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
@@ -197,27 +196,6 @@ func handleDeleteOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "OAuth2 client deleted"})
 	}
-}
-
-// getDecryptedOAuthClient retrieves an OAuth2 client, decrypting the credentials
-func getDecryptedOAuthClient(db *gorm.DB, clientID string, owner ownerIdentity) (clientIDVal string, clientSecret string, issuerURL string, err error) {
-	var client TransferOAuthClient
-	if err = db.Where("id = ? AND user_id = ?",
-		clientID, owner.UserID).First(&client).Error; err != nil {
-		return "", "", "", errors.Wrap(err, "failed to find OAuth2 client")
-	}
-
-	clientIDVal, err = decryptSecret(client.EncryptedClientID)
-	if err != nil {
-		return "", "", "", errors.Wrap(err, "failed to decrypt client ID")
-	}
-
-	clientSecret, err = decryptSecret(client.EncryptedClientSecret)
-	if err != nil {
-		return "", "", "", errors.Wrap(err, "failed to decrypt client secret")
-	}
-
-	return clientIDVal, clientSecret, client.IssuerURL, nil
 }
 
 func oauthClientToResponse(client *TransferOAuthClient) *OAuthClientResponse {

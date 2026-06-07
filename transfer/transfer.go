@@ -110,12 +110,11 @@ func registerTransferRoutes(ctx context.Context, engine *gin.Engine, egrp *errgr
 	publicGroup := engine.Group("/api/v1.0/transfer", web_ui.ServerHeaderMiddleware)
 	{
 		publicGroup.GET("/ping", handlePing())
-		publicGroup.GET("/auth-methods", handleGetAuthMethods(db))
 	}
 
 	// Shared OAuth2 callback endpoint — multiple modules can register
 	// handlers here, dispatched by state-parameter prefix.
-	callbackGroup := engine.Group("/api/callback", web_ui.ServerHeaderMiddleware)
+	callbackGroup := engine.Group(SharedCallbackPath, web_ui.ServerHeaderMiddleware)
 	{
 		callbackGroup.GET("", HandleSharedCallback(db))
 		callbackGroup.GET("/start/:code", handleStartRedirect())
@@ -125,6 +124,11 @@ func registerTransferRoutes(ctx context.Context, engine *gin.Engine, egrp *errgr
 	transferGroup := engine.Group("/api/v1.0/transfer", web_ui.ServerHeaderMiddleware)
 	transferGroup.Use(TransferAuthMiddleware(db))
 	{
+		// Credential bootstrap discovery. Authenticated (and gated to
+		// registered issuers) because it triggers a server-side fetch of a
+		// user-supplied issuer URL.
+		transferGroup.GET("/auth-methods", handleGetAuthMethods(db))
+
 		// Credential management
 		transferGroup.POST("/credentials", handleCreateCredential(db))
 		transferGroup.GET("/credentials", handleListCredentials(db))
