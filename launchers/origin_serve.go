@@ -32,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
@@ -381,6 +382,32 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
 
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
+	}
+
+	// Register a server-level "local" issuer for the transfer API. Its tokens
+	// carry iss = config.GetLocalIssuerUrl() and the (group-gated)
+	// pelican.transfer scope, so the transfer middleware's LocalIssuer check
+	// accepts them. This is independent of any data-export namespace, so a
+	// transfer-enabled origin can authenticate the CLI even with only public
+	// exports.
+	if param.Origin_EnableTransferAPI.GetBool() {
+		localIssuerURL := config.GetLocalIssuerUrl()
+		localProvider, lpErr := issuer.NewOIDCProvider(database.ServerDatabase, localIssuerURL, gracePeriod, issuer.TransferIssuerNamespace)
+		if lpErr != nil {
+			return errors.Wrap(lpErr, "failed to create local issuer provider for the transfer API")
+		}
+		registry.Register(issuer.TransferIssuerNamespace, localProvider)
+
+		unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+		if unusedTimeout == 0 {
+			unusedTimeout = 1 * time.Hour
+		}
+		staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+		if staleTimeout == 0 {
+			staleTimeout = 336 * time.Hour
+		}
+		localProvider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+		log.Infof("Embedded OIDC issuer: registered local transfer issuer (iss=%s)", localIssuerURL)
 	}
 
 	if registry.First() == nil {

@@ -76,8 +76,10 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 		entry = &fc.TransferServers[tsIdx]
 	}
 
-	// Get the transfer server's issuer metadata (its own OIDC endpoint)
-	issuerURL := serverURL
+	// Discover the server's local issuer (which mints pelican.transfer tokens)
+	// from the transfer ping endpoint, then fetch its OIDC metadata. Older
+	// servers that don't advertise an issuer fall back to the server URL.
+	issuerURL := discoverTransferIssuer(ctx, serverURL)
 	issuerMeta, err := config.GetIssuerMetadata(issuerURL)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to get transfer server's issuer metadata")
@@ -209,9 +211,37 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 	return token.AccessToken, entry, nil
 }
 
+// discoverTransferIssuer asks the transfer server's ping endpoint for the URL
+// of the local issuer that mints pelican.transfer tokens. It falls back to the
+// server URL itself for older servers that do not advertise an issuer.
+func discoverTransferIssuer(ctx context.Context, serverURL string) string {
+	client := &http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		normalizeServerURL(serverURL)+"/api/v1.0/transfer/ping", nil)
+	if err != nil {
+		return serverURL
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return serverURL
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return serverURL
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var ping struct {
+		Issuer string `json:"issuer"`
+	}
+	if err := json.Unmarshal(body, &ping); err != nil || ping.Issuer == "" {
+		return serverURL
+	}
+	return ping.Issuer
+}
+
 // queryAuthMethods asks the transfer server what credential-bootstrap flows
 // it supports for the given issuer.
-func queryAuthMethods(ctx context.Context, serverURL, issuerURL string) ([]string, error) {
+func queryAuthMethods(ctx context.Context, serverURL, bearerToken, issuerURL string) ([]string, error) {
 	transport := config.GetTransport()
 	client := &http.Client{Transport: transport}
 
@@ -227,6 +257,7 @@ func queryAuthMethods(ctx context.Context, serverURL, issuerURL string) ([]strin
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -294,14 +325,19 @@ func bootstrapCredentialViaTokenExchange(ctx context.Context, serverURL, bearerT
 // bootstrapCredentialViaAuthCode bootstraps a credential using the
 // authorization code flow: the server returns a URL, the user visits it, and
 // the CLI polls for completion.
-func bootstrapCredentialViaAuthCode(ctx context.Context, serverURL, bearerToken, issuerURL, credName string) (string, error) {
+func bootstrapCredentialViaAuthCode(ctx context.Context, serverURL, bearerToken, issuerURL, credName string, scopes []string) (string, error) {
 	transport := config.GetTransport()
 	client := &http.Client{Transport: transport}
 
-	// Start the auth code session
+	// Start the auth code session. Request the storage scopes the credential
+	// needs (e.g. storage.read for the source); without them the issuer only
+	// grants offline_access and the data movement is unauthorized.
 	reqBody := map[string]string{
 		"issuer_url": issuerURL,
 		"name":       credName,
+	}
+	if len(scopes) > 0 {
+		reqBody["scopes"] = strings.Join(scopes, " ")
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -396,7 +432,7 @@ func bootstrapCredentialViaAuthCode(ctx context.Context, serverURL, bearerToken,
 // storage scopes the credential should be bootstrapped with (e.g.
 // "storage.read:/", "storage.modify:/").
 func bootstrapCredential(ctx context.Context, serverURL, bearerToken, issuerURL, credName string, scopes []string) (string, error) {
-	methods, err := queryAuthMethods(ctx, serverURL, issuerURL)
+	methods, err := queryAuthMethods(ctx, serverURL, bearerToken, issuerURL)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to query auth methods")
 	}
@@ -406,7 +442,7 @@ func bootstrapCredential(ctx context.Context, serverURL, bearerToken, issuerURL,
 	// Try authorization_code first (preferred — the server handles the full
 	// OAuth flow so the user just clicks a link)
 	if slices.Contains(methods, "authorization_code") {
-		credID, err := bootstrapCredentialViaAuthCode(ctx, serverURL, bearerToken, issuerURL, credName)
+		credID, err := bootstrapCredentialViaAuthCode(ctx, serverURL, bearerToken, issuerURL, credName, scopes)
 		if err == nil {
 			return credID, nil
 		}

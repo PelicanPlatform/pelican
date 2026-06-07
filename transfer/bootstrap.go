@@ -143,8 +143,10 @@ const callbackStatePrefix = "xfer:"
 
 // SharedCallbackPath is the unified OAuth2 callback endpoint that multiple
 // modules can share. The state parameter's prefix determines which handler
-// processes the callback.
-const SharedCallbackPath = "/api/callback"
+// processes the callback. It lives under /api/v1.0/ so that a co-located
+// director's ShortcutMiddleware (which treats non-/api/v1.0 paths as object
+// requests) routes it to the handler instead of object resolution.
+const SharedCallbackPath = "/api/v1.0/callback"
 
 func (c *issuerMetadataCache) get(issuerURL string) (*config.OauthIssuer, error) {
 	c.mu.RLock()
@@ -154,7 +156,10 @@ func (c *issuerMetadataCache) get(issuerURL string) (*config.OauthIssuer, error)
 		return entry.metadata, nil
 	}
 
-	meta, err := config.GetIssuerMetadata(issuerURL)
+	// Fetch through the SSRF-resistant transport: issuerURL is user-supplied,
+	// so this prevents the metadata fetch from reaching loopback, link-local,
+	// or private (RFC 1918) addresses.
+	meta, err := config.GetIssuerMetadataWithClient(issuerURL, &http.Client{Transport: config.GetSSRFHttpTransport()})
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +314,10 @@ func scopesContainAll(haystack, needles []string) bool {
 }
 
 // handleGetAuthMethods handles GET /api/v1.0/transfer/auth-methods
-// This endpoint is intentionally unauthenticated so the CLI can discover
-// supported flows before authenticating.
+// It reports which credential-bootstrap flows the server can perform for a
+// given issuer. It is authenticated (it triggers a server-side fetch of a
+// user-supplied issuer URL) and only contacts issuers that already have a
+// registered OAuth client, so it cannot be used to fetch arbitrary URLs.
 func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		issuerURL := c.Query("issuer")
@@ -318,6 +325,28 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, ErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "issuer query parameter is required",
+			})
+			return
+		}
+
+		// SSRF allow-list: only contact issuers that already have a registered
+		// OAuth client. Server-assisted bootstrap (token-exchange,
+		// authorization-code) requires such a client anyway, so this loses no
+		// functionality while preventing the metadata fetch from being aimed at
+		// an arbitrary URL. device_code is discoverable by the CLI directly
+		// against the issuer and does not need a server-side fetch.
+		var clientCount int64
+		if err := db.Model(&TransferOAuthClient{}).Where("issuer_url = ?", issuerURL).Count(&clientCount).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  "INTERNAL",
+				Error: "Failed to look up OAuth clients",
+			})
+			return
+		}
+		if clientCount == 0 {
+			c.JSON(http.StatusOK, AuthMethodsResponse{
+				Issuer:  issuerURL,
+				Methods: []string{},
 			})
 			return
 		}
@@ -438,10 +467,10 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Perform RFC 8693 token exchange
-		// Inject the Pelican HTTP transport so the exchange uses the server's TLS config.
+		// Perform RFC 8693 token exchange. Use the SSRF-resistant transport:
+		// the token endpoint comes from the (user-supplied) issuer's metadata.
 		tokenExchangeCtx := context.WithValue(c.Request.Context(), pelican_oauth2.HTTPClient, &http.Client{
-			Transport: config.GetTransport(),
+			Transport: config.GetSSRFHttpTransport(),
 		})
 		exchangedToken, err := performTokenExchange(tokenExchangeCtx, issuerMeta.TokenURL, clientID, clientSecret, req.SubjectToken, req.Scopes)
 		if err != nil {
@@ -725,10 +754,10 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	serverBase := param.Server_ExternalWebUrl.GetString()
 	redirectURI := serverBase + SharedCallbackPath
 
-	// Inject the Pelican HTTP transport so the token exchange uses the
-	// server's TLS configuration (e.g. TLSSkipVerify in dev/test).
+	// Use the SSRF-resistant transport: the token endpoint comes from the
+	// (user-supplied) issuer's metadata document.
 	tokenCtx := context.WithValue(c.Request.Context(), pelican_oauth2.HTTPClient, &http.Client{
-		Transport: config.GetTransport(),
+		Transport: config.GetSSRFHttpTransport(),
 	})
 	token, err := exchangeCodeForToken(tokenCtx, issuerMeta.TokenURL, clientID, clientSecret, code, redirectURI)
 	if err != nil {
@@ -949,9 +978,4 @@ func LaunchBootstrapSessionCleanup(ctx context.Context, egrp *errgroup.Group) {
 			}
 		}
 	})
-}
-
-// trimTrailingSlash is a helper that normalizes URLs.
-func trimTrailingSlash(s string) string {
-	return strings.TrimRight(s, "/")
 }

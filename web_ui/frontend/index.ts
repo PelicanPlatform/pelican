@@ -8,7 +8,12 @@ export interface User {
   csrfToken?: string;
 }
 
-export type ServerType = 'registry' | 'director' | 'origin' | 'cache' | 'transfer';
+export type ServerType =
+  | 'registry'
+  | 'director'
+  | 'origin'
+  | 'cache'
+  | 'transfer';
 
 export interface Server {
   name: string;

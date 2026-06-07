@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,6 +66,15 @@ var (
 	buildErr error
 )
 
+// deviceApproval carries an intercepted device user_code together with the
+// issuer namespace it belongs to, so the test approves it against the correct
+// embedded-issuer provider (e.g. /.transfer for transfer-auth, /data for the
+// storage token-exchange flow).
+type deviceApproval struct {
+	userCode  string
+	namespace string
+}
+
 // getPelicanBinary builds the pelican binary once and returns its path.
 func getPelicanBinary(t *testing.T) string {
 	t.Helper()
@@ -81,7 +91,10 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
+		// The cmd package is gated behind the client/server build tags; build the
+		// client-flavored binary (matching the real `pelican` binary) so the
+		// object/transfer subcommands are present.
+		buildCmd := exec.Command("go", "build", "-tags", "client", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
 		buildCmd.Env = os.Environ()
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
@@ -199,7 +212,7 @@ Transfer:
 
 // setupFedForTransferTPC starts a federation with the transfer API enabled and
 // creates users for authentication.
-func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, testUserPassword string, dataDir string) {
+func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, adminPassword, testUserPassword string, dataDir string) {
 	t.Helper()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -207,7 +220,7 @@ func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, testUserP
 
 	htpasswdDir := t.TempDir()
 	htpasswdFile := filepath.Join(htpasswdDir, "htpasswd")
-	adminPassword := randomString(16)
+	adminPassword = randomString(16)
 	testUserPassword = randomString(16)
 
 	adminHash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
@@ -218,6 +231,9 @@ func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, testUserP
 	htpasswdContent := fmt.Sprintf("admin:%s\ntestuser:%s\n", string(adminHash), string(testUserHash))
 	require.NoError(t, os.WriteFile(htpasswdFile, []byte(htpasswdContent), 0600))
 	require.NoError(t, param.Set(param.Server_UIPasswordFile, htpasswdFile))
+	// The flow performs several web-UI logins (admin setup plus the simulated
+	// device-code approvals); raise the rate limit so they are not throttled (429).
+	require.NoError(t, param.Set(param.Server_UILoginRateLimit, 100))
 
 	groupFileDir := t.TempDir()
 	groupFilePath := filepath.Join(groupFileDir, "groups.json")
@@ -238,12 +254,25 @@ func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, testUserP
 
 // createIssuerOAuthClient creates a token-exchange-enabled OIDC client on the
 // embedded issuer's admin API.  Returns (clientID, clientSecret).
-func createIssuerOAuthClient(t *testing.T, serverURL, namespace string) (string, string) {
+func createIssuerOAuthClient(t *testing.T, serverURL, adminPassword, namespace string) (string, string) {
 	t.Helper()
 
-	httpClient := &http.Client{Transport: config.GetTransport()}
+	// The issuer admin API requires an authenticated admin session. Log in as
+	// the "admin" htpasswd user (CheckAdmin grants admin to that username) and
+	// reuse the resulting login cookie on the admin request.
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	httpClient := &http.Client{Transport: config.GetTransport(), Jar: jar}
 
-	callbackURL := fmt.Sprintf("%s/api/callback", serverURL)
+	loginResp, err := httpClient.PostForm(serverURL+"/api/v1.0/auth/login",
+		url.Values{"user": {"admin"}, "password": {adminPassword}})
+	require.NoError(t, err)
+	loginBody, _ := io.ReadAll(loginResp.Body)
+	loginResp.Body.Close()
+	require.Equal(t, http.StatusOK, loginResp.StatusCode,
+		"Admin login failed: %s", string(loginBody))
+
+	callbackURL := fmt.Sprintf("%s/api/v1.0/callback", serverURL)
 	payload, _ := json.Marshal(map[string]interface{}{
 		"grant_types": []string{
 			"urn:ietf:params:oauth:grant-type:token-exchange",
@@ -257,7 +286,7 @@ func createIssuerOAuthClient(t *testing.T, serverURL, namespace string) (string,
 		},
 	})
 
-	adminURL := fmt.Sprintf("%s/api/v1.0/issuer/ns%s/admin/clients", serverURL, namespace)
+	adminURL := fmt.Sprintf("%s/api/v1.0/issuer/admin/ns%s/clients", serverURL, namespace)
 	resp, err := httpClient.Post(adminURL, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -289,6 +318,9 @@ func registerOAuthClientOnTransferServer(t *testing.T, serverURL, bearerToken, i
 		"issuer_url":    issuerURL,
 		"client_id":     clientID,
 		"client_secret": clientSecret,
+		// grant_types must be populated so findOAuthClientForGrant can match
+		// the client to a bootstrap flow (space-separated, per the API).
+		"grant_types": "urn:ietf:params:oauth:grant-type:token-exchange authorization_code refresh_token",
 	})
 
 	apiURL := serverURL + "/api/v1.0/transfer/oauth-clients"
@@ -363,6 +395,20 @@ func simulateAuthCodeApproval(t *testing.T, serverURL, authorizeURL, password st
 		},
 	}
 
+	// Step 0: If given the auth-code bootstrap start URL, follow its single
+	// redirect to obtain the real issuer /authorize URL.
+	if strings.Contains(authorizeURL, "/api/v1.0/callback/start/") {
+		resp, err := browserClient.Get(authorizeURL)
+		require.NoError(t, err)
+		_, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.Equal(t, http.StatusFound, resp.StatusCode,
+			"Start URL should redirect to the issuer authorize URL")
+		authorizeURL = resp.Header.Get("Location")
+		require.NotEmpty(t, authorizeURL, "Start redirect should include a Location header")
+		t.Logf("Auth code: resolved start URL to authorize URL: %s", authorizeURL)
+	}
+
 	// Step 1: GET the authorize URL while unauthenticated → redirect to login.
 	resp, err := browserClient.Get(authorizeURL)
 	require.NoError(t, err)
@@ -431,7 +477,7 @@ func simulateAuthCodeApproval(t *testing.T, serverURL, authorizeURL, password st
 //  5. Monitors stdout+stderr for device-code verification URLs and approves them
 //  6. Verifies the destination file exists with correct content
 func TestTransferTPCViaOriginE2E(t *testing.T) {
-	ft, testUserPassword, _ := setupFedForTransferTPC(t)
+	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t)
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	hostname := param.Server_Hostname.GetString()
@@ -462,7 +508,7 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 
 	// ---- Step 2: Create issuer OAuth client for token exchange ----
 	nsIssuerURL := serverURL + "/api/v1.0/issuer/ns/data"
-	issuerClientID, issuerClientSecret := createIssuerOAuthClient(t, serverURL, "/data")
+	issuerClientID, issuerClientSecret := createIssuerOAuthClient(t, serverURL, adminPassword, "/data")
 
 	// ---- Step 3: Register the issuer client on the transfer server ----
 	transferToken := generateTransferScopeToken(t)
@@ -472,7 +518,10 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 	{
 		httpClient := &http.Client{Transport: config.GetTransport()}
 		authMethodsURL := fmt.Sprintf("%s/api/v1.0/transfer/auth-methods?issuer=%s", serverURL, nsIssuerURL)
-		resp, err := httpClient.Get(authMethodsURL)
+		authMethodsReq, err := http.NewRequest(http.MethodGet, authMethodsURL, nil)
+		require.NoError(t, err)
+		authMethodsReq.Header.Set("Authorization", "Bearer "+transferToken)
+		resp, err := httpClient.Do(authMethodsReq)
 		require.NoError(t, err)
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -501,6 +550,7 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 
 	cmd := exec.Command(cliPath, "object", "copy",
 		"--transfer-server", serverURL,
+		"--wait",
 		srcURLDirect, dstURL,
 	)
 	cmd.Env = append(os.Environ(),
@@ -529,10 +579,13 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 	// and authorization code URLs.
 	// Transfer bootstrap prints to stdout (fmt.Printf), while the oauth2
 	// library prints to stderr.
-	userCodeCh := make(chan string, 8)
+	userCodeCh := make(chan deviceApproval, 8)
 	authURLCh := make(chan string, 4)
 	userCodeRe := regexp.MustCompile(`user_code=([A-Z0-9-]+)`)
-	authURLRe := regexp.MustCompile(`(https://[^\s]+/authorize\?[^\s]+)`)
+	namespaceRe := regexp.MustCompile(`namespace=([^&\s]+)`)
+	// Match either a direct issuer /authorize URL or the transfer server's
+	// auth-code bootstrap start URL (which 302-redirects to /authorize).
+	authURLRe := regexp.MustCompile(`(https://[^\s]+/(?:authorize\?|api/v1.0/callback/start/)[^\s]+)`)
 
 	scanAndExtract := func(name string, reader io.Reader) {
 		scanner := bufio.NewScanner(reader)
@@ -540,8 +593,17 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 			line := scanner.Text()
 			t.Logf("CLI %s: %s", name, line)
 			if matches := userCodeRe.FindStringSubmatch(line); len(matches) > 1 {
-				t.Logf("Intercepted user_code from %s: %s", name, matches[1])
-				userCodeCh <- matches[1]
+				// The device URL on the same line carries the issuer namespace
+				// (e.g. namespace=%2F.transfer for the transfer-auth flow or
+				// namespace=%2Fdata for the storage token-exchange flow).
+				namespace := "/data"
+				if nsMatch := namespaceRe.FindStringSubmatch(line); len(nsMatch) > 1 {
+					if decoded, derr := url.QueryUnescape(nsMatch[1]); derr == nil {
+						namespace = decoded
+					}
+				}
+				t.Logf("Intercepted user_code from %s: %s (namespace=%s)", name, matches[1], namespace)
+				userCodeCh <- deviceApproval{userCode: matches[1], namespace: namespace}
 			}
 			if matches := authURLRe.FindStringSubmatch(line); len(matches) > 1 {
 				t.Logf("Intercepted authorize URL from %s: %s", name, matches[1])
@@ -568,8 +630,8 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 				goto done
 			}
 			approvedCount++
-			t.Logf("Approving user_code #%d: %s", approvedCount, code)
-			simulateUserApproval(t, serverURL, "/data", code, testUserPassword)
+			t.Logf("Approving user_code #%d: %s (namespace=%s)", approvedCount, code.userCode, code.namespace)
+			simulateUserApproval(t, serverURL, code.namespace, code.userCode, testUserPassword)
 		case authURL, ok := <-authURLCh:
 			if !ok {
 				goto done
@@ -588,8 +650,8 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 						break drainLoop
 					}
 					approvedCount++
-					t.Logf("Approving late user_code #%d: %s", approvedCount, code)
-					simulateUserApproval(t, serverURL, "/data", code, testUserPassword)
+					t.Logf("Approving late user_code #%d: %s (namespace=%s)", approvedCount, code.userCode, code.namespace)
+					simulateUserApproval(t, serverURL, code.namespace, code.userCode, testUserPassword)
 				case authURL, ok := <-authURLCh:
 					if !ok {
 						break drainLoop
@@ -647,7 +709,7 @@ done:
 //  6. Submit a transfer job
 //  7. Poll until completion and verify the destination file
 func TestTransferTPCDirectCredentialE2E(t *testing.T) {
-	ft, testUserPassword, _ := setupFedForTransferTPC(t)
+	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t)
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	hostname := param.Server_Hostname.GetString()
@@ -673,7 +735,7 @@ func TestTransferTPCDirectCredentialE2E(t *testing.T) {
 
 	// ---- Step 2: Create issuer OAuth client ----
 	nsIssuerURL := serverURL + "/api/v1.0/issuer/ns/data"
-	issuerClientID, issuerClientSecret := createIssuerOAuthClient(t, serverURL, "/data")
+	issuerClientID, issuerClientSecret := createIssuerOAuthClient(t, serverURL, adminPassword, "/data")
 
 	// ---- Step 3: Register on transfer server ----
 	transferToken := generateTransferScopeToken(t)

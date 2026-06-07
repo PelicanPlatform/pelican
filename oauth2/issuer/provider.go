@@ -62,6 +62,12 @@ type OIDCProvider struct {
 	// provider is scoped to.
 	Namespace string
 
+	// IssuerURL is the canonical issuer identifier (the "iss" claim) for tokens
+	// minted by this provider, and the base for its OIDC discovery document.
+	// For per-namespace data issuers this is IssuerURLForNamespace(Namespace);
+	// for the server-level transfer issuer it is config.GetLocalIssuerUrl().
+	IssuerURL string
+
 	// AuthzRules holds per-namespace compiled authorization templates.
 	// When set, these are used instead of the global rules from
 	// oa4mp.InitAuthzRules().
@@ -183,6 +189,7 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		strategy:            strategy,
 		privateKey:          privateKey,
 		Namespace:           namespace,
+		IssuerURL:           issuerURL,
 		DeviceCodeHandler:   deviceHandler,
 		RegistrationLimiter: regLimiter,
 	}, nil
@@ -435,6 +442,16 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 // compiled by oa4mp.InitAuthzRules().
 func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
+}
+
+// Issuer returns the canonical issuer URL ("iss" claim / discovery base) for
+// this provider.  It prefers the explicitly-configured IssuerURL and falls
+// back to the per-namespace URL for providers constructed without one.
+func (p *OIDCProvider) Issuer() string {
+	if p.IssuerURL != "" {
+		return p.IssuerURL
+	}
+	return IssuerURLForNamespace(p.Namespace)
 }
 
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
