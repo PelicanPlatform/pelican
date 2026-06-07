@@ -98,13 +98,14 @@ func TestParseObjectMetadataHeader_InnerListRejected(t *testing.T) {
 }
 
 // TestParseObjectMetadataHeader_RoundTripFromClient confirms that
-// the SFV string the *client* emits (via client.BuildObjectMetadataHeader)
-// is exactly what the origin-side parser accepts. This is the wire
-// contract; we test it directly by hand-coding the format the client
-// produces today and ensuring both ends agree.
+// the SFV string the *client* emits (via the client package's
+// internal buildObjectMetadataHeader) is exactly what the origin-
+// side parser accepts. This is the wire contract; we test it
+// directly by hand-coding the format the client produces today and
+// ensuring both ends agree.
 func TestParseObjectMetadataHeader_RoundTripFromClient(t *testing.T) {
 	// This is the deterministic output of
-	// client.BuildObjectMetadataHeader for the given inputs (covered
+	// client.buildObjectMetadataHeader for the given inputs (covered
 	// by client/object_metadata_test.go::TestBuildObjectMetadataHeader_RoundTrip).
 	hdr := `experiment="atlas", is_test=?0, run_number=4172, weight=3.14`
 	got, err := ParseObjectMetadataHeader(hdr)

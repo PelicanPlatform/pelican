@@ -415,6 +415,7 @@ type (
 	identTransferOptionCacheEmbeddedClientMode  struct{}
 	identTransferOptionRequestId                struct{}
 	identTransferOptionObjectMetadata           struct{}
+	identTransferOptionObjectMetadataFile       struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -929,6 +930,22 @@ func WithRequireChecksum() TransferOption {
 // every transferFile produced by a recursive upload.
 func WithObjectMetadata(fields map[string]any) TransferOption {
 	return option.New(identTransferOptionObjectMetadata{}, fields)
+}
+
+// WithObjectMetadataFile is the file-shaped sibling of WithObjectMetadata.
+// The supplied path must point to a JSON object whose top-level keys
+// are scalar (string / number / boolean) values. The file is read
+// and validated lazily inside NewTransferJob's option-apply pass,
+// so a malformed file or unreadable path surfaces as an error from
+// NewTransferJob (and therefore from DoPut) rather than at upload
+// time. The same reserved-key rules and value-type restrictions
+// described on WithObjectMetadata apply.
+//
+// If both WithObjectMetadata and WithObjectMetadataFile are supplied,
+// later options win — matching the option-application order used by
+// every other With…() helper here.
+func WithObjectMetadataFile(path string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataFile{}, path)
 }
 
 // Create an option to specify the token acquisition logic
@@ -1648,6 +1665,14 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.requestId = option.Value().(string)
 		case identTransferOptionObjectMetadata{}:
 			tj.objectMetadata = option.Value().(map[string]any)
+		case identTransferOptionObjectMetadataFile{}:
+			path := option.Value().(string)
+			fields, ferr := loadObjectMetadataFile(path)
+			if ferr != nil {
+				err = errors.Wrap(ferr, "WithObjectMetadataFile")
+				return
+			}
+			tj.objectMetadata = fields
 		}
 	}
 
@@ -4363,10 +4388,10 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// If the caller supplied uploader metadata, render it into the
 	// origin-side X-Pelican-Object-Metadata Structured Fields
 	// header. We've already validated values during option parsing
-	// (see WithObjectMetadata + LoadObjectMetadataFile), so an
+	// (see WithObjectMetadata + WithObjectMetadataFile), so an
 	// error here means a programmer bug, not a user-input problem.
 	if len(transfer.objectMetadata) > 0 {
-		hdrVal, hdrErr := BuildObjectMetadataHeader(transfer.objectMetadata)
+		hdrVal, hdrErr := buildObjectMetadataHeader(transfer.objectMetadata)
 		if hdrErr != nil {
 			log.Errorln("Failed to render X-Pelican-Object-Metadata header:", hdrErr)
 			transferResult.Error = hdrErr

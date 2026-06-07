@@ -26,7 +26,7 @@ import (
 )
 
 func TestParseObjectMetadataJSON_Primitives(t *testing.T) {
-	got, err := ParseObjectMetadataJSON([]byte(`{
+	got, err := parseObjectMetadataJSON([]byte(`{
 		"experiment": "atlas",
 		"run_number": 4172,
 		"weight": 3.14,
@@ -52,7 +52,7 @@ func TestParseObjectMetadataJSON_Primitives(t *testing.T) {
 func TestParseObjectMetadataJSON_RejectsReservedKeys(t *testing.T) {
 	for _, k := range ReservedObjectMetadataKeys {
 		body := []byte(`{"` + k + `": "x"}`)
-		if _, err := ParseObjectMetadataJSON(body); err == nil {
+		if _, err := parseObjectMetadataJSON(body); err == nil {
 			t.Fatalf("reserved key %q should have been rejected", k)
 		}
 	}
@@ -65,7 +65,7 @@ func TestParseObjectMetadataJSON_RejectsNested(t *testing.T) {
 		`{"x": null}`,
 	}
 	for _, c := range cases {
-		if _, err := ParseObjectMetadataJSON([]byte(c)); err == nil {
+		if _, err := parseObjectMetadataJSON([]byte(c)); err == nil {
 			t.Fatalf("expected rejection of %q", c)
 		}
 	}
@@ -73,20 +73,20 @@ func TestParseObjectMetadataJSON_RejectsNested(t *testing.T) {
 
 func TestParseObjectMetadataJSON_RejectsTopLevelNonObject(t *testing.T) {
 	for _, c := range []string{`["a", "b"]`, `"just a string"`, `42`} {
-		if _, err := ParseObjectMetadataJSON([]byte(c)); err == nil {
+		if _, err := parseObjectMetadataJSON([]byte(c)); err == nil {
 			t.Fatalf("expected rejection of top-level %q", c)
 		}
 	}
 }
 
 func TestParseObjectMetadataJSON_Malformed(t *testing.T) {
-	if _, err := ParseObjectMetadataJSON([]byte(`{not valid`)); err == nil {
+	if _, err := parseObjectMetadataJSON([]byte(`{not valid`)); err == nil {
 		t.Fatal("expected JSON parse error")
 	}
 }
 
 func TestBuildObjectMetadataHeader_RoundTrip(t *testing.T) {
-	got, err := BuildObjectMetadataHeader(map[string]any{
+	got, err := buildObjectMetadataHeader(map[string]any{
 		"experiment": "atlas",
 		"run_number": int64(4172),
 		"weight":     3.14,
@@ -104,7 +104,7 @@ func TestBuildObjectMetadataHeader_RoundTrip(t *testing.T) {
 }
 
 func TestBuildObjectMetadataHeader_EmptyMap(t *testing.T) {
-	got, err := BuildObjectMetadataHeader(nil)
+	got, err := buildObjectMetadataHeader(nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestBuildObjectMetadataHeader_EmptyMap(t *testing.T) {
 }
 
 func TestBuildObjectMetadataHeader_AcceptsIntAndFloat(t *testing.T) {
-	got, err := BuildObjectMetadataHeader(map[string]any{
+	got, err := buildObjectMetadataHeader(map[string]any{
 		"a": int(7),
 		"b": int64(99),
 		"c": float64(0.5),
@@ -133,7 +133,7 @@ func TestLoadObjectMetadataFile_HappyPath(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"experiment":"atlas","run":4172}`), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := LoadObjectMetadataFile(path)
+	got, err := loadObjectMetadataFile(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -143,13 +143,27 @@ func TestLoadObjectMetadataFile_HappyPath(t *testing.T) {
 }
 
 func TestLoadObjectMetadataFile_MissingFile(t *testing.T) {
-	if _, err := LoadObjectMetadataFile("/no/such/file.json"); err == nil {
+	if _, err := loadObjectMetadataFile("/no/such/file.json"); err == nil {
 		t.Fatal("expected error for missing file")
 	}
 }
 
 func TestLoadObjectMetadataFile_EmptyPath(t *testing.T) {
-	if _, err := LoadObjectMetadataFile(""); err == nil {
+	if _, err := loadObjectMetadataFile(""); err == nil {
 		t.Fatal("expected error for empty path")
+	}
+}
+
+// TestWithObjectMetadataFile_OptionConstructionShape sanity-checks
+// that the option carries the path verbatim. It's the cheapest
+// regression cover against accidentally swapping the ident or value
+// type when more options are added.
+func TestWithObjectMetadataFile_OptionConstructionShape(t *testing.T) {
+	opt := WithObjectMetadataFile("/some/path.json")
+	if _, ok := opt.Ident().(identTransferOptionObjectMetadataFile); !ok {
+		t.Fatalf("Ident type = %T, want identTransferOptionObjectMetadataFile", opt.Ident())
+	}
+	if got, ok := opt.Value().(string); !ok || got != "/some/path.json" {
+		t.Fatalf("Value = %#v, want \"/some/path.json\"", opt.Value())
 	}
 }
