@@ -47,11 +47,15 @@ const ObjectMetadataHeaderName = "X-Pelican-Object-Metadata"
 // error rather than a silent server-side drop.
 var ReservedObjectMetadataKeys = []string{"path", "size", "etag", "created_at"}
 
-// LoadObjectMetadataFile reads and validates the JSON file at the
+// loadObjectMetadataFile reads and validates the JSON file at the
 // supplied path. Returns the parsed map. Errors out cleanly on
 // reserved keys, nested structures, or non-scalar values so the user
 // finds out before the upload starts.
-func LoadObjectMetadataFile(path string) (map[string]any, error) {
+//
+// This is a package-private helper. Public callers should use the
+// WithObjectMetadataFile transfer option, which dispatches here as
+// part of NewTransferJob's option-apply pass.
+func loadObjectMetadataFile(path string) (map[string]any, error) {
 	if path == "" {
 		return nil, errors.New("metadata file path is empty")
 	}
@@ -59,15 +63,15 @@ func LoadObjectMetadataFile(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "reading metadata file %q", path)
 	}
-	return ParseObjectMetadataJSON(raw)
+	return parseObjectMetadataJSON(raw)
 }
 
-// ParseObjectMetadataJSON parses a single JSON object into the
+// parseObjectMetadataJSON parses a single JSON object into the
 // scalar-only map[string]any the upload header carries. We use
 // json.Decoder with UseNumber so integers stay distinct from floats
 // — the origin's SFV parser preserves typed values, and "the user
 // wrote 4172, not 4172.0" survives end to end.
-func ParseObjectMetadataJSON(data []byte) (map[string]any, error) {
+func parseObjectMetadataJSON(data []byte) (map[string]any, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var top any
@@ -135,11 +139,11 @@ func coerceJSONScalar(v any) (any, error) {
 	}
 }
 
-// BuildObjectMetadataHeader renders the supplied map as an RFC 9651
+// buildObjectMetadataHeader renders the supplied map as an RFC 9651
 // Structured Fields dictionary, suitable for use as the value of
 // X-Pelican-Object-Metadata. Returns ("", nil) for an empty/nil
 // input so callers can omit the header entirely.
-func BuildObjectMetadataHeader(fields map[string]any) (string, error) {
+func buildObjectMetadataHeader(fields map[string]any) (string, error) {
 	if len(fields) == 0 {
 		return "", nil
 	}
