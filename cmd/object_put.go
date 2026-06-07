@@ -364,16 +364,12 @@ func putMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	// Optional uploader-supplied metadata file: parse early so we
-	// fail before kicking off any network I/O if the JSON is bad or
-	// uses reserved keys.
+	// Optional uploader-supplied metadata file. The option lazily
+	// loads + validates the file inside NewTransferJob's option-
+	// apply pass, so any malformed JSON / reserved-key violation
+	// surfaces as an error from DoPut before any network I/O.
 	if metadataFile, _ := cmd.Flags().GetString("metadata-file"); metadataFile != "" {
-		fields, err := client.LoadObjectMetadataFile(metadataFile)
-		if err != nil {
-			log.Errorln("Failed to load --metadata-file:", err)
-			os.Exit(1)
-		}
-		options = append(options, client.WithObjectMetadata(fields))
+		options = append(options, client.WithObjectMetadataFile(metadataFile))
 	}
 
 	var result error

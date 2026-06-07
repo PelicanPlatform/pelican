@@ -19,13 +19,14 @@
  ***************************************************************/
 
 // File fed_object_metadata_test.go is an end-to-end test of the
-// `pelican` client's `WithObjectMetadata` option through the full
-// federation:
+// `pelican` client's `WithObjectMetadataFile` option through the
+// full federation:
 //
-//   - The CLI loads a JSON file (LoadObjectMetadataFile).
+//   - The CLI passes --metadata-file as WithObjectMetadataFile(path).
+//   - NewTransferJob's option-apply pass loads the file and parses
+//     the JSON into a scalar-only map[string]any.
 //   - The client renders it as an RFC 9651 Structured Fields header
-//     and attaches it to the upload PUT (BuildObjectMetadataHeader,
-//     wired in handle_http.go).
+//     and attaches it to the upload PUT (handle_http.go).
 //   - The V2 origin's request middleware parses the header
 //     (ParseObjectMetadataHeader) and stashes it on the context.
 //   - POSC commits the object on close, fires the metadata-publish
@@ -118,6 +119,54 @@ func pelicanURL(path string) string {
 		path)
 }
 
+// TestClientWithObjectMetadataFile_BadFileFailsFast confirms that a
+// bad --metadata-file path is reported as an error from DoPut before
+// any network I/O — the wiring goes through NewTransferJob's option-
+// apply pass and surfaces via the standard error return. This locks
+// down the lazy-load semantics of WithObjectMetadataFile.
+func TestClientWithObjectMetadataFile_BadFileFailsFast(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// We don't actually need the metadata feature wired up on the
+	// origin — the failure happens before any HTTP request leaves
+	// the client. But we still need a valid federation the client
+	// can resolve so the test exercises the *real* DoPut entry
+	// point rather than a contrived shortcut.
+	originCfg := `
+Origin:
+  StorageType: posixv2
+  Exports:
+    - FederationPrefix: /test
+      Capabilities: ["Reads", "Writes", "Listings", "DirectReads"]
+Director:
+  MinStatResponse: 1
+  MaxStatResponse: 1
+`
+	ft := fed_test_utils.NewFedTest(t, originCfg)
+	require.NotNil(t, ft)
+
+	tkn := objectMetadataTokenForUser(t, "alice")
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "payload.bin")
+	require.NoError(t, os.WriteFile(srcPath, []byte("data"), 0644))
+
+	// Point at a path that does not exist.
+	bogus := filepath.Join(t.TempDir(), "no-such-metadata.json")
+
+	_, err := client.DoPut(ft.Ctx, srcPath, pelicanURL("/test/payload.bin"), false,
+		client.WithToken(tkn),
+		client.WithObjectMetadataFile(bogus),
+	)
+	require.Error(t, err, "DoPut must fail when WithObjectMetadataFile path is bogus")
+	assert.Contains(t, err.Error(), "WithObjectMetadataFile",
+		"the error must identify the failing option")
+	assert.Contains(t, err.Error(), bogus,
+		"the error must mention the offending file path")
+}
+
 // TestClientUploadWithObjectMetadata is the headline e2e: the
 // `pelican` client uploads a file with a JSON metadata file, and we
 // confirm the configured external receiver gets exactly the custom
@@ -166,20 +215,18 @@ Director:
 		"is_test":     false
 	}`), 0644))
 
-	// Plumb the JSON file through the same path the CLI uses.
-	customFields, err := client.LoadObjectMetadataFile(metaPath)
-	require.NoError(t, err)
-	require.NotEmpty(t, customFields)
-
 	// Build the file we'll upload.
 	srcDir := t.TempDir()
 	srcPath := filepath.Join(srcDir, "payload.bin")
 	require.NoError(t, os.WriteFile(srcPath, []byte("client-uploaded payload"), 0644))
 
-	// Upload via the real client.DoPut path with our new option.
+	// Upload via the real client.DoPut path. WithObjectMetadataFile
+	// is the single public option that does file → SFV → header
+	// plumbing; any parse / reserved-key error is reported as an
+	// error from DoPut before any network I/O.
 	results, err := client.DoPut(ft.Ctx, srcPath, pelicanURL("/test/payload.bin"), false,
 		client.WithToken(tkn),
-		client.WithObjectMetadata(customFields),
+		client.WithObjectMetadataFile(metaPath),
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
