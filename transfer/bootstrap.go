@@ -948,20 +948,8 @@ func createCredentialFromToken(db *gorm.DB, owner ownerIdentity, name, issuerURL
 	return &cred, nil
 }
 
-// encryptSecret encrypts a secret value for storage in the database.
-// TODO: Replace with master-secret-based encryption once the separate branch
-// lands. For now delegates to config.EncryptString.
-func encryptSecret(plaintext string) (string, error) {
-	return config.EncryptString(plaintext)
-}
-
-// decryptSecret decrypts a secret value retrieved from the database.
-// TODO: Replace with master-secret-based decryption once the separate branch
-// lands. For now delegates to config.DecryptString.
-func decryptSecret(ciphertext string) (string, error) {
-	plaintext, _, err := config.DecryptString(ciphertext)
-	return plaintext, err
-}
+// encryptSecret and decryptSecret (secret storage encryption) are defined in
+// encryption.go, where they derive their key from the server master key.
 
 // LaunchBootstrapSessionCleanup starts a goroutine that periodically cleans up
 // expired bootstrap sessions.
