@@ -35,16 +35,20 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/oauth2/issuer"
 )
 
 // handlePing handles GET /api/v1.0/transfer/ping
 // This is an unauthenticated endpoint that returns a simple health check,
-// allowing clients to discover whether the transfer service is enabled.
+// allowing clients to discover whether the transfer service is enabled. It
+// also advertises the OIDC discovery URL of the server's local issuer, so the
+// CLI knows where to obtain a pelican.transfer-scoped token.
 func handlePing() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"service": "transfer",
+			"issuer":  issuer.TransferIssuerServiceURL(),
 		})
 	}
 }

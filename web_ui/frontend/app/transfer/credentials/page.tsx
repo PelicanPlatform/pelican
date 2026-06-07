@@ -78,9 +78,7 @@ export default function TransferCredentialsPage() {
       const data: Credential[] = await response.json();
       setCredentials(data || []);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : 'Failed to fetch credentials'
-      );
+      setError(e instanceof Error ? e.message : 'Failed to fetch credentials');
     } finally {
       setLoading(false);
     }
@@ -136,9 +134,7 @@ export default function TransferCredentialsPage() {
       }
       fetchCredentials();
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : 'Failed to delete credential'
-      );
+      setError(e instanceof Error ? e.message : 'Failed to delete credential');
     }
   };
 
