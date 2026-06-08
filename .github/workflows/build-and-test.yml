@@ -90,6 +90,9 @@ jobs:
 
             brianaydemir/pelicanplatform-pelican)
               REGISTRY_REPO="hub.opensciencegrid.org/brian.aydemir.r1" ;;
+
+            matyasselmeci/pelican)
+              REGISTRY_REPO="hub.osg-htc.org/matyasosg" ;;
           esac
 
           # By default, assume that we are unable to push container images
