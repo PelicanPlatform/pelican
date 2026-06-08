@@ -17,6 +17,12 @@
 Logging:
   Client:
     ProgressInterval: 1m
+  Rotation:
+    Frequency: daily
+    MaxSize: 1GB
+    MaxRetentionSize: 10GB
+    MaxRetentionPeriod: 720h
+    FlushInterval: 50ms
 Client:
   SlowTransferRampupTime: 100s
   SlowTransferWindow: 30s

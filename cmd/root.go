@@ -109,10 +109,22 @@ var egrpPostHandler func(error) (bool, error)
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	// Register the errgroup with the logging subsystem so the asynchronous log
+	// writer (if file logging is enabled) runs as an errgroup-managed goroutine.
+	logging.SetErrgroup(ctx, egrp)
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
 		log.Debugln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
 	}
+	// Signal the async log writer to drain and switch to synchronous mode. The
+	// writer goroutine already does this on its own when the context is cancelled
+	// (e.g. on a signal-driven server shutdown); this call covers the case where
+	// the command returned without the context being cancelled (notably one-shot
+	// commands with file logging), so egrp.Wait below does not block on the
+	// still-running writer goroutine. It also guarantees any log lines emitted
+	// during the remaining shutdown go straight to the log file rather than being
+	// buffered. It blocks only until the writer has flushed and exited.
+	logging.EnterSyncMode()
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
 

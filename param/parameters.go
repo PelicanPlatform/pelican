@@ -272,6 +272,13 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Origin.Scitokens": true,
 	"Logging.Origin.Xrd": true,
 	"Logging.Origin.Xrootd": true,
+	"Logging.Rotation.Disable": false,
+	"Logging.Rotation.DisableCompress": false,
+	"Logging.Rotation.FlushInterval": false,
+	"Logging.Rotation.Frequency": false,
+	"Logging.Rotation.MaxRetentionPeriod": false,
+	"Logging.Rotation.MaxRetentionSize": false,
+	"Logging.Rotation.MaxSize": false,
 	"Lotman.DbLocation": false,
 	"Lotman.DefaultLotDeletionLifetime": false,
 	"Lotman.DefaultLotExpirationLifetime": false,
@@ -628,6 +635,9 @@ var stringAccessors = map[string]func(*Config) string{
 	"Logging.Origin.Scitokens": func(c *Config) string { return c.Logging.Origin.Scitokens },
 	"Logging.Origin.Xrd": func(c *Config) string { return c.Logging.Origin.Xrd },
 	"Logging.Origin.Xrootd": func(c *Config) string { return c.Logging.Origin.Xrootd },
+	"Logging.Rotation.Frequency": func(c *Config) string { return c.Logging.Rotation.Frequency },
+	"Logging.Rotation.MaxRetentionSize": func(c *Config) string { return c.Logging.Rotation.MaxRetentionSize },
+	"Logging.Rotation.MaxSize": func(c *Config) string { return c.Logging.Rotation.MaxSize },
 	"Lotman.DbLocation": func(c *Config) string { return c.Lotman.DbLocation },
 	"Lotman.EnabledPolicy": func(c *Config) string { return c.Lotman.EnabledPolicy },
 	"Lotman.LibLocation": func(c *Config) string { return c.Lotman.LibLocation },
@@ -984,6 +994,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Logging.Rotation.Disable": func(c *Config) bool { return c.Logging.Rotation.Disable },
+	"Logging.Rotation.DisableCompress": func(c *Config) bool { return c.Logging.Rotation.DisableCompress },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
@@ -1094,6 +1106,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"LocalCache.DefaultMaxAge": func(c *Config) time.Duration { return c.LocalCache.DefaultMaxAge },
 	"LocalCache.PrefetchTimeout": func(c *Config) time.Duration { return c.LocalCache.PrefetchTimeout },
 	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
+	"Logging.Rotation.FlushInterval": func(c *Config) time.Duration { return c.Logging.Rotation.FlushInterval },
+	"Logging.Rotation.MaxRetentionPeriod": func(c *Config) time.Duration { return c.Logging.Rotation.MaxRetentionPeriod },
 	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
 	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
 	"Lotman.GarbageCollectionInterval": func(c *Config) time.Duration { return c.Lotman.GarbageCollectionInterval },
@@ -1399,6 +1413,13 @@ var allParameterNames = []string{
 	"Logging.Origin.Scitokens",
 	"Logging.Origin.Xrd",
 	"Logging.Origin.Xrootd",
+	"Logging.Rotation.Disable",
+	"Logging.Rotation.DisableCompress",
+	"Logging.Rotation.FlushInterval",
+	"Logging.Rotation.Frequency",
+	"Logging.Rotation.MaxRetentionPeriod",
+	"Logging.Rotation.MaxRetentionSize",
+	"Logging.Rotation.MaxSize",
 	"Lotman.DbLocation",
 	"Lotman.DefaultLotDeletionLifetime",
 	"Lotman.DefaultLotExpirationLifetime",
@@ -1728,6 +1749,9 @@ var (
 	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
 	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
+	Logging_Rotation_Frequency = StringParam{"Logging.Rotation.Frequency"}
+	Logging_Rotation_MaxRetentionSize = StringParam{"Logging.Rotation.MaxRetentionSize"}
+	Logging_Rotation_MaxSize = StringParam{"Logging.Rotation.MaxSize"}
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
 	Lotman_EnabledPolicy = StringParam{"Lotman.EnabledPolicy"}
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
@@ -1963,6 +1987,8 @@ var (
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Logging_Rotation_Disable = BoolParam{"Logging.Rotation.Disable"}
+	Logging_Rotation_DisableCompress = BoolParam{"Logging.Rotation.DisableCompress"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
@@ -2045,6 +2071,8 @@ var (
 	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
 	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
+	Logging_Rotation_FlushInterval = DurationParam{"Logging.Rotation.FlushInterval"}
+	Logging_Rotation_MaxRetentionPeriod = DurationParam{"Logging.Rotation.MaxRetentionPeriod"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
 	Lotman_GarbageCollectionInterval = DurationParam{"Lotman.GarbageCollectionInterval"}
@@ -2190,6 +2218,9 @@ func init() {
 		"Logging.Origin.Scitokens": Logging_Origin_Scitokens,
 		"Logging.Origin.Xrd": Logging_Origin_Xrd,
 		"Logging.Origin.Xrootd": Logging_Origin_Xrootd,
+		"Logging.Rotation.Frequency": Logging_Rotation_Frequency,
+		"Logging.Rotation.MaxRetentionSize": Logging_Rotation_MaxRetentionSize,
+		"Logging.Rotation.MaxSize": Logging_Rotation_MaxSize,
 		"Lotman.DbLocation": Lotman_DbLocation,
 		"Lotman.EnabledPolicy": Lotman_EnabledPolicy,
 		"Lotman.LibLocation": Lotman_LibLocation,
@@ -2413,6 +2444,8 @@ func init() {
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Logging.Rotation.Disable": Logging_Rotation_Disable,
+		"Logging.Rotation.DisableCompress": Logging_Rotation_DisableCompress,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
@@ -2492,6 +2525,8 @@ func init() {
 		"LocalCache.DefaultMaxAge": LocalCache_DefaultMaxAge,
 		"LocalCache.PrefetchTimeout": LocalCache_PrefetchTimeout,
 		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
+		"Logging.Rotation.FlushInterval": Logging_Rotation_FlushInterval,
+		"Logging.Rotation.MaxRetentionPeriod": Logging_Rotation_MaxRetentionPeriod,
 		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
 		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
 		"Lotman.GarbageCollectionInterval": Lotman_GarbageCollectionInterval,
