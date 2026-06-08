@@ -109,10 +109,20 @@ var egrpPostHandler func(error) (bool, error)
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	// Register the errgroup with the logging subsystem so the asynchronous log
+	// writer (and its compression worker) run under the errgroup and stop when
+	// the context is cancelled.
+	logging.SetErrgroup(ctx, egrp)
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
 		log.Debugln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
 	}
+	// Stop the async log writer's drain goroutine and flip it to synchronous mode
+	// so egrp.Wait below does not block on it (notably for one-shot commands whose
+	// context is never cancelled) and any log lines emitted during the remaining
+	// shutdown go straight to the log file rather than being buffered. It blocks
+	// only until the writer has flushed and exited.
+	logging.EnterSyncMode()
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
 

@@ -42,7 +42,12 @@ var cliExecErrorHook func(err error)
 //go:generate go run -tags server . generate-docs docs/app/commands-reference/pelican-server
 func main() {
 	logging.SetupLogBuffering()
+	// On a panic (or any unwind), flip the log writer to synchronous mode first
+	// so buffered lines are flushed and late lines reach the log file, then run
+	// the normal flush. Defers run LIFO, so EnterSyncMode (registered last) runs
+	// before FlushLogs.
 	defer logging.FlushLogs(false)
+	defer logging.EnterSyncMode()
 	if len(os.Args) > 1 && os.Args[1] == "generate-docs" {
 		outputDir := "docs/app/commands-reference"
 		if len(os.Args) > 2 {
