@@ -2868,7 +2868,7 @@ description: |+
   an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
 type: filename
 root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
-default: ${ConfigBase}/maxmind/GeoLite2-city.mmdb
+default: ${ConfigBase}/maxmind/GeoLite2-City.mmdb
 components: ["director"]
 ---
 name: Director.MinStatResponse
