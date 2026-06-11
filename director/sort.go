@@ -28,7 +28,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -191,12 +190,8 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	// paths like /foo and /foobar with basic prefix matching because without the trailing /, these
 	// two would match.
 	reqPath = path.Clean(reqPath) + "/"
-	ads := make([]*server_structs.Advertisement, 0, serverAds.Len())
 
-	serverAds.Range(func(item *ttlcache.Item[string, *server_structs.Advertisement]) bool {
-		ads = append(ads, item.Value())
-		return true
-	})
+	ads := getServerAdsSnapshot()
 
 	// Move topo sorted ads to the end of our slice
 	sortServerAdsByTopo(ads)
