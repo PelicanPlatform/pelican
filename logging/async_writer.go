@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,6 +33,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // asyncWriter is an io.Writer that decouples the (synchronous) logging call
@@ -200,6 +203,9 @@ const (
 	// logFileFlags is how the active log file is (re)opened: write-only, created
 	// if absent, appending to preserve any existing content.
 	logFileFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	// compressTempSuffix is appended to a rotated file's name while its gzip
+	// archive is being written; it is renamed to ".gz" once complete.
+	compressTempSuffix = ".gz.tmp"
 )
 
 // newAsyncWriter opens (creating if necessary, appending if present) the log
@@ -268,6 +274,9 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 			return nil, fmt.Errorf("failed to open log directory %q for rotation: %w", dir, rerr)
 		}
 		w.root = root
+		// Remove any leftover compression temp files from a previous run that was
+		// killed mid-compression. No compression is running yet, so this is safe.
+		w.cleanupStaleTempFiles()
 	}
 
 	return w, nil
@@ -344,7 +353,8 @@ type errGroup interface {
 }
 
 // run is the drain loop. It returns nil on a clean stop and a non-nil error if
-// writing to the log file fails (which is fatal).
+// writing to the log file fails (which is fatal). It stops when the context is
+// cancelled (process shutdown) or when explicitly stopped via stopCh.
 func (w *asyncWriter) run(ctx context.Context) error {
 	defer w.markDone()
 	for {
@@ -423,25 +433,18 @@ func (w *asyncWriter) finalDrain() error {
 	// Best-effort durability at shutdown.
 	_ = w.file.Sync()
 	w.fileMu.Unlock()
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "pelican logging: failed to flush log file %q on shutdown: %v\n", w.path, err)
-		return err
-	}
-	return nil
+	return err
 }
 
-// writeDirect writes straight to the file descriptor under fileMu. Used in
-// synchronous mode (after shutdown) for late-arriving log lines.
+// writeDirect writes straight to the file descriptor under fileMu, used in
+// synchronous mode for lines written by their calling goroutine.
 func (w *asyncWriter) writeDirect(p []byte) (int, error) {
 	w.fileMu.Lock()
 	defer w.fileMu.Unlock()
-	n, err := w.file.Write(p)
-	w.written += int64(n)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "pelican logging: failed to write log line directly to %q: %v\n", w.path, err)
+	if err := w.writeRotatingLocked(p); err != nil {
+		return 0, err
 	}
-	return n, err
+	return len(p), nil
 }
 
 // fail records a fatal write error: it emits to stderr and flips to synchronous
@@ -593,9 +596,8 @@ func firstLineEnd(b []byte) int {
 // opens a fresh one for the current period, and kicks off (optional) compression
 // and retention pruning. Callers must hold fileMu.
 func (w *asyncWriter) rotate() error {
-	if err := w.file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync log file before rotation: %w", err)
-	}
+	// fsync is best-effort: a failure must not abort rotation.
+	_ = w.file.Sync()
 	if err := w.file.Close(); err != nil {
 		return fmt.Errorf("failed to close log file before rotation: %w", err)
 	}
@@ -628,10 +630,14 @@ func (w *asyncWriter) rotate() error {
 		w.compressWg.Add(1)
 		go func() {
 			defer w.compressWg.Done()
-			// compressBackup produces the ".gz" and removes the source itself.
+			// compressBackup produces "<base>.gz"; on success the uncompressed
+			// source is removed. Both failure modes leave the (readable)
+			// uncompressed source in place.
 			if cerr := w.compressBackup(rotatedBase); cerr != nil {
-				fmt.Fprintf(os.Stderr, "pelican logging: failed to compress rotated log %q: %v\n",
-					filepath.Join(w.dir, rotatedBase), cerr)
+				log.Warnf("Failed to compress rotated log %q: %v", filepath.Join(w.dir, rotatedBase), cerr)
+			} else if rerr := w.root.Remove(rotatedBase); rerr != nil {
+				log.Warnf("Failed to remove %q after compression (leaving an uncompressed copy): %v",
+					filepath.Join(w.dir, rotatedBase), rerr)
 			}
 			w.pruneRetention()
 		}()
@@ -724,18 +730,36 @@ func (w *asyncWriter) pruneRetention() {
 	}
 }
 
+// cleanupStaleTempFiles removes leftover compression temp files (named
+// "<base>.*<compressTempSuffix>") in the log directory. These are left behind
+// only when a process is killed while a compression is in progress; on startup
+// none can be legitimately in use.
+func (w *asyncWriter) cleanupStaleTempFiles() {
+	entries, err := fs.ReadDir(w.root.FS(), ".")
+	if err != nil {
+		return
+	}
+	prefix := w.base + "."
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, compressTempSuffix) {
+			continue
+		}
+		if rerr := w.root.Remove(name); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			log.Warnf("Failed to remove stale compression temp file %q: %v", filepath.Join(w.dir, name), rerr)
+		}
+	}
+}
+
 // compressBackup gzips the rotated file named base (relative to the log
-// directory) to base+".gz" and removes the uncompressed source. All I/O is done
-// through the held os.Root.
+// directory) to base+".gz", leaving the uncompressed source for the caller to
+// remove.
 //
-// Two properties matter for correctness:
-//   - Atomicity: the gzip is written to a temporary file and renamed into place,
-//     so a crash never leaves a partial ".gz".
-//   - The source is always removed once a complete ".gz" is in place. In
-//     particular, fsync is best-effort: a complete gzip already holds the data,
-//     so a spurious fsync error (seen on some macOS filesystems) must not abort
-//     the removal -- otherwise a valid ".gz" would be stranded next to its
-//     identical uncompressed source.
+// Compression is atomic: the gzip is written to a temporary file and renamed
+// into place, so a crash never leaves a partial ".gz". fsync is best-effort: a
+// complete gzip already holds the data, so a sync failure must not fail the
+// operation, which would otherwise leave the caller to skip removing the source
+// and strand a valid ".gz" next to its identical uncompressed copy.
 func (w *asyncWriter) compressBackup(base string) error {
 	in, err := w.root.Open(base)
 	if err != nil {
@@ -743,7 +767,7 @@ func (w *asyncWriter) compressBackup(base string) error {
 	}
 	defer in.Close()
 
-	tmp := base + ".gz.tmp"
+	tmp := base + compressTempSuffix
 	out, err := w.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return err
@@ -762,18 +786,16 @@ func (w *asyncWriter) compressBackup(base string) error {
 		return cerr
 	}
 	// Best-effort durability; do not let a sync failure strand the source.
-	if serr := out.Sync(); serr != nil {
-		fmt.Fprintf(os.Stderr, "pelican logging: warning: fsync of %s failed: %v\n",
-			filepath.Join(w.dir, tmp), serr)
-	}
+	_ = out.Sync()
 	if cerr := out.Close(); cerr != nil {
 		_ = w.root.Remove(tmp)
 		return cerr
 	}
-	// Put the finished archive in place atomically, then drop the source.
+	// Put the finished archive in place atomically. The caller removes the
+	// (still-present) uncompressed source.
 	if cerr := w.root.Rename(tmp, base+".gz"); cerr != nil {
 		_ = w.root.Remove(tmp)
 		return cerr
 	}
-	return w.root.Remove(base)
+	return nil
 }
