@@ -46,6 +46,9 @@ import (
 func TestFileLoggingThroughRedactionFilter(t *testing.T) {
 	require.NoError(t, param.Reset())
 
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "pelican.log")
+
 	t.Cleanup(func() {
 		logging.CloseLogger()
 		logging.ResetLogFlush()
@@ -56,9 +59,6 @@ func TestFileLoggingThroughRedactionFilter(t *testing.T) {
 		log.SetLevel(log.InfoLevel)
 		_ = param.Reset()
 	})
-
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "pelican.log")
 
 	require.NoError(t, param.Logging_LogLocation.Set(logPath))
 	require.NoError(t, param.Logging_Rotation_Frequency.Set("daily"))
