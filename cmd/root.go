@@ -109,13 +109,10 @@ var egrpPostHandler func(error) (bool, error)
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
-	// Register the errgroup with the logging subsystem so the
-	// asynchronous log writer stops when the context is cancelled.
+	// Register the errgroup with the logging subsystem so the asynchronous log
+	// writer (and its compression worker) run under the errgroup and stop when
+	// the context is cancelled.
 	logging.SetErrgroup(ctx, egrp)
-	// Wait for any in-flight background log rotation to finish before the
-	// process exits, so a graceful shutdown does not abandon a compression
-	// mid-write.
-	defer logging.AwaitCompression()
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
 		log.Debugln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)

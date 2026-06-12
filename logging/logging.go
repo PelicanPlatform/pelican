@@ -110,18 +110,6 @@ func buildRotateConfig() (rotateConfig, error) {
 	return cfg, nil
 }
 
-// AwaitCompression blocks until any in-flight background log compression has
-// finished.  This ensures a graceful exit does not abandon a compression
-// mid-write, which would leave a stale ".gz.tmp" file.
-func AwaitCompression() {
-	asyncMu.Lock()
-	w := asyncW
-	asyncMu.Unlock()
-	if w != nil {
-		w.compressWg.Wait()
-	}
-}
-
 // EnterSyncMode is the logging shutdown handler. It drains and flushes the
 // asynchronous log writer, then flips it to synchronous mode so that any
 // late-arriving log line (e.g. emitted during signal handling or a panic) is
