@@ -1555,8 +1555,7 @@ func discoverOriginCache(ctx *gin.Context) {
 	}
 
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
-	for _, ad := range serverAds.Items() {
-		serverAd := ad.Value()
+	for _, serverAd := range getServerAdsSnapshot() {
 		if serverAd.WebURL.String() == "" {
 			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL

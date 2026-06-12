@@ -56,6 +56,9 @@ const (
 
 var (
 	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
+	//
+	// To iterate this cache, use getServerAdsSnapshot (or Items when you also need the keys or
+	// Item wrappers). Do not use Range, which is not safe to iterate concurrently with cache writes.
 	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](param.Director_AdvertisementTTL.GetDuration()),
 		ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 	// The map holds servers that are disabled, with the key being the ServerAd.Name
@@ -78,6 +81,22 @@ var (
 	// a firewall.
 	brokerDialer *broker.BrokerDialer = nil
 )
+
+// getServerAdsSnapshot returns a point-in-time copy of every (non-expired) server
+// advertisement in the cache.
+//
+// Prefer this for iterating serverAds: callers walk their own slice and never hold the
+// cache lock across their work, so cache reads and writes can't be blocked by a slow
+// caller. Use Items directly only when you also need the keys or Item wrappers, and do
+// not use Range to iterate this cache.
+func getServerAdsSnapshot() []*server_structs.Advertisement {
+	items := serverAds.Items()
+	ads := make([]*server_structs.Advertisement, 0, len(items))
+	for _, item := range items {
+		ads = append(ads, item.Value())
+	}
+	return ads
+}
 
 func (f filterType) String() string {
 	switch f {
@@ -785,10 +804,13 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	// or the downtime is expired (deleted). In either case, we still need to proceed to use
 	// it to update `filteredServers` and `federationDowntimes`, clearing out stale info.
 
+	// Snapshot serverAds before locking filteredServersMutex. The two have independent
+	// locks; never hold filteredServersMutex across a serverAds access, so that the order
+	// in which they are acquired can't vary between call sites.
+	ads := serverAds.Items() // only used to map server names below
+
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
-
-	ads := serverAds.Items() // pull the cached server ads slice once
 
 	// Format downtimes to align server names with Director's in-memory state
 	allDowntimes, err := formatServerDowntimes(registryDowntimes, ads)
