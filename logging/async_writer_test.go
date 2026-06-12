@@ -35,6 +35,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // fakeEgrp is a minimal errGroup that records the first non-nil error returned
@@ -203,6 +204,47 @@ func TestAsyncWriterBackpressure(t *testing.T) {
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "blocked", "the previously-blocked line should reach the file")
+}
+
+// TestAsyncWriterCompressionWorkerGracefulShutdown verifies the permanent
+// compression worker model: rotations hand compression to a worker registered
+// in the errgroup, and a graceful shutdown (enterSyncMode followed by
+// egrp.Wait) finishes all in-flight compression with no separate "await" call --
+// leaving no stale ".gz.tmp" and no uncompressed rotated sources behind.
+func TestAsyncWriterCompressionWorkerGracefulShutdown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxSize: 100, compress: true}
+	w, err := newAsyncWriter(path, cfg, time.Millisecond)
+	require.NoError(t, err)
+
+	egrp, ctx := errgroup.WithContext(context.Background())
+	w.start(ctx, egrp) // launches the drain goroutine and the compression worker
+
+	for i := 0; i < 200; i++ {
+		_, err := w.Write([]byte(fmt.Sprintf("line-%04d-padding-xxxx\n", i)))
+		require.NoError(t, err)
+		if i%20 == 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+
+	// Graceful shutdown: enterSyncMode drains the worker; egrp.Wait then returns
+	// with no AwaitCompression-style call needed.
+	w.enterSyncMode()
+	require.NoError(t, egrp.Wait())
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		name := e.Name()
+		assert.Falsef(t, strings.HasSuffix(name, compressTempSuffix),
+			"a graceful shutdown must not leave a stale temp file: %s", name)
+		if strings.HasPrefix(name, "test.log.") && !strings.HasSuffix(name, ".gz") {
+			t.Errorf("uncompressed rotated source lingered after compression: %s", name)
+		}
+	}
+	w.close()
 }
 
 // TestAsyncWriterContinuousRotation drives the drain goroutine with a steady stream

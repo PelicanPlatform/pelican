@@ -120,14 +120,25 @@ type asyncWriter struct {
 	now func() time.Time
 
 	// lifecycle
-	started    atomic.Bool // true once the drain goroutine has been launched
-	stopCh     chan struct{}
-	stopOnce   sync.Once
-	doneCh     chan struct{}
-	doneOnce   sync.Once
-	selfMgd    bool           // true when not registered with an errgroup
-	wg         sync.WaitGroup // tracks the self-managed drain goroutine
-	compressWg sync.WaitGroup
+	started  atomic.Bool // true once the drain goroutine has been launched
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	doneCh   chan struct{}
+	doneOnce sync.Once
+	selfMgd  bool           // true when not registered with an errgroup
+	wg       sync.WaitGroup // tracks self-managed goroutines
+
+	// Compression worker: one permanent goroutine (started alongside the drain
+	// goroutine when rotation+compression is enabled) compresses rotated files
+	// handed to it on compressCh. The drain goroutine is the sole sender and
+	// closes the channel when it stops; the worker then drains the queue and
+	// exits, closing compressDone. In synchronous mode the worker is drained and
+	// compression is performed inline instead.
+	compressCh       chan string
+	compressDone     chan struct{}
+	compressStarted  atomic.Bool
+	compressChClosed atomic.Bool
+	compressChOnce   sync.Once
 }
 
 // rotationFrequency is the calendar cadence at which logs are rotated. freqNone
@@ -206,6 +217,10 @@ const (
 	// compressTempSuffix is appended to a rotated file's name while its gzip
 	// archive is being written; it is renamed to ".gz" once complete.
 	compressTempSuffix = ".gz.tmp"
+	// compressQueueDepth bounds how many rotated files may await compression
+	// before the drain goroutine blocks on rotation (which in turn applies
+	// backpressure to writers). Rotations are infrequent, so this is generous.
+	compressQueueDepth = 8
 )
 
 // newAsyncWriter opens (creating if necessary, appending if present) the log
@@ -242,6 +257,8 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 		now:           time.Now,
 		stopCh:        make(chan struct{}),
 		doneCh:        make(chan struct{}),
+		compressCh:    make(chan string, compressQueueDepth),
+		compressDone:  make(chan struct{}),
 	}
 	w.roomCond = sync.NewCond(&w.mu)
 
@@ -327,15 +344,25 @@ func nonBlockingSignal(ch chan struct{}) {
 	}
 }
 
-// start launches the drain goroutine. When egrp is non-nil the goroutine is
-// registered with it (so a fatal write error cancels the shutdown context);
-// otherwise the writer self-manages the goroutine and panics on a fatal error.
+// start launches the drain goroutine (and, when rotation+compression is enabled,
+// the permanent compression worker). When egrp is non-nil the goroutines are
+// registered with it (so a fatal write error cancels the shutdown context, and
+// egrp.Wait covers the worker); otherwise the writer self-manages them and the
+// drain goroutine panics on a fatal error.
 func (w *asyncWriter) start(ctx context.Context, egrp errGroup) {
 	w.started.Store(true)
+	if w.rotateOK && w.rot.compress {
+		w.compressStarted.Store(true)
+	}
+
 	if egrp != nil {
 		egrp.Go(func() error { return w.run(ctx) })
+		if w.compressStarted.Load() {
+			egrp.Go(w.compressLoop)
+		}
 		return
 	}
+
 	w.selfMgd = true
 	w.wg.Add(1)
 	go func() {
@@ -344,6 +371,71 @@ func (w *asyncWriter) start(ctx context.Context, egrp errGroup) {
 			panic(fmt.Sprintf("pelican logging: fatal error writing to log file %q: %v", w.path, err))
 		}
 	}()
+	if w.compressStarted.Load() {
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			_ = w.compressLoop()
+		}()
+	}
+}
+
+// compressLoop is the permanent compression worker. It compresses each rotated
+// file handed to it until the drain goroutine closes compressCh, then drains any
+// remaining queued files and exits.
+func (w *asyncWriter) compressLoop() error {
+	defer close(w.compressDone)
+	for base := range w.compressCh {
+		w.compressAndPrune(base)
+	}
+	return nil
+}
+
+// stopCompression closes compressCh so the worker drains its queue and exits.
+// The drain goroutine is the sole sender, so it is the only caller (from
+// finalDrain or fail); idempotent.
+func (w *asyncWriter) stopCompression() {
+	if !w.compressStarted.Load() {
+		return
+	}
+	w.compressChOnce.Do(func() {
+		w.compressChClosed.Store(true)
+		close(w.compressCh)
+	})
+}
+
+// compressAndPrune compresses rotatedBase to "<base>.gz", removes the source on
+// success, and applies the retention budgets.
+func (w *asyncWriter) compressAndPrune(rotatedBase string) {
+	if err := w.compressBackup(rotatedBase); err != nil {
+		log.Warnf("Failed to compress rotated log %q: %v", filepath.Join(w.dir, rotatedBase), err)
+	} else if err := w.root.Remove(rotatedBase); err != nil {
+		log.Warnf("Failed to remove %q after compression (leaving an uncompressed copy): %v",
+			filepath.Join(w.dir, rotatedBase), err)
+	}
+	w.pruneRetention()
+}
+
+// afterRotate schedules the post-rotation work for a freshly rotated file.
+// Callers must hold fileMu. In asynchronous mode the compression is handed to
+// the permanent worker; once the worker has been stopped (synchronous mode) or
+// was never started, compression is performed inline -- after waiting for the
+// worker to finish so the two never touch the directory concurrently.
+func (w *asyncWriter) afterRotate(rotatedBase string) {
+	if !w.rot.compress {
+		w.pruneRetention()
+		return
+	}
+	if w.compressStarted.Load() && !w.compressChClosed.Load() {
+		w.compressCh <- rotatedBase
+		return
+	}
+	if w.compressStarted.Load() {
+		// The worker was told to stop; let it fully drain before we compress
+		// inline so we do not operate on the directory concurrently.
+		<-w.compressDone
+	}
+	w.compressAndPrune(rotatedBase)
 }
 
 // errGroup is the minimal subset of *errgroup.Group the writer needs; using an
@@ -410,28 +502,36 @@ func (w *asyncWriter) flushOnce() error {
 	return w.writeRotatingLocked(batch)
 }
 
-// finalDrain writes any remaining batch and atomically flips the writer to
-// synchronous mode so that subsequent Write calls go straight to the file. It is
-// only ever called from the drain goroutine.
+// finalDrain writes any remaining batch, stops the compression worker, and
+// flips the writer to synchronous mode so subsequent Write calls go straight to
+// the file. Everything is done under fileMu so a producer that later observes
+// synchronous==true (and calls writeDirect) cannot race ahead of this final
+// batch -- and, by the time it can, the worker has been told to stop and
+// compressChClosed is visible, so its rotations compress inline rather than
+// sending on a channel the drain goroutine is closing.
 func (w *asyncWriter) finalDrain() error {
-	// Hold fileMu across the flip so a producer that observes synchronous==true
-	// and calls writeDirect cannot race ahead of this final batch.
 	w.fileMu.Lock()
 	w.mu.Lock()
 	batch := w.buf
 	w.buf = nil
-	w.synchronous = true
-	// Wake any callers blocked on backpressure; they will re-check synchronous
-	// and fall through to a direct write.
-	w.roomCond.Broadcast()
 	w.mu.Unlock()
 
+	// Flush the last batch while still asynchronous, so any rotation it triggers
+	// hands compression to the worker.
 	var err error
 	if len(batch) > 0 {
 		err = w.writeRotatingLocked(batch)
 	}
 	// Best-effort durability at shutdown.
 	_ = w.file.Sync()
+
+	// The drain goroutine is the sole sender and is done sending; stop the worker
+	// so it drains its queue and exits, then flip to synchronous mode.
+	w.stopCompression()
+	w.mu.Lock()
+	w.synchronous = true
+	w.roomCond.Broadcast()
+	w.mu.Unlock()
 	w.fileMu.Unlock()
 	return err
 }
@@ -452,6 +552,8 @@ func (w *asyncWriter) writeDirect(p []byte) (int, error) {
 // is propagated to the owning errgroup.
 func (w *asyncWriter) fail(err error) error {
 	fmt.Fprintf(os.Stderr, "pelican logging: fatal error writing to log file %q: %v\n", w.path, err)
+	// The drain goroutine is exiting; stop the worker so it drains and exits too.
+	w.stopCompression()
 	w.mu.Lock()
 	w.synchronous = true
 	// Release any callers blocked on backpressure so they don't hang now that the
@@ -472,27 +574,33 @@ func (w *asyncWriter) markDone() {
 func (w *asyncWriter) enterSyncMode() {
 	w.stopOnce.Do(func() { close(w.stopCh) })
 	if w.started.Load() {
-		// The drain goroutine will flush, flip to sync mode, and close doneCh.
+		// The drain goroutine will flush, stop the worker, flip to sync mode, and
+		// close doneCh.
 		<-w.doneCh
-		return
+	} else {
+		// No drain goroutine was ever launched (e.g. file logging that opened the
+		// writer but never started it). Perform the final flush/flip inline so the
+		// writer is left in a consistent synchronous state.
+		w.doneOnce.Do(func() {
+			_ = w.finalDrain()
+			close(w.doneCh)
+		})
 	}
-	// No drain goroutine was ever launched (e.g. file logging that opened the
-	// writer but never started it). Perform the final flush/flip inline so the
-	// writer is left in a consistent synchronous state.
-	w.doneOnce.Do(func() {
-		_ = w.finalDrain()
-		close(w.doneCh)
-	})
+	// Wait for the compression worker to finish draining its queue and exit, so a
+	// graceful shutdown never abandons an in-flight compression.
+	if w.compressStarted.Load() {
+		<-w.compressDone
+	}
 }
 
-// close stops the writer (if not already), waits for any compression workers,
-// and closes the file and directory handles. Intended for tests and ResetConfig.
+// close stops the writer (if not already) and closes the file and directory
+// handles. Intended for tests and ResetConfig. enterSyncMode has already drained
+// the compression worker.
 func (w *asyncWriter) close() {
 	w.enterSyncMode()
 	if w.selfMgd {
 		w.wg.Wait()
 	}
-	w.compressWg.Wait()
 	w.fileMu.Lock()
 	if w.file != nil {
 		_ = w.file.Close()
@@ -626,25 +734,9 @@ func (w *asyncWriter) rotate() error {
 	w.written = 0
 	w.periodStart = w.rot.frequency.truncate(w.now())
 
-	if w.rot.compress {
-		w.compressWg.Add(1)
-		go func() {
-			defer w.compressWg.Done()
-			// compressBackup produces "<base>.gz"; on success the uncompressed
-			// source is removed. Both failure modes leave the (readable)
-			// uncompressed source in place.
-			if cerr := w.compressBackup(rotatedBase); cerr != nil {
-				log.Warnf("Failed to compress rotated log %q: %v", filepath.Join(w.dir, rotatedBase), cerr)
-			} else if rerr := w.root.Remove(rotatedBase); rerr != nil {
-				log.Warnf("Failed to remove %q after compression (leaving an uncompressed copy): %v",
-					filepath.Join(w.dir, rotatedBase), rerr)
-			}
-			w.pruneRetention()
-		}()
-	} else {
-		w.pruneRetention()
-	}
-
+	// Hand the (slow) compression to the permanent worker, or do it inline in
+	// synchronous mode; afterRotate also applies retention.
+	w.afterRotate(rotatedBase)
 	return nil
 }
 
