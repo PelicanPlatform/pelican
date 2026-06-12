@@ -205,6 +205,44 @@ func TestAsyncWriterBackpressure(t *testing.T) {
 	assert.Contains(t, string(content), "blocked", "the previously-blocked line should reach the file")
 }
 
+// TestAsyncWriterContinuousRotation drives the drain goroutine with a steady stream
+// of writes and asserts rotation keeps working past the first few.
+func TestAsyncWriterContinuousRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxSize: 200, compress: true}
+	w, err := newAsyncWriter(path, cfg, 2*time.Millisecond)
+	require.NoError(t, err)
+	w.start(context.Background(), &fakeEgrp{}) // real drain goroutine
+
+	// ~20 bytes/line; 500 lines -> 10KB -> ~50 rotations at MaxSize=200.
+	for i := 0; i < 500; i++ {
+		_, err := w.Write([]byte(fmt.Sprintf("line-%05d-xxxx\n", i)))
+		require.NoError(t, err)
+		if i%25 == 0 {
+			time.Sleep(3 * time.Millisecond) // let the drain goroutine flush + rotate
+		}
+	}
+	w.enterSyncMode()
+
+	// If rotation kept working, the active file is bounded near MaxSize.
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.LessOrEqualf(t, fi.Size(), int64(400),
+		"active file grew to %d bytes -- rotation appears to have stopped", fi.Size())
+
+	w.close()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var backups int
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "test.log.") {
+			backups++
+		}
+	}
+	assert.Greaterf(t, backups, 5, "expected many rotated files, got %d", backups)
+}
+
 // newRotatingTestWriter builds a writer with rotation enabled and an injected
 // clock anchored at start, so calendar-boundary rotation can be driven
 // deterministically.
@@ -565,6 +603,71 @@ func TestAsyncWriterCompressionNoDuplicate(t *testing.T) {
 		lingering = append(lingering, name)
 	}
 	assert.Emptyf(t, lingering, "uncompressed rotated files lingered after compression: %v", lingering)
+}
+
+// TestAsyncWriterSyncModeStillRotates verifies that once the writer is in
+// synchronous mode (drain goroutine stopped, e.g. shutdown context cancelled
+// mid-run), writes still rotate by size -- otherwise the log would grow without
+// bound during the shutdown routines (which can still be chatty).
+func TestAsyncWriterSyncModeStillRotates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 9, 12, 0, 0, 0, time.Local)}
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxSize: 50, compress: false}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+
+	// Flip to synchronous mode without ever starting the drain goroutine, so
+	// every Write goes through the direct (synchronous) path.
+	w.mu.Lock()
+	w.synchronous = true
+	w.mu.Unlock()
+
+	for i := 0; i < 30; i++ {
+		clk.advance(time.Second)                  // unique timestamp suffixes for size-only naming
+		_, err := w.Write([]byte("0123456789\n")) // 11 bytes
+		require.NoError(t, err)
+	}
+	w.close()
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var backups int
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "test.log.") {
+			backups++
+		}
+	}
+	assert.GreaterOrEqual(t, backups, 3, "synchronous-mode writes must still rotate by size")
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.LessOrEqualf(t, fi.Size(), int64(50), "active file must stay within MaxSize in synchronous mode")
+}
+
+// TestAsyncWriterCleansStaleTempFiles verifies that a leftover compression temp
+// file (from a process killed mid-compression) is removed on startup, while real
+// rotated files are left alone.
+func TestAsyncWriterCleansStaleTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+
+	stale := filepath.Join(dir, "test.log.2026-06-09-1.gz.tmp")
+	require.NoError(t, os.WriteFile(stale, []byte("\x1f\x8b"), 0640)) // partial gzip
+	keep := filepath.Join(dir, "test.log.2026-06-09-1")
+	require.NoError(t, os.WriteFile(keep, []byte("data\n"), 0640))
+	keepGz := filepath.Join(dir, "test.log.2026-06-09.gz")
+	require.NoError(t, os.WriteFile(keepGz, []byte("\x1f\x8bcompressed"), 0640))
+
+	cfg := rotateConfig{enable: true, frequency: freqDaily, maxSize: 1000}
+	w, err := newAsyncWriter(path, cfg, time.Millisecond)
+	require.NoError(t, err)
+	defer w.close()
+
+	_, err = os.Stat(stale)
+	assert.Truef(t, os.IsNotExist(err), "stale %s should be removed on startup", filepath.Base(stale))
+	_, err = os.Stat(keep)
+	assert.NoErrorf(t, err, "rotated source %s must not be removed", filepath.Base(keep))
+	_, err = os.Stat(keepGz)
+	assert.NoErrorf(t, err, "compressed backup %s must not be removed", filepath.Base(keepGz))
 }
 
 // TestAsyncWriterNonRegularNoRotation verifies that a non-regular target

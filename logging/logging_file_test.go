@@ -92,8 +92,15 @@ func TestBuildRotateConfigRejectsBadSize(t *testing.T) {
 
 	require.NoError(t, param.Logging_Rotation_MaxSize.Set("100 bananas"))
 	_, err := buildRotateConfig()
-	require.Error(t, err, "an unparseable MaxSize must surface an error, not be silently dropped")
+	require.Error(t, err, "an unparsable MaxSize must surface an error, not be silently dropped")
 	assert.Contains(t, err.Error(), param.Logging_Rotation_MaxSize.GetName())
+
+	// A value that exceeds int64 (but still fits uint64) must error, not wrap to
+	// a negative size. 1e10 GB ~= 1.07e19 bytes, above MaxInt64 (~9.2e18).
+	require.NoError(t, param.Logging_Rotation_MaxSize.Set("10000000000GB"))
+	_, err = buildRotateConfig()
+	require.Error(t, err, "an out-of-range MaxSize must surface an error")
+	assert.Contains(t, err.Error(), "too large")
 
 	// A valid size parses cleanly.
 	require.NoError(t, param.Logging_Rotation_MaxSize.Set("250MB"))

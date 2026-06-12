@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,11 +57,11 @@ var (
 	loggingEgrp *errgroup.Group
 )
 
-// SetErrgroup registers the process-wide errgroup (and its context) used to
-// manage the asynchronous log-writer goroutine. When set, the writer goroutine
-// runs under the errgroup so a fatal write error cancels the shutdown context;
-// the context's cancellation also stops the writer. Call this once, early
-// (e.g. from cmd.Execute), before file logging is initialized.
+// SetErrgroup registers the process-wide errgroup (and its context) used to run
+// the asynchronous log-writer goroutine: the goroutine runs under the errgroup
+// so a fatal write error propagates, and stops when the context is cancelled at
+// shutdown. Call this once, early (e.g. from cmd.Execute), before file logging
+// is initialized.
 func SetErrgroup(ctx context.Context, egrp *errgroup.Group) {
 	asyncMu.Lock()
 	defer asyncMu.Unlock()
@@ -70,7 +71,7 @@ func SetErrgroup(ctx context.Context, egrp *errgroup.Group) {
 
 // buildRotateConfig reads the Logging.Rotation.* parameters into the parsed form
 // used by the async writer. It returns an error on a malformed value (e.g. an
-// unparseable size) so the caller can fail loudly at startup rather than
+// unparsable size) so the caller can fail loudly at startup rather than
 // silently disabling a misconfigured knob.
 func buildRotateConfig() (rotateConfig, error) {
 	// The admin-facing knobs are phrased as "Disable..." so their zero value is
@@ -101,9 +102,24 @@ func buildRotateConfig() (rotateConfig, error) {
 		if err != nil {
 			return cfg, fmt.Errorf("invalid %s value %q: %w", k.name, k.val, err)
 		}
+		if size > math.MaxInt64 {
+			return cfg, fmt.Errorf("%s value %q is too large", k.name, k.val)
+		}
 		*k.dst = int64(size)
 	}
 	return cfg, nil
+}
+
+// AwaitCompression blocks until any in-flight background log compression has
+// finished.  This ensures a graceful exit does not abandon a compression
+// mid-write, which would leave a stale ".gz.tmp" file.
+func AwaitCompression() {
+	asyncMu.Lock()
+	w := asyncW
+	asyncMu.Unlock()
+	if w != nil {
+		w.compressWg.Wait()
+	}
 }
 
 // EnterSyncMode is the logging shutdown handler. It drains and flushes the
