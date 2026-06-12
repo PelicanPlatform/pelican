@@ -40,14 +40,14 @@ import (
 // drained, and EnterSyncMode flushes + flips to synchronous mode so that a
 // line emitted afterward is written directly and still lands in the file.
 func TestFlushLogsToFileAndSyncMode(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "pelican.log")
+
 	// Snapshot/restore the global logging state touched by this test.
 	t.Cleanup(func() {
 		CloseLogger()
 		ResetLogFlush()
 	})
-
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "pelican.log")
 
 	require.NoError(t, param.Logging_LogLocation.Set(logPath))
 	require.NoError(t, param.Logging_Rotation_Frequency.Set("daily"))
