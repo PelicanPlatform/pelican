@@ -128,3 +128,139 @@ func lotToSpec(l *Lot) core.LotSpec {
 		ParentAttributions: parentAttrToCore(l.ParentAttributions),
 	}
 }
+
+// --- output mappers: core (bytes) -> adapter (GB) ---
+
+// coreMPAToAdapter converts a core Lot's MPA fields to the adapter MPA (GB).
+func coreMPAToAdapter(l core.Lot) *MPA {
+	return &MPA{
+		DedicatedGB:     bytesToGBPtr(l.DedicatedBytes),
+		OpportunisticGB: bytesToGBPtr(l.OpportunisticBytes),
+		MaxNumObjects:   &Int64FromFloat{Value: l.MaxNumObjects},
+		CreationTime:    &Int64FromFloat{Value: l.CreationTime},
+		ExpirationTime:  &Int64FromFloat{Value: l.ExpirationTime},
+		DeletionTime:    &Int64FromFloat{Value: l.DeletionTime},
+	}
+}
+
+// lotViewToAdapter converts a core LotView (lot + parents + paths + usage row)
+// to the adapter Lot shape. RestrictiveMPA is attached separately by the caller
+// when a recursive GetLot was requested.
+func lotViewToAdapter(v *core.LotView) *Lot {
+	paths := make([]LotPath, 0, len(v.Paths))
+	for _, p := range v.Paths {
+		paths = append(paths, LotPath{Path: p.Path, Recursive: p.Recursive, LotName: v.LotName})
+	}
+	return &Lot{
+		LotName: v.LotName,
+		Owner:   v.Owner,
+		Parents: v.Parents,
+		Paths:   paths,
+		MPA:     coreMPAToAdapter(v.Lot),
+		Usage:   usageRowToLotUsage(v.Usage, v.Lot),
+	}
+}
+
+// splitStorage divides a used-byte total into the portion that falls within the
+// dedicated allotment and the portion that spills into opportunistic burst,
+// honoring the unbounded sentinel on either axis.
+func splitStorage(used, dedicated, opportunistic int64) (ded, opp int64) {
+	if dedicated == core.Unbounded {
+		return used, 0
+	}
+	if used <= dedicated {
+		return used, 0
+	}
+	overage := used - dedicated
+	if opportunistic == core.Unbounded {
+		return dedicated, overage
+	}
+	if overage > opportunistic {
+		overage = opportunistic
+	}
+	return dedicated, overage
+}
+
+// usageRowToLotUsage maps a core usage row to the adapter's per-axis LotUsage
+// view. The total/objects/being-written axes map directly; the dedicated and
+// opportunistic axes are derived by splitting total usage against the lot's MPA
+// (a total-level split; the reference's finer self/children CASE breakdown can
+// be layered in later if a consumer needs it).
+func usageRowToLotUsage(u core.LotUsage, l core.Lot) *LotUsage {
+	total := u.SelfBytes + u.ChildrenBytes
+	dedUsed, oppUsed := splitStorage(total, l.DedicatedBytes, l.OpportunisticBytes)
+	return &LotUsage{
+		TotalGB: UsageMapFloat{
+			SelfContrib:     bytesToGB(u.SelfBytes),
+			ChildrenContrib: bytesToGB(u.ChildrenBytes),
+			Total:           bytesToGB(total),
+		},
+		DedicatedGB:     UsageMapFloat{Total: bytesToGB(dedUsed)},
+		OpportunisticGB: UsageMapFloat{Total: bytesToGB(oppUsed)},
+		NumObjects: UsageMapInt{
+			SelfContrib:     Int64FromFloat{Value: u.SelfObjects},
+			ChildrenContrib: Int64FromFloat{Value: u.ChildrenObjects},
+			Total:           Int64FromFloat{Value: u.SelfObjects + u.ChildrenObjects},
+		},
+		GBBeingWritten: UsageMapFloat{
+			SelfContrib:     bytesToGB(u.SelfBytesBeingWritten),
+			ChildrenContrib: bytesToGB(u.ChildrenBytesBeingWritten),
+			Total:           bytesToGB(u.SelfBytesBeingWritten + u.ChildrenBytesBeingWritten),
+		},
+		ObjectsBeingWritten: UsageMapInt{
+			SelfContrib:     Int64FromFloat{Value: u.SelfObjectsBeingWritten},
+			ChildrenContrib: Int64FromFloat{Value: u.ChildrenObjectsBeingWritten},
+			Total:           Int64FromFloat{Value: u.SelfObjectsBeingWritten + u.ChildrenObjectsBeingWritten},
+		},
+	}
+}
+
+// restrictiveToAdapter converts core's restrictive-value map (keyed by core MPA
+// key) into the adapter's RestrictiveMPA. Byte axes are converted to GB.
+func restrictiveToAdapter(rv map[string]core.RestrictiveValue) *RestrictiveMPA {
+	floatAxis := func(key string) LotValueMapFloat {
+		v := rv[key]
+		return LotValueMapFloat{LotName: v.LotName, Value: bytesToGB(v.Value)}
+	}
+	intAxis := func(key string) LotValueMapInt {
+		v := rv[key]
+		return LotValueMapInt{LotName: v.LotName, Value: Int64FromFloat{Value: v.Value}}
+	}
+	return &RestrictiveMPA{
+		DedicatedGB:     floatAxis(core.MpaKeyDedicatedBytes),
+		OpportunisticGB: floatAxis(core.MpaKeyOpportunisticBytes),
+		MaxNumObjects:   intAxis(core.MpaKeyMaxNumObjects),
+		CreationTime:    intAxis("creation_time"),
+		ExpirationTime:  intAxis("expiration_time"),
+		DeletionTime:    intAxis("deletion_time"),
+	}
+}
+
+// capacityToAdapter converts core available-capacity (bytes, nil for unbounded
+// axes) to the adapter AvailableCapacity (GB; an unbounded axis reports 0,
+// matching the prior null-decodes-to-zero behavior).
+func capacityToAdapter(c *core.AvailableCapacity) *AvailableCapacity {
+	gbOrZero := func(p *int64) float64 {
+		if p == nil {
+			return 0
+		}
+		return bytesToGB(*p)
+	}
+	return &AvailableCapacity{
+		AvailableDedicatedGB:     gbOrZero(c.AvailableDedicatedBytes),
+		AvailableOpportunisticGB: gbOrZero(c.AvailableOpportunisticBytes),
+		AvailableTotalGB:         gbOrZero(c.AvailableTotalBytes),
+		AvailableMaxNumObjects:   derefOrZero(c.AvailableMaxNumObjects),
+		PeakDedicatedGB:          bytesToGB(c.PeakDedicatedBytes),
+		PeakOpportunisticGB:      bytesToGB(c.PeakOpportunisticBytes),
+		PeakMaxNumObjects:        c.PeakMaxNumObjects,
+		PeakTotalGB:              bytesToGB(c.PeakTotalBytes),
+	}
+}
+
+func derefOrZero(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
