@@ -169,7 +169,7 @@ func TestLotsFromDirActiveWindowAndReclaim(t *testing.T) {
 	// Expiring lot active in [100, 200).
 	if err := m.AddLot(LotSpec{LotName: "gen", Owner: "fed", Parents: []string{"root"},
 		Paths: []PathSpec{{Path: "/atlas", Recursive: true}},
-		MPA:   MPA{DedicatedGB: 10, OpportunisticGB: -1, MaxNumObjects: -1, CreationTime: 100, ExpirationTime: 200, DeletionTime: 300}}, ""); err != nil {
+		MPA:   MPA{DedicatedBytes: 10, OpportunisticBytes: -1, MaxNumObjects: -1, CreationTime: 100, ExpirationTime: 200, DeletionTime: 300}}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,12 +196,12 @@ func TestLotsForPathWindowUnion(t *testing.T) {
 	// Two back-to-back generations of /atlas: genA [100,200), genB [200,300).
 	if err := m.AddLot(LotSpec{LotName: "genA", Owner: "fed", Parents: []string{"root"},
 		Paths: []PathSpec{{Path: "/atlas", Recursive: true}},
-		MPA:   MPA{DedicatedGB: 10, OpportunisticGB: -1, MaxNumObjects: -1, CreationTime: 100, ExpirationTime: 200, DeletionTime: 400}}, ""); err != nil {
+		MPA:   MPA{DedicatedBytes: 10, OpportunisticBytes: -1, MaxNumObjects: -1, CreationTime: 100, ExpirationTime: 200, DeletionTime: 400}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddLot(LotSpec{LotName: "genB", Owner: "fed", Parents: []string{"root"},
 		Paths: []PathSpec{{Path: "/atlas", Recursive: true}},
-		MPA:   MPA{DedicatedGB: 10, OpportunisticGB: -1, MaxNumObjects: -1, CreationTime: 200, ExpirationTime: 300, DeletionTime: 400}}, ""); err != nil {
+		MPA:   MPA{DedicatedBytes: 10, OpportunisticBytes: -1, MaxNumObjects: -1, CreationTime: 200, ExpirationTime: 300, DeletionTime: 400}}, ""); err != nil {
 		t.Fatal(err)
 	}
 
