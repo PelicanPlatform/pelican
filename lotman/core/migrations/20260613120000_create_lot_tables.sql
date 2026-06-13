@@ -3,9 +3,9 @@
 CREATE TABLE lots (
     lot_name             TEXT    PRIMARY KEY,
     owner                TEXT    NOT NULL,
-    dedicated_bytes      INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded
-    opportunistic_bytes  INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded
-    max_num_objects      INTEGER NOT NULL DEFAULT -1,  -- -1 = unbounded
+    dedicated_bytes      INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded (set explicitly)
+    opportunistic_bytes  INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded (set explicitly)
+    max_num_objects      INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded (set explicitly)
     creation_time        INTEGER NOT NULL DEFAULT 0,   -- ms; all-zero triple = non-expiring
     expiration_time      INTEGER NOT NULL DEFAULT 0,
     deletion_time        INTEGER NOT NULL DEFAULT 0,
