@@ -30,7 +30,7 @@ type Lot struct {
 	Owner              string `gorm:"column:owner;not null"`
 	DedicatedBytes     int64  `gorm:"column:dedicated_bytes;not null;default:0"`
 	OpportunisticBytes int64  `gorm:"column:opportunistic_bytes;not null;default:0"`
-	MaxNumObjects      int64  `gorm:"column:max_num_objects;not null;default:-1"`
+	MaxNumObjects      int64  `gorm:"column:max_num_objects;not null;default:0"`
 	CreationTime       int64  `gorm:"column:creation_time;not null;default:0"`
 	ExpirationTime     int64  `gorm:"column:expiration_time;not null;default:0"`
 	DeletionTime       int64  `gorm:"column:deletion_time;not null;default:0"`
