@@ -1436,7 +1436,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	meta.LastModified = statInfo.ModTime
 	meta.SourceURL = pelicanURL
 	meta.NamespaceID = namespaceID
-	meta.LotID = pc.getLotID(pelicanURL)
+	meta.LotID = pc.lotIDOf(namespaceID)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -1859,7 +1859,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				ContentLength: metadata.ObjectSize,
 				SourceURL:     dl.sourceURL,
 				NamespaceID:   dl.namespaceID,
-				LotID:         pc.getLotID(dl.sourceURL),
+				LotID:         pc.lotIDOf(dl.namespaceID),
 			}
 			dl.noStoreMeta.SetCacheControl(dl.cacheControl)
 
@@ -2293,7 +2293,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 	meta.SetCacheControl(w.dl.cacheControl)
 	meta.SourceURL = w.dl.sourceURL
 	meta.NamespaceID = w.dl.namespaceID
-	meta.LotID = w.pc.getLotID(w.dl.sourceURL)
+	meta.LotID = w.pc.lotIDOf(w.dl.namespaceID)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -2399,7 +2399,7 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 			ContentLength: int64(len(w.buffer)),
 			SourceURL:     dl.sourceURL,
 			NamespaceID:   dl.namespaceID,
-			LotID:         w.pc.getLotID(dl.sourceURL),
+			LotID:         w.pc.lotIDOf(dl.namespaceID),
 			Completed:     time.Now(),
 			LastValidated: time.Now(),
 			Checksums:     dl.checksums,
@@ -2515,19 +2515,6 @@ func (pc *PersistentCache) normalizePath(objectPath string) string {
 	return u.String()
 }
 
-// getLotID resolves the storage lot that owns an object and returns its LotID.
-// The input is the object's federation-qualified pelican:// URL (meta.SourceURL),
-// from which a federation-qualified resolution key is derived so the same path
-// in different federations maps to different lots. Returns 0 when lot tracking
-// is disabled (no manager/index), in which case objects are not lot-accounted.
-func (pc *PersistentCache) getLotID(pelicanURL string) LotID {
-	if pc.lotIndex == nil {
-		return 0
-	}
-	_, id := pc.lotIndex.Resolve(federationQualifiedKey(pelicanURL, pc.defaultFed))
-	return id
-}
-
 // RebuildLotIndex refreshes the in-memory lot index from the lot manager. It is
 // called when lots change (creation/renewal/removal) so subsequently-ingested
 // objects resolve against the current set of lots. No-op when lot tracking is
@@ -2539,13 +2526,21 @@ func (pc *PersistentCache) RebuildLotIndex() error {
 	return pc.lotIndex.rebuildFromManager(pc.lotMgr)
 }
 
-// getNamespaceID returns or assigns a namespace ID for a path
+// getNamespaceID returns or assigns the accounting bucket id for a path. When
+// lot tracking is enabled the bucket is the object's owning lot (resolved by
+// longest-prefix match over federation-qualified lot paths); otherwise it is the
+// legacy first-path-component namespace, preserving namespace fairness when
+// lotman is disabled. Either way the bucket key is a string mapped to a stable,
+// persisted id (reusing the namespace-mapping table), so usage/LRU keys survive
+// restarts.
 func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
-	// Extract namespace prefix from path
-	prefix := extractNamespacePrefix(objectPath)
+	bucketKey := extractNamespacePrefix(objectPath)
+	if pc.lotIndex != nil {
+		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(pc.normalizePath(objectPath), pc.defaultFed))
+	}
 
 	pc.namespaceMapMu.RLock()
-	if id, exists := pc.namespaceMap[prefix]; exists {
+	if id, exists := pc.namespaceMap[bucketKey]; exists {
 		pc.namespaceMapMu.RUnlock()
 		return id
 	}
@@ -2556,20 +2551,30 @@ func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
 	defer pc.namespaceMapMu.Unlock()
 
 	// Double-check after acquiring write lock
-	if id, exists := pc.namespaceMap[prefix]; exists {
+	if id, exists := pc.namespaceMap[bucketKey]; exists {
 		return id
 	}
 
 	id := NamespaceID(pc.nextNamespaceID.Add(1))
-	pc.namespaceMap[prefix] = id
+	pc.namespaceMap[bucketKey] = id
 
 	// Persist the mapping so it survives restarts
-	if err := pc.db.SetNamespaceMapping(prefix, id); err != nil {
-		log.Warnf("Failed to persist namespace mapping %s -> %d: %v", prefix, id, err)
+	if err := pc.db.SetNamespaceMapping(bucketKey, id); err != nil {
+		log.Warnf("Failed to persist bucket mapping %s -> %d: %v", bucketKey, id, err)
 	}
 
-	log.Debugf("Assigned namespace ID %d to prefix %s", id, prefix)
+	log.Debugf("Assigned bucket ID %d to key %s", id, bucketKey)
 	return id
+}
+
+// lotIDOf returns the LotID for an object given its accounting bucket id. When
+// lot tracking is enabled the bucket is the lot, so the LotID equals the bucket
+// id; otherwise there is no lot and it returns 0.
+func (pc *PersistentCache) lotIDOf(bucket NamespaceID) LotID {
+	if pc.lotIndex == nil {
+		return 0
+	}
+	return LotID(bucket)
 }
 
 // extractNamespacePrefix extracts the namespace prefix from a path
