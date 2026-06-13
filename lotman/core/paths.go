@@ -181,6 +181,23 @@ func (m *Manager) pathCandidates(q string) ([]lotPathCand, error) {
 	return out, nil
 }
 
+// LotForPath returns the name of the lot that has the given path in its path
+// set (exact match), or "" if none does. Unlike LotsFromDir this is a direct
+// row lookup, not longest-prefix resolution, and ignores lifecycle windows and
+// reclamation — it answers "which lot owns this exact path row", as needed when
+// removing a path.
+func (m *Manager) LotForPath(path string) (string, error) {
+	q := normalizePath(path)
+	var names []string
+	if err := m.db.Model(&LotPath{}).Where("path = ?", q).Limit(1).Pluck("lot_name", &names).Error; err != nil {
+		return "", wrap(err, "looking up lot for path")
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	return names[0], nil
+}
+
 // LotsFromDir resolves the lot that owns dir at instant atMs, using
 // longest-prefix matching with recursive/exclude semantics. When recursive is
 // true the owning lot's ancestors are appended. A path matching no active,
