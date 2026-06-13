@@ -70,7 +70,7 @@ func TestLotsPastDedQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	// ns uses 60 GB > its 50 dedicated.
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfGB: f64(60)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: i64(60)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	past, err := m.LotsPastDed(false, false, false, false)
@@ -98,7 +98,7 @@ func TestLotsPastDedHierarchical(t *testing.T) {
 	// ns overshoots its dedicated by 70 (120 used, 50 quota). The overage (70)
 	// attributed to root: root.self(0) + 70 = 70 < root.dedicated(100) -> root
 	// not yet past. Bump ns to 180 (overage 130) -> root past (0 + 130 >= 100).
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfGB: f64(120)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: i64(120)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	past, err := m.LotsPastDed(false, false, false, true)
@@ -112,7 +112,7 @@ func TestLotsPastDedHierarchical(t *testing.T) {
 		t.Errorf("ns should be past its own dedicated: %v", past)
 	}
 
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfGB: f64(180)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: i64(180)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	past, _ = m.LotsPastDed(false, false, false, true)
@@ -160,11 +160,11 @@ func TestLotsPastObjAndUnboundedSkipped(t *testing.T) {
 func TestReclaimLot(t *testing.T) {
 	m := seedThreeLevel(t) // root -> ns -> grand
 	// Give grand usage so root's rollup counts it.
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "grand", SelfGB: f64(8)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "grand", SelfBytes: i64(8)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := m.GetLotUsage("root"); r.ChildrenGB != 8 {
-		t.Fatalf("precondition root children 8, got %v", r.ChildrenGB)
+	if r, _ := m.GetLotUsage("root"); r.ChildrenBytes != 8 {
+		t.Fatalf("precondition root children 8, got %v", r.ChildrenBytes)
 	}
 
 	// Reclaim ns: cascades to grand.
@@ -176,8 +176,8 @@ func TestReclaimLot(t *testing.T) {
 		t.Errorf("expected ReclaimOK, got %v", res)
 	}
 	// Reclaimed subtree drops out of root's rollup.
-	if r, _ := m.GetLotUsage("root"); r.ChildrenGB != 0 {
-		t.Errorf("root children should be 0 after reclaim, got %v", r.ChildrenGB)
+	if r, _ := m.GetLotUsage("root"); r.ChildrenBytes != 0 {
+		t.Errorf("root children should be 0 after reclaim, got %v", r.ChildrenBytes)
 	}
 
 	// Re-reclaiming is a no-op signalled as already-reclaimed.
@@ -202,7 +202,7 @@ func TestPastQuotaExcludesReclaimed(t *testing.T) {
 		MPA: nonExpiringMPA(10, -1, -1)}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfGB: f64(50)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: i64(50)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	// Over quota and present by default.

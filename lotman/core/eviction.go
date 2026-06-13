@@ -63,7 +63,7 @@ func (m *Manager) LotsPastDel(atMs int64, recursive, includeReclaimed bool) ([]s
 	return m.finishPastQuery(names, recursive, includeReclaimed, atMs)
 }
 
-// LotsPastDed returns lots over their dedicated_GB quota. With hierarchical, an
+// LotsPastDed returns lots over their dedicated quota. With hierarchical, an
 // adjusted-usage query attributes children's overage to their parents and
 // results are returned deepest-first; recQuota/recChildren are ignored in that
 // mode. Otherwise recQuota counts children toward the quota (self+children) and
@@ -71,14 +71,14 @@ func (m *Manager) LotsPastDel(atMs int64, recursive, includeReclaimed bool) ([]s
 func (m *Manager) LotsPastDed(recQuota, recChildren, includeReclaimed, hierarchical bool) ([]string, error) {
 	if hierarchical {
 		return m.lotsPastThresholdHierarchical(
-			"self_gb", "c_usage.self_gb + c_usage.children_gb", "c_mpa.dedicated_gb", "p_mpa.dedicated_gb",
-			"p_mpa.dedicated_gb = -1", "c_mpa.dedicated_gb = -1", includeReclaimed)
+			"self_bytes", "c_usage.self_bytes + c_usage.children_bytes", "c_mpa.dedicated_bytes", "p_mpa.dedicated_bytes",
+			"p_mpa.dedicated_bytes = -1", "c_mpa.dedicated_bytes = -1", includeReclaimed)
 	}
-	usageExpr := "u.self_gb"
+	usageExpr := "u.self_bytes"
 	if recQuota {
-		usageExpr = "u.self_gb + u.children_gb"
+		usageExpr = "u.self_bytes + u.children_bytes"
 	}
-	names, err := m.pastQuotaQuery("l.dedicated_gb != -1", usageExpr+" >= l.dedicated_gb")
+	names, err := m.pastQuotaQuery("l.dedicated_bytes != -1", usageExpr+" >= l.dedicated_bytes")
 	if err != nil {
 		return nil, err
 	}
@@ -89,18 +89,18 @@ func (m *Manager) LotsPastDed(recQuota, recChildren, includeReclaimed, hierarchi
 func (m *Manager) LotsPastOpp(recQuota, recChildren, includeReclaimed, hierarchical bool) ([]string, error) {
 	if hierarchical {
 		return m.lotsPastThresholdHierarchical(
-			"self_gb", "c_usage.self_gb + c_usage.children_gb",
-			"c_mpa.dedicated_gb + c_mpa.opportunistic_gb", "p_mpa.dedicated_gb + p_mpa.opportunistic_gb",
-			"p_mpa.dedicated_gb = -1 OR p_mpa.opportunistic_gb = -1",
-			"c_mpa.dedicated_gb = -1 OR c_mpa.opportunistic_gb = -1", includeReclaimed)
+			"self_bytes", "c_usage.self_bytes + c_usage.children_bytes",
+			"c_mpa.dedicated_bytes + c_mpa.opportunistic_bytes", "p_mpa.dedicated_bytes + p_mpa.opportunistic_bytes",
+			"p_mpa.dedicated_bytes = -1 OR p_mpa.opportunistic_bytes = -1",
+			"c_mpa.dedicated_bytes = -1 OR c_mpa.opportunistic_bytes = -1", includeReclaimed)
 	}
-	usageExpr := "u.self_gb"
+	usageExpr := "u.self_bytes"
 	if recQuota {
-		usageExpr = "u.self_gb + u.children_gb"
+		usageExpr = "u.self_bytes + u.children_bytes"
 	}
 	names, err := m.pastQuotaQuery(
-		"l.dedicated_gb != -1 AND l.opportunistic_gb != -1",
-		usageExpr+" >= l.dedicated_gb + l.opportunistic_gb")
+		"l.dedicated_bytes != -1 AND l.opportunistic_bytes != -1",
+		usageExpr+" >= l.dedicated_bytes + l.opportunistic_bytes")
 	if err != nil {
 		return nil, err
 	}
