@@ -370,6 +370,12 @@ type CacheMetadata struct {
 	NamespaceID NamespaceID `msgpack:"ns"` // ID of the namespace prefix
 	// Usage is tracked per (StorageID, NamespaceID) pair for multi-storage fairness
 
+	// LotID identifies the storage lot that owns this object, resolved at ingest
+	// by longest-prefix match over federation-qualified lot paths. It is the
+	// accounting bucket for lot-aware usage and eviction. 0 means no lot (lot
+	// tracking disabled, or no lotman manager configured).
+	LotID LotID `msgpack:"lot,omitempty"`
+
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
 }

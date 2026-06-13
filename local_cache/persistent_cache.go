@@ -58,6 +58,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/lotman/core"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -143,6 +144,12 @@ type PersistentCache struct {
 	namespaceMap    map[string]NamespaceID
 	namespaceMapMu  sync.RWMutex
 	nextNamespaceID atomic.Uint32
+
+	// Lot tracking. lotMgr is the (optional) lotman core manager; when nil, lot
+	// tracking is disabled and objects get LotID 0. lotIndex is the in-memory
+	// longest-prefix resolver, rebuilt from lotMgr when lots change.
+	lotMgr   *core.Manager
+	lotIndex *lotIndex
 
 	// Active downloads tracking
 	activeDownloads   map[ObjectHash]*persistentDownload
@@ -337,6 +344,12 @@ type PersistentCacheConfig struct {
 	InlineStorageMaxBytes int
 
 	DefaultFederation string
+
+	// LotManager is the optional lotman core manager. When set, the cache
+	// resolves each object to a storage lot and tracks usage per lot; when nil,
+	// lot tracking is disabled. The cache does not own the manager's lifecycle
+	// or bootstrap (lots are created by the lotman init/renewal code).
+	LotManager *core.Manager
 
 	// DeferConfig delays the initial director namespace fetch until
 	// Config() is called explicitly.  The server launcher sets this to
@@ -585,6 +598,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		directorURL:     directorURL,
 		defaultFed:      defaultFed,
 		ac:              newAuthConfig(ctx, egrp),
+		lotMgr:          cfg.LotManager,
 		namespaceMap:    make(map[string]NamespaceID),
 		activeDownloads: make(map[ObjectHash]*persistentDownload),
 		downloadCtx:     downloadCtx,
@@ -594,6 +608,16 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	}
 	pc.fedTokenReady = make(chan struct{})
 	pc.prestageManager = NewPrestageManager(pc)
+
+	// Build the in-memory lot index from the current set of lots so object
+	// ingest can resolve lots without touching the lot database. A build error
+	// is non-fatal: objects fall to the default lot until the next rebuild.
+	if pc.lotMgr != nil {
+		pc.lotIndex = newLotIndex()
+		if err := pc.lotIndex.rebuildFromManager(pc.lotMgr); err != nil {
+			log.Warnf("Failed to build initial lot index (objects will use the default lot until rebuilt): %v", err)
+		}
+	}
 
 	// Restore persisted namespace mappings so that LRU keys and usage
 	// counters from prior runs remain valid.
@@ -1412,6 +1436,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	meta.LastModified = statInfo.ModTime
 	meta.SourceURL = pelicanURL
 	meta.NamespaceID = namespaceID
+	meta.LotID = pc.getLotID(pelicanURL)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -1834,6 +1859,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				ContentLength: metadata.ObjectSize,
 				SourceURL:     dl.sourceURL,
 				NamespaceID:   dl.namespaceID,
+				LotID:         pc.getLotID(dl.sourceURL),
 			}
 			dl.noStoreMeta.SetCacheControl(dl.cacheControl)
 
@@ -2267,6 +2293,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 	meta.SetCacheControl(w.dl.cacheControl)
 	meta.SourceURL = w.dl.sourceURL
 	meta.NamespaceID = w.dl.namespaceID
+	meta.LotID = w.pc.getLotID(w.dl.sourceURL)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -2372,6 +2399,7 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 			ContentLength: int64(len(w.buffer)),
 			SourceURL:     dl.sourceURL,
 			NamespaceID:   dl.namespaceID,
+			LotID:         w.pc.getLotID(dl.sourceURL),
 			Completed:     time.Now(),
 			LastValidated: time.Now(),
 			Checksums:     dl.checksums,
@@ -2485,6 +2513,30 @@ func (pc *PersistentCache) normalizePath(objectPath string) string {
 	u.Path = path.Clean(objectPath)
 
 	return u.String()
+}
+
+// getLotID resolves the storage lot that owns an object and returns its LotID.
+// The input is the object's federation-qualified pelican:// URL (meta.SourceURL),
+// from which a federation-qualified resolution key is derived so the same path
+// in different federations maps to different lots. Returns 0 when lot tracking
+// is disabled (no manager/index), in which case objects are not lot-accounted.
+func (pc *PersistentCache) getLotID(pelicanURL string) LotID {
+	if pc.lotIndex == nil {
+		return 0
+	}
+	_, id := pc.lotIndex.Resolve(federationQualifiedKey(pelicanURL, pc.defaultFed))
+	return id
+}
+
+// RebuildLotIndex refreshes the in-memory lot index from the lot manager. It is
+// called when lots change (creation/renewal/removal) so subsequently-ingested
+// objects resolve against the current set of lots. No-op when lot tracking is
+// disabled.
+func (pc *PersistentCache) RebuildLotIndex() error {
+	if pc.lotIndex == nil || pc.lotMgr == nil {
+		return nil
+	}
+	return pc.lotIndex.rebuildFromManager(pc.lotMgr)
 }
 
 // getNamespaceID returns or assigns a namespace ID for a path
