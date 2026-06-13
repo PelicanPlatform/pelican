@@ -42,9 +42,28 @@ const rrTableSize = 1024
 // Each storage directory has independent watermarks; eviction is triggered
 // per-directory when a directory exceeds its high-water mark and proceeds
 // until the directory's usage falls to its low-water mark.
+// lotEvictionPlanner supplies lot-aware eviction guidance. It is optional: when
+// set (lot tracking enabled), the eviction loop drains over-quota/expired lots
+// first, in priority order, before falling back to greediest-bucket eviction.
+// Implemented by PersistentCache; the interface keeps eviction decoupled from
+// the lot manager.
+type lotEvictionPlanner interface {
+	// syncLotUsage pushes current cache usage into the lot store so the
+	// priority queries below reflect what the cache actually holds.
+	syncLotUsage() error
+	// priorityBuckets returns the accounting bucket ids to evict first within a
+	// storage directory, ordered past-deletion, past-expiration,
+	// over-opportunistic, then over-dedicated, restricted to lots with usage in
+	// that directory.
+	priorityBuckets(storageID StorageID) []NamespaceID
+}
+
 type EvictionManager struct {
 	db      *CacheDB
 	storage *StorageManager
+
+	// planner is the optional lot-aware eviction advisor; nil disables it.
+	planner lotEvictionPlanner
 
 	// Per-directory size limits, keyed by storageID.  The map is
 	// read-only after construction and requires no synchronisation.
@@ -303,6 +322,12 @@ func (em *EvictionManager) getDirUsage(storageID StorageID) int64 {
 	return total
 }
 
+// SetLotPlanner installs the optional lot-aware eviction advisor. Passing nil
+// (the default) leaves eviction in greediest-bucket mode.
+func (em *EvictionManager) SetLotPlanner(p lotEvictionPlanner) {
+	em.planner = p
+}
+
 // checkAndEvict checks each storage directory against its own watermarks
 // and evicts from any directory that exceeds its high-water mark.
 // Directories are processed concurrently because they typically reside
@@ -330,6 +355,24 @@ func (em *EvictionManager) checkAndEvict() {
 	var totalEvictedObjects atomic.Int64
 	var totalConflicts atomic.Int64
 
+	// Lot-aware eviction refreshes the lot store's usage view before planning so
+	// the priority queries are accurate -- but only if some directory actually
+	// needs eviction, to avoid syncing on idle ticks.
+	if em.planner != nil {
+		needsEviction := false
+		for sid, limits := range em.dirLimits {
+			if u := em.getDirUsage(sid); u > 0 && uint64(u) > limits.highWater {
+				needsEviction = true
+				break
+			}
+		}
+		if needsEviction {
+			if err := em.planner.syncLotUsage(); err != nil {
+				rl.WithError(err).Warn("Pre-eviction lot usage sync failed; proceeding with stale usage")
+			}
+		}
+	}
+
 	var wg sync.WaitGroup
 	for sid, limits := range em.dirLimits {
 		wg.Add(1)
@@ -346,6 +389,26 @@ func (em *EvictionManager) checkAndEvict() {
 				"highWater": limits.highWater,
 			}).Info("Starting eviction")
 
+			// Tier 1: drain over-quota / expired lots first, in priority order.
+			if em.planner != nil {
+				for _, bucket := range em.planner.priorityBuckets(sid) {
+					dirUsage = em.getDirUsage(sid)
+					if dirUsage <= 0 || uint64(dirUsage) <= limits.lowWater {
+						break
+					}
+					overhead := dirUsage - int64(limits.lowWater)
+					bytes, count, conflicts, err := em.evictFromNamespace(rl, sid, bucket, 0, overhead)
+					totalConflicts.Add(int64(conflicts))
+					if err != nil {
+						rl.WithFields(log.Fields{"storageID": sid, "namespaceID": bucket}).WithError(err).Warn("Error evicting priority lot")
+						continue
+					}
+					totalEvictedBytes.Add(bytes)
+					totalEvictedObjects.Add(int64(count))
+				}
+			}
+
+			// Tier 2: fall back to greediest-bucket eviction for any remainder.
 			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)

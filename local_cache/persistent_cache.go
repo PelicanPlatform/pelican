@@ -617,6 +617,8 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		if err := pc.lotIndex.rebuildFromManager(pc.lotMgr); err != nil {
 			log.Warnf("Failed to build initial lot index (objects will use the default lot until rebuilt): %v", err)
 		}
+		// Make eviction lot-aware: drain over-quota/expired lots first.
+		pc.eviction.SetLotPlanner(pc)
 	}
 
 	// Restore persisted namespace mappings so that LRU keys and usage
