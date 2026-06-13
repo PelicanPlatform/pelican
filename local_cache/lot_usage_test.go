@@ -21,9 +21,92 @@ package local_cache
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
+
+// seedLRUObject writes a minimal object (metadata + LRU index entry) into the
+// given (storage, bucket) so CountLRUEntries / the object-cap trim can see it.
+func seedLRUObject(t *testing.T, cdb *CacheDB, sid StorageID, bucket NamespaceID, id string) {
+	t.Helper()
+	hash := InstanceHash("obj-" + id)
+	meta := &CacheMetadata{
+		ETag:           id,
+		ContentLength:  10,
+		StorageID:      sid,
+		NamespaceID:    bucket,
+		LotID:          LotID(bucket),
+		LastAccessTime: time.Now(),
+	}
+	if err := cdb.SetMetadata(hash, meta); err != nil {
+		t.Fatalf("set metadata: %v", err)
+	}
+	if err := cdb.UpdateLRU(hash, 0); err != nil {
+		t.Fatalf("update lru: %v", err)
+	}
+}
+
+func TestCountLRUEntries(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	seedLRUObject(t, cdb, 0, 7, "a")
+	seedLRUObject(t, cdb, 0, 7, "b")
+	seedLRUObject(t, cdb, 0, 7, "c")
+	seedLRUObject(t, cdb, 0, 8, "d")
+
+	if c, _ := cdb.CountLRUEntries(0, 7); c != 3 {
+		t.Errorf("bucket 7 count = %d, want 3", c)
+	}
+	if c, _ := cdb.CountLRUEntries(0, 8); c != 1 {
+		t.Errorf("bucket 8 count = %d, want 1", c)
+	}
+	if c, _ := cdb.CountLRUEntries(0, 9); c != 0 {
+		t.Errorf("empty bucket 9 count = %d, want 0", c)
+	}
+}
+
+func TestTrimObjectCapsUnderCap(t *testing.T) {
+	m := newCoreTestManager(t)
+	mustAdd := func(s core.LotSpec) {
+		if err := m.AddLot(s, ""); err != nil {
+			t.Fatalf("add %s: %v", s.LotName, err)
+		}
+	}
+	mustAdd(core.LotSpec{LotName: "root", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: -1, OpportunisticBytes: -1, MaxNumObjects: -1}})
+	mustAdd(core.LotSpec{LotName: "mon", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 0, OpportunisticBytes: -1, MaxNumObjects: 5}})
+
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	seedLRUObject(t, cdb, 0, 7, "a")
+	seedLRUObject(t, cdb, 0, 7, "b")
+
+	// eviction is not invoked under cap, so a storage-less manager is fine here.
+	pc := &PersistentCache{
+		db:           cdb,
+		lotMgr:       m,
+		namespaceMap: map[string]NamespaceID{"mon": 7, "root": 8},
+		eviction:     &EvictionManager{db: cdb},
+	}
+	if err := pc.trimObjectCaps(); err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+	if c, _ := cdb.CountLRUEntries(0, 7); c != 2 {
+		t.Errorf("under-cap lot should be untouched, count = %d, want 2", c)
+	}
+}
 
 func TestAggregateUsageByLot(t *testing.T) {
 	usage := map[StorageUsageKey]int64{
