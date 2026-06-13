@@ -25,55 +25,55 @@ import (
 	"gorm.io/gorm"
 )
 
-const fpTol = 1e-9
-
 // mpaKeys are the three axes that carry parent attributions.
-var mpaKeys = []string{MpaKeyDedicatedGB, MpaKeyOpportunisticGB, MpaKeyMaxNumObjects}
+var mpaKeys = []string{MpaKeyDedicatedBytes, MpaKeyOpportunisticBytes, MpaKeyMaxNumObjects}
 
 // isPartialStorageSentinel reports the transient mid-update state where
 // dedicated is unbounded but opportunistic is not (an invalid persisting state,
 // but tolerated during a multi-field update so axiom checks defer to the final
 // invariant check).
-func isPartialStorageSentinel(dedicated, opportunistic float64) bool {
-	return IsUnboundedGB(dedicated) && !IsUnboundedGB(opportunistic)
+func isPartialStorageSentinel(dedicated, opportunistic int64) bool {
+	return IsUnboundedBytes(dedicated) && !IsUnboundedBytes(opportunistic)
 }
 
-// mpaAxisValue returns the MPA value for an attribution axis as a float.
-func mpaAxisValue(mpa MPA, key string) float64 {
+// mpaAxisValue returns the MPA value for an attribution axis.
+func mpaAxisValue(mpa MPA, key string) int64 {
 	switch key {
-	case MpaKeyDedicatedGB:
-		return mpa.DedicatedGB
-	case MpaKeyOpportunisticGB:
-		return mpa.OpportunisticGB
+	case MpaKeyDedicatedBytes:
+		return mpa.DedicatedBytes
+	case MpaKeyOpportunisticBytes:
+		return mpa.OpportunisticBytes
 	case MpaKeyMaxNumObjects:
-		return float64(mpa.MaxNumObjects)
+		return mpa.MaxNumObjects
 	}
 	return 0
 }
 
 // explicitAttr returns the explicit attributed value for an axis, if specified.
-func explicitAttr(pa ParentAttribution, key string) (float64, bool) {
+func explicitAttr(pa ParentAttribution, key string) (int64, bool) {
 	switch key {
-	case MpaKeyDedicatedGB:
-		if pa.DedicatedGB != nil {
-			return *pa.DedicatedGB, true
+	case MpaKeyDedicatedBytes:
+		if pa.DedicatedBytes != nil {
+			return *pa.DedicatedBytes, true
 		}
-	case MpaKeyOpportunisticGB:
-		if pa.OpportunisticGB != nil {
-			return *pa.OpportunisticGB, true
+	case MpaKeyOpportunisticBytes:
+		if pa.OpportunisticBytes != nil {
+			return *pa.OpportunisticBytes, true
 		}
 	case MpaKeyMaxNumObjects:
 		if pa.MaxNumObjects != nil {
-			return float64(*pa.MaxNumObjects), true
+			return *pa.MaxNumObjects, true
 		}
 	}
 	return 0, false
 }
 
 // computeAndStoreAttributions distributes the lot's MPA across its non-self
-// parents as fractions and persists them, replacing any existing attribution
-// rows. Root/self-only lots have nothing to attribute. Ported from the
-// reference compute_and_store_attributions.
+// parents as absolute amounts and persists them, replacing any existing rows.
+// Root/self-only lots have nothing to attribute. An unbounded axis (-1) is
+// propagated as -1 to every parent; a zero axis attributes 0; otherwise
+// explicit per-parent amounts are honored and the remainder is split as evenly
+// as integer division allows.
 func computeAndStoreAttributions(tx *gorm.DB, lotName string, mpa MPA, parents []string, attrs map[string]ParentAttribution) error {
 	nonSelf := make([]string, 0, len(parents))
 	for _, p := range parents {
@@ -102,106 +102,88 @@ func computeAndStoreAttributions(tx *gorm.DB, lotName string, mpa MPA, parents [
 	for _, key := range mpaKeys {
 		total := mpaAxisValue(mpa, key)
 
-		// Unbounded child: propagate the unbounded designation to every parent
-		// with fraction 1.0 (downstream reconstructs child.mpa * 1.0 == -1).
-		if total == -1 {
+		switch {
+		case total == -1: // unbounded: propagate to every parent
 			for _, p := range nonSelf {
-				if err := storeAttribution(tx, lotName, p, key, 1.0); err != nil {
+				if err := storeAttribution(tx, lotName, p, key, -1); err != nil {
+					return err
+				}
+			}
+			continue
+		case total == 0: // nothing to attribute on this axis
+			for _, p := range nonSelf {
+				if err := storeAttribution(tx, lotName, p, key, 0); err != nil {
 					return err
 				}
 			}
 			continue
 		}
 
-		explicitlyAttributed := 0.0
+		var explicitlyAttributed int64
 		var unspecified []string
 		for _, p := range nonSelf {
-			val, ok := false, false
-			var ev float64
 			if pa, present := attrs[p]; present {
-				ev, ok = explicitAttr(pa, key)
-				val = ok
-			}
-			if val {
-				frac := 0.0
-				if total > 0 {
-					frac = ev / total
-				}
-				if err := storeAttribution(tx, lotName, p, key, frac); err != nil {
-					return err
-				}
-				explicitlyAttributed += ev
-			} else {
-				unspecified = append(unspecified, p)
-			}
-		}
-
-		if len(unspecified) == 0 && total > 0 {
-			if total-explicitlyAttributed > fpTol {
-				return wrapf(ErrInvalidLot, "explicit attributions for %q sum to %v but total is %v (shortfall, no parent to absorb)", key, explicitlyAttributed, total)
-			}
-			if explicitlyAttributed-total > fpTol {
-				return wrapf(ErrInvalidLot, "explicit attributions for %q sum to %v which exceeds total %v (double-count)", key, explicitlyAttributed, total)
-			}
-		}
-
-		if len(unspecified) > 0 {
-			remainder := total - explicitlyAttributed
-			if remainder < -fpTol {
-				return wrapf(ErrInvalidLot, "explicit attributions for %q exceed the total allocation", key)
-			}
-			if remainder < 0 {
-				remainder = 0
-			}
-			n := int64(len(unspecified))
-			perParent := remainder / float64(len(unspecified))
-			var intPer, intExtra int64
-			if key == MpaKeyMaxNumObjects {
-				ir := int64(remainder)
-				intPer = ir / n
-				intExtra = ir % n
-			}
-			for i, p := range unspecified {
-				value := perParent
-				if key == MpaKeyMaxNumObjects {
-					value = float64(intPer)
-					if int64(i) < intExtra {
-						value++
+				if ev, ok := explicitAttr(pa, key); ok {
+					if err := storeAttribution(tx, lotName, p, key, ev); err != nil {
+						return err
 					}
+					explicitlyAttributed += ev
+					continue
 				}
-				frac := 0.0
-				if total > 0 {
-					frac = value / total
-				}
-				if err := storeAttribution(tx, lotName, p, key, frac); err != nil {
-					return err
-				}
+			}
+			unspecified = append(unspecified, p)
+		}
+
+		if len(unspecified) == 0 {
+			if explicitlyAttributed < total {
+				return wrapf(ErrInvalidLot, "explicit attributions for %q sum to %d but total is %d (shortfall, no parent to absorb)", key, explicitlyAttributed, total)
+			}
+			if explicitlyAttributed > total {
+				return wrapf(ErrInvalidLot, "explicit attributions for %q sum to %d which exceeds total %d (double-count)", key, explicitlyAttributed, total)
+			}
+			continue
+		}
+
+		remainder := total - explicitlyAttributed
+		if remainder < 0 {
+			return wrapf(ErrInvalidLot, "explicit attributions for %q exceed the total allocation", key)
+		}
+		n := int64(len(unspecified))
+		per := remainder / n
+		extra := remainder % n
+		for i, p := range unspecified {
+			value := per
+			if int64(i) < extra {
+				value++
+			}
+			if err := storeAttribution(tx, lotName, p, key, value); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func storeAttribution(tx *gorm.DB, child, parent, key string, fraction float64) error {
-	row := LotParentAttribution{ChildLotName: child, ParentLotName: parent, MpaKey: key, Fraction: fraction}
+func storeAttribution(tx *gorm.DB, child, parent, key string, value int64) error {
+	row := LotParentAttribution{ChildLotName: child, ParentLotName: parent, MpaKey: key, AttributedValue: value}
 	if err := tx.Create(&row).Error; err != nil {
 		return wrap(err, "storing attribution")
 	}
 	return nil
 }
 
-// attributionFractions returns parent -> {mpaKey -> fraction} for a child.
-func attributionFractions(tx *gorm.DB, childName string) (map[string]map[string]float64, error) {
+// attributionValues returns parent -> {mpaKey -> attributed value} for a child.
+func attributionValues(tx *gorm.DB, childName string) (map[string]map[string]int64, error) {
 	var rows []LotParentAttribution
 	if err := tx.Where("child_lot_name = ?", childName).Find(&rows).Error; err != nil {
 		return nil, wrap(err, "loading attributions")
 	}
-	out := map[string]map[string]float64{}
+	out := map[string]map[string]int64{}
 	for _, r := range rows {
 		if out[r.ParentLotName] == nil {
-			out[r.ParentLotName] = map[string]float64{}
+			out[r.ParentLotName] = map[string]int64{}
 		}
-		out[r.ParentLotName][r.MpaKey] = r.Fraction
+		out[r.ParentLotName][r.MpaKey] = r.AttributedValue
 	}
 	return out, nil
 }
@@ -276,23 +258,23 @@ func (m *Manager) validateAxiom1(tx *gorm.DB, childName string) error {
 	if err != nil {
 		return err
 	}
-	if isPartialStorageSentinel(child.DedicatedGB, child.OpportunisticGB) {
+	if isPartialStorageSentinel(child.DedicatedBytes, child.OpportunisticBytes) {
 		return nil // defer transient state
 	}
-	childUnbDed := IsUnboundedGB(child.DedicatedGB)
-	childUnbOpp := IsUnboundedGB(child.OpportunisticGB)
+	childUnbDed := IsUnboundedBytes(child.DedicatedBytes)
+	childUnbOpp := IsUnboundedBytes(child.OpportunisticBytes)
 	childUnbObj := IsUnboundedObjects(child.MaxNumObjects)
 
 	parents, err := nonSelfParentNames(tx, childName)
 	if err != nil {
 		return err
 	}
-	fracs, err := attributionFractions(tx, childName)
+	vals, err := attributionValues(tx, childName)
 	if err != nil {
 		return err
 	}
 	for _, pn := range parents {
-		pf, ok := fracs[pn]
+		pv, ok := vals[pn]
 		if !ok {
 			return wrapf(ErrInvalidLot, "missing attribution rows for child %q under parent %q", childName, pn)
 		}
@@ -300,35 +282,31 @@ func (m *Manager) validateAxiom1(tx *gorm.DB, childName string) error {
 		if err != nil {
 			return err
 		}
-		if isPartialStorageSentinel(parent.DedicatedGB, parent.OpportunisticGB) {
+		if isPartialStorageSentinel(parent.DedicatedBytes, parent.OpportunisticBytes) {
 			continue
 		}
-		pUnbDed := IsUnboundedGB(parent.DedicatedGB)
-		pUnbOpp := IsUnboundedGB(parent.OpportunisticGB)
+		pUnbDed := IsUnboundedBytes(parent.DedicatedBytes)
+		pUnbOpp := IsUnboundedBytes(parent.OpportunisticBytes)
 		pUnbObj := IsUnboundedObjects(parent.MaxNumObjects)
 
 		if childUnbDed && !pUnbDed {
-			return wrapf(ErrInvalidLot, "child %q has unbounded dedicated_GB but parent %q is bounded", childName, pn)
+			return wrapf(ErrInvalidLot, "child %q has unbounded dedicated_bytes but parent %q is bounded", childName, pn)
 		}
 		if childUnbOpp && !pUnbOpp {
-			return wrapf(ErrInvalidLot, "child %q has unbounded opportunistic_GB but parent %q is bounded", childName, pn)
+			return wrapf(ErrInvalidLot, "child %q has unbounded opportunistic_bytes but parent %q is bounded", childName, pn)
 		}
 		if childUnbObj && !pUnbObj {
 			return wrapf(ErrInvalidLot, "child %q has unbounded max_num_objects but parent %q is bounded", childName, pn)
 		}
 
-		attrDed := pf[MpaKeyDedicatedGB] * child.DedicatedGB
-		attrOpp := pf[MpaKeyOpportunisticGB] * child.OpportunisticGB
-		attrObj := math.Round(pf[MpaKeyMaxNumObjects] * float64(child.MaxNumObjects))
-
-		if !pUnbDed && attrDed > parent.DedicatedGB+fpTol {
-			return wrapf(ErrInvalidLot, "child %q attributes %v dedicated_GB to parent %q exceeding its %v", childName, attrDed, pn, parent.DedicatedGB)
+		if !pUnbDed && pv[MpaKeyDedicatedBytes] > parent.DedicatedBytes {
+			return wrapf(ErrInvalidLot, "child %q attributes %d dedicated_bytes to parent %q exceeding its %d", childName, pv[MpaKeyDedicatedBytes], pn, parent.DedicatedBytes)
 		}
-		if !pUnbOpp && attrOpp > parent.OpportunisticGB+fpTol {
-			return wrapf(ErrInvalidLot, "child %q attributes %v opportunistic_GB to parent %q exceeding its %v", childName, attrOpp, pn, parent.OpportunisticGB)
+		if !pUnbOpp && pv[MpaKeyOpportunisticBytes] > parent.OpportunisticBytes {
+			return wrapf(ErrInvalidLot, "child %q attributes %d opportunistic_bytes to parent %q exceeding its %d", childName, pv[MpaKeyOpportunisticBytes], pn, parent.OpportunisticBytes)
 		}
-		if !pUnbObj && int64(attrObj) > parent.MaxNumObjects {
-			return wrapf(ErrInvalidLot, "child %q attributes %d max_num_objects to parent %q exceeding its %d", childName, int64(attrObj), pn, parent.MaxNumObjects)
+		if !pUnbObj && pv[MpaKeyMaxNumObjects] > parent.MaxNumObjects {
+			return wrapf(ErrInvalidLot, "child %q attributes %d max_num_objects to parent %q exceeding its %d", childName, pv[MpaKeyMaxNumObjects], pn, parent.MaxNumObjects)
 		}
 	}
 	return nil
@@ -347,11 +325,11 @@ func (m *Manager) validateAxiom2(tx *gorm.DB, childName string, nowMs int64) err
 		if err != nil {
 			return err
 		}
-		if isPartialStorageSentinel(parent.DedicatedGB, parent.OpportunisticGB) {
+		if isPartialStorageSentinel(parent.DedicatedBytes, parent.OpportunisticBytes) {
 			continue
 		}
-		pUnbDed := IsUnboundedGB(parent.DedicatedGB)
-		pUnbOpp := IsUnboundedGB(parent.OpportunisticGB)
+		pUnbDed := IsUnboundedBytes(parent.DedicatedBytes)
+		pUnbOpp := IsUnboundedBytes(parent.OpportunisticBytes)
 		pUnbObj := IsUnboundedObjects(parent.MaxNumObjects)
 		if pUnbDed && pUnbOpp && pUnbObj {
 			continue
@@ -361,14 +339,14 @@ func (m *Manager) validateAxiom2(tx *gorm.DB, childName string, nowMs int64) err
 			return err
 		}
 		peak := runSweepLine(events)
-		if !pUnbDed && peak.ded > parent.DedicatedGB+fpTol {
-			return wrapf(ErrInvalidLot, "peak concurrent dedicated_GB across children of %q is %v exceeding its %v", pn, peak.ded, parent.DedicatedGB)
+		if !pUnbDed && peak.ded > parent.DedicatedBytes {
+			return wrapf(ErrInvalidLot, "peak concurrent dedicated_bytes across children of %q is %d exceeding its %d", pn, peak.ded, parent.DedicatedBytes)
 		}
-		if !pUnbOpp && peak.opp > parent.OpportunisticGB+fpTol {
-			return wrapf(ErrInvalidLot, "peak concurrent opportunistic_GB across children of %q is %v exceeding its %v", pn, peak.opp, parent.OpportunisticGB)
+		if !pUnbOpp && peak.opp > parent.OpportunisticBytes {
+			return wrapf(ErrInvalidLot, "peak concurrent opportunistic_bytes across children of %q is %d exceeding its %d", pn, peak.opp, parent.OpportunisticBytes)
 		}
-		if !pUnbObj && int64(math.Round(peak.obj)) > parent.MaxNumObjects {
-			return wrapf(ErrInvalidLot, "peak concurrent max_num_objects across children of %q is %d exceeding its %d", pn, int64(math.Round(peak.obj)), parent.MaxNumObjects)
+		if !pUnbObj && peak.obj > parent.MaxNumObjects {
+			return wrapf(ErrInvalidLot, "peak concurrent max_num_objects across children of %q is %d exceeding its %d", pn, peak.obj, parent.MaxNumObjects)
 		}
 	}
 	return nil
@@ -422,14 +400,14 @@ func (m *Manager) validateAxiom3(tx *gorm.DB, childName string) error {
 // contribution to a parent.
 type sweepEvent struct {
 	time    int64
-	dDed    float64
-	dOpp    float64
-	dObj    float64
+	dDed    int64
+	dOpp    int64
+	dObj    int64
 	isStart bool
 }
 
 type sweepPeak struct {
-	ded, opp, obj, total float64
+	ded, opp, obj, total int64
 }
 
 // buildAttributionEvents constructs sweep-line events from a parent's children's
@@ -458,26 +436,26 @@ func (m *Manager) buildAttributionEvents(tx *gorm.DB, parentName string, startMs
 		if !nonExpiring && hasWindow && (child.CreationTime >= endMs || child.ExpirationTime <= startMs) {
 			continue
 		}
-		fracs, err := attributionFractions(tx, cn)
+		vals, err := attributionValues(tx, cn)
 		if err != nil {
 			return nil, err
 		}
-		pf := fracs[parentName]
-		if pf == nil {
+		pv := vals[parentName]
+		if pv == nil {
 			if m.opts.StrictHierarchy {
 				return nil, wrapf(ErrInvalidLot, "missing attribution rows for child %q under parent %q", cn, parentName)
 			}
-			pf = map[string]float64{}
+			pv = map[string]int64{}
 		}
-		var dDed, dOpp, dObj float64
-		if !IsUnboundedGB(child.DedicatedGB) {
-			dDed = pf[MpaKeyDedicatedGB] * child.DedicatedGB
+		var dDed, dOpp, dObj int64
+		if !IsUnboundedBytes(child.DedicatedBytes) {
+			dDed = pv[MpaKeyDedicatedBytes]
 		}
-		if !IsUnboundedGB(child.OpportunisticGB) {
-			dOpp = pf[MpaKeyOpportunisticGB] * child.OpportunisticGB
+		if !IsUnboundedBytes(child.OpportunisticBytes) {
+			dOpp = pv[MpaKeyOpportunisticBytes]
 		}
 		if !IsUnboundedObjects(child.MaxNumObjects) {
-			dObj = math.Round(pf[MpaKeyMaxNumObjects] * float64(child.MaxNumObjects))
+			dObj = pv[MpaKeyMaxNumObjects]
 		}
 
 		evStart := child.CreationTime
@@ -513,7 +491,7 @@ func runSweepLine(events []sweepEvent) sweepPeak {
 		// removal (false) sorts before addition (true)
 		return !events[i].isStart && events[j].isStart
 	})
-	var curDed, curOpp, curObj float64
+	var curDed, curOpp, curObj int64
 	var peak sweepPeak
 	for _, ev := range events {
 		curDed += ev.dDed
@@ -551,14 +529,14 @@ func (m *Manager) isReclaimedAtTx(tx *gorm.DB, name string, t int64) (bool, erro
 // the window [startMs, endMs), accounting for children's attributed allocations
 // via a sweep-line. Unbounded axes report nil.
 type AvailableCapacity struct {
-	AvailableDedicatedGB     *float64
-	AvailableOpportunisticGB *float64
-	AvailableTotalGB         *float64
-	AvailableMaxNumObjects   *int64
-	PeakDedicatedGB          float64
-	PeakOpportunisticGB      float64
-	PeakMaxNumObjects        int64
-	PeakTotalGB              float64
+	AvailableDedicatedBytes     *int64
+	AvailableOpportunisticBytes *int64
+	AvailableTotalBytes         *int64
+	AvailableMaxNumObjects      *int64
+	PeakDedicatedBytes          int64
+	PeakOpportunisticBytes      int64
+	PeakMaxNumObjects           int64
+	PeakTotalBytes              int64
 }
 
 // AvailableCapacity computes advisory capacity under parentName for the window.
@@ -573,30 +551,30 @@ func (m *Manager) AvailableCapacity(parentName string, startMs, endMs int64) (*A
 	}
 	peak := runSweepLine(events)
 
-	pUnbDed := IsUnboundedGB(parent.DedicatedGB)
-	pUnbOpp := IsUnboundedGB(parent.OpportunisticGB)
+	pUnbDed := IsUnboundedBytes(parent.DedicatedBytes)
+	pUnbOpp := IsUnboundedBytes(parent.OpportunisticBytes)
 	pUnbObj := IsUnboundedObjects(parent.MaxNumObjects)
 
 	out := &AvailableCapacity{
-		PeakDedicatedGB:     peak.ded,
-		PeakOpportunisticGB: peak.opp,
-		PeakMaxNumObjects:   int64(peak.obj),
-		PeakTotalGB:         peak.total,
+		PeakDedicatedBytes:     peak.ded,
+		PeakOpportunisticBytes: peak.opp,
+		PeakMaxNumObjects:      peak.obj,
+		PeakTotalBytes:         peak.total,
 	}
 	if !pUnbDed {
-		v := parent.DedicatedGB - peak.ded
-		out.AvailableDedicatedGB = &v
+		v := parent.DedicatedBytes - peak.ded
+		out.AvailableDedicatedBytes = &v
 	}
 	if !pUnbOpp {
-		v := parent.OpportunisticGB - peak.opp
-		out.AvailableOpportunisticGB = &v
+		v := parent.OpportunisticBytes - peak.opp
+		out.AvailableOpportunisticBytes = &v
 	}
 	if !pUnbDed && !pUnbOpp {
-		v := (parent.DedicatedGB + parent.OpportunisticGB) - peak.total
-		out.AvailableTotalGB = &v
+		v := (parent.DedicatedBytes + parent.OpportunisticBytes) - peak.total
+		out.AvailableTotalBytes = &v
 	}
 	if !pUnbObj {
-		v := parent.MaxNumObjects - int64(peak.obj)
+		v := parent.MaxNumObjects - peak.obj
 		out.AvailableMaxNumObjects = &v
 	}
 	return out, nil
@@ -613,12 +591,12 @@ type PolicyAttrsRequest struct {
 // axis and the lot that imposes it.
 type RestrictiveValue struct {
 	LotName string
-	Value   float64
+	Value   int64
 }
 
-// allPolicyKeys are the six attributes get_policy_attributes can report.
+// allPolicyKeys are the six attributes PolicyAttributes can report.
 var allPolicyKeys = []string{
-	MpaKeyDedicatedGB, MpaKeyOpportunisticGB, MpaKeyMaxNumObjects,
+	MpaKeyDedicatedBytes, MpaKeyOpportunisticBytes, MpaKeyMaxNumObjects,
 	"creation_time", "expiration_time", "deletion_time",
 }
 
@@ -665,20 +643,20 @@ func (m *Manager) PolicyAttributes(req PolicyAttrsRequest) (map[string]Restricti
 	return out, nil
 }
 
-func policyKeyValue(l Lot, key string) float64 {
+func policyKeyValue(l Lot, key string) int64 {
 	switch key {
-	case MpaKeyDedicatedGB:
-		return l.DedicatedGB
-	case MpaKeyOpportunisticGB:
-		return l.OpportunisticGB
+	case MpaKeyDedicatedBytes:
+		return l.DedicatedBytes
+	case MpaKeyOpportunisticBytes:
+		return l.OpportunisticBytes
 	case MpaKeyMaxNumObjects:
-		return float64(l.MaxNumObjects)
+		return l.MaxNumObjects
 	case "creation_time":
-		return float64(l.CreationTime)
+		return l.CreationTime
 	case "expiration_time":
-		return float64(l.ExpirationTime)
+		return l.ExpirationTime
 	case "deletion_time":
-		return float64(l.DeletionTime)
+		return l.DeletionTime
 	}
 	return 0
 }

@@ -26,16 +26,16 @@ type PathSpec struct {
 	Exclude   bool
 }
 
-// MPA bundles a lot's management-policy attributes. GB axes use -1 for
-// "unbounded"; MaxNumObjects uses -1 for "unbounded". A (creation, expiration,
-// deletion) triple of all zeros denotes a non-expiring lot.
+// MPA bundles a lot's management-policy attributes. All quantities are int64;
+// the storage axes are in bytes. Each axis uses -1 for "unbounded". A
+// (creation, expiration, deletion) triple of all zeros denotes a non-expiring lot.
 type MPA struct {
-	DedicatedGB     float64
-	OpportunisticGB float64
-	MaxNumObjects   int64
-	CreationTime    int64 // Unix ms
-	ExpirationTime  int64 // Unix ms
-	DeletionTime    int64 // Unix ms
+	DedicatedBytes     int64
+	OpportunisticBytes int64
+	MaxNumObjects      int64
+	CreationTime       int64 // Unix ms
+	ExpirationTime     int64 // Unix ms
+	DeletionTime       int64 // Unix ms
 }
 
 // ParentAttribution optionally specifies how much of a child's MPA on each
@@ -43,9 +43,9 @@ type MPA struct {
 // left to the equal-split remainder distribution. Used only under strict
 // hierarchy.
 type ParentAttribution struct {
-	DedicatedGB     *float64
-	OpportunisticGB *float64
-	MaxNumObjects   *int64
+	DedicatedBytes     *int64
+	OpportunisticBytes *int64
+	MaxNumObjects      *int64
 }
 
 // LotSpec is the input to AddLot.
@@ -107,12 +107,12 @@ type LotView struct {
 // mpaOf extracts the MPA from a Lot row.
 func mpaOf(l Lot) MPA {
 	return MPA{
-		DedicatedGB:     l.DedicatedGB,
-		OpportunisticGB: l.OpportunisticGB,
-		MaxNumObjects:   l.MaxNumObjects,
-		CreationTime:    l.CreationTime,
-		ExpirationTime:  l.ExpirationTime,
-		DeletionTime:    l.DeletionTime,
+		DedicatedBytes:     l.DedicatedBytes,
+		OpportunisticBytes: l.OpportunisticBytes,
+		MaxNumObjects:      l.MaxNumObjects,
+		CreationTime:       l.CreationTime,
+		ExpirationTime:     l.ExpirationTime,
+		DeletionTime:       l.DeletionTime,
 	}
 }
 

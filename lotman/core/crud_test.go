@@ -25,8 +25,8 @@ import (
 )
 
 // nonExpiringMPA returns an MPA with the given quotas and a non-expiring window.
-func nonExpiringMPA(dedicated, opportunistic float64, maxObjects int64) MPA {
-	return MPA{DedicatedGB: dedicated, OpportunisticGB: opportunistic, MaxNumObjects: maxObjects}
+func nonExpiringMPA(dedicated, opportunistic, maxObjects int64) MPA {
+	return MPA{DedicatedBytes: dedicated, OpportunisticBytes: opportunistic, MaxNumObjects: maxObjects}
 }
 
 // seedRootAndChild builds: root (self-parent, owner "fed") -> childA (owner "fed",
@@ -63,7 +63,7 @@ func TestAddAndGetLot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get childA: %v", err)
 	}
-	if view.Owner != "fed" || view.DedicatedGB != 50 {
+	if view.Owner != "fed" || view.DedicatedBytes != 50 {
 		t.Errorf("unexpected lot view: %+v", view.Lot)
 	}
 	if len(view.Parents) != 1 || view.Parents[0] != "root" {
@@ -113,8 +113,8 @@ func TestAddLotValidation(t *testing.T) {
 	cases := map[string]LotSpec{
 		"no parents":         {LotName: "x", Owner: "o", MPA: nonExpiringMPA(1, -1, -1)},
 		"no owner":           {LotName: "x", Parents: []string{"x"}, MPA: nonExpiringMPA(1, -1, -1)},
-		"bad dedicated":      {LotName: "x", Owner: "o", Parents: []string{"x"}, MPA: MPA{DedicatedGB: -1, OpportunisticGB: 5}},
-		"partial-zero times": {LotName: "x", Owner: "o", Parents: []string{"x"}, MPA: MPA{DedicatedGB: 1, OpportunisticGB: -1, CreationTime: 10}},
+		"bad dedicated":      {LotName: "x", Owner: "o", Parents: []string{"x"}, MPA: MPA{DedicatedBytes: -1, OpportunisticBytes: 5}},
+		"partial-zero times": {LotName: "x", Owner: "o", Parents: []string{"x"}, MPA: MPA{DedicatedBytes: 1, OpportunisticBytes: -1, CreationTime: 10}},
 	}
 	for name, spec := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -238,7 +238,7 @@ func TestUpdateLot(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 	view, _ := m.GetLot("childA")
-	if view.Owner != "newowner" || view.DedicatedGB != 75 || view.OpportunisticGB != 10 || view.MaxNumObjects != 1000 {
+	if view.Owner != "newowner" || view.DedicatedBytes != 75 || view.OpportunisticBytes != 10 || view.MaxNumObjects != 1000 {
 		t.Errorf("update not applied: %+v", view.Lot)
 	}
 }

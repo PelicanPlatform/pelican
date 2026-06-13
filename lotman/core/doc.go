@@ -31,18 +31,14 @@
 // adapter layer outside this package.
 package core
 
-// Sentinel values, ported verbatim from the C++ library's semantics.
-const (
-	// Unbounded marks a management-policy axis (dedicated_GB, opportunistic_GB,
-	// max_num_objects) as having no limit.
-	Unbounded = -1
+// Unbounded marks a management-policy axis (dedicated bytes, opportunistic
+// bytes, max_num_objects) as having no limit. All storage quantities are int64
+// bytes; conversion to/from GB happens only at external edges (REST API, config,
+// the C ABI).
+const Unbounded int64 = -1
 
-	// UnboundedGB is the float form of Unbounded for the GB axes.
-	UnboundedGB float64 = -1
-)
-
-// IsUnboundedGB reports whether a GB axis value means "no limit".
-func IsUnboundedGB(v float64) bool { return v == UnboundedGB }
+// IsUnboundedBytes reports whether a byte-axis value means "no limit".
+func IsUnboundedBytes(v int64) bool { return v == Unbounded }
 
 // IsUnboundedObjects reports whether an object-count axis value means "no limit".
 func IsUnboundedObjects(v int64) bool { return v == Unbounded }
