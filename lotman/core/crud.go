@@ -87,8 +87,28 @@ func (m *Manager) AddLot(spec LotSpec, caller string) error {
 		if err := tx.Create(&LotUsage{LotName: spec.LotName}).Error; err != nil {
 			return wrap(err, "creating usage row")
 		}
+		if err := computeAndStoreAttributions(tx, spec.LotName, spec.MPA, spec.Parents, spec.ParentAttributions); err != nil {
+			return err
+		}
+		if err := m.validateAxioms(tx, spec.LotName, false); err != nil {
+			return err
+		}
 		return nil
 	})
+}
+
+// allParentNames returns every parent name of a lot (including a self-parent),
+// scoped to the transaction.
+func allParentNames(tx *gorm.DB, lotName string) ([]string, error) {
+	var edges []LotParent
+	if err := tx.Where("lot_name = ?", lotName).Find(&edges).Error; err != nil {
+		return nil, wrap(err, "loading parents")
+	}
+	out := make([]string, 0, len(edges))
+	for _, e := range edges {
+		out = append(out, e.Parent)
+	}
+	return out, nil
 }
 
 // GetLot returns a lot with its immediate parents, paths, and usage.
@@ -146,6 +166,25 @@ func (m *Manager) UpdateLot(update LotUpdate, caller string) error {
 		if err := tx.Model(&Lot{}).Where("lot_name = ?", update.LotName).Updates(fields).Error; err != nil {
 			return wrap(err, "updating lot")
 		}
+		// An MPA or attribution change can alter attributions and break axioms
+		// for this lot or its children; recompute and revalidate. An owner-only
+		// update leaves attributions untouched.
+		if update.MPA != nil || update.ParentAttributions != nil {
+			updated, err := m.loadLot(tx, update.LotName)
+			if err != nil {
+				return err
+			}
+			parentNames, err := allParentNames(tx, update.LotName)
+			if err != nil {
+				return err
+			}
+			if err := computeAndStoreAttributions(tx, update.LotName, mpaOf(*updated), parentNames, update.ParentAttributions); err != nil {
+				return err
+			}
+			if err := m.validateAxioms(tx, update.LotName, true); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -189,6 +228,20 @@ func (m *Manager) AddToLot(add LotAddition, caller string) error {
 				return wrap(err, "adding path")
 			}
 		}
+		// Adding parents (or supplying attributions) changes the attribution
+		// distribution and requires revalidation.
+		if len(add.Parents) > 0 || add.ParentAttributions != nil {
+			parentNames, err := allParentNames(tx, add.LotName)
+			if err != nil {
+				return err
+			}
+			if err := computeAndStoreAttributions(tx, add.LotName, mpaOf(*lot), parentNames, add.ParentAttributions); err != nil {
+				return err
+			}
+			if err := m.validateAxioms(tx, add.LotName, false); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -216,6 +269,17 @@ func (m *Manager) RemoveParents(rm LotParentRemoval, caller string) error {
 		}
 		if remaining == 0 {
 			return wrapf(ErrInvalidLot, "lot %q must retain at least one parent", rm.LotName)
+		}
+		// Parents changed: recompute attributions over the remaining parents.
+		parentNames, err := allParentNames(tx, rm.LotName)
+		if err != nil {
+			return err
+		}
+		if err := computeAndStoreAttributions(tx, rm.LotName, mpaOf(*lot), parentNames, nil); err != nil {
+			return err
+		}
+		if err := m.validateAxioms(tx, rm.LotName, false); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -308,6 +372,24 @@ func (m *Manager) RemoveLot(name string, opts RemoveOptions, caller string) erro
 
 		if err := tx.Where("lot_name = ?", name).Delete(&Lot{}).Error; err != nil {
 			return wrap(err, "deleting lot")
+		}
+		// Reparented children gained/lost a parent; recompute their attributions
+		// (clearing rows that referenced the removed lot) and revalidate.
+		for _, ce := range childEdges {
+			childLot, err := m.loadLot(tx, ce.LotName)
+			if err != nil {
+				return err
+			}
+			parentNames, err := allParentNames(tx, ce.LotName)
+			if err != nil {
+				return err
+			}
+			if err := computeAndStoreAttributions(tx, ce.LotName, mpaOf(*childLot), parentNames, nil); err != nil {
+				return err
+			}
+			if err := m.validateAxioms(tx, ce.LotName, false); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
