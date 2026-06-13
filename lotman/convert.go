@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
