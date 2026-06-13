@@ -38,6 +38,16 @@ type MPA struct {
 	DeletionTime    int64 // Unix ms
 }
 
+// ParentAttribution optionally specifies how much of a child's MPA on each
+// axis is attributed to a particular parent (absolute values). Nil fields are
+// left to the equal-split remainder distribution. Used only under strict
+// hierarchy.
+type ParentAttribution struct {
+	DedicatedGB     *float64
+	OpportunisticGB *float64
+	MaxNumObjects   *int64
+}
+
 // LotSpec is the input to AddLot.
 type LotSpec struct {
 	LotName string
@@ -45,21 +55,26 @@ type LotSpec struct {
 	Parents []string
 	Paths   []PathSpec
 	MPA     MPA
+	// ParentAttributions maps a (non-self) parent name to its explicit share of
+	// this lot's MPA. Parents omitted here split the remainder equally.
+	ParentAttributions map[string]ParentAttribution
 }
 
 // LotUpdate is the input to UpdateLot. Nil fields are left unchanged. A non-nil
 // MPA replaces the lot's management-policy attributes wholesale.
 type LotUpdate struct {
-	LotName string
-	Owner   *string
-	MPA     *MPA
+	LotName            string
+	Owner              *string
+	MPA                *MPA
+	ParentAttributions map[string]ParentAttribution
 }
 
 // LotAddition is the input to AddToLot: parents and/or paths to add.
 type LotAddition struct {
-	LotName string
-	Parents []string
-	Paths   []PathSpec
+	LotName            string
+	Parents            []string
+	Paths              []PathSpec
+	ParentAttributions map[string]ParentAttribution
 }
 
 // LotParentRemoval is the input to RemoveParents.
