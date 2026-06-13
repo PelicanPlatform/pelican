@@ -48,35 +48,9 @@ func TestLotIndexResolve(t *testing.T) {
 		"/":                   "root",    // exact match on "/"
 	}
 	for objectPath, want := range cases {
-		got, id := li.Resolve(objectPath)
-		if got != want {
+		if got := li.Resolve(objectPath); got != want {
 			t.Errorf("Resolve(%q) = %q, want %q", objectPath, got, want)
 		}
-		if id == 0 {
-			t.Errorf("Resolve(%q) returned zero LotID", objectPath)
-		}
-	}
-}
-
-func TestLotIndexStableIDs(t *testing.T) {
-	li := newLotIndex()
-	li.setEntries([]lotPathEntry{{lotName: "ns", path: "/atlas", recursive: true}})
-
-	_, id1 := li.Resolve("/atlas/a")
-	_, id2 := li.Resolve("/atlas/b")
-	if id1 != id2 {
-		t.Errorf("same lot returned different ids: %d vs %d", id1, id2)
-	}
-	// default has the reserved first id; ns differs from default.
-	_, defID := li.Resolve("/other")
-	if defID == id1 {
-		t.Errorf("default and ns should not share an id")
-	}
-	// Rebuild preserves the id.
-	li.setEntries([]lotPathEntry{{lotName: "ns", path: "/atlas", recursive: true}, {lotName: "x", path: "/x", recursive: true}})
-	_, id3 := li.Resolve("/atlas/c")
-	if id3 != id1 {
-		t.Errorf("rebuild changed ns id: %d -> %d", id1, id3)
 	}
 }
 
@@ -98,31 +72,16 @@ func TestFederationQualifiedKey(t *testing.T) {
 	}
 }
 
-func TestGetLotID(t *testing.T) {
-	// No lot index configured: lot tracking disabled -> LotID 0.
-	pc := &PersistentCache{defaultFed: "primary.org"}
-	if id := pc.getLotID("pelican://primary.org/atlas/x"); id != 0 {
+func TestLotIDOf(t *testing.T) {
+	// No lot index configured: lot tracking disabled -> LotID 0 regardless of bucket.
+	pc := &PersistentCache{}
+	if id := pc.lotIDOf(5); id != 0 {
 		t.Errorf("nil lotIndex should yield LotID 0, got %d", id)
 	}
-
-	// With an index, getLotID resolves the federation-qualified key.
+	// With lot tracking on, the accounting bucket id is the lot id.
 	pc.lotIndex = newLotIndex()
-	pc.lotIndex.setEntries([]lotPathEntry{
-		{lotName: "primary-atlas", path: "/primary.org/atlas", recursive: true},
-		{lotName: "other-atlas", path: "/other.org/atlas", recursive: true},
-	})
-	_, want := pc.lotIndex.Resolve("/primary.org/atlas/x")
-	if id := pc.getLotID("pelican://primary.org/atlas/x"); id != want {
-		t.Errorf("getLotID(primary) = %d, want %d", id, want)
-	}
-	// A bare path uses the default federation.
-	if id := pc.getLotID("/atlas/x"); id != want {
-		t.Errorf("getLotID(bare) = %d, want %d (default fed)", id, want)
-	}
-	// Different federation, same path -> different lot.
-	_, otherWant := pc.lotIndex.Resolve("/other.org/atlas/x")
-	if id := pc.getLotID("pelican://other.org/atlas/x"); id != otherWant || id == want {
-		t.Errorf("getLotID(other) = %d, want %d (distinct from primary %d)", id, otherWant, want)
+	if id := pc.lotIDOf(5); id != LotID(5) {
+		t.Errorf("lotIDOf(5) = %d, want 5", id)
 	}
 }
 
@@ -137,10 +96,10 @@ func TestLotIndexFederationIsolation(t *testing.T) {
 	keyA := federationQualifiedKey("pelican://fedA.org/atlas/data/x", "fedA.org")
 	keyB := federationQualifiedKey("pelican://fedB.org/atlas/data/y", "fedA.org")
 
-	if name, _ := li.Resolve(keyA); name != "fedA-atlas" {
+	if name := li.Resolve(keyA); name != "fedA-atlas" {
 		t.Errorf("fedA object -> %q, want fedA-atlas", name)
 	}
-	if name, _ := li.Resolve(keyB); name != "fedB-atlas" {
+	if name := li.Resolve(keyB); name != "fedB-atlas" {
 		t.Errorf("fedB object -> %q, want fedB-atlas (must NOT collapse into fedA)", name)
 	}
 }
@@ -165,7 +124,9 @@ func newCoreTestManager(t *testing.T) *core.Manager {
 
 func TestLotIndexFromManager(t *testing.T) {
 	m := newCoreTestManager(t)
-	mpa := func(ded int64) core.MPA { return core.MPA{DedicatedBytes: ded, OpportunisticBytes: -1, MaxNumObjects: -1} }
+	mpa := func(ded int64) core.MPA {
+		return core.MPA{DedicatedBytes: ded, OpportunisticBytes: -1, MaxNumObjects: -1}
+	}
 	mustAdd := func(s core.LotSpec) {
 		if err := m.AddLot(s, ""); err != nil {
 			t.Fatalf("add %s: %v", s.LotName, err)
@@ -183,13 +144,13 @@ func TestLotIndexFromManager(t *testing.T) {
 		t.Fatalf("rebuild: %v", err)
 	}
 
-	if name, _ := li.Resolve("/atlas/raw/x"); name != "ns" {
+	if name := li.Resolve("/atlas/raw/x"); name != "ns" {
 		t.Errorf("/atlas/raw/x -> %q, want ns", name)
 	}
-	if name, _ := li.Resolve("/atlas/data"); name != "sub" {
+	if name := li.Resolve("/atlas/data"); name != "sub" {
 		t.Errorf("/atlas/data -> %q, want sub", name)
 	}
-	if name, _ := li.Resolve("/cms/y"); name != "default" {
+	if name := li.Resolve("/cms/y"); name != "default" {
 		t.Errorf("/cms/y -> %q, want default", name)
 	}
 }
