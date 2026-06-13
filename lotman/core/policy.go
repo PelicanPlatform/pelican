@@ -172,6 +172,12 @@ func storeAttribution(tx *gorm.DB, child, parent, key string, value int64) error
 	return nil
 }
 
+// Attributions returns the stored parent attributions for a child lot, keyed by
+// parent name then MPA key (absolute values in bytes/counts; -1 = unbounded).
+func (m *Manager) Attributions(childName string) (map[string]map[string]int64, error) {
+	return attributionValues(m.db, childName)
+}
+
 // attributionValues returns parent -> {mpaKey -> attributed value} for a child.
 func attributionValues(tx *gorm.DB, childName string) (map[string]map[string]int64, error) {
 	var rows []LotParentAttribution
