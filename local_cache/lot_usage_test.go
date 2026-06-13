@@ -46,6 +46,74 @@ func TestAggregateUsageByLot(t *testing.T) {
 	}
 }
 
+func TestPriorityBuckets(t *testing.T) {
+	m := newCoreTestManager(t)
+	mustAdd := func(s core.LotSpec) {
+		if err := m.AddLot(s, ""); err != nil {
+			t.Fatalf("add %s: %v", s.LotName, err)
+		}
+	}
+	mustAdd(core.LotSpec{LotName: "root", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 1_000_000, OpportunisticBytes: -1, MaxNumObjects: -1}})
+	// expired: a finite window already in the past -> past expiration/deletion.
+	mustAdd(core.LotSpec{LotName: "expired", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 50_000, OpportunisticBytes: -1, MaxNumObjects: -1,
+			CreationTime: 1, ExpirationTime: 100, DeletionTime: 200}})
+	// over: non-expiring but over its dedicated quota (usage set below).
+	mustAdd(core.LotSpec{LotName: "over", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 1000, OpportunisticBytes: -1, MaxNumObjects: -1}})
+	if err := m.UpdateLotUsage(core.UsageUpdate{LotName: "over", SelfBytes: ptrI64(5000)}, false, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	pc := &PersistentCache{
+		db:           cdb,
+		lotMgr:       m,
+		namespaceMap: map[string]NamespaceID{"expired": 20, "over": 21, "root": 22},
+	}
+
+	// Dir 3 holds both priority lots; expect priority order [expired(20), over(21)].
+	mustSeed(t, cdb, 3, 20, 1000)
+	mustSeed(t, cdb, 3, 21, 2000)
+	got := pc.priorityBuckets(3)
+	if len(got) != 2 || got[0] != 20 || got[1] != 21 {
+		t.Errorf("priorityBuckets(3) = %v, want [20 21] (expired before over)", got)
+	}
+
+	// Dir 1 holds only the over-quota lot; expired is filtered out (not present).
+	mustSeed(t, cdb, 1, 21, 500)
+	if got := pc.priorityBuckets(1); len(got) != 1 || got[0] != 21 {
+		t.Errorf("priorityBuckets(1) = %v, want [21]", got)
+	}
+
+	// Dir 2 holds only the expired lot.
+	mustSeed(t, cdb, 2, 20, 500)
+	if got := pc.priorityBuckets(2); len(got) != 1 || got[0] != 20 {
+		t.Errorf("priorityBuckets(2) = %v, want [20]", got)
+	}
+
+	// No planner without a manager.
+	if (&PersistentCache{db: cdb}).priorityBuckets(3) != nil {
+		t.Error("priorityBuckets should be nil with no lot manager")
+	}
+}
+
+func ptrI64(v int64) *int64 { return &v }
+
+func mustSeed(t *testing.T, cdb *CacheDB, sid StorageID, ns NamespaceID, delta int64) {
+	t.Helper()
+	if err := cdb.AddUsage(sid, ns, delta); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+}
+
 func TestSyncLotUsage(t *testing.T) {
 	m := newCoreTestManager(t)
 	mpa := func(ded int64) core.MPA {
