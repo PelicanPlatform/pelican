@@ -1,16 +1,16 @@
 -- +goose Up
 -- +goose StatementBegin
 CREATE TABLE lots (
-    lot_name          TEXT    PRIMARY KEY,
-    owner             TEXT    NOT NULL,
-    dedicated_gb      REAL    NOT NULL DEFAULT 0,   -- -1 = unbounded
-    opportunistic_gb  REAL    NOT NULL DEFAULT 0,   -- -1 = unbounded
-    max_num_objects   INTEGER NOT NULL DEFAULT -1,  -- -1 = unbounded
-    creation_time     INTEGER NOT NULL DEFAULT 0,   -- ms; all-zero triple = non-expiring
-    expiration_time   INTEGER NOT NULL DEFAULT 0,
-    deletion_time     INTEGER NOT NULL DEFAULT 0,
-    created_at        INTEGER NOT NULL DEFAULT 0,
-    updated_at        INTEGER NOT NULL DEFAULT 0
+    lot_name             TEXT    PRIMARY KEY,
+    owner                TEXT    NOT NULL,
+    dedicated_bytes      INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded
+    opportunistic_bytes  INTEGER NOT NULL DEFAULT 0,   -- -1 = unbounded
+    max_num_objects      INTEGER NOT NULL DEFAULT -1,  -- -1 = unbounded
+    creation_time        INTEGER NOT NULL DEFAULT 0,   -- ms; all-zero triple = non-expiring
+    expiration_time      INTEGER NOT NULL DEFAULT 0,
+    deletion_time        INTEGER NOT NULL DEFAULT 0,
+    created_at           INTEGER NOT NULL DEFAULT 0,
+    updated_at           INTEGER NOT NULL DEFAULT 0
 );
 -- +goose StatementEnd
 
@@ -41,12 +41,12 @@ CREATE INDEX idx_lot_paths_path ON lot_paths(path);
 -- +goose StatementBegin
 CREATE TABLE lot_usage (
     lot_name                       TEXT    PRIMARY KEY,
-    self_gb                        REAL    NOT NULL DEFAULT 0,
-    children_gb                    REAL    NOT NULL DEFAULT 0,
+    self_bytes                     INTEGER NOT NULL DEFAULT 0,
+    children_bytes                 INTEGER NOT NULL DEFAULT 0,
     self_objects                   INTEGER NOT NULL DEFAULT 0,
     children_objects               INTEGER NOT NULL DEFAULT 0,
-    self_gb_being_written          REAL    NOT NULL DEFAULT 0,
-    children_gb_being_written      REAL    NOT NULL DEFAULT 0,
+    self_bytes_being_written       INTEGER NOT NULL DEFAULT 0,
+    children_bytes_being_written   INTEGER NOT NULL DEFAULT 0,
     self_objects_being_written     INTEGER NOT NULL DEFAULT 0,
     children_objects_being_written INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (lot_name) REFERENCES lots(lot_name) ON DELETE CASCADE
@@ -55,10 +55,10 @@ CREATE TABLE lot_usage (
 
 -- +goose StatementBegin
 CREATE TABLE lot_parent_attributions (
-    child_lot_name  TEXT NOT NULL,
-    parent_lot_name TEXT NOT NULL,
-    mpa_key         TEXT NOT NULL,   -- 'dedicated_GB' | 'opportunistic_GB' | 'max_num_objects'
-    fraction        REAL NOT NULL,
+    child_lot_name   TEXT    NOT NULL,
+    parent_lot_name  TEXT    NOT NULL,
+    mpa_key          TEXT    NOT NULL,   -- 'dedicated_bytes' | 'opportunistic_bytes' | 'max_num_objects'
+    attributed_value INTEGER NOT NULL,   -- absolute attributed amount; -1 = unbounded
     PRIMARY KEY (child_lot_name, parent_lot_name, mpa_key),
     FOREIGN KEY (child_lot_name) REFERENCES lots(lot_name) ON DELETE CASCADE
 );

@@ -24,12 +24,12 @@ import (
 )
 
 // expiring returns an MPA with a finite [creation, expiration) window.
-func expiring(dedicated, opportunistic float64, maxObjects, c, e, d int64) MPA {
-	return MPA{DedicatedGB: dedicated, OpportunisticGB: opportunistic, MaxNumObjects: maxObjects,
+func expiring(dedicated, opportunistic, maxObjects, c, e, d int64) MPA {
+	return MPA{DedicatedBytes: dedicated, OpportunisticBytes: opportunistic, MaxNumObjects: maxObjects,
 		CreationTime: c, ExpirationTime: e, DeletionTime: d}
 }
 
-func addRoot(t *testing.T, m *Manager, name string, dedicated float64) {
+func addRoot(t *testing.T, m *Manager, name string, dedicated int64) {
 	t.Helper()
 	if err := m.AddLot(LotSpec{LotName: name, Owner: "fed", Parents: []string{name},
 		MPA: nonExpiringMPA(dedicated, -1, -1)}, ""); err != nil {
@@ -109,8 +109,8 @@ func TestExplicitAttributionsAndCapacity(t *testing.T) {
 	err := m.AddLot(LotSpec{LotName: "child", Owner: "fed", Parents: []string{"rootX", "rootY"},
 		MPA: nonExpiringMPA(80, 0, 0),
 		ParentAttributions: map[string]ParentAttribution{
-			"rootX": {DedicatedGB: f64(60)},
-			"rootY": {DedicatedGB: f64(20)},
+			"rootX": {DedicatedBytes: i64(60)},
+			"rootY": {DedicatedBytes: i64(20)},
 		}}, "")
 	if err != nil {
 		t.Fatalf("explicit attribution add: %v", err)
@@ -120,12 +120,12 @@ func TestExplicitAttributionsAndCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capacity rootX: %v", err)
 	}
-	if capX.PeakDedicatedGB != 60 || capX.AvailableDedicatedGB == nil || *capX.AvailableDedicatedGB != 40 {
-		t.Errorf("rootX: peak=%v avail=%v, want peak 60 avail 40", capX.PeakDedicatedGB, capX.AvailableDedicatedGB)
+	if capX.PeakDedicatedBytes != 60 || capX.AvailableDedicatedBytes == nil || *capX.AvailableDedicatedBytes != 40 {
+		t.Errorf("rootX: peak=%v avail=%v, want peak 60 avail 40", capX.PeakDedicatedBytes, capX.AvailableDedicatedBytes)
 	}
 	capY, _ := m.AvailableCapacity("rootY", 1, 1_000_000)
-	if capY.PeakDedicatedGB != 20 || capY.AvailableDedicatedGB == nil || *capY.AvailableDedicatedGB != 80 {
-		t.Errorf("rootY: peak=%v avail=%v, want peak 20 avail 80", capY.PeakDedicatedGB, capY.AvailableDedicatedGB)
+	if capY.PeakDedicatedBytes != 20 || capY.AvailableDedicatedBytes == nil || *capY.AvailableDedicatedBytes != 80 {
+		t.Errorf("rootY: peak=%v avail=%v, want peak 20 avail 80", capY.PeakDedicatedBytes, capY.AvailableDedicatedBytes)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestExplicitAttributionsOverageRejected(t *testing.T) {
 	err := m.AddLot(LotSpec{LotName: "child", Owner: "fed", Parents: []string{"rootX", "rootY"},
 		MPA: nonExpiringMPA(80, 0, 0),
 		ParentAttributions: map[string]ParentAttribution{
-			"rootX": {DedicatedGB: f64(50)},
-			"rootY": {DedicatedGB: f64(50)},
+			"rootX": {DedicatedBytes: i64(50)},
+			"rootY": {DedicatedBytes: i64(50)},
 		}}, "")
 	if !errors.Is(err, ErrInvalidLot) {
 		t.Fatalf("expected overage rejection, got %v", err)
@@ -152,28 +152,28 @@ func TestAvailableCapacityUnboundedAxis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capacity: %v", err)
 	}
-	if cap.AvailableOpportunisticGB != nil {
-		t.Errorf("expected nil available opportunistic (unbounded), got %v", *cap.AvailableOpportunisticGB)
+	if cap.AvailableOpportunisticBytes != nil {
+		t.Errorf("expected nil available opportunistic (unbounded), got %v", *cap.AvailableOpportunisticBytes)
 	}
-	if cap.AvailableDedicatedGB == nil || *cap.AvailableDedicatedGB != 100 {
-		t.Errorf("expected available dedicated 100, got %v", cap.AvailableDedicatedGB)
+	if cap.AvailableDedicatedBytes == nil || *cap.AvailableDedicatedBytes != 100 {
+		t.Errorf("expected available dedicated 100, got %v", cap.AvailableDedicatedBytes)
 	}
 }
 
 func TestPolicyAttributesRestrictive(t *testing.T) {
 	m := seedThreeLevel(t) // root 100 -> ns 50 -> grand 10
-	res, err := m.PolicyAttributes(PolicyAttrsRequest{LotName: "grand", Recursive: true, Keys: []string{MpaKeyDedicatedGB}})
+	res, err := m.PolicyAttributes(PolicyAttrsRequest{LotName: "grand", Recursive: true, Keys: []string{MpaKeyDedicatedBytes}})
 	if err != nil {
 		t.Fatalf("policy attrs: %v", err)
 	}
-	rv := res[MpaKeyDedicatedGB]
+	rv := res[MpaKeyDedicatedBytes]
 	// In a valid hierarchy the deepest lot holds the smallest dedicated quota.
 	if rv.Value != 10 || rv.LotName != "grand" {
 		t.Errorf("restrictive dedicated = %+v, want {grand 10}", rv)
 	}
 	// Non-recursive returns the lot's own value.
-	res, _ = m.PolicyAttributes(PolicyAttrsRequest{LotName: "ns", Recursive: false, Keys: []string{MpaKeyDedicatedGB}})
-	if res[MpaKeyDedicatedGB].Value != 50 {
-		t.Errorf("non-recursive ns dedicated = %v, want 50", res[MpaKeyDedicatedGB].Value)
+	res, _ = m.PolicyAttributes(PolicyAttrsRequest{LotName: "ns", Recursive: false, Keys: []string{MpaKeyDedicatedBytes}})
+	if res[MpaKeyDedicatedBytes].Value != 50 {
+		t.Errorf("non-recursive ns dedicated = %v, want 50", res[MpaKeyDedicatedBytes].Value)
 	}
 }
