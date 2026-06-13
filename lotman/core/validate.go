@@ -20,20 +20,20 @@ package core
 
 // validateMPA enforces the sentinel rules for management-policy attributes:
 //   - each axis must be >= 0 or exactly -1 (unbounded); any other negative is invalid
-//   - an unbounded dedicated_GB requires an unbounded opportunistic_GB
+//   - an unbounded dedicated_bytes requires an unbounded opportunistic_bytes
 func validateMPA(mpa MPA) error {
-	badF := func(v float64) bool { return v < 0 && v != -1 }
-	if badF(mpa.DedicatedGB) {
-		return wrapf(ErrInvalidLot, "dedicated_GB %v must be >= 0 or exactly -1", mpa.DedicatedGB)
+	bad := func(v int64) bool { return v < 0 && v != -1 }
+	if bad(mpa.DedicatedBytes) {
+		return wrapf(ErrInvalidLot, "dedicated_bytes %d must be >= 0 or exactly -1", mpa.DedicatedBytes)
 	}
-	if badF(mpa.OpportunisticGB) {
-		return wrapf(ErrInvalidLot, "opportunistic_GB %v must be >= 0 or exactly -1", mpa.OpportunisticGB)
+	if bad(mpa.OpportunisticBytes) {
+		return wrapf(ErrInvalidLot, "opportunistic_bytes %d must be >= 0 or exactly -1", mpa.OpportunisticBytes)
 	}
-	if mpa.MaxNumObjects < 0 && mpa.MaxNumObjects != -1 {
+	if bad(mpa.MaxNumObjects) {
 		return wrapf(ErrInvalidLot, "max_num_objects %d must be >= 0 or exactly -1", mpa.MaxNumObjects)
 	}
-	if IsUnboundedGB(mpa.DedicatedGB) && !IsUnboundedGB(mpa.OpportunisticGB) {
-		return wrapf(ErrInvalidLot, "unbounded dedicated_GB requires unbounded opportunistic_GB (got %v)", mpa.OpportunisticGB)
+	if IsUnboundedBytes(mpa.DedicatedBytes) && !IsUnboundedBytes(mpa.OpportunisticBytes) {
+		return wrapf(ErrInvalidLot, "unbounded dedicated_bytes requires unbounded opportunistic_bytes (got %d)", mpa.OpportunisticBytes)
 	}
 	return validateTimestamps(mpa.CreationTime, mpa.ExpirationTime, mpa.DeletionTime)
 }

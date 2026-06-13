@@ -22,15 +22,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// UsageUpdate reports a lot's own ("self") usage. Nil fields are left
-// unchanged. In delta mode each value is added to the current value (and may be
-// negative, as long as the result is non-negative); in absolute mode each value
-// replaces the current value (and must be non-negative).
+// UsageUpdate reports a lot's own ("self") usage in bytes/object counts. Nil
+// fields are left unchanged. In delta mode each value is added to the current
+// value (and may be negative, as long as the result is non-negative); in
+// absolute mode each value replaces the current value (and must be non-negative).
 type UsageUpdate struct {
 	LotName                 string
-	SelfGB                  *float64
+	SelfBytes               *int64
 	SelfObjects             *int64
-	SelfGBBeingWritten      *float64
+	SelfBytesBeingWritten   *int64
 	SelfObjectsBeingWritten *int64
 }
 
@@ -38,7 +38,7 @@ type UsageUpdate struct {
 // its owning lot (attribution semantics) before applying.
 type DirUsage struct {
 	Path       string
-	SizeGB     float64
+	SizeBytes  int64
 	NumObjects int64
 }
 
@@ -46,17 +46,17 @@ type DirUsage struct {
 type UsageReport struct {
 	LotName string
 
-	SelfGB     float64
-	ChildrenGB float64
-	TotalGB    float64
+	SelfBytes     int64
+	ChildrenBytes int64
+	TotalBytes    int64
 
 	SelfObjects     int64
 	ChildrenObjects int64
 	TotalObjects    int64
 
-	SelfGBBeingWritten     float64
-	ChildrenGBBeingWritten float64
-	TotalGBBeingWritten    float64
+	SelfBytesBeingWritten     int64
+	ChildrenBytesBeingWritten int64
+	TotalBytesBeingWritten    int64
 
 	SelfObjectsBeingWritten     int64
 	ChildrenObjectsBeingWritten int64
@@ -99,8 +99,8 @@ func (m *Manager) UpdateLotUsage(u UsageUpdate, delta bool, caller string) error
 // aggregated total for that lot; lots not referenced are left untouched.
 func (m *Manager) UpdateLotUsageByDir(entries []DirUsage, delta bool, atMs int64, caller string) error {
 	type agg struct {
-		gb  float64
-		obj int64
+		bytes int64
+		obj   int64
 	}
 	perLot := map[string]*agg{}
 	for _, e := range entries {
@@ -114,7 +114,7 @@ func (m *Manager) UpdateLotUsageByDir(entries []DirUsage, delta bool, atMs int64
 			a = &agg{}
 			perLot[lot] = a
 		}
-		a.gb += e.SizeGB
+		a.bytes += e.SizeBytes
 		a.obj += e.NumObjects
 	}
 	for lot, a := range perLot {
@@ -127,8 +127,8 @@ func (m *Manager) UpdateLotUsageByDir(entries []DirUsage, delta bool, atMs int64
 				continue
 			}
 		}
-		gb, obj := a.gb, a.obj
-		if err := m.UpdateLotUsage(UsageUpdate{LotName: lot, SelfGB: &gb, SelfObjects: &obj}, delta, caller); err != nil {
+		bytes, obj := a.bytes, a.obj
+		if err := m.UpdateLotUsage(UsageUpdate{LotName: lot, SelfBytes: &bytes, SelfObjects: &obj}, delta, caller); err != nil {
 			return err
 		}
 	}
@@ -143,25 +143,25 @@ func (m *Manager) GetLotUsage(lotName string) (*UsageReport, error) {
 	} else if !ok {
 		return nil, ErrLotNotFound
 	}
-	var u LotUsage
 	var usages []LotUsage
 	if err := m.db.Where("lot_name = ?", lotName).Limit(1).Find(&usages).Error; err != nil {
 		return nil, wrap(err, "loading usage")
 	}
+	u := LotUsage{LotName: lotName}
 	if len(usages) > 0 {
 		u = usages[0]
 	}
 	return &UsageReport{
 		LotName:                     lotName,
-		SelfGB:                      u.SelfGB,
-		ChildrenGB:                  u.ChildrenGB,
-		TotalGB:                     u.SelfGB + u.ChildrenGB,
+		SelfBytes:                   u.SelfBytes,
+		ChildrenBytes:               u.ChildrenBytes,
+		TotalBytes:                  u.SelfBytes + u.ChildrenBytes,
 		SelfObjects:                 u.SelfObjects,
 		ChildrenObjects:             u.ChildrenObjects,
 		TotalObjects:                u.SelfObjects + u.ChildrenObjects,
-		SelfGBBeingWritten:          u.SelfGBBeingWritten,
-		ChildrenGBBeingWritten:      u.ChildrenGBBeingWritten,
-		TotalGBBeingWritten:         u.SelfGBBeingWritten + u.ChildrenGBBeingWritten,
+		SelfBytesBeingWritten:       u.SelfBytesBeingWritten,
+		ChildrenBytesBeingWritten:   u.ChildrenBytesBeingWritten,
+		TotalBytesBeingWritten:      u.SelfBytesBeingWritten + u.ChildrenBytesBeingWritten,
 		SelfObjectsBeingWritten:     u.SelfObjectsBeingWritten,
 		ChildrenObjectsBeingWritten: u.ChildrenObjectsBeingWritten,
 		TotalObjectsBeingWritten:    u.SelfObjectsBeingWritten + u.ChildrenObjectsBeingWritten,
@@ -198,12 +198,12 @@ func applySelfUsage(tx *gorm.DB, u UsageUpdate, delta bool) error {
 	}
 
 	fields := map[string]any{}
-	if u.SelfGB != nil {
-		nv, err := newFloat(cur.SelfGB, *u.SelfGB, delta)
+	if u.SelfBytes != nil {
+		nv, err := newInt(cur.SelfBytes, *u.SelfBytes, delta)
 		if err != nil {
-			return wrapf(err, "self_gb")
+			return wrapf(err, "self_bytes")
 		}
-		fields["self_gb"] = nv
+		fields["self_bytes"] = nv
 	}
 	if u.SelfObjects != nil {
 		nv, err := newInt(cur.SelfObjects, *u.SelfObjects, delta)
@@ -212,12 +212,12 @@ func applySelfUsage(tx *gorm.DB, u UsageUpdate, delta bool) error {
 		}
 		fields["self_objects"] = nv
 	}
-	if u.SelfGBBeingWritten != nil {
-		nv, err := newFloat(cur.SelfGBBeingWritten, *u.SelfGBBeingWritten, delta)
+	if u.SelfBytesBeingWritten != nil {
+		nv, err := newInt(cur.SelfBytesBeingWritten, *u.SelfBytesBeingWritten, delta)
 		if err != nil {
-			return wrapf(err, "self_gb_being_written")
+			return wrapf(err, "self_bytes_being_written")
 		}
-		fields["self_gb_being_written"] = nv
+		fields["self_bytes_being_written"] = nv
 	}
 	if u.SelfObjectsBeingWritten != nil {
 		nv, err := newInt(cur.SelfObjectsBeingWritten, *u.SelfObjectsBeingWritten, delta)
@@ -240,20 +240,6 @@ func applySelfUsage(tx *gorm.DB, u UsageUpdate, delta bool) error {
 		return wrap(err, "updating self usage")
 	}
 	return nil
-}
-
-func newFloat(current, val float64, delta bool) (float64, error) {
-	if delta {
-		nv := current + val
-		if nv < 0 {
-			return 0, wrapf(ErrInvalidLot, "delta update would store a negative value (%v)", nv)
-		}
-		return nv, nil
-	}
-	if val < 0 {
-		return 0, wrapf(ErrInvalidLot, "absolute usage value must be non-negative (%v)", val)
-	}
-	return val, nil
 }
 
 func newInt(current, val int64, delta bool) (int64, error) {
@@ -279,14 +265,14 @@ func recalcChildren(tx *gorm.DB, name string) error {
 		return err
 	}
 	var sums struct {
-		GB   float64 `gorm:"column:gb"`
-		GBW  float64 `gorm:"column:gbw"`
-		Obj  int64   `gorm:"column:obj"`
-		ObjW int64   `gorm:"column:objw"`
+		Bytes  int64 `gorm:"column:bytes"`
+		BytesW int64 `gorm:"column:bytesw"`
+		Obj    int64 `gorm:"column:obj"`
+		ObjW   int64 `gorm:"column:objw"`
 	}
 	if len(descendants) > 0 {
 		err := tx.Table("lot_usage AS lu").
-			Select("COALESCE(SUM(lu.self_gb),0) AS gb, COALESCE(SUM(lu.self_gb_being_written),0) AS gbw, "+
+			Select("COALESCE(SUM(lu.self_bytes),0) AS bytes, COALESCE(SUM(lu.self_bytes_being_written),0) AS bytesw, "+
 				"COALESCE(SUM(lu.self_objects),0) AS obj, COALESCE(SUM(lu.self_objects_being_written),0) AS objw").
 			Joins("LEFT JOIN lot_reclamations r ON r.lot_name = lu.lot_name").
 			Where("r.lot_name IS NULL AND lu.lot_name IN ?", descendants).
@@ -296,8 +282,8 @@ func recalcChildren(tx *gorm.DB, name string) error {
 		}
 	}
 	fields := map[string]any{
-		"children_gb":                    sums.GB,
-		"children_gb_being_written":      sums.GBW,
+		"children_bytes":                 sums.Bytes,
+		"children_bytes_being_written":   sums.BytesW,
 		"children_objects":               sums.Obj,
 		"children_objects_being_written": sums.ObjW,
 	}

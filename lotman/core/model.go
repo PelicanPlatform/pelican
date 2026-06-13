@@ -26,16 +26,16 @@ package core
 // window, and management-policy attributes (MPAs). Owner and the MPA columns are
 // folded into this table (1:1 with the lot) rather than kept in separate tables.
 type Lot struct {
-	LotName         string  `gorm:"column:lot_name;primaryKey"`
-	Owner           string  `gorm:"column:owner;not null"`
-	DedicatedGB     float64 `gorm:"column:dedicated_gb;not null;default:0"`
-	OpportunisticGB float64 `gorm:"column:opportunistic_gb;not null;default:0"`
-	MaxNumObjects   int64   `gorm:"column:max_num_objects;not null;default:-1"`
-	CreationTime    int64   `gorm:"column:creation_time;not null;default:0"`
-	ExpirationTime  int64   `gorm:"column:expiration_time;not null;default:0"`
-	DeletionTime    int64   `gorm:"column:deletion_time;not null;default:0"`
-	CreatedAt       int64   `gorm:"column:created_at;not null;default:0"`
-	UpdatedAt       int64   `gorm:"column:updated_at;not null;default:0"`
+	LotName            string `gorm:"column:lot_name;primaryKey"`
+	Owner              string `gorm:"column:owner;not null"`
+	DedicatedBytes     int64  `gorm:"column:dedicated_bytes;not null;default:0"`
+	OpportunisticBytes int64  `gorm:"column:opportunistic_bytes;not null;default:0"`
+	MaxNumObjects      int64  `gorm:"column:max_num_objects;not null;default:-1"`
+	CreationTime       int64  `gorm:"column:creation_time;not null;default:0"`
+	ExpirationTime     int64  `gorm:"column:expiration_time;not null;default:0"`
+	DeletionTime       int64  `gorm:"column:deletion_time;not null;default:0"`
+	CreatedAt          int64  `gorm:"column:created_at;not null;default:0"`
+	UpdatedAt          int64  `gorm:"column:updated_at;not null;default:0"`
 }
 
 func (Lot) TableName() string { return "lots" }
@@ -64,33 +64,34 @@ func (LotPath) TableName() string { return "lot_paths" }
 // LotUsage tracks per-lot usage, keeping self and children contributions
 // separate so callers can choose whether to count descendants toward a quota.
 type LotUsage struct {
-	LotName                     string  `gorm:"column:lot_name;primaryKey"`
-	SelfGB                      float64 `gorm:"column:self_gb;not null;default:0"`
-	ChildrenGB                  float64 `gorm:"column:children_gb;not null;default:0"`
-	SelfObjects                 int64   `gorm:"column:self_objects;not null;default:0"`
-	ChildrenObjects             int64   `gorm:"column:children_objects;not null;default:0"`
-	SelfGBBeingWritten          float64 `gorm:"column:self_gb_being_written;not null;default:0"`
-	ChildrenGBBeingWritten      float64 `gorm:"column:children_gb_being_written;not null;default:0"`
-	SelfObjectsBeingWritten     int64   `gorm:"column:self_objects_being_written;not null;default:0"`
-	ChildrenObjectsBeingWritten int64   `gorm:"column:children_objects_being_written;not null;default:0"`
+	LotName                     string `gorm:"column:lot_name;primaryKey"`
+	SelfBytes                   int64  `gorm:"column:self_bytes;not null;default:0"`
+	ChildrenBytes               int64  `gorm:"column:children_bytes;not null;default:0"`
+	SelfObjects                 int64  `gorm:"column:self_objects;not null;default:0"`
+	ChildrenObjects             int64  `gorm:"column:children_objects;not null;default:0"`
+	SelfBytesBeingWritten       int64  `gorm:"column:self_bytes_being_written;not null;default:0"`
+	ChildrenBytesBeingWritten   int64  `gorm:"column:children_bytes_being_written;not null;default:0"`
+	SelfObjectsBeingWritten     int64  `gorm:"column:self_objects_being_written;not null;default:0"`
+	ChildrenObjectsBeingWritten int64  `gorm:"column:children_objects_being_written;not null;default:0"`
 }
 
 func (LotUsage) TableName() string { return "lot_usage" }
 
 // MPA-key constants used by LotParentAttribution.MpaKey.
 const (
-	MpaKeyDedicatedGB     = "dedicated_GB"
-	MpaKeyOpportunisticGB = "opportunistic_GB"
-	MpaKeyMaxNumObjects   = "max_num_objects"
+	MpaKeyDedicatedBytes     = "dedicated_bytes"
+	MpaKeyOpportunisticBytes = "opportunistic_bytes"
+	MpaKeyMaxNumObjects      = "max_num_objects"
 )
 
-// LotParentAttribution records, under strict hierarchy, the fraction of a
-// child's MPA on a given axis that is attributed to a particular parent.
+// LotParentAttribution records, under strict hierarchy, the absolute amount of
+// a child's MPA on a given axis that is attributed to a particular parent
+// (bytes for the storage axes, a count for objects; -1 means unbounded).
 type LotParentAttribution struct {
-	ChildLotName  string  `gorm:"column:child_lot_name;primaryKey"`
-	ParentLotName string  `gorm:"column:parent_lot_name;primaryKey"`
-	MpaKey        string  `gorm:"column:mpa_key;primaryKey"`
-	Fraction      float64 `gorm:"column:fraction;not null"`
+	ChildLotName    string `gorm:"column:child_lot_name;primaryKey"`
+	ParentLotName   string `gorm:"column:parent_lot_name;primaryKey"`
+	MpaKey          string `gorm:"column:mpa_key;primaryKey"`
+	AttributedValue int64  `gorm:"column:attributed_value;not null"`
 }
 
 func (LotParentAttribution) TableName() string { return "lot_parent_attributions" }
