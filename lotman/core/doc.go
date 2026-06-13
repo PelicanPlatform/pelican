@@ -28,8 +28,7 @@
 // github.com/pelicanplatform/pelican/... package, so that it can be promoted to
 // a standalone repository. All Pelican-specific concerns (config, federation
 // discovery, token-scope auth, HTTP routing, cache integration) live in the
-// adapter layer outside this package. See
-// reference/lotman-v2-plan/05-module-boundary-and-migration-plan.md.
+// adapter layer outside this package.
 package core
 
 // Sentinel values, ported verbatim from the C++ library's semantics.
