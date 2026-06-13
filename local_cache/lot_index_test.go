@@ -98,6 +98,34 @@ func TestFederationQualifiedKey(t *testing.T) {
 	}
 }
 
+func TestGetLotID(t *testing.T) {
+	// No lot index configured: lot tracking disabled -> LotID 0.
+	pc := &PersistentCache{defaultFed: "primary.org"}
+	if id := pc.getLotID("pelican://primary.org/atlas/x"); id != 0 {
+		t.Errorf("nil lotIndex should yield LotID 0, got %d", id)
+	}
+
+	// With an index, getLotID resolves the federation-qualified key.
+	pc.lotIndex = newLotIndex()
+	pc.lotIndex.setEntries([]lotPathEntry{
+		{lotName: "primary-atlas", path: "/primary.org/atlas", recursive: true},
+		{lotName: "other-atlas", path: "/other.org/atlas", recursive: true},
+	})
+	_, want := pc.lotIndex.Resolve("/primary.org/atlas/x")
+	if id := pc.getLotID("pelican://primary.org/atlas/x"); id != want {
+		t.Errorf("getLotID(primary) = %d, want %d", id, want)
+	}
+	// A bare path uses the default federation.
+	if id := pc.getLotID("/atlas/x"); id != want {
+		t.Errorf("getLotID(bare) = %d, want %d (default fed)", id, want)
+	}
+	// Different federation, same path -> different lot.
+	_, otherWant := pc.lotIndex.Resolve("/other.org/atlas/x")
+	if id := pc.getLotID("pelican://other.org/atlas/x"); id != otherWant || id == want {
+		t.Errorf("getLotID(other) = %d, want %d (distinct from primary %d)", id, otherWant, want)
+	}
+}
+
 func TestLotIndexFederationIsolation(t *testing.T) {
 	li := newLotIndex()
 	// Two federations each have an /atlas namespace; lots are federation-qualified.
