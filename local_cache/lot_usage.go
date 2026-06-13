@@ -147,6 +147,109 @@ func (pc *PersistentCache) priorityBuckets(storageID StorageID) []NamespaceID {
 	return out
 }
 
+// defaultObjectCapTrimInterval is how often object-count caps are enforced when
+// no interval is configured.
+const defaultObjectCapTrimInterval = time.Minute
+
+// trimObjectCaps enforces lots' max_num_objects caps as a rolling window,
+// independent of disk pressure: for every lot with a finite object cap, it
+// counts the objects in the lot's accounting bucket (across storage
+// directories, including inline) and evicts the oldest excess so the lot is
+// brought back to its cap. This is the mechanism behind the monitoring lot's
+// bounded object count. A no-op when lot tracking is disabled.
+//
+// Object counts are read from the LRU index on demand (bounded per-lot prefix
+// scans) rather than maintained as a hot-path counter; core's self_objects is
+// not yet populated, so this enforcement is cache-side.
+func (pc *PersistentCache) trimObjectCaps() error {
+	if pc.lotMgr == nil {
+		return nil
+	}
+	names, err := pc.lotMgr.ListAllLots()
+	if err != nil {
+		return errors.Wrap(err, "listing lots for object-cap trim")
+	}
+	rl := log.WithField("component", "lotObjTrim")
+
+	// Buckets can hold inline objects (StorageID 0) as well as disk objects.
+	storageIDs := append([]StorageID{StorageIDInline}, pc.eviction.dirIDs...)
+
+	for _, name := range names {
+		view, err := pc.lotMgr.GetLot(name)
+		if err != nil {
+			continue
+		}
+		objCap := view.MaxNumObjects
+		if objCap < 0 { // unbounded
+			continue
+		}
+		pc.namespaceMapMu.RLock()
+		bucket, ok := pc.namespaceMap[name]
+		pc.namespaceMapMu.RUnlock()
+		if !ok { // no objects ever ingested for this lot
+			continue
+		}
+
+		counts := make(map[StorageID]int64, len(storageIDs))
+		var total int64
+		for _, sid := range storageIDs {
+			c, err := pc.db.CountLRUEntries(sid, bucket)
+			if err != nil {
+				rl.Warnf("object-cap trim: counting lot %q dir %d: %v", name, sid, err)
+				continue
+			}
+			counts[sid] = c
+			total += c
+		}
+		if total <= objCap {
+			continue
+		}
+
+		excess := total - objCap
+		rl.WithFields(log.Fields{"lot": name, "objects": total, "cap": objCap, "evict": excess}).Debug("trimming object-capped lot")
+		for _, sid := range storageIDs {
+			if excess <= 0 {
+				break
+			}
+			if counts[sid] == 0 {
+				continue
+			}
+			_, count, _, err := pc.eviction.evictFromNamespace(rl, sid, bucket, int(excess), 0)
+			if err != nil {
+				rl.Warnf("object-cap trim: evicting lot %q dir %d: %v", name, sid, err)
+				continue
+			}
+			excess -= int64(count)
+		}
+	}
+	return nil
+}
+
+// startObjectCapTrim runs trimObjectCaps on a fixed interval until ctx is
+// cancelled. A no-op when lot tracking is disabled.
+func (pc *PersistentCache) startObjectCapTrim(ctx context.Context, egrp *errgroup.Group, interval time.Duration) {
+	if pc.lotMgr == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = defaultObjectCapTrimInterval
+	}
+	egrp.Go(func() error {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				if err := pc.trimObjectCaps(); err != nil {
+					log.Warnf("object-cap trim failed: %v", err)
+				}
+			}
+		}
+	})
+}
+
 // startLotUsageSync runs syncLotUsage on a fixed interval until ctx is
 // cancelled. A no-op when lot tracking is disabled.
 func (pc *PersistentCache) startLotUsageSync(ctx context.Context, egrp *errgroup.Group, interval time.Duration) {
