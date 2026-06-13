@@ -30,6 +30,7 @@ import (
 // responsibility; this method enforces only the ownership relationships the
 // model requires.
 func (m *Manager) AddLot(spec LotSpec, caller string) error {
+	spec.Paths = normalizedPaths(spec.Paths)
 	if err := validateLotSpec(spec); err != nil {
 		return err
 	}
@@ -152,6 +153,7 @@ func (m *Manager) UpdateLot(update LotUpdate, caller string) error {
 // AddToLot adds parents and/or paths to an existing lot. Duplicate edges/paths
 // are ignored. The caller must own the lot or one of its parents.
 func (m *Manager) AddToLot(add LotAddition, caller string) error {
+	add.Paths = normalizedPaths(add.Paths)
 	return m.db.Transaction(func(tx *gorm.DB) error {
 		lot, err := m.loadLot(tx, add.LotName)
 		if err != nil {
@@ -224,6 +226,11 @@ func (m *Manager) RemovePaths(rm LotPathRemoval, caller string) error {
 	if len(rm.Paths) == 0 {
 		return nil
 	}
+	normPaths := make([]string, len(rm.Paths))
+	for i, p := range rm.Paths {
+		normPaths[i] = normalizePath(p)
+	}
+	rm.Paths = normPaths
 	return m.db.Transaction(func(tx *gorm.DB) error {
 		lot, err := m.loadLot(tx, rm.LotName)
 		if err != nil {
