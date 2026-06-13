@@ -258,7 +258,8 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 			}
 		}
 
-		// Bind the c library funcs to Go, instantiate lots, set up the Lotman database, etc
+		// Open the lot database, apply schema migrations, and instantiate the
+		// federation/config-derived lots.
 		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
 			return nil, errors.New("Failed to initialize lotman")
 		}

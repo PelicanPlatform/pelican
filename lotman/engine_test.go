@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -88,9 +86,9 @@ func TestLotToSpecConversion(t *testing.T) {
 }
 
 func TestMpaToCoreDefaults(t *testing.T) {
-	// A nil MPA maps to a zero-storage, unbounded-objects, non-expiring MPA.
+	// A nil MPA maps to an all-zero, non-expiring MPA (unset = 0 on every axis).
 	m := mpaToCore(nil)
-	if m.DedicatedBytes != 0 || m.OpportunisticBytes != 0 || m.MaxNumObjects != core.Unbounded {
+	if m.DedicatedBytes != 0 || m.OpportunisticBytes != 0 || m.MaxNumObjects != 0 {
 		t.Errorf("nil MPA defaults wrong: %+v", m)
 	}
 	if !core.IsNonExpiring(m.CreationTime, m.ExpirationTime, m.DeletionTime) {

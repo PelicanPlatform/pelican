@@ -423,46 +423,82 @@ func (m *Manager) descendantsAndSelf(tx *gorm.DB, name string) ([]string, error)
 	return out, nil
 }
 
-// authorizeCreate enforces the create-time ownership rule. Empty caller is a
-// trusted/system call (e.g. bootstrap of root/default lots).
+// ownerOfAncestors returns the set of owners of the named lots and all of their
+// recursive ancestors. A caller in this set owns a lot or one of its ancestors
+// and is therefore authorized to operate on the subtree.
+func (m *Manager) ownerOfAncestors(tx *gorm.DB, names ...string) (map[string]bool, error) {
+	owners := map[string]bool{}
+	seen := map[string]bool{}
+	var walk func(name string) error
+	walk = func(name string) error {
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
+		lot, err := m.loadLot(tx, name)
+		if err != nil {
+			return err
+		}
+		owners[lot.Owner] = true
+		ancestors, err := ancestorsVia(tx, name)
+		if err != nil {
+			return err
+		}
+		for _, a := range ancestors {
+			al, err := m.loadLot(tx, a)
+			if err != nil {
+				return err
+			}
+			owners[al.Owner] = true
+		}
+		return nil
+	}
+	for _, n := range names {
+		if err := walk(n); err != nil {
+			return nil, err
+		}
+	}
+	return owners, nil
+}
+
+// authorizeCreate enforces the create-time ownership rule: the caller must own
+// one of the new lot's parents or a recursive ancestor thereof (so the owner of
+// "root" can create anywhere beneath it). Empty caller is a trusted/system call
+// (e.g. bootstrap of root/default lots); AdminOverride bypasses the check.
 func (m *Manager) authorizeCreate(tx *gorm.DB, spec LotSpec, caller string) error {
 	if caller == "" || m.opts.AdminOverride {
 		return nil
 	}
+	nonSelf := make([]string, 0, len(spec.Parents))
 	for _, p := range spec.Parents {
 		if p == spec.LotName {
 			return nil // self-parented: creating one's own root
 		}
+		nonSelf = append(nonSelf, p)
 	}
-	var owned int64
-	if err := tx.Model(&Lot{}).Where("lot_name IN ? AND owner = ?", spec.Parents, caller).Count(&owned).Error; err != nil {
-		return wrap(err, "checking parent ownership")
+	owners, err := m.ownerOfAncestors(tx, nonSelf...)
+	if err != nil {
+		return err
 	}
-	if owned == 0 {
-		return wrapf(ErrNotAuthorized, "caller %q owns no parent of lot %q", caller, spec.LotName)
+	if owners[caller] {
+		return nil
 	}
-	return nil
+	return wrapf(ErrNotAuthorized, "caller %q owns no parent or ancestor of lot %q", caller, spec.LotName)
 }
 
 // authorizeModify enforces the modify-time ownership rule: the caller must own
-// the lot or one of its parents (or be a trusted/system/admin caller).
+// the lot or one of its (recursive) ancestors, or be a trusted/system/admin
+// caller.
 func (m *Manager) authorizeModify(tx *gorm.DB, lot Lot, caller string) error {
 	if caller == "" || m.opts.AdminOverride {
 		return nil
 	}
-	if lot.Owner == caller {
+	owners, err := m.ownerOfAncestors(tx, lot.LotName)
+	if err != nil {
+		return err
+	}
+	if owners[caller] {
 		return nil
 	}
-	var owned int64
-	err := tx.Table("lot_parents AS lp").
-		Joins("JOIN lots l ON l.lot_name = lp.parent").
-		Where("lp.lot_name = ? AND lp.parent != lp.lot_name AND l.owner = ?", lot.LotName, caller).
-		Count(&owned).Error
-	if err != nil {
-		return wrap(err, "checking lot ownership")
-	}
-	if owned == 0 {
-		return wrapf(ErrNotAuthorized, "caller %q does not own lot %q or a parent", caller, lot.LotName)
-	}
-	return nil
+	return wrapf(ErrNotAuthorized, "caller %q does not own lot %q or an ancestor", caller, lot.LotName)
 }

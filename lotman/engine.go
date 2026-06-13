@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -21,12 +19,73 @@
 package lotman
 
 import (
+	"errors"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
+
+// errNotInitialized is returned by the wrappers when InitLotman has not yet
+// built the manager.
+var errNotInitialized = errors.New("lotman: manager is not initialized")
+
+// requireManager returns the initialized manager or errNotInitialized.
+func requireManager() (*core.Manager, error) {
+	m := getManager()
+	if m == nil {
+		return nil, errNotInitialized
+	}
+	return m, nil
+}
+
+// pathSpecsFromLotPaths converts adapter LotPath values to core PathSpecs. The
+// adapter LotPath carries no exclude flag.
+func pathSpecsFromLotPaths(in []LotPath) []core.PathSpec {
+	out := make([]core.PathSpec, 0, len(in))
+	for _, p := range in {
+		out = append(out, core.PathSpec{Path: p.Path, Recursive: p.Recursive})
+	}
+	return out
+}
+
+// mergeMPAToCore builds the full replacement MPA for an update: it starts from
+// the lot's existing MPA and overlays only the fields the caller specified
+// (non-nil). This preserves unspecified fields — notably creation_time, which
+// getLotUpdateJSONs deliberately nils out because it must not change.
+func mergeMPAToCore(u *MPA, existing core.Lot) core.MPA {
+	out := core.MPA{
+		DedicatedBytes:     existing.DedicatedBytes,
+		OpportunisticBytes: existing.OpportunisticBytes,
+		MaxNumObjects:      existing.MaxNumObjects,
+		CreationTime:       existing.CreationTime,
+		ExpirationTime:     existing.ExpirationTime,
+		DeletionTime:       existing.DeletionTime,
+	}
+	if u == nil {
+		return out
+	}
+	if u.DedicatedGB != nil {
+		out.DedicatedBytes = gbToBytes(*u.DedicatedGB)
+	}
+	if u.OpportunisticGB != nil {
+		out.OpportunisticBytes = gbToBytes(*u.OpportunisticGB)
+	}
+	if u.MaxNumObjects != nil {
+		out.MaxNumObjects = u.MaxNumObjects.Value
+	}
+	if u.CreationTime != nil {
+		out.CreationTime = u.CreationTime.Value
+	}
+	if u.ExpirationTime != nil {
+		out.ExpirationTime = u.ExpirationTime.Value
+	}
+	if u.DeletionTime != nil {
+		out.DeletionTime = u.DeletionTime.Value
+	}
+	return out
+}
 
 // This file holds the native lotman engine: a process-wide core.Manager plus
 // the mapping layer that converts the adapter's GB-based public types into the
@@ -73,21 +132,46 @@ func gbPtrToBytesPtr(gb *float64) *int64 {
 	return &v
 }
 
-// mpaToCore converts an adapter MPA (GB, pointers) to a core MPA (bytes). A nil
-// MPA yields a zero-storage, unbounded-objects, non-expiring MPA; unset object
-// counts default to unbounded and unset timestamps to the non-expiring sentinel.
+// mpaToCore converts an adapter MPA (GB, pointers) to a core MPA (bytes). Every
+// unset axis defaults to 0 (no quota / non-expiring); the unbounded sentinel
+// (-1) is always set explicitly by callers, never implied by omission. A nil
+// MPA therefore yields an all-zero MPA.
 func mpaToCore(m *MPA) core.MPA {
 	if m == nil {
-		return core.MPA{MaxNumObjects: core.Unbounded}
+		return core.MPA{}
 	}
 	return core.MPA{
 		DedicatedBytes:     gbPtrToBytes(m.DedicatedGB),
 		OpportunisticBytes: gbPtrToBytes(m.OpportunisticGB),
-		MaxNumObjects:      int64PtrValue(m.MaxNumObjects, core.Unbounded),
+		MaxNumObjects:      int64PtrValue(m.MaxNumObjects, 0),
 		CreationTime:       int64PtrValue(m.CreationTime, 0),
 		ExpirationTime:     int64PtrValue(m.ExpirationTime, 0),
 		DeletionTime:       int64PtrValue(m.DeletionTime, 0),
 	}
+}
+
+// attrValuesToAdapter converts core attribution values (bytes, keyed by parent
+// then MPA key) back to the adapter's GB-based ParentAttribution map.
+func attrValuesToAdapter(in map[string]map[string]int64) map[string]ParentAttribution {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]ParentAttribution, len(in))
+	for parent, axes := range in {
+		var pa ParentAttribution
+		if v, ok := axes[core.MpaKeyDedicatedBytes]; ok {
+			pa.DedicatedGB = bytesToGBPtr(v)
+		}
+		if v, ok := axes[core.MpaKeyOpportunisticBytes]; ok {
+			pa.OpportunisticGB = bytesToGBPtr(v)
+		}
+		if v, ok := axes[core.MpaKeyMaxNumObjects]; ok {
+			vv := v
+			pa.MaxNumObjects = &Int64FromFloat{Value: vv}
+		}
+		out[parent] = pa
+	}
+	return out
 }
 
 // parentAttrToCore converts adapter parent attributions (GB) to core
