@@ -93,6 +93,60 @@ func (pc *PersistentCache) syncLotUsage() error {
 	return nil
 }
 
+// priorityBuckets returns the accounting bucket ids to evict first within a
+// storage directory, in priority order: lots past their deletion time, then
+// past expiration, then over their dedicated+opportunistic quota, then over
+// their dedicated quota. The result is restricted to lots that actually have
+// usage in the given directory and is de-duplicated, preserving priority order.
+// Implements lotEvictionPlanner.
+func (pc *PersistentCache) priorityBuckets(storageID StorageID) []NamespaceID {
+	if pc.lotMgr == nil {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+
+	var lotNames []string
+	appendLots := func(names []string, err error) {
+		if err != nil {
+			log.Warnf("lot eviction planning query failed: %v", err)
+			return
+		}
+		lotNames = append(lotNames, names...)
+	}
+	// Recursive for the time-based passes so descendants of an expired/deleted
+	// lot are included; hierarchical for the quota passes so the deepest
+	// over-quota lots come first.
+	appendLots(pc.lotMgr.LotsPastDel(now, true, false))
+	appendLots(pc.lotMgr.LotsPastExp(now, true, false))
+	appendLots(pc.lotMgr.LotsPastOpp(false, false, false, true))
+	appendLots(pc.lotMgr.LotsPastDed(false, false, false, true))
+
+	// Restrict to lots present in this storage directory.
+	dirUsage, err := pc.db.GetDirUsage(storageID)
+	if err != nil {
+		log.Warnf("lot eviction planning: failed to read dir usage: %v", err)
+		return nil
+	}
+	present := make(map[NamespaceID]bool, len(dirUsage))
+	for id := range dirUsage {
+		present[id] = true
+	}
+
+	pc.namespaceMapMu.RLock()
+	defer pc.namespaceMapMu.RUnlock()
+	seen := make(map[NamespaceID]bool)
+	var out []NamespaceID
+	for _, name := range lotNames {
+		id, ok := pc.namespaceMap[name]
+		if !ok || seen[id] || !present[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
 // startLotUsageSync runs syncLotUsage on a fixed interval until ctx is
 // cancelled. A no-op when lot tracking is disabled.
 func (pc *PersistentCache) startLotUsageSync(ctx context.Context, egrp *errgroup.Group, interval time.Duration) {
