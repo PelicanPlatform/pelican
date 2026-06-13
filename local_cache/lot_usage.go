@@ -65,6 +65,10 @@ func (pc *PersistentCache) syncLotUsage() error {
 	if err != nil {
 		return errors.Wrap(err, "reading cache usage for lot sync")
 	}
+	objCounts, err := pc.db.GetAllObjectCounts()
+	if err != nil {
+		return errors.Wrap(err, "reading cache object counts for lot sync")
+	}
 
 	// Reverse the persisted bucket mapping: bucket id -> lot name.
 	pc.namespaceMapMu.RLock()
@@ -74,7 +78,8 @@ func (pc *PersistentCache) syncLotUsage() error {
 	}
 	pc.namespaceMapMu.RUnlock()
 
-	perLot := aggregateUsageByLot(usage, idToName)
+	perLotBytes := aggregateUsageByLot(usage, idToName)
+	perLotObjects := aggregateUsageByLot(objCounts, idToName)
 
 	// Write absolute self usage for every lot, so lots with no cached bytes are
 	// reset to 0. Iterating the core's lots (rather than just the observed
@@ -85,8 +90,9 @@ func (pc *PersistentCache) syncLotUsage() error {
 		return errors.Wrap(err, "listing lots for usage sync")
 	}
 	for _, name := range names {
-		bytes := perLot[name]
-		if err := pc.lotMgr.UpdateLotUsage(core.UsageUpdate{LotName: name, SelfBytes: &bytes}, false, ""); err != nil {
+		bytes := perLotBytes[name]
+		objects := perLotObjects[name]
+		if err := pc.lotMgr.UpdateLotUsage(core.UsageUpdate{LotName: name, SelfBytes: &bytes, SelfObjects: &objects}, false, ""); err != nil {
 			log.Warnf("lot usage sync: failed to update lot %q: %v", name, err)
 		}
 	}
@@ -153,14 +159,15 @@ const defaultObjectCapTrimInterval = time.Minute
 
 // trimObjectCaps enforces lots' max_num_objects caps as a rolling window,
 // independent of disk pressure: for every lot with a finite object cap, it
-// counts the objects in the lot's accounting bucket (across storage
-// directories, including inline) and evicts the oldest excess so the lot is
-// brought back to its cap. This is the mechanism behind the monitoring lot's
-// bounded object count. A no-op when lot tracking is disabled.
+// reads the per-bucket object counts (reconciled by the periodic metadata scan,
+// so this is O(buckets), not O(objects)), and evicts the oldest excess so the
+// lot is brought back to its cap. This is the mechanism behind the monitoring
+// lot's bounded object count. A no-op when lot tracking is disabled.
 //
-// Object counts are read from the LRU index on demand (bounded per-lot prefix
-// scans) rather than maintained as a hot-path counter; core's self_objects is
-// not yet populated, so this enforcement is cache-side.
+// Counts are as fresh as the last metadata scan (newly-ingested objects are
+// picked up at the next scan), so the cap is approximate within that window;
+// after evicting, the counter is decremented so a re-run before the next scan
+// does not over-evict.
 func (pc *PersistentCache) trimObjectCaps() error {
 	if pc.lotMgr == nil {
 		return nil
@@ -168,6 +175,10 @@ func (pc *PersistentCache) trimObjectCaps() error {
 	names, err := pc.lotMgr.ListAllLots()
 	if err != nil {
 		return errors.Wrap(err, "listing lots for object-cap trim")
+	}
+	counts, err := pc.db.GetAllObjectCounts()
+	if err != nil {
+		return errors.Wrap(err, "reading object counts for trim")
 	}
 	rl := log.WithField("component", "lotObjTrim")
 
@@ -190,16 +201,9 @@ func (pc *PersistentCache) trimObjectCaps() error {
 			continue
 		}
 
-		counts := make(map[StorageID]int64, len(storageIDs))
 		var total int64
 		for _, sid := range storageIDs {
-			c, err := pc.db.CountLRUEntries(sid, bucket)
-			if err != nil {
-				rl.Warnf("object-cap trim: counting lot %q dir %d: %v", name, sid, err)
-				continue
-			}
-			counts[sid] = c
-			total += c
+			total += counts[StorageUsageKey{StorageID: sid, NamespaceID: bucket}]
 		}
 		if total <= objCap {
 			continue
@@ -211,7 +215,8 @@ func (pc *PersistentCache) trimObjectCaps() error {
 			if excess <= 0 {
 				break
 			}
-			if counts[sid] == 0 {
+			key := StorageUsageKey{StorageID: sid, NamespaceID: bucket}
+			if counts[key] == 0 {
 				continue
 			}
 			_, count, _, err := pc.eviction.evictFromNamespace(rl, sid, bucket, int(excess), 0)
@@ -220,6 +225,16 @@ func (pc *PersistentCache) trimObjectCaps() error {
 				continue
 			}
 			excess -= int64(count)
+			// Keep the counter consistent so a re-run before the next metadata
+			// scan does not over-evict.
+			newCount := counts[key] - int64(count)
+			if newCount < 0 {
+				newCount = 0
+			}
+			counts[key] = newCount
+			if err := pc.db.SetObjectCount(sid, bucket, newCount); err != nil {
+				rl.Warnf("object-cap trim: updating count for lot %q dir %d: %v", name, sid, err)
+			}
 		}
 	}
 	return nil
