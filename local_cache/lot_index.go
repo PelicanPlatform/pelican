@@ -167,6 +167,28 @@ func pathCovers(lotPath string, recursive bool, q string) bool {
 	return strings.HasPrefix(q, lotPath+"/")
 }
 
+// federationQualifiedKey builds the resolution key for an object, prefixing the
+// path with the object's federation discovery host so that the same path in two
+// federations resolves to two different lots. The cache can serve multiple
+// federations (Cache.AllowedFederations), and an object's federation is carried
+// in its pelican:// URL host; bare/host-less inputs fall back to defaultFed
+// (the cache's primary federation).
+//
+// Lots are stored with matching federation-qualified paths (e.g.
+// "/osg-htc.org/atlas"), so resolution stays a pure longest-prefix match and the
+// lot core needs no federation dimension of its own.
+func federationQualifiedKey(pelicanURL, defaultFed string) string {
+	host := defaultFed
+	p := pelicanURL
+	if u, err := url.Parse(pelicanURL); err == nil && u.Scheme != "" {
+		if u.Host != "" {
+			host = u.Host
+		}
+		p = u.Path
+	}
+	return normalizeLotPath("/" + host + "/" + p)
+}
+
 // normalizeLotPath canonicalizes an object/lot path: absolute, cleaned, and
 // without a trailing slash (except root). Mirrors the core's normalization so
 // in-memory resolution matches the database's.
