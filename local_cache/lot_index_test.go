@@ -80,6 +80,43 @@ func TestLotIndexStableIDs(t *testing.T) {
 	}
 }
 
+func TestFederationQualifiedKey(t *testing.T) {
+	cases := []struct {
+		pelicanURL string
+		defaultFed string
+		want       string
+	}{
+		{"pelican://osg-htc.org/atlas/file", "primary.org", "/osg-htc.org/atlas/file"},
+		{"pelican://other-fed.org/atlas/file", "primary.org", "/other-fed.org/atlas/file"},
+		{"pelican://osg-htc.org:8443/cms/x", "primary.org", "/osg-htc.org:8443/cms/x"},
+		{"/atlas/file", "primary.org", "/primary.org/atlas/file"}, // host-less -> default fed
+	}
+	for _, c := range cases {
+		if got := federationQualifiedKey(c.pelicanURL, c.defaultFed); got != c.want {
+			t.Errorf("federationQualifiedKey(%q, %q) = %q, want %q", c.pelicanURL, c.defaultFed, got, c.want)
+		}
+	}
+}
+
+func TestLotIndexFederationIsolation(t *testing.T) {
+	li := newLotIndex()
+	// Two federations each have an /atlas namespace; lots are federation-qualified.
+	li.setEntries([]lotPathEntry{
+		{lotName: "fedA-atlas", path: "/fedA.org/atlas", recursive: true},
+		{lotName: "fedB-atlas", path: "/fedB.org/atlas", recursive: true},
+	})
+
+	keyA := federationQualifiedKey("pelican://fedA.org/atlas/data/x", "fedA.org")
+	keyB := federationQualifiedKey("pelican://fedB.org/atlas/data/y", "fedA.org")
+
+	if name, _ := li.Resolve(keyA); name != "fedA-atlas" {
+		t.Errorf("fedA object -> %q, want fedA-atlas", name)
+	}
+	if name, _ := li.Resolve(keyB); name != "fedB-atlas" {
+		t.Errorf("fedB object -> %q, want fedB-atlas (must NOT collapse into fedA)", name)
+	}
+}
+
 // newCoreTestManager opens a temp-file SQLite core manager for integration tests.
 func newCoreTestManager(t *testing.T) *core.Manager {
 	t.Helper()
