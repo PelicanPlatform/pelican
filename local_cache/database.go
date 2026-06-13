@@ -1238,6 +1238,27 @@ func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, err
 	return result, nil
 }
 
+// CountLRUEntries returns the number of cached object instances tracked in the
+// LRU index for a (storage, bucket) pair, i.e. the object count for that bucket
+// in that storage directory. Each cached object has exactly one LRU entry
+// (regardless of chunking), so this is an exact object count. It is a keys-only
+// prefix scan bounded by the number of objects in the bucket.
+func (cdb *CacheDB) CountLRUEntries(storageID StorageID, namespaceID NamespaceID) (int64, error) {
+	prefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, storageID, namespaceID))
+	var count int64
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			count++
+		}
+		return nil
+	})
+	return count, err
+}
+
 // getUsageByPrefix returns usage for all keys matching the given prefix.
 // Active MergeOperators are consulted first; dormant keys (no operator)
 // are read via a normal prefix scan.

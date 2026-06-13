@@ -636,9 +636,10 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	db.StartGC(ctx, egrp)
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
-	// Periodically push per-lot usage into the lotman core (no-op when lot
-	// tracking is disabled).
+	// Periodically push per-lot usage into the lotman core and enforce lots'
+	// object-count caps (both no-ops when lot tracking is disabled).
 	pc.startLotUsageSync(ctx, egrp, 0)
+	pc.startObjectCapTrim(ctx, egrp, 0)
 
 	// Ensure all resources are released when the context is cancelled.
 	// Without this, the TransferEngine and BadgerDB leak across tests
