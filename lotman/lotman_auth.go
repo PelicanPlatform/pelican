@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -48,7 +46,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -124,14 +121,10 @@ func verifyTokenSignedByAnyIssuer(strToken string, candidateIssuers []string) (b
 // capacity endpoints query "default" directly when appropriate, rather
 // than going through this resolver — see getAvailableCapacity.)
 func resolveParentsForPath(path string) ([]string, error) {
-	errMsg := make([]byte, 2048)
-	lots := unsafe.Pointer(nil)
-	ret := LotmanGetLotsFromDir(path, false, time.Now().UnixMilli(), &lots, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		return nil, errors.Errorf("error resolving parent lots for path %s: %s", path, string(errMsg))
+	goLots, err := GetLotsFromDir(path, false, time.Now().UnixMilli())
+	if err != nil {
+		return nil, errors.Wrapf(err, "error resolving parent lots for path %s", path)
 	}
-	goLots := cArrToGoArr(&lots)
 	if len(goLots) == 0 || goLots[0] == "default" {
 		return []string{"root"}, nil
 	}

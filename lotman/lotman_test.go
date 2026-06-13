@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -21,24 +19,25 @@
 package lotman
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/glebarez/sqlite"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -148,9 +147,22 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	} else {
 		require.NoError(t, param.Cache_DataLocations.Set([]string{tmpPath}))
 	}
+	// The native lot engine stores lots in the Pelican server database. Point
+	// it at a throwaway SQLite file and select the V2 (server-DB) code path so
+	// InitLotman builds the manager against it.
+	require.NoError(t, param.Cache_EnableV2.Set(true))
+	sdb, err := gorm.Open(sqlite.Open(filepath.Join(tmpPath, "server.sqlite")+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = sdb
+
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
+		setManager(nil)
+		if sqlDB, derr := sdb.DB(); derr == nil {
+			_ = sqlDB.Close()
+		}
+		database.ServerDatabase = nil
 		server_utils.ResetTestState()
 	}
 }
@@ -197,18 +209,9 @@ func TestLotmanInit(t *testing.T) {
 		require.True(t, success)
 
 		// Now that we've initialized (without config) test that we have default/root
-		defaultOutput := make([]byte, 4096)
-		errMsg := make([]byte, 2048)
-
-		ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-		}
-		trimBuf(&defaultOutput)
-		var defaultLot Lot
-		err := json.Unmarshal(defaultOutput, &defaultLot)
-		require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
+		defaultLotPtr, err := GetLot("default", false)
+		require.NoError(t, err, "Error getting default lot")
+		defaultLot := *defaultLotPtr
 		require.Equal(t, "default", defaultLot.LotName)
 		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
@@ -219,16 +222,9 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, float64(0), *(defaultLot.MPA.OpportunisticGB))
 		require.Equal(t, int64(0), defaultLot.MPA.MaxNumObjects.Value)
 
-		rootOutput := make([]byte, 4096)
-		ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-		}
-		trimBuf(&rootOutput)
-		var rootLot Lot
-		err = json.Unmarshal(rootOutput, &rootLot)
-		require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
+		rootLotPtr, err := GetLot("root", false)
+		require.NoError(t, err, "Error getting root lot")
+		rootLot := *rootLotPtr
 		require.Equal(t, "root", rootLot.LotName)
 		require.Equal(t, server.URL, rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
@@ -253,95 +249,44 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.True(t, success)
 
 	// Lotman is initialized, let's check that it has the information it should based on the config
-	defaultOutput := make([]byte, 4096)
-	errMsg := make([]byte, 2048)
-
-	// Check for default lot
-	ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&defaultOutput)
-	var defaultLot Lot
-	err := json.Unmarshal(defaultOutput, &defaultLot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
+	defaultLotPtr, err := GetLot("default", false)
+	require.NoError(t, err, "Error getting default lot")
+	defaultLot := *defaultLotPtr
 	require.Equal(t, "default", defaultLot.LotName)
 	require.Equal(t, server.URL, defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
 
-	// Now root
-	rootOutput := make([]byte, 4096)
-	ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&rootOutput)
-	var rootLot Lot
-	err = json.Unmarshal(rootOutput, &rootLot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
+	rootLotPtr, err := GetLot("root", false)
+	require.NoError(t, err, "Error getting root lot")
+	rootLot := *rootLotPtr
 	require.Equal(t, "root", rootLot.LotName)
 	require.Equal(t, server.URL, rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
 	require.Equal(t, "/", rootLot.Paths[0].Path)
 	require.False(t, rootLot.Paths[0].Recursive)
 
-	// Now test-1
-	test1Output := make([]byte, 4096)
-	ret = LotmanGetLotJSON("test-1", false, &test1Output, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&test1Output)
-	var test1Lot Lot
-	err = json.Unmarshal(test1Output, &test1Lot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-1 lot JSON: %s", string(test1Output)))
+	test1LotPtr, err := GetLot("test-1", false)
+	require.NoError(t, err, "Error getting test-1 lot")
+	test1Lot := *test1LotPtr
 	require.Equal(t, "test-1", test1Lot.LotName)
 	require.Equal(t, "https://different-fake-federation.com", test1Lot.Owner)
 	require.Equal(t, "root", test1Lot.Parents[0])
 	require.Equal(t, 1.11, *(test1Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test1Lot.MPA.MaxNumObjects.Value)
-	// Newer lotman normalises lot paths with a trailing slash on retrieval.
-	require.Equal(t, "/test-1/", test1Lot.Paths[0].Path)
+	// The native engine normalizes paths without a trailing slash.
+	require.Equal(t, "/test-1", test1Lot.Paths[0].Path)
 	require.False(t, test1Lot.Paths[0].Recursive)
 
-	// Finally test-2
-	test2Output := make([]byte, 4096)
-	ret = LotmanGetLotJSON("test-2", false, &test2Output, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&test2Output)
-	var test2Lot Lot
-	err = json.Unmarshal(test2Output, &test2Lot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-2 lot JSON: %s", string(test2Output)))
+	test2LotPtr, err := GetLot("test-2", false)
+	require.NoError(t, err, "Error getting test-2 lot")
+	test2Lot := *test2LotPtr
 	require.Equal(t, "test-2", test2Lot.LotName)
 	require.Equal(t, "https://another-fake-federation.com", test2Lot.Owner)
 	require.Equal(t, "test-1", test2Lot.Parents[0])
 	require.Equal(t, 1.11, *(test2Lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), test2Lot.MPA.MaxNumObjects.Value)
-	// Newer lotman normalises lot paths with a trailing slash on retrieval.
-	require.Equal(t, "/test-1/test-2/", test2Lot.Paths[0].Path)
+	require.Equal(t, "/test-1/test-2", test2Lot.Paths[0].Path)
 	require.True(t, test2Lot.Paths[0].Recursive)
-}
-
-func TestGetLotmanLib(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	libLoc := getLotmanLib()
-	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
-
-	// Now try to fool it and see that we get the same value back. We can detect this by
-	// capturing the log output
-	logOutput := &(bytes.Buffer{})
-	log.SetOutput(logOutput)
-	config.SetLogging(log.DebugLevel)
-	require.NoError(t, param.Lotman_LibLocation.Set("/not/a/pathlibLotMan.so"))
-	libLoc = getLotmanLib()
-	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
-	require.Contains(t, logOutput.String(), "libLotMan.so not found in configured path, attempting to find using known fallbacks")
 }
 
 func TestGetAuthzCallers(t *testing.T) {
@@ -389,7 +334,7 @@ func TestGetLot(t *testing.T) {
 	require.Equal(t, 1.11, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(42), lot.MPA.MaxNumObjects.Value)
 	// Newer lotman normalises lot paths with a trailing slash on retrieval.
-	require.Equal(t, "/test-1/test-2/", lot.Paths[0].Path)
+	require.Equal(t, "/test-1/test-2", lot.Paths[0].Path)
 	require.True(t, lot.Paths[0].Recursive)
 }
 
@@ -434,7 +379,7 @@ func TestUpdateLot(t *testing.T) {
 	require.Equal(t, dedicatedGB, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(84), lot.MPA.MaxNumObjects.Value)
 	// Newer lotman normalises lot paths with a trailing slash on retrieval.
-	require.Equal(t, "/test-1-updated/", lot.Paths[0].Path)
+	require.Equal(t, "/test-1-updated", lot.Paths[0].Path)
 	require.False(t, lot.Paths[0].Recursive)
 }
 
@@ -475,7 +420,7 @@ func TestAddToLot(t *testing.T) {
 	// `AddToLot()`` doesn't accept it
 	newLotPath.LotName = "test-1"
 	// Newer lotman normalises lot paths with a trailing slash on retrieval.
-	newLotPath.Path = "/a/new/path/"
+	newLotPath.Path = "/a/new/path"
 
 	// Now check that the addition was successful
 	lot, err := GetLot("test-1", false)
@@ -1043,51 +988,6 @@ func TestComputeRootDedicatedGB_ClampsToHWM(t *testing.T) {
 // strict_hierarchy, contraction_policy, and admin_override must each be
 // readable via lotman_get_context_str with the documented values after a
 // successful init.
-func TestStrictHierarchyContextSet(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanStrictHierCtx", server.URL, nil)
-	defer cleanup()
-	require.True(t, success)
-
-	cases := []struct {
-		key, want string
-	}{
-		{"strict_hierarchy", "true"},
-		{"contraction_policy", "always"},
-		{"admin_override", "false"},
-	}
-	for _, c := range cases {
-		out := make([]byte, 256)
-		errMsg := make([]byte, 2048)
-		ret := LotmanGetContextStr(c.key, &out, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("LotmanGetContextStr(%s) failed: %s", c.key, string(errMsg))
-		}
-		trimBuf(&out)
-		assert.Equal(t, c.want, string(out), "context flag %s should be %q", c.key, c.want)
-	}
-}
-
-// TestLotmanVersionCompatibility verifies that checkLotmanVersionCompatibility
-// accepts the version string returned by the currently loaded libLotMan.so
-// (which must be >= v0.1.0 to support strict_hierarchy + parent_attributions).
-func TestLotmanVersionCompatibility(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	server := getMockDiscoveryHost()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanVersionCheck", server.URL, nil)
-	defer cleanup()
-	require.True(t, success)
-
-	assert.True(t, checkLotmanVersionCompatibility(),
-		"installed lotman version %q must be >= %s", LotmanVersion(), minLotmanVersion)
-}
-
 // TestInitLotmanNestedNamespaces drives the full PR-3/PR-4 path-prefix
 // nesting pipeline through a real lotman_add_lot call. Three namespaces
 // are submitted: /a, /a/b, and /c. Expected lot tree:
@@ -1124,17 +1024,9 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	}
 
 	getLot := func(name string) Lot {
-		buf := make([]byte, 8192)
-		errBuf := make([]byte, 2048)
-		ret := LotmanGetLotJSON(name, false, &buf, &errBuf)
-		if ret != 0 {
-			trimBuf(&errBuf)
-			t.Fatalf("get lot %q failed: %s", name, string(errBuf))
-		}
-		trimBuf(&buf)
-		var l Lot
-		require.NoErrorf(t, json.Unmarshal(buf, &l), "unmarshal %q: %s", name, string(buf))
-		return l
+		l, err := GetLot(name, false)
+		require.NoErrorf(t, err, "get lot %q", name)
+		return *l
 	}
 
 	aName := nameForPath("/a")
