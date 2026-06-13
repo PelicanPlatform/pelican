@@ -98,6 +98,45 @@ func TestMpaToCoreDefaults(t *testing.T) {
 	}
 }
 
+func TestSplitStorage(t *testing.T) {
+	cases := []struct {
+		used, ded, opp   int64
+		wantDed, wantOpp int64
+	}{
+		{used: 30, ded: 100, opp: 50, wantDed: 30, wantOpp: 0},     // within dedicated
+		{used: 120, ded: 100, opp: 50, wantDed: 100, wantOpp: 20},  // spills into opp
+		{used: 200, ded: 100, opp: 50, wantDed: 100, wantOpp: 50},  // opp capped
+		{used: 200, ded: 100, opp: -1, wantDed: 100, wantOpp: 100}, // unbounded opp
+		{used: 200, ded: -1, opp: -1, wantDed: 200, wantOpp: 0},    // unbounded dedicated
+	}
+	for _, c := range cases {
+		ded, opp := splitStorage(c.used, c.ded, c.opp)
+		if ded != c.wantDed || opp != c.wantOpp {
+			t.Errorf("splitStorage(%d,%d,%d) = (%d,%d), want (%d,%d)", c.used, c.ded, c.opp, ded, opp, c.wantDed, c.wantOpp)
+		}
+	}
+}
+
+func TestCapacityToAdapterUnbounded(t *testing.T) {
+	avail := int64(40_000_000_000) // 40 GB
+	c := &core.AvailableCapacity{
+		AvailableDedicatedBytes:     &avail,
+		AvailableOpportunisticBytes: nil, // unbounded
+		PeakDedicatedBytes:          60_000_000_000,
+		PeakMaxNumObjects:           7,
+	}
+	ac := capacityToAdapter(c)
+	if ac.AvailableDedicatedGB != 40 {
+		t.Errorf("available dedicated = %v, want 40", ac.AvailableDedicatedGB)
+	}
+	if ac.AvailableOpportunisticGB != 0 {
+		t.Errorf("unbounded available opportunistic should map to 0, got %v", ac.AvailableOpportunisticGB)
+	}
+	if ac.PeakDedicatedGB != 60 || ac.PeakMaxNumObjects != 7 {
+		t.Errorf("peaks not mapped: %+v", ac)
+	}
+}
+
 func TestManagerHolder(t *testing.T) {
 	setManager(nil)
 	if getManager() != nil {
