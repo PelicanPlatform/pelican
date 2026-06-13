@@ -19,17 +19,18 @@
 package core
 
 // validateMPA enforces the sentinel rules for management-policy attributes:
-//   - each axis is either >= 0 or exactly -1 (unbounded); values < -1 are invalid
+//   - each axis must be >= 0 or exactly -1 (unbounded); any other negative is invalid
 //   - an unbounded dedicated_GB requires an unbounded opportunistic_GB
 func validateMPA(mpa MPA) error {
-	if mpa.DedicatedGB < -1 {
-		return wrapf(ErrInvalidLot, "dedicated_GB %v is below the unbounded sentinel (-1)", mpa.DedicatedGB)
+	badF := func(v float64) bool { return v < 0 && v != -1 }
+	if badF(mpa.DedicatedGB) {
+		return wrapf(ErrInvalidLot, "dedicated_GB %v must be >= 0 or exactly -1", mpa.DedicatedGB)
 	}
-	if mpa.OpportunisticGB < -1 {
-		return wrapf(ErrInvalidLot, "opportunistic_GB %v is below the unbounded sentinel (-1)", mpa.OpportunisticGB)
+	if badF(mpa.OpportunisticGB) {
+		return wrapf(ErrInvalidLot, "opportunistic_GB %v must be >= 0 or exactly -1", mpa.OpportunisticGB)
 	}
-	if mpa.MaxNumObjects < -1 {
-		return wrapf(ErrInvalidLot, "max_num_objects %d is below the unbounded sentinel (-1)", mpa.MaxNumObjects)
+	if mpa.MaxNumObjects < 0 && mpa.MaxNumObjects != -1 {
+		return wrapf(ErrInvalidLot, "max_num_objects %d must be >= 0 or exactly -1", mpa.MaxNumObjects)
 	}
 	if IsUnboundedGB(mpa.DedicatedGB) && !IsUnboundedGB(mpa.OpportunisticGB) {
 		return wrapf(ErrInvalidLot, "unbounded dedicated_GB requires unbounded opportunistic_GB (got %v)", mpa.OpportunisticGB)
@@ -37,23 +38,26 @@ func validateMPA(mpa MPA) error {
 	return validateTimestamps(mpa.CreationTime, mpa.ExpirationTime, mpa.DeletionTime)
 }
 
-// validateTimestamps enforces the lifecycle-window rules: either all three are
-// zero (non-expiring) or all three are positive and ordered
-// creation <= expiration <= deletion. Any partial-zero combination is invalid.
+// validateTimestamps enforces the lifecycle-window rules (matching the
+// reference exactly): either all three timestamps are zero (the non-expiring
+// sentinel), or none is zero and creation < expiration (a non-empty half-open
+// interval) with deletion >= expiration. A partial-zero combination is invalid.
+// Note: non-zero negative values are permitted as long as the ordering holds,
+// faithfully matching the reference; real timestamps are positive Unix ms.
 func validateTimestamps(creationMs, expirationMs, deletionMs int64) error {
 	if IsNonExpiring(creationMs, expirationMs, deletionMs) {
 		return nil
 	}
-	if creationMs <= 0 || expirationMs <= 0 || deletionMs <= 0 {
+	if creationMs == 0 || expirationMs == 0 || deletionMs == 0 {
 		return wrapf(ErrInvalidLot,
-			"lifecycle timestamps must be all-zero (non-expiring) or all-positive (got creation=%d expiration=%d deletion=%d)",
+			"a 0 timestamp sentinel requires all of creation/expiration/deletion to be 0 (got creation=%d expiration=%d deletion=%d)",
 			creationMs, expirationMs, deletionMs)
 	}
-	if creationMs > expirationMs {
-		return wrapf(ErrInvalidLot, "creation_time %d must not exceed expiration_time %d", creationMs, expirationMs)
+	if creationMs >= expirationMs {
+		return wrapf(ErrInvalidLot, "creation_time %d must be strictly less than expiration_time %d", creationMs, expirationMs)
 	}
-	if expirationMs > deletionMs {
-		return wrapf(ErrInvalidLot, "expiration_time %d must not exceed deletion_time %d", expirationMs, deletionMs)
+	if deletionMs < expirationMs {
+		return wrapf(ErrInvalidLot, "deletion_time %d must be >= expiration_time %d", deletionMs, expirationMs)
 	}
 	return nil
 }
