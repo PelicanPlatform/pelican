@@ -46,10 +46,14 @@ type lotPathEntry struct {
 	exclude   bool
 }
 
-// lotIndex resolves object paths to owning lots via longest-prefix matching,
-// entirely in memory so the object hot path never touches the lot database. It
-// is rebuilt (via setEntries) whenever lots change; LotID assignments are stable
-// across rebuilds. Safe for concurrent use.
+// lotIndex resolves object paths to owning lot names via longest-prefix
+// matching, entirely in memory so the object hot path never touches the lot
+// database. It is rebuilt (via setEntries) whenever lots change. Safe for
+// concurrent use.
+//
+// It performs pure resolution (path -> lot name); the stable accounting bucket
+// id for a lot name is assigned and persisted by the cache (reusing its
+// namespace-mapping table), so ids survive restarts.
 //
 // The matching rules mirror the lotman core's point-in-time resolution: a path
 // entry covers a query iff it equals the query exactly or is a recursive
@@ -59,56 +63,24 @@ type lotPathEntry struct {
 type lotIndex struct {
 	mu      sync.RWMutex
 	entries []lotPathEntry
-	ids     map[string]LotID
-	next    LotID
 }
 
-// newLotIndex returns an empty index with the default lot pre-assigned id 1.
+// newLotIndex returns an empty index.
 func newLotIndex() *lotIndex {
-	li := &lotIndex{ids: make(map[string]LotID), next: 1}
-	li.ids[DefaultLotName] = li.next
-	li.next++
-	return li
+	return &lotIndex{}
 }
 
-// setEntries replaces the index's path entries (e.g. after lots change) and
-// assigns a stable LotID to any newly-seen lot. Existing ids are preserved.
+// setEntries replaces the index's path entries (e.g. after lots change).
 func (li *lotIndex) setEntries(entries []lotPathEntry) {
 	li.mu.Lock()
 	defer li.mu.Unlock()
 	li.entries = entries
-	for _, e := range entries {
-		if _, ok := li.ids[e.lotName]; !ok {
-			li.ids[e.lotName] = li.next
-			li.next++
-		}
-	}
 }
 
-// idFor returns the stable LotID for a lot name, assigning one if necessary.
-func (li *lotIndex) idFor(name string) LotID {
-	li.mu.RLock()
-	if id, ok := li.ids[name]; ok {
-		li.mu.RUnlock()
-		return id
-	}
-	li.mu.RUnlock()
-
-	li.mu.Lock()
-	defer li.mu.Unlock()
-	if id, ok := li.ids[name]; ok {
-		return id
-	}
-	id := li.next
-	li.next++
-	li.ids[name] = id
-	return id
-}
-
-// Resolve maps an object path to its owning lot name and stable LotID.
-func (li *lotIndex) Resolve(objectPath string) (string, LotID) {
-	name := li.resolveName(normalizeLotPath(objectPath))
-	return name, li.idFor(name)
+// Resolve returns the name of the lot that owns objectPath, or DefaultLotName
+// if no lot matches.
+func (li *lotIndex) Resolve(objectPath string) string {
+	return li.resolveName(normalizeLotPath(objectPath))
 }
 
 // resolveName returns the owning lot for a normalized query path, or the
