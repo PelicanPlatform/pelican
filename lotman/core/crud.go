@@ -60,16 +60,16 @@ func (m *Manager) AddLot(spec LotSpec, caller string) error {
 		}
 
 		lot := Lot{
-			LotName:         spec.LotName,
-			Owner:           spec.Owner,
-			DedicatedGB:     spec.MPA.DedicatedGB,
-			OpportunisticGB: spec.MPA.OpportunisticGB,
-			MaxNumObjects:   spec.MPA.MaxNumObjects,
-			CreationTime:    spec.MPA.CreationTime,
-			ExpirationTime:  spec.MPA.ExpirationTime,
-			DeletionTime:    spec.MPA.DeletionTime,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			LotName:            spec.LotName,
+			Owner:              spec.Owner,
+			DedicatedBytes:     spec.MPA.DedicatedBytes,
+			OpportunisticBytes: spec.MPA.OpportunisticBytes,
+			MaxNumObjects:      spec.MPA.MaxNumObjects,
+			CreationTime:       spec.MPA.CreationTime,
+			ExpirationTime:     spec.MPA.ExpirationTime,
+			DeletionTime:       spec.MPA.DeletionTime,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}
 		if err := tx.Create(&lot).Error; err != nil {
 			return wrap(err, "creating lot row")
@@ -156,8 +156,8 @@ func (m *Manager) UpdateLot(update LotUpdate, caller string) error {
 			fields["owner"] = *update.Owner
 		}
 		if update.MPA != nil {
-			fields["dedicated_gb"] = update.MPA.DedicatedGB
-			fields["opportunistic_gb"] = update.MPA.OpportunisticGB
+			fields["dedicated_bytes"] = update.MPA.DedicatedBytes
+			fields["opportunistic_bytes"] = update.MPA.OpportunisticBytes
 			fields["max_num_objects"] = update.MPA.MaxNumObjects
 			fields["creation_time"] = update.MPA.CreationTime
 			fields["expiration_time"] = update.MPA.ExpirationTime

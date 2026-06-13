@@ -38,11 +38,11 @@ func TestValidateMPASentinels(t *testing.T) {
 		}
 	}
 	invalid := []MPA{
-		nonExpiringMPA(-1, 0, -1),    // unbounded dedicated needs unbounded opp
-		nonExpiringMPA(-1, 5, -1),    // same
-		nonExpiringMPA(-0.5, -1, -1), // negative that is not the -1 sentinel
-		nonExpiringMPA(5, -2, -1),    // opp below -1
-		nonExpiringMPA(5, 5, -2),     // objects below -1
+		nonExpiringMPA(-1, 0, -1),  // unbounded dedicated needs unbounded opp
+		nonExpiringMPA(-1, 5, -1),  // same
+		nonExpiringMPA(-2, -1, -1), // negative that is not the -1 sentinel
+		nonExpiringMPA(5, -2, -1),  // opp below -1
+		nonExpiringMPA(5, 5, -2),   // objects below -1
 	}
 	for i, mpa := range invalid {
 		if err := validateMPA(mpa); err == nil {
@@ -103,7 +103,7 @@ func TestUnboundedNeverPastQuota(t *testing.T) {
 		MPA: nonExpiringMPA(-1, -1, -1)}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.UpdateLotUsage(UsageUpdate{LotName: "root", SelfGB: f64(10000), SelfObjects: i64(10000)}, false, ""); err != nil {
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "root", SelfBytes: i64(10000), SelfObjects: i64(10000)}, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	for name, fn := range map[string]func() ([]string, error){
