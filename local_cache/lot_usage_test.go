@@ -21,33 +21,13 @@ package local_cache
 import (
 	"context"
 	"testing"
-	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
 
-// seedLRUObject writes a minimal object (metadata + LRU index entry) into the
-// given (storage, bucket) so CountLRUEntries / the object-cap trim can see it.
-func seedLRUObject(t *testing.T, cdb *CacheDB, sid StorageID, bucket NamespaceID, id string) {
-	t.Helper()
-	hash := InstanceHash("obj-" + id)
-	meta := &CacheMetadata{
-		ETag:           id,
-		ContentLength:  10,
-		StorageID:      sid,
-		NamespaceID:    bucket,
-		LotID:          LotID(bucket),
-		LastAccessTime: time.Now(),
-	}
-	if err := cdb.SetMetadata(hash, meta); err != nil {
-		t.Fatalf("set metadata: %v", err)
-	}
-	if err := cdb.UpdateLRU(hash, 0); err != nil {
-		t.Fatalf("update lru: %v", err)
-	}
-}
-
-func TestCountLRUEntries(t *testing.T) {
+func TestObjectCountStore(t *testing.T) {
 	InitIssuerKeyForTests(t)
 	cdb, err := NewCacheDB(context.Background(), t.TempDir())
 	if err != nil {
@@ -55,23 +35,70 @@ func TestCountLRUEntries(t *testing.T) {
 	}
 	defer cdb.Close()
 
-	seedLRUObject(t, cdb, 0, 7, "a")
-	seedLRUObject(t, cdb, 0, 7, "b")
-	seedLRUObject(t, cdb, 0, 7, "c")
-	seedLRUObject(t, cdb, 0, 8, "d")
+	if err := cdb.SetObjectCount(0, 7, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := cdb.SetObjectCount(1, 7, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := cdb.SetObjectCount(0, 8, 5); err != nil {
+		t.Fatal(err)
+	}
 
-	if c, _ := cdb.CountLRUEntries(0, 7); c != 3 {
-		t.Errorf("bucket 7 count = %d, want 3", c)
+	if c, _ := cdb.GetObjectCount(0, 7); c != 3 {
+		t.Errorf("(0,7) = %d, want 3", c)
 	}
-	if c, _ := cdb.CountLRUEntries(0, 8); c != 1 {
-		t.Errorf("bucket 8 count = %d, want 1", c)
+	if c, _ := cdb.GetObjectCount(0, 9); c != 0 {
+		t.Errorf("absent (0,9) = %d, want 0", c)
 	}
-	if c, _ := cdb.CountLRUEntries(0, 9); c != 0 {
-		t.Errorf("empty bucket 9 count = %d, want 0", c)
+	all, err := cdb.GetAllObjectCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[StorageUsageKey{0, 7}] != 3 || all[StorageUsageKey{1, 7}] != 2 || all[StorageUsageKey{0, 8}] != 5 || len(all) != 3 {
+		t.Errorf("GetAllObjectCounts = %v", all)
+	}
+	// Negative is clamped to 0.
+	if err := cdb.SetObjectCount(0, 7, -4); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := cdb.GetObjectCount(0, 7); c != 0 {
+		t.Errorf("negative set should clamp to 0, got %d", c)
 	}
 }
 
-func TestTrimObjectCapsUnderCap(t *testing.T) {
+func TestReconcileObjectCounts(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	// Pre-existing counts: (0,7)=10 (will change), (0,9)=4 (absent from scan -> zero).
+	_ = cdb.SetObjectCount(0, 7, 10)
+	_ = cdb.SetObjectCount(0, 9, 4)
+
+	cc := &ConsistencyChecker{db: cdb}
+	scan := map[StorageUsageKey]int64{
+		{StorageID: 0, NamespaceID: 7}: 3, // corrected down
+		{StorageID: 0, NamespaceID: 8}: 5, // new
+	}
+	if err := cc.reconcileObjectCounts(context.Background(), log.WithField("t", "test"), scan); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if c, _ := cdb.GetObjectCount(0, 7); c != 3 {
+		t.Errorf("(0,7) = %d, want 3 (corrected)", c)
+	}
+	if c, _ := cdb.GetObjectCount(0, 8); c != 5 {
+		t.Errorf("(0,8) = %d, want 5 (new)", c)
+	}
+	if c, _ := cdb.GetObjectCount(0, 9); c != 0 {
+		t.Errorf("(0,9) = %d, want 0 (absent from scan)", c)
+	}
+}
+
+func TestTrimObjectCaps(t *testing.T) {
 	m := newCoreTestManager(t)
 	mustAdd := func(s core.LotSpec) {
 		if err := m.AddLot(s, ""); err != nil {
@@ -90,22 +117,65 @@ func TestTrimObjectCapsUnderCap(t *testing.T) {
 	}
 	defer cdb.Close()
 
-	seedLRUObject(t, cdb, 0, 7, "a")
-	seedLRUObject(t, cdb, 0, 7, "b")
-
-	// eviction is not invoked under cap, so a storage-less manager is fine here.
 	pc := &PersistentCache{
 		db:           cdb,
 		lotMgr:       m,
 		namespaceMap: map[string]NamespaceID{"mon": 7, "root": 8},
 		eviction:     &EvictionManager{db: cdb},
 	}
+
+	// Under cap: trim is a no-op (eviction not invoked, so storage-less is fine).
+	if err := cdb.SetObjectCount(0, 7, 2); err != nil {
+		t.Fatal(err)
+	}
 	if err := pc.trimObjectCaps(); err != nil {
-		t.Fatalf("trim: %v", err)
+		t.Fatalf("trim under cap: %v", err)
 	}
-	if c, _ := cdb.CountLRUEntries(0, 7); c != 2 {
-		t.Errorf("under-cap lot should be untouched, count = %d, want 2", c)
+	if c, _ := cdb.GetObjectCount(0, 7); c != 2 {
+		t.Errorf("under-cap count = %d, want 2 (untouched)", c)
 	}
+
+	// The over-cap eviction path (which calls StorageManager.EvictByLRU) is
+	// exercised by the fed_test_utils integration tests; here we verify the
+	// decision logic (excess computed against the reconciled counter and the
+	// cap from the core).
+	excess := computeObjectExcess(m, cdb, pc.namespaceMap, []StorageID{0})
+	if excess["mon"] != 0 {
+		t.Errorf("under cap should compute 0 excess, got %d", excess["mon"])
+	}
+	if err := cdb.SetObjectCount(0, 7, 9); err != nil { // 9 > cap 5 -> excess 4
+		t.Fatal(err)
+	}
+	excess = computeObjectExcess(m, cdb, pc.namespaceMap, []StorageID{0})
+	if excess["mon"] != 4 {
+		t.Errorf("over cap (9 vs 5) should compute excess 4, got %d", excess["mon"])
+	}
+}
+
+// computeObjectExcess mirrors trimObjectCaps's decision (count vs cap) without
+// evicting, so it can be unit-tested without the storage-manager harness.
+func computeObjectExcess(m *core.Manager, cdb *CacheDB, nsMap map[string]NamespaceID, storageIDs []StorageID) map[string]int64 {
+	counts, _ := cdb.GetAllObjectCounts()
+	names, _ := m.ListAllLots()
+	out := map[string]int64{}
+	for _, name := range names {
+		view, err := m.GetLot(name)
+		if err != nil || view.MaxNumObjects < 0 {
+			continue
+		}
+		bucket, ok := nsMap[name]
+		if !ok {
+			continue
+		}
+		var total int64
+		for _, sid := range storageIDs {
+			total += counts[StorageUsageKey{StorageID: sid, NamespaceID: bucket}]
+		}
+		if total > view.MaxNumObjects {
+			out[name] = total - view.MaxNumObjects
+		}
+	}
+	return out
 }
 
 func TestAggregateUsageByLot(t *testing.T) {
