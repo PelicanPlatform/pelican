@@ -1,0 +1,82 @@
+# Standalone GoReleaser config for the libLotMan C-ABI shared library.
+#
+# This is intentionally separate from .goreleaser.in.yml so the main
+# pelican / pelican-server builds stay CGO-free. -buildmode=c-shared requires
+# CGO and a per-target C toolchain, so this config is exercised on native
+# per-architecture runners in release CI rather than via pure cross-compile.
+#
+# Generated into .goreleaser.lotman.generated.yml by scripts/generate_goreleaser.sh
+# (which substitutes %VERSION%); build with `make lotman-package`.
+version: 2
+project_name: pelican-lotman
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: lotman-shared
+    main: ./lotman/cshared
+    binary: libLotMan.so
+    buildmode: c-shared
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - ppc64le
+    # The C ABI version is reported at runtime by lotman_version(); no Go
+    # version metadata is linked into the library.
+    ldflags:
+      - -s -w
+
+archives:
+  - id: lotman-shared
+    ids:
+      - lotman-shared
+    name_template: >-
+      libLotMan_{{ title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    # Ship the generated C header alongside the library so consumers can compile
+    # against it.
+    files:
+      - LICENSE
+      - src: "dist/lotman-shared_{{ .Os }}_{{ .Arch }}*/libLotMan.h"
+        dst: include
+        strip_parent: true
+
+nfpms:
+  - id: lotman
+    package_name: pelican-lotman
+    ids:
+      - lotman-shared
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: OSG Consortium
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
+    description: |-
+      LotMan storage-lot management shared library (libLotMan, C ABI), built from
+      Pelican's native Go lot engine. A drop-in for external C consumers such as
+      the XRootD pfc purge plugin.
+    license: ASL 2.0
+    formats:
+      - apk
+      - deb
+      - rpm
+    release: 1
+    # Place the shared library under the system library directory rather than the
+    # default /usr/bin.
+    bindir: /usr/lib64
+    contents:
+      - src: "dist/lotman-shared_{{ .Os }}_{{ .Arch }}*/libLotMan.h"
+        dst: "/usr/include/libLotMan.h"
+        file_info:
+          mode: 0644
+      - src: LICENSE
+        dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+        file_info:
+          mode: 0644
+        type: doc
