@@ -2342,6 +2342,17 @@ type: string
 default: none
 components: ["cache"]
 ---
+name: Cache.PurgeInterval
+description: |+
+  How often the XRootD (V1) cache's pfc purge thread wakes up to enforce the
+  watermark and file-size limits, and (when `Cache.EnableLotman` is set) to
+  reclaim lots that are past their expiration/deletion or over quota. Maps
+  directly to the xrootd `pfc.diskusage purgeinterval` directive, which XRootD
+  requires to be at least 60 seconds.
+type: duration
+default: 5m
+components: ["cache"]
+---
 name: Cache.FilesBaseSize
 description: |+
   A value that sets the "base" cumulative size of files that can be stored in the cache's data directory. This is the

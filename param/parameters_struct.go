@@ -65,6 +65,7 @@ type Config struct {
 		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
+		PurgeInterval time.Duration `mapstructure:"purgeinterval" yaml:"PurgeInterval"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
@@ -554,6 +555,7 @@ type configWithType struct {
 		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
+		PurgeInterval struct { Type string; Value time.Duration }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }

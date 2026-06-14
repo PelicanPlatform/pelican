@@ -136,6 +136,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.PSSOrigin": false,
 	"Cache.PermittedNamespaces": false,
 	"Cache.Port": false,
+	"Cache.PurgeInterval": false,
 	"Cache.RunLocation": false,
 	"Cache.SelfTest": false,
 	"Cache.SelfTestInterval": false,
@@ -1077,6 +1078,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.EvictionMonitoringInterval": func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
 	"Cache.LotUsageReconcileInterval": func(c *Config) time.Duration { return c.Cache.LotUsageReconcileInterval },
 	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
+	"Cache.PurgeInterval": func(c *Config) time.Duration { return c.Cache.PurgeInterval },
 	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
 	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
@@ -1271,6 +1273,7 @@ var allParameterNames = []string{
 	"Cache.PSSOrigin",
 	"Cache.PermittedNamespaces",
 	"Cache.Port",
+	"Cache.PurgeInterval",
 	"Cache.RunLocation",
 	"Cache.SelfTest",
 	"Cache.SelfTestInterval",
@@ -2036,6 +2039,7 @@ var (
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_LotUsageReconcileInterval = DurationParam{"Cache.LotUsageReconcileInterval"}
 	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
+	Cache_PurgeInterval = DurationParam{"Cache.PurgeInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
@@ -2487,6 +2491,7 @@ func init() {
 		"Cache.EvictionMonitoringInterval": Cache_EvictionMonitoringInterval,
 		"Cache.LotUsageReconcileInterval": Cache_LotUsageReconcileInterval,
 		"Cache.MinDirectorRefreshInterval": Cache_MinDirectorRefreshInterval,
+		"Cache.PurgeInterval": Cache_PurgeInterval,
 		"Cache.SelfTestInterval": Cache_SelfTestInterval,
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
 		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,

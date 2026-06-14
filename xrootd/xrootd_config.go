@@ -157,6 +157,7 @@ type (
 		FilesBaseSize              string
 		FilesNominalSize           string
 		FilesMaxSize               string
+		PurgeInterval              string
 		ExportLocation             string
 		RunLocation                string
 		DataLocations              []string
@@ -1149,6 +1150,9 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", err
 		}
 		xrdConfig.Cache.PSSOrigin = pssOrigin
+
+		// Render the pfc purge cadence as an xrootd-formatted seconds string.
+		xrdConfig.Cache.PurgeInterval = strconv.FormatInt(int64(param.Cache_PurgeInterval.GetDuration().Seconds()), 10) + "s"
 
 		// For cache watermarks, convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
 		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
