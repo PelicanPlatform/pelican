@@ -406,77 +406,14 @@ func lotman_get_lots_for_path(path *C.char, recursive C._Bool, timeLoMs, timeHiM
 	return 0
 }
 
-// --- eviction-priority queries ------------------------------------------------
-
-//export lotman_get_lots_past_exp
-func lotman_get_lots_past_exp(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	lots, err := m.LotsPastExp(int64(queryTime), bool(recursive), bool(includeReclaimed))
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	putStringList(output, lots)
-	return 0
-}
-
-//export lotman_get_lots_past_del
-func lotman_get_lots_past_del(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	lots, err := m.LotsPastDel(int64(queryTime), bool(recursive), bool(includeReclaimed))
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	putStringList(output, lots)
-	return 0
-}
-
-//export lotman_get_lots_past_opp
-func lotman_get_lots_past_opp(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	lots, err := m.LotsPastOpp(bool(recursiveQuota), bool(recursiveChildren), bool(includeReclaimed), bool(hierarchical))
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	putStringList(output, lots)
-	return 0
-}
-
-//export lotman_get_lots_past_ded
-func lotman_get_lots_past_ded(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	lots, err := m.LotsPastDed(bool(recursiveQuota), bool(recursiveChildren), bool(includeReclaimed), bool(hierarchical))
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	putStringList(output, lots)
-	return 0
-}
-
-//export lotman_get_lots_past_obj
-func lotman_get_lots_past_obj(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	lots, err := m.LotsPastObj(bool(recursiveQuota), bool(recursiveChildren), bool(includeReclaimed), bool(hierarchical))
-	if err != nil {
-		return fail(errMsg, err)
-	}
-	putStringList(output, lots)
-	return 0
-}
+// The eviction-priority queries (lotman_get_lots_past_*) and
+// lotman_update_lot_usage_by_dir changed their C signatures between lotman
+// v0.0.4 and v0.1.0 (added include_reclaimed/hierarchical/query_time
+// parameters). Their exported definitions therefore live in the build-tag-gated
+// files export_api_v1.go (default, v0.1.0+ ABI) and export_api_legacy.go
+// (-tags lotman_legacy_api, v0.0.4 ABI) so the library can be built to match the
+// libXrdPurgeLotMan plugin it will be loaded by. The shared parsing/usage
+// helpers they call live below and in this file.
 
 // --- JSON-document queries (single-string output) -----------------------------
 
@@ -666,15 +603,12 @@ type dirUsageNode struct {
 	Subdirs []dirUsageNode `json:"subdirs"`
 }
 
-//export lotman_update_lot_usage_by_dir
-func lotman_update_lot_usage_by_dir(updateJSON *C.char, deltaMode C._Bool, queryTime C.int64_t, errMsg **C.char) C.int {
-	m, err := manager()
-	if err != nil {
-		return fail(errMsg, err)
-	}
+// parseDirUsage flattens the nested by-dir usage JSON into core.DirUsage
+// entries. Shared by the new- and legacy-ABI lotman_update_lot_usage_by_dir.
+func parseDirUsage(updateJSON string) ([]core.DirUsage, error) {
 	var nodes []dirUsageNode
-	if err := json.Unmarshal([]byte(C.GoString(updateJSON)), &nodes); err != nil {
-		return fail(errMsg, err)
+	if err := json.Unmarshal([]byte(updateJSON), &nodes); err != nil {
+		return nil, err
 	}
 	var entries []core.DirUsage
 	var walk func(n dirUsageNode)
@@ -694,10 +628,7 @@ func lotman_update_lot_usage_by_dir(updateJSON *C.char, deltaMode C._Bool, query
 	for _, n := range nodes {
 		walk(n)
 	}
-	if err := m.UpdateLotUsageByDir(entries, bool(deltaMode), int64(queryTime), caller()); err != nil {
-		return fail(errMsg, err)
-	}
-	return 0
+	return entries, nil
 }
 
 // --- context ------------------------------------------------------------------
