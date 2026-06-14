@@ -74,13 +74,20 @@ type (
 	}
 
 	// OriginExportMetadata is the per-export override block for Origin.Metadata.*
-	// settings that are namespace-scoped (endpoint, mode, on/off). Concurrency
-	// and rate-limit knobs remain origin-wide because they describe shared
-	// resources (worker pool, token bucket).
+	// settings that are namespace-scoped. Concurrency / rate-limit / batcher
+	// knobs remain origin-wide because they describe shared resources
+	// (worker pool, token bucket, write-behind goroutine).
 	OriginExportMetadata struct {
+		// Webhook publisher overrides.
 		Enabled  *bool  `json:"enabled,omitempty" mapstructure:"enabled" yaml:"Enabled"`
 		Endpoint string `json:"endpoint,omitempty" mapstructure:"endpoint" yaml:"Endpoint"`
 		Mode     string `json:"mode,omitempty" mapstructure:"mode" yaml:"Mode"`
+
+		// Local object-metadata tracking overrides. nil = inherit
+		// the corresponding origin-wide default.
+		TrackAccess          *bool `json:"trackAccess,omitempty" mapstructure:"trackaccess" yaml:"TrackAccess"`
+		TrackExtra           *bool `json:"trackExtra,omitempty" mapstructure:"trackextra" yaml:"TrackExtra"`
+		HistoryRetentionDays *int  `json:"historyRetentionDays,omitempty" mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
 	}
 )
 

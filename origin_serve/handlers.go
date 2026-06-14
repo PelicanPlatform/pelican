@@ -39,6 +39,7 @@ import (
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/identity"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -62,6 +63,28 @@ var (
 	// metadataCtl is the singleton metadata-publish controller.
 	// nil when Origin.Metadata.Enabled is false.
 	metadataCtl *metadataController
+
+	// objectMetaBatcher is the singleton write-behind batcher
+	// shared by both the publish-queue insert path and the
+	// object-metadata tracking DAO. nil when no feature that needs
+	// it (webhook publishing OR per-namespace object tracking) is
+	// enabled. Owns its own goroutine — stopped via ResetHandlers.
+	objectMetaBatcher *sqliteBatcher
+
+	// objectMetaDAO is the singleton object-metadata DAO. nil when
+	// no namespace has TrackAccess enabled. Shared across exports
+	// (it's stateless; per-namespace policy comes from the
+	// per-export observationConfig).
+	objectMetaDAO *objectMetadataDAO
+
+	// objectMetaPruner is the background goroutine that trims
+	// object_metadata_history per the configured retention. nil
+	// when no namespace has TrackAccess + a positive retention.
+	objectMetaPruner *objectMetadataPruner
+
+	// objectMetaAccess is the origin-wide atime debouncer. Same
+	// nil-when-disabled rule as objectMetaDAO.
+	objectMetaAccess *accessDebouncer
 )
 
 const (
@@ -201,6 +224,22 @@ func ResetHandlers() {
 		metadataCtl.Stop()
 		metadataCtl = nil
 	}
+	if objectMetaPruner != nil {
+		objectMetaPruner.Stop()
+		objectMetaPruner = nil
+	}
+	if objectMetaAccess != nil {
+		// Final atime flush BEFORE the batcher shuts down (the
+		// debouncer's Flush enqueues through the batcher).
+		objectMetaAccess.Stop()
+		objectMetaAccess = nil
+	}
+	if objectMetaBatcher != nil {
+		// Drain in-flight writes before discarding the singleton.
+		objectMetaBatcher.Stop()
+		objectMetaBatcher = nil
+	}
+	objectMetaDAO = nil
 	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
@@ -503,6 +542,29 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 // xrdMonitoringMiddleware emits XRootD-compatible monitoring packets for
 // data transfer requests (GET/PUT). It runs after authMiddleware so that
 // the authenticated user's DN and issuer are available for the 'u' packet.
+// listingModeMiddleware tags PROPFIND-with-Depth>=1 requests as
+// "directory enumeration." The object-metadata observation layer
+// reads the resulting context flag in aferoFileSystem.Stat and
+// short-circuits, so that listing a large cold directory stays as
+// cheap as today (no per-entry cache lookup, SELECT, or enqueue).
+// Single-target Stats (HEAD, GET, PROPFIND Depth:0) are *not*
+// marked — they drive change detection normally.
+func listingModeMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == "PROPFIND" {
+			// RFC 4918 §10.2: the Depth header is `"0"`, `"1"`,
+			// or `"infinity"`. Absence defaults to "infinity"
+			// for PROPFIND. We treat anything that isn't
+			// explicitly `"0"` as a listing.
+			depth := c.Request.Header.Get("Depth")
+			if depth != "0" {
+				c.Request = c.Request.WithContext(withListingMode(c.Request.Context()))
+			}
+		}
+		c.Next()
+	}
+}
+
 func xrdMonitoringMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
@@ -589,6 +651,47 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	// would either fail or run as the wrong identity.
 	preMultiuserFs := make(map[string]webdav.FileSystem)
 
+	// Spin up the shared write-behind batcher first if anyone
+	// needs it: either the publish-queue insert path (when webhook
+	// publishing is on) or the object-metadata DAO (when
+	// TrackAccess is on for any namespace). Both routes go through
+	// the same goroutine so concurrent commits coalesce into one
+	// fsync. The metadata controller below consumes this batcher
+	// for its publish-queue inserts.
+	needBatcher := anyTrackAccessEnabled(exports) || shouldEnableMetadataController(exports)
+	if needBatcher {
+		if database.ServerDatabase == nil {
+			log.Warn("Metadata features enabled but ServerDatabase is nil; batcher disabled.")
+		} else {
+			bufferSize := param.Origin_Metadata_BatchBufferSize.GetInt()
+			flushInterval := param.Origin_Metadata_BatchFlushInterval.GetDuration()
+			objectMetaBatcher = newSQLiteBatcher(ctx, database.ServerDatabase, bufferSize, flushInterval)
+			objectMetaBatcher.SetHooks(batcherMetricsHooks())
+			log.Infof("Metadata SQLite batcher started (buffer=%d, flush=%s)", bufferSize, flushInterval)
+
+			if anyTrackAccessEnabled(exports) {
+				objectMetaDAO = newObjectMetadataDAO(database.ServerDatabase, objectMetaBatcher)
+				// Start the history pruner. It iterates exports
+				// per its own schedule and skips namespaces with
+				// retention=0.
+				pruneInterval := param.Origin_Metadata_History_PruneInterval.GetDuration()
+				pruneBatch := param.Origin_Metadata_History_PruneBatchSize.GetInt()
+				objectMetaPruner = newObjectMetadataPruner(objectMetaDAO, exports, pruneInterval, pruneBatch)
+				objectMetaPruner.SetHooks(prunerMetricsHooks())
+				objectMetaPruner.Start(ctx)
+				log.Infof("Object-metadata history pruner started (interval=%s, batch=%d)", pruneInterval, pruneBatch)
+
+				// Origin-wide atime debouncer: one instance per
+				// process; the namespace travels in each Note key
+				// so a single goroutine handles every export.
+				accessInterval := param.Origin_Metadata_AccessFlushInterval.GetDuration()
+				objectMetaAccess = newAccessDebouncer(objectMetaDAO, accessInterval)
+				objectMetaAccess.Start(ctx)
+				log.Infof("Object-metadata atime debouncer started (flush=%s)", accessInterval)
+			}
+		}
+	}
+
 	// If the metadata-publish feature is enabled (origin-wide or
 	// any export turns it on), construct the controller now. The
 	// controller is shared across exports; per-export endpoint /
@@ -616,6 +719,9 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				}
 				return nil
 			},
+			// Share the same write-behind batcher object-metadata
+			// tracking uses; concurrent commits coalesce into one tx.
+			Batcher: objectMetaBatcher,
 		}
 		metadataCtl = newMetadataController(opts)
 		metadataCtl.Start(ctx)
@@ -666,13 +772,50 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 
 			autoFs := newAutoCreateDirFs(localFs)
-			var fs webdav.FileSystem = newAferoFileSystem(autoFs, "", logger)
+			aferoFs := newAferoFileSystem(autoFs, "", logger)
+			var fs webdav.FileSystem = aferoFs
+
+			// If TrackAccess is enabled for this namespace, wire
+			// the object-metadata observation hooks into the base
+			// aferoFileSystem. Resolution: per-export override
+			// wins over the origin-wide default.
+			if objectMetaDAO != nil && resolveTrackAccess(export) {
+				obs := &observationConfig{
+					namespace:       export.FederationPrefix,
+					trackExtra:      resolveTrackExtra(export),
+					dao:             objectMetaDAO,
+					cache:           newObservationCache(0),
+					accessDebouncer: objectMetaAccess,
+				}
+				aferoFs.setObservation(obs)
+				log.Infof("Object-metadata tracking enabled for %s (TrackExtra=%t)",
+					export.FederationPrefix, obs.trackExtra)
+			}
 
 			// Wrap with POSC layer if enabled. POSC sits between the
 			// (optional) multiuser layer and the base aferoFileSystem so
 			// that staged temp files inherit the authenticated user's
 			// uid/gid and so that the expiry goroutine — which runs
 			// without a request context — bypasses multiuser entirely.
+			// Compose the close hook from any of: (a) the publish
+			// controller (metadataCtl), (b) the local object-
+			// metadata DAO (objectMetaDAO + per-export TrackAccess).
+			// Either, both, or neither may be active. closeHook is
+			// nil iff no one wants to be told.
+			var publishHook, trackHook closeHookFn
+			if metadataCtl != nil {
+				publishHook = metadataCtl.CommitEventFromCloseHook(export.FederationPrefix)
+			}
+			if objectMetaDAO != nil && resolveTrackAccess(export) {
+				trackHook = RecordCommitCloseHook(objectMetaDAO, export.FederationPrefix, resolveTrackExtra(export))
+			}
+			// Argument order = fire order; the LAST hook's error
+			// is the one surfaced to the caller. Track is best-
+			// effort so it goes first (its error is overwritten
+			// by publish's nil on the happy path); publish's
+			// error is what the close caller acts on.
+			closeHook := composeCloseHooks(trackHook, publishHook)
+
 			poscEnabled := param.Origin_Posc_Enabled.GetBool()
 			if poscEnabled {
 				poscPrefix := param.Origin_Posc_Prefix.GetString()
@@ -684,19 +827,24 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				// has no utimes-equivalent.
 				posc.SetTouchFS(autoFs)
 				posc.SetMetricsHooks(poscMetricsHooks(export.FederationPrefix))
-				if metadataCtl != nil {
-					posc.SetCloseHook(metadataCtl.CommitEventFromCloseHook(export.FederationPrefix))
+				// Wire the origin-supplied ETag policy. Today the
+				// only non-empty value is "sha256"; the empty
+				// default leaves the backend ETag in charge.
+				posc.SetEtagPolicy(param.Origin_Metadata_EtagPolicy.GetString())
+				if closeHook != nil {
+					posc.SetCloseHook(closeHook)
 				}
 				poscFilesystems[export.FederationPrefix] = posc
 				fs = posc
 				log.Infof("POSC enabled for %s (prefix=%s, fileTimeout=%s, keepalive=%s)",
 					export.FederationPrefix, poscPrefix, poscTimeout, poscKA)
-			} else if metadataCtl != nil {
-				// Metadata publishing is enabled but POSC is not.
-				// Use a thin close-notify wrapper so the publish hook
-				// still fires only on a successful Close().
-				fs = newCloseNotifyFs(fs, metadataCtl.CommitEventFromCloseHook(export.FederationPrefix))
-				log.Infof("Metadata-on-close enabled for %s (without POSC)", export.FederationPrefix)
+			} else if closeHook != nil {
+				// POSC is off but at least one of publish/track
+				// is on. Use the thin close-notify wrapper so the
+				// hook still fires only on a successful Close().
+				fs = newCloseNotifyFs(fs, closeHook)
+				log.Infof("Close-hook enabled for %s (without POSC; publish=%t, track=%t)",
+					export.FederationPrefix, publishHook != nil, trackHook != nil)
 			}
 
 			// Capture the pre-multiuser FileSystem for the metadata
@@ -787,6 +935,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
 		group.Use(xrdMonitoringMiddleware())
+		group.Use(listingModeMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {

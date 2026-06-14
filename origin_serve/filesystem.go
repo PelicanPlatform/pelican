@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 
@@ -155,6 +156,12 @@ type aferoFileSystem struct {
 	prefix      string
 	logger      func(*http.Request, error)
 	rateLimiter *htb.HTB // Optional rate limiter for IO operations
+
+	// obs is the per-export object-metadata observation config.
+	// nil when TrackAccess is off for this namespace. When set,
+	// Stat / RemoveAll / Rename consult it on every call to keep
+	// the local DB in sync with backend reality.
+	obs *observationConfig
 }
 
 // newAferoFileSystem creates a new aferoFileSystem
@@ -164,6 +171,13 @@ func newAferoFileSystem(fs afero.Fs, prefix string, logger func(*http.Request, e
 		prefix: prefix,
 		logger: logger,
 	}
+}
+
+// setObservation installs the object-metadata observation hooks.
+// Called by InitializeHandlers when TrackAccess is on for the
+// namespace; nil-tolerant.
+func (afs *aferoFileSystem) setObservation(obs *observationConfig) {
+	afs.obs = obs
 }
 
 // newAferoFileSystemWithRateLimiter creates a new aferoFileSystem with rate limiting
@@ -270,7 +284,9 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 	}, nil
 }
 
-// RemoveAll implements webdav.FileSystem
+// RemoveAll implements webdav.FileSystem. On success against a
+// TrackAccess-enabled namespace, fires RecordDelete (durable) so the
+// soft-delete + history snapshot lands.
 func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 	defer trackOperation(operationMetrics{
 		total:         metrics.StorageUnlinksTotal,
@@ -280,10 +296,29 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 	}, usernameFromContext(ctx))()
 
 	fullPath := afs.fullPath(name)
-	return afs.fs.RemoveAll(fullPath)
+	if err := afs.fs.RemoveAll(fullPath); err != nil {
+		return err
+	}
+	if afs.obs != nil {
+		fedPath := joinFederationPath(afs.obs.namespace, name)
+		afs.obs.cache.Invalidate(afs.obs.namespace, fedPath)
+		// RecordDelete reads the live row inside the DAO; if no
+		// row exists, it's a silent no-op (we never saw the path
+		// before).
+		if recErr := afs.obs.dao.RecordDelete(ctx, ObjectMetadataEventInput{
+			Namespace:  afs.obs.namespace,
+			ObjectPath: fedPath,
+			Actor:      usernameFromContext(ctx),
+		}); recErr != nil {
+			log.Debugf("object-metadata: RecordDelete(%s,%s) failed: %v", afs.obs.namespace, fedPath, recErr)
+		}
+	}
+	return nil
 }
 
-// Rename implements webdav.FileSystem
+// Rename implements webdav.FileSystem. On success against a
+// TrackAccess-enabled namespace, fires RecordRename (durable) and
+// invalidates both the old and new cache entries.
 func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string) error {
 	defer trackOperation(operationMetrics{
 		total:         metrics.StorageRenamesTotal,
@@ -294,7 +329,19 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 
 	oldPath := afs.fullPath(oldName)
 	newPath := afs.fullPath(newName)
-	return afs.fs.Rename(oldPath, newPath)
+	if err := afs.fs.Rename(oldPath, newPath); err != nil {
+		return err
+	}
+	if afs.obs != nil {
+		oldFed := joinFederationPath(afs.obs.namespace, oldName)
+		newFed := joinFederationPath(afs.obs.namespace, newName)
+		afs.obs.cache.Invalidate(afs.obs.namespace, oldFed)
+		afs.obs.cache.Invalidate(afs.obs.namespace, newFed)
+		if recErr := afs.obs.dao.RecordRename(ctx, afs.obs.namespace, oldFed, afs.obs.namespace, newFed, usernameFromContext(ctx)); recErr != nil {
+			log.Debugf("object-metadata: RecordRename(%s, %s→%s) failed: %v", afs.obs.namespace, oldFed, newFed, recErr)
+		}
+	}
+	return nil
 }
 
 // Stat implements webdav.FileSystem.
@@ -302,6 +349,14 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 // The returned FileInfo is wrapped by withBackendETag so the metadata
 // publish path can ask it for an ETag without baking a particular
 // convention into the publisher. See backend_etag.go.
+//
+// When object-metadata observation is enabled for this namespace AND
+// the request context is *not* in listing mode (PROPFIND Depth>=1),
+// the call also drives change-detection: cache lookup → live-row
+// LookupLive → enqueue external_observe / external_modify /
+// external_delete via the write-behind batcher. Listing-mode skips
+// the entire observation ladder to keep PROPFIND of a large cold
+// directory as cheap as today.
 func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	defer trackOperation(operationMetrics{
 		total:         metrics.StorageStatsTotal,
@@ -313,9 +368,19 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 	fullPath := afs.fullPath(name)
 	info, err := afs.fs.Stat(fullPath)
 	if err != nil {
+		// ENOENT may indicate an external_delete; let observation
+		// decide. Skipped for listing mode (and when observation
+		// is off for the namespace).
+		if afs.obs != nil && !isListingMode(ctx) && os.IsNotExist(err) {
+			afs.obs.handleENOENT(ctx, joinFederationPath(afs.obs.namespace, name))
+		}
 		return nil, err
 	}
-	return withBackendETag(info), nil
+	wrapped := withBackendETag(info)
+	if afs.obs != nil && !isListingMode(ctx) {
+		afs.obs.handleStatSuccess(ctx, joinFederationPath(afs.obs.namespace, name), wrapped)
+	}
+	return wrapped, nil
 }
 
 // fullPath converts a webdav path to a full filesystem path
