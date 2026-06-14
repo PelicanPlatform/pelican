@@ -323,7 +323,7 @@ func createLot(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := CreateLot(&lot, res.caller); err != nil {
+	if err := CreateLot(&lot, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to create lot", err)
 		return
 	}
@@ -430,7 +430,7 @@ func patchLot(ctx *gin.Context) {
 		MPA:                internalMPA,
 		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
-	if err := UpdateLot(&upd, res.caller); err != nil {
+	if err := UpdateLot(&upd, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to update lot", err)
 		return
 	}
@@ -495,7 +495,7 @@ func deleteLot(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := DeleteLotsRecursive(lotName, res.caller); err != nil {
+	if err := DeleteLotsRecursive(lotName, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to delete lot", err)
 		return
 	}
@@ -550,7 +550,7 @@ func reclaimLot(ctx *gin.Context) {
 	// Allowing the client to backdate or future-date this would let
 	// any caller corrupt the audit trail.
 	reclaimedAt := time.Now().UnixMilli()
-	rows, err := ReclaimLot(lotName, reclaimedAt, req.Reason, res.caller)
+	rows, err := ReclaimLot(lotName, reclaimedAt, req.Reason, res.lotmanCaller())
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to reclaim lot", err)
 		return
