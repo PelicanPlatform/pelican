@@ -97,6 +97,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_MinDirectorRefreshInterval.GetName(), "15s")
 	// Cache.Port
 	v.SetDefault(param.Cache_Port.GetName(), 8442)
+	// Cache.PurgeInterval
+	v.SetDefault(param.Cache_PurgeInterval.GetName(), "5m")
 	// Cache.RunLocation
 	if isRoot {
 		v.SetDefault(param.Cache_RunLocation.GetName(), "/run/pelican/xrootd/cache")
