@@ -433,6 +433,11 @@ type PersistentCacheConfig struct {
 	// or bootstrap (lots are created by the lotman init/renewal code).
 	LotManager *core.Manager
 
+	// LotReconcileInterval is how often the cache pushes per-lot usage into the
+	// lot manager and enforces object-count caps. 0 uses the default. Only
+	// meaningful when LotManager is set.
+	LotReconcileInterval time.Duration
+
 	// DeferConfig delays the initial director namespace fetch until
 	// Config() is called explicitly.  The server launcher sets this to
 	// true because the director may not be reachable when the cache is
@@ -846,8 +851,8 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	consistency.Start(ctx, egrp)
 	// Periodically push per-lot usage into the lotman core and enforce lots'
 	// object-count caps (both no-ops when lot tracking is disabled).
-	pc.startLotUsageSync(ctx, egrp, 0)
-	pc.startObjectCapTrim(ctx, egrp, 0)
+	pc.startLotUsageSync(ctx, egrp, cfg.LotReconcileInterval)
+	pc.startObjectCapTrim(ctx, egrp, cfg.LotReconcileInterval)
 
 	// Start the tiering uploader.  Its crash recovery runs synchronously
 	// here, before the cache serves anything: it reconciles the buckets

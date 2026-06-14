@@ -47,13 +47,14 @@ func defaultRenewalCfg(now int64) renewalConfig {
 	// clamp Horizon up to DefaultLifetime; setting them equal keeps
 	// behaviour predictable.
 	return renewalConfig{
-		NowMs:             now,
-		PeriodMs:          int64(60 * 60 * 1000), // 1h
-		HorizonMs:         int64(60 * 60 * 1000), // 1h
-		DefaultLifetimeMs: int64(60 * 60 * 1000), // 1h
-		DefaultDeletionMs: int64(60 * 60 * 1000),
-		MaxLifetimeMs:     int64(168 * 60 * 60 * 1000), // 168h
-		FederationIssuer:  "https://fed.example/",
+		NowMs:                now,
+		PeriodMs:             int64(60 * 60 * 1000), // 1h
+		HorizonMs:            int64(60 * 60 * 1000), // 1h
+		DefaultLifetimeMs:    int64(60 * 60 * 1000), // 1h
+		DefaultDeletionMs:    int64(60 * 60 * 1000),
+		MaxLifetimeMs:        int64(168 * 60 * 60 * 1000), // 168h
+		FederationIssuer:     "https://fed.example/",
+		AutoCreateOnDiscover: true,
 	}
 }
 
@@ -118,6 +119,36 @@ func TestRenewExpiringLots_MonitoringPathSkipped(t *testing.T) {
 	prop := renewExpiringLots(cfg, ads, nil)
 	require.Len(t, prop.newLots, 1)
 	assert.Equal(t, "/a", prop.newLots[0].Paths[0].Path)
+}
+
+func TestRenewExpiringLots_AutoCreateOnDiscoverFalse(t *testing.T) {
+	now := int64(1_000_000)
+	cfg := defaultRenewalCfg(now)
+	cfg.AutoCreateOnDiscover = false
+	ads := adsForRenewal("/new", "/existing")
+
+	// "/existing" already has a lot with a gap inside the window; "/new" has
+	// never had one. With auto-create disabled only the existing prefix is
+	// renewed.
+	existing := []Lot{makeLot("u1", "/existing", now-1000, now+int64(30*60*1000))}
+	prop := renewExpiringLots(cfg, ads, existing)
+
+	require.Len(t, prop.newLots, 1)
+	assert.Equal(t, "/existing", prop.newLots[0].Paths[0].Path)
+
+	// A skip is recorded for the never-seen prefix.
+	skipped := false
+	for _, s := range prop.skips {
+		if s.NamespacePath == "/new" {
+			skipped = true
+		}
+	}
+	assert.True(t, skipped, "expected a skip reason for the uncovered prefix")
+
+	// Sanity: with auto-create enabled (the default), both are minted.
+	cfg.AutoCreateOnDiscover = true
+	prop = renewExpiringLots(cfg, ads, existing)
+	require.Len(t, prop.newLots, 2)
 }
 
 func TestRenewExpiringLots_Idempotent(t *testing.T) {
@@ -253,14 +284,15 @@ func TestRenewExpiringLots_SkippedWhenParentWindowGivesNoRoom(t *testing.T) {
 // to the legacy single-fill defaults.
 func horizonRenewalCfg(now int64) renewalConfig {
 	return renewalConfig{
-		NowMs:             now,
-		PeriodMs:          int64(60 * 60 * 1000),       // 1h
-		HorizonMs:         int64(48 * 60 * 60 * 1000),  // 48h
-		MinFillerWidthMs:  int64(15 * 60 * 1000),       // 15m
-		DefaultLifetimeMs: int64(24 * 60 * 60 * 1000),  // 24h
-		DefaultDeletionMs: int64(48 * 60 * 60 * 1000),  // 48h
-		MaxLifetimeMs:     int64(168 * 60 * 60 * 1000), // 168h
-		FederationIssuer:  "https://fed.example/",
+		NowMs:                now,
+		PeriodMs:             int64(60 * 60 * 1000),       // 1h
+		HorizonMs:            int64(48 * 60 * 60 * 1000),  // 48h
+		MinFillerWidthMs:     int64(15 * 60 * 1000),       // 15m
+		DefaultLifetimeMs:    int64(24 * 60 * 60 * 1000),  // 24h
+		DefaultDeletionMs:    int64(48 * 60 * 60 * 1000),  // 48h
+		MaxLifetimeMs:        int64(168 * 60 * 60 * 1000), // 168h
+		FederationIssuer:     "https://fed.example/",
+		AutoCreateOnDiscover: true,
 	}
 }
 
