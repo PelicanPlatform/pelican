@@ -294,6 +294,20 @@ type authResult struct {
 	isAdmin bool
 }
 
+// lotmanCaller returns the caller string to pass to lotman's mutating
+// operations. An admin is a trusted/system actor whose authority overrides lot
+// ownership: the core treats the empty ("system") caller as an ownership
+// bypass, so an admin request maps to it. Non-admin callers pass their verified
+// issuer, so the normal owner/ancestor check applies. (The admin's federation
+// issuer is still used as res.caller elsewhere, e.g. to derive a new lot's
+// owner; only the ownership *check* is overridden here.)
+func (r *authResult) lotmanCaller() string {
+	if r.isAdmin {
+		return ""
+	}
+	return r.caller
+}
+
 // tryAdminCookie returns true (and a non-nil authResult) iff the request
 // carries a valid Pelican login cookie whose user is recognized as an
 // admin per CheckAdmin. Unlike web_ui.AuthHandler, this function does NOT
