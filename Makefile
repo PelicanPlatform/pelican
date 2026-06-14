@@ -154,11 +154,42 @@ ifeq ($(goos),darwin)
 endif
 LOTMAN_SHARED_DIR := $(PELICAN_DIST_PATH)/lotman
 
+# The XRootD pfc purge plugin (libXrdPurgeLotMan) links libLotMan at a specific C
+# ABI. lotman v0.1.0 added query_time / include_reclaimed / hierarchical params to
+# the eviction queries and update_lot_usage_by_dir; a plugin built against the
+# older v0.0.4 ABI (shipped with xrootd-lotman v0.0.5) passes fewer arguments, so
+# a new-ABI libLotMan reads shifted registers and segfaults. Build the matching
+# ABI via the lotman_legacy_api build tag.
+#
+# LOTMAN_ABI picks the variant: auto (default — sniff the installed lotman
+# header), new, or legacy. Override e.g. `make lotman-shared LOTMAN_ABI=legacy`.
+LOTMAN_ABI ?= auto
+ifeq ($(LOTMAN_ABI),auto)
+  LOTMAN_HEADER := $(firstword $(wildcard \
+    /usr/include/lotman.h /usr/include/lotman/lotman.h \
+    /usr/local/include/lotman.h /usr/local/include/lotman/lotman.h))
+  ifeq ($(LOTMAN_HEADER),)
+    # No header to sniff (e.g. a cross build); assume the current ABI.
+    LOTMAN_ABI_RESOLVED := new
+  else ifeq ($(shell awk '/lotman_update_lot_usage_by_dir/{f=1} f{print} f&&/;/{exit}' $(LOTMAN_HEADER) | grep -c int64_t),0)
+    # The new ABI added an int64_t query_time arg to update_lot_usage_by_dir.
+    LOTMAN_ABI_RESOLVED := legacy
+  else
+    LOTMAN_ABI_RESOLVED := new
+  endif
+else
+  LOTMAN_ABI_RESOLVED := $(LOTMAN_ABI)
+endif
+LOTMAN_BUILD_TAGS :=
+ifeq ($(LOTMAN_ABI_RESOLVED),legacy)
+  LOTMAN_BUILD_TAGS := -tags lotman_legacy_api
+endif
+
 .PHONY: lotman-shared
 lotman-shared:
-	@echo BUILD libLotMan C-ABI shared library
+	@echo "BUILD libLotMan C-ABI shared library (lotman ABI: $(LOTMAN_ABI_RESOLVED))"
 	@mkdir -p $(LOTMAN_SHARED_DIR)
-	CGO_ENABLED=1 go build -buildmode=c-shared -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
+	CGO_ENABLED=1 go build -buildmode=c-shared $(LOTMAN_BUILD_TAGS) -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
 	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and its C header"
 
 # Produce the libLotMan packages (RPM/DEB/APK). -buildmode=c-shared needs CGO
