@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -1191,7 +1192,7 @@ func CreateCollection(db *gorm.DB, name, description, ownerID, namespace string,
 		Visibility:  visibility,
 	}
 
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(collection); result.Error != nil {
 			return result.Error
 		}
@@ -1226,7 +1227,7 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, ownerID, names
 		EnableSharing: enableSharing,
 	}
 
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(collection); result.Error != nil {
 			return result.Error
 		}
@@ -1474,7 +1475,7 @@ func loadCollectionForWrite(db *gorm.DB, id, user, userID string, groups []strin
 // other — which used to mean loading the collection and running the
 // authorization check twice on every name-space grant.
 func applyCollectionACLGrant(db *gorm.DB, id, userID string, subject ACLSubject, role AclRole, expiresAt *time.Time) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
 			SubjectType:  subject.Type,
@@ -1503,7 +1504,7 @@ func applyCollectionACLRevoke(db *gorm.DB, id string, subject ACLSubject, role A
 	default:
 		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		return tx.Where("collection_id = ? AND subject_type = ? AND subject_id = ? AND role = ?",
 			id, subject.Type, subject.ID, role).Delete(&CollectionACL{}).Error
 	})
@@ -1578,7 +1579,7 @@ func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 		return err
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		metadata := CollectionMetadata{
 			CollectionID: id,
 			Key:          key,
@@ -1598,7 +1599,7 @@ func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 		return err
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND key = ?", id, key).Delete(&CollectionMetadata{}); result.Error != nil {
 			return result.Error
 		}
@@ -1921,7 +1922,7 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 			AddedBy:      creatorOrUnknown(addedByID),
 		})
 	}
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -1939,7 +1940,7 @@ func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user, use
 		return err
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND object_url IN ?", id, members).Delete(&CollectionMember{}); result.Error != nil {
 			return result.Error
 		}
@@ -1968,7 +1969,7 @@ func DeleteCollection(db *gorm.DB, id string, owner, ownerID string, groups []st
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// delete all references to the collection
 		if result := tx.Where("collection_id = ?", id).Delete(&CollectionMember{}); result.Error != nil {
 			return result.Error
@@ -2360,7 +2361,7 @@ func ensureBuiltinAdmin(db *gorm.DB) error {
 	if externalURL == "" {
 		return nil
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		var others []User
 		if err := tx.Where("username = ? AND sub <> ?", builtinAdminUsername, builtinAdminUsername).Find(&others).Error; err != nil {
 			return err
@@ -2483,7 +2484,7 @@ func RenameUser(db *gorm.DB, id, newUsername, localIssuer string) error {
 	if err := ValidateIdentifier(newUsername); err != nil {
 		return err
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		var user User
 		if err := tx.First(&user, "id = ?", id).Error; err != nil {
 			return err
@@ -3270,7 +3271,7 @@ func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID stri
 	}
 
 	now := time.Now()
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Drop every mirrored membership this user has that the current
 		// provider does not assert — including ones stamped by a
 		// previous Issuer.GroupSource. Done before adding, so a
@@ -3551,7 +3552,7 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 		return nil
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Verify group exists and check authorization inside the transaction
 		var group Group
 		if err := tx.First(&group, "id = ?", id).Error; err != nil {
@@ -3587,7 +3588,7 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 // UpdateGroupOwnership updates the owner and/or admin settings of a group.
 // Only the group owner (or system admin) may change these settings.
 func UpdateGroupOwnership(db *gorm.DB, id string, ownerID, adminID *string, adminType *AdminType, requestorUserID string, isSystemAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		var group Group
 		if err := tx.First(&group, "id = ?", id).Error; err != nil {
 			return err
@@ -3966,7 +3967,7 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 //
 // Only the group owner or a system admin may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Fetch group inside transaction to avoid race conditions
 		var group Group
 		if err := tx.First(&group, "id = ?", groupID).Error; err != nil {
@@ -4044,7 +4045,7 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 //
 // If isAdmin is false, only the user themselves may delete their account.
 func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Fetch user inside transaction to avoid race conditions
 		var user User
 		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
@@ -4254,7 +4255,7 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 		return "", "", errors.New("redeemer user ID is required")
 	}
 	var collectionID, previousOwnerID string
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := utils.WriteTx(db, func(tx *gorm.DB) error {
 		var links []GroupInviteLink
 		if err := tx.Where("revoked = 0 AND expires_at > ? AND kind = ?", time.Now(), InviteKindCollectionOwnership).Find(&links).Error; err != nil {
 			return err
@@ -4389,7 +4390,7 @@ func RedeemRegistrationOwnershipInviteLink(db *gorm.DB, plaintext string, redeem
 	}
 	var registrationID int
 	var registrationPrefix string
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := utils.WriteTx(db, func(tx *gorm.DB) error {
 		var links []GroupInviteLink
 		if err := tx.Where("revoked = 0 AND expires_at > ? AND kind = ?", time.Now(), InviteKindRegistrationOwnership).Find(&links).Error; err != nil {
 			return err
@@ -4575,7 +4576,7 @@ func GetGroupInviteLinkByToken(db *gorm.DB, plaintext string) (*GroupInviteLink,
 // the caller to the right place after redemption.
 func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string, sub string, issuer string, username string) (string, string, error) {
 	var groupID, finalUserID string
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Scan non-revoked, non-expired links and bcrypt-compare
 		var links []GroupInviteLink
 		if err := tx.Where("revoked = 0 AND expires_at > ?", time.Now()).Find(&links).Error; err != nil {
@@ -4730,7 +4731,7 @@ func RedeemPasswordInviteLink(db *gorm.DB, plaintext, newPassword string) (strin
 	}
 
 	var userID string
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Same scan-and-bcrypt-compare loop the group redeem uses; we
 		// can't index on the hash (bcrypt is salted) so a linear scan
 		// over the small set of live links is unavoidable.
@@ -4840,7 +4841,7 @@ func ListPasswordInvitesForUser(db *gorm.DB, userID string) ([]GroupInviteLink, 
 // RevokeGroupInviteLink revokes an invite link. Only the group owner or admin
 // (or a system admin) may revoke invite links.
 func RevokeGroupInviteLink(db *gorm.DB, linkID, requestorUserID string, isSystemAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		var link GroupInviteLink
 		if err := tx.First(&link, "id = ?", linkID).Error; err != nil {
 			return err

@@ -35,6 +35,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database/utils"
 )
 
 const (
@@ -187,7 +188,7 @@ func ClearMasterKeyRows(ctx context.Context, db *gorm.DB) error {
 func SyncMasterKeyRows(db *gorm.DB, masterKey []byte, currentKeys map[string]jwk.Key) error {
 	ctx := context.Background()
 
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db.WithContext(ctx), func(tx *gorm.DB) error {
 		existing, err := LoadMasterKeyRows(ctx, tx)
 		if err != nil {
 			return fmt.Errorf("failed to load master key rows: %w", err)
