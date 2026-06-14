@@ -114,7 +114,7 @@ func TestQueueEnqueueAndFetch(t *testing.T) {
 	q := newPublishQueue(db)
 
 	event := NewObjectCommitEvent("/foo", "/foo/a.bin", 42, `"etag"`, time.Now().UTC(), CustomFields{"k": int64(7)})
-	row, err := q.EnqueueEvent(event)
+	row, err := q.EnqueueEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -145,10 +145,10 @@ func TestQueueEventIDUnique(t *testing.T) {
 	db := newTestDB(t)
 	q := newPublishQueue(db)
 	event := NewObjectCommitEvent("/n", "/n/x", 1, "", time.Now().UTC(), nil)
-	if _, err := q.EnqueueEvent(event); err != nil {
+	if _, err := q.EnqueueEvent(context.Background(), event); err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
-	if _, err := q.EnqueueEvent(event); err == nil {
+	if _, err := q.EnqueueEvent(context.Background(), event); err == nil {
 		t.Fatal("second enqueue should fail unique-constraint")
 	}
 }
@@ -157,7 +157,7 @@ func TestQueueClaimDuePushesAttempt(t *testing.T) {
 	db := newTestDB(t)
 	q := newPublishQueue(db)
 	for i := 0; i < 3; i++ {
-		_, err := q.EnqueueEvent(NewObjectCommitEvent("/n", "/n/x", int64(i), "", time.Now().UTC(), nil))
+		_, err := q.EnqueueEvent(context.Background(), NewObjectCommitEvent("/n", "/n/x", int64(i), "", time.Now().UTC(), nil))
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
@@ -184,7 +184,7 @@ func TestQueueClaimDuePushesAttempt(t *testing.T) {
 func TestQueueScheduleRetryBumpsAttempts(t *testing.T) {
 	db := newTestDB(t)
 	q := newPublishQueue(db)
-	row, err := q.EnqueueEvent(NewObjectCommitEvent("/n", "/n/x", 1, "", time.Now().UTC(), nil))
+	row, err := q.EnqueueEvent(context.Background(), NewObjectCommitEvent("/n", "/n/x", 1, "", time.Now().UTC(), nil))
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestSchedulerRateLimiterCapsPublishes(t *testing.T) {
 	const N = 30
 	for i := 0; i < N; i++ {
 		ev := NewObjectCommitEvent("/foo", fmt.Sprintf("/foo/x%d", i), int64(i), "", time.Now().UTC(), nil)
-		if _, err := ctl.queue.EnqueueEvent(ev); err != nil {
+		if _, err := ctl.queue.EnqueueEvent(context.Background(), ev); err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
 		}
 	}

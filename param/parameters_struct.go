@@ -326,10 +326,19 @@ type Config struct {
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Metadata struct {
+			AccessFlushInterval time.Duration `mapstructure:"accessflushinterval" yaml:"AccessFlushInterval"`
 			AllowMultipart bool `mapstructure:"allowmultipart" yaml:"AllowMultipart"`
+			BatchBufferSize int `mapstructure:"batchbuffersize" yaml:"BatchBufferSize"`
+			BatchFlushInterval time.Duration `mapstructure:"batchflushinterval" yaml:"BatchFlushInterval"`
 			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
 			Endpoint string `mapstructure:"endpoint" yaml:"Endpoint"`
 			ErrorAfter time.Duration `mapstructure:"errorafter" yaml:"ErrorAfter"`
+			EtagPolicy string `mapstructure:"etagpolicy" yaml:"EtagPolicy"`
+			History struct {
+				PruneBatchSize int `mapstructure:"prunebatchsize" yaml:"PruneBatchSize"`
+				PruneInterval time.Duration `mapstructure:"pruneinterval" yaml:"PruneInterval"`
+				RetentionDays int `mapstructure:"retentiondays" yaml:"RetentionDays"`
+			} `mapstructure:"history" yaml:"History"`
 			MaxBackoff time.Duration `mapstructure:"maxbackoff" yaml:"MaxBackoff"`
 			MaxInflight int `mapstructure:"maxinflight" yaml:"MaxInflight"`
 			MaxMetadataBytes int `mapstructure:"maxmetadatabytes" yaml:"MaxMetadataBytes"`
@@ -340,6 +349,8 @@ type Config struct {
 			RatePerSecond int `mapstructure:"ratepersecond" yaml:"RatePerSecond"`
 			RequestTimeout time.Duration `mapstructure:"requesttimeout" yaml:"RequestTimeout"`
 			TokenLifetime time.Duration `mapstructure:"tokenlifetime" yaml:"TokenLifetime"`
+			TrackAccess bool `mapstructure:"trackaccess" yaml:"TrackAccess"`
+			TrackExtra bool `mapstructure:"trackextra" yaml:"TrackExtra"`
 			WarnAfter time.Duration `mapstructure:"warnafter" yaml:"WarnAfter"`
 		} `mapstructure:"metadata" yaml:"Metadata"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
@@ -845,10 +856,19 @@ type configWithType struct {
 		HttpServiceUrl struct { Type string; Value string }
 		IssuerMode struct { Type string; Value string }
 		Metadata struct {
+			AccessFlushInterval struct { Type string; Value time.Duration }
 			AllowMultipart struct { Type string; Value bool }
+			BatchBufferSize struct { Type string; Value int }
+			BatchFlushInterval struct { Type string; Value time.Duration }
 			Enabled struct { Type string; Value bool }
 			Endpoint struct { Type string; Value string }
 			ErrorAfter struct { Type string; Value time.Duration }
+			EtagPolicy struct { Type string; Value string }
+			History struct {
+				PruneBatchSize struct { Type string; Value int }
+				PruneInterval struct { Type string; Value time.Duration }
+				RetentionDays struct { Type string; Value int }
+			}
 			MaxBackoff struct { Type string; Value time.Duration }
 			MaxInflight struct { Type string; Value int }
 			MaxMetadataBytes struct { Type string; Value int }
@@ -859,6 +879,8 @@ type configWithType struct {
 			RatePerSecond struct { Type string; Value int }
 			RequestTimeout struct { Type string; Value time.Duration }
 			TokenLifetime struct { Type string; Value time.Duration }
+			TrackAccess struct { Type string; Value bool }
+			TrackExtra struct { Type string; Value bool }
 			WarnAfter struct { Type string; Value time.Duration }
 		}
 		Mode struct { Type string; Value string }

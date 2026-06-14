@@ -2269,6 +2269,103 @@ default: "object"
 components: ["origin"]
 ---
 ############################
+#  Origin object-metadata  #
+############################
+name: Origin.Metadata.TrackAccess
+description: |+
+  Master per-origin switch for the local object-metadata tracking subsystem. When enabled,
+  the origin records per-object lifecycle data (commits, deletes, renames, observed external
+  changes, optional access timestamps) in its local SQLite database. This is independent of
+  Origin.Metadata.Enabled (the webhook publisher): you can enable tracking without webhooks
+  or webhooks without tracking. May be overridden per-export via
+  Origin.Exports[].Metadata.TrackAccess.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.TrackExtra
+description: |+
+  When true (and TrackAccess is enabled for the same namespace), the contents of the inbound
+  X-Pelican-Object-Metadata header are snapshotted into the object-metadata history table
+  for each event. When false, only the auto-collected fields (path, size, etag, mtime,
+  actor) are recorded. Useful for privacy-sensitive deployments where uploader-supplied
+  fields should not be persisted. Per-export overridable via
+  Origin.Exports[].Metadata.TrackExtra.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.EtagPolicy
+description: |+
+  Strategy the origin uses to populate the ETag field when the underlying storage backend
+  does not supply one. Either "uuid" (mint a UUIDv4 at commit time, opaque, no I/O cost) or
+  "sha256" (stream a SHA-256 of the content during the POSC write; the resulting hex digest
+  becomes the ETag). The backend ETag is always preferred when present; this policy only
+  applies to backends that decline to supply one.
+type: string
+default: "uuid"
+components: ["origin"]
+---
+name: Origin.Metadata.AccessFlushInterval
+description: |+
+  How often the in-memory atime debouncer flushes accumulated last_accessed timestamps to
+  the database. Only meaningful when TrackAccess is enabled. A worst-case crash loses up to
+  this much access-time history; commit / delete / rename records are flushed durably and
+  are not affected.
+type: duration
+hidden: true
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.BatchFlushInterval
+description: |+
+  Maximum age of best-effort writes in the SQLite write-behind batcher before a flush is
+  forced. Smaller values reduce best-effort loss on crash at the cost of slightly more
+  frequent transactions. Durable writes (RecordCommit, RecordDelete, RecordRename, publish-
+  queue enqueue) always force an immediate flush regardless of this value.
+type: duration
+default: 50ms
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.BatchBufferSize
+description: |+
+  Capacity of the in-memory batcher channel. When full, best-effort writes block their
+  caller until a flush makes room (Stat-path back-pressure). The blocking behavior is
+  intentional: dropping observations silently was rejected at design time. Increase this
+  if you see batcher back-pressure in metrics.
+type: int
+default: 256
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.History.RetentionDays
+description: |+
+  How long (in days) object_metadata_history rows are kept before the background pruner
+  deletes them. 0 disables pruning (keep history forever). May be overridden per-export
+  via Origin.Exports[].Metadata.HistoryRetentionDays.
+type: int
+default: 90
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneInterval
+description: |+
+  How often the object-metadata-history pruner runs. The pruner deletes rows older than
+  the configured retention in bounded batches per pass.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneBatchSize
+description: |+
+  Maximum number of object_metadata_history rows the pruner deletes per pass per
+  namespace. Bounded to keep WAL pressure proportional.
+type: int
+default: 1000
+hidden: true
+components: ["origin"]
+---
+############################
 #   Local cache configs    #
 ############################
 name: LocalCache.RunLocation

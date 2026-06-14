@@ -560,12 +560,26 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_HttpAuthTokenPassthrough.GetName(), false)
 	// Origin.IssuerMode
 	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
+	// Origin.Metadata.AccessFlushInterval
+	v.SetDefault(param.Origin_Metadata_AccessFlushInterval.GetName(), "5m")
 	// Origin.Metadata.AllowMultipart
 	v.SetDefault(param.Origin_Metadata_AllowMultipart.GetName(), true)
+	// Origin.Metadata.BatchBufferSize
+	v.SetDefault(param.Origin_Metadata_BatchBufferSize.GetName(), 256)
+	// Origin.Metadata.BatchFlushInterval
+	v.SetDefault(param.Origin_Metadata_BatchFlushInterval.GetName(), "50ms")
 	// Origin.Metadata.Enabled
 	v.SetDefault(param.Origin_Metadata_Enabled.GetName(), false)
 	// Origin.Metadata.ErrorAfter
 	v.SetDefault(param.Origin_Metadata_ErrorAfter.GetName(), "24h")
+	// Origin.Metadata.EtagPolicy
+	v.SetDefault(param.Origin_Metadata_EtagPolicy.GetName(), "uuid")
+	// Origin.Metadata.History.PruneBatchSize
+	v.SetDefault(param.Origin_Metadata_History_PruneBatchSize.GetName(), 1000)
+	// Origin.Metadata.History.PruneInterval
+	v.SetDefault(param.Origin_Metadata_History_PruneInterval.GetName(), "1h")
+	// Origin.Metadata.History.RetentionDays
+	v.SetDefault(param.Origin_Metadata_History_RetentionDays.GetName(), 90)
 	// Origin.Metadata.MaxBackoff
 	v.SetDefault(param.Origin_Metadata_MaxBackoff.GetName(), "30m")
 	// Origin.Metadata.MaxInflight
@@ -586,6 +600,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_Metadata_RequestTimeout.GetName(), "10s")
 	// Origin.Metadata.TokenLifetime
 	v.SetDefault(param.Origin_Metadata_TokenLifetime.GetName(), "5m")
+	// Origin.Metadata.TrackAccess
+	v.SetDefault(param.Origin_Metadata_TrackAccess.GetName(), false)
+	// Origin.Metadata.TrackExtra
+	v.SetDefault(param.Origin_Metadata_TrackExtra.GetName(), false)
 	// Origin.Metadata.WarnAfter
 	v.SetDefault(param.Origin_Metadata_WarnAfter.GetName(), "4h")
 	// Origin.Multiuser

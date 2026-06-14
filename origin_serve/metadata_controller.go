@@ -208,6 +208,12 @@ type metadataControllerOptions struct {
 
 	// DB lets tests inject a sqlite handle.
 	DB *gorm.DB
+
+	// Batcher, when non-nil, routes publish-queue inserts through
+	// the shared write-behind batcher so concurrent commits coalesce
+	// into one transaction. nil → direct synchronous INSERT
+	// (preserved as the test-friendly default).
+	Batcher *sqliteBatcher
 }
 
 // newMetadataController constructs the controller but does not start
@@ -242,8 +248,12 @@ func newMetadataController(opts metadataControllerOptions) *metadataController {
 	}
 
 	c := &metadataController{
-		publisher:     newPublisher(opts.RequestTimeout, opts.TokenLifetime),
-		queue:         newPublishQueue(opts.DB),
+		publisher: newPublisher(opts.RequestTimeout, opts.TokenLifetime),
+		queue: func() *publishQueue {
+			q := newPublishQueue(opts.DB)
+			q.setBatcher(opts.Batcher)
+			return q
+		}(),
 		resolver:      newMetadataResolver(opts.OriginEnabled, opts.OriginEndpoint, opts.OriginMode, opts.Exports),
 		maxInflight:   opts.MaxInflight,
 		ratePerSecond: opts.RatePerSecond,
@@ -313,7 +323,7 @@ func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommi
 		return fmt.Errorf("metadata: namespace %q has metadata enabled but no endpoint resolved", event.Namespace)
 	}
 
-	row, err := c.queue.EnqueueEvent(event)
+	row, err := c.queue.EnqueueEvent(ctx, event)
 	if err != nil {
 		return fmt.Errorf("metadata: enqueue: %w", err)
 	}

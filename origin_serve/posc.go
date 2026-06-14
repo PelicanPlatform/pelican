@@ -32,8 +32,11 @@ package origin_serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math/rand"
 	"os"
@@ -48,6 +51,17 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 )
+
+// sha256HasherPool reuses streaming hashers across uploads when
+// EtagPolicy=sha256 is on. A fresh sha256.New() allocates ~200 B per
+// upload; at thousands-of-uploads/sec rates that's real GC pressure.
+// Get() returns a Reset hasher ready to feed Writes; Close() puts it
+// back. Underlying type is *sha256.digest (returned by sha256.New())
+// — a safe candidate for pooling because Reset() restores it to the
+// initial state.
+var sha256HasherPool = sync.Pool{
+	New: func() any { return sha256.New() },
+}
 
 // PoscMetricsHooks is a small set of optional hooks the POSC layer calls
 // for observability. Wired up by the metrics package; the layer functions
@@ -84,6 +98,11 @@ type poscFileSystem struct {
 	keepalive   time.Duration
 	clock       func() time.Time
 
+	// etagPolicy is set via SetEtagPolicy. Empty = no streaming;
+	// "sha256" = tap every Write through SHA-256 and surface the
+	// digest as the post-rename ETag. See SetEtagPolicy.
+	etagPolicy string
+
 	mu       sync.Mutex
 	openHead *poscFile
 
@@ -107,6 +126,21 @@ type poscFileSystem struct {
 // reading from (typically the OsRootFs / autoCreateDirFs the rest of
 // the chain wraps). Pass nil to disable.
 func (p *poscFileSystem) SetTouchFS(fs afero.Fs) { p.touchFS = fs }
+
+// SetEtagPolicy controls how POSC supplies an ETag for backends that
+// decline to provide one of their own. Valid values:
+//
+//   - ""        (default) — POSC does not stream a hash; the backend
+//     FileInfo's ETag wins (eg POSIXv2's mtime+size synthesis).
+//   - "sha256"  — POSC tee's every Write into a SHA-256 stream and,
+//     on successful commit, wraps the post-rename FileInfo with an
+//     ETag that returns "sha256-<hex-digest>". Adds ~one cycle/byte
+//     to the write path; cheap relative to disk.
+//
+// Other values are treated as the empty policy (no streaming).
+func (p *poscFileSystem) SetEtagPolicy(policy string) {
+	p.etagPolicy = policy
+}
 
 // newPoscFileSystem constructs a POSC-wrapping webdav.FileSystem. The
 // background expiry goroutine starts immediately and is shut down when
@@ -258,6 +292,18 @@ func (p *poscFileSystem) OpenFile(ctx context.Context, name string, flag int, pe
 				finalPath: path.Clean("/" + strings.TrimLeft(name, "/")),
 				perm:     perm,
 				mtime:    p.clock(),
+			}
+			// If the configured ETag policy needs a streaming
+			// hash, grab one from the pool now so every Write
+			// feeds it. The hasher is Reset-ed before reuse and
+			// returned to the pool inside Close. Currently the
+			// only such policy is "sha256"; others (none today)
+			// would slot in via this same switch.
+			switch p.etagPolicy {
+			case "sha256":
+				h := sha256HasherPool.Get().(hash.Hash)
+				h.Reset()
+				pf.streamingHasher = h
 			}
 			p.registerOpen(pf)
 			if p.hooks != nil && p.hooks.IncActive != nil {
@@ -469,6 +515,15 @@ type poscFile struct {
 	// in-flight bookkeeping
 	bytesWritten int64
 
+	// streamingHasher, when non-nil, is fed by every Write and
+	// finalized in Close to produce an origin-supplied ETag for
+	// backends that don't yield one of their own. Configured via
+	// poscFileSystem.SetEtagPolicy. Once finalized, the digest is
+	// stored in finalizedDigest so the post-rename FileInfo wrap
+	// can return it.
+	streamingHasher  hash.Hash
+	finalizedDigest  string
+
 	prev *poscFile
 	next *poscFile
 }
@@ -511,6 +566,14 @@ func (f *poscFile) Write(p []byte) (int, error) {
 	if n > 0 {
 		f.bytesWritten += int64(n)
 		f.markActivity()
+		// Feed the streaming hasher AFTER the underlying write has
+		// landed N bytes — we hash exactly what made it to disk
+		// (matching the byte-for-byte semantics a receiver doing
+		// the same hash on a subsequent GET would observe).
+		if f.streamingHasher != nil {
+			// hash.Hash.Write never returns an error per the contract.
+			_, _ = f.streamingHasher.Write(p[:n])
+		}
 	}
 	return n, err
 }
@@ -568,10 +631,33 @@ func (f *poscFile) Close() error {
 		return err
 	}
 
+	// Finalize the streaming hash (if configured) before we hand
+	// FileInfo to the close hook. The wrap below substitutes our
+	// computed digest for whatever ETag the backend would otherwise
+	// supply via etagFileInfo.
+	if f.streamingHasher != nil {
+		f.finalizedDigest = "sha256-" + hex.EncodeToString(f.streamingHasher.Sum(nil))
+		// Return the hasher to the pool. Future GetTime callers
+		// will Reset it before reuse, but clearing the pointer
+		// here guards against a stray Write after Close racing
+		// into the now-pooled instance (callers shouldn't Write
+		// after Close, but the cost of being defensive is zero).
+		sha256HasherPool.Put(f.streamingHasher)
+		f.streamingHasher = nil
+	}
+
 	if f.fs.closeHook != nil {
 		info, statErr := f.fs.inner.Stat(f.ctx, final)
 		if statErr != nil {
 			log.Debugf("POSC: stat after rename failed for %q: %v", final, statErr)
+		}
+		// When we computed an origin-supplied ETag, wrap the
+		// backend FileInfo so BackendETag returns our digest.
+		// This is the only place where the etag policy is
+		// honored — by the time the close hook reads ETag from
+		// FileInfo, the value is final.
+		if info != nil && f.finalizedDigest != "" {
+			info = poscDigestFileInfo{FileInfo: info, digest: f.finalizedDigest}
 		}
 		if err := f.fs.closeHook(f.ctx, final, info); err != nil {
 			// Transactional rollback: the publish refused the
@@ -591,3 +677,23 @@ func (f *poscFile) Close() error {
 
 // activePoscFiles is a Prometheus-friendly accessor used by tests / metrics.
 func (p *poscFileSystem) activePoscFiles() int64 { return p.activeCount.Load() }
+
+// poscDigestFileInfo wraps an os.FileInfo with a BackendETag that
+// returns POSC's streamed digest (eg "sha256-<hex>"). Used when
+// EtagPolicy is non-empty so the close hook + downstream readers
+// observe the origin-supplied ETag instead of the backend's
+// synthesized one.
+type poscDigestFileInfo struct {
+	os.FileInfo
+	digest string
+}
+
+// ETag implements BackendETager (declared in backend_etag.go) and
+// takes precedence over any inner ETag method because Go's
+// method-set resolution prefers the outer-most type.
+func (p poscDigestFileInfo) ETag(_ context.Context) (string, error) {
+	return p.digest, nil
+}
+
+// (compile-time assert)
+var _ BackendETager = poscDigestFileInfo{}
