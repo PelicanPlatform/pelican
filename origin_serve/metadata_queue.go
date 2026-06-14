@@ -26,6 +26,7 @@
 package origin_serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -71,8 +72,15 @@ var ErrEventNotFound = errors.New("metadata publish event not found")
 // publishQueue is a thin DAO over the GORM ServerDatabase handle.
 // Methods accept *gorm.DB so unit tests can inject a sqlite in-memory
 // instance without touching package globals.
+//
+// If `batcher` is non-nil, EnqueueEvent routes the INSERT through
+// the shared SQLite write-behind batcher so it coalesces with other
+// concurrent commits + best-effort observations into one transaction.
+// Without the batcher (tests, or when no metadata feature triggers
+// batcher construction) it falls back to a direct synchronous INSERT.
 type publishQueue struct {
-	db *gorm.DB
+	db      *gorm.DB
+	batcher *sqliteBatcher
 }
 
 // newPublishQueue wraps the supplied GORM handle. Passing nil causes
@@ -80,6 +88,11 @@ type publishQueue struct {
 // is the production path; the explicit-injection form is provided for
 // tests.
 func newPublishQueue(db *gorm.DB) *publishQueue { return &publishQueue{db: db} }
+
+// setBatcher installs the shared write-behind batcher. Production
+// wiring lives in InitializeHandlers; tests can call this directly.
+// Nil-tolerant (setting nil reverts to direct-insert mode).
+func (q *publishQueue) setBatcher(b *sqliteBatcher) { q.batcher = b }
 
 func (q *publishQueue) handle() *gorm.DB {
 	if q.db != nil {
@@ -91,7 +104,15 @@ func (q *publishQueue) handle() *gorm.DB {
 // EnqueueEvent inserts a row into the publish queue from an in-memory
 // event. CustomFields is JSON-encoded once at write time so subsequent
 // reads can pass it straight through to the wire.
-func (q *publishQueue) EnqueueEvent(e *ObjectCommitEvent) (*MetadataPublishRow, error) {
+//
+// When a batcher is installed (production path), the INSERT goes
+// through EnqueueDurable so a burst of concurrent commits coalesces
+// into one transaction. The autoincrement ID isn't known until after
+// the batched tx commits, so we then read it back via SELECT WHERE
+// event_id=?. The extra read is amortized across the coalesced
+// batch — typically zero round-trips of latency because the row is
+// already in SQLite's page cache.
+func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent) (*MetadataPublishRow, error) {
 	customJSON := []byte("{}")
 	if len(e.CustomFields) > 0 {
 		var err error
@@ -101,23 +122,54 @@ func (q *publishQueue) EnqueueEvent(e *ObjectCommitEvent) (*MetadataPublishRow, 
 		}
 	}
 	now := time.Now().UTC()
-	row := &MetadataPublishRow{
-		EventID:             e.ID,
-		Namespace:           e.Namespace,
-		ObjectPath:          e.ObjectPath,
-		ObjectSize:          e.ObjectSize,
-		ETag:                e.ETag,
-		ObjectCreated:       e.ObjectCreated.UTC(),
-		CustomFields:        string(customJSON),
-		MetadataContentType: e.MetadataContentType,
-		MetadataBody:        e.MetadataBody,
-		CreatedAt:           now,
-		NextAttemptAt:       now, // first attempt eligible immediately
+	if q.batcher == nil {
+		// Direct path (tests + early-init).
+		row := &MetadataPublishRow{
+			EventID:             e.ID,
+			Namespace:           e.Namespace,
+			ObjectPath:          e.ObjectPath,
+			ObjectSize:          e.ObjectSize,
+			ETag:                e.ETag,
+			ObjectCreated:       e.ObjectCreated.UTC(),
+			CustomFields:        string(customJSON),
+			MetadataContentType: e.MetadataContentType,
+			MetadataBody:        e.MetadataBody,
+			CreatedAt:           now,
+			NextAttemptAt:       now,
+		}
+		if err := q.handle().Create(row).Error; err != nil {
+			return nil, err
+		}
+		return row, nil
 	}
-	if err := q.handle().Create(row).Error; err != nil {
+
+	// Batched path: durable insert coalesces with other concurrent
+	// commits and any in-flight best-effort tracking writes.
+	// Apply column defaults explicitly here — when we name a NOT
+	// NULL column in the INSERT list, SQLite expects a value
+	// regardless of any DEFAULT clause on the schema. GORM's
+	// `.Create()` path handles this implicitly; the raw INSERT
+	// does not.
+	metadataBody := e.MetadataBody
+	if metadataBody == nil {
+		metadataBody = []byte{}
+	}
+	if err := q.batcher.EnqueueDurable(ctx,
+		`INSERT INTO metadata_publish_queue
+			(event_id, namespace, object_path, object_size, etag, object_created,
+			 custom_fields, metadata_content_type, metadata_body,
+			 created_at, next_attempt_at, attempts, last_error)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,0,'')`,
+		e.ID, e.Namespace, e.ObjectPath, e.ObjectSize, e.ETag, e.ObjectCreated.UTC(),
+		string(customJSON), e.MetadataContentType, metadataBody,
+		now, now,
+	); err != nil {
 		return nil, err
 	}
-	return row, nil
+	// Read back to recover the autoincrement ID. This SELECT is
+	// indexed (event_id is UNIQUE) and the row was just written
+	// inside the batched tx, so it's in cache.
+	return q.FindByEventID(e.ID)
 }
 
 // EventFromRow reconstructs an in-memory event from a persisted row.
