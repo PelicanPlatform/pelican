@@ -20,9 +20,12 @@ package local_cache
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/dgraph-io/badger/v4"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
@@ -150,6 +153,94 @@ func TestTrimObjectCaps(t *testing.T) {
 	if excess["mon"] != 4 {
 		t.Errorf("over cap (9 vs 5) should compute excess 4, got %d", excess["mon"])
 	}
+}
+
+// TestTrimObjectCapsEvicts exercises the full over-cap trim path: a lot holding
+// more objects than its max_num_objects cap has the oldest excess really evicted
+// (through StorageManager.EvictByLRU), with the per-bucket counter brought back
+// down to the cap. Inline objects (StorageID 0) keep the harness disk-free.
+func TestTrimObjectCapsEvicts(t *testing.T) {
+	m := newCoreTestManager(t)
+	mustAdd := func(s core.LotSpec) {
+		if err := m.AddLot(s, ""); err != nil {
+			t.Fatalf("add %s: %v", s.LotName, err)
+		}
+	}
+	mustAdd(core.LotSpec{LotName: "root", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: -1, OpportunisticBytes: -1, MaxNumObjects: -1}})
+	mustAdd(core.LotSpec{LotName: "mon", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 0, OpportunisticBytes: -1, MaxNumObjects: 5}})
+
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	egrp, _ := errgroup.WithContext(context.Background())
+	sm, err := NewStorageManager(cdb, []string{t.TempDir()}, 0, egrp)
+	if err != nil {
+		t.Fatalf("storage manager: %v", err)
+	}
+
+	const bucket NamespaceID = 7
+	// Seed 9 real inline objects in the lot's bucket so the LRU index has
+	// concrete entries to evict (9 > cap 5 -> excess 4).
+	for i := 0; i < 9; i++ {
+		hash := InstanceHash(fmt.Sprintf("obj-%02d", i))
+		meta := &CacheMetadata{StorageID: StorageIDInline, NamespaceID: bucket, ContentLength: 100}
+		if err := cdb.SetMetadata(hash, meta); err != nil {
+			t.Fatalf("set metadata: %v", err)
+		}
+		if err := cdb.UpdateLRU(hash, 0); err != nil {
+			t.Fatalf("update lru: %v", err)
+		}
+	}
+	if err := cdb.SetObjectCount(StorageIDInline, bucket, 9); err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PersistentCache{
+		db:           cdb,
+		lotMgr:       m,
+		namespaceMap: map[string]NamespaceID{"mon": bucket, "root": 8},
+		eviction:     &EvictionManager{db: cdb, storage: sm},
+	}
+
+	if err := pc.trimObjectCaps(); err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+
+	// The counter is brought back down to the cap.
+	if c, _ := cdb.GetObjectCount(StorageIDInline, bucket); c != 5 {
+		t.Errorf("post-trim count = %d, want 5 (cap)", c)
+	}
+	// And the excess objects are really gone from the LRU index.
+	if n := countLRUEntriesForTest(t, cdb, StorageIDInline, bucket); n != 5 {
+		t.Errorf("remaining LRU entries = %d, want 5", n)
+	}
+}
+
+// countLRUEntriesForTest counts LRU index entries for a (storage, bucket) pair.
+func countLRUEntriesForTest(t *testing.T, cdb *CacheDB, sid StorageID, ns NamespaceID) int {
+	t.Helper()
+	prefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, sid, ns))
+	n := 0
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			n++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("count lru: %v", err)
+	}
+	return n
 }
 
 // computeObjectExcess mirrors trimObjectCaps's decision (count vs cap) without

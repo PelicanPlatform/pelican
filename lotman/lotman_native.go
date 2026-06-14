@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/lotman/core"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // initializedLots holds the lot set computed by initLots during InitLotman and
@@ -575,10 +576,10 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 	defaultDeletion := now + param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds()
 
 	for name, lot := range *lotMap {
-		// root and default carry the all-zero non-expiring sentinel introduced
-		// in lotman PR #44. Skip them so their timestamps are not overwritten
-		// with real values by the defaulting logic below.
-		if lot.LotName == "root" || lot.LotName == "default" {
+		// root, default, and monitoring carry the all-zero non-expiring sentinel
+		// introduced in lotman PR #44. Skip them so their timestamps are not
+		// overwritten with real values by the defaulting logic below.
+		if lot.LotName == "root" || lot.LotName == "default" || lot.LotName == "monitoring" {
 			continue
 		}
 		if lot.MPA == nil {
@@ -1023,7 +1024,11 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	// storage MPAs, so 0 here means exactly what it says: zero capacity.
 	if _, exists := lotMap["default"]; !exists {
 		defDed := zero
-		defOpp := zero
+		// The default lot's opportunistic quota controls whether unlotted data
+		// is retained at all. 0 (the historical default) means no protected
+		// quota -- unlotted data is reclaimed first; a positive value lets the
+		// cache keep it opportunistically, and -1 is unbounded.
+		defOpp := float64(param.Lotman_DefaultLotOpportunisticGB.GetInt())
 		lotMap["default"] = Lot{
 			LotName: "default",
 			Owner:   federationIssuer,
@@ -1068,6 +1073,41 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 				ExpirationTime: &Int64FromFloat{Value: 0},
 				DeletionTime:   &Int64FromFloat{Value: 0},
 			},
+		}
+	}
+
+	// The monitoring lot owns the federation's self-test / monitoring namespace
+	// and bounds how many such objects the cache retains. It exists only on the
+	// V2 (persistent) cache, which enforces the object cap as a rolling window;
+	// V1 (XRootD) has no federation-aware monitoring lot and its purge plugin
+	// does not honour max_num_objects. The lot carries zero dedicated bytes (so
+	// it is a first eviction target under disk pressure) and an unbounded
+	// opportunistic byte quota, leaving the object count as the binding axis.
+	if param.Cache_EnableV2.GetBool() {
+		if _, exists := lotMap["monitoring"]; !exists {
+			monDed := zero
+			monOpp := unboundedGB
+			lotMap["monitoring"] = Lot{
+				LotName: "monitoring",
+				Owner:   federationIssuer,
+				Parents: []string{"root"},
+				Paths: []LotPath{
+					{
+						Path:      monitoringBasePath(),
+						Recursive: true,
+					},
+				},
+				MPA: &MPA{
+					DedicatedGB:     &monDed,
+					OpportunisticGB: &monOpp,
+					MaxNumObjects:   &Int64FromFloat{Value: int64(param.Lotman_MonitoringLotMaxObjects.GetInt())},
+					// All-zero timestamps = non-expiring sentinel (lotman PR #44);
+					// configLotTimestamps skips it so these stay zero.
+					CreationTime:   &Int64FromFloat{Value: 0},
+					ExpirationTime: &Int64FromFloat{Value: 0},
+					DeletionTime:   &Int64FromFloat{Value: 0},
+				},
+			}
 		}
 	}
 
@@ -1139,8 +1179,38 @@ func lotmanDatabase() (*gorm.DB, error) {
 	return db, nil
 }
 
+// federationQualifyAds prepends the configured federation prefix (set by the V2
+// launcher) to each namespace ad's path, so lots auto-created from these ads are
+// federation-qualified and match the persistent cache's resolution keys. A no-op
+// (returns the input) when no prefix is configured (e.g. the V1 cache), keeping
+// paths bare for xrootd. The input slice is not mutated.
+func federationQualifyAds(ads []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+	prefix := getFederationPrefix()
+	if prefix == "" {
+		return ads
+	}
+	out := make([]server_structs.NamespaceAdV2, len(ads))
+	for i, ad := range ads {
+		ad.Path = normaliseLotPath(prefix + ad.Path)
+		out[i] = ad
+	}
+	return out
+}
+
+// monitoringBasePath returns the (possibly federation-qualified) base path for
+// monitoring namespaces, so monitoring detection works whether or not lot paths
+// are federation-prefixed.
+func monitoringBasePath() string {
+	return normaliseLotPath(getFederationPrefix() + server_utils.MonitoringBaseNs)
+}
+
 func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	log.Infof("Initializing LotMan...")
+
+	// Federation-qualify namespace paths for V2 (no-op for V1) so all
+	// downstream lot creation, hierarchy, and renewal operate in the same
+	// path space the persistent cache resolves against.
+	adsFromFed = federationQualifyAds(adsFromFed)
 
 	// Build the native lot manager over the appropriate database (V2 uses the
 	// shared Pelican server DB; V1 uses a dedicated, xrootd-shareable SQLite
@@ -1210,7 +1280,10 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// Now instantiate any other lots that are in the config
 	for _, lot := range initializedLots {
 		if lot.LotName != "default" && lot.LotName != "root" {
-			initialized, err := ensureLotExistsOrUpdate(lot.LotName, initializedLots, federationIssuer, false)
+			// monitoring is auto-derived from config like default/root; treat it
+			// as admin-controlled so its object cap can be lowered across restarts.
+			asAdmin := lot.LotName == "monitoring"
+			initialized, err := ensureLotExistsOrUpdate(lot.LotName, initializedLots, federationIssuer, asAdmin)
 			if err != nil {
 				return false
 			}

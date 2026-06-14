@@ -147,6 +147,40 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 		cfg.StorageDirs = storageDirs
 	}
 
+	// Federation-qualified lot tracking for the persistent (V2) cache. Lots live
+	// in the shared server DB and their paths are prefixed with the federation
+	// discovery host so the same path in different federations resolves to
+	// distinct lots, matching the cache's resolution keys. InitLotman runs
+	// before NewPersistentCache so the cache can build its lot index from the
+	// bootstrapped lots and account/evict per lot.
+	if param.Cache_EnableLotman.GetBool() {
+		fedInfo, ferr := config.GetFederation(ctx)
+		if ferr != nil {
+			return nil, errors.Wrap(ferr, "failed to get federation info for lotman")
+		}
+		fedHost := ""
+		if u, e := url.Parse(fedInfo.DiscoveryEndpoint); e == nil && u.Host != "" {
+			fedHost = u.Host
+		}
+		if fedHost == "" {
+			if u, e := url.Parse(fedInfo.DirectorEndpoint); e == nil {
+				fedHost = u.Host
+			}
+		}
+		if fedHost == "" {
+			return nil, errors.New("could not determine federation host for lotman federation-qualification")
+		}
+		lotman.SetFederationPrefix("/" + fedHost)
+		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
+			return nil, errors.New("failed to initialize lotman")
+		}
+		cfg.LotManager = lotman.GetManager()
+		cfg.LotReconcileInterval = param.Cache_LotUsageReconcileInterval.GetDuration()
+		// Pin the cache to the same federation host so its resolution keys match
+		// the federation-qualified lot paths exactly.
+		cfg.DefaultFederation = fedHost
+	}
+
 	pc, err := local_cache.NewPersistentCache(ctx, egrp, cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create persistent cache")
@@ -169,6 +203,19 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Register HTTP handlers on the Gin engine
 	if err := pc.RegisterCacheHandlers(engine, directorEnabled); err != nil {
 		return nil, errors.Wrap(err, "failed to register persistent cache handlers")
+	}
+
+	// Lotman background work for the persistent cache: the REST API, periodic
+	// per-namespace lot renewal, and GC of expired lot records. Lot
+	// initialization and manager injection happened before NewPersistentCache.
+	if param.Cache_EnableLotman.GetBool() {
+		if param.Lotman_EnableAPI.GetBool() {
+			if err := lotman.RegisterLotsAPI(engine.Group("/", web_ui.ServerHeaderMiddleware)); err != nil {
+				return nil, errors.Wrap(err, "failed to register lotman API")
+			}
+		}
+		lotman.LaunchRenewalRoutine(ctx, cacheServer.GetNamespaceAds)
+		lotman.LaunchLotGcRoutine(ctx)
 	}
 
 	// Set Cache.Url to point to the API endpoint when director is enabled

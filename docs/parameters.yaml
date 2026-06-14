@@ -2405,6 +2405,17 @@ type: bool
 default: false
 components: ["cache"]
 ---
+name: Cache.LotUsageReconcileInterval
+description: |+
+  How often the persistent (V2) cache reconciles per-lot usage with the lot
+  database and enforces lots' object-count caps. On each tick the cache pushes
+  its current per-lot byte and object usage into LotMan and trims any lot that
+  is over its object-count cap back down to the cap.
+  Only used when both Cache.EnableLotman and Cache.EnableV2 are set.
+type: duration
+default: 1m
+components: ["cache"]
+---
 name: Cache.EnableV2
 description: |+
   Enable the XRootD-free persistent cache implementation.
@@ -4644,13 +4655,13 @@ components: ["cache"]
 ---
 name: Lotman.LibLocation
 description: |+
-  The location of the system's installed LotMan library (libLotMan.so). When unset, the system will attempt to find Lotman
-  at these fallback paths:
-  - /usr/lib64/libLotMan.so
-  - /usr/local/lib64/libLotMan.so
-  - /opt/local/lib64/libLotMan.so
+  [Deprecated] `Lotman.LibLocation` is deprecated and will be removed in a future release. It is
+  no longer consumed: lot management runs in-process on a native Go engine, so there is no
+  external LotMan shared library (libLotMan.so) to locate. The value is accepted but ignored.
 type: filename
 default: none
+deprecated: true
+replacedby: ["none"]
 components: ["cache"]
 ---
 name: Lotman.EnableAPI
@@ -4881,6 +4892,43 @@ description: |+
 type: duration
 hidden: true
 default: 1h
+components: ["cache"]
+---
+name: Lotman.MonitoringLotMaxObjects
+description: |+
+  The maximum number of objects retained by the auto-configured `monitoring` lot, which owns the
+  federation's monitoring/self-test namespace (`/pelican/monitoring`). The persistent (V2) cache
+  enforces this as a rolling window: when the lot holds more than this many objects, the oldest
+  excess is evicted on the next reconcile tick (see `Cache.LotUsageReconcileInterval`), keeping
+  monitoring traffic from accumulating unboundedly. The lot carries no dedicated byte quota, so it
+  is also a first eviction target under disk pressure.
+
+  Only used by the V2 cache (`Cache.EnableV2`); the V1 (XRootD) cache has no federation-aware
+  monitoring lot.
+type: int
+default: 500
+components: ["cache"]
+---
+name: Lotman.AutoCreateOnDiscover
+description: |+
+  Whether the renewal routine automatically creates lots for federation prefixes advertised by the
+  Director that do not yet have any lot covering them. When true (the default), a newly-advertised
+  namespace is given an auto-derived lot on the next renewal tick. Set this to false at
+  strict-reservations sites where only explicitly-configured or API-created lots should exist;
+  prefixes without a lot are then left to the catch-all `default` lot.
+type: bool
+default: true
+components: ["cache"]
+---
+name: Lotman.DefaultLotOpportunisticGB
+description: |+
+  The opportunistic storage quota, in GB, granted to the catch-all `default` lot that owns any
+  cached data not aligned with an explicit lot. The default of 0 keeps the historical behavior:
+  unlotted data has no protected quota and is reclaimed first. Set a positive value to let the
+  cache retain unlotted data opportunistically (evicted ahead of lotted data under disk pressure),
+  or -1 for an unbounded opportunistic quota.
+type: int
+default: 0
 components: ["cache"]
 ---
 name: Topology.DisableDowntime
