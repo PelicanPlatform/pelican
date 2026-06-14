@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -599,7 +600,7 @@ func AddRegistration(ns *server_structs.Registration) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Save the registration
 		if err := tx.Save(&ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to save registration: %s", ns.AdminMetadata.SiteName)
@@ -891,7 +892,7 @@ func updateRegistration(ns *server_structs.Registration) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Update the registration first
 		if err := tx.Save(ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to update registration: %s", ns.AdminMetadata.SiteName)
@@ -965,7 +966,7 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 // If services remain, update the server's is_origin and is_cache fields accordingly.
 func deleteRegistrationByID(id int) error {
 	// Wrap in a transaction to perform an atomic operation
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Determine the server ID associated with this registration via the services table
 		// (Server ID is not empty if this is a server registration)
 		var svc server_structs.Service
@@ -1044,7 +1045,7 @@ func deleteRegistrationByPrefix(prefix string) error {
 func deleteServerByID(id string) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Look up registration IDs for this server inside the transaction to avoid
 		// a race where a registration is added after we read but before we delete.
 		var registrationIDs []int
@@ -1151,7 +1152,7 @@ func PopulateTopology(ctx context.Context) error {
 		toAddTopo = append(toAddTopo, Topology{Prefix: prefix})
 	}
 
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		if err := tx.Where("prefix IN ?", toDelete).Delete(&Topology{}).Error; err != nil {
 			return err
 		}

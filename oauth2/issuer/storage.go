@@ -37,6 +37,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 // validTableNames is the whitelist of allowed table names for token session CRUD
@@ -248,7 +250,7 @@ func (s *OIDCStorage) GetBoundUser(_ context.Context, clientID string) (string, 
 func (s *OIDCStorage) BindClientToUser(ctx context.Context, clientID, user string) error {
 	// Single transaction: read the client's registration type and current
 	// binding, then conditionally update — all under one lock.
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(s.db.WithContext(ctx), func(tx *gorm.DB) error {
 		var record OIDCClientRecord
 		if err := tx.Select("dynamically_registered", "bound_user").First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
