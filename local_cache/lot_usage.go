@@ -282,6 +282,13 @@ func (pc *PersistentCache) startLotUsageSync(ctx context.Context, egrp *errgroup
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
+				// Refresh the lot index first so lots created since the last
+				// tick (renewal successors, API creations) are resolvable
+				// before we attribute usage. This is the periodic backstop;
+				// in-process lot mutations may also rebuild it directly.
+				if err := pc.RebuildLotIndex(); err != nil {
+					log.Warnf("periodic lot index rebuild failed: %v", err)
+				}
 				if err := pc.syncLotUsage(); err != nil {
 					log.Warnf("periodic lot usage sync failed: %v", err)
 				}

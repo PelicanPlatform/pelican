@@ -87,6 +87,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Cache.HighWaterMark
 	v.SetDefault(param.Cache_HighWaterMark.GetName(), 89)
+	// Cache.LotUsageReconcileInterval
+	v.SetDefault(param.Cache_LotUsageReconcileInterval.GetName(), "1m")
 	// Cache.LowWaterMark
 	v.SetDefault(param.Cache_LowWaterMark.GetName(), 85)
 	// Cache.MemoryCacheSize
@@ -390,10 +392,14 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Logging_Origin_Xrd.GetName(), "error")
 	// Logging.Origin.Xrootd
 	v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
+	// Lotman.AutoCreateOnDiscover
+	v.SetDefault(param.Lotman_AutoCreateOnDiscover.GetName(), true)
 	// Lotman.DefaultLotDeletionLifetime
 	v.SetDefault(param.Lotman_DefaultLotDeletionLifetime.GetName(), "48h")
 	// Lotman.DefaultLotExpirationLifetime
 	v.SetDefault(param.Lotman_DefaultLotExpirationLifetime.GetName(), "24h")
+	// Lotman.DefaultLotOpportunisticGB
+	v.SetDefault(param.Lotman_DefaultLotOpportunisticGB.GetName(), 0)
 	// Lotman.EnableAPI
 	v.SetDefault(param.Lotman_EnableAPI.GetName(), false)
 	// Lotman.EnabledPolicy
@@ -416,6 +422,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Lotman_MaxLotLifetime.GetName(), "168h")
 	// Lotman.MinFillerWidth
 	v.SetDefault(param.Lotman_MinFillerWidth.GetName(), "0s")
+	// Lotman.MonitoringLotMaxObjects
+	v.SetDefault(param.Lotman_MonitoringLotMaxObjects.GetName(), 500)
 	// Lotman.PolicyDefinitions
 	v.SetDefault(param.Lotman_PolicyDefinitions.GetName(), []any{map[string]any{"DiscoverPrefixes": true, "DivideUnallocated": true, "MergeLocalWithDiscovered": false, "PolicyName": "fairshare", "PurgeOrder": []any{"del", "exp", "opp", "ded"}}})
 	// Lotman.RenewalCheckInterval

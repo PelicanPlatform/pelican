@@ -236,7 +236,45 @@ func TestLotmanInit(t *testing.T) {
 		require.InDelta(t, float64(100), *(rootLot.MPA.DedicatedGB), 1e-6)
 		require.Equal(t, float64(-1), *(rootLot.MPA.OpportunisticGB))
 		require.Equal(t, int64(-1), rootLot.MPA.MaxNumObjects.Value)
+
+		// The V2 cache also auto-creates the monitoring lot, which bounds how
+		// many monitoring/self-test objects are retained. With no override it
+		// carries the default object cap, no dedicated bytes, and an unbounded
+		// opportunistic byte quota.
+		monLotPtr, err := GetLot("monitoring", false)
+		require.NoError(t, err, "Error getting monitoring lot")
+		monLot := *monLotPtr
+		require.Equal(t, "monitoring", monLot.LotName)
+		require.Equal(t, "root", monLot.Parents[0])
+		require.Equal(t, server_utils.MonitoringBaseNs, monLot.Paths[0].Path)
+		require.True(t, monLot.Paths[0].Recursive)
+		require.Equal(t, float64(0), *(monLot.MPA.DedicatedGB))
+		require.Equal(t, float64(-1), *(monLot.MPA.OpportunisticGB))
+		require.Equal(t, int64(500), monLot.MPA.MaxNumObjects.Value)
 	})
+}
+
+// The monitoring lot's object cap and the default lot's opportunistic quota are
+// both surfaced as config params; verify they propagate into the created lots.
+func TestLotmanInitMonitoringAndDefaultOpp(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+	require.NoError(t, param.Lotman_MonitoringLotMaxObjects.Set(42))
+	require.NoError(t, param.Lotman_DefaultLotOpportunisticGB.Set(7))
+
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanMonCap", server.URL, nil, withoutCacheDataLocations())
+	defer cleanup()
+	require.True(t, success)
+
+	monLotPtr, err := GetLot("monitoring", false)
+	require.NoError(t, err, "Error getting monitoring lot")
+	require.Equal(t, int64(42), monLotPtr.MPA.MaxNumObjects.Value)
+
+	defLotPtr, err := GetLot("default", false)
+	require.NoError(t, err, "Error getting default lot")
+	require.Equal(t, float64(7), *(defLotPtr.MPA.OpportunisticGB))
 }
 
 func TestLotmanInitFromConfig(t *testing.T) {

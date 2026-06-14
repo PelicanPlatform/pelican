@@ -95,6 +95,15 @@ func mergeMPAToCore(u *MPA, existing core.Lot) core.MPA {
 var (
 	mgr   *core.Manager
 	mgrMu sync.RWMutex
+
+	// fedPrefix, when non-empty, is prepended to every namespace ad path during
+	// lot auto-creation so V2 (persistent cache) lots are federation-qualified
+	// (e.g. "/osg-htc.org/atlas"), matching the cache's federation-qualified
+	// resolution keys. It MUST stay empty for the V1 (XRootD) cache: the purge
+	// plugin and xrootd have no concept of federation prefixes and bare paths
+	// are required there.
+	fedPrefix   string
+	fedPrefixMu sync.RWMutex
 )
 
 // getManager returns the initialized core manager, or nil if InitLotman has not
@@ -105,12 +114,36 @@ func getManager() *core.Manager {
 	return mgr
 }
 
+// GetManager returns the initialized lot core manager (or nil before
+// InitLotman). The persistent (V2) cache uses it to resolve objects to lots and
+// to track/evict per-lot usage.
+func GetManager() *core.Manager {
+	return getManager()
+}
+
 // setManager installs the process-wide manager (called by InitLotman, and by
 // tests that exercise the wrappers against an in-memory database).
 func setManager(m *core.Manager) {
 	mgrMu.Lock()
 	defer mgrMu.Unlock()
 	mgr = m
+}
+
+// SetFederationPrefix sets the path prefix prepended to namespace ad paths
+// during lot auto-creation. The V2 cache launcher calls it with "/<discovery
+// host>" BEFORE InitLotman so lots are federation-qualified; V1 must never call
+// it. Pass "" to disable.
+func SetFederationPrefix(prefix string) {
+	fedPrefixMu.Lock()
+	defer fedPrefixMu.Unlock()
+	fedPrefix = prefix
+}
+
+// getFederationPrefix returns the configured federation path prefix ("" if none).
+func getFederationPrefix() string {
+	fedPrefixMu.RLock()
+	defer fedPrefixMu.RUnlock()
+	return fedPrefix
 }
 
 // coreLogger adapts logrus to the core.Logger interface so the standalone core

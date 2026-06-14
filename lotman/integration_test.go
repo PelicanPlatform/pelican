@@ -136,9 +136,11 @@ func TestRenewalEndToEnd(t *testing.T) {
 	runGcTick()
 	allFinal, err := ListAllLots()
 	require.NoError(t, err)
-	// root and default must survive; planner-minted lots should be gone.
+	// root, default, and the monitoring sentinel must survive; planner-minted
+	// lots should be gone.
 	hasRoot := false
 	hasDefault := false
+	hasMonitoring := false
 	plannerLeft := 0
 	for _, n := range allFinal {
 		switch n {
@@ -146,12 +148,15 @@ func TestRenewalEndToEnd(t *testing.T) {
 			hasRoot = true
 		case "default":
 			hasDefault = true
+		case "monitoring":
+			hasMonitoring = true
 		default:
 			plannerLeft++
 		}
 	}
 	assert.True(t, hasRoot, "root lot must survive GC")
 	assert.True(t, hasDefault, "default lot must survive GC")
+	assert.True(t, hasMonitoring, "monitoring lot must survive GC")
 	assert.Zero(t, plannerLeft,
 		"all planner-minted lots should be GC'd once past deletion_time + LotRecordRetention; %d still present (%v)",
 		plannerLeft, allFinal)
