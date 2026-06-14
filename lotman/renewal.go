@@ -634,21 +634,6 @@ func issuerForPath(p string, ads []server_structs.NamespaceAdV2) string {
 	return ""
 }
 
-// ExpirationTimeIsSentinel reports whether the lot uses the "non-expiring"
-// all-zero timestamp sentinel (lotman PR #44). Sentinel lots (root,
-// default) must never be extended by the renewal scheduler.
-func (l Lot) ExpirationTimeIsSentinel() bool {
-	if l.MPA == nil {
-		return true
-	}
-	if l.MPA.CreationTime == nil || l.MPA.ExpirationTime == nil || l.MPA.DeletionTime == nil {
-		return false
-	}
-	return l.MPA.CreationTime.Value == 0 &&
-		l.MPA.ExpirationTime.Value == 0 &&
-		l.MPA.DeletionTime.Value == 0
-}
-
 // LaunchRenewalRoutine starts a background ticker that periodically calls
 // renewExpiringLots and applies the resulting proposal to the lotman DB.
 // It returns immediately; the goroutine exits when ctx is done.
