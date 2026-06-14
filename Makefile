@@ -143,3 +143,33 @@ pelican-serve-test-origin: pelican-build
 pelican-build-server-image:
 	@echo BUILD SERVER IMAGE
 	@$(CONTAINER_TOOL) build -t pelican-server -f images/Dockerfile .
+
+# libLotMan is the only artifact that needs CGO. The pelican / pelican-server
+# binaries stay CGO-free (see the lotman/core embedded engine); this target
+# builds the standalone C-ABI shared library that external C consumers — notably
+# the XRootD pfc purge plugin — link against, from the same Go core.
+LOTMAN_SHARED_EXT := so
+ifeq ($(goos),darwin)
+	LOTMAN_SHARED_EXT := dylib
+endif
+LOTMAN_SHARED_DIR := $(PELICAN_DIST_PATH)/lotman
+
+.PHONY: lotman-shared
+lotman-shared:
+	@echo BUILD libLotMan C-ABI shared library
+	@mkdir -p $(LOTMAN_SHARED_DIR)
+	CGO_ENABLED=1 go build -buildmode=c-shared -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
+	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and its C header"
+
+# Produce the libLotMan packages (RPM/DEB/APK). -buildmode=c-shared needs CGO
+# and a per-target toolchain, so unlike the CGO-free pelican packages this runs
+# on native per-arch runners in release CI rather than via cross-compile.
+.PHONY: lotman-package
+lotman-package:
+	@echo PACKAGE libLotMan
+	./scripts/generate_goreleaser.sh .goreleaser.lotman.in.yml .goreleaser.lotman.generated.yml
+ifeq ($(USE_DOCKER),0)
+	@goreleaser release --clean --snapshot --config .goreleaser.lotman.generated.yml
+else
+	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser release --clean --snapshot --config .goreleaser.lotman.generated.yml
+endif

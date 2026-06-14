@@ -69,6 +69,47 @@ This section documents the additional arguments you can pass to the command abov
 
 There are other configurations available to modify via the configuration file. Refer to the [Parameters](../parameters.mdx) page for details.
 
+## Managing cache space with storage lots
+
+A Pelican cache can divide its disk into **storage lots** — reservations that
+track per-namespace usage and drive eviction. Each lot owns one or more
+federation paths, carries dedicated and opportunistic byte quotas plus an
+object-count cap, and has a lifecycle (creation, expiration, deletion). When a
+lot is over quota or past its expiration, the cache evicts its objects ahead of
+healthy lots. Lots form a hierarchy under a synthesized `root` lot; data that
+matches no explicit lot falls to the catch-all `default` lot.
+
+Lot management runs in-process on the persistent (V2) cache. Enable it with:
+
+```yaml
+Cache:
+  EnableV2: true
+  EnableLotman: true
+```
+
+Lots are usually derived automatically from the namespaces the Director
+advertises, but you can also declare them explicitly under
+`Lotman.PolicyDefinitions`, or manage them at runtime over the REST API
+(`/api/v1.0/lots`, enabled with `Lotman.EnableAPI`).
+
+A few commonly-tuned settings (see the [Parameters](../parameters.mdx) page for
+the full list):
+
+* **`Cache.LotUsageReconcileInterval`**: how often the cache reconciles per-lot
+  usage with the lot database and enforces object-count caps (default `1m`).
+* **`Lotman.MonitoringLotMaxObjects`**: object cap for the auto-created
+  `monitoring` lot that owns the federation's self-test namespace
+  (`/pelican/monitoring`), enforced as a rolling window (default `500`).
+* **`Lotman.AutoCreateOnDiscover`**: whether newly-advertised federation
+  prefixes automatically get a lot (default `true`). Set to `false` at
+  strict-reservations sites.
+* **`Lotman.DefaultLotOpportunisticGB`**: opportunistic quota for the `default`
+  lot. `0` (the default) reclaims unlotted data first; a positive value (or
+  `-1` for unbounded) lets the cache retain it opportunistically.
+
+The legacy XRootD (V1) cache reaches the same lot engine through the
+`libLotMan` shared library; `Cache.EnableV2` caches need no external library.
+
 ## Test Cache Functionality
 
 Once you have your cache set up, follow the steps below to test if your cache can access a file through a Pelican federation.
