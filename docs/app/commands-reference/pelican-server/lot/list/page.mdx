@@ -1,0 +1,40 @@
+---
+title: pelican server lot list
+---
+
+## pelican-server lot list
+
+List the lots known to a cache
+
+### Synopsis
+
+List the names of the storage lots configured on a Pelican cache. Requires an administrative token for the cache.
+
+```
+pelican-server lot list [flags]
+```
+
+### Options
+
+```
+  -h, --help           help for list
+      --owner string   Only list lots owned by this issuer URL
+      --recursive      Include child lots (default true)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican cache (e.g. https://my-cache.com:8447)
+  -t, --token string        Path to an admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server lot](/commands-reference/pelican-server/lot/)	 - Manage storage lots (reservations) on a Pelican cache
