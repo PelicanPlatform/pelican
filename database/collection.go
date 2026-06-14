@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -619,7 +620,7 @@ func CreateCollection(db *gorm.DB, name, description, owner, ownerID, namespace 
 		Visibility:  visibility,
 	}
 
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(collection); result.Error != nil {
 			return result.Error
 		}
@@ -655,7 +656,7 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID
 		EnableSharing: enableSharing,
 	}
 
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(collection); result.Error != nil {
 			return result.Error
 		}
@@ -930,7 +931,7 @@ func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, g
 		return err
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
 			GroupID:      groupId,
@@ -959,7 +960,7 @@ func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, 
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND group_id = ? AND role = ?", id, groupId, role).Delete(&CollectionACL{}); result.Error != nil {
 			return result.Error
 		}
@@ -980,7 +981,7 @@ func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		metadata := CollectionMetadata{
 			CollectionID: id,
 			Key:          key,
@@ -1007,7 +1008,7 @@ func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND key = ?", id, key).Delete(&CollectionMetadata{}); result.Error != nil {
 			return result.Error
 		}
@@ -1350,7 +1351,7 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 			AddedBy:      addedBy,
 		})
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -1375,7 +1376,7 @@ func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user, use
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND object_url IN ?", id, members).Delete(&CollectionMember{}); result.Error != nil {
 			return result.Error
 		}
@@ -1404,7 +1405,7 @@ func DeleteCollection(db *gorm.DB, id string, owner, ownerID string, groups []st
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// delete all references to the collection
 		if result := tx.Where("collection_id = ?", id).Delete(&CollectionMember{}); result.Error != nil {
 			return result.Error
@@ -2338,7 +2339,7 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 		return nil
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Verify group exists and check authorization inside the transaction
 		var group Group
 		if err := tx.First(&group, "id = ?", id).Error; err != nil {
@@ -2700,7 +2701,7 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 //
 // Only the group owner or a system admin may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Fetch group inside transaction to avoid race conditions
 		var group Group
 		if err := tx.First(&group, "id = ?", groupID).Error; err != nil {
@@ -2740,7 +2741,7 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 //
 // If isAdmin is false, only the user themselves may delete their account.
 func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(db, func(tx *gorm.DB) error {
 		// Fetch user inside transaction to avoid race conditions
 		var user User
 		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
