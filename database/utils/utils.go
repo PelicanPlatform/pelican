@@ -24,11 +24,22 @@ func SQLiteDSN(dbPath string) string {
 	// Use repeated _pragma entries, as glebarez/sqlite (modernc.org/sqlite) requires.
 	// The mattn-style `_name=value` shorthand is silently ignored.
 	//
-	// `_txlock=immediate` makes every non-readonly Begin() / gorm Transaction()
-	// issue `BEGIN IMMEDIATE`, acquiring the write lock at BEGIN. Without this,
-	// SQLite defaults to BEGIN DEFERRED and a read-then-write tx can hit
-	// SQLITE_BUSY_SNAPSHOT when a concurrent writer commits between its first
-	// SELECT and its UPDATE — busy_timeout does not retry that error.
+	// _txlock=immediate makes every transaction BEGIN IMMEDIATE, acquiring the
+	// write lock up front. Without it, GORM's default deferred transactions take
+	// only a read lock and then try to upgrade to a write on their first write
+	// statement; when two connections from the pool do this concurrently, SQLite
+	// returns SQLITE_BUSY ("database is locked") *immediately* -- busy_timeout
+	// does not help, because waiting cannot resolve the mutual upgrade. With
+	// BEGIN IMMEDIATE, a second writer instead waits on busy_timeout for the
+	// write lock, which is exactly the intended serialization. It also avoids
+	// SQLITE_BUSY_SNAPSHOT, which a deferred read-then-write transaction hits
+	// when a concurrent writer commits between its first SELECT and its UPDATE.
+	//
+	// Consequently every explicit transaction is BEGIN IMMEDIATE by default. A
+	// multi-statement read that must stay concurrent with writers should run via
+	// ReadTx (which marks the transaction ReadOnly); lone autocommit reads are
+	// unaffected and remain concurrent. Prefer WriteTx/ReadTx over calling
+	// db.Transaction directly so the lock intent is explicit.
 	return dbPath + "?" +
 		"_pragma=busy_timeout(5000)&" +
 		"_pragma=journal_mode(WAL)&" +
@@ -83,6 +94,27 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+// WriteTx runs fn inside a read-write transaction. With the standard SQLite DSN
+// (see SQLiteDSN) the transaction is BEGIN IMMEDIATE: it takes the write lock up
+// front and serializes cleanly against other writers via busy_timeout, instead
+// of risking an immediate SQLITE_BUSY ("database is locked") on a deferred
+// read->write upgrade. This is the default shape; use it for any transaction
+// that writes.
+func WriteTx(db *gorm.DB, fn func(tx *gorm.DB) error) error {
+	return db.Transaction(fn)
+}
+
+// ReadTx runs fn inside a read-only transaction. It is marked ReadOnly so the
+// driver issues a deferred read transaction that keeps running concurrently
+// under WAL even while a writer holds the lock -- unlike a default transaction,
+// which BEGIN IMMEDIATE would serialize. Use it only for a multi-statement read
+// that needs a single consistent snapshot. (A lone query -- db.First/Find/Where
+// with no transaction -- is already a concurrent autocommit read and needs no
+// wrapper.)
+func ReadTx(db *gorm.DB, fn func(tx *gorm.DB) error) error {
+	return db.Transaction(fn, &sql.TxOptions{ReadOnly: true})
 }
 
 func MigrateDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string) error {
