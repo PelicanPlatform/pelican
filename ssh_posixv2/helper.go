@@ -138,13 +138,16 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 		return errors.Wrap(err, "failed to get stderr pipe")
 	}
 
-	// Initialize helper IO management
-	c.helperIO = &helperIO{
+	// Initialize helper IO management. Populate the struct fully before
+	// publishing it via Store so readers never observe a partially-built
+	// helperIO.
+	hio := &helperIO{
 		stdin:        stdin,
 		stdoutReader: bufio.NewReader(stdout),
 	}
-	c.helperIO.lastPong.Store(time.Now())
-	c.helperIO.helperUptime.Store("")
+	hio.lastPong.Store(time.Now())
+	hio.helperUptime.Store("")
+	c.helperIO.Store(hio)
 
 	// Serialize the helper configuration
 	configJSON, err := json.Marshal(helperConfig)
@@ -243,10 +246,10 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 // readHelperStdout reads and processes stdout messages from the helper.
 // It parses JSON messages for pong responses and ready notifications.
 func (c *SSHConnection) readHelperStdout(ctx context.Context) error {
-	// Snapshot helperIO once. StopHelper nils c.helperIO during teardown;
+	// Snapshot helperIO once. StopHelper clears c.helperIO during teardown;
 	// holding our own pointer keeps the underlying struct reachable for
 	// the rest of this goroutine's life and avoids a nil-deref race.
-	helperIO := c.helperIO
+	helperIO := c.helperIO.Load()
 	if helperIO == nil {
 		return nil
 	}
@@ -431,10 +434,10 @@ func (c *SSHConnection) runStdinKeepalive(ctx context.Context) error {
 
 // sendPing sends a ping message to the helper via stdin
 func (c *SSHConnection) sendPing() error {
-	// Snapshot helperIO so a concurrent StopHelper that nils it (or its
+	// Snapshot helperIO so a concurrent StopHelper that clears it (or its
 	// stdin) can't turn this into a nil deref. sendShutdownMessage uses
 	// the same pattern.
-	helperIO := c.helperIO
+	helperIO := c.helperIO.Load()
 	if helperIO == nil || helperIO.stdin == nil {
 		return errors.New("helper IO not initialized")
 	}
@@ -459,7 +462,10 @@ func (c *SSHConnection) sendPing() error {
 
 // sendShutdownMessage sends a shutdown message to the helper via stdin
 func (c *SSHConnection) sendShutdownMessage() error {
-	if c.helperIO == nil {
+	// Snapshot helperIO so a concurrent StopHelper that clears it (or its
+	// stdin) can't turn this into a nil deref, mirroring sendPing.
+	helperIO := c.helperIO.Load()
+	if helperIO == nil || helperIO.stdin == nil {
 		return nil
 	}
 
@@ -469,13 +475,13 @@ func (c *SSHConnection) sendShutdownMessage() error {
 		return err
 	}
 
-	c.helperIO.stdinMu.Lock()
-	defer c.helperIO.stdinMu.Unlock()
+	helperIO.stdinMu.Lock()
+	defer helperIO.stdinMu.Unlock()
 
-	if _, err := c.helperIO.stdin.Write(data); err != nil {
+	if _, err := helperIO.stdin.Write(data); err != nil {
 		return err
 	}
-	if _, err := c.helperIO.stdin.Write([]byte("\n")); err != nil {
+	if _, err := helperIO.stdin.Write([]byte("\n")); err != nil {
 		return err
 	}
 	sshLog.Debug("Sent shutdown message to helper")
@@ -489,11 +495,11 @@ func (c *SSHConnection) runPongMonitor(ctx context.Context) error {
 		timeout = c.helperConfig.KeepaliveTimeout
 	}
 
-	// Snapshot helperIO once: StopHelper sets c.helperIO = nil during
-	// teardown, and a nil deref on c.helperIO.lastPong here is the panic
-	// reported in #3363. Holding our own pointer keeps the atomic.Value
-	// reachable for the rest of the goroutine's life.
-	helperIO := c.helperIO
+	// Snapshot helperIO once: StopHelper clears c.helperIO during teardown,
+	// and a nil deref on c.helperIO.lastPong here is the panic reported in
+	// #3363. Holding our own pointer keeps the atomic.Value reachable for
+	// the rest of the goroutine's life.
+	helperIO := c.helperIO.Load()
 	if helperIO == nil {
 		return nil
 	}
@@ -543,17 +549,20 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 	// Close stdin so the helper also sees EOF (belt-and-suspenders with
 	// the "shutdown" message above).  This also causes the origin-side
 	// runStdinKeepalive to fail its next Write and return.
-	if c.helperIO != nil && c.helperIO.stdin != nil {
-		c.helperIO.stdin.Close()
+	if hio := c.helperIO.Load(); hio != nil && hio.stdin != nil {
+		hio.stdin.Close()
 	}
 
 	// Start waiting for the errgroup to finish in the background.
-	// We must wait for all goroutines to exit before niling helperIO,
+	// We must wait for all goroutines to exit before clearing helperIO,
 	// otherwise goroutines like readHelperStdout will hit a nil pointer.
+	// Snapshot the errgroup under c.mu and hand it to the goroutine so the
+	// goroutine never reads c.helperErrgroup (which we nil below) directly.
+	egrp := c.helperErrgroup
 	done := make(chan error, 1)
 	go func() {
-		if c.helperErrgroup != nil {
-			done <- c.helperErrgroup.Wait()
+		if egrp != nil {
+			done <- egrp.Wait()
 		} else {
 			done <- nil
 		}
@@ -592,8 +601,8 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 
 			// Close stdin and session to force goroutines to unblock from
 			// their I/O reads, then wait for the errgroup to finish.
-			if c.helperIO != nil && c.helperIO.stdin != nil {
-				c.helperIO.stdin.Close()
+			if hio := c.helperIO.Load(); hio != nil && hio.stdin != nil {
+				hio.stdin.Close()
 			}
 			c.session.Close()
 
@@ -624,8 +633,8 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 	}
 
 	// Close stdin and session (may already be closed after SIGKILL path; double-close is safe)
-	if c.helperIO != nil && c.helperIO.stdin != nil {
-		c.helperIO.stdin.Close()
+	if hio := c.helperIO.Load(); hio != nil && hio.stdin != nil {
+		hio.stdin.Close()
 	}
 
 	if c.session != nil {
@@ -638,7 +647,7 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 		c.helperCancel = nil
 	}
 	c.session = nil
-	c.helperIO = nil
+	c.helperIO.Store(nil)
 	c.helperErrgroup = nil
 
 	if c.GetState() == StateRunningHelper {
@@ -714,11 +723,14 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 // GetHelperStatus queries the helper for its status using the stdin/stdout protocol.
 // This does not require the helper to listen on any TCP port.
 func (c *SSHConnection) GetHelperStatus(ctx context.Context) (*HelperStatus, error) {
-	// Snapshot helperIO once so a concurrent StopHelper that nils it
+	// Snapshot helperIO once so a concurrent StopHelper that clears it
 	// can't turn the field reads below into a nil-deref or surface a
-	// type-assertion panic on a nil interface from Load().
-	helperIO := c.helperIO
-	if c.session == nil || helperIO == nil {
+	// type-assertion panic on a nil interface from Load(). helperIO is
+	// non-nil exactly when the helper is started (StartHelper/StopHelper
+	// set it together with c.session under c.mu), so it doubles as the
+	// "started?" check without a lock-free read of c.session.
+	helperIO := c.helperIO.Load()
+	if helperIO == nil {
 		return &HelperStatus{
 			State:   HelperStateNotStarted,
 			Message: "Helper not started",
@@ -768,6 +780,12 @@ func (c *SSHConnection) GetHelperStatus(ctx context.Context) (*HelperStatus, err
 func (c *SSHConnection) WaitForHelper(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
+	// Snapshot the helper context once. It is published by StartHelper
+	// (under c.mu) before WaitForHelper is called and is not reassigned for
+	// this helper instance, so reading it once here avoids a lock-free read
+	// of c.helperCtx/c.helperErrgroup racing with StopHelper clearing them.
+	helperCtx := c.helperCtx
+
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -775,28 +793,18 @@ func (c *SSHConnection) WaitForHelper(ctx context.Context, timeout time.Duration
 		default:
 		}
 
-		// Check if helper errgroup has an error
-		if c.helperErrgroup != nil {
-			// Check non-blocking if errgroup finished
-			done := make(chan struct{})
-			go func() {
-				// This will return quickly if errgroup is done
-				select {
-				case <-c.helperCtx.Done():
-					close(done)
-				default:
-				}
-			}()
+		// If the helper context is already cancelled, the helper goroutines
+		// have failed or exited; stop waiting.
+		if helperCtx != nil {
 			select {
-			case <-done:
-				// Context was cancelled, likely helper failed
+			case <-helperCtx.Done():
 				return errors.New("helper process failed during startup")
 			default:
 			}
 		}
 
 		// Check if helper is ready
-		if c.helperIO != nil && c.helperIO.helperReady.Load() {
+		if hio := c.helperIO.Load(); hio != nil && hio.helperReady.Load() {
 			return nil
 		}
 
@@ -818,8 +826,8 @@ func (c *SSHConnection) WaitForHelperSocket(ctx context.Context, timeout time.Du
 		default:
 		}
 
-		if c.helperIO != nil {
-			if v := c.helperIO.helperSocketPath.Load(); v != nil {
+		if hio := c.helperIO.Load(); hio != nil {
+			if v := hio.helperSocketPath.Load(); v != nil {
 				if sp, ok := v.(string); ok && sp != "" {
 					return sp, nil
 				}
