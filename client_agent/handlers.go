@@ -78,24 +78,10 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 		return
 	}
 
-	// Build response
-	transfers := make([]TransferResponse, len(job.Transfers))
-	for i, transfer := range job.Transfers {
-		transfers[i] = TransferResponse{
-			TransferID:  transfer.ID,
-			Operation:   transfer.Operation,
-			Source:      transfer.Source,
-			Destination: transfer.Destination,
-			Status:      transfer.Status,
-		}
-	}
-
-	resp := JobResponse{
-		JobID:     job.ID,
-		Status:    job.Status,
-		CreatedAt: job.CreatedAt,
-		Transfers: transfers,
-	}
+	// Build response. Read the job's mutable status fields under the transfer
+	// manager's lock, since the job's asynchronous execution goroutine may
+	// already be updating them.
+	resp := s.transferManager.SnapshotJobResponse(job)
 
 	c.JSON(http.StatusCreated, resp)
 }
