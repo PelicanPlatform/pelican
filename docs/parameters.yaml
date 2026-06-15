@@ -654,6 +654,21 @@ default: 0
 components: ["client"]
 hidden: true
 ---
+name: Client.PreferAnycast
+description: |+
+  When true, and the federation advertises a TCP anycast endpoint, the client prefers the
+  anycast endpoint for service selection (contacting it first for downloads and routing
+  write-through uploads to it), bypassing the director on the happy path.
+
+  The default is false: the director's geography/load/health-aware selection is preferred,
+  and the anycast endpoint is used only as a fallback when the director is unreachable.
+  Enable this only for sites known to be well-covered by the federation's anycast group;
+  clients far from the anycast group (e.g. outside the covered region) may otherwise be
+  routed to a distant cache.
+type: bool
+default: false
+components: ["client"]
+---
 name: Client.AssumeDirectorServerHeader
 description: |+
   Assume whether a Director response is actually coming from the Director.
@@ -2416,6 +2431,146 @@ default: false
 components: ["cache"]
 hidden: true
 ---
+name: Cache.Anycast.Enable
+description: |+
+  Enable TCP anycast support for this cache.  When enabled, the cache will connect to a
+  BGP peer and advertise the configured net blocks (Cache.Anycast.Routes) for the anycast
+  service, but only while the cache believes itself to be healthy and is serving a TLS
+  certificate containing the configured anycast hostname as a Subject Alternative Name.
+
+  Anycast is only supported by the persistent (V2) cache implementation; if Cache.EnableV2
+  is false this feature is disabled.
+type: bool
+default: false
+components: ["cache"]
+---
+name: Cache.Anycast.Hostname
+description: |+
+  The anycast hostname that clients use to reach the anycast service.  Routes are only
+  advertised while the cache's host certificate contains this name as a Subject Alternative
+  Name (verified by an external TLS probe to Cache.Anycast.ProbeUrl).
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.Routes
+description: |+
+  A list of CIDR net blocks for the anycast service that this cache should advertise to its
+  BGP peer (e.g. ["192.0.2.0/24", "2001:db8::/64"]).
+type: stringSlice
+default: []
+components: ["cache"]
+---
+name: Cache.Anycast.Addresses
+description: |+
+  The anycast service IP address(es) (IPv4 and/or IPv6) that this cache answers for and that
+  must be present on a local network device so the kernel accepts packets destined to them.
+  Each entry may be a bare IP (a host route is assumed: /32 for IPv4, /128 for IPv6) or an
+  IP with an explicit prefix length.  These are distinct from Cache.Anycast.Routes, which are
+  the (possibly larger) net blocks advertised via BGP.  Whether Pelican adds/removes these on
+  the device is governed by Cache.Anycast.AddressManagement.
+type: stringSlice
+default: []
+components: ["cache"]
+---
+name: Cache.Anycast.Device
+description: |+
+  The network device on which Pelican manages the anycast IP addresses
+  (Cache.Anycast.Addresses).  If empty, Pelican determines the device by asking the kernel
+  (via netlink) which interface would route to the director.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.AddressManagement
+description: |+
+  Controls whether Pelican adds/removes the anycast IP addresses (Cache.Anycast.Addresses)
+  on the local network device.  One of:
+    - "auto" (default): for each address, add it if it is not already present at startup and
+      remove that address on shutdown; addresses already present at startup are left untouched.
+    - "on": always add the addresses at startup and always remove them on shutdown.
+    - "off": never add or remove addresses (the operator manages them out of band).
+  Local address management is only supported on Linux.
+type: string
+default: auto
+components: ["cache"]
+---
+name: Cache.Anycast.NextHop
+description: |+
+  The BGP next-hop address to advertise with the anycast routes.  This is normally the
+  cache's own routable IP address.  If left empty, Cache.Anycast.BGP.LocalAddress is used.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.ProbeUrl
+description: |+
+  The URL whose TLS certificate is probed to determine whether this cache is serving the
+  correct host certificate before advertising anycast routes.  This should be the cache's
+  own external URL, NOT the anycast hostname (which may route to a different cache).  If
+  empty, Server.ExternalWebUrl is used.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.ProbeInterval
+description: |+
+  How often the cache re-evaluates its health and host certificate and (re)advertises or
+  withdraws the anycast routes accordingly.
+type: duration
+default: 30s
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.PeerAddress
+description: |+
+  The IP address of the BGP peer (router) to which anycast routes are advertised.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.PeerASN
+description: |+
+  The Autonomous System Number (ASN) of the BGP peer.
+type: int
+default: 0
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.LocalASN
+description: |+
+  The local Autonomous System Number (ASN) used by this cache when peering.
+type: int
+default: 0
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.RouterID
+description: |+
+  The BGP router ID (an IPv4-address-formatted identifier) for this cache's BGP speaker.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.LocalAddress
+description: |+
+  The local address the BGP speaker binds to when connecting to the peer.  Optional; if
+  empty, the system default is used.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.Port
+description: |+
+  The TCP port used to connect to the BGP peer.
+type: int
+default: 179
+components: ["cache"]
+---
+name: Cache.Anycast.BGP.Password
+description: |+
+  An optional TCP-MD5 password used to authenticate the BGP session with the peer.
+type: string
+default: none
+components: ["cache"]
+---
 name: Cache.AllowedFederations
 description: |+
   A list of federation discovery URLs (or host:port values) that this cache is allowed to serve.
@@ -2659,6 +2814,16 @@ default: $ConfigBase/director.sqlite
 components: ["director"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
+---
+name: Director.AnycastUrl
+description: |+
+  The federation-wide anycast endpoint URL advertised in the director's federation metadata
+  (at /.well-known/pelican-configuration as "anycast_endpoint").  Clients may connect to this
+  endpoint directly to reach an anycast-enabled cache, bypassing the director on the happy
+  path.  This is a single shared address served by all anycast-enabled caches in the federation.
+type: string
+default: none
+components: ["director"]
 ---
 name: Director.DefaultResponse
 description: |+

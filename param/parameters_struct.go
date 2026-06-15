@@ -28,6 +28,26 @@ import (
 type Config struct {
 	Cache struct {
 		AllowedFederations []string `mapstructure:"allowedfederations" yaml:"AllowedFederations"`
+		Anycast struct {
+			AddressManagement string `mapstructure:"addressmanagement" yaml:"AddressManagement"`
+			Addresses []string `mapstructure:"addresses" yaml:"Addresses"`
+			BGP struct {
+				LocalASN int `mapstructure:"localasn" yaml:"LocalASN"`
+				LocalAddress string `mapstructure:"localaddress" yaml:"LocalAddress"`
+				Password string `mapstructure:"password" yaml:"Password"`
+				PeerASN int `mapstructure:"peerasn" yaml:"PeerASN"`
+				PeerAddress string `mapstructure:"peeraddress" yaml:"PeerAddress"`
+				Port int `mapstructure:"port" yaml:"Port"`
+				RouterID string `mapstructure:"routerid" yaml:"RouterID"`
+			} `mapstructure:"bgp" yaml:"BGP"`
+			Device string `mapstructure:"device" yaml:"Device"`
+			Enable bool `mapstructure:"enable" yaml:"Enable"`
+			Hostname string `mapstructure:"hostname" yaml:"Hostname"`
+			NextHop string `mapstructure:"nexthop" yaml:"NextHop"`
+			ProbeInterval time.Duration `mapstructure:"probeinterval" yaml:"ProbeInterval"`
+			ProbeUrl string `mapstructure:"probeurl" yaml:"ProbeUrl"`
+			Routes []string `mapstructure:"routes" yaml:"Routes"`
+		} `mapstructure:"anycast" yaml:"Anycast"`
 		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
 		ClientStatisticsLocation string `mapstructure:"clientstatisticslocation" yaml:"ClientStatisticsLocation"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
@@ -83,6 +103,7 @@ type Config struct {
 		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
+		PreferAnycast bool `mapstructure:"preferanycast" yaml:"PreferAnycast"`
 		PreferredCaches []string `mapstructure:"preferredcaches" yaml:"PreferredCaches"`
 		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime" yaml:"SlowTransferRampupTime"`
 		SlowTransferWindow time.Duration `mapstructure:"slowtransferwindow" yaml:"SlowTransferWindow"`
@@ -106,6 +127,7 @@ type Config struct {
 		AdaptiveSortTruncateConstant int `mapstructure:"adaptivesorttruncateconstant" yaml:"AdaptiveSortTruncateConstant"`
 		AdvertiseUrl string `mapstructure:"advertiseurl" yaml:"AdvertiseUrl"`
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
+		AnycastUrl string `mapstructure:"anycasturl" yaml:"AnycastUrl"`
 		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
 		CachePresenceCapacity int `mapstructure:"cachepresencecapacity" yaml:"CachePresenceCapacity"`
 		CachePresenceTTL time.Duration `mapstructure:"cachepresencettl" yaml:"CachePresenceTTL"`
@@ -513,6 +535,26 @@ type Config struct {
 type configWithType struct {
 	Cache struct {
 		AllowedFederations struct { Type string; Value []string }
+		Anycast struct {
+			AddressManagement struct { Type string; Value string }
+			Addresses struct { Type string; Value []string }
+			BGP struct {
+				LocalASN struct { Type string; Value int }
+				LocalAddress struct { Type string; Value string }
+				Password struct { Type string; Value string }
+				PeerASN struct { Type string; Value int }
+				PeerAddress struct { Type string; Value string }
+				Port struct { Type string; Value int }
+				RouterID struct { Type string; Value string }
+			}
+			Device struct { Type string; Value string }
+			Enable struct { Type string; Value bool }
+			Hostname struct { Type string; Value string }
+			NextHop struct { Type string; Value string }
+			ProbeInterval struct { Type string; Value time.Duration }
+			ProbeUrl struct { Type string; Value string }
+			Routes struct { Type string; Value []string }
+		}
 		BlocksToPrefetch struct { Type string; Value int }
 		ClientStatisticsLocation struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
@@ -568,6 +610,7 @@ type configWithType struct {
 		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
+		PreferAnycast struct { Type string; Value bool }
 		PreferredCaches struct { Type string; Value []string }
 		SlowTransferRampupTime struct { Type string; Value time.Duration }
 		SlowTransferWindow struct { Type string; Value time.Duration }
@@ -591,6 +634,7 @@ type configWithType struct {
 		AdaptiveSortTruncateConstant struct { Type string; Value int }
 		AdvertiseUrl struct { Type string; Value string }
 		AdvertisementTTL struct { Type string; Value time.Duration }
+		AnycastUrl struct { Type string; Value string }
 		AssumePresenceAtSingleOrigin struct { Type string; Value bool }
 		CachePresenceCapacity struct { Type string; Value int }
 		CachePresenceTTL struct { Type string; Value time.Duration }

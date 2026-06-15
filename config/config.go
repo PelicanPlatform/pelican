@@ -606,6 +606,10 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	if fedInfo.DirectorAdvertiseEndpoints == nil && metadata.DirectorAdvertiseEndpoints != nil {
 		fedInfo.DirectorAdvertiseEndpoints = metadata.DirectorAdvertiseEndpoints
 	}
+	if fedInfo.AnycastEndpoint == "" && metadata.AnycastEndpoint != "" {
+		log.Debugln("Setting global anycast endpoint to", metadata.AnycastEndpoint)
+		fedInfo.AnycastEndpoint = metadata.AnycastEndpoint
+	}
 
 	return
 }

@@ -38,6 +38,7 @@ require (
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4
+	github.com/osrg/gobgp/v3 v3.37.0
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/xattr v0.4.12
 	github.com/pressly/goose/v3 v3.18.0
@@ -53,6 +54,7 @@ require (
 	github.com/tg123/go-htpasswd v1.2.1
 	github.com/thomas-tacquet/gormv2-logrus v1.2.3
 	github.com/vbauerster/mpb/v8 v8.6.1
+	github.com/vishvananda/netlink v1.2.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
@@ -79,8 +81,11 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/cristalhq/jwt/v4 v4.0.2 // indirect
 	github.com/dgraph-io/ristretto v1.0.0 // indirect
+	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
+	github.com/eapache/channels v1.1.0 // indirect
+	github.com/eapache/queue v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-stomp/stomp/v3 v3.0.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
@@ -99,6 +104,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/joncrlsn/dque v0.0.0-20211108142734-c2ef48c5192a // indirect
+	github.com/k-sone/critbitgo v1.4.0 // indirect
 	github.com/lestrrat-go/httprc v1.0.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -120,6 +126,7 @@ require (
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/streadway/amqp v1.0.0 // indirect
+	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect
@@ -242,7 +249,7 @@ require (
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.32.0
 	golang.org/x/time v0.8.0
-	google.golang.org/protobuf v1.36.10 // indirect
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.69 // indirect
 	modernc.org/libc v1.32.0 // indirect
