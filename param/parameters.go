@@ -370,13 +370,17 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.HttpAuthTokenPassthrough": false,
 	"Origin.HttpServiceUrl": false,
 	"Origin.IssuerMode": false,
+	"Origin.Metadata.AllowMultipart": false,
 	"Origin.Metadata.Enabled": false,
 	"Origin.Metadata.Endpoint": false,
 	"Origin.Metadata.ErrorAfter": false,
 	"Origin.Metadata.MaxBackoff": false,
 	"Origin.Metadata.MaxInflight": false,
+	"Origin.Metadata.MaxMetadataBytes": false,
+	"Origin.Metadata.MetadataPartName": false,
 	"Origin.Metadata.MinBackoff": false,
 	"Origin.Metadata.Mode": false,
+	"Origin.Metadata.ObjectPartName": false,
 	"Origin.Metadata.RatePerSecond": false,
 	"Origin.Metadata.RequestTimeout": false,
 	"Origin.Metadata.TokenLifetime": false,
@@ -713,7 +717,9 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
 	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
 	"Origin.Metadata.Endpoint": func(c *Config) string { return c.Origin.Metadata.Endpoint },
+	"Origin.Metadata.MetadataPartName": func(c *Config) string { return c.Origin.Metadata.MetadataPartName },
 	"Origin.Metadata.Mode": func(c *Config) string { return c.Origin.Metadata.Mode },
+	"Origin.Metadata.ObjectPartName": func(c *Config) string { return c.Origin.Metadata.ObjectPartName },
 	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
 	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
@@ -932,6 +938,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
 	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
 	"Origin.Metadata.MaxInflight": func(c *Config) int { return c.Origin.Metadata.MaxInflight },
+	"Origin.Metadata.MaxMetadataBytes": func(c *Config) int { return c.Origin.Metadata.MaxMetadataBytes },
 	"Origin.Metadata.RatePerSecond": func(c *Config) int { return c.Origin.Metadata.RatePerSecond },
 	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
 	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
@@ -1084,6 +1091,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
 	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
 	"Origin.HttpAuthTokenPassthrough": func(c *Config) bool { return c.Origin.HttpAuthTokenPassthrough },
+	"Origin.Metadata.AllowMultipart": func(c *Config) bool { return c.Origin.Metadata.AllowMultipart },
 	"Origin.Metadata.Enabled": func(c *Config) bool { return c.Origin.Metadata.Enabled },
 	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
 	"Origin.Posc.Enabled": func(c *Config) bool { return c.Origin.Posc.Enabled },
@@ -1591,13 +1599,17 @@ var allParameterNames = []string{
 	"Origin.HttpAuthTokenPassthrough",
 	"Origin.HttpServiceUrl",
 	"Origin.IssuerMode",
+	"Origin.Metadata.AllowMultipart",
 	"Origin.Metadata.Enabled",
 	"Origin.Metadata.Endpoint",
 	"Origin.Metadata.ErrorAfter",
 	"Origin.Metadata.MaxBackoff",
 	"Origin.Metadata.MaxInflight",
+	"Origin.Metadata.MaxMetadataBytes",
+	"Origin.Metadata.MetadataPartName",
 	"Origin.Metadata.MinBackoff",
 	"Origin.Metadata.Mode",
+	"Origin.Metadata.ObjectPartName",
 	"Origin.Metadata.RatePerSecond",
 	"Origin.Metadata.RequestTimeout",
 	"Origin.Metadata.TokenLifetime",
@@ -1907,7 +1919,9 @@ var (
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
 	Origin_Metadata_Endpoint = StringParam{"Origin.Metadata.Endpoint"}
+	Origin_Metadata_MetadataPartName = StringParam{"Origin.Metadata.MetadataPartName"}
 	Origin_Metadata_Mode = StringParam{"Origin.Metadata.Mode"}
+	Origin_Metadata_ObjectPartName = StringParam{"Origin.Metadata.ObjectPartName"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
@@ -2070,6 +2084,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Metadata_MaxInflight = IntParam{"Origin.Metadata.MaxInflight"}
+	Origin_Metadata_MaxMetadataBytes = IntParam{"Origin.Metadata.MaxMetadataBytes"}
 	Origin_Metadata_RatePerSecond = IntParam{"Origin.Metadata.RatePerSecond"}
 	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
 	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
@@ -2157,6 +2172,7 @@ var (
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
 	Origin_HttpAuthTokenPassthrough = BoolParam{"Origin.HttpAuthTokenPassthrough"}
+	Origin_Metadata_AllowMultipart = BoolParam{"Origin.Metadata.AllowMultipart"}
 	Origin_Metadata_Enabled = BoolParam{"Origin.Metadata.Enabled"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_Posc_Enabled = BoolParam{"Origin.Posc.Enabled"}
@@ -2416,7 +2432,9 @@ func init() {
 		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
 		"Origin.IssuerMode": Origin_IssuerMode,
 		"Origin.Metadata.Endpoint": Origin_Metadata_Endpoint,
+		"Origin.Metadata.MetadataPartName": Origin_Metadata_MetadataPartName,
 		"Origin.Metadata.Mode": Origin_Metadata_Mode,
+		"Origin.Metadata.ObjectPartName": Origin_Metadata_ObjectPartName,
 		"Origin.Mode": Origin_Mode,
 		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
@@ -2573,6 +2591,7 @@ func init() {
 		"Origin.ConcurrencyDegradedThreshold": Origin_ConcurrencyDegradedThreshold,
 		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
 		"Origin.Metadata.MaxInflight": Origin_Metadata_MaxInflight,
+		"Origin.Metadata.MaxMetadataBytes": Origin_Metadata_MaxMetadataBytes,
 		"Origin.Metadata.RatePerSecond": Origin_Metadata_RatePerSecond,
 		"Origin.MultiuserMinID": Origin_MultiuserMinID,
 		"Origin.MultiuserUmask": Origin_MultiuserUmask,
@@ -2654,6 +2673,7 @@ func init() {
 		"Origin.EnableWrite": Origin_EnableWrite,
 		"Origin.EnableWrites": Origin_EnableWrites,
 		"Origin.HttpAuthTokenPassthrough": Origin_HttpAuthTokenPassthrough,
+		"Origin.Metadata.AllowMultipart": Origin_Metadata_AllowMultipart,
 		"Origin.Metadata.Enabled": Origin_Metadata_Enabled,
 		"Origin.Multiuser": Origin_Multiuser,
 		"Origin.Posc.Enabled": Origin_Posc_Enabled,
