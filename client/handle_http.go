@@ -267,6 +267,12 @@ type (
 		// with an X-Pelican-Object-Metadata header carrying the SFV
 		// rendering of these fields.
 		objectMetadata map[string]any
+		// objectMetadataBlob carries the optional opaque-blob
+		// metadata supplied via WithObjectMetadataBlob /
+		// WithObjectMetadataBlobFile. When non-nil, the upload PUT
+		// is sent as multipart/form-data: "metadata" part with
+		// the blob, "object" part with the file body.
+		objectMetadataBlob *objectMetadataBlob
 	}
 
 	// A representation of a "transfer job".  The job
@@ -317,6 +323,12 @@ type (
 		// X-Pelican-Object-Metadata field-set propagated to all
 		// child transferFiles for upload jobs.
 		objectMetadata map[string]any
+		// objectMetadataBlob is the optional opaque-blob metadata
+		// (set by WithObjectMetadataBlob / WithObjectMetadataBlobFile).
+		// When non-nil and the blob body is non-empty, every child
+		// transferFile uploads via multipart/form-data instead of
+		// the historic raw PUT.
+		objectMetadataBlob *objectMetadataBlob
 	}
 
 	// A TransferJob associated with a client's request
@@ -416,6 +428,9 @@ type (
 	identTransferOptionRequestId                struct{}
 	identTransferOptionObjectMetadata           struct{}
 	identTransferOptionObjectMetadataFile       struct{}
+	identTransferOptionObjectMetadataBlob       struct{}
+	identTransferOptionObjectMetadataBlobFile   struct{}
+	identTransferOptionObjectMetadataBlobType   struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -955,6 +970,51 @@ func WithObjectMetadata(fields map[string]any) TransferOption {
 // every other With…() helper here.
 func WithObjectMetadataFile(path string) TransferOption {
 	return option.New(identTransferOptionObjectMetadataFile{}, path)
+}
+
+// WithObjectMetadataBlob attaches an opaque metadata blob to an
+// upload. When non-empty, the upload PUT switches from raw to
+// multipart/form-data with two parts: the metadata blob first, the
+// object body second. The origin's multipart middleware reads the
+// blob into memory (capped by Origin.Metadata.MaxMetadataBytes),
+// streams the object part through the existing POSC pipeline, and
+// forwards the blob byte-for-byte to the configured metadata
+// endpoint as the second part of a multipart/related body.
+//
+// `contentType` is the on-the-wire Content-Type a receiver sees;
+// pass an empty string to default to "application/octet-stream".
+// Reserved field names ("metadata", "object" by default) are
+// configured on the origin and are not visible to callers — the
+// client always sends the metadata part with the origin's
+// configured metadata-part name.
+func WithObjectMetadataBlob(body []byte, contentType string) TransferOption {
+	// Defensive copy so the caller can recycle the byte slice.
+	cpy := append([]byte(nil), body...)
+	return option.New(identTransferOptionObjectMetadataBlob{}, objectMetadataBlob{
+		body:        cpy,
+		contentType: contentType,
+	})
+}
+
+// WithObjectMetadataBlobFile is the file-shaped sibling of
+// WithObjectMetadataBlob. The blob is read lazily during
+// NewTransferJob's option-apply pass; an unreadable path surfaces
+// as an error from DoPut before any network I/O. The blob's
+// Content-Type is sniffed from the file extension (".xml" ⇒
+// application/xml, ".json" ⇒ application/json, …) and may be
+// overridden via WithObjectMetadataContentType.
+func WithObjectMetadataBlobFile(path string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataBlobFile{}, path)
+}
+
+// WithObjectMetadataContentType overrides the Content-Type used for
+// the metadata blob supplied via WithObjectMetadataBlobFile. No
+// effect on WithObjectMetadataBlob (which takes the content type as
+// a constructor argument). Last-supplied wins if both
+// WithObjectMetadataContentType and WithObjectMetadataBlob /
+// WithObjectMetadataBlobFile are used.
+func WithObjectMetadataContentType(contentType string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataBlobType{}, contentType)
 }
 
 // Create an option to specify the token acquisition logic
@@ -1684,6 +1744,27 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				return
 			}
 			tj.objectMetadata = fields
+		case identTransferOptionObjectMetadataBlob{}:
+			blob := option.Value().(objectMetadataBlob)
+			tj.objectMetadataBlob = &blob
+		case identTransferOptionObjectMetadataBlobFile{}:
+			path := option.Value().(string)
+			blob, ferr := loadObjectMetadataBlobFile(path)
+			if ferr != nil {
+				err = errors.Wrap(ferr, "WithObjectMetadataBlobFile")
+				return
+			}
+			tj.objectMetadataBlob = blob
+		case identTransferOptionObjectMetadataBlobType{}:
+			ct := option.Value().(string)
+			// Apply to whatever blob is currently set. If no blob
+			// is set yet, allocate an empty placeholder so a later
+			// WithObjectMetadataBlobFile / WithObjectMetadataBlob
+			// can fill in the body. Apply order is last-wins.
+			if tj.objectMetadataBlob == nil {
+				tj.objectMetadataBlob = &objectMetadataBlob{}
+			}
+			tj.objectMetadataBlob.contentType = ct
 		}
 	}
 
@@ -2596,6 +2677,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			byteRange:          job.job.byteRange,
 			metadataChan:       job.job.metadataChan,
 			objectMetadata:     job.job.objectMetadata,
+			objectMetadataBlob: job.job.objectMetadataBlob,
 		},
 	}:
 	}
@@ -4364,9 +4446,24 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
+
+	// Decide whether the wire body is a raw stream (the default,
+	// historical shape) or multipart/form-data (set when the caller
+	// supplied opaque-blob metadata via WithObjectMetadataBlob /
+	// WithObjectMetadataBlobFile). The multipart branch wraps the
+	// existing `tee` (which already drives progress + checksum
+	// accounting) into the "object" part; the "metadata" part holds
+	// the blob bytes.
+	wireBody := io.Reader(tee)
+	wireContentType := "" // empty = leave existing handling alone (no Content-Type override)
+	if transfer.objectMetadataBlob != nil && len(transfer.objectMetadataBlob.body) > 0 && nonZeroSize {
+		mpBody, mpCT := buildMultipartUploadBody(tee, transfer.objectMetadataBlob)
+		wireBody = mpBody
+		wireContentType = mpCT
+	}
 	// For files that are 0 length, we need to send a PUT request with an nil body
 	if nonZeroSize {
-		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), tee)
+		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), wireBody)
 	} else {
 		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), http.NoBody)
 	}
@@ -4374,6 +4471,17 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		log.Errorln("Error creating request:", err)
 		transferResult.Error = err
 		return transferResult, err
+	}
+	if wireContentType != "" {
+		request.Header.Set("Content-Type", wireContentType)
+		// Multipart bodies have unknown total length on the wire
+		// (the metadata blob size + file size + per-part framing
+		// overhead). Force chunked transfer encoding so Go's HTTP
+		// client doesn't try to compute a Content-Length we can't
+		// supply exactly. The server's POSC pipeline already
+		// streams the object part from the multipart reader.
+		request.ContentLength = -1
+		request.TransferEncoding = []string{"chunked"}
 	}
 
 	// Hint upload size

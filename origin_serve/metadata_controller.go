@@ -667,6 +667,12 @@ func (c *metadataController) CommitEventFromCloseHook(namespace string) func(ctx
 		}
 		fullPath := joinFederationPath(namespace, finalPath)
 		event := NewObjectCommitEvent(namespace, fullPath, size, etag, mtime, custom)
+		// If the upload was multipart-shaped, the inbound splitter
+		// stashed the blob on ctx; pull it through to the event
+		// so the publisher knows to switch to multipart/related.
+		if blob := multipartBlobFromContext(ctx); blob != nil {
+			event.WithMetadataBlob(blob.ContentType, blob.Body)
+		}
 		return c.CommitEvent(ctx, event)
 	}
 }

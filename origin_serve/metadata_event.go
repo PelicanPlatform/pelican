@@ -82,6 +82,23 @@ type ObjectCommitEvent struct {
 	// X-Pelican-Object-Metadata header). Reserved keys are stripped
 	// at parse time.
 	CustomFields CustomFields
+
+	// MetadataContentType + MetadataBody carry the opaque-blob
+	// metadata supplied via the multipart/form-data upload path
+	// (see metadata_multipart.go). Empty content type AND empty body
+	// means "no blob, post plain JSON outbound." A non-empty body
+	// switches the outbound webhook to multipart/related so the
+	// receiver gets the bytes byte-for-byte. They are independent
+	// of CustomFields: an upload may carry both.
+	MetadataContentType string
+	MetadataBody        []byte
+}
+
+// HasMetadataBlob reports whether the event carries an opaque blob,
+// driving the outbound publish path between plain-JSON and
+// multipart/related.
+func (e *ObjectCommitEvent) HasMetadataBlob() bool {
+	return e != nil && len(e.MetadataBody) > 0
 }
 
 // NewObjectCommitEvent constructs a fresh event with a server-generated
@@ -100,13 +117,36 @@ func NewObjectCommitEvent(namespace, objectPath string, size int64, etag string,
 	}
 }
 
+// WithMetadataBlob attaches an opaque metadata blob to the event in
+// place and returns the same pointer (for fluent construction). Empty
+// contentType+body is a no-op so the blob path stays opt-in.
+func (e *ObjectCommitEvent) WithMetadataBlob(contentType string, body []byte) *ObjectCommitEvent {
+	if e == nil || len(body) == 0 {
+		return e
+	}
+	e.MetadataContentType = contentType
+	// Defensive copy: the caller may mutate `body` after the call
+	// (e.g. recycle a buffer pool). The queue inserts the slice we
+	// hold; a shared reference would be a latent race.
+	e.MetadataBody = append([]byte(nil), body...)
+	return e
+}
+
 // MarshalJSON renders the event in the wire shape:
 //
 //	{
 //	  "id": "...", "type": "object.committed", "timestamp": "...",
 //	  "namespace": "/foo",
 //	  "object": { "path": ..., "size": ..., "etag": ..., "created_at": ..., ...inlined customs }
+//	  // when a blob is attached:
+//	  "metadata": { "content_type": "application/xml", "size": 12345 }
 //	}
+//
+// The blob *bytes themselves* are not in the JSON — they ride as the
+// second part of a multipart/related body when the outbound mode is
+// switched on (see metadata_publisher.go). The JSON "metadata"
+// sub-object is a *descriptor* the receiver can read before pulling
+// the blob part.
 func (e *ObjectCommitEvent) MarshalJSON() ([]byte, error) {
 	if e == nil {
 		return nil, errors.New("nil ObjectCommitEvent")
@@ -127,6 +167,7 @@ func (e *ObjectCommitEvent) MarshalJSON() ([]byte, error) {
 		Timestamp string         `json:"timestamp"`
 		Namespace string         `json:"namespace"`
 		Object    map[string]any `json:"object"`
+		Metadata  *metaWire      `json:"metadata,omitempty"`
 	}{
 		ID:        e.ID,
 		Type:      e.Type,
@@ -134,5 +175,18 @@ func (e *ObjectCommitEvent) MarshalJSON() ([]byte, error) {
 		Namespace: e.Namespace,
 		Object:    obj,
 	}
+	if e.HasMetadataBlob() {
+		wire.Metadata = &metaWire{
+			ContentType: e.MetadataContentType,
+			Size:        int64(len(e.MetadataBody)),
+		}
+	}
 	return json.Marshal(wire)
+}
+
+// metaWire is the JSON descriptor for an attached metadata blob. It
+// is omitted entirely when no blob is present.
+type metaWire struct {
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
 }

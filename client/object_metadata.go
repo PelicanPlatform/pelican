@@ -29,7 +29,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/textproto"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -37,10 +41,142 @@ import (
 	"github.com/pkg/errors"
 )
 
+// clientMultipartMetadataPartName and clientMultipartObjectPartName
+// are the field names the client sends on a multipart upload. They
+// must match the origin's Origin.Metadata.MetadataPartName /
+// ObjectPartName (default "metadata" and "object"). An operator who
+// reconfigures the server-side names is responsible for fielding a
+// matching client.
+const (
+	clientMultipartMetadataPartName = "metadata"
+	clientMultipartObjectPartName   = "object"
+)
+
+// buildMultipartUploadBody wraps the per-object `tee` reader as the
+// "object" part of a streaming multipart/form-data body. The
+// "metadata" part is written first (small, in memory) so a server
+// using a one-pass multipart reader can pick up the blob before the
+// file bytes start arriving.
+//
+// Returns the request body io.Reader (suitable for
+// http.NewRequestWithContext) and the Content-Type value (including
+// the boundary parameter).
+func buildMultipartUploadBody(tee io.Reader, blob *objectMetadataBlob) (io.Reader, string) {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	contentType := mw.FormDataContentType()
+
+	go func() {
+		// We close pw on the way out so the reader side sees io.EOF
+		// once we're done OR a non-nil error if anything went wrong
+		// while writing the multipart structure.
+		var writeErr error
+		defer func() {
+			if writeErr != nil {
+				_ = pw.CloseWithError(writeErr)
+			} else {
+				_ = pw.Close()
+			}
+		}()
+
+		// Part 1: opaque metadata blob.
+		metaHeader := textproto.MIMEHeader{}
+		metaHeader.Set("Content-Disposition", fmt.Sprintf(
+			`form-data; name=%q`, clientMultipartMetadataPartName))
+		ct := strings.TrimSpace(blob.contentType)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		metaHeader.Set("Content-Type", ct)
+		metaPart, err := mw.CreatePart(metaHeader)
+		if err != nil {
+			writeErr = errors.Wrap(err, "multipart create metadata part")
+			return
+		}
+		if _, err := metaPart.Write(blob.body); err != nil {
+			writeErr = errors.Wrap(err, "multipart write metadata part")
+			return
+		}
+
+		// Part 2: object body, streamed.
+		objHeader := textproto.MIMEHeader{}
+		objHeader.Set("Content-Disposition", fmt.Sprintf(
+			`form-data; name=%q; filename="object"`, clientMultipartObjectPartName))
+		objHeader.Set("Content-Type", "application/octet-stream")
+		objPart, err := mw.CreatePart(objHeader)
+		if err != nil {
+			writeErr = errors.Wrap(err, "multipart create object part")
+			return
+		}
+		if _, err := io.Copy(objPart, tee); err != nil {
+			writeErr = errors.Wrap(err, "multipart stream object part")
+			return
+		}
+
+		if err := mw.Close(); err != nil {
+			writeErr = errors.Wrap(err, "multipart close")
+			return
+		}
+	}()
+
+	return pr, contentType
+}
+
 // ObjectMetadataHeaderName is the HTTP header that carries the
 // rendered Structured Fields dictionary on the upload PUT request.
 // Kept as a public constant so other clients can reuse it.
 const ObjectMetadataHeaderName = "X-Pelican-Object-Metadata"
+
+// objectMetadataBlob is the in-memory value the
+// WithObjectMetadataBlob / WithObjectMetadataBlobFile options
+// produce. NewTransferJob's option-apply pass stashes it on the
+// TransferJob; uploadObject reads it and switches the PUT body to
+// multipart/form-data when present.
+type objectMetadataBlob struct {
+	body        []byte
+	contentType string
+}
+
+// loadObjectMetadataBlobFile reads a blob from disk and sniffs the
+// Content-Type from the file's extension when no explicit override
+// is in play. The Content-Type can be overridden later by
+// WithObjectMetadataContentType (the option-apply switch handles
+// the override).
+func loadObjectMetadataBlobFile(path string) (*objectMetadataBlob, error) {
+	if path == "" {
+		return nil, errors.New("metadata blob file path is empty")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.Wrapf(err, "reading metadata blob file %q", path)
+	}
+	return &objectMetadataBlob{
+		body:        body,
+		contentType: sniffBlobContentType(path),
+	}, nil
+}
+
+// sniffBlobContentType picks a reasonable on-the-wire Content-Type
+// from a file's extension. The mapping is intentionally short — we
+// cover the cases consumers actually use; everything else falls
+// back to application/octet-stream and can be overridden via
+// WithObjectMetadataContentType.
+func sniffBlobContentType(path string) string {
+	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	case ".xml":
+		return "application/xml"
+	case ".json":
+		return "application/json"
+	case ".yaml", ".yml":
+		return "application/yaml"
+	case ".txt":
+		return "text/plain"
+	case ".csv":
+		return "text/csv"
+	default:
+		return "application/octet-stream"
+	}
+}
 
 // ReservedObjectMetadataKeys lists the keys the origin populates
 // itself; the client refuses to forward them so users get a clear

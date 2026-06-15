@@ -812,6 +812,21 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// the close hook can inline custom fields into the webhook.
 			req = extractObjectMetadataFromRequest(req)
 
+			// When the upload is multipart/form-data, peel the
+			// metadata part now (capped, into memory) and rewire
+			// r.Body to stream the object part into the webdav
+			// pipeline. Shape violations terminate the request
+			// with a 4xx; in that case we must NOT fall through
+			// to the webdav handler.
+			if req.Method == http.MethodPut {
+				var ok bool
+				req, ok = rewriteMultipartPUT(c.Writer, req, loadMultipartConfig())
+				if !ok {
+					c.Abort()
+					return
+				}
+			}
+
 			if isTPCRequest(c.Request) {
 				handleCopyTPC(c, backend, prefix)
 			} else if c.Request.Method == http.MethodHead {

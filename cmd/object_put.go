@@ -66,6 +66,8 @@ func init() {
 	flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
 	flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
 	flagSet.String("metadata-file", "", "Path to a JSON file whose top-level keys are forwarded to the origin's metadata-publish endpoint via the X-Pelican-Object-Metadata header. Values must be string, number, or boolean. The keys 'path', 'size', 'etag', and 'created_at' are reserved and will be rejected.")
+	flagSet.String("metadata-body", "", "Path to a file holding an opaque metadata blob (e.g. an XML manifest). When supplied, the upload PUT is sent as multipart/form-data and the blob is forwarded to the origin's metadata-publish endpoint byte-for-byte. May be used alongside --metadata-file.")
+	flagSet.String("metadata-content-type", "", "Override the Content-Type of the metadata blob supplied via --metadata-body. Defaults to a value sniffed from the file extension (.xml ⇒ application/xml, .json ⇒ application/json, .yaml/.yml ⇒ application/yaml, .txt ⇒ text/plain, .csv ⇒ text/csv, otherwise application/octet-stream).")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -370,6 +372,20 @@ func putMain(cmd *cobra.Command, args []string) {
 	// surfaces as an error from DoPut before any network I/O.
 	if metadataFile, _ := cmd.Flags().GetString("metadata-file"); metadataFile != "" {
 		options = append(options, client.WithObjectMetadataFile(metadataFile))
+	}
+
+	// Optional opaque-blob metadata (multipart upload). The
+	// extension-sniff happens inside WithObjectMetadataBlobFile;
+	// an explicit --metadata-content-type wins via the last-write
+	// semantics of the option-apply pass below.
+	if metadataBody, _ := cmd.Flags().GetString("metadata-body"); metadataBody != "" {
+		options = append(options, client.WithObjectMetadataBlobFile(metadataBody))
+		if ct, _ := cmd.Flags().GetString("metadata-content-type"); ct != "" {
+			options = append(options, client.WithObjectMetadataContentType(ct))
+		}
+	} else if ct, _ := cmd.Flags().GetString("metadata-content-type"); ct != "" {
+		log.Errorln("--metadata-content-type was supplied without --metadata-body; nothing to override")
+		os.Exit(1)
 	}
 
 	var result error

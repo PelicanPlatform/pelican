@@ -560,6 +560,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Origin.IssuerMode
 	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
+	// Origin.Metadata.AllowMultipart
+	v.SetDefault(param.Origin_Metadata_AllowMultipart.GetName(), true)
 	// Origin.Metadata.Enabled
 	v.SetDefault(param.Origin_Metadata_Enabled.GetName(), false)
 	// Origin.Metadata.ErrorAfter
@@ -568,10 +570,16 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_Metadata_MaxBackoff.GetName(), "30m")
 	// Origin.Metadata.MaxInflight
 	v.SetDefault(param.Origin_Metadata_MaxInflight.GetName(), 4)
+	// Origin.Metadata.MaxMetadataBytes
+	v.SetDefault(param.Origin_Metadata_MaxMetadataBytes.GetName(), 4194304)
+	// Origin.Metadata.MetadataPartName
+	v.SetDefault(param.Origin_Metadata_MetadataPartName.GetName(), "metadata")
 	// Origin.Metadata.MinBackoff
 	v.SetDefault(param.Origin_Metadata_MinBackoff.GetName(), "30s")
 	// Origin.Metadata.Mode
 	v.SetDefault(param.Origin_Metadata_Mode.GetName(), "eventual")
+	// Origin.Metadata.ObjectPartName
+	v.SetDefault(param.Origin_Metadata_ObjectPartName.GetName(), "object")
 	// Origin.Metadata.RatePerSecond
 	v.SetDefault(param.Origin_Metadata_RatePerSecond.GetName(), 10)
 	// Origin.Metadata.RequestTimeout
