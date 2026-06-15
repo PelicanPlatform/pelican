@@ -104,9 +104,11 @@ func TestCLIAsyncGet(t *testing.T) {
 	// Create temporary directory
 	tempDir := t.TempDir()
 
-	// Create token
-	err := param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
+	// Create token. Sign it with the federation's existing issuer key (set up by
+	// NewFedTest) rather than resetting IssuerKeysDirectory to a fresh directory:
+	// rotating the key after the federation is already running makes every server
+	// re-sign with a key the cached JWKS sets don't yet trust, so token
+	// verification (including this upload) races against JWKS refresh and fails.
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -278,10 +280,9 @@ func TestCLIAsyncPut(t *testing.T) {
 	// Create temporary directory
 	tempDir := t.TempDir()
 
-	// Create token
+	// Create token. Sign with the federation's existing issuer key rather than
+	// rotating IssuerKeysDirectory after startup; see TestCLIAsyncGet for why.
 	tokenStart := time.Now()
-	err := param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -397,9 +398,8 @@ func TestCLIAsyncPrestage(t *testing.T) {
 	// Create temporary directory
 	tempDir := t.TempDir()
 
-	// Create token
-	err := param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
+	// Create token. Sign with the federation's existing issuer key rather than
+	// rotating IssuerKeysDirectory after startup; see TestCLIAsyncGet for why.
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -554,9 +554,8 @@ func TestCLIJobCommands(t *testing.T) {
 	// Create temporary directory
 	tempDir := t.TempDir()
 
-	// Create token
-	err := param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
+	// Create token. Sign with the federation's existing issuer key rather than
+	// rotating IssuerKeysDirectory after startup; see TestCLIAsyncGet for why.
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
