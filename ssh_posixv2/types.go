@@ -392,8 +392,13 @@ type SSHConnection struct {
 	// errChan is used to signal errors from the helper process
 	errChan chan error
 
-	// helperIO manages stdin/stdout communication with the remote helper
-	helperIO *helperIO
+	// helperIO manages stdin/stdout communication with the remote helper.
+	// Stored atomically: StopHelper clears it from under the long-lived
+	// helper goroutines (which read it without holding c.mu, since they
+	// can't — StopHelper holds c.mu while waiting on them in errgroup.Wait,
+	// so taking c.mu in a goroutine would deadlock). Load() gives each
+	// reader a stable snapshot for the rest of its critical section.
+	helperIO atomic.Pointer[helperIO]
 
 	// helperErrgroup manages goroutines for the helper process
 	helperErrgroup *errgroup.Group
@@ -401,7 +406,10 @@ type SSHConnection struct {
 	// helperCtx is the context for helper goroutines
 	helperCtx context.Context
 
-	// helperCancel cancels the helper context and triggers clean shutdown
+	// helperCancel cancels the helper context, waking the ticker-driven
+	// helper goroutines so they can exit promptly. It does not message the
+	// remote helper; StopHelper sends the shutdown message separately via
+	// sendShutdownMessage.
 	helperCancel func()
 }
 
