@@ -1022,6 +1022,20 @@ func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Ha
 		// hook can inline uploader-supplied custom fields into the webhook.
 		modifiedReq = extractObjectMetadataFromRequest(modifiedReq)
 
+		// When the upload is multipart/form-data, peel the metadata part now
+		// (capped, into memory) and rewire the body to stream the object part
+		// into the webdav pipeline. Shape violations terminate the request
+		// with a 4xx; in that case we must NOT fall through to the webdav
+		// handler.
+		if c.Request.Method == http.MethodPut {
+			var ok bool
+			modifiedReq, ok = rewriteMultipartPUT(c.Writer, modifiedReq, loadMultipartConfig())
+			if !ok {
+				c.Abort()
+				return
+			}
+		}
+
 		// Every one of these is handed newPath, the cleaned path, rather
 		// than the raw wildcard: a request for "/%2e%2e/other" arrives
 		// with its dot-segments intact (Gin and net/http do not normalize

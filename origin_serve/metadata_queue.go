@@ -38,19 +38,27 @@ import (
 // MetadataPublishRow is the GORM-mapped persistence representation of
 // one queued event. The struct tag `gorm:"unique"` on event_id matches
 // the migration's UNIQUE constraint.
+//
+// MetadataContentType and MetadataBody are populated only when the
+// upload was multipart/form-data (see splitMultipartParts in
+// metadata_multipart.go); both columns are empty for header-only and
+// no-metadata uploads, and the worker chooses plain-JSON vs
+// multipart/related outbound based on whether the blob is non-empty.
 type MetadataPublishRow struct {
-	ID            int64     `gorm:"primaryKey;autoIncrement"`
-	EventID       string    `gorm:"column:event_id;uniqueIndex;not null"`
-	Namespace     string    `gorm:"column:namespace;not null;index"`
-	ObjectPath    string    `gorm:"column:object_path;not null"`
-	ObjectSize    int64     `gorm:"column:object_size;not null"`
-	ETag          string    `gorm:"column:etag;not null"`
-	ObjectCreated time.Time `gorm:"column:object_created;not null"`
-	CustomFields  string    `gorm:"column:custom_fields;not null;default:'{}'"`
-	CreatedAt     time.Time `gorm:"column:created_at;not null;index"`
-	NextAttemptAt time.Time `gorm:"column:next_attempt_at;not null;index"`
-	Attempts      int       `gorm:"column:attempts;not null;default:0"`
-	LastError     string    `gorm:"column:last_error;not null;default:''"`
+	ID                  int64     `gorm:"primaryKey;autoIncrement"`
+	EventID             string    `gorm:"column:event_id;uniqueIndex;not null"`
+	Namespace           string    `gorm:"column:namespace;not null;index"`
+	ObjectPath          string    `gorm:"column:object_path;not null"`
+	ObjectSize          int64     `gorm:"column:object_size;not null"`
+	ETag                string    `gorm:"column:etag;not null"`
+	ObjectCreated       time.Time `gorm:"column:object_created;not null"`
+	CustomFields        string    `gorm:"column:custom_fields;not null;default:'{}'"`
+	MetadataContentType string    `gorm:"column:metadata_content_type;not null;default:''"`
+	MetadataBody        []byte    `gorm:"column:metadata_body;not null;default:''"`
+	CreatedAt           time.Time `gorm:"column:created_at;not null;index"`
+	NextAttemptAt       time.Time `gorm:"column:next_attempt_at;not null;index"`
+	Attempts            int       `gorm:"column:attempts;not null;default:0"`
+	LastError           string    `gorm:"column:last_error;not null;default:''"`
 }
 
 // TableName overrides the default GORM pluralization rule.
@@ -94,15 +102,17 @@ func (q *publishQueue) EnqueueEvent(e *ObjectCommitEvent) (*MetadataPublishRow, 
 	}
 	now := time.Now().UTC()
 	row := &MetadataPublishRow{
-		EventID:       e.ID,
-		Namespace:     e.Namespace,
-		ObjectPath:    e.ObjectPath,
-		ObjectSize:    e.ObjectSize,
-		ETag:          e.ETag,
-		ObjectCreated: e.ObjectCreated.UTC(),
-		CustomFields:  string(customJSON),
-		CreatedAt:     now,
-		NextAttemptAt: now, // first attempt eligible immediately
+		EventID:             e.ID,
+		Namespace:           e.Namespace,
+		ObjectPath:          e.ObjectPath,
+		ObjectSize:          e.ObjectSize,
+		ETag:                e.ETag,
+		ObjectCreated:       e.ObjectCreated.UTC(),
+		CustomFields:        string(customJSON),
+		MetadataContentType: e.MetadataContentType,
+		MetadataBody:        e.MetadataBody,
+		CreatedAt:           now,
+		NextAttemptAt:       now, // first attempt eligible immediately
 	}
 	if err := q.handle().Create(row).Error; err != nil {
 		return nil, err
@@ -120,15 +130,17 @@ func EventFromRow(r *MetadataPublishRow) (*ObjectCommitEvent, error) {
 		}
 	}
 	return &ObjectCommitEvent{
-		ID:            r.EventID,
-		Type:          ObjectCommitEventType,
-		Timestamp:     r.CreatedAt,
-		Namespace:     r.Namespace,
-		ObjectPath:    r.ObjectPath,
-		ObjectSize:    r.ObjectSize,
-		ETag:          r.ETag,
-		ObjectCreated: r.ObjectCreated,
-		CustomFields:  custom,
+		ID:                  r.EventID,
+		Type:                ObjectCommitEventType,
+		Timestamp:           r.CreatedAt,
+		Namespace:           r.Namespace,
+		ObjectPath:          r.ObjectPath,
+		ObjectSize:          r.ObjectSize,
+		ETag:                r.ETag,
+		ObjectCreated:       r.ObjectCreated,
+		CustomFields:        custom,
+		MetadataContentType: r.MetadataContentType,
+		MetadataBody:        r.MetadataBody,
 	}, nil
 }
 

@@ -405,6 +405,200 @@ The PR will not be marked ready until coverage of `origin_serve/posc*.go` and `o
 - Should we support TLS client-cert auth to the metadata endpoint as an alternative to JWT? Filed as a follow-up; default is JWT only.
 - Do we want a header-only signature instead of a full bearer JWT, to let the receiver verify without downloading the issuer's JWKS? We are punting on this until at least one consumer is written.
 
+## Addendum: opaque-blob metadata via multipart upload
+
+Status: design, not yet implemented. This section is layered on top of the original design — none of it is in tree yet, and nothing above changes shape. The existing `X-Pelican-Object-Metadata` header path stays. This addendum specifies the *opt-in* multipart form for consumers whose metadata is not key/value-shaped (the motivating case: XML documents).
+
+### Why a separate path
+
+The Structured-Fields header is great for "experiment=atlas, run_number=4172, is_test=?0" but breaks the moment a consumer wants to forward a 50 KB XML manifest. SFV doesn't model documents; even if we forced base64, header-size limits across the HTTP stack (stdlib net/http default 1 MB, common reverse-proxy caps ≈8–64 KB) mean we'd start dropping requests well before "reasonable XML metadata." We need a body-shaped channel for that data.
+
+### Wire format
+
+When a client wants to attach an opaque metadata blob to an upload, the upload `PUT` is sent as `multipart/form-data` (RFC 7578) with **exactly two parts, in this order**:
+
+```
+PUT /exp/data/run99.dat
+Content-Type: multipart/form-data; boundary=BOUNDARY
+Content-Length: <set by client; covers full body>
+
+--BOUNDARY
+Content-Disposition: form-data; name="metadata"
+Content-Type: application/xml
+
+<datasetSummary>
+  <experiment>atlas</experiment>
+  <runs>4170,4171,4172</runs>
+</datasetSummary>
+--BOUNDARY
+Content-Disposition: form-data; name="object"
+Content-Type: application/octet-stream
+
+<bytes of run99.dat ...>
+--BOUNDARY--
+```
+
+Rules:
+
+- The boundary string is the client's choice and follows RFC 7578 / RFC 2046 syntax (Go's `mime/multipart.Writer` picks one automatically).
+- The first part **must** have `Content-Disposition: form-data; name="metadata"`. Its `Content-Type` is the on-the-wire type of the blob (XML, JSON, CSV, opaque binary, …); the origin treats it as opaque bytes and forwards the type verbatim to the receiver.
+- The second part **must** have `Content-Disposition: form-data; name="object"`. Its body is the file content. The origin streams this part straight through the POSC pipeline as if it had been the raw PUT body.
+- Any other part name, any other order, or absence of either required part → **400 Bad Request**. Failing fast keeps the staging directory clean and the close-hook precondition ("we have all the metadata") true.
+
+Order is non-negotiable because a multipart reader is one-pass forward: receiving the file body before the metadata would force the origin to buffer either GB of file bytes (memory) or the file to a sidecar (extra fsync round-trip) before the close-hook fires.
+
+### Content-Type detection on the origin
+
+The PUT entry point checks `Content-Type`:
+
+| Incoming Content-Type | Path taken | |----------------------------|-------------------------------------------------------------| | `multipart/form-data; …` | Multipart parser (this addendum). | | anything else | Existing path: stdlib `webdav.Handler` reads `r.Body` raw. |
+
+Header-based custom fields (`X-Pelican-Object-Metadata`) are honored on **either** path. They occupy a different slot in the webhook (see below), so there is no ambiguity if both are present on a multipart upload — the SFV fields inline into the `object` sub-object exactly as today, while the multipart blob lands in the new `metadata` sub-object.
+
+### Reverse-direction: how the origin posts to the receiver
+
+When the inbound upload was multipart-shaped, the outbound webhook to the metadata endpoint is also multipart so the consumer can process the blob without a base64 round-trip:
+
+```
+POST <Origin.Metadata.Endpoint>
+Authorization: Bearer <jwt>
+Content-Type: multipart/related; boundary=B; type="application/json"; start="<event>"
+X-Pelican-Idempotency-Key: <event-uuid>
+User-Agent: pelican-origin/<version>
+
+--B
+Content-ID: <event>
+Content-Type: application/json
+
+{
+  "id": "...",
+  "type": "object.committed",
+  "timestamp": "...",
+  "namespace": "/exp",
+  "object": { "path": "/exp/data/run99.dat", "size": ..., "etag": ..., "created_at": ... },
+  "metadata": {
+    "content_type": "application/xml",
+    "size": 12345
+  }
+}
+--B
+Content-ID: <metadata>
+Content-Type: application/xml
+
+<datasetSummary>…</datasetSummary>
+--B--
+```
+
+We use `multipart/related` (RFC 2387) outbound — not `multipart/form-data` — because the receiver is treating the body as a compound document with a root (the JSON event) rather than as a set of form fields. The `start` parameter points at the root via its `Content-ID`.
+
+When the inbound upload was *not* multipart, the outbound webhook is the same plain-JSON form as today (no behavior change for existing consumers).
+
+### Database schema delta
+
+The `metadata_publish_queue` table grows two columns:
+
+```sql
+ALTER TABLE metadata_publish_queue ADD COLUMN metadata_content_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE metadata_publish_queue ADD COLUMN metadata_body         BLOB NOT NULL DEFAULT X'';
+```
+
+Notes:
+
+- For inserts where no multipart blob was supplied, both columns are empty strings / empty blobs. The worker observes this and posts the existing plain-JSON form.
+- The blob is stored as a SQLite `BLOB`, capped in size by config (see below). 4 MB is the per-row hot limit; bigger blobs are rejected by the multipart middleware before they reach the queue.
+
+### New configuration
+
+| Parameter | Type | Default | Purpose | |------------------------------------------|----------|---------------|------------------------------------------------------------------------------------------------------| | `Origin.Metadata.AllowMultipart` | bool | `true` | When false, the origin rejects multipart-form PUTs with a 415 so an operator can keep raw-PUT only. | | `Origin.Metadata.MaxMetadataBytes` | bytecount| `4MB` | Hard cap on the size of the `metadata` part. Larger requests get a 413. | | `Origin.Metadata.MetadataPartName` | string | `metadata` | Reserved field name for the metadata part. Configurable in case a downstream consumer needs a different convention. | | `Origin.Metadata.ObjectPartName` | string | `object` | Same, for the object body part. |
+
+### Client-side API delta
+
+Two new transfer options join `WithObjectMetadata` / `WithObjectMetadataFile`:
+
+```go
+// Attach an opaque metadata blob from an in-memory byte slice.
+// contentType is the on-the-wire Content-Type the receiver sees
+// (e.g. "application/xml"). The upload PUT switches from raw to
+// multipart/form-data.
+func WithObjectMetadataBlob(body []byte, contentType string) TransferOption
+
+// Sibling that reads the blob from a file path. The Content-Type
+// is sniffed from the file extension (.xml ⇒ application/xml,
+// .json ⇒ application/json, …) and may be overridden via
+// WithObjectMetadataContentType.
+func WithObjectMetadataBlobFile(path string) TransferOption
+
+// Override the auto-sniffed content type from WithObjectMetadataBlobFile.
+func WithObjectMetadataContentType(contentType string) TransferOption
+```
+
+The CLI gets one new flag:
+
+```
+pelican object put --metadata-body manifest.xml \
+                   [--metadata-content-type application/xml] \
+                   src dst
+```
+
+If `--metadata-body` and `--metadata-file` (header-form) are both supplied, the client errors out before any network I/O — exactly one opaque-blob source per upload.
+
+### Coexistence with the existing header path
+
+Both can be present on a single upload:
+
+| `X-Pelican-Object-Metadata` | multipart `metadata` part | Webhook shape | |-----------------------------|---------------------------|----------------------------------------------------------------------------| | absent | absent | plain JSON, no `metadata` field | | present | absent | plain JSON, custom fields inline into `object` | | absent | present | `multipart/related` outbound; JSON event + opaque blob | | present | present | `multipart/related` outbound; JSON event has both inline custom fields AND a `metadata` sub-object pointing at the blob |
+
+### Streaming bounds (the question that started this)
+
+Multipart parsing is a one-pass stream:
+
+- The metadata part is read into memory up to `MaxMetadataBytes`, then closed. If the first part's payload exceeds the cap, the middleware aborts with 413 *before* opening any staging file — no partial write hits disk.
+- The object part is wrapped as an `io.Reader` and fed straight into the existing POSC `OpenFile → Write → Close` pipeline. Memory cost is bounded by Go's stdlib multipart buffering (currently a small bufio default per part) — independent of total upload size.
+- `Content-Length` from the request still bounds the *total* PUT body, which the existing rate-limit / metrics layers honor. The POSC-side `expected_size` check we added in P2.7 is dropped for multipart uploads because the per-part length is not known from the request header alone; an operator who wants size guarantees on multipart uploads can re-introduce them by having the client send a custom `Content-Disposition` `size=` param and adding a middleware check.
+
+### Server-side composition
+
+The PUT entry point becomes a thin demultiplexer that runs *before* `webdav.Handler.ServeHTTP`:
+
+```
+handleRequest:
+  if r.Method == PUT && contentTypeIsMultipart(r):
+      partMeta, partObj, err := splitMultipartParts(r.Body, cfg)
+      if err != nil: write the right 4xx and return
+      stash partMeta in the request context (capped slurp)
+      replace r.Body with partObj
+      set r.Header["Content-Type"] = partObj's Content-Type
+      delete r.Header["Content-Length"]   // unknown now
+      r.TransferEncoding = ["chunked"]
+  webdav.Handler.ServeHTTP(w, r)
+```
+
+The POSC close-hook reads `multipartMetadataFromContext(ctx)` to decide whether to attach the blob, and the metadata controller queues the blob alongside the existing event row.
+
+### What is NOT in scope for this addendum
+
+- Multiple metadata parts. v1 is one blob. Receivers wanting more structure can do their own internal split.
+- WebDAV `MOVE`/`COPY` propagation of the metadata blob. Not supported; metadata is upload-time only.
+- Director-side handling. The director is body-transparent; this is an origin-↔-client + origin-↔-receiver contract.
+- POSC `oss.asize` parity for multipart. Documented as a follow-up knob, not a v1 deliverable.
+- Synchronous validation of the metadata blob's content (XSD, JSON Schema, etc.). The origin treats it as opaque bytes; if a deployment wants validation, that lives on the receiver.
+
+### Test plan (delta)
+
+1. Client unit tests: option-construction, content-type sniffing on `WithObjectMetadataBlobFile`, mutual-exclusion check vs the header path.
+1. Origin unit tests: the splitter rejects wrong ordering, missing parts, too-large `metadata`, and bad form-field names with the right 4xx code each time.
+1. Origin unit tests: POSC pipeline still streams the object part straight through (no buffering surprise from the multipart layer).
+1. E2E (mirrors `TestClientUploadWithObjectMetadata`): client posts a multipart upload with a synthetic XML blob, receiver gets a `multipart/related` POST whose second part is the same XML byte-for-byte.
+1. E2E: an upload with both `X-Pelican-Object-Metadata` and a multipart `metadata` part is accepted and both surface in the outbound `multipart/related` webhook.
+
+### Open questions for review
+
+- Should `Origin.Metadata.AllowMultipart` default to `true` (opt-out) or `false` (opt-in)? Defaulting to true matches the "accept both" guidance and minimizes friction for operators; the flag is then a safety valve for deployments behind a proxy that rewrites `Content-Type`.
+- `MaxMetadataBytes = 4 MB` is a guess. Real consumers' XML manifests are typically \<100 KB; 4 MB leaves slack but bounds worst-case row sizes in SQLite. Open to data.
+- Should we store the blob inline in the queue table, or in a side-table keyed by `event_id`, or in a per-namespace filesystem path? Inline keeps the model simple at the cost of bigger row sizes on the hot path; a side-table is easy to add if blobs grow.
+
+---
+
 ## Deferred / out-of-scope (PR-time documentation)
 
 The following are explicitly out of scope for the initial PR but are called out here so reviewers can confirm intent and so future operators have a single place to look.

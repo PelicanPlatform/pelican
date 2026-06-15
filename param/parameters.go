@@ -65,539 +65,543 @@ type OpaqueParam struct {
 }
 
 func GetDeprecated() map[string][]string {
-	return map[string][]string{
-		"Cache.DataLocation":          {"Cache.StorageLocation"},
-		"Cache.DbLocation":            {"Server.DbLocation"},
-		"Cache.LocalRoot":             {"Cache.StorageLocation"},
-		"Debug":                       {"Logging.Level"},
-		"Director.DbLocation":         {"Server.DbLocation"},
-		"Director.EnableStat":         {"Director.CheckOriginPresence"},
-		"DisableHttpProxy":            {"Client.DisableHttpProxy"},
-		"DisableProxyFallback":        {"Client.DisableProxyFallback"},
-		"IssuerKey":                   {"none"},
-		"Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
-		"Lotman.DbLocation":           {"Lotman.LotHome"},
-		"MinimumDownloadSpeed":        {"Client.MinimumDownloadSpeed"},
-		"Origin.EnableDirListing":     {"Origin.EnableListings"},
-		"Origin.EnableFallbackRead":   {"Origin.EnableDirectReads"},
-		"Origin.EnableWrite":          {"Origin.EnableWrites"},
-		"Origin.ExportVolume":         {"Origin.ExportVolumes"},
-		"Origin.Mode":                 {"Origin.StorageType"},
-		"Origin.NamespacePrefix":      {"Origin.FederationPrefix"},
-		"Origin.S3ServiceName":        {"none"},
-		"Registry.AdminUsers":         {"Server.UIAdminUsers"},
-		"Registry.DbLocation":         {"Server.DbLocation"},
-		"Server.TLSCertificate":       {"Server.TLSCertificateChain"},
-		"Xrootd.Port":                 {"Origin.Port", "Cache.Port"},
-		"Xrootd.RunLocation":          {"Cache.RunLocation", "Origin.RunLocation"},
-	}
+    return map[string][]string{
+        "Cache.DataLocation": {"Cache.StorageLocation"},
+        "Cache.DbLocation": {"Server.DbLocation"},
+        "Cache.LocalRoot": {"Cache.StorageLocation"},
+        "Debug": {"Logging.Level"},
+        "Director.DbLocation": {"Server.DbLocation"},
+        "Director.EnableStat": {"Director.CheckOriginPresence"},
+        "DisableHttpProxy": {"Client.DisableHttpProxy"},
+        "DisableProxyFallback": {"Client.DisableProxyFallback"},
+        "IssuerKey": {"none"},
+        "Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
+        "Lotman.DbLocation": {"Lotman.LotHome"},
+        "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
+        "Origin.EnableDirListing": {"Origin.EnableListings"},
+        "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
+        "Origin.EnableWrite": {"Origin.EnableWrites"},
+        "Origin.ExportVolume": {"Origin.ExportVolumes"},
+        "Origin.Mode": {"Origin.StorageType"},
+        "Origin.NamespacePrefix": {"Origin.FederationPrefix"},
+        "Origin.S3ServiceName": {"none"},
+        "Registry.AdminUsers": {"Server.UIAdminUsers"},
+        "Registry.DbLocation": {"Server.DbLocation"},
+        "Server.TLSCertificate": {"Server.TLSCertificateChain"},
+        "Xrootd.Port": {"Origin.Port", "Cache.Port"},
+        "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
+    }
 }
 
 // runtimeConfigurableMap is a map of parameter names to their runtime configurability status.
 // It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
 // at runtime without requiring a server restart.
 var runtimeConfigurableMap = map[string]bool{
-	"Cache.AllowedFederations":                     false,
-	"Cache.BlocksToPrefetch":                       false,
-	"Cache.ClientStatisticsLocation":               false,
-	"Cache.Concurrency":                            false,
-	"Cache.ConcurrencyDegradedThreshold":           false,
-	"Cache.DataLocation":                           false,
-	"Cache.DataLocations":                          false,
-	"Cache.DataScanMode":                           false,
-	"Cache.DataScanResampleInterval":               false,
-	"Cache.DbLocation":                             false,
-	"Cache.DefaultCacheTimeout":                    false,
-	"Cache.DirectorTest":                           false,
-	"Cache.DisableClientX509":                      false,
-	"Cache.EnableBroker":                           false,
-	"Cache.EnableChaosAPI":                         false,
-	"Cache.EnableEvictionMonitoring":               false,
-	"Cache.EnableLotman":                           false,
-	"Cache.EnableOIDC":                             false,
-	"Cache.EnablePrefetch":                         false,
-	"Cache.EnableSiteLocalMode":                    false,
-	"Cache.EnableTLSClientAuth":                    false,
-	"Cache.EnableV2":                               false,
-	"Cache.EnableVoms":                             false,
-	"Cache.EvictionMonitoringInterval":             false,
-	"Cache.EvictionMonitoringMaxDepth":             false,
-	"Cache.ExportLocation":                         false,
-	"Cache.FedTokenLocation":                       false,
-	"Cache.FilesBaseSize":                          false,
-	"Cache.FilesMaxSize":                           false,
-	"Cache.FilesNominalSize":                       false,
-	"Cache.HighWaterMark":                          false,
-	"Cache.LocalRoot":                              false,
-	"Cache.LowWaterMark":                           false,
-	"Cache.MemoryCacheSize":                        false,
-	"Cache.MetaLocations":                          false,
-	"Cache.MinDirectorRefreshInterval":             false,
-	"Cache.NamespaceLocation":                      false,
-	"Cache.PSSOrigin":                              false,
-	"Cache.PermittedNamespaces":                    false,
-	"Cache.Port":                                   false,
-	"Cache.RunLocation":                            false,
-	"Cache.SelfTest":                               false,
-	"Cache.SelfTestInterval":                       false,
-	"Cache.SelfTestMaxAge":                         false,
-	"Cache.SentinelLocation":                       false,
-	"Cache.StorageLocation":                        false,
-	"Cache.Throttle.EMAWindow":                     false,
-	"Cache.Throttle.PendingBufferSize":             false,
-	"Cache.Throttle.PerOriginActivePercent":        false,
-	"Cache.Throttle.PerOriginPendingSize":          false,
-	"Cache.Throttle.PerOriginStarvingPercent":      false,
-	"Cache.Throttle.RetryAfter":                    false,
-	"Cache.Url":                                    false,
-	"Cache.WorkerCount":                            false,
-	"Cache.XRootDPrefix":                           false,
-	"Client.AssumeDirectorServerHeader":            false,
-	"Client.CredentialFile":                        false,
-	"Client.DirectorRetries":                       false,
-	"Client.DisableHttpProxy":                      false,
-	"Client.DisableProxyFallback":                  false,
-	"Client.EnableOverwrites":                      false,
-	"Client.IsPlugin":                              false,
-	"Client.MaximumDownloadSpeed":                  false,
-	"Client.MinimumDownloadSpeed":                  false,
-	"Client.PreferredCaches":                       false,
-	"Client.SlowTransferRampupTime":                false,
-	"Client.SlowTransferWindow":                    false,
-	"Client.StoppedTransferTimeout":                false,
-	"Client.WorkerCount":                           false,
-	"ClientAgent.DbLocation":                       false,
-	"ClientAgent.HistoryRetentionDays":             false,
-	"ClientAgent.IdleTimeout":                      false,
-	"ClientAgent.MaxConcurrentJobs":                false,
-	"ClientAgent.PidFile":                          false,
-	"ClientAgent.ProgressUpdateInterval":           false,
-	"ClientAgent.Socket":                           false,
-	"ConfigBase":                                   false,
-	"ConfigLocations":                              false,
-	"Debug":                                        false,
-	"Director.AdaptiveSortEWMATimeConstant":        false,
-	"Director.AdaptiveSortTruncateConstant":        false,
-	"Director.AdvertiseUrl":                        false,
-	"Director.AdvertisementTTL":                    false,
-	"Director.AssumePresenceAtSingleOrigin":        false,
-	"Director.CachePresenceCapacity":               false,
-	"Director.CachePresenceTTL":                    false,
-	"Director.CacheResponseHostnames":              false,
-	"Director.CacheSortMethod":                     false,
-	"Director.CachesPullFromCaches":                false,
-	"Director.CheckCachePresence":                  false,
-	"Director.CheckOriginPresence":                 false,
-	"Director.DbLocation":                          false,
-	"Director.DefaultResponse":                     false,
-	"Director.EnableBroker":                        false,
-	"Director.EnableFederationMetadataHosting":     false,
-	"Director.EnableOIDC":                          false,
-	"Director.EnableStat":                          false,
-	"Director.FedTokenLifetime":                    false,
-	"Director.FilterCachesInErrorState":            false,
-	"Director.FilteredServers":                     false,
-	"Director.GeoIPLocation":                       false,
-	"Director.MaxMindKeyFile":                      false,
-	"Director.MaxStatResponse":                     false,
-	"Director.MetadataComparisonInterval":          false,
-	"Director.MinStatResponse":                     false,
-	"Director.OriginCacheHealthTestInterval":       false,
-	"Director.OriginResponseHostnames":             false,
-	"Director.RegistryQueryInterval":               false,
-	"Director.StatConcurrencyLimit":                false,
-	"Director.StatTimeout":                         false,
-	"Director.SupportContactEmail":                 false,
-	"Director.SupportContactUrl":                   false,
-	"DisableHttpProxy":                             false,
-	"DisableProxyFallback":                         false,
-	"Federation.BrokerUrl":                         false,
-	"Federation.DirectorUrl":                       false,
-	"Federation.DiscoveryUrl":                      false,
-	"Federation.JwkUrl":                            false,
-	"Federation.RegistryUrl":                       false,
-	"Federation.TopologyDowntimeUrl":               false,
-	"Federation.TopologyNamespaceUrl":              false,
-	"Federation.TopologyReloadInterval":            false,
-	"Federation.TopologyUrl":                       false,
-	"GeoIPOverrides":                               false,
-	"GeoLocation":                                  false,
-	"Issuer.AccessTokenLifetime":                   false,
-	"Issuer.AuthenticationSource":                  false,
-	"Issuer.AuthorizationCodeLifetime":             false,
-	"Issuer.AuthorizationTemplates":                false,
-	"Issuer.DynamicClientStaleTimeout":             false,
-	"Issuer.DynamicClientUnusedTimeout":            false,
-	"Issuer.GroupFile":                             false,
-	"Issuer.GroupRequirements":                     false,
-	"Issuer.GroupSource":                           false,
-	"Issuer.IDTokenLifetime":                       false,
-	"Issuer.IssuerClaimValue":                      false,
-	"Issuer.OIDCAuthenticationRequirements":        false,
-	"Issuer.OIDCAuthenticationUserClaim":           false,
-	"Issuer.OIDCGroupClaim":                        false,
-	"Issuer.OIDCIssuerClaim":                       false,
-	"Issuer.OIDCPreferClaimsFromIDToken":           false,
-	"Issuer.OIDCSubjectClaim":                      false,
-	"Issuer.PublicClientID":                        false,
-	"Issuer.QDLLocation":                           false,
-	"Issuer.RedirectUris":                          false,
-	"Issuer.RefreshTokenGracePeriod":               false,
-	"Issuer.RefreshTokenLifetime":                  false,
-	"Issuer.ScitokensServerLocation":               false,
-	"Issuer.TomcatLocation":                        false,
-	"Issuer.UserStripDomain":                       false,
-	"IssuerKey":                                    false,
-	"IssuerKeysDirectory":                          false,
-	"LocalCache.ChunkSize":                         false,
-	"LocalCache.DataLocation":                      false,
-	"LocalCache.DefaultMaxAge":                     false,
-	"LocalCache.FDCacheSize":                       false,
-	"LocalCache.HighWaterMarkPercentage":           false,
-	"LocalCache.LowWaterMarkPercentage":            false,
-	"LocalCache.MaxConcurrentPrefetch":             false,
-	"LocalCache.MemoryCacheSize":                   false,
-	"LocalCache.PrefetchTimeout":                   false,
-	"LocalCache.RevalidationJitter":                false,
-	"LocalCache.RunLocation":                       false,
-	"LocalCache.Size":                              false,
-	"LocalCache.Socket":                            false,
-	"LocalCache.StorageDirs":                       false,
-	"Logging.Buffer.BatchLines":                    false,
-	"Logging.Buffer.MaxSize":                       false,
-	"Logging.Cache.Http":                           true,
-	"Logging.Cache.Lotman":                         true,
-	"Logging.Cache.Ofs":                            true,
-	"Logging.Cache.Pfc":                            true,
-	"Logging.Cache.Pss":                            true,
-	"Logging.Cache.PssSetOpt":                      true,
-	"Logging.Cache.Scitokens":                      true,
-	"Logging.Cache.Xrd":                            true,
-	"Logging.Cache.Xrootd":                         true,
-	"Logging.Client.DisableProgressBars":           false,
-	"Logging.Client.ProgressInterval":              false,
-	"Logging.DisableProgressBars":                  false,
-	"Logging.Level":                                true,
-	"Logging.LogLocation":                          false,
-	"Logging.Origin.Cms":                           true,
-	"Logging.Origin.Http":                          true,
-	"Logging.Origin.Ofs":                           true,
-	"Logging.Origin.Oss":                           true,
-	"Logging.Origin.Scitokens":                     true,
-	"Logging.Origin.Xrd":                           true,
-	"Logging.Origin.Xrootd":                        true,
-	"Logging.Rotation.Disable":                     false,
-	"Logging.Rotation.DisableCompress":             false,
-	"Logging.Rotation.FlushInterval":               false,
-	"Logging.Rotation.Frequency":                   false,
-	"Logging.Rotation.MaxRetentionPeriod":          false,
-	"Logging.Rotation.MaxRetentionSize":            false,
-	"Logging.Rotation.MaxSize":                     false,
-	"Lotman.DbLocation":                            false,
-	"Lotman.DefaultLotDeletionLifetime":            false,
-	"Lotman.DefaultLotExpirationLifetime":          false,
-	"Lotman.EnableAPI":                             false,
-	"Lotman.EnabledPolicy":                         false,
-	"Lotman.GarbageCollectionInterval":             false,
-	"Lotman.LibLocation":                           false,
-	"Lotman.LotHome":                               false,
-	"Lotman.LotRecordRetention":                    false,
-	"Lotman.MaxLotLifetime":                        false,
-	"Lotman.MinFillerWidth":                        false,
-	"Lotman.PolicyDefinitions":                     false,
-	"Lotman.RenewalCheckInterval":                  false,
-	"Lotman.SchedulingHorizon":                     false,
-	"MinimumDownloadSpeed":                         false,
-	"Monitoring.AggregatePrefixes":                 false,
-	"Monitoring.DataLocation":                      false,
-	"Monitoring.DataRetention":                     false,
-	"Monitoring.DataRetentionSize":                 false,
-	"Monitoring.EnablePrometheus":                  false,
-	"Monitoring.LabelLimit":                        false,
-	"Monitoring.LabelNameLengthLimit":              false,
-	"Monitoring.LabelValueLengthLimit":             false,
-	"Monitoring.MetricAuthorization":               false,
-	"Monitoring.PortHigher":                        false,
-	"Monitoring.PortLower":                         false,
-	"Monitoring.PromQLAuthorization":               false,
-	"Monitoring.SampleLimit":                       false,
-	"Monitoring.StorageCriticalThreshold":          false,
-	"Monitoring.StorageHealthCheckInterval":        false,
-	"Monitoring.StorageWarningThreshold":           false,
-	"Monitoring.TokenExpiresIn":                    false,
-	"Monitoring.TokenRefreshInterval":              false,
-	"OIDC.AuthorizationEndpoint":                   false,
-	"OIDC.ClientID":                                false,
-	"OIDC.ClientIDFile":                            false,
-	"OIDC.ClientRedirectHostname":                  false,
-	"OIDC.ClientSecretFile":                        false,
-	"OIDC.DeviceAuthEndpoint":                      false,
-	"OIDC.Issuer":                                  false,
-	"OIDC.Scopes":                                  false,
-	"OIDC.TokenEndpoint":                           false,
-	"OIDC.UserInfoEndpoint":                        false,
-	"Origin.CacheControl":                          false,
-	"Origin.Concurrency":                           false,
-	"Origin.ConcurrencyDegradedThreshold":          false,
-	"Origin.DbLocation":                            false,
-	"Origin.DefaultChecksumTypes":                  false,
-	"Origin.DirectorTest":                          false,
-	"Origin.DisableCopies":                         false,
-	"Origin.DisableDirectClients":                  false,
-	"Origin.DiskUsageCalculationDelay":             false,
-	"Origin.DiskUsageCalculationInterval":          false,
-	"Origin.DiskUsageCalculationRateLimit":         false,
-	"Origin.EnableAtomicUploads":                   false,
-	"Origin.EnableBroker":                          false,
-	"Origin.EnableCmsd":                            false,
-	"Origin.EnableDirListing":                      false,
-	"Origin.EnableDirectReads":                     false,
-	"Origin.EnableDiskUsageCalculation":            false,
-	"Origin.EnableFallbackRead":                    false,
-	"Origin.EnableIssuer":                          false,
-	"Origin.EnableListings":                        false,
-	"Origin.EnableMacaroons":                       false,
-	"Origin.EnableOIDC":                            false,
-	"Origin.EnablePublicReads":                     false,
-	"Origin.EnableReads":                           false,
-	"Origin.EnableStandaloneMode":                  false,
-	"Origin.EnableTLSClientAuth":                   false,
-	"Origin.EnableTransferAPI":                     false,
-	"Origin.EnableVoms":                            false,
-	"Origin.EnableWrite":                           false,
-	"Origin.EnableWrites":                          false,
-	"Origin.ExportVolume":                          false,
-	"Origin.ExportVolumes":                         false,
-	"Origin.Exports":                               false,
-	"Origin.FedTokenLocation":                      false,
-	"Origin.FederationPrefix":                      false,
-	"Origin.GlobusClientIDFile":                    false,
-	"Origin.GlobusClientSecretFile":                false,
-	"Origin.GlobusCollectionID":                    false,
-	"Origin.GlobusCollectionName":                  false,
-	"Origin.GlobusConfigLocation":                  false,
-	"Origin.GlobusIssuerURL":                       false,
-	"Origin.GlobusTransferAPIBaseUrl":              false,
-	"Origin.GlobusTransferTokenFile":               false,
-	"Origin.Globusv2TokenRefreshInterval":          false,
-	"Origin.HttpAuthOAuth2ClientID":                false,
-	"Origin.HttpAuthOAuth2ClientSecretFile":        false,
-	"Origin.HttpAuthOAuth2Issuer":                  false,
-	"Origin.HttpAuthTokenFile":                     false,
-	"Origin.HttpAuthTokenPassthrough":              false,
-	"Origin.HttpServiceUrl":                        false,
-	"Origin.IssuerMode":                            false,
-	"Origin.Metadata.Enabled":                      false,
-	"Origin.Metadata.Endpoint":                     false,
-	"Origin.Metadata.ErrorAfter":                   false,
-	"Origin.Metadata.MaxBackoff":                   false,
-	"Origin.Metadata.MaxInflight":                  false,
-	"Origin.Metadata.MinBackoff":                   false,
-	"Origin.Metadata.Mode":                         false,
-	"Origin.Metadata.RatePerSecond":                false,
-	"Origin.Metadata.RequestTimeout":               false,
-	"Origin.Metadata.TokenLifetime":                false,
-	"Origin.Metadata.WarnAfter":                    false,
-	"Origin.Mode":                                  false,
-	"Origin.Multiuser":                             false,
-	"Origin.MultiuserMinID":                        false,
-	"Origin.MultiuserUmask":                        false,
-	"Origin.MultiuserVarlinkSocketPath":            false,
-	"Origin.NamespacePrefix":                       false,
-	"Origin.ObjectProviderURL":                     false,
-	"Origin.PStoreDataScanInterval":                false,
-	"Origin.PStoreDataScanRate":                    false,
-	"Origin.PStoreIndexCheckInterval":              false,
-	"Origin.PStoreInlineMaxBytes":                  false,
-	"Origin.PStoreLocation":                        false,
-	"Origin.PStoreMetadataBackupInterval":          false,
-	"Origin.PStoreMetadataBackupLocation":          false,
-	"Origin.PStoreMetadataBackupsToKeep":           false,
-	"Origin.PStoreStorageDirs":                     false,
-	"Origin.Port":                                  false,
-	"Origin.Posc.Enabled":                          false,
-	"Origin.Posc.FileTimeout":                      false,
-	"Origin.Posc.KeepaliveInterval":                false,
-	"Origin.Posc.Prefix":                           false,
-	"Origin.RunLocation":                           false,
-	"Origin.S3AccessKeyfile":                       false,
-	"Origin.S3Bucket":                              false,
-	"Origin.S3Region":                              false,
-	"Origin.S3SecretKeyfile":                       false,
-	"Origin.S3ServiceName":                         false,
-	"Origin.S3ServiceUrl":                          false,
-	"Origin.S3UrlStyle":                            false,
-	"Origin.SSH.AuthMethods":                       false,
-	"Origin.SSH.AutoAddHostKey":                    false,
-	"Origin.SSH.ChallengeTimeout":                  false,
-	"Origin.SSH.ConnectTimeout":                    false,
-	"Origin.SSH.Host":                              false,
-	"Origin.SSH.KeepaliveInterval":                 false,
-	"Origin.SSH.KeepaliveTimeout":                  false,
-	"Origin.SSH.KnownHostsFile":                    false,
-	"Origin.SSH.MaxRetries":                        false,
-	"Origin.SSH.PasswordFile":                      false,
-	"Origin.SSH.PelicanBinaryPath":                 false,
-	"Origin.SSH.Port":                              false,
-	"Origin.SSH.PrivateKeyFile":                    false,
-	"Origin.SSH.PrivateKeyPassphraseFile":          false,
-	"Origin.SSH.ProxyJump":                         false,
-	"Origin.SSH.RemotePelicanBinaryDir":            false,
-	"Origin.SSH.RemotePelicanBinaryOverrides":      false,
-	"Origin.SSH.SessionEstablishTimeout":           false,
-	"Origin.SSH.TunnelCallback":                    false,
-	"Origin.SSH.User":                              false,
-	"Origin.ScitokensDefaultUser":                  false,
-	"Origin.ScitokensGroupsClaim":                  false,
-	"Origin.ScitokensMapSubject":                   false,
-	"Origin.ScitokensNameMapFile":                  false,
-	"Origin.ScitokensRestrictedPaths":              false,
-	"Origin.ScitokensUnauthenticatedUser":          false,
-	"Origin.ScitokensUsernameClaim":                false,
-	"Origin.SelfTest":                              false,
-	"Origin.SelfTestInterval":                      false,
-	"Origin.SelfTestMaxAge":                        false,
-	"Origin.StoragePrefix":                         false,
-	"Origin.StorageType":                           false,
-	"Origin.SupportedChecksumTypes":                false,
-	"Origin.TokenAudience":                         false,
-	"Origin.TransferRateLimit":                     false,
-	"Origin.UploadTempLocation":                    false,
-	"Origin.Url":                                   false,
-	"Origin.UserMapfileRefreshInterval":            false,
-	"Origin.XRootDPrefix":                          false,
-	"Origin.XRootServiceUrl":                       false,
-	"Plugin.DirectorDecisionPercentage":            false,
-	"Plugin.Token":                                 false,
-	"Registry.AdminUsers":                          false,
-	"Registry.CustomRegistrationFields":            false,
-	"Registry.DbLocation":                          false,
-	"Registry.EnableOIDC":                          false,
+	"Cache.AllowedFederations": false,
+	"Cache.BlocksToPrefetch": false,
+	"Cache.ClientStatisticsLocation": false,
+	"Cache.Concurrency": false,
+	"Cache.ConcurrencyDegradedThreshold": false,
+	"Cache.DataLocation": false,
+	"Cache.DataLocations": false,
+	"Cache.DataScanMode": false,
+	"Cache.DataScanResampleInterval": false,
+	"Cache.DbLocation": false,
+	"Cache.DefaultCacheTimeout": false,
+	"Cache.DirectorTest": false,
+	"Cache.DisableClientX509": false,
+	"Cache.EnableBroker": false,
+	"Cache.EnableChaosAPI": false,
+	"Cache.EnableEvictionMonitoring": false,
+	"Cache.EnableLotman": false,
+	"Cache.EnableOIDC": false,
+	"Cache.EnablePrefetch": false,
+	"Cache.EnableSiteLocalMode": false,
+	"Cache.EnableTLSClientAuth": false,
+	"Cache.EnableV2": false,
+	"Cache.EnableVoms": false,
+	"Cache.EvictionMonitoringInterval": false,
+	"Cache.EvictionMonitoringMaxDepth": false,
+	"Cache.ExportLocation": false,
+	"Cache.FedTokenLocation": false,
+	"Cache.FilesBaseSize": false,
+	"Cache.FilesMaxSize": false,
+	"Cache.FilesNominalSize": false,
+	"Cache.HighWaterMark": false,
+	"Cache.LocalRoot": false,
+	"Cache.LowWaterMark": false,
+	"Cache.MemoryCacheSize": false,
+	"Cache.MetaLocations": false,
+	"Cache.MinDirectorRefreshInterval": false,
+	"Cache.NamespaceLocation": false,
+	"Cache.PSSOrigin": false,
+	"Cache.PermittedNamespaces": false,
+	"Cache.Port": false,
+	"Cache.RunLocation": false,
+	"Cache.SelfTest": false,
+	"Cache.SelfTestInterval": false,
+	"Cache.SelfTestMaxAge": false,
+	"Cache.SentinelLocation": false,
+	"Cache.StorageLocation": false,
+	"Cache.Throttle.EMAWindow": false,
+	"Cache.Throttle.PendingBufferSize": false,
+	"Cache.Throttle.PerOriginActivePercent": false,
+	"Cache.Throttle.PerOriginPendingSize": false,
+	"Cache.Throttle.PerOriginStarvingPercent": false,
+	"Cache.Throttle.RetryAfter": false,
+	"Cache.Url": false,
+	"Cache.WorkerCount": false,
+	"Cache.XRootDPrefix": false,
+	"Client.AssumeDirectorServerHeader": false,
+	"Client.CredentialFile": false,
+	"Client.DirectorRetries": false,
+	"Client.DisableHttpProxy": false,
+	"Client.DisableProxyFallback": false,
+	"Client.EnableOverwrites": false,
+	"Client.IsPlugin": false,
+	"Client.MaximumDownloadSpeed": false,
+	"Client.MinimumDownloadSpeed": false,
+	"Client.PreferredCaches": false,
+	"Client.SlowTransferRampupTime": false,
+	"Client.SlowTransferWindow": false,
+	"Client.StoppedTransferTimeout": false,
+	"Client.WorkerCount": false,
+	"ClientAgent.DbLocation": false,
+	"ClientAgent.HistoryRetentionDays": false,
+	"ClientAgent.IdleTimeout": false,
+	"ClientAgent.MaxConcurrentJobs": false,
+	"ClientAgent.PidFile": false,
+	"ClientAgent.ProgressUpdateInterval": false,
+	"ClientAgent.Socket": false,
+	"ConfigBase": false,
+	"ConfigLocations": false,
+	"Debug": false,
+	"Director.AdaptiveSortEWMATimeConstant": false,
+	"Director.AdaptiveSortTruncateConstant": false,
+	"Director.AdvertiseUrl": false,
+	"Director.AdvertisementTTL": false,
+	"Director.AssumePresenceAtSingleOrigin": false,
+	"Director.CachePresenceCapacity": false,
+	"Director.CachePresenceTTL": false,
+	"Director.CacheResponseHostnames": false,
+	"Director.CacheSortMethod": false,
+	"Director.CachesPullFromCaches": false,
+	"Director.CheckCachePresence": false,
+	"Director.CheckOriginPresence": false,
+	"Director.DbLocation": false,
+	"Director.DefaultResponse": false,
+	"Director.EnableBroker": false,
+	"Director.EnableFederationMetadataHosting": false,
+	"Director.EnableOIDC": false,
+	"Director.EnableStat": false,
+	"Director.FedTokenLifetime": false,
+	"Director.FilterCachesInErrorState": false,
+	"Director.FilteredServers": false,
+	"Director.GeoIPLocation": false,
+	"Director.MaxMindKeyFile": false,
+	"Director.MaxStatResponse": false,
+	"Director.MetadataComparisonInterval": false,
+	"Director.MinStatResponse": false,
+	"Director.OriginCacheHealthTestInterval": false,
+	"Director.OriginResponseHostnames": false,
+	"Director.RegistryQueryInterval": false,
+	"Director.StatConcurrencyLimit": false,
+	"Director.StatTimeout": false,
+	"Director.SupportContactEmail": false,
+	"Director.SupportContactUrl": false,
+	"DisableHttpProxy": false,
+	"DisableProxyFallback": false,
+	"Federation.BrokerUrl": false,
+	"Federation.DirectorUrl": false,
+	"Federation.DiscoveryUrl": false,
+	"Federation.JwkUrl": false,
+	"Federation.RegistryUrl": false,
+	"Federation.TopologyDowntimeUrl": false,
+	"Federation.TopologyNamespaceUrl": false,
+	"Federation.TopologyReloadInterval": false,
+	"Federation.TopologyUrl": false,
+	"GeoIPOverrides": false,
+	"GeoLocation": false,
+	"Issuer.AccessTokenLifetime": false,
+	"Issuer.AuthenticationSource": false,
+	"Issuer.AuthorizationCodeLifetime": false,
+	"Issuer.AuthorizationTemplates": false,
+	"Issuer.DynamicClientStaleTimeout": false,
+	"Issuer.DynamicClientUnusedTimeout": false,
+	"Issuer.GroupFile": false,
+	"Issuer.GroupRequirements": false,
+	"Issuer.GroupSource": false,
+	"Issuer.IDTokenLifetime": false,
+	"Issuer.IssuerClaimValue": false,
+	"Issuer.OIDCAuthenticationRequirements": false,
+	"Issuer.OIDCAuthenticationUserClaim": false,
+	"Issuer.OIDCGroupClaim": false,
+	"Issuer.OIDCIssuerClaim": false,
+	"Issuer.OIDCPreferClaimsFromIDToken": false,
+	"Issuer.OIDCSubjectClaim": false,
+	"Issuer.PublicClientID": false,
+	"Issuer.QDLLocation": false,
+	"Issuer.RedirectUris": false,
+	"Issuer.RefreshTokenGracePeriod": false,
+	"Issuer.RefreshTokenLifetime": false,
+	"Issuer.ScitokensServerLocation": false,
+	"Issuer.TomcatLocation": false,
+	"Issuer.UserStripDomain": false,
+	"IssuerKey": false,
+	"IssuerKeysDirectory": false,
+	"LocalCache.ChunkSize": false,
+	"LocalCache.DataLocation": false,
+	"LocalCache.DefaultMaxAge": false,
+	"LocalCache.FDCacheSize": false,
+	"LocalCache.HighWaterMarkPercentage": false,
+	"LocalCache.LowWaterMarkPercentage": false,
+	"LocalCache.MaxConcurrentPrefetch": false,
+	"LocalCache.MemoryCacheSize": false,
+	"LocalCache.PrefetchTimeout": false,
+	"LocalCache.RevalidationJitter": false,
+	"LocalCache.RunLocation": false,
+	"LocalCache.Size": false,
+	"LocalCache.Socket": false,
+	"LocalCache.StorageDirs": false,
+	"Logging.Buffer.BatchLines": false,
+	"Logging.Buffer.MaxSize": false,
+	"Logging.Cache.Http": true,
+	"Logging.Cache.Lotman": true,
+	"Logging.Cache.Ofs": true,
+	"Logging.Cache.Pfc": true,
+	"Logging.Cache.Pss": true,
+	"Logging.Cache.PssSetOpt": true,
+	"Logging.Cache.Scitokens": true,
+	"Logging.Cache.Xrd": true,
+	"Logging.Cache.Xrootd": true,
+	"Logging.Client.DisableProgressBars": false,
+	"Logging.Client.ProgressInterval": false,
+	"Logging.DisableProgressBars": false,
+	"Logging.Level": true,
+	"Logging.LogLocation": false,
+	"Logging.Origin.Cms": true,
+	"Logging.Origin.Http": true,
+	"Logging.Origin.Ofs": true,
+	"Logging.Origin.Oss": true,
+	"Logging.Origin.Scitokens": true,
+	"Logging.Origin.Xrd": true,
+	"Logging.Origin.Xrootd": true,
+	"Logging.Rotation.Disable": false,
+	"Logging.Rotation.DisableCompress": false,
+	"Logging.Rotation.FlushInterval": false,
+	"Logging.Rotation.Frequency": false,
+	"Logging.Rotation.MaxRetentionPeriod": false,
+	"Logging.Rotation.MaxRetentionSize": false,
+	"Logging.Rotation.MaxSize": false,
+	"Lotman.DbLocation": false,
+	"Lotman.DefaultLotDeletionLifetime": false,
+	"Lotman.DefaultLotExpirationLifetime": false,
+	"Lotman.EnableAPI": false,
+	"Lotman.EnabledPolicy": false,
+	"Lotman.GarbageCollectionInterval": false,
+	"Lotman.LibLocation": false,
+	"Lotman.LotHome": false,
+	"Lotman.LotRecordRetention": false,
+	"Lotman.MaxLotLifetime": false,
+	"Lotman.MinFillerWidth": false,
+	"Lotman.PolicyDefinitions": false,
+	"Lotman.RenewalCheckInterval": false,
+	"Lotman.SchedulingHorizon": false,
+	"MinimumDownloadSpeed": false,
+	"Monitoring.AggregatePrefixes": false,
+	"Monitoring.DataLocation": false,
+	"Monitoring.DataRetention": false,
+	"Monitoring.DataRetentionSize": false,
+	"Monitoring.EnablePrometheus": false,
+	"Monitoring.LabelLimit": false,
+	"Monitoring.LabelNameLengthLimit": false,
+	"Monitoring.LabelValueLengthLimit": false,
+	"Monitoring.MetricAuthorization": false,
+	"Monitoring.PortHigher": false,
+	"Monitoring.PortLower": false,
+	"Monitoring.PromQLAuthorization": false,
+	"Monitoring.SampleLimit": false,
+	"Monitoring.StorageCriticalThreshold": false,
+	"Monitoring.StorageHealthCheckInterval": false,
+	"Monitoring.StorageWarningThreshold": false,
+	"Monitoring.TokenExpiresIn": false,
+	"Monitoring.TokenRefreshInterval": false,
+	"OIDC.AuthorizationEndpoint": false,
+	"OIDC.ClientID": false,
+	"OIDC.ClientIDFile": false,
+	"OIDC.ClientRedirectHostname": false,
+	"OIDC.ClientSecretFile": false,
+	"OIDC.DeviceAuthEndpoint": false,
+	"OIDC.Issuer": false,
+	"OIDC.Scopes": false,
+	"OIDC.TokenEndpoint": false,
+	"OIDC.UserInfoEndpoint": false,
+	"Origin.CacheControl": false,
+	"Origin.Concurrency": false,
+	"Origin.ConcurrencyDegradedThreshold": false,
+	"Origin.DbLocation": false,
+	"Origin.DefaultChecksumTypes": false,
+	"Origin.DirectorTest": false,
+	"Origin.DisableCopies": false,
+	"Origin.DisableDirectClients": false,
+	"Origin.DiskUsageCalculationDelay": false,
+	"Origin.DiskUsageCalculationInterval": false,
+	"Origin.DiskUsageCalculationRateLimit": false,
+	"Origin.EnableAtomicUploads": false,
+	"Origin.EnableBroker": false,
+	"Origin.EnableCmsd": false,
+	"Origin.EnableDirListing": false,
+	"Origin.EnableDirectReads": false,
+	"Origin.EnableDiskUsageCalculation": false,
+	"Origin.EnableFallbackRead": false,
+	"Origin.EnableIssuer": false,
+	"Origin.EnableListings": false,
+	"Origin.EnableMacaroons": false,
+	"Origin.EnableOIDC": false,
+	"Origin.EnablePublicReads": false,
+	"Origin.EnableReads": false,
+	"Origin.EnableStandaloneMode": false,
+	"Origin.EnableTLSClientAuth": false,
+	"Origin.EnableTransferAPI": false,
+	"Origin.EnableVoms": false,
+	"Origin.EnableWrite": false,
+	"Origin.EnableWrites": false,
+	"Origin.ExportVolume": false,
+	"Origin.ExportVolumes": false,
+	"Origin.Exports": false,
+	"Origin.FedTokenLocation": false,
+	"Origin.FederationPrefix": false,
+	"Origin.GlobusClientIDFile": false,
+	"Origin.GlobusClientSecretFile": false,
+	"Origin.GlobusCollectionID": false,
+	"Origin.GlobusCollectionName": false,
+	"Origin.GlobusConfigLocation": false,
+	"Origin.GlobusIssuerURL": false,
+	"Origin.GlobusTransferAPIBaseUrl": false,
+	"Origin.GlobusTransferTokenFile": false,
+	"Origin.Globusv2TokenRefreshInterval": false,
+	"Origin.HttpAuthOAuth2ClientID": false,
+	"Origin.HttpAuthOAuth2ClientSecretFile": false,
+	"Origin.HttpAuthOAuth2Issuer": false,
+	"Origin.HttpAuthTokenFile": false,
+	"Origin.HttpAuthTokenPassthrough": false,
+	"Origin.HttpServiceUrl": false,
+	"Origin.IssuerMode": false,
+	"Origin.Metadata.AllowMultipart": false,
+	"Origin.Metadata.Enabled": false,
+	"Origin.Metadata.Endpoint": false,
+	"Origin.Metadata.ErrorAfter": false,
+	"Origin.Metadata.MaxBackoff": false,
+	"Origin.Metadata.MaxInflight": false,
+	"Origin.Metadata.MaxMetadataBytes": false,
+	"Origin.Metadata.MetadataPartName": false,
+	"Origin.Metadata.MinBackoff": false,
+	"Origin.Metadata.Mode": false,
+	"Origin.Metadata.ObjectPartName": false,
+	"Origin.Metadata.RatePerSecond": false,
+	"Origin.Metadata.RequestTimeout": false,
+	"Origin.Metadata.TokenLifetime": false,
+	"Origin.Metadata.WarnAfter": false,
+	"Origin.Mode": false,
+	"Origin.Multiuser": false,
+	"Origin.MultiuserMinID": false,
+	"Origin.MultiuserUmask": false,
+	"Origin.MultiuserVarlinkSocketPath": false,
+	"Origin.NamespacePrefix": false,
+	"Origin.ObjectProviderURL": false,
+	"Origin.PStoreDataScanInterval": false,
+	"Origin.PStoreDataScanRate": false,
+	"Origin.PStoreIndexCheckInterval": false,
+	"Origin.PStoreInlineMaxBytes": false,
+	"Origin.PStoreLocation": false,
+	"Origin.PStoreMetadataBackupInterval": false,
+	"Origin.PStoreMetadataBackupLocation": false,
+	"Origin.PStoreMetadataBackupsToKeep": false,
+	"Origin.PStoreStorageDirs": false,
+	"Origin.Port": false,
+	"Origin.Posc.Enabled": false,
+	"Origin.Posc.FileTimeout": false,
+	"Origin.Posc.KeepaliveInterval": false,
+	"Origin.Posc.Prefix": false,
+	"Origin.RunLocation": false,
+	"Origin.S3AccessKeyfile": false,
+	"Origin.S3Bucket": false,
+	"Origin.S3Region": false,
+	"Origin.S3SecretKeyfile": false,
+	"Origin.S3ServiceName": false,
+	"Origin.S3ServiceUrl": false,
+	"Origin.S3UrlStyle": false,
+	"Origin.SSH.AuthMethods": false,
+	"Origin.SSH.AutoAddHostKey": false,
+	"Origin.SSH.ChallengeTimeout": false,
+	"Origin.SSH.ConnectTimeout": false,
+	"Origin.SSH.Host": false,
+	"Origin.SSH.KeepaliveInterval": false,
+	"Origin.SSH.KeepaliveTimeout": false,
+	"Origin.SSH.KnownHostsFile": false,
+	"Origin.SSH.MaxRetries": false,
+	"Origin.SSH.PasswordFile": false,
+	"Origin.SSH.PelicanBinaryPath": false,
+	"Origin.SSH.Port": false,
+	"Origin.SSH.PrivateKeyFile": false,
+	"Origin.SSH.PrivateKeyPassphraseFile": false,
+	"Origin.SSH.ProxyJump": false,
+	"Origin.SSH.RemotePelicanBinaryDir": false,
+	"Origin.SSH.RemotePelicanBinaryOverrides": false,
+	"Origin.SSH.SessionEstablishTimeout": false,
+	"Origin.SSH.TunnelCallback": false,
+	"Origin.SSH.User": false,
+	"Origin.ScitokensDefaultUser": false,
+	"Origin.ScitokensGroupsClaim": false,
+	"Origin.ScitokensMapSubject": false,
+	"Origin.ScitokensNameMapFile": false,
+	"Origin.ScitokensRestrictedPaths": false,
+	"Origin.ScitokensUnauthenticatedUser": false,
+	"Origin.ScitokensUsernameClaim": false,
+	"Origin.SelfTest": false,
+	"Origin.SelfTestInterval": false,
+	"Origin.SelfTestMaxAge": false,
+	"Origin.StoragePrefix": false,
+	"Origin.StorageType": false,
+	"Origin.SupportedChecksumTypes": false,
+	"Origin.TokenAudience": false,
+	"Origin.TransferRateLimit": false,
+	"Origin.UploadTempLocation": false,
+	"Origin.Url": false,
+	"Origin.UserMapfileRefreshInterval": false,
+	"Origin.XRootDPrefix": false,
+	"Origin.XRootServiceUrl": false,
+	"Plugin.DirectorDecisionPercentage": false,
+	"Plugin.Token": false,
+	"Registry.AdminUsers": false,
+	"Registry.CustomRegistrationFields": false,
+	"Registry.DbLocation": false,
+	"Registry.EnableOIDC": false,
 	"Registry.InactiveRegistrationCleanupInterval": false,
-	"Registry.InactiveRegistrationTimeout":         false,
-	"Registry.Institutions":                        false,
-	"Registry.InstitutionsUrl":                     false,
-	"Registry.InstitutionsUrlReloadMinutes":        false,
-	"Registry.RequireCacheApproval":                false,
-	"Registry.RequireKeyChaining":                  false,
-	"Registry.RequireOriginApproval":               false,
-	"RuntimeDir":                                   false,
-	"Server.AUPCanonicalURL":                       false,
-	"Server.AUPFile":                               false,
-	"Server.AUPLastUpdated":                        false,
-	"Server.AdLifetime":                            false,
-	"Server.AdminGroups":                           false,
-	"Server.AdvertisementInterval":                 false,
-	"Server.AutoEnrollUsernameClaims":              false,
-	"Server.CollectionAdminGroups":                 false,
-	"Server.CollectionAdminUsers":                  false,
-	"Server.DatabaseBackup.Frequency":              false,
-	"Server.DatabaseBackup.Location":               false,
-	"Server.DatabaseBackup.MaxCount":               false,
-	"Server.DbLocation":                            false,
-	"Server.DirectorUrls":                          false,
-	"Server.DropPrivileges":                        false,
-	"Server.EnablePKCS11":                          false,
-	"Server.EnablePprof":                           false,
-	"Server.EnableUI":                              false,
-	"Server.ExternalWebUrl":                        false,
-	"Server.GroupInviteLinkExpiration":             false,
-	"Server.HealthMonitoringPublic":                false,
-	"Server.Hostname":                              false,
-	"Server.IssuerHostname":                        false,
-	"Server.IssuerJwks":                            false,
-	"Server.IssuerPort":                            false,
-	"Server.IssuerUrl":                             false,
-	"Server.Modules":                               false,
-	"Server.NewUserDefaultScopes":                  false,
-	"Server.RegistrationRetryInterval":             false,
-	"Server.SSRFProtection.AllowedCIDRs":           false,
-	"Server.SSRFProtection.BlockedCIDRs":           false,
-	"Server.SSRFProtection.Disabled":               false,
-	"Server.SSRFProtection.SkipDefaultBlocks":      false,
-	"Server.SessionSecretFile":                     false,
-	"Server.StartupTimeout":                        false,
-	"Server.TLSCACertificateDirectory":             false,
-	"Server.TLSCACertificateFile":                  false,
-	"Server.TLSCAKey":                              false,
-	"Server.TLSCertificate":                        false,
-	"Server.TLSCertificateChain":                   false,
-	"Server.TLSKey":                                false,
-	"Server.TrustedProxies":                        false,
-	"Server.UIActivationCodeFile":                  false,
-	"Server.UIAdminUsers":                          false,
-	"Server.UILoginRateLimit":                      false,
-	"Server.UIPasswordFile":                        false,
-	"Server.UnprivilegedUser":                      false,
-	"Server.UserAdminGroups":                       false,
-	"Server.UserAdminUsers":                        false,
-	"Server.WebConfigFile":                         false,
-	"Server.WebHost":                               false,
-	"Server.WebPort":                               false,
-	"Server.WebReadOnly":                           false,
-	"Shoveler.AMQPExchange":                        false,
-	"Shoveler.AMQPTokenLocation":                   false,
-	"Shoveler.Enable":                              false,
-	"Shoveler.IPMapping":                           false,
-	"Shoveler.MessageQueueProtocol":                false,
-	"Shoveler.OutputDestinations":                  false,
-	"Shoveler.PasswordLocation":                    false,
-	"Shoveler.PortHigher":                          false,
-	"Shoveler.PortLower":                           false,
-	"Shoveler.QueueDirectory":                      false,
-	"Shoveler.StompCert":                           false,
-	"Shoveler.StompCertKey":                        false,
-	"Shoveler.StompUsername":                       false,
-	"Shoveler.Topic":                               false,
-	"Shoveler.URL":                                 false,
-	"Shoveler.VerifyHeader":                        false,
-	"StagePlugin.Hook":                             false,
-	"StagePlugin.MountPrefix":                      false,
-	"StagePlugin.OriginPrefix":                     false,
-	"StagePlugin.ShadowOriginPrefix":               false,
-	"TLSSkipVerify":                                false,
-	"Topology.DisableCacheX509":                    false,
-	"Topology.DisableCaches":                       false,
-	"Topology.DisableDowntime":                     false,
-	"Topology.DisableOriginX509":                   false,
-	"Topology.DisableOrigins":                      false,
-	"Transfer.CredentialIdleTimeout":               false,
-	"Transfer.EnableOAuth2Clients":                 false,
-	"Transfer.EnabledGroups":                       false,
-	"Transfer.MaxConcurrentJobs":                   false,
-	"Transport.BrokerEndpointCacheTTL":             false,
-	"Transport.DialerKeepAlive":                    false,
-	"Transport.DialerTimeout":                      false,
-	"Transport.ExpectContinueTimeout":              false,
-	"Transport.IdleConnTimeout":                    false,
-	"Transport.MaxIdleConns":                       false,
-	"Transport.ResponseHeaderTimeout":              false,
-	"Transport.TLSHandshakeTimeout":                false,
-	"Xrootd.AuthRefreshInterval":                   false,
-	"Xrootd.Authfile":                              false,
-	"Xrootd.AutoShutdownEnabled":                   false,
-	"Xrootd.ConfigFile":                            false,
-	"Xrootd.ConfigUpdateFailureTimeout":            false,
-	"Xrootd.DetailedMonitoringHost":                false,
-	"Xrootd.DetailedMonitoringPort":                false,
-	"Xrootd.EnableLocalMonitoring":                 false,
-	"Xrootd.HttpMaxDelay":                          false,
-	"Xrootd.LocalMonitoringHost":                   false,
-	"Xrootd.LocalMonitoringPort":                   false,
-	"Xrootd.MacaroonsKeyFile":                      false,
-	"Xrootd.ManagerHost":                           false,
-	"Xrootd.ManagerPort":                           false,
-	"Xrootd.MaxStartupWait":                        false,
-	"Xrootd.MaxThreads":                            false,
-	"Xrootd.Mount":                                 false,
-	"Xrootd.Port":                                  false,
-	"Xrootd.RobotsTxtFile":                         false,
-	"Xrootd.RunLocation":                           false,
-	"Xrootd.ScitokensConfig":                       false,
-	"Xrootd.ShutdownTimeout":                       false,
-	"Xrootd.Sitename":                              false,
-	"Xrootd.SummaryMonitoringHost":                 false,
-	"Xrootd.SummaryMonitoringPort":                 false,
+	"Registry.InactiveRegistrationTimeout": false,
+	"Registry.Institutions": false,
+	"Registry.InstitutionsUrl": false,
+	"Registry.InstitutionsUrlReloadMinutes": false,
+	"Registry.RequireCacheApproval": false,
+	"Registry.RequireKeyChaining": false,
+	"Registry.RequireOriginApproval": false,
+	"RuntimeDir": false,
+	"Server.AUPCanonicalURL": false,
+	"Server.AUPFile": false,
+	"Server.AUPLastUpdated": false,
+	"Server.AdLifetime": false,
+	"Server.AdminGroups": false,
+	"Server.AdvertisementInterval": false,
+	"Server.AutoEnrollUsernameClaims": false,
+	"Server.CollectionAdminGroups": false,
+	"Server.CollectionAdminUsers": false,
+	"Server.DatabaseBackup.Frequency": false,
+	"Server.DatabaseBackup.Location": false,
+	"Server.DatabaseBackup.MaxCount": false,
+	"Server.DbLocation": false,
+	"Server.DirectorUrls": false,
+	"Server.DropPrivileges": false,
+	"Server.EnablePKCS11": false,
+	"Server.EnablePprof": false,
+	"Server.EnableUI": false,
+	"Server.ExternalWebUrl": false,
+	"Server.GroupInviteLinkExpiration": false,
+	"Server.HealthMonitoringPublic": false,
+	"Server.Hostname": false,
+	"Server.IssuerHostname": false,
+	"Server.IssuerJwks": false,
+	"Server.IssuerPort": false,
+	"Server.IssuerUrl": false,
+	"Server.Modules": false,
+	"Server.NewUserDefaultScopes": false,
+	"Server.RegistrationRetryInterval": false,
+	"Server.SSRFProtection.AllowedCIDRs": false,
+	"Server.SSRFProtection.BlockedCIDRs": false,
+	"Server.SSRFProtection.Disabled": false,
+	"Server.SSRFProtection.SkipDefaultBlocks": false,
+	"Server.SessionSecretFile": false,
+	"Server.StartupTimeout": false,
+	"Server.TLSCACertificateDirectory": false,
+	"Server.TLSCACertificateFile": false,
+	"Server.TLSCAKey": false,
+	"Server.TLSCertificate": false,
+	"Server.TLSCertificateChain": false,
+	"Server.TLSKey": false,
+	"Server.TrustedProxies": false,
+	"Server.UIActivationCodeFile": false,
+	"Server.UIAdminUsers": false,
+	"Server.UILoginRateLimit": false,
+	"Server.UIPasswordFile": false,
+	"Server.UnprivilegedUser": false,
+	"Server.UserAdminGroups": false,
+	"Server.UserAdminUsers": false,
+	"Server.WebConfigFile": false,
+	"Server.WebHost": false,
+	"Server.WebPort": false,
+	"Server.WebReadOnly": false,
+	"Shoveler.AMQPExchange": false,
+	"Shoveler.AMQPTokenLocation": false,
+	"Shoveler.Enable": false,
+	"Shoveler.IPMapping": false,
+	"Shoveler.MessageQueueProtocol": false,
+	"Shoveler.OutputDestinations": false,
+	"Shoveler.PasswordLocation": false,
+	"Shoveler.PortHigher": false,
+	"Shoveler.PortLower": false,
+	"Shoveler.QueueDirectory": false,
+	"Shoveler.StompCert": false,
+	"Shoveler.StompCertKey": false,
+	"Shoveler.StompUsername": false,
+	"Shoveler.Topic": false,
+	"Shoveler.URL": false,
+	"Shoveler.VerifyHeader": false,
+	"StagePlugin.Hook": false,
+	"StagePlugin.MountPrefix": false,
+	"StagePlugin.OriginPrefix": false,
+	"StagePlugin.ShadowOriginPrefix": false,
+	"TLSSkipVerify": false,
+	"Topology.DisableCacheX509": false,
+	"Topology.DisableCaches": false,
+	"Topology.DisableDowntime": false,
+	"Topology.DisableOriginX509": false,
+	"Topology.DisableOrigins": false,
+	"Transfer.CredentialIdleTimeout": false,
+	"Transfer.EnableOAuth2Clients": false,
+	"Transfer.EnabledGroups": false,
+	"Transfer.MaxConcurrentJobs": false,
+	"Transport.BrokerEndpointCacheTTL": false,
+	"Transport.DialerKeepAlive": false,
+	"Transport.DialerTimeout": false,
+	"Transport.ExpectContinueTimeout": false,
+	"Transport.IdleConnTimeout": false,
+	"Transport.MaxIdleConns": false,
+	"Transport.ResponseHeaderTimeout": false,
+	"Transport.TLSHandshakeTimeout": false,
+	"Xrootd.AuthRefreshInterval": false,
+	"Xrootd.Authfile": false,
+	"Xrootd.AutoShutdownEnabled": false,
+	"Xrootd.ConfigFile": false,
+	"Xrootd.ConfigUpdateFailureTimeout": false,
+	"Xrootd.DetailedMonitoringHost": false,
+	"Xrootd.DetailedMonitoringPort": false,
+	"Xrootd.EnableLocalMonitoring": false,
+	"Xrootd.HttpMaxDelay": false,
+	"Xrootd.LocalMonitoringHost": false,
+	"Xrootd.LocalMonitoringPort": false,
+	"Xrootd.MacaroonsKeyFile": false,
+	"Xrootd.ManagerHost": false,
+	"Xrootd.ManagerPort": false,
+	"Xrootd.MaxStartupWait": false,
+	"Xrootd.MaxThreads": false,
+	"Xrootd.Mount": false,
+	"Xrootd.Port": false,
+	"Xrootd.RobotsTxtFile": false,
+	"Xrootd.RunLocation": false,
+	"Xrootd.ScitokensConfig": false,
+	"Xrootd.ShutdownTimeout": false,
+	"Xrootd.Sitename": false,
+	"Xrootd.SummaryMonitoringHost": false,
+	"Xrootd.SummaryMonitoringPort": false,
 }
 
 func GetRuntimeConfigurable() map[string]bool {
@@ -628,209 +632,211 @@ func paramNameToEnvVar(paramName string) string {
 // single parameter refers to a sensitive value like a password location.
 // The same logic applies to the other maps generated by this file.
 var stringAccessors = map[string]func(*Config) string{
-	"Cache.ClientStatisticsLocation":        func(c *Config) string { return c.Cache.ClientStatisticsLocation },
-	"Cache.DataLocation":                    func(c *Config) string { return c.Cache.DataLocation },
-	"Cache.DataScanMode":                    func(c *Config) string { return c.Cache.DataScanMode },
-	"Cache.DbLocation":                      func(c *Config) string { return c.Cache.DbLocation },
-	"Cache.ExportLocation":                  func(c *Config) string { return c.Cache.ExportLocation },
-	"Cache.FedTokenLocation":                func(c *Config) string { return c.Cache.FedTokenLocation },
-	"Cache.FilesBaseSize":                   func(c *Config) string { return c.Cache.FilesBaseSize },
-	"Cache.FilesMaxSize":                    func(c *Config) string { return c.Cache.FilesMaxSize },
-	"Cache.FilesNominalSize":                func(c *Config) string { return c.Cache.FilesNominalSize },
-	"Cache.HighWaterMark":                   func(c *Config) string { return c.Cache.HighWaterMark },
-	"Cache.LocalRoot":                       func(c *Config) string { return c.Cache.LocalRoot },
-	"Cache.LowWaterMark":                    func(c *Config) string { return c.Cache.LowWaterMark },
-	"Cache.MemoryCacheSize":                 func(c *Config) string { return c.Cache.MemoryCacheSize },
-	"Cache.NamespaceLocation":               func(c *Config) string { return c.Cache.NamespaceLocation },
-	"Cache.PSSOrigin":                       func(c *Config) string { return c.Cache.PSSOrigin },
-	"Cache.RunLocation":                     func(c *Config) string { return c.Cache.RunLocation },
-	"Cache.SentinelLocation":                func(c *Config) string { return c.Cache.SentinelLocation },
-	"Cache.StorageLocation":                 func(c *Config) string { return c.Cache.StorageLocation },
-	"Cache.Url":                             func(c *Config) string { return c.Cache.Url },
-	"Cache.XRootDPrefix":                    func(c *Config) string { return c.Cache.XRootDPrefix },
-	"ClientAgent.DbLocation":                func(c *Config) string { return c.ClientAgent.DbLocation },
-	"ClientAgent.PidFile":                   func(c *Config) string { return c.ClientAgent.PidFile },
-	"ClientAgent.Socket":                    func(c *Config) string { return c.ClientAgent.Socket },
-	"Client.CredentialFile":                 func(c *Config) string { return c.Client.CredentialFile },
-	"ConfigBase":                            func(c *Config) string { return c.ConfigBase },
-	"Director.AdvertiseUrl":                 func(c *Config) string { return c.Director.AdvertiseUrl },
-	"Director.CacheSortMethod":              func(c *Config) string { return c.Director.CacheSortMethod },
-	"Director.DbLocation":                   func(c *Config) string { return c.Director.DbLocation },
-	"Director.DefaultResponse":              func(c *Config) string { return c.Director.DefaultResponse },
-	"Director.GeoIPLocation":                func(c *Config) string { return c.Director.GeoIPLocation },
-	"Director.MaxMindKeyFile":               func(c *Config) string { return c.Director.MaxMindKeyFile },
-	"Director.SupportContactEmail":          func(c *Config) string { return c.Director.SupportContactEmail },
-	"Director.SupportContactUrl":            func(c *Config) string { return c.Director.SupportContactUrl },
-	"Federation.DiscoveryUrl":               func(c *Config) string { return c.Federation.DiscoveryUrl },
-	"Federation.TopologyDowntimeUrl":        func(c *Config) string { return c.Federation.TopologyDowntimeUrl },
-	"Federation.TopologyNamespaceUrl":       func(c *Config) string { return c.Federation.TopologyNamespaceUrl },
-	"Federation.TopologyUrl":                func(c *Config) string { return c.Federation.TopologyUrl },
-	"GeoLocation":                           func(c *Config) string { return c.GeoLocation },
-	"IssuerKey":                             func(c *Config) string { return c.IssuerKey },
-	"IssuerKeysDirectory":                   func(c *Config) string { return c.IssuerKeysDirectory },
-	"Issuer.AuthenticationSource":           func(c *Config) string { return c.Issuer.AuthenticationSource },
-	"Issuer.GroupFile":                      func(c *Config) string { return c.Issuer.GroupFile },
-	"Issuer.GroupSource":                    func(c *Config) string { return c.Issuer.GroupSource },
-	"Issuer.IssuerClaimValue":               func(c *Config) string { return c.Issuer.IssuerClaimValue },
-	"Issuer.OIDCAuthenticationUserClaim":    func(c *Config) string { return c.Issuer.OIDCAuthenticationUserClaim },
-	"Issuer.OIDCGroupClaim":                 func(c *Config) string { return c.Issuer.OIDCGroupClaim },
-	"Issuer.OIDCIssuerClaim":                func(c *Config) string { return c.Issuer.OIDCIssuerClaim },
-	"Issuer.OIDCSubjectClaim":               func(c *Config) string { return c.Issuer.OIDCSubjectClaim },
-	"Issuer.PublicClientID":                 func(c *Config) string { return c.Issuer.PublicClientID },
-	"Issuer.QDLLocation":                    func(c *Config) string { return c.Issuer.QDLLocation },
-	"Issuer.ScitokensServerLocation":        func(c *Config) string { return c.Issuer.ScitokensServerLocation },
-	"Issuer.TomcatLocation":                 func(c *Config) string { return c.Issuer.TomcatLocation },
-	"LocalCache.ChunkSize":                  func(c *Config) string { return c.LocalCache.ChunkSize },
-	"LocalCache.DataLocation":               func(c *Config) string { return c.LocalCache.DataLocation },
-	"LocalCache.MemoryCacheSize":            func(c *Config) string { return c.LocalCache.MemoryCacheSize },
-	"LocalCache.RunLocation":                func(c *Config) string { return c.LocalCache.RunLocation },
-	"LocalCache.Size":                       func(c *Config) string { return c.LocalCache.Size },
-	"LocalCache.Socket":                     func(c *Config) string { return c.LocalCache.Socket },
-	"Logging.Buffer.MaxSize":                func(c *Config) string { return c.Logging.Buffer.MaxSize },
-	"Logging.Cache.Http":                    func(c *Config) string { return c.Logging.Cache.Http },
-	"Logging.Cache.Lotman":                  func(c *Config) string { return c.Logging.Cache.Lotman },
-	"Logging.Cache.Ofs":                     func(c *Config) string { return c.Logging.Cache.Ofs },
-	"Logging.Cache.Pfc":                     func(c *Config) string { return c.Logging.Cache.Pfc },
-	"Logging.Cache.Pss":                     func(c *Config) string { return c.Logging.Cache.Pss },
-	"Logging.Cache.PssSetOpt":               func(c *Config) string { return c.Logging.Cache.PssSetOpt },
-	"Logging.Cache.Scitokens":               func(c *Config) string { return c.Logging.Cache.Scitokens },
-	"Logging.Cache.Xrd":                     func(c *Config) string { return c.Logging.Cache.Xrd },
-	"Logging.Cache.Xrootd":                  func(c *Config) string { return c.Logging.Cache.Xrootd },
-	"Logging.Level":                         func(c *Config) string { return c.Logging.Level },
-	"Logging.LogLocation":                   func(c *Config) string { return c.Logging.LogLocation },
-	"Logging.Origin.Cms":                    func(c *Config) string { return c.Logging.Origin.Cms },
-	"Logging.Origin.Http":                   func(c *Config) string { return c.Logging.Origin.Http },
-	"Logging.Origin.Ofs":                    func(c *Config) string { return c.Logging.Origin.Ofs },
-	"Logging.Origin.Oss":                    func(c *Config) string { return c.Logging.Origin.Oss },
-	"Logging.Origin.Scitokens":              func(c *Config) string { return c.Logging.Origin.Scitokens },
-	"Logging.Origin.Xrd":                    func(c *Config) string { return c.Logging.Origin.Xrd },
-	"Logging.Origin.Xrootd":                 func(c *Config) string { return c.Logging.Origin.Xrootd },
-	"Logging.Rotation.Frequency":            func(c *Config) string { return c.Logging.Rotation.Frequency },
-	"Logging.Rotation.MaxRetentionSize":     func(c *Config) string { return c.Logging.Rotation.MaxRetentionSize },
-	"Logging.Rotation.MaxSize":              func(c *Config) string { return c.Logging.Rotation.MaxSize },
-	"Lotman.DbLocation":                     func(c *Config) string { return c.Lotman.DbLocation },
-	"Lotman.EnabledPolicy":                  func(c *Config) string { return c.Lotman.EnabledPolicy },
-	"Lotman.LibLocation":                    func(c *Config) string { return c.Lotman.LibLocation },
-	"Lotman.LotHome":                        func(c *Config) string { return c.Lotman.LotHome },
-	"Monitoring.DataLocation":               func(c *Config) string { return c.Monitoring.DataLocation },
-	"Monitoring.DataRetentionSize":          func(c *Config) string { return c.Monitoring.DataRetentionSize },
-	"OIDC.AuthorizationEndpoint":            func(c *Config) string { return c.OIDC.AuthorizationEndpoint },
-	"OIDC.ClientID":                         func(c *Config) string { return c.OIDC.ClientID },
-	"OIDC.ClientIDFile":                     func(c *Config) string { return c.OIDC.ClientIDFile },
-	"OIDC.ClientRedirectHostname":           func(c *Config) string { return c.OIDC.ClientRedirectHostname },
-	"OIDC.ClientSecretFile":                 func(c *Config) string { return c.OIDC.ClientSecretFile },
-	"OIDC.DeviceAuthEndpoint":               func(c *Config) string { return c.OIDC.DeviceAuthEndpoint },
-	"OIDC.Issuer":                           func(c *Config) string { return c.OIDC.Issuer },
-	"OIDC.TokenEndpoint":                    func(c *Config) string { return c.OIDC.TokenEndpoint },
-	"OIDC.UserInfoEndpoint":                 func(c *Config) string { return c.OIDC.UserInfoEndpoint },
-	"Origin.CacheControl":                   func(c *Config) string { return c.Origin.CacheControl },
-	"Origin.DbLocation":                     func(c *Config) string { return c.Origin.DbLocation },
-	"Origin.ExportVolume":                   func(c *Config) string { return c.Origin.ExportVolume },
-	"Origin.FedTokenLocation":               func(c *Config) string { return c.Origin.FedTokenLocation },
-	"Origin.FederationPrefix":               func(c *Config) string { return c.Origin.FederationPrefix },
-	"Origin.GlobusClientIDFile":             func(c *Config) string { return c.Origin.GlobusClientIDFile },
-	"Origin.GlobusClientSecretFile":         func(c *Config) string { return c.Origin.GlobusClientSecretFile },
-	"Origin.GlobusCollectionID":             func(c *Config) string { return c.Origin.GlobusCollectionID },
-	"Origin.GlobusCollectionName":           func(c *Config) string { return c.Origin.GlobusCollectionName },
-	"Origin.GlobusConfigLocation":           func(c *Config) string { return c.Origin.GlobusConfigLocation },
-	"Origin.GlobusIssuerURL":                func(c *Config) string { return c.Origin.GlobusIssuerURL },
-	"Origin.GlobusTransferAPIBaseUrl":       func(c *Config) string { return c.Origin.GlobusTransferAPIBaseUrl },
-	"Origin.GlobusTransferTokenFile":        func(c *Config) string { return c.Origin.GlobusTransferTokenFile },
-	"Origin.HttpAuthOAuth2ClientID":         func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientID },
+	"Cache.ClientStatisticsLocation": func(c *Config) string { return c.Cache.ClientStatisticsLocation },
+	"Cache.DataLocation": func(c *Config) string { return c.Cache.DataLocation },
+	"Cache.DataScanMode": func(c *Config) string { return c.Cache.DataScanMode },
+	"Cache.DbLocation": func(c *Config) string { return c.Cache.DbLocation },
+	"Cache.ExportLocation": func(c *Config) string { return c.Cache.ExportLocation },
+	"Cache.FedTokenLocation": func(c *Config) string { return c.Cache.FedTokenLocation },
+	"Cache.FilesBaseSize": func(c *Config) string { return c.Cache.FilesBaseSize },
+	"Cache.FilesMaxSize": func(c *Config) string { return c.Cache.FilesMaxSize },
+	"Cache.FilesNominalSize": func(c *Config) string { return c.Cache.FilesNominalSize },
+	"Cache.HighWaterMark": func(c *Config) string { return c.Cache.HighWaterMark },
+	"Cache.LocalRoot": func(c *Config) string { return c.Cache.LocalRoot },
+	"Cache.LowWaterMark": func(c *Config) string { return c.Cache.LowWaterMark },
+	"Cache.MemoryCacheSize": func(c *Config) string { return c.Cache.MemoryCacheSize },
+	"Cache.NamespaceLocation": func(c *Config) string { return c.Cache.NamespaceLocation },
+	"Cache.PSSOrigin": func(c *Config) string { return c.Cache.PSSOrigin },
+	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
+	"Cache.SentinelLocation": func(c *Config) string { return c.Cache.SentinelLocation },
+	"Cache.StorageLocation": func(c *Config) string { return c.Cache.StorageLocation },
+	"Cache.Url": func(c *Config) string { return c.Cache.Url },
+	"Cache.XRootDPrefix": func(c *Config) string { return c.Cache.XRootDPrefix },
+	"ClientAgent.DbLocation": func(c *Config) string { return c.ClientAgent.DbLocation },
+	"ClientAgent.PidFile": func(c *Config) string { return c.ClientAgent.PidFile },
+	"ClientAgent.Socket": func(c *Config) string { return c.ClientAgent.Socket },
+	"Client.CredentialFile": func(c *Config) string { return c.Client.CredentialFile },
+	"ConfigBase": func(c *Config) string { return c.ConfigBase },
+	"Director.AdvertiseUrl": func(c *Config) string { return c.Director.AdvertiseUrl },
+	"Director.CacheSortMethod": func(c *Config) string { return c.Director.CacheSortMethod },
+	"Director.DbLocation": func(c *Config) string { return c.Director.DbLocation },
+	"Director.DefaultResponse": func(c *Config) string { return c.Director.DefaultResponse },
+	"Director.GeoIPLocation": func(c *Config) string { return c.Director.GeoIPLocation },
+	"Director.MaxMindKeyFile": func(c *Config) string { return c.Director.MaxMindKeyFile },
+	"Director.SupportContactEmail": func(c *Config) string { return c.Director.SupportContactEmail },
+	"Director.SupportContactUrl": func(c *Config) string { return c.Director.SupportContactUrl },
+	"Federation.DiscoveryUrl": func(c *Config) string { return c.Federation.DiscoveryUrl },
+	"Federation.TopologyDowntimeUrl": func(c *Config) string { return c.Federation.TopologyDowntimeUrl },
+	"Federation.TopologyNamespaceUrl": func(c *Config) string { return c.Federation.TopologyNamespaceUrl },
+	"Federation.TopologyUrl": func(c *Config) string { return c.Federation.TopologyUrl },
+	"GeoLocation": func(c *Config) string { return c.GeoLocation },
+	"IssuerKey": func(c *Config) string { return c.IssuerKey },
+	"IssuerKeysDirectory": func(c *Config) string { return c.IssuerKeysDirectory },
+	"Issuer.AuthenticationSource": func(c *Config) string { return c.Issuer.AuthenticationSource },
+	"Issuer.GroupFile": func(c *Config) string { return c.Issuer.GroupFile },
+	"Issuer.GroupSource": func(c *Config) string { return c.Issuer.GroupSource },
+	"Issuer.IssuerClaimValue": func(c *Config) string { return c.Issuer.IssuerClaimValue },
+	"Issuer.OIDCAuthenticationUserClaim": func(c *Config) string { return c.Issuer.OIDCAuthenticationUserClaim },
+	"Issuer.OIDCGroupClaim": func(c *Config) string { return c.Issuer.OIDCGroupClaim },
+	"Issuer.OIDCIssuerClaim": func(c *Config) string { return c.Issuer.OIDCIssuerClaim },
+	"Issuer.OIDCSubjectClaim": func(c *Config) string { return c.Issuer.OIDCSubjectClaim },
+	"Issuer.PublicClientID": func(c *Config) string { return c.Issuer.PublicClientID },
+	"Issuer.QDLLocation": func(c *Config) string { return c.Issuer.QDLLocation },
+	"Issuer.ScitokensServerLocation": func(c *Config) string { return c.Issuer.ScitokensServerLocation },
+	"Issuer.TomcatLocation": func(c *Config) string { return c.Issuer.TomcatLocation },
+	"LocalCache.ChunkSize": func(c *Config) string { return c.LocalCache.ChunkSize },
+	"LocalCache.DataLocation": func(c *Config) string { return c.LocalCache.DataLocation },
+	"LocalCache.MemoryCacheSize": func(c *Config) string { return c.LocalCache.MemoryCacheSize },
+	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
+	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
+	"LocalCache.Socket": func(c *Config) string { return c.LocalCache.Socket },
+	"Logging.Buffer.MaxSize": func(c *Config) string { return c.Logging.Buffer.MaxSize },
+	"Logging.Cache.Http": func(c *Config) string { return c.Logging.Cache.Http },
+	"Logging.Cache.Lotman": func(c *Config) string { return c.Logging.Cache.Lotman },
+	"Logging.Cache.Ofs": func(c *Config) string { return c.Logging.Cache.Ofs },
+	"Logging.Cache.Pfc": func(c *Config) string { return c.Logging.Cache.Pfc },
+	"Logging.Cache.Pss": func(c *Config) string { return c.Logging.Cache.Pss },
+	"Logging.Cache.PssSetOpt": func(c *Config) string { return c.Logging.Cache.PssSetOpt },
+	"Logging.Cache.Scitokens": func(c *Config) string { return c.Logging.Cache.Scitokens },
+	"Logging.Cache.Xrd": func(c *Config) string { return c.Logging.Cache.Xrd },
+	"Logging.Cache.Xrootd": func(c *Config) string { return c.Logging.Cache.Xrootd },
+	"Logging.Level": func(c *Config) string { return c.Logging.Level },
+	"Logging.LogLocation": func(c *Config) string { return c.Logging.LogLocation },
+	"Logging.Origin.Cms": func(c *Config) string { return c.Logging.Origin.Cms },
+	"Logging.Origin.Http": func(c *Config) string { return c.Logging.Origin.Http },
+	"Logging.Origin.Ofs": func(c *Config) string { return c.Logging.Origin.Ofs },
+	"Logging.Origin.Oss": func(c *Config) string { return c.Logging.Origin.Oss },
+	"Logging.Origin.Scitokens": func(c *Config) string { return c.Logging.Origin.Scitokens },
+	"Logging.Origin.Xrd": func(c *Config) string { return c.Logging.Origin.Xrd },
+	"Logging.Origin.Xrootd": func(c *Config) string { return c.Logging.Origin.Xrootd },
+	"Logging.Rotation.Frequency": func(c *Config) string { return c.Logging.Rotation.Frequency },
+	"Logging.Rotation.MaxRetentionSize": func(c *Config) string { return c.Logging.Rotation.MaxRetentionSize },
+	"Logging.Rotation.MaxSize": func(c *Config) string { return c.Logging.Rotation.MaxSize },
+	"Lotman.DbLocation": func(c *Config) string { return c.Lotman.DbLocation },
+	"Lotman.EnabledPolicy": func(c *Config) string { return c.Lotman.EnabledPolicy },
+	"Lotman.LibLocation": func(c *Config) string { return c.Lotman.LibLocation },
+	"Lotman.LotHome": func(c *Config) string { return c.Lotman.LotHome },
+	"Monitoring.DataLocation": func(c *Config) string { return c.Monitoring.DataLocation },
+	"Monitoring.DataRetentionSize": func(c *Config) string { return c.Monitoring.DataRetentionSize },
+	"OIDC.AuthorizationEndpoint": func(c *Config) string { return c.OIDC.AuthorizationEndpoint },
+	"OIDC.ClientID": func(c *Config) string { return c.OIDC.ClientID },
+	"OIDC.ClientIDFile": func(c *Config) string { return c.OIDC.ClientIDFile },
+	"OIDC.ClientRedirectHostname": func(c *Config) string { return c.OIDC.ClientRedirectHostname },
+	"OIDC.ClientSecretFile": func(c *Config) string { return c.OIDC.ClientSecretFile },
+	"OIDC.DeviceAuthEndpoint": func(c *Config) string { return c.OIDC.DeviceAuthEndpoint },
+	"OIDC.Issuer": func(c *Config) string { return c.OIDC.Issuer },
+	"OIDC.TokenEndpoint": func(c *Config) string { return c.OIDC.TokenEndpoint },
+	"OIDC.UserInfoEndpoint": func(c *Config) string { return c.OIDC.UserInfoEndpoint },
+	"Origin.CacheControl": func(c *Config) string { return c.Origin.CacheControl },
+	"Origin.DbLocation": func(c *Config) string { return c.Origin.DbLocation },
+	"Origin.ExportVolume": func(c *Config) string { return c.Origin.ExportVolume },
+	"Origin.FedTokenLocation": func(c *Config) string { return c.Origin.FedTokenLocation },
+	"Origin.FederationPrefix": func(c *Config) string { return c.Origin.FederationPrefix },
+	"Origin.GlobusClientIDFile": func(c *Config) string { return c.Origin.GlobusClientIDFile },
+	"Origin.GlobusClientSecretFile": func(c *Config) string { return c.Origin.GlobusClientSecretFile },
+	"Origin.GlobusCollectionID": func(c *Config) string { return c.Origin.GlobusCollectionID },
+	"Origin.GlobusCollectionName": func(c *Config) string { return c.Origin.GlobusCollectionName },
+	"Origin.GlobusConfigLocation": func(c *Config) string { return c.Origin.GlobusConfigLocation },
+	"Origin.GlobusIssuerURL": func(c *Config) string { return c.Origin.GlobusIssuerURL },
+	"Origin.GlobusTransferAPIBaseUrl": func(c *Config) string { return c.Origin.GlobusTransferAPIBaseUrl },
+	"Origin.GlobusTransferTokenFile": func(c *Config) string { return c.Origin.GlobusTransferTokenFile },
+	"Origin.HttpAuthOAuth2ClientID": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientID },
 	"Origin.HttpAuthOAuth2ClientSecretFile": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientSecretFile },
-	"Origin.HttpAuthOAuth2Issuer":           func(c *Config) string { return c.Origin.HttpAuthOAuth2Issuer },
-	"Origin.HttpAuthTokenFile":              func(c *Config) string { return c.Origin.HttpAuthTokenFile },
-	"Origin.HttpServiceUrl":                 func(c *Config) string { return c.Origin.HttpServiceUrl },
-	"Origin.IssuerMode":                     func(c *Config) string { return c.Origin.IssuerMode },
-	"Origin.Metadata.Endpoint":              func(c *Config) string { return c.Origin.Metadata.Endpoint },
-	"Origin.Metadata.Mode":                  func(c *Config) string { return c.Origin.Metadata.Mode },
-	"Origin.Mode":                           func(c *Config) string { return c.Origin.Mode },
-	"Origin.MultiuserVarlinkSocketPath":     func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
-	"Origin.NamespacePrefix":                func(c *Config) string { return c.Origin.NamespacePrefix },
-	"Origin.ObjectProviderURL":              func(c *Config) string { return c.Origin.ObjectProviderURL },
-	"Origin.PStoreLocation":                 func(c *Config) string { return c.Origin.PStoreLocation },
-	"Origin.PStoreMetadataBackupLocation":   func(c *Config) string { return c.Origin.PStoreMetadataBackupLocation },
-	"Origin.Posc.Prefix":                    func(c *Config) string { return c.Origin.Posc.Prefix },
-	"Origin.RunLocation":                    func(c *Config) string { return c.Origin.RunLocation },
-	"Origin.S3AccessKeyfile":                func(c *Config) string { return c.Origin.S3AccessKeyfile },
-	"Origin.S3Bucket":                       func(c *Config) string { return c.Origin.S3Bucket },
-	"Origin.S3Region":                       func(c *Config) string { return c.Origin.S3Region },
-	"Origin.S3SecretKeyfile":                func(c *Config) string { return c.Origin.S3SecretKeyfile },
-	"Origin.S3ServiceName":                  func(c *Config) string { return c.Origin.S3ServiceName },
-	"Origin.S3ServiceUrl":                   func(c *Config) string { return c.Origin.S3ServiceUrl },
-	"Origin.S3UrlStyle":                     func(c *Config) string { return c.Origin.S3UrlStyle },
-	"Origin.SSH.Host":                       func(c *Config) string { return c.Origin.SSH.Host },
-	"Origin.SSH.KnownHostsFile":             func(c *Config) string { return c.Origin.SSH.KnownHostsFile },
-	"Origin.SSH.PasswordFile":               func(c *Config) string { return c.Origin.SSH.PasswordFile },
-	"Origin.SSH.PelicanBinaryPath":          func(c *Config) string { return c.Origin.SSH.PelicanBinaryPath },
-	"Origin.SSH.PrivateKeyFile":             func(c *Config) string { return c.Origin.SSH.PrivateKeyFile },
-	"Origin.SSH.PrivateKeyPassphraseFile":   func(c *Config) string { return c.Origin.SSH.PrivateKeyPassphraseFile },
-	"Origin.SSH.ProxyJump":                  func(c *Config) string { return c.Origin.SSH.ProxyJump },
-	"Origin.SSH.RemotePelicanBinaryDir":     func(c *Config) string { return c.Origin.SSH.RemotePelicanBinaryDir },
-	"Origin.SSH.User":                       func(c *Config) string { return c.Origin.SSH.User },
-	"Origin.ScitokensDefaultUser":           func(c *Config) string { return c.Origin.ScitokensDefaultUser },
-	"Origin.ScitokensGroupsClaim":           func(c *Config) string { return c.Origin.ScitokensGroupsClaim },
-	"Origin.ScitokensNameMapFile":           func(c *Config) string { return c.Origin.ScitokensNameMapFile },
-	"Origin.ScitokensUnauthenticatedUser":   func(c *Config) string { return c.Origin.ScitokensUnauthenticatedUser },
-	"Origin.ScitokensUsernameClaim":         func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
-	"Origin.StoragePrefix":                  func(c *Config) string { return c.Origin.StoragePrefix },
-	"Origin.StorageType":                    func(c *Config) string { return c.Origin.StorageType },
-	"Origin.TokenAudience":                  func(c *Config) string { return c.Origin.TokenAudience },
-	"Origin.UploadTempLocation":             func(c *Config) string { return c.Origin.UploadTempLocation },
-	"Origin.Url":                            func(c *Config) string { return c.Origin.Url },
-	"Origin.XRootDPrefix":                   func(c *Config) string { return c.Origin.XRootDPrefix },
-	"Origin.XRootServiceUrl":                func(c *Config) string { return c.Origin.XRootServiceUrl },
-	"Plugin.Token":                          func(c *Config) string { return c.Plugin.Token },
-	"Registry.DbLocation":                   func(c *Config) string { return c.Registry.DbLocation },
-	"Registry.InstitutionsUrl":              func(c *Config) string { return c.Registry.InstitutionsUrl },
-	"RuntimeDir":                            func(c *Config) string { return c.RuntimeDir },
-	"Server.AUPCanonicalURL":                func(c *Config) string { return c.Server.AUPCanonicalURL },
-	"Server.AUPFile":                        func(c *Config) string { return c.Server.AUPFile },
-	"Server.AUPLastUpdated":                 func(c *Config) string { return c.Server.AUPLastUpdated },
-	"Server.DatabaseBackup.Location":        func(c *Config) string { return c.Server.DatabaseBackup.Location },
-	"Server.DbLocation":                     func(c *Config) string { return c.Server.DbLocation },
-	"Server.ExternalWebUrl":                 func(c *Config) string { return c.Server.ExternalWebUrl },
-	"Server.Hostname":                       func(c *Config) string { return c.Server.Hostname },
-	"Server.IssuerHostname":                 func(c *Config) string { return c.Server.IssuerHostname },
-	"Server.IssuerJwks":                     func(c *Config) string { return c.Server.IssuerJwks },
-	"Server.IssuerUrl":                      func(c *Config) string { return c.Server.IssuerUrl },
-	"Server.SessionSecretFile":              func(c *Config) string { return c.Server.SessionSecretFile },
-	"Server.TLSCACertificateDirectory":      func(c *Config) string { return c.Server.TLSCACertificateDirectory },
-	"Server.TLSCACertificateFile":           func(c *Config) string { return c.Server.TLSCACertificateFile },
-	"Server.TLSCAKey":                       func(c *Config) string { return c.Server.TLSCAKey },
-	"Server.TLSCertificate":                 func(c *Config) string { return c.Server.TLSCertificate },
-	"Server.TLSCertificateChain":            func(c *Config) string { return c.Server.TLSCertificateChain },
-	"Server.TLSKey":                         func(c *Config) string { return c.Server.TLSKey },
-	"Server.UIActivationCodeFile":           func(c *Config) string { return c.Server.UIActivationCodeFile },
-	"Server.UIPasswordFile":                 func(c *Config) string { return c.Server.UIPasswordFile },
-	"Server.UnprivilegedUser":               func(c *Config) string { return c.Server.UnprivilegedUser },
-	"Server.WebConfigFile":                  func(c *Config) string { return c.Server.WebConfigFile },
-	"Server.WebHost":                        func(c *Config) string { return c.Server.WebHost },
-	"Shoveler.AMQPExchange":                 func(c *Config) string { return c.Shoveler.AMQPExchange },
-	"Shoveler.AMQPTokenLocation":            func(c *Config) string { return c.Shoveler.AMQPTokenLocation },
-	"Shoveler.MessageQueueProtocol":         func(c *Config) string { return c.Shoveler.MessageQueueProtocol },
-	"Shoveler.PasswordLocation":             func(c *Config) string { return c.Shoveler.PasswordLocation },
-	"Shoveler.QueueDirectory":               func(c *Config) string { return c.Shoveler.QueueDirectory },
-	"Shoveler.StompCert":                    func(c *Config) string { return c.Shoveler.StompCert },
-	"Shoveler.StompCertKey":                 func(c *Config) string { return c.Shoveler.StompCertKey },
-	"Shoveler.StompUsername":                func(c *Config) string { return c.Shoveler.StompUsername },
-	"Shoveler.Topic":                        func(c *Config) string { return c.Shoveler.Topic },
-	"Shoveler.URL":                          func(c *Config) string { return c.Shoveler.URL },
-	"StagePlugin.MountPrefix":               func(c *Config) string { return c.StagePlugin.MountPrefix },
-	"StagePlugin.OriginPrefix":              func(c *Config) string { return c.StagePlugin.OriginPrefix },
-	"StagePlugin.ShadowOriginPrefix":        func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
-	"Xrootd.Authfile":                       func(c *Config) string { return c.Xrootd.Authfile },
-	"Xrootd.ConfigFile":                     func(c *Config) string { return c.Xrootd.ConfigFile },
-	"Xrootd.DetailedMonitoringHost":         func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
-	"Xrootd.LocalMonitoringHost":            func(c *Config) string { return c.Xrootd.LocalMonitoringHost },
-	"Xrootd.MacaroonsKeyFile":               func(c *Config) string { return c.Xrootd.MacaroonsKeyFile },
-	"Xrootd.ManagerHost":                    func(c *Config) string { return c.Xrootd.ManagerHost },
-	"Xrootd.Mount":                          func(c *Config) string { return c.Xrootd.Mount },
-	"Xrootd.RobotsTxtFile":                  func(c *Config) string { return c.Xrootd.RobotsTxtFile },
-	"Xrootd.RunLocation":                    func(c *Config) string { return c.Xrootd.RunLocation },
-	"Xrootd.ScitokensConfig":                func(c *Config) string { return c.Xrootd.ScitokensConfig },
-	"Xrootd.Sitename":                       func(c *Config) string { return c.Xrootd.Sitename },
-	"Xrootd.SummaryMonitoringHost":          func(c *Config) string { return c.Xrootd.SummaryMonitoringHost },
+	"Origin.HttpAuthOAuth2Issuer": func(c *Config) string { return c.Origin.HttpAuthOAuth2Issuer },
+	"Origin.HttpAuthTokenFile": func(c *Config) string { return c.Origin.HttpAuthTokenFile },
+	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
+	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
+	"Origin.Metadata.Endpoint": func(c *Config) string { return c.Origin.Metadata.Endpoint },
+	"Origin.Metadata.MetadataPartName": func(c *Config) string { return c.Origin.Metadata.MetadataPartName },
+	"Origin.Metadata.Mode": func(c *Config) string { return c.Origin.Metadata.Mode },
+	"Origin.Metadata.ObjectPartName": func(c *Config) string { return c.Origin.Metadata.ObjectPartName },
+	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
+	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
+	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
+	"Origin.ObjectProviderURL": func(c *Config) string { return c.Origin.ObjectProviderURL },
+	"Origin.PStoreLocation": func(c *Config) string { return c.Origin.PStoreLocation },
+	"Origin.PStoreMetadataBackupLocation": func(c *Config) string { return c.Origin.PStoreMetadataBackupLocation },
+	"Origin.Posc.Prefix": func(c *Config) string { return c.Origin.Posc.Prefix },
+	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
+	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
+	"Origin.S3Bucket": func(c *Config) string { return c.Origin.S3Bucket },
+	"Origin.S3Region": func(c *Config) string { return c.Origin.S3Region },
+	"Origin.S3SecretKeyfile": func(c *Config) string { return c.Origin.S3SecretKeyfile },
+	"Origin.S3ServiceName": func(c *Config) string { return c.Origin.S3ServiceName },
+	"Origin.S3ServiceUrl": func(c *Config) string { return c.Origin.S3ServiceUrl },
+	"Origin.S3UrlStyle": func(c *Config) string { return c.Origin.S3UrlStyle },
+	"Origin.SSH.Host": func(c *Config) string { return c.Origin.SSH.Host },
+	"Origin.SSH.KnownHostsFile": func(c *Config) string { return c.Origin.SSH.KnownHostsFile },
+	"Origin.SSH.PasswordFile": func(c *Config) string { return c.Origin.SSH.PasswordFile },
+	"Origin.SSH.PelicanBinaryPath": func(c *Config) string { return c.Origin.SSH.PelicanBinaryPath },
+	"Origin.SSH.PrivateKeyFile": func(c *Config) string { return c.Origin.SSH.PrivateKeyFile },
+	"Origin.SSH.PrivateKeyPassphraseFile": func(c *Config) string { return c.Origin.SSH.PrivateKeyPassphraseFile },
+	"Origin.SSH.ProxyJump": func(c *Config) string { return c.Origin.SSH.ProxyJump },
+	"Origin.SSH.RemotePelicanBinaryDir": func(c *Config) string { return c.Origin.SSH.RemotePelicanBinaryDir },
+	"Origin.SSH.User": func(c *Config) string { return c.Origin.SSH.User },
+	"Origin.ScitokensDefaultUser": func(c *Config) string { return c.Origin.ScitokensDefaultUser },
+	"Origin.ScitokensGroupsClaim": func(c *Config) string { return c.Origin.ScitokensGroupsClaim },
+	"Origin.ScitokensNameMapFile": func(c *Config) string { return c.Origin.ScitokensNameMapFile },
+	"Origin.ScitokensUnauthenticatedUser": func(c *Config) string { return c.Origin.ScitokensUnauthenticatedUser },
+	"Origin.ScitokensUsernameClaim": func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
+	"Origin.StoragePrefix": func(c *Config) string { return c.Origin.StoragePrefix },
+	"Origin.StorageType": func(c *Config) string { return c.Origin.StorageType },
+	"Origin.TokenAudience": func(c *Config) string { return c.Origin.TokenAudience },
+	"Origin.UploadTempLocation": func(c *Config) string { return c.Origin.UploadTempLocation },
+	"Origin.Url": func(c *Config) string { return c.Origin.Url },
+	"Origin.XRootDPrefix": func(c *Config) string { return c.Origin.XRootDPrefix },
+	"Origin.XRootServiceUrl": func(c *Config) string { return c.Origin.XRootServiceUrl },
+	"Plugin.Token": func(c *Config) string { return c.Plugin.Token },
+	"Registry.DbLocation": func(c *Config) string { return c.Registry.DbLocation },
+	"Registry.InstitutionsUrl": func(c *Config) string { return c.Registry.InstitutionsUrl },
+	"RuntimeDir": func(c *Config) string { return c.RuntimeDir },
+	"Server.AUPCanonicalURL": func(c *Config) string { return c.Server.AUPCanonicalURL },
+	"Server.AUPFile": func(c *Config) string { return c.Server.AUPFile },
+	"Server.AUPLastUpdated": func(c *Config) string { return c.Server.AUPLastUpdated },
+	"Server.DatabaseBackup.Location": func(c *Config) string { return c.Server.DatabaseBackup.Location },
+	"Server.DbLocation": func(c *Config) string { return c.Server.DbLocation },
+	"Server.ExternalWebUrl": func(c *Config) string { return c.Server.ExternalWebUrl },
+	"Server.Hostname": func(c *Config) string { return c.Server.Hostname },
+	"Server.IssuerHostname": func(c *Config) string { return c.Server.IssuerHostname },
+	"Server.IssuerJwks": func(c *Config) string { return c.Server.IssuerJwks },
+	"Server.IssuerUrl": func(c *Config) string { return c.Server.IssuerUrl },
+	"Server.SessionSecretFile": func(c *Config) string { return c.Server.SessionSecretFile },
+	"Server.TLSCACertificateDirectory": func(c *Config) string { return c.Server.TLSCACertificateDirectory },
+	"Server.TLSCACertificateFile": func(c *Config) string { return c.Server.TLSCACertificateFile },
+	"Server.TLSCAKey": func(c *Config) string { return c.Server.TLSCAKey },
+	"Server.TLSCertificate": func(c *Config) string { return c.Server.TLSCertificate },
+	"Server.TLSCertificateChain": func(c *Config) string { return c.Server.TLSCertificateChain },
+	"Server.TLSKey": func(c *Config) string { return c.Server.TLSKey },
+	"Server.UIActivationCodeFile": func(c *Config) string { return c.Server.UIActivationCodeFile },
+	"Server.UIPasswordFile": func(c *Config) string { return c.Server.UIPasswordFile },
+	"Server.UnprivilegedUser": func(c *Config) string { return c.Server.UnprivilegedUser },
+	"Server.WebConfigFile": func(c *Config) string { return c.Server.WebConfigFile },
+	"Server.WebHost": func(c *Config) string { return c.Server.WebHost },
+	"Shoveler.AMQPExchange": func(c *Config) string { return c.Shoveler.AMQPExchange },
+	"Shoveler.AMQPTokenLocation": func(c *Config) string { return c.Shoveler.AMQPTokenLocation },
+	"Shoveler.MessageQueueProtocol": func(c *Config) string { return c.Shoveler.MessageQueueProtocol },
+	"Shoveler.PasswordLocation": func(c *Config) string { return c.Shoveler.PasswordLocation },
+	"Shoveler.QueueDirectory": func(c *Config) string { return c.Shoveler.QueueDirectory },
+	"Shoveler.StompCert": func(c *Config) string { return c.Shoveler.StompCert },
+	"Shoveler.StompCertKey": func(c *Config) string { return c.Shoveler.StompCertKey },
+	"Shoveler.StompUsername": func(c *Config) string { return c.Shoveler.StompUsername },
+	"Shoveler.Topic": func(c *Config) string { return c.Shoveler.Topic },
+	"Shoveler.URL": func(c *Config) string { return c.Shoveler.URL },
+	"StagePlugin.MountPrefix": func(c *Config) string { return c.StagePlugin.MountPrefix },
+	"StagePlugin.OriginPrefix": func(c *Config) string { return c.StagePlugin.OriginPrefix },
+	"StagePlugin.ShadowOriginPrefix": func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
+	"Xrootd.Authfile": func(c *Config) string { return c.Xrootd.Authfile },
+	"Xrootd.ConfigFile": func(c *Config) string { return c.Xrootd.ConfigFile },
+	"Xrootd.DetailedMonitoringHost": func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
+	"Xrootd.LocalMonitoringHost": func(c *Config) string { return c.Xrootd.LocalMonitoringHost },
+	"Xrootd.MacaroonsKeyFile": func(c *Config) string { return c.Xrootd.MacaroonsKeyFile },
+	"Xrootd.ManagerHost": func(c *Config) string { return c.Xrootd.ManagerHost },
+	"Xrootd.Mount": func(c *Config) string { return c.Xrootd.Mount },
+	"Xrootd.RobotsTxtFile": func(c *Config) string { return c.Xrootd.RobotsTxtFile },
+	"Xrootd.RunLocation": func(c *Config) string { return c.Xrootd.RunLocation },
+	"Xrootd.ScitokensConfig": func(c *Config) string { return c.Xrootd.ScitokensConfig },
+	"Xrootd.Sitename": func(c *Config) string { return c.Xrootd.Sitename },
+	"Xrootd.SummaryMonitoringHost": func(c *Config) string { return c.Xrootd.SummaryMonitoringHost },
 }
 
 func (sP StringParam) GetString() string {
@@ -862,41 +868,41 @@ func (sP StringParam) Set(value string) error {
 }
 
 var stringSliceAccessors = map[string]func(*Config) []string{
-	"Cache.AllowedFederations":                func(c *Config) []string { return c.Cache.AllowedFederations },
-	"Cache.DataLocations":                     func(c *Config) []string { return c.Cache.DataLocations },
-	"Cache.MetaLocations":                     func(c *Config) []string { return c.Cache.MetaLocations },
-	"Cache.PermittedNamespaces":               func(c *Config) []string { return c.Cache.PermittedNamespaces },
-	"Client.PreferredCaches":                  func(c *Config) []string { return c.Client.PreferredCaches },
-	"ConfigLocations":                         func(c *Config) []string { return c.ConfigLocations },
-	"Director.CacheResponseHostnames":         func(c *Config) []string { return c.Director.CacheResponseHostnames },
-	"Director.FilteredServers":                func(c *Config) []string { return c.Director.FilteredServers },
-	"Director.OriginResponseHostnames":        func(c *Config) []string { return c.Director.OriginResponseHostnames },
-	"Issuer.GroupRequirements":                func(c *Config) []string { return c.Issuer.GroupRequirements },
-	"Issuer.RedirectUris":                     func(c *Config) []string { return c.Issuer.RedirectUris },
-	"Monitoring.AggregatePrefixes":            func(c *Config) []string { return c.Monitoring.AggregatePrefixes },
-	"OIDC.Scopes":                             func(c *Config) []string { return c.OIDC.Scopes },
-	"Origin.DefaultChecksumTypes":             func(c *Config) []string { return c.Origin.DefaultChecksumTypes },
-	"Origin.ExportVolumes":                    func(c *Config) []string { return c.Origin.ExportVolumes },
-	"Origin.SSH.AuthMethods":                  func(c *Config) []string { return c.Origin.SSH.AuthMethods },
+	"Cache.AllowedFederations": func(c *Config) []string { return c.Cache.AllowedFederations },
+	"Cache.DataLocations": func(c *Config) []string { return c.Cache.DataLocations },
+	"Cache.MetaLocations": func(c *Config) []string { return c.Cache.MetaLocations },
+	"Cache.PermittedNamespaces": func(c *Config) []string { return c.Cache.PermittedNamespaces },
+	"Client.PreferredCaches": func(c *Config) []string { return c.Client.PreferredCaches },
+	"ConfigLocations": func(c *Config) []string { return c.ConfigLocations },
+	"Director.CacheResponseHostnames": func(c *Config) []string { return c.Director.CacheResponseHostnames },
+	"Director.FilteredServers": func(c *Config) []string { return c.Director.FilteredServers },
+	"Director.OriginResponseHostnames": func(c *Config) []string { return c.Director.OriginResponseHostnames },
+	"Issuer.GroupRequirements": func(c *Config) []string { return c.Issuer.GroupRequirements },
+	"Issuer.RedirectUris": func(c *Config) []string { return c.Issuer.RedirectUris },
+	"Monitoring.AggregatePrefixes": func(c *Config) []string { return c.Monitoring.AggregatePrefixes },
+	"OIDC.Scopes": func(c *Config) []string { return c.OIDC.Scopes },
+	"Origin.DefaultChecksumTypes": func(c *Config) []string { return c.Origin.DefaultChecksumTypes },
+	"Origin.ExportVolumes": func(c *Config) []string { return c.Origin.ExportVolumes },
+	"Origin.SSH.AuthMethods": func(c *Config) []string { return c.Origin.SSH.AuthMethods },
 	"Origin.SSH.RemotePelicanBinaryOverrides": func(c *Config) []string { return c.Origin.SSH.RemotePelicanBinaryOverrides },
-	"Origin.ScitokensRestrictedPaths":         func(c *Config) []string { return c.Origin.ScitokensRestrictedPaths },
-	"Origin.SupportedChecksumTypes":           func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
-	"Registry.AdminUsers":                     func(c *Config) []string { return c.Registry.AdminUsers },
-	"Server.AdminGroups":                      func(c *Config) []string { return c.Server.AdminGroups },
-	"Server.AutoEnrollUsernameClaims":         func(c *Config) []string { return c.Server.AutoEnrollUsernameClaims },
-	"Server.CollectionAdminGroups":            func(c *Config) []string { return c.Server.CollectionAdminGroups },
-	"Server.CollectionAdminUsers":             func(c *Config) []string { return c.Server.CollectionAdminUsers },
-	"Server.DirectorUrls":                     func(c *Config) []string { return c.Server.DirectorUrls },
-	"Server.Modules":                          func(c *Config) []string { return c.Server.Modules },
-	"Server.NewUserDefaultScopes":             func(c *Config) []string { return c.Server.NewUserDefaultScopes },
-	"Server.SSRFProtection.AllowedCIDRs":      func(c *Config) []string { return c.Server.SSRFProtection.AllowedCIDRs },
-	"Server.SSRFProtection.BlockedCIDRs":      func(c *Config) []string { return c.Server.SSRFProtection.BlockedCIDRs },
-	"Server.TrustedProxies":                   func(c *Config) []string { return c.Server.TrustedProxies },
-	"Server.UIAdminUsers":                     func(c *Config) []string { return c.Server.UIAdminUsers },
-	"Server.UserAdminGroups":                  func(c *Config) []string { return c.Server.UserAdminGroups },
-	"Server.UserAdminUsers":                   func(c *Config) []string { return c.Server.UserAdminUsers },
-	"Shoveler.OutputDestinations":             func(c *Config) []string { return c.Shoveler.OutputDestinations },
-	"Transfer.EnabledGroups":                  func(c *Config) []string { return c.Transfer.EnabledGroups },
+	"Origin.ScitokensRestrictedPaths": func(c *Config) []string { return c.Origin.ScitokensRestrictedPaths },
+	"Origin.SupportedChecksumTypes": func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
+	"Registry.AdminUsers": func(c *Config) []string { return c.Registry.AdminUsers },
+	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
+	"Server.AutoEnrollUsernameClaims": func(c *Config) []string { return c.Server.AutoEnrollUsernameClaims },
+	"Server.CollectionAdminGroups": func(c *Config) []string { return c.Server.CollectionAdminGroups },
+	"Server.CollectionAdminUsers": func(c *Config) []string { return c.Server.CollectionAdminUsers },
+	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
+	"Server.Modules": func(c *Config) []string { return c.Server.Modules },
+	"Server.NewUserDefaultScopes": func(c *Config) []string { return c.Server.NewUserDefaultScopes },
+	"Server.SSRFProtection.AllowedCIDRs": func(c *Config) []string { return c.Server.SSRFProtection.AllowedCIDRs },
+	"Server.SSRFProtection.BlockedCIDRs": func(c *Config) []string { return c.Server.SSRFProtection.BlockedCIDRs },
+	"Server.TrustedProxies": func(c *Config) []string { return c.Server.TrustedProxies },
+	"Server.UIAdminUsers": func(c *Config) []string { return c.Server.UIAdminUsers },
+	"Server.UserAdminGroups": func(c *Config) []string { return c.Server.UserAdminGroups },
+	"Server.UserAdminUsers": func(c *Config) []string { return c.Server.UserAdminUsers },
+	"Shoveler.OutputDestinations": func(c *Config) []string { return c.Shoveler.OutputDestinations },
+	"Transfer.EnabledGroups": func(c *Config) []string { return c.Transfer.EnabledGroups },
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
@@ -928,70 +934,71 @@ func (slP StringSliceParam) Set(value []string) error {
 }
 
 var intAccessors = map[string]func(*Config) int{
-	"Cache.BlocksToPrefetch":                  func(c *Config) int { return c.Cache.BlocksToPrefetch },
-	"Cache.Concurrency":                       func(c *Config) int { return c.Cache.Concurrency },
-	"Cache.ConcurrencyDegradedThreshold":      func(c *Config) int { return c.Cache.ConcurrencyDegradedThreshold },
-	"Cache.DataScanResampleInterval":          func(c *Config) int { return c.Cache.DataScanResampleInterval },
-	"Cache.EvictionMonitoringMaxDepth":        func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
-	"Cache.Port":                              func(c *Config) int { return c.Cache.Port },
-	"Cache.Throttle.PendingBufferSize":        func(c *Config) int { return c.Cache.Throttle.PendingBufferSize },
-	"Cache.Throttle.PerOriginActivePercent":   func(c *Config) int { return c.Cache.Throttle.PerOriginActivePercent },
-	"Cache.Throttle.PerOriginPendingSize":     func(c *Config) int { return c.Cache.Throttle.PerOriginPendingSize },
+	"Cache.BlocksToPrefetch": func(c *Config) int { return c.Cache.BlocksToPrefetch },
+	"Cache.Concurrency": func(c *Config) int { return c.Cache.Concurrency },
+	"Cache.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Cache.ConcurrencyDegradedThreshold },
+	"Cache.DataScanResampleInterval": func(c *Config) int { return c.Cache.DataScanResampleInterval },
+	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
+	"Cache.Port": func(c *Config) int { return c.Cache.Port },
+	"Cache.Throttle.PendingBufferSize": func(c *Config) int { return c.Cache.Throttle.PendingBufferSize },
+	"Cache.Throttle.PerOriginActivePercent": func(c *Config) int { return c.Cache.Throttle.PerOriginActivePercent },
+	"Cache.Throttle.PerOriginPendingSize": func(c *Config) int { return c.Cache.Throttle.PerOriginPendingSize },
 	"Cache.Throttle.PerOriginStarvingPercent": func(c *Config) int { return c.Cache.Throttle.PerOriginStarvingPercent },
-	"Cache.WorkerCount":                       func(c *Config) int { return c.Cache.WorkerCount },
-	"ClientAgent.HistoryRetentionDays":        func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
-	"ClientAgent.MaxConcurrentJobs":           func(c *Config) int { return c.ClientAgent.MaxConcurrentJobs },
-	"Client.DirectorRetries":                  func(c *Config) int { return c.Client.DirectorRetries },
-	"Client.MaximumDownloadSpeed":             func(c *Config) int { return c.Client.MaximumDownloadSpeed },
-	"Client.MinimumDownloadSpeed":             func(c *Config) int { return c.Client.MinimumDownloadSpeed },
-	"Client.WorkerCount":                      func(c *Config) int { return c.Client.WorkerCount },
-	"Director.AdaptiveSortTruncateConstant":   func(c *Config) int { return c.Director.AdaptiveSortTruncateConstant },
-	"Director.CachePresenceCapacity":          func(c *Config) int { return c.Director.CachePresenceCapacity },
-	"Director.MaxStatResponse":                func(c *Config) int { return c.Director.MaxStatResponse },
-	"Director.MinStatResponse":                func(c *Config) int { return c.Director.MinStatResponse },
-	"Director.StatConcurrencyLimit":           func(c *Config) int { return c.Director.StatConcurrencyLimit },
-	"LocalCache.FDCacheSize":                  func(c *Config) int { return c.LocalCache.FDCacheSize },
-	"LocalCache.HighWaterMarkPercentage":      func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
-	"LocalCache.LowWaterMarkPercentage":       func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
-	"LocalCache.MaxConcurrentPrefetch":        func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
-	"LocalCache.RevalidationJitter":           func(c *Config) int { return c.LocalCache.RevalidationJitter },
-	"Logging.Buffer.BatchLines":               func(c *Config) int { return c.Logging.Buffer.BatchLines },
-	"MinimumDownloadSpeed":                    func(c *Config) int { return c.MinimumDownloadSpeed },
-	"Monitoring.LabelLimit":                   func(c *Config) int { return c.Monitoring.LabelLimit },
-	"Monitoring.LabelNameLengthLimit":         func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
-	"Monitoring.LabelValueLengthLimit":        func(c *Config) int { return c.Monitoring.LabelValueLengthLimit },
-	"Monitoring.PortHigher":                   func(c *Config) int { return c.Monitoring.PortHigher },
-	"Monitoring.PortLower":                    func(c *Config) int { return c.Monitoring.PortLower },
-	"Monitoring.SampleLimit":                  func(c *Config) int { return c.Monitoring.SampleLimit },
-	"Monitoring.StorageCriticalThreshold":     func(c *Config) int { return c.Monitoring.StorageCriticalThreshold },
-	"Monitoring.StorageWarningThreshold":      func(c *Config) int { return c.Monitoring.StorageWarningThreshold },
-	"Origin.Concurrency":                      func(c *Config) int { return c.Origin.Concurrency },
-	"Origin.ConcurrencyDegradedThreshold":     func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
-	"Origin.DiskUsageCalculationRateLimit":    func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
-	"Origin.Metadata.MaxInflight":             func(c *Config) int { return c.Origin.Metadata.MaxInflight },
-	"Origin.Metadata.RatePerSecond":           func(c *Config) int { return c.Origin.Metadata.RatePerSecond },
-	"Origin.MultiuserMinID":                   func(c *Config) int { return c.Origin.MultiuserMinID },
-	"Origin.MultiuserUmask":                   func(c *Config) int { return c.Origin.MultiuserUmask },
-	"Origin.PStoreInlineMaxBytes":             func(c *Config) int { return c.Origin.PStoreInlineMaxBytes },
-	"Origin.PStoreMetadataBackupsToKeep":      func(c *Config) int { return c.Origin.PStoreMetadataBackupsToKeep },
-	"Origin.Port":                             func(c *Config) int { return c.Origin.Port },
-	"Origin.SSH.MaxRetries":                   func(c *Config) int { return c.Origin.SSH.MaxRetries },
-	"Origin.SSH.Port":                         func(c *Config) int { return c.Origin.SSH.Port },
-	"Plugin.DirectorDecisionPercentage":       func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
-	"Server.DatabaseBackup.MaxCount":          func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
-	"Server.IssuerPort":                       func(c *Config) int { return c.Server.IssuerPort },
-	"Server.UILoginRateLimit":                 func(c *Config) int { return c.Server.UILoginRateLimit },
-	"Server.WebPort":                          func(c *Config) int { return c.Server.WebPort },
-	"Shoveler.PortHigher":                     func(c *Config) int { return c.Shoveler.PortHigher },
-	"Shoveler.PortLower":                      func(c *Config) int { return c.Shoveler.PortLower },
-	"Transfer.MaxConcurrentJobs":              func(c *Config) int { return c.Transfer.MaxConcurrentJobs },
-	"Transport.MaxIdleConns":                  func(c *Config) int { return c.Transport.MaxIdleConns },
-	"Xrootd.DetailedMonitoringPort":           func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
-	"Xrootd.LocalMonitoringPort":              func(c *Config) int { return c.Xrootd.LocalMonitoringPort },
-	"Xrootd.ManagerPort":                      func(c *Config) int { return c.Xrootd.ManagerPort },
-	"Xrootd.MaxThreads":                       func(c *Config) int { return c.Xrootd.MaxThreads },
-	"Xrootd.Port":                             func(c *Config) int { return c.Xrootd.Port },
-	"Xrootd.SummaryMonitoringPort":            func(c *Config) int { return c.Xrootd.SummaryMonitoringPort },
+	"Cache.WorkerCount": func(c *Config) int { return c.Cache.WorkerCount },
+	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
+	"ClientAgent.MaxConcurrentJobs": func(c *Config) int { return c.ClientAgent.MaxConcurrentJobs },
+	"Client.DirectorRetries": func(c *Config) int { return c.Client.DirectorRetries },
+	"Client.MaximumDownloadSpeed": func(c *Config) int { return c.Client.MaximumDownloadSpeed },
+	"Client.MinimumDownloadSpeed": func(c *Config) int { return c.Client.MinimumDownloadSpeed },
+	"Client.WorkerCount": func(c *Config) int { return c.Client.WorkerCount },
+	"Director.AdaptiveSortTruncateConstant": func(c *Config) int { return c.Director.AdaptiveSortTruncateConstant },
+	"Director.CachePresenceCapacity": func(c *Config) int { return c.Director.CachePresenceCapacity },
+	"Director.MaxStatResponse": func(c *Config) int { return c.Director.MaxStatResponse },
+	"Director.MinStatResponse": func(c *Config) int { return c.Director.MinStatResponse },
+	"Director.StatConcurrencyLimit": func(c *Config) int { return c.Director.StatConcurrencyLimit },
+	"LocalCache.FDCacheSize": func(c *Config) int { return c.LocalCache.FDCacheSize },
+	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
+	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
+	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
+	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
+	"Logging.Buffer.BatchLines": func(c *Config) int { return c.Logging.Buffer.BatchLines },
+	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
+	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
+	"Monitoring.LabelNameLengthLimit": func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
+	"Monitoring.LabelValueLengthLimit": func(c *Config) int { return c.Monitoring.LabelValueLengthLimit },
+	"Monitoring.PortHigher": func(c *Config) int { return c.Monitoring.PortHigher },
+	"Monitoring.PortLower": func(c *Config) int { return c.Monitoring.PortLower },
+	"Monitoring.SampleLimit": func(c *Config) int { return c.Monitoring.SampleLimit },
+	"Monitoring.StorageCriticalThreshold": func(c *Config) int { return c.Monitoring.StorageCriticalThreshold },
+	"Monitoring.StorageWarningThreshold": func(c *Config) int { return c.Monitoring.StorageWarningThreshold },
+	"Origin.Concurrency": func(c *Config) int { return c.Origin.Concurrency },
+	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
+	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
+	"Origin.Metadata.MaxInflight": func(c *Config) int { return c.Origin.Metadata.MaxInflight },
+	"Origin.Metadata.MaxMetadataBytes": func(c *Config) int { return c.Origin.Metadata.MaxMetadataBytes },
+	"Origin.Metadata.RatePerSecond": func(c *Config) int { return c.Origin.Metadata.RatePerSecond },
+	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
+	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
+	"Origin.PStoreInlineMaxBytes": func(c *Config) int { return c.Origin.PStoreInlineMaxBytes },
+	"Origin.PStoreMetadataBackupsToKeep": func(c *Config) int { return c.Origin.PStoreMetadataBackupsToKeep },
+	"Origin.Port": func(c *Config) int { return c.Origin.Port },
+	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
+	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
+	"Plugin.DirectorDecisionPercentage": func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
+	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
+	"Server.IssuerPort": func(c *Config) int { return c.Server.IssuerPort },
+	"Server.UILoginRateLimit": func(c *Config) int { return c.Server.UILoginRateLimit },
+	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
+	"Shoveler.PortHigher": func(c *Config) int { return c.Shoveler.PortHigher },
+	"Shoveler.PortLower": func(c *Config) int { return c.Shoveler.PortLower },
+	"Transfer.MaxConcurrentJobs": func(c *Config) int { return c.Transfer.MaxConcurrentJobs },
+	"Transport.MaxIdleConns": func(c *Config) int { return c.Transport.MaxIdleConns },
+	"Xrootd.DetailedMonitoringPort": func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
+	"Xrootd.LocalMonitoringPort": func(c *Config) int { return c.Xrootd.LocalMonitoringPort },
+	"Xrootd.ManagerPort": func(c *Config) int { return c.Xrootd.ManagerPort },
+	"Xrootd.MaxThreads": func(c *Config) int { return c.Xrootd.MaxThreads },
+	"Xrootd.Port": func(c *Config) int { return c.Xrootd.Port },
+	"Xrootd.SummaryMonitoringPort": func(c *Config) int { return c.Xrootd.SummaryMonitoringPort },
 }
 
 func (iP IntParam) GetInt() int {
@@ -1024,7 +1031,7 @@ func (iP IntParam) Set(value int) error {
 
 var byteRateAccessors = map[string]func(*Config) byte_rate.ByteRate{
 	"Origin.PStoreDataScanRate": func(c *Config) byte_rate.ByteRate { return c.Origin.PStoreDataScanRate },
-	"Origin.TransferRateLimit":  func(c *Config) byte_rate.ByteRate { return c.Origin.TransferRateLimit },
+	"Origin.TransferRateLimit": func(c *Config) byte_rate.ByteRate { return c.Origin.TransferRateLimit },
 }
 
 func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
@@ -1065,100 +1072,101 @@ func (bRP ByteRateParam) SetString(value string) error {
 }
 
 var boolAccessors = map[string]func(*Config) bool{
-	"Cache.DirectorTest":                       func(c *Config) bool { return c.Cache.DirectorTest },
-	"Cache.DisableClientX509":                  func(c *Config) bool { return c.Cache.DisableClientX509 },
-	"Cache.EnableBroker":                       func(c *Config) bool { return c.Cache.EnableBroker },
-	"Cache.EnableChaosAPI":                     func(c *Config) bool { return c.Cache.EnableChaosAPI },
-	"Cache.EnableEvictionMonitoring":           func(c *Config) bool { return c.Cache.EnableEvictionMonitoring },
-	"Cache.EnableLotman":                       func(c *Config) bool { return c.Cache.EnableLotman },
-	"Cache.EnableOIDC":                         func(c *Config) bool { return c.Cache.EnableOIDC },
-	"Cache.EnablePrefetch":                     func(c *Config) bool { return c.Cache.EnablePrefetch },
-	"Cache.EnableSiteLocalMode":                func(c *Config) bool { return c.Cache.EnableSiteLocalMode },
-	"Cache.EnableTLSClientAuth":                func(c *Config) bool { return c.Cache.EnableTLSClientAuth },
-	"Cache.EnableV2":                           func(c *Config) bool { return c.Cache.EnableV2 },
-	"Cache.EnableVoms":                         func(c *Config) bool { return c.Cache.EnableVoms },
-	"Cache.SelfTest":                           func(c *Config) bool { return c.Cache.SelfTest },
-	"Client.AssumeDirectorServerHeader":        func(c *Config) bool { return c.Client.AssumeDirectorServerHeader },
-	"Client.DisableHttpProxy":                  func(c *Config) bool { return c.Client.DisableHttpProxy },
-	"Client.DisableProxyFallback":              func(c *Config) bool { return c.Client.DisableProxyFallback },
-	"Client.EnableOverwrites":                  func(c *Config) bool { return c.Client.EnableOverwrites },
-	"Client.IsPlugin":                          func(c *Config) bool { return c.Client.IsPlugin },
-	"Debug":                                    func(c *Config) bool { return c.Debug },
-	"Director.AssumePresenceAtSingleOrigin":    func(c *Config) bool { return c.Director.AssumePresenceAtSingleOrigin },
-	"Director.CachesPullFromCaches":            func(c *Config) bool { return c.Director.CachesPullFromCaches },
-	"Director.CheckCachePresence":              func(c *Config) bool { return c.Director.CheckCachePresence },
-	"Director.CheckOriginPresence":             func(c *Config) bool { return c.Director.CheckOriginPresence },
-	"Director.EnableBroker":                    func(c *Config) bool { return c.Director.EnableBroker },
+	"Cache.DirectorTest": func(c *Config) bool { return c.Cache.DirectorTest },
+	"Cache.DisableClientX509": func(c *Config) bool { return c.Cache.DisableClientX509 },
+	"Cache.EnableBroker": func(c *Config) bool { return c.Cache.EnableBroker },
+	"Cache.EnableChaosAPI": func(c *Config) bool { return c.Cache.EnableChaosAPI },
+	"Cache.EnableEvictionMonitoring": func(c *Config) bool { return c.Cache.EnableEvictionMonitoring },
+	"Cache.EnableLotman": func(c *Config) bool { return c.Cache.EnableLotman },
+	"Cache.EnableOIDC": func(c *Config) bool { return c.Cache.EnableOIDC },
+	"Cache.EnablePrefetch": func(c *Config) bool { return c.Cache.EnablePrefetch },
+	"Cache.EnableSiteLocalMode": func(c *Config) bool { return c.Cache.EnableSiteLocalMode },
+	"Cache.EnableTLSClientAuth": func(c *Config) bool { return c.Cache.EnableTLSClientAuth },
+	"Cache.EnableV2": func(c *Config) bool { return c.Cache.EnableV2 },
+	"Cache.EnableVoms": func(c *Config) bool { return c.Cache.EnableVoms },
+	"Cache.SelfTest": func(c *Config) bool { return c.Cache.SelfTest },
+	"Client.AssumeDirectorServerHeader": func(c *Config) bool { return c.Client.AssumeDirectorServerHeader },
+	"Client.DisableHttpProxy": func(c *Config) bool { return c.Client.DisableHttpProxy },
+	"Client.DisableProxyFallback": func(c *Config) bool { return c.Client.DisableProxyFallback },
+	"Client.EnableOverwrites": func(c *Config) bool { return c.Client.EnableOverwrites },
+	"Client.IsPlugin": func(c *Config) bool { return c.Client.IsPlugin },
+	"Debug": func(c *Config) bool { return c.Debug },
+	"Director.AssumePresenceAtSingleOrigin": func(c *Config) bool { return c.Director.AssumePresenceAtSingleOrigin },
+	"Director.CachesPullFromCaches": func(c *Config) bool { return c.Director.CachesPullFromCaches },
+	"Director.CheckCachePresence": func(c *Config) bool { return c.Director.CheckCachePresence },
+	"Director.CheckOriginPresence": func(c *Config) bool { return c.Director.CheckOriginPresence },
+	"Director.EnableBroker": func(c *Config) bool { return c.Director.EnableBroker },
 	"Director.EnableFederationMetadataHosting": func(c *Config) bool { return c.Director.EnableFederationMetadataHosting },
-	"Director.EnableOIDC":                      func(c *Config) bool { return c.Director.EnableOIDC },
-	"Director.EnableStat":                      func(c *Config) bool { return c.Director.EnableStat },
-	"Director.FilterCachesInErrorState":        func(c *Config) bool { return c.Director.FilterCachesInErrorState },
-	"DisableHttpProxy":                         func(c *Config) bool { return c.DisableHttpProxy },
-	"DisableProxyFallback":                     func(c *Config) bool { return c.DisableProxyFallback },
-	"Issuer.OIDCPreferClaimsFromIDToken":       func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
-	"Issuer.UserStripDomain":                   func(c *Config) bool { return c.Issuer.UserStripDomain },
-	"Logging.Client.DisableProgressBars":       func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
-	"Logging.DisableProgressBars":              func(c *Config) bool { return c.Logging.DisableProgressBars },
-	"Logging.Rotation.Disable":                 func(c *Config) bool { return c.Logging.Rotation.Disable },
-	"Logging.Rotation.DisableCompress":         func(c *Config) bool { return c.Logging.Rotation.DisableCompress },
-	"Lotman.EnableAPI":                         func(c *Config) bool { return c.Lotman.EnableAPI },
-	"Monitoring.EnablePrometheus":              func(c *Config) bool { return c.Monitoring.EnablePrometheus },
-	"Monitoring.MetricAuthorization":           func(c *Config) bool { return c.Monitoring.MetricAuthorization },
-	"Monitoring.PromQLAuthorization":           func(c *Config) bool { return c.Monitoring.PromQLAuthorization },
-	"Origin.DirectorTest":                      func(c *Config) bool { return c.Origin.DirectorTest },
-	"Origin.DisableCopies":                     func(c *Config) bool { return c.Origin.DisableCopies },
-	"Origin.DisableDirectClients":              func(c *Config) bool { return c.Origin.DisableDirectClients },
-	"Origin.EnableAtomicUploads":               func(c *Config) bool { return c.Origin.EnableAtomicUploads },
-	"Origin.EnableBroker":                      func(c *Config) bool { return c.Origin.EnableBroker },
-	"Origin.EnableCmsd":                        func(c *Config) bool { return c.Origin.EnableCmsd },
-	"Origin.EnableDirListing":                  func(c *Config) bool { return c.Origin.EnableDirListing },
-	"Origin.EnableDirectReads":                 func(c *Config) bool { return c.Origin.EnableDirectReads },
-	"Origin.EnableDiskUsageCalculation":        func(c *Config) bool { return c.Origin.EnableDiskUsageCalculation },
-	"Origin.EnableFallbackRead":                func(c *Config) bool { return c.Origin.EnableFallbackRead },
-	"Origin.EnableIssuer":                      func(c *Config) bool { return c.Origin.EnableIssuer },
-	"Origin.EnableListings":                    func(c *Config) bool { return c.Origin.EnableListings },
-	"Origin.EnableMacaroons":                   func(c *Config) bool { return c.Origin.EnableMacaroons },
-	"Origin.EnableOIDC":                        func(c *Config) bool { return c.Origin.EnableOIDC },
-	"Origin.EnablePublicReads":                 func(c *Config) bool { return c.Origin.EnablePublicReads },
-	"Origin.EnableReads":                       func(c *Config) bool { return c.Origin.EnableReads },
-	"Origin.EnableStandaloneMode":              func(c *Config) bool { return c.Origin.EnableStandaloneMode },
-	"Origin.EnableTLSClientAuth":               func(c *Config) bool { return c.Origin.EnableTLSClientAuth },
-	"Origin.EnableTransferAPI":                 func(c *Config) bool { return c.Origin.EnableTransferAPI },
-	"Origin.EnableVoms":                        func(c *Config) bool { return c.Origin.EnableVoms },
-	"Origin.EnableWrite":                       func(c *Config) bool { return c.Origin.EnableWrite },
-	"Origin.EnableWrites":                      func(c *Config) bool { return c.Origin.EnableWrites },
-	"Origin.HttpAuthTokenPassthrough":          func(c *Config) bool { return c.Origin.HttpAuthTokenPassthrough },
-	"Origin.Metadata.Enabled":                  func(c *Config) bool { return c.Origin.Metadata.Enabled },
-	"Origin.Multiuser":                         func(c *Config) bool { return c.Origin.Multiuser },
-	"Origin.Posc.Enabled":                      func(c *Config) bool { return c.Origin.Posc.Enabled },
-	"Origin.SSH.AutoAddHostKey":                func(c *Config) bool { return c.Origin.SSH.AutoAddHostKey },
-	"Origin.SSH.TunnelCallback":                func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
-	"Origin.ScitokensMapSubject":               func(c *Config) bool { return c.Origin.ScitokensMapSubject },
-	"Origin.SelfTest":                          func(c *Config) bool { return c.Origin.SelfTest },
-	"Registry.EnableOIDC":                      func(c *Config) bool { return c.Registry.EnableOIDC },
-	"Registry.RequireCacheApproval":            func(c *Config) bool { return c.Registry.RequireCacheApproval },
-	"Registry.RequireKeyChaining":              func(c *Config) bool { return c.Registry.RequireKeyChaining },
-	"Registry.RequireOriginApproval":           func(c *Config) bool { return c.Registry.RequireOriginApproval },
-	"Server.DropPrivileges":                    func(c *Config) bool { return c.Server.DropPrivileges },
-	"Server.EnablePKCS11":                      func(c *Config) bool { return c.Server.EnablePKCS11 },
-	"Server.EnablePprof":                       func(c *Config) bool { return c.Server.EnablePprof },
-	"Server.EnableUI":                          func(c *Config) bool { return c.Server.EnableUI },
-	"Server.HealthMonitoringPublic":            func(c *Config) bool { return c.Server.HealthMonitoringPublic },
-	"Server.SSRFProtection.Disabled":           func(c *Config) bool { return c.Server.SSRFProtection.Disabled },
-	"Server.SSRFProtection.SkipDefaultBlocks":  func(c *Config) bool { return c.Server.SSRFProtection.SkipDefaultBlocks },
-	"Server.WebReadOnly":                       func(c *Config) bool { return c.Server.WebReadOnly },
-	"Shoveler.Enable":                          func(c *Config) bool { return c.Shoveler.Enable },
-	"Shoveler.VerifyHeader":                    func(c *Config) bool { return c.Shoveler.VerifyHeader },
-	"StagePlugin.Hook":                         func(c *Config) bool { return c.StagePlugin.Hook },
-	"TLSSkipVerify":                            func(c *Config) bool { return c.TLSSkipVerify },
-	"Topology.DisableCacheX509":                func(c *Config) bool { return c.Topology.DisableCacheX509 },
-	"Topology.DisableCaches":                   func(c *Config) bool { return c.Topology.DisableCaches },
-	"Topology.DisableDowntime":                 func(c *Config) bool { return c.Topology.DisableDowntime },
-	"Topology.DisableOriginX509":               func(c *Config) bool { return c.Topology.DisableOriginX509 },
-	"Topology.DisableOrigins":                  func(c *Config) bool { return c.Topology.DisableOrigins },
-	"Transfer.EnableOAuth2Clients":             func(c *Config) bool { return c.Transfer.EnableOAuth2Clients },
-	"Xrootd.AutoShutdownEnabled":               func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
-	"Xrootd.EnableLocalMonitoring":             func(c *Config) bool { return c.Xrootd.EnableLocalMonitoring },
+	"Director.EnableOIDC": func(c *Config) bool { return c.Director.EnableOIDC },
+	"Director.EnableStat": func(c *Config) bool { return c.Director.EnableStat },
+	"Director.FilterCachesInErrorState": func(c *Config) bool { return c.Director.FilterCachesInErrorState },
+	"DisableHttpProxy": func(c *Config) bool { return c.DisableHttpProxy },
+	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
+	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
+	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
+	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
+	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Logging.Rotation.Disable": func(c *Config) bool { return c.Logging.Rotation.Disable },
+	"Logging.Rotation.DisableCompress": func(c *Config) bool { return c.Logging.Rotation.DisableCompress },
+	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
+	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
+	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
+	"Monitoring.PromQLAuthorization": func(c *Config) bool { return c.Monitoring.PromQLAuthorization },
+	"Origin.DirectorTest": func(c *Config) bool { return c.Origin.DirectorTest },
+	"Origin.DisableCopies": func(c *Config) bool { return c.Origin.DisableCopies },
+	"Origin.DisableDirectClients": func(c *Config) bool { return c.Origin.DisableDirectClients },
+	"Origin.EnableAtomicUploads": func(c *Config) bool { return c.Origin.EnableAtomicUploads },
+	"Origin.EnableBroker": func(c *Config) bool { return c.Origin.EnableBroker },
+	"Origin.EnableCmsd": func(c *Config) bool { return c.Origin.EnableCmsd },
+	"Origin.EnableDirListing": func(c *Config) bool { return c.Origin.EnableDirListing },
+	"Origin.EnableDirectReads": func(c *Config) bool { return c.Origin.EnableDirectReads },
+	"Origin.EnableDiskUsageCalculation": func(c *Config) bool { return c.Origin.EnableDiskUsageCalculation },
+	"Origin.EnableFallbackRead": func(c *Config) bool { return c.Origin.EnableFallbackRead },
+	"Origin.EnableIssuer": func(c *Config) bool { return c.Origin.EnableIssuer },
+	"Origin.EnableListings": func(c *Config) bool { return c.Origin.EnableListings },
+	"Origin.EnableMacaroons": func(c *Config) bool { return c.Origin.EnableMacaroons },
+	"Origin.EnableOIDC": func(c *Config) bool { return c.Origin.EnableOIDC },
+	"Origin.EnablePublicReads": func(c *Config) bool { return c.Origin.EnablePublicReads },
+	"Origin.EnableReads": func(c *Config) bool { return c.Origin.EnableReads },
+	"Origin.EnableStandaloneMode": func(c *Config) bool { return c.Origin.EnableStandaloneMode },
+	"Origin.EnableTLSClientAuth": func(c *Config) bool { return c.Origin.EnableTLSClientAuth },
+	"Origin.EnableTransferAPI": func(c *Config) bool { return c.Origin.EnableTransferAPI },
+	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
+	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
+	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
+	"Origin.HttpAuthTokenPassthrough": func(c *Config) bool { return c.Origin.HttpAuthTokenPassthrough },
+	"Origin.Metadata.AllowMultipart": func(c *Config) bool { return c.Origin.Metadata.AllowMultipart },
+	"Origin.Metadata.Enabled": func(c *Config) bool { return c.Origin.Metadata.Enabled },
+	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
+	"Origin.Posc.Enabled": func(c *Config) bool { return c.Origin.Posc.Enabled },
+	"Origin.SSH.AutoAddHostKey": func(c *Config) bool { return c.Origin.SSH.AutoAddHostKey },
+	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
+	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
+	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.EnableOIDC": func(c *Config) bool { return c.Registry.EnableOIDC },
+	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
+	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
+	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
+	"Server.DropPrivileges": func(c *Config) bool { return c.Server.DropPrivileges },
+	"Server.EnablePKCS11": func(c *Config) bool { return c.Server.EnablePKCS11 },
+	"Server.EnablePprof": func(c *Config) bool { return c.Server.EnablePprof },
+	"Server.EnableUI": func(c *Config) bool { return c.Server.EnableUI },
+	"Server.HealthMonitoringPublic": func(c *Config) bool { return c.Server.HealthMonitoringPublic },
+	"Server.SSRFProtection.Disabled": func(c *Config) bool { return c.Server.SSRFProtection.Disabled },
+	"Server.SSRFProtection.SkipDefaultBlocks": func(c *Config) bool { return c.Server.SSRFProtection.SkipDefaultBlocks },
+	"Server.WebReadOnly": func(c *Config) bool { return c.Server.WebReadOnly },
+	"Shoveler.Enable": func(c *Config) bool { return c.Shoveler.Enable },
+	"Shoveler.VerifyHeader": func(c *Config) bool { return c.Shoveler.VerifyHeader },
+	"StagePlugin.Hook": func(c *Config) bool { return c.StagePlugin.Hook },
+	"TLSSkipVerify": func(c *Config) bool { return c.TLSSkipVerify },
+	"Topology.DisableCacheX509": func(c *Config) bool { return c.Topology.DisableCacheX509 },
+	"Topology.DisableCaches": func(c *Config) bool { return c.Topology.DisableCaches },
+	"Topology.DisableDowntime": func(c *Config) bool { return c.Topology.DisableDowntime },
+	"Topology.DisableOriginX509": func(c *Config) bool { return c.Topology.DisableOriginX509 },
+	"Topology.DisableOrigins": func(c *Config) bool { return c.Topology.DisableOrigins },
+	"Transfer.EnableOAuth2Clients": func(c *Config) bool { return c.Transfer.EnableOAuth2Clients },
+	"Xrootd.AutoShutdownEnabled": func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
+	"Xrootd.EnableLocalMonitoring": func(c *Config) bool { return c.Xrootd.EnableLocalMonitoring },
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -1190,95 +1198,95 @@ func (bP BoolParam) Set(value bool) error {
 }
 
 var durationAccessors = map[string]func(*Config) time.Duration{
-	"Cache.DefaultCacheTimeout":                    func(c *Config) time.Duration { return c.Cache.DefaultCacheTimeout },
-	"Cache.EvictionMonitoringInterval":             func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
-	"Cache.MinDirectorRefreshInterval":             func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
-	"Cache.SelfTestInterval":                       func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
-	"Cache.SelfTestMaxAge":                         func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
-	"Cache.Throttle.EMAWindow":                     func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
-	"Cache.Throttle.RetryAfter":                    func(c *Config) time.Duration { return c.Cache.Throttle.RetryAfter },
-	"ClientAgent.IdleTimeout":                      func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
-	"ClientAgent.ProgressUpdateInterval":           func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
-	"Client.SlowTransferRampupTime":                func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
-	"Client.SlowTransferWindow":                    func(c *Config) time.Duration { return c.Client.SlowTransferWindow },
-	"Client.StoppedTransferTimeout":                func(c *Config) time.Duration { return c.Client.StoppedTransferTimeout },
-	"Director.AdaptiveSortEWMATimeConstant":        func(c *Config) time.Duration { return c.Director.AdaptiveSortEWMATimeConstant },
-	"Director.AdvertisementTTL":                    func(c *Config) time.Duration { return c.Director.AdvertisementTTL },
-	"Director.CachePresenceTTL":                    func(c *Config) time.Duration { return c.Director.CachePresenceTTL },
-	"Director.FedTokenLifetime":                    func(c *Config) time.Duration { return c.Director.FedTokenLifetime },
-	"Director.MetadataComparisonInterval":          func(c *Config) time.Duration { return c.Director.MetadataComparisonInterval },
-	"Director.OriginCacheHealthTestInterval":       func(c *Config) time.Duration { return c.Director.OriginCacheHealthTestInterval },
-	"Director.RegistryQueryInterval":               func(c *Config) time.Duration { return c.Director.RegistryQueryInterval },
-	"Director.StatTimeout":                         func(c *Config) time.Duration { return c.Director.StatTimeout },
-	"Federation.TopologyReloadInterval":            func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
-	"Issuer.AccessTokenLifetime":                   func(c *Config) time.Duration { return c.Issuer.AccessTokenLifetime },
-	"Issuer.AuthorizationCodeLifetime":             func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifetime },
-	"Issuer.DynamicClientStaleTimeout":             func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
-	"Issuer.DynamicClientUnusedTimeout":            func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
-	"Issuer.IDTokenLifetime":                       func(c *Config) time.Duration { return c.Issuer.IDTokenLifetime },
-	"Issuer.RefreshTokenGracePeriod":               func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
-	"Issuer.RefreshTokenLifetime":                  func(c *Config) time.Duration { return c.Issuer.RefreshTokenLifetime },
-	"LocalCache.DefaultMaxAge":                     func(c *Config) time.Duration { return c.LocalCache.DefaultMaxAge },
-	"LocalCache.PrefetchTimeout":                   func(c *Config) time.Duration { return c.LocalCache.PrefetchTimeout },
-	"Logging.Client.ProgressInterval":              func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
-	"Logging.Rotation.FlushInterval":               func(c *Config) time.Duration { return c.Logging.Rotation.FlushInterval },
-	"Logging.Rotation.MaxRetentionPeriod":          func(c *Config) time.Duration { return c.Logging.Rotation.MaxRetentionPeriod },
-	"Lotman.DefaultLotDeletionLifetime":            func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
-	"Lotman.DefaultLotExpirationLifetime":          func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
-	"Lotman.GarbageCollectionInterval":             func(c *Config) time.Duration { return c.Lotman.GarbageCollectionInterval },
-	"Lotman.LotRecordRetention":                    func(c *Config) time.Duration { return c.Lotman.LotRecordRetention },
-	"Lotman.MaxLotLifetime":                        func(c *Config) time.Duration { return c.Lotman.MaxLotLifetime },
-	"Lotman.MinFillerWidth":                        func(c *Config) time.Duration { return c.Lotman.MinFillerWidth },
-	"Lotman.RenewalCheckInterval":                  func(c *Config) time.Duration { return c.Lotman.RenewalCheckInterval },
-	"Lotman.SchedulingHorizon":                     func(c *Config) time.Duration { return c.Lotman.SchedulingHorizon },
-	"Monitoring.DataRetention":                     func(c *Config) time.Duration { return c.Monitoring.DataRetention },
-	"Monitoring.StorageHealthCheckInterval":        func(c *Config) time.Duration { return c.Monitoring.StorageHealthCheckInterval },
-	"Monitoring.TokenExpiresIn":                    func(c *Config) time.Duration { return c.Monitoring.TokenExpiresIn },
-	"Monitoring.TokenRefreshInterval":              func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
-	"Origin.DiskUsageCalculationDelay":             func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
-	"Origin.DiskUsageCalculationInterval":          func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
-	"Origin.Globusv2TokenRefreshInterval":          func(c *Config) time.Duration { return c.Origin.Globusv2TokenRefreshInterval },
-	"Origin.PStoreDataScanInterval":                func(c *Config) time.Duration { return c.Origin.PStoreDataScanInterval },
-	"Origin.PStoreIndexCheckInterval":              func(c *Config) time.Duration { return c.Origin.PStoreIndexCheckInterval },
-	"Origin.PStoreMetadataBackupInterval":          func(c *Config) time.Duration { return c.Origin.PStoreMetadataBackupInterval },
-	"Origin.Metadata.ErrorAfter":                   func(c *Config) time.Duration { return c.Origin.Metadata.ErrorAfter },
-	"Origin.Metadata.MaxBackoff":                   func(c *Config) time.Duration { return c.Origin.Metadata.MaxBackoff },
-	"Origin.Metadata.MinBackoff":                   func(c *Config) time.Duration { return c.Origin.Metadata.MinBackoff },
-	"Origin.Metadata.RequestTimeout":               func(c *Config) time.Duration { return c.Origin.Metadata.RequestTimeout },
-	"Origin.Metadata.TokenLifetime":                func(c *Config) time.Duration { return c.Origin.Metadata.TokenLifetime },
-	"Origin.Metadata.WarnAfter":                    func(c *Config) time.Duration { return c.Origin.Metadata.WarnAfter },
-	"Origin.Posc.FileTimeout":                      func(c *Config) time.Duration { return c.Origin.Posc.FileTimeout },
-	"Origin.Posc.KeepaliveInterval":                func(c *Config) time.Duration { return c.Origin.Posc.KeepaliveInterval },
-	"Origin.SSH.ChallengeTimeout":                  func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
-	"Origin.SSH.ConnectTimeout":                    func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
-	"Origin.SSH.KeepaliveInterval":                 func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
-	"Origin.SSH.KeepaliveTimeout":                  func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveTimeout },
-	"Origin.SSH.SessionEstablishTimeout":           func(c *Config) time.Duration { return c.Origin.SSH.SessionEstablishTimeout },
-	"Origin.SelfTestInterval":                      func(c *Config) time.Duration { return c.Origin.SelfTestInterval },
-	"Origin.SelfTestMaxAge":                        func(c *Config) time.Duration { return c.Origin.SelfTestMaxAge },
-	"Origin.UserMapfileRefreshInterval":            func(c *Config) time.Duration { return c.Origin.UserMapfileRefreshInterval },
+	"Cache.DefaultCacheTimeout": func(c *Config) time.Duration { return c.Cache.DefaultCacheTimeout },
+	"Cache.EvictionMonitoringInterval": func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
+	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
+	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
+	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
+	"Cache.Throttle.EMAWindow": func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
+	"Cache.Throttle.RetryAfter": func(c *Config) time.Duration { return c.Cache.Throttle.RetryAfter },
+	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
+	"ClientAgent.ProgressUpdateInterval": func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
+	"Client.SlowTransferRampupTime": func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
+	"Client.SlowTransferWindow": func(c *Config) time.Duration { return c.Client.SlowTransferWindow },
+	"Client.StoppedTransferTimeout": func(c *Config) time.Duration { return c.Client.StoppedTransferTimeout },
+	"Director.AdaptiveSortEWMATimeConstant": func(c *Config) time.Duration { return c.Director.AdaptiveSortEWMATimeConstant },
+	"Director.AdvertisementTTL": func(c *Config) time.Duration { return c.Director.AdvertisementTTL },
+	"Director.CachePresenceTTL": func(c *Config) time.Duration { return c.Director.CachePresenceTTL },
+	"Director.FedTokenLifetime": func(c *Config) time.Duration { return c.Director.FedTokenLifetime },
+	"Director.MetadataComparisonInterval": func(c *Config) time.Duration { return c.Director.MetadataComparisonInterval },
+	"Director.OriginCacheHealthTestInterval": func(c *Config) time.Duration { return c.Director.OriginCacheHealthTestInterval },
+	"Director.RegistryQueryInterval": func(c *Config) time.Duration { return c.Director.RegistryQueryInterval },
+	"Director.StatTimeout": func(c *Config) time.Duration { return c.Director.StatTimeout },
+	"Federation.TopologyReloadInterval": func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
+	"Issuer.AccessTokenLifetime": func(c *Config) time.Duration { return c.Issuer.AccessTokenLifetime },
+	"Issuer.AuthorizationCodeLifetime": func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifetime },
+	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
+	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
+	"Issuer.IDTokenLifetime": func(c *Config) time.Duration { return c.Issuer.IDTokenLifetime },
+	"Issuer.RefreshTokenGracePeriod": func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
+	"Issuer.RefreshTokenLifetime": func(c *Config) time.Duration { return c.Issuer.RefreshTokenLifetime },
+	"LocalCache.DefaultMaxAge": func(c *Config) time.Duration { return c.LocalCache.DefaultMaxAge },
+	"LocalCache.PrefetchTimeout": func(c *Config) time.Duration { return c.LocalCache.PrefetchTimeout },
+	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
+	"Logging.Rotation.FlushInterval": func(c *Config) time.Duration { return c.Logging.Rotation.FlushInterval },
+	"Logging.Rotation.MaxRetentionPeriod": func(c *Config) time.Duration { return c.Logging.Rotation.MaxRetentionPeriod },
+	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
+	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
+	"Lotman.GarbageCollectionInterval": func(c *Config) time.Duration { return c.Lotman.GarbageCollectionInterval },
+	"Lotman.LotRecordRetention": func(c *Config) time.Duration { return c.Lotman.LotRecordRetention },
+	"Lotman.MaxLotLifetime": func(c *Config) time.Duration { return c.Lotman.MaxLotLifetime },
+	"Lotman.MinFillerWidth": func(c *Config) time.Duration { return c.Lotman.MinFillerWidth },
+	"Lotman.RenewalCheckInterval": func(c *Config) time.Duration { return c.Lotman.RenewalCheckInterval },
+	"Lotman.SchedulingHorizon": func(c *Config) time.Duration { return c.Lotman.SchedulingHorizon },
+	"Monitoring.DataRetention": func(c *Config) time.Duration { return c.Monitoring.DataRetention },
+	"Monitoring.StorageHealthCheckInterval": func(c *Config) time.Duration { return c.Monitoring.StorageHealthCheckInterval },
+	"Monitoring.TokenExpiresIn": func(c *Config) time.Duration { return c.Monitoring.TokenExpiresIn },
+	"Monitoring.TokenRefreshInterval": func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
+	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
+	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
+	"Origin.Globusv2TokenRefreshInterval": func(c *Config) time.Duration { return c.Origin.Globusv2TokenRefreshInterval },
+	"Origin.Metadata.ErrorAfter": func(c *Config) time.Duration { return c.Origin.Metadata.ErrorAfter },
+	"Origin.Metadata.MaxBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MaxBackoff },
+	"Origin.Metadata.MinBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MinBackoff },
+	"Origin.Metadata.RequestTimeout": func(c *Config) time.Duration { return c.Origin.Metadata.RequestTimeout },
+	"Origin.Metadata.TokenLifetime": func(c *Config) time.Duration { return c.Origin.Metadata.TokenLifetime },
+	"Origin.Metadata.WarnAfter": func(c *Config) time.Duration { return c.Origin.Metadata.WarnAfter },
+	"Origin.PStoreDataScanInterval": func(c *Config) time.Duration { return c.Origin.PStoreDataScanInterval },
+	"Origin.PStoreIndexCheckInterval": func(c *Config) time.Duration { return c.Origin.PStoreIndexCheckInterval },
+	"Origin.PStoreMetadataBackupInterval": func(c *Config) time.Duration { return c.Origin.PStoreMetadataBackupInterval },
+	"Origin.Posc.FileTimeout": func(c *Config) time.Duration { return c.Origin.Posc.FileTimeout },
+	"Origin.Posc.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.Posc.KeepaliveInterval },
+	"Origin.SSH.ChallengeTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
+	"Origin.SSH.ConnectTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
+	"Origin.SSH.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
+	"Origin.SSH.KeepaliveTimeout": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveTimeout },
+	"Origin.SSH.SessionEstablishTimeout": func(c *Config) time.Duration { return c.Origin.SSH.SessionEstablishTimeout },
+	"Origin.SelfTestInterval": func(c *Config) time.Duration { return c.Origin.SelfTestInterval },
+	"Origin.SelfTestMaxAge": func(c *Config) time.Duration { return c.Origin.SelfTestMaxAge },
+	"Origin.UserMapfileRefreshInterval": func(c *Config) time.Duration { return c.Origin.UserMapfileRefreshInterval },
 	"Registry.InactiveRegistrationCleanupInterval": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationCleanupInterval },
-	"Registry.InactiveRegistrationTimeout":         func(c *Config) time.Duration { return c.Registry.InactiveRegistrationTimeout },
-	"Registry.InstitutionsUrlReloadMinutes":        func(c *Config) time.Duration { return c.Registry.InstitutionsUrlReloadMinutes },
-	"Server.AdLifetime":                            func(c *Config) time.Duration { return c.Server.AdLifetime },
-	"Server.AdvertisementInterval":                 func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
-	"Server.DatabaseBackup.Frequency":              func(c *Config) time.Duration { return c.Server.DatabaseBackup.Frequency },
-	"Server.GroupInviteLinkExpiration":             func(c *Config) time.Duration { return c.Server.GroupInviteLinkExpiration },
-	"Server.RegistrationRetryInterval":             func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
-	"Server.StartupTimeout":                        func(c *Config) time.Duration { return c.Server.StartupTimeout },
-	"Transfer.CredentialIdleTimeout":               func(c *Config) time.Duration { return c.Transfer.CredentialIdleTimeout },
-	"Transport.BrokerEndpointCacheTTL":             func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
-	"Transport.DialerKeepAlive":                    func(c *Config) time.Duration { return c.Transport.DialerKeepAlive },
-	"Transport.DialerTimeout":                      func(c *Config) time.Duration { return c.Transport.DialerTimeout },
-	"Transport.ExpectContinueTimeout":              func(c *Config) time.Duration { return c.Transport.ExpectContinueTimeout },
-	"Transport.IdleConnTimeout":                    func(c *Config) time.Duration { return c.Transport.IdleConnTimeout },
-	"Transport.ResponseHeaderTimeout":              func(c *Config) time.Duration { return c.Transport.ResponseHeaderTimeout },
-	"Transport.TLSHandshakeTimeout":                func(c *Config) time.Duration { return c.Transport.TLSHandshakeTimeout },
-	"Xrootd.AuthRefreshInterval":                   func(c *Config) time.Duration { return c.Xrootd.AuthRefreshInterval },
-	"Xrootd.ConfigUpdateFailureTimeout":            func(c *Config) time.Duration { return c.Xrootd.ConfigUpdateFailureTimeout },
-	"Xrootd.HttpMaxDelay":                          func(c *Config) time.Duration { return c.Xrootd.HttpMaxDelay },
-	"Xrootd.MaxStartupWait":                        func(c *Config) time.Duration { return c.Xrootd.MaxStartupWait },
-	"Xrootd.ShutdownTimeout":                       func(c *Config) time.Duration { return c.Xrootd.ShutdownTimeout },
+	"Registry.InactiveRegistrationTimeout": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationTimeout },
+	"Registry.InstitutionsUrlReloadMinutes": func(c *Config) time.Duration { return c.Registry.InstitutionsUrlReloadMinutes },
+	"Server.AdLifetime": func(c *Config) time.Duration { return c.Server.AdLifetime },
+	"Server.AdvertisementInterval": func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
+	"Server.DatabaseBackup.Frequency": func(c *Config) time.Duration { return c.Server.DatabaseBackup.Frequency },
+	"Server.GroupInviteLinkExpiration": func(c *Config) time.Duration { return c.Server.GroupInviteLinkExpiration },
+	"Server.RegistrationRetryInterval": func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
+	"Server.StartupTimeout": func(c *Config) time.Duration { return c.Server.StartupTimeout },
+	"Transfer.CredentialIdleTimeout": func(c *Config) time.Duration { return c.Transfer.CredentialIdleTimeout },
+	"Transport.BrokerEndpointCacheTTL": func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
+	"Transport.DialerKeepAlive": func(c *Config) time.Duration { return c.Transport.DialerKeepAlive },
+	"Transport.DialerTimeout": func(c *Config) time.Duration { return c.Transport.DialerTimeout },
+	"Transport.ExpectContinueTimeout": func(c *Config) time.Duration { return c.Transport.ExpectContinueTimeout },
+	"Transport.IdleConnTimeout": func(c *Config) time.Duration { return c.Transport.IdleConnTimeout },
+	"Transport.ResponseHeaderTimeout": func(c *Config) time.Duration { return c.Transport.ResponseHeaderTimeout },
+	"Transport.TLSHandshakeTimeout": func(c *Config) time.Duration { return c.Transport.TLSHandshakeTimeout },
+	"Xrootd.AuthRefreshInterval": func(c *Config) time.Duration { return c.Xrootd.AuthRefreshInterval },
+	"Xrootd.ConfigUpdateFailureTimeout": func(c *Config) time.Duration { return c.Xrootd.ConfigUpdateFailureTimeout },
+	"Xrootd.HttpMaxDelay": func(c *Config) time.Duration { return c.Xrootd.HttpMaxDelay },
+	"Xrootd.MaxStartupWait": func(c *Config) time.Duration { return c.Xrootd.MaxStartupWait },
+	"Xrootd.ShutdownTimeout": func(c *Config) time.Duration { return c.Xrootd.ShutdownTimeout },
 }
 
 func (dP DurationParam) GetDuration() time.Duration {
@@ -1659,13 +1667,17 @@ var allParameterNames = []string{
 	"Origin.HttpAuthTokenPassthrough",
 	"Origin.HttpServiceUrl",
 	"Origin.IssuerMode",
+	"Origin.Metadata.AllowMultipart",
 	"Origin.Metadata.Enabled",
 	"Origin.Metadata.Endpoint",
 	"Origin.Metadata.ErrorAfter",
 	"Origin.Metadata.MaxBackoff",
 	"Origin.Metadata.MaxInflight",
+	"Origin.Metadata.MaxMetadataBytes",
+	"Origin.Metadata.MetadataPartName",
 	"Origin.Metadata.MinBackoff",
 	"Origin.Metadata.Mode",
+	"Origin.Metadata.ObjectPartName",
 	"Origin.Metadata.RatePerSecond",
 	"Origin.Metadata.RequestTimeout",
 	"Origin.Metadata.TokenLifetime",
@@ -1873,527 +1885,531 @@ var allParameterNames = []string{
 }
 
 var (
-	Cache_ClientStatisticsLocation        = StringParam{"Cache.ClientStatisticsLocation"}
-	Cache_DataLocation                    = StringParam{"Cache.DataLocation"}
-	Cache_DataScanMode                    = StringParam{"Cache.DataScanMode"}
-	Cache_DbLocation                      = StringParam{"Cache.DbLocation"}
-	Cache_ExportLocation                  = StringParam{"Cache.ExportLocation"}
-	Cache_FedTokenLocation                = StringParam{"Cache.FedTokenLocation"}
-	Cache_FilesBaseSize                   = StringParam{"Cache.FilesBaseSize"}
-	Cache_FilesMaxSize                    = StringParam{"Cache.FilesMaxSize"}
-	Cache_FilesNominalSize                = StringParam{"Cache.FilesNominalSize"}
-	Cache_HighWaterMark                   = StringParam{"Cache.HighWaterMark"}
-	Cache_LocalRoot                       = StringParam{"Cache.LocalRoot"}
-	Cache_LowWaterMark                    = StringParam{"Cache.LowWaterMark"}
-	Cache_MemoryCacheSize                 = StringParam{"Cache.MemoryCacheSize"}
-	Cache_NamespaceLocation               = StringParam{"Cache.NamespaceLocation"}
-	Cache_PSSOrigin                       = StringParam{"Cache.PSSOrigin"}
-	Cache_RunLocation                     = StringParam{"Cache.RunLocation"}
-	Cache_SentinelLocation                = StringParam{"Cache.SentinelLocation"}
-	Cache_StorageLocation                 = StringParam{"Cache.StorageLocation"}
-	Cache_Url                             = StringParam{"Cache.Url"}
-	Cache_XRootDPrefix                    = StringParam{"Cache.XRootDPrefix"}
-	ClientAgent_DbLocation                = StringParam{"ClientAgent.DbLocation"}
-	ClientAgent_PidFile                   = StringParam{"ClientAgent.PidFile"}
-	ClientAgent_Socket                    = StringParam{"ClientAgent.Socket"}
-	Client_CredentialFile                 = StringParam{"Client.CredentialFile"}
-	ConfigBase                            = StringParam{"ConfigBase"}
-	Director_AdvertiseUrl                 = StringParam{"Director.AdvertiseUrl"}
-	Director_CacheSortMethod              = StringParam{"Director.CacheSortMethod"}
-	Director_DbLocation                   = StringParam{"Director.DbLocation"}
-	Director_DefaultResponse              = StringParam{"Director.DefaultResponse"}
-	Director_GeoIPLocation                = StringParam{"Director.GeoIPLocation"}
-	Director_MaxMindKeyFile               = StringParam{"Director.MaxMindKeyFile"}
-	Director_SupportContactEmail          = StringParam{"Director.SupportContactEmail"}
-	Director_SupportContactUrl            = StringParam{"Director.SupportContactUrl"}
-	Federation_DiscoveryUrl               = StringParam{"Federation.DiscoveryUrl"}
-	Federation_TopologyDowntimeUrl        = StringParam{"Federation.TopologyDowntimeUrl"}
-	Federation_TopologyNamespaceUrl       = StringParam{"Federation.TopologyNamespaceUrl"}
-	Federation_TopologyUrl                = StringParam{"Federation.TopologyUrl"}
-	GeoLocation                           = StringParam{"GeoLocation"}
-	IssuerKey                             = StringParam{"IssuerKey"}
-	IssuerKeysDirectory                   = StringParam{"IssuerKeysDirectory"}
-	Issuer_AuthenticationSource           = StringParam{"Issuer.AuthenticationSource"}
-	Issuer_GroupFile                      = StringParam{"Issuer.GroupFile"}
-	Issuer_GroupSource                    = StringParam{"Issuer.GroupSource"}
-	Issuer_IssuerClaimValue               = StringParam{"Issuer.IssuerClaimValue"}
-	Issuer_OIDCAuthenticationUserClaim    = StringParam{"Issuer.OIDCAuthenticationUserClaim"}
-	Issuer_OIDCGroupClaim                 = StringParam{"Issuer.OIDCGroupClaim"}
-	Issuer_OIDCIssuerClaim                = StringParam{"Issuer.OIDCIssuerClaim"}
-	Issuer_OIDCSubjectClaim               = StringParam{"Issuer.OIDCSubjectClaim"}
-	Issuer_PublicClientID                 = StringParam{"Issuer.PublicClientID"}
-	Issuer_QDLLocation                    = StringParam{"Issuer.QDLLocation"}
-	Issuer_ScitokensServerLocation        = StringParam{"Issuer.ScitokensServerLocation"}
-	Issuer_TomcatLocation                 = StringParam{"Issuer.TomcatLocation"}
-	LocalCache_ChunkSize                  = StringParam{"LocalCache.ChunkSize"}
-	LocalCache_DataLocation               = StringParam{"LocalCache.DataLocation"}
-	LocalCache_MemoryCacheSize            = StringParam{"LocalCache.MemoryCacheSize"}
-	LocalCache_RunLocation                = StringParam{"LocalCache.RunLocation"}
-	LocalCache_Size                       = StringParam{"LocalCache.Size"}
-	LocalCache_Socket                     = StringParam{"LocalCache.Socket"}
-	Logging_Buffer_MaxSize                = StringParam{"Logging.Buffer.MaxSize"}
-	Logging_Cache_Http                    = StringParam{"Logging.Cache.Http"}
-	Logging_Cache_Lotman                  = StringParam{"Logging.Cache.Lotman"}
-	Logging_Cache_Ofs                     = StringParam{"Logging.Cache.Ofs"}
-	Logging_Cache_Pfc                     = StringParam{"Logging.Cache.Pfc"}
-	Logging_Cache_Pss                     = StringParam{"Logging.Cache.Pss"}
-	Logging_Cache_PssSetOpt               = StringParam{"Logging.Cache.PssSetOpt"}
-	Logging_Cache_Scitokens               = StringParam{"Logging.Cache.Scitokens"}
-	Logging_Cache_Xrd                     = StringParam{"Logging.Cache.Xrd"}
-	Logging_Cache_Xrootd                  = StringParam{"Logging.Cache.Xrootd"}
-	Logging_Level                         = StringParam{"Logging.Level"}
-	Logging_LogLocation                   = StringParam{"Logging.LogLocation"}
-	Logging_Origin_Cms                    = StringParam{"Logging.Origin.Cms"}
-	Logging_Origin_Http                   = StringParam{"Logging.Origin.Http"}
-	Logging_Origin_Ofs                    = StringParam{"Logging.Origin.Ofs"}
-	Logging_Origin_Oss                    = StringParam{"Logging.Origin.Oss"}
-	Logging_Origin_Scitokens              = StringParam{"Logging.Origin.Scitokens"}
-	Logging_Origin_Xrd                    = StringParam{"Logging.Origin.Xrd"}
-	Logging_Origin_Xrootd                 = StringParam{"Logging.Origin.Xrootd"}
-	Logging_Rotation_Frequency            = StringParam{"Logging.Rotation.Frequency"}
-	Logging_Rotation_MaxRetentionSize     = StringParam{"Logging.Rotation.MaxRetentionSize"}
-	Logging_Rotation_MaxSize              = StringParam{"Logging.Rotation.MaxSize"}
-	Lotman_DbLocation                     = StringParam{"Lotman.DbLocation"}
-	Lotman_EnabledPolicy                  = StringParam{"Lotman.EnabledPolicy"}
-	Lotman_LibLocation                    = StringParam{"Lotman.LibLocation"}
-	Lotman_LotHome                        = StringParam{"Lotman.LotHome"}
-	Monitoring_DataLocation               = StringParam{"Monitoring.DataLocation"}
-	Monitoring_DataRetentionSize          = StringParam{"Monitoring.DataRetentionSize"}
-	OIDC_AuthorizationEndpoint            = StringParam{"OIDC.AuthorizationEndpoint"}
-	OIDC_ClientID                         = StringParam{"OIDC.ClientID"}
-	OIDC_ClientIDFile                     = StringParam{"OIDC.ClientIDFile"}
-	OIDC_ClientRedirectHostname           = StringParam{"OIDC.ClientRedirectHostname"}
-	OIDC_ClientSecretFile                 = StringParam{"OIDC.ClientSecretFile"}
-	OIDC_DeviceAuthEndpoint               = StringParam{"OIDC.DeviceAuthEndpoint"}
-	OIDC_Issuer                           = StringParam{"OIDC.Issuer"}
-	OIDC_TokenEndpoint                    = StringParam{"OIDC.TokenEndpoint"}
-	OIDC_UserInfoEndpoint                 = StringParam{"OIDC.UserInfoEndpoint"}
-	Origin_CacheControl                   = StringParam{"Origin.CacheControl"}
-	Origin_DbLocation                     = StringParam{"Origin.DbLocation"}
-	Origin_ExportVolume                   = StringParam{"Origin.ExportVolume"}
-	Origin_FedTokenLocation               = StringParam{"Origin.FedTokenLocation"}
-	Origin_FederationPrefix               = StringParam{"Origin.FederationPrefix"}
-	Origin_GlobusClientIDFile             = StringParam{"Origin.GlobusClientIDFile"}
-	Origin_GlobusClientSecretFile         = StringParam{"Origin.GlobusClientSecretFile"}
-	Origin_GlobusCollectionID             = StringParam{"Origin.GlobusCollectionID"}
-	Origin_GlobusCollectionName           = StringParam{"Origin.GlobusCollectionName"}
-	Origin_GlobusConfigLocation           = StringParam{"Origin.GlobusConfigLocation"}
-	Origin_GlobusIssuerURL                = StringParam{"Origin.GlobusIssuerURL"}
-	Origin_GlobusTransferAPIBaseUrl       = StringParam{"Origin.GlobusTransferAPIBaseUrl"}
-	Origin_GlobusTransferTokenFile        = StringParam{"Origin.GlobusTransferTokenFile"}
-	Origin_HttpAuthOAuth2ClientID         = StringParam{"Origin.HttpAuthOAuth2ClientID"}
+	Cache_ClientStatisticsLocation = StringParam{"Cache.ClientStatisticsLocation"}
+	Cache_DataLocation = StringParam{"Cache.DataLocation"}
+	Cache_DataScanMode = StringParam{"Cache.DataScanMode"}
+	Cache_DbLocation = StringParam{"Cache.DbLocation"}
+	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_FedTokenLocation = StringParam{"Cache.FedTokenLocation"}
+	Cache_FilesBaseSize = StringParam{"Cache.FilesBaseSize"}
+	Cache_FilesMaxSize = StringParam{"Cache.FilesMaxSize"}
+	Cache_FilesNominalSize = StringParam{"Cache.FilesNominalSize"}
+	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
+	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
+	Cache_LowWaterMark = StringParam{"Cache.LowWaterMark"}
+	Cache_MemoryCacheSize = StringParam{"Cache.MemoryCacheSize"}
+	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
+	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
+	Cache_RunLocation = StringParam{"Cache.RunLocation"}
+	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
+	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
+	Cache_Url = StringParam{"Cache.Url"}
+	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
+	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
+	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
+	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
+	Client_CredentialFile = StringParam{"Client.CredentialFile"}
+	ConfigBase = StringParam{"ConfigBase"}
+	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
+	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
+	Director_DbLocation = StringParam{"Director.DbLocation"}
+	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
+	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
+	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
+	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
+	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
+	Federation_TopologyDowntimeUrl = StringParam{"Federation.TopologyDowntimeUrl"}
+	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
+	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
+	GeoLocation = StringParam{"GeoLocation"}
+	IssuerKey = StringParam{"IssuerKey"}
+	IssuerKeysDirectory = StringParam{"IssuerKeysDirectory"}
+	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
+	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
+	Issuer_GroupSource = StringParam{"Issuer.GroupSource"}
+	Issuer_IssuerClaimValue = StringParam{"Issuer.IssuerClaimValue"}
+	Issuer_OIDCAuthenticationUserClaim = StringParam{"Issuer.OIDCAuthenticationUserClaim"}
+	Issuer_OIDCGroupClaim = StringParam{"Issuer.OIDCGroupClaim"}
+	Issuer_OIDCIssuerClaim = StringParam{"Issuer.OIDCIssuerClaim"}
+	Issuer_OIDCSubjectClaim = StringParam{"Issuer.OIDCSubjectClaim"}
+	Issuer_PublicClientID = StringParam{"Issuer.PublicClientID"}
+	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
+	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
+	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
+	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_MemoryCacheSize = StringParam{"LocalCache.MemoryCacheSize"}
+	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
+	LocalCache_Size = StringParam{"LocalCache.Size"}
+	LocalCache_Socket = StringParam{"LocalCache.Socket"}
+	Logging_Buffer_MaxSize = StringParam{"Logging.Buffer.MaxSize"}
+	Logging_Cache_Http = StringParam{"Logging.Cache.Http"}
+	Logging_Cache_Lotman = StringParam{"Logging.Cache.Lotman"}
+	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
+	Logging_Cache_Pfc = StringParam{"Logging.Cache.Pfc"}
+	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
+	Logging_Cache_PssSetOpt = StringParam{"Logging.Cache.PssSetOpt"}
+	Logging_Cache_Scitokens = StringParam{"Logging.Cache.Scitokens"}
+	Logging_Cache_Xrd = StringParam{"Logging.Cache.Xrd"}
+	Logging_Cache_Xrootd = StringParam{"Logging.Cache.Xrootd"}
+	Logging_Level = StringParam{"Logging.Level"}
+	Logging_LogLocation = StringParam{"Logging.LogLocation"}
+	Logging_Origin_Cms = StringParam{"Logging.Origin.Cms"}
+	Logging_Origin_Http = StringParam{"Logging.Origin.Http"}
+	Logging_Origin_Ofs = StringParam{"Logging.Origin.Ofs"}
+	Logging_Origin_Oss = StringParam{"Logging.Origin.Oss"}
+	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
+	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
+	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
+	Logging_Rotation_Frequency = StringParam{"Logging.Rotation.Frequency"}
+	Logging_Rotation_MaxRetentionSize = StringParam{"Logging.Rotation.MaxRetentionSize"}
+	Logging_Rotation_MaxSize = StringParam{"Logging.Rotation.MaxSize"}
+	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
+	Lotman_EnabledPolicy = StringParam{"Lotman.EnabledPolicy"}
+	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
+	Lotman_LotHome = StringParam{"Lotman.LotHome"}
+	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
+	Monitoring_DataRetentionSize = StringParam{"Monitoring.DataRetentionSize"}
+	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
+	OIDC_ClientID = StringParam{"OIDC.ClientID"}
+	OIDC_ClientIDFile = StringParam{"OIDC.ClientIDFile"}
+	OIDC_ClientRedirectHostname = StringParam{"OIDC.ClientRedirectHostname"}
+	OIDC_ClientSecretFile = StringParam{"OIDC.ClientSecretFile"}
+	OIDC_DeviceAuthEndpoint = StringParam{"OIDC.DeviceAuthEndpoint"}
+	OIDC_Issuer = StringParam{"OIDC.Issuer"}
+	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
+	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_CacheControl = StringParam{"Origin.CacheControl"}
+	Origin_DbLocation = StringParam{"Origin.DbLocation"}
+	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
+	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
+	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
+	Origin_GlobusClientIDFile = StringParam{"Origin.GlobusClientIDFile"}
+	Origin_GlobusClientSecretFile = StringParam{"Origin.GlobusClientSecretFile"}
+	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
+	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
+	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
+	Origin_GlobusIssuerURL = StringParam{"Origin.GlobusIssuerURL"}
+	Origin_GlobusTransferAPIBaseUrl = StringParam{"Origin.GlobusTransferAPIBaseUrl"}
+	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
+	Origin_HttpAuthOAuth2ClientID = StringParam{"Origin.HttpAuthOAuth2ClientID"}
 	Origin_HttpAuthOAuth2ClientSecretFile = StringParam{"Origin.HttpAuthOAuth2ClientSecretFile"}
-	Origin_HttpAuthOAuth2Issuer           = StringParam{"Origin.HttpAuthOAuth2Issuer"}
-	Origin_HttpAuthTokenFile              = StringParam{"Origin.HttpAuthTokenFile"}
-	Origin_HttpServiceUrl                 = StringParam{"Origin.HttpServiceUrl"}
-	Origin_IssuerMode                     = StringParam{"Origin.IssuerMode"}
-	Origin_Metadata_Endpoint              = StringParam{"Origin.Metadata.Endpoint"}
-	Origin_Metadata_Mode                  = StringParam{"Origin.Metadata.Mode"}
-	Origin_Mode                           = StringParam{"Origin.Mode"}
-	Origin_MultiuserVarlinkSocketPath     = StringParam{"Origin.MultiuserVarlinkSocketPath"}
-	Origin_NamespacePrefix                = StringParam{"Origin.NamespacePrefix"}
-	Origin_ObjectProviderURL              = StringParam{"Origin.ObjectProviderURL"}
-	Origin_PStoreLocation                 = StringParam{"Origin.PStoreLocation"}
-	Origin_PStoreMetadataBackupLocation   = StringParam{"Origin.PStoreMetadataBackupLocation"}
-	Origin_Posc_Prefix                    = StringParam{"Origin.Posc.Prefix"}
-	Origin_RunLocation                    = StringParam{"Origin.RunLocation"}
-	Origin_S3AccessKeyfile                = StringParam{"Origin.S3AccessKeyfile"}
-	Origin_S3Bucket                       = StringParam{"Origin.S3Bucket"}
-	Origin_S3Region                       = StringParam{"Origin.S3Region"}
-	Origin_S3SecretKeyfile                = StringParam{"Origin.S3SecretKeyfile"}
-	Origin_S3ServiceName                  = StringParam{"Origin.S3ServiceName"}
-	Origin_S3ServiceUrl                   = StringParam{"Origin.S3ServiceUrl"}
-	Origin_S3UrlStyle                     = StringParam{"Origin.S3UrlStyle"}
-	Origin_SSH_Host                       = StringParam{"Origin.SSH.Host"}
-	Origin_SSH_KnownHostsFile             = StringParam{"Origin.SSH.KnownHostsFile"}
-	Origin_SSH_PasswordFile               = StringParam{"Origin.SSH.PasswordFile"}
-	Origin_SSH_PelicanBinaryPath          = StringParam{"Origin.SSH.PelicanBinaryPath"}
-	Origin_SSH_PrivateKeyFile             = StringParam{"Origin.SSH.PrivateKeyFile"}
-	Origin_SSH_PrivateKeyPassphraseFile   = StringParam{"Origin.SSH.PrivateKeyPassphraseFile"}
-	Origin_SSH_ProxyJump                  = StringParam{"Origin.SSH.ProxyJump"}
-	Origin_SSH_RemotePelicanBinaryDir     = StringParam{"Origin.SSH.RemotePelicanBinaryDir"}
-	Origin_SSH_User                       = StringParam{"Origin.SSH.User"}
-	Origin_ScitokensDefaultUser           = StringParam{"Origin.ScitokensDefaultUser"}
-	Origin_ScitokensGroupsClaim           = StringParam{"Origin.ScitokensGroupsClaim"}
-	Origin_ScitokensNameMapFile           = StringParam{"Origin.ScitokensNameMapFile"}
-	Origin_ScitokensUnauthenticatedUser   = StringParam{"Origin.ScitokensUnauthenticatedUser"}
-	Origin_ScitokensUsernameClaim         = StringParam{"Origin.ScitokensUsernameClaim"}
-	Origin_StoragePrefix                  = StringParam{"Origin.StoragePrefix"}
-	Origin_StorageType                    = StringParam{"Origin.StorageType"}
-	Origin_TokenAudience                  = StringParam{"Origin.TokenAudience"}
-	Origin_UploadTempLocation             = StringParam{"Origin.UploadTempLocation"}
-	Origin_Url                            = StringParam{"Origin.Url"}
-	Origin_XRootDPrefix                   = StringParam{"Origin.XRootDPrefix"}
-	Origin_XRootServiceUrl                = StringParam{"Origin.XRootServiceUrl"}
-	Plugin_Token                          = StringParam{"Plugin.Token"}
-	Registry_DbLocation                   = StringParam{"Registry.DbLocation"}
-	Registry_InstitutionsUrl              = StringParam{"Registry.InstitutionsUrl"}
-	RuntimeDir                            = StringParam{"RuntimeDir"}
-	Server_AUPCanonicalURL                = StringParam{"Server.AUPCanonicalURL"}
-	Server_AUPFile                        = StringParam{"Server.AUPFile"}
-	Server_AUPLastUpdated                 = StringParam{"Server.AUPLastUpdated"}
-	Server_DatabaseBackup_Location        = StringParam{"Server.DatabaseBackup.Location"}
-	Server_DbLocation                     = StringParam{"Server.DbLocation"}
-	Server_ExternalWebUrl                 = StringParam{"Server.ExternalWebUrl"}
-	Server_Hostname                       = StringParam{"Server.Hostname"}
-	Server_IssuerHostname                 = StringParam{"Server.IssuerHostname"}
-	Server_IssuerJwks                     = StringParam{"Server.IssuerJwks"}
-	Server_IssuerUrl                      = StringParam{"Server.IssuerUrl"}
-	Server_SessionSecretFile              = StringParam{"Server.SessionSecretFile"}
-	Server_TLSCACertificateDirectory      = StringParam{"Server.TLSCACertificateDirectory"}
-	Server_TLSCACertificateFile           = StringParam{"Server.TLSCACertificateFile"}
-	Server_TLSCAKey                       = StringParam{"Server.TLSCAKey"}
-	Server_TLSCertificate                 = StringParam{"Server.TLSCertificate"}
-	Server_TLSCertificateChain            = StringParam{"Server.TLSCertificateChain"}
-	Server_TLSKey                         = StringParam{"Server.TLSKey"}
-	Server_UIActivationCodeFile           = StringParam{"Server.UIActivationCodeFile"}
-	Server_UIPasswordFile                 = StringParam{"Server.UIPasswordFile"}
-	Server_UnprivilegedUser               = StringParam{"Server.UnprivilegedUser"}
-	Server_WebConfigFile                  = StringParam{"Server.WebConfigFile"}
-	Server_WebHost                        = StringParam{"Server.WebHost"}
-	Shoveler_AMQPExchange                 = StringParam{"Shoveler.AMQPExchange"}
-	Shoveler_AMQPTokenLocation            = StringParam{"Shoveler.AMQPTokenLocation"}
-	Shoveler_MessageQueueProtocol         = StringParam{"Shoveler.MessageQueueProtocol"}
-	Shoveler_PasswordLocation             = StringParam{"Shoveler.PasswordLocation"}
-	Shoveler_QueueDirectory               = StringParam{"Shoveler.QueueDirectory"}
-	Shoveler_StompCert                    = StringParam{"Shoveler.StompCert"}
-	Shoveler_StompCertKey                 = StringParam{"Shoveler.StompCertKey"}
-	Shoveler_StompUsername                = StringParam{"Shoveler.StompUsername"}
-	Shoveler_Topic                        = StringParam{"Shoveler.Topic"}
-	Shoveler_URL                          = StringParam{"Shoveler.URL"}
-	StagePlugin_MountPrefix               = StringParam{"StagePlugin.MountPrefix"}
-	StagePlugin_OriginPrefix              = StringParam{"StagePlugin.OriginPrefix"}
-	StagePlugin_ShadowOriginPrefix        = StringParam{"StagePlugin.ShadowOriginPrefix"}
-	Xrootd_Authfile                       = StringParam{"Xrootd.Authfile"}
-	Xrootd_ConfigFile                     = StringParam{"Xrootd.ConfigFile"}
-	Xrootd_DetailedMonitoringHost         = StringParam{"Xrootd.DetailedMonitoringHost"}
-	Xrootd_LocalMonitoringHost            = StringParam{"Xrootd.LocalMonitoringHost"}
-	Xrootd_MacaroonsKeyFile               = StringParam{"Xrootd.MacaroonsKeyFile"}
-	Xrootd_ManagerHost                    = StringParam{"Xrootd.ManagerHost"}
-	Xrootd_Mount                          = StringParam{"Xrootd.Mount"}
-	Xrootd_RobotsTxtFile                  = StringParam{"Xrootd.RobotsTxtFile"}
-	Xrootd_RunLocation                    = StringParam{"Xrootd.RunLocation"}
-	Xrootd_ScitokensConfig                = StringParam{"Xrootd.ScitokensConfig"}
-	Xrootd_Sitename                       = StringParam{"Xrootd.Sitename"}
-	Xrootd_SummaryMonitoringHost          = StringParam{"Xrootd.SummaryMonitoringHost"}
+	Origin_HttpAuthOAuth2Issuer = StringParam{"Origin.HttpAuthOAuth2Issuer"}
+	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
+	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
+	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
+	Origin_Metadata_Endpoint = StringParam{"Origin.Metadata.Endpoint"}
+	Origin_Metadata_MetadataPartName = StringParam{"Origin.Metadata.MetadataPartName"}
+	Origin_Metadata_Mode = StringParam{"Origin.Metadata.Mode"}
+	Origin_Metadata_ObjectPartName = StringParam{"Origin.Metadata.ObjectPartName"}
+	Origin_Mode = StringParam{"Origin.Mode"}
+	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
+	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
+	Origin_ObjectProviderURL = StringParam{"Origin.ObjectProviderURL"}
+	Origin_PStoreLocation = StringParam{"Origin.PStoreLocation"}
+	Origin_PStoreMetadataBackupLocation = StringParam{"Origin.PStoreMetadataBackupLocation"}
+	Origin_Posc_Prefix = StringParam{"Origin.Posc.Prefix"}
+	Origin_RunLocation = StringParam{"Origin.RunLocation"}
+	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
+	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
+	Origin_S3Region = StringParam{"Origin.S3Region"}
+	Origin_S3SecretKeyfile = StringParam{"Origin.S3SecretKeyfile"}
+	Origin_S3ServiceName = StringParam{"Origin.S3ServiceName"}
+	Origin_S3ServiceUrl = StringParam{"Origin.S3ServiceUrl"}
+	Origin_S3UrlStyle = StringParam{"Origin.S3UrlStyle"}
+	Origin_SSH_Host = StringParam{"Origin.SSH.Host"}
+	Origin_SSH_KnownHostsFile = StringParam{"Origin.SSH.KnownHostsFile"}
+	Origin_SSH_PasswordFile = StringParam{"Origin.SSH.PasswordFile"}
+	Origin_SSH_PelicanBinaryPath = StringParam{"Origin.SSH.PelicanBinaryPath"}
+	Origin_SSH_PrivateKeyFile = StringParam{"Origin.SSH.PrivateKeyFile"}
+	Origin_SSH_PrivateKeyPassphraseFile = StringParam{"Origin.SSH.PrivateKeyPassphraseFile"}
+	Origin_SSH_ProxyJump = StringParam{"Origin.SSH.ProxyJump"}
+	Origin_SSH_RemotePelicanBinaryDir = StringParam{"Origin.SSH.RemotePelicanBinaryDir"}
+	Origin_SSH_User = StringParam{"Origin.SSH.User"}
+	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
+	Origin_ScitokensGroupsClaim = StringParam{"Origin.ScitokensGroupsClaim"}
+	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
+	Origin_ScitokensUnauthenticatedUser = StringParam{"Origin.ScitokensUnauthenticatedUser"}
+	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
+	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
+	Origin_StorageType = StringParam{"Origin.StorageType"}
+	Origin_TokenAudience = StringParam{"Origin.TokenAudience"}
+	Origin_UploadTempLocation = StringParam{"Origin.UploadTempLocation"}
+	Origin_Url = StringParam{"Origin.Url"}
+	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
+	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}
+	Plugin_Token = StringParam{"Plugin.Token"}
+	Registry_DbLocation = StringParam{"Registry.DbLocation"}
+	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
+	RuntimeDir = StringParam{"RuntimeDir"}
+	Server_AUPCanonicalURL = StringParam{"Server.AUPCanonicalURL"}
+	Server_AUPFile = StringParam{"Server.AUPFile"}
+	Server_AUPLastUpdated = StringParam{"Server.AUPLastUpdated"}
+	Server_DatabaseBackup_Location = StringParam{"Server.DatabaseBackup.Location"}
+	Server_DbLocation = StringParam{"Server.DbLocation"}
+	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
+	Server_Hostname = StringParam{"Server.Hostname"}
+	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}
+	Server_IssuerJwks = StringParam{"Server.IssuerJwks"}
+	Server_IssuerUrl = StringParam{"Server.IssuerUrl"}
+	Server_SessionSecretFile = StringParam{"Server.SessionSecretFile"}
+	Server_TLSCACertificateDirectory = StringParam{"Server.TLSCACertificateDirectory"}
+	Server_TLSCACertificateFile = StringParam{"Server.TLSCACertificateFile"}
+	Server_TLSCAKey = StringParam{"Server.TLSCAKey"}
+	Server_TLSCertificate = StringParam{"Server.TLSCertificate"}
+	Server_TLSCertificateChain = StringParam{"Server.TLSCertificateChain"}
+	Server_TLSKey = StringParam{"Server.TLSKey"}
+	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
+	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
+	Server_UnprivilegedUser = StringParam{"Server.UnprivilegedUser"}
+	Server_WebConfigFile = StringParam{"Server.WebConfigFile"}
+	Server_WebHost = StringParam{"Server.WebHost"}
+	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
+	Shoveler_AMQPTokenLocation = StringParam{"Shoveler.AMQPTokenLocation"}
+	Shoveler_MessageQueueProtocol = StringParam{"Shoveler.MessageQueueProtocol"}
+	Shoveler_PasswordLocation = StringParam{"Shoveler.PasswordLocation"}
+	Shoveler_QueueDirectory = StringParam{"Shoveler.QueueDirectory"}
+	Shoveler_StompCert = StringParam{"Shoveler.StompCert"}
+	Shoveler_StompCertKey = StringParam{"Shoveler.StompCertKey"}
+	Shoveler_StompUsername = StringParam{"Shoveler.StompUsername"}
+	Shoveler_Topic = StringParam{"Shoveler.Topic"}
+	Shoveler_URL = StringParam{"Shoveler.URL"}
+	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
+	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
+	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
+	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
+	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
+	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
+	Xrootd_LocalMonitoringHost = StringParam{"Xrootd.LocalMonitoringHost"}
+	Xrootd_MacaroonsKeyFile = StringParam{"Xrootd.MacaroonsKeyFile"}
+	Xrootd_ManagerHost = StringParam{"Xrootd.ManagerHost"}
+	Xrootd_Mount = StringParam{"Xrootd.Mount"}
+	Xrootd_RobotsTxtFile = StringParam{"Xrootd.RobotsTxtFile"}
+	Xrootd_RunLocation = StringParam{"Xrootd.RunLocation"}
+	Xrootd_ScitokensConfig = StringParam{"Xrootd.ScitokensConfig"}
+	Xrootd_Sitename = StringParam{"Xrootd.Sitename"}
+	Xrootd_SummaryMonitoringHost = StringParam{"Xrootd.SummaryMonitoringHost"}
 )
 
 var (
-	Cache_AllowedFederations                = StringSliceParam{"Cache.AllowedFederations"}
-	Cache_DataLocations                     = StringSliceParam{"Cache.DataLocations"}
-	Cache_MetaLocations                     = StringSliceParam{"Cache.MetaLocations"}
-	Cache_PermittedNamespaces               = StringSliceParam{"Cache.PermittedNamespaces"}
-	Client_PreferredCaches                  = StringSliceParam{"Client.PreferredCaches"}
-	ConfigLocations                         = StringSliceParam{"ConfigLocations"}
-	Director_CacheResponseHostnames         = StringSliceParam{"Director.CacheResponseHostnames"}
-	Director_FilteredServers                = StringSliceParam{"Director.FilteredServers"}
-	Director_OriginResponseHostnames        = StringSliceParam{"Director.OriginResponseHostnames"}
-	Issuer_GroupRequirements                = StringSliceParam{"Issuer.GroupRequirements"}
-	Issuer_RedirectUris                     = StringSliceParam{"Issuer.RedirectUris"}
-	Monitoring_AggregatePrefixes            = StringSliceParam{"Monitoring.AggregatePrefixes"}
-	OIDC_Scopes                             = StringSliceParam{"OIDC.Scopes"}
-	Origin_DefaultChecksumTypes             = StringSliceParam{"Origin.DefaultChecksumTypes"}
-	Origin_ExportVolumes                    = StringSliceParam{"Origin.ExportVolumes"}
-	Origin_SSH_AuthMethods                  = StringSliceParam{"Origin.SSH.AuthMethods"}
+	Cache_AllowedFederations = StringSliceParam{"Cache.AllowedFederations"}
+	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
+	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
+	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
+	Client_PreferredCaches = StringSliceParam{"Client.PreferredCaches"}
+	ConfigLocations = StringSliceParam{"ConfigLocations"}
+	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
+	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
+	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
+	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
+	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
+	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
+	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
+	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}
+	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
+	Origin_SSH_AuthMethods = StringSliceParam{"Origin.SSH.AuthMethods"}
 	Origin_SSH_RemotePelicanBinaryOverrides = StringSliceParam{"Origin.SSH.RemotePelicanBinaryOverrides"}
-	Origin_ScitokensRestrictedPaths         = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
-	Origin_SupportedChecksumTypes           = StringSliceParam{"Origin.SupportedChecksumTypes"}
-	Registry_AdminUsers                     = StringSliceParam{"Registry.AdminUsers"}
-	Server_AdminGroups                      = StringSliceParam{"Server.AdminGroups"}
-	Server_AutoEnrollUsernameClaims         = StringSliceParam{"Server.AutoEnrollUsernameClaims"}
-	Server_CollectionAdminGroups            = StringSliceParam{"Server.CollectionAdminGroups"}
-	Server_CollectionAdminUsers             = StringSliceParam{"Server.CollectionAdminUsers"}
-	Server_DirectorUrls                     = StringSliceParam{"Server.DirectorUrls"}
-	Server_Modules                          = StringSliceParam{"Server.Modules"}
-	Server_NewUserDefaultScopes             = StringSliceParam{"Server.NewUserDefaultScopes"}
-	Server_SSRFProtection_AllowedCIDRs      = StringSliceParam{"Server.SSRFProtection.AllowedCIDRs"}
-	Server_SSRFProtection_BlockedCIDRs      = StringSliceParam{"Server.SSRFProtection.BlockedCIDRs"}
-	Server_TrustedProxies                   = StringSliceParam{"Server.TrustedProxies"}
-	Server_UIAdminUsers                     = StringSliceParam{"Server.UIAdminUsers"}
-	Server_UserAdminGroups                  = StringSliceParam{"Server.UserAdminGroups"}
-	Server_UserAdminUsers                   = StringSliceParam{"Server.UserAdminUsers"}
-	Shoveler_OutputDestinations             = StringSliceParam{"Shoveler.OutputDestinations"}
-	Transfer_EnabledGroups                  = StringSliceParam{"Transfer.EnabledGroups"}
+	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
+	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
+	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
+	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
+	Server_AutoEnrollUsernameClaims = StringSliceParam{"Server.AutoEnrollUsernameClaims"}
+	Server_CollectionAdminGroups = StringSliceParam{"Server.CollectionAdminGroups"}
+	Server_CollectionAdminUsers = StringSliceParam{"Server.CollectionAdminUsers"}
+	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
+	Server_Modules = StringSliceParam{"Server.Modules"}
+	Server_NewUserDefaultScopes = StringSliceParam{"Server.NewUserDefaultScopes"}
+	Server_SSRFProtection_AllowedCIDRs = StringSliceParam{"Server.SSRFProtection.AllowedCIDRs"}
+	Server_SSRFProtection_BlockedCIDRs = StringSliceParam{"Server.SSRFProtection.BlockedCIDRs"}
+	Server_TrustedProxies = StringSliceParam{"Server.TrustedProxies"}
+	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
+	Server_UserAdminGroups = StringSliceParam{"Server.UserAdminGroups"}
+	Server_UserAdminUsers = StringSliceParam{"Server.UserAdminUsers"}
+	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
+	Transfer_EnabledGroups = StringSliceParam{"Transfer.EnabledGroups"}
 )
 
 var (
-	Cache_BlocksToPrefetch                  = IntParam{"Cache.BlocksToPrefetch"}
-	Cache_Concurrency                       = IntParam{"Cache.Concurrency"}
-	Cache_ConcurrencyDegradedThreshold      = IntParam{"Cache.ConcurrencyDegradedThreshold"}
-	Cache_DataScanResampleInterval          = IntParam{"Cache.DataScanResampleInterval"}
-	Cache_EvictionMonitoringMaxDepth        = IntParam{"Cache.EvictionMonitoringMaxDepth"}
-	Cache_Port                              = IntParam{"Cache.Port"}
-	Cache_Throttle_PendingBufferSize        = IntParam{"Cache.Throttle.PendingBufferSize"}
-	Cache_Throttle_PerOriginActivePercent   = IntParam{"Cache.Throttle.PerOriginActivePercent"}
-	Cache_Throttle_PerOriginPendingSize     = IntParam{"Cache.Throttle.PerOriginPendingSize"}
+	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
+	Cache_Concurrency = IntParam{"Cache.Concurrency"}
+	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
+	Cache_DataScanResampleInterval = IntParam{"Cache.DataScanResampleInterval"}
+	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
+	Cache_Port = IntParam{"Cache.Port"}
+	Cache_Throttle_PendingBufferSize = IntParam{"Cache.Throttle.PendingBufferSize"}
+	Cache_Throttle_PerOriginActivePercent = IntParam{"Cache.Throttle.PerOriginActivePercent"}
+	Cache_Throttle_PerOriginPendingSize = IntParam{"Cache.Throttle.PerOriginPendingSize"}
 	Cache_Throttle_PerOriginStarvingPercent = IntParam{"Cache.Throttle.PerOriginStarvingPercent"}
-	Cache_WorkerCount                       = IntParam{"Cache.WorkerCount"}
-	ClientAgent_HistoryRetentionDays        = IntParam{"ClientAgent.HistoryRetentionDays"}
-	ClientAgent_MaxConcurrentJobs           = IntParam{"ClientAgent.MaxConcurrentJobs"}
-	Client_DirectorRetries                  = IntParam{"Client.DirectorRetries"}
-	Client_MaximumDownloadSpeed             = IntParam{"Client.MaximumDownloadSpeed"}
-	Client_MinimumDownloadSpeed             = IntParam{"Client.MinimumDownloadSpeed"}
-	Client_WorkerCount                      = IntParam{"Client.WorkerCount"}
-	Director_AdaptiveSortTruncateConstant   = IntParam{"Director.AdaptiveSortTruncateConstant"}
-	Director_CachePresenceCapacity          = IntParam{"Director.CachePresenceCapacity"}
-	Director_MaxStatResponse                = IntParam{"Director.MaxStatResponse"}
-	Director_MinStatResponse                = IntParam{"Director.MinStatResponse"}
-	Director_StatConcurrencyLimit           = IntParam{"Director.StatConcurrencyLimit"}
-	LocalCache_FDCacheSize                  = IntParam{"LocalCache.FDCacheSize"}
-	LocalCache_HighWaterMarkPercentage      = IntParam{"LocalCache.HighWaterMarkPercentage"}
-	LocalCache_LowWaterMarkPercentage       = IntParam{"LocalCache.LowWaterMarkPercentage"}
-	LocalCache_MaxConcurrentPrefetch        = IntParam{"LocalCache.MaxConcurrentPrefetch"}
-	LocalCache_RevalidationJitter           = IntParam{"LocalCache.RevalidationJitter"}
-	Logging_Buffer_BatchLines               = IntParam{"Logging.Buffer.BatchLines"}
-	MinimumDownloadSpeed                    = IntParam{"MinimumDownloadSpeed"}
-	Monitoring_LabelLimit                   = IntParam{"Monitoring.LabelLimit"}
-	Monitoring_LabelNameLengthLimit         = IntParam{"Monitoring.LabelNameLengthLimit"}
-	Monitoring_LabelValueLengthLimit        = IntParam{"Monitoring.LabelValueLengthLimit"}
-	Monitoring_PortHigher                   = IntParam{"Monitoring.PortHigher"}
-	Monitoring_PortLower                    = IntParam{"Monitoring.PortLower"}
-	Monitoring_SampleLimit                  = IntParam{"Monitoring.SampleLimit"}
-	Monitoring_StorageCriticalThreshold     = IntParam{"Monitoring.StorageCriticalThreshold"}
-	Monitoring_StorageWarningThreshold      = IntParam{"Monitoring.StorageWarningThreshold"}
-	Origin_Concurrency                      = IntParam{"Origin.Concurrency"}
-	Origin_ConcurrencyDegradedThreshold     = IntParam{"Origin.ConcurrencyDegradedThreshold"}
-	Origin_DiskUsageCalculationRateLimit    = IntParam{"Origin.DiskUsageCalculationRateLimit"}
-	Origin_Metadata_MaxInflight             = IntParam{"Origin.Metadata.MaxInflight"}
-	Origin_Metadata_RatePerSecond           = IntParam{"Origin.Metadata.RatePerSecond"}
-	Origin_MultiuserMinID                   = IntParam{"Origin.MultiuserMinID"}
-	Origin_MultiuserUmask                   = IntParam{"Origin.MultiuserUmask"}
-	Origin_PStoreInlineMaxBytes             = IntParam{"Origin.PStoreInlineMaxBytes"}
-	Origin_PStoreMetadataBackupsToKeep      = IntParam{"Origin.PStoreMetadataBackupsToKeep"}
-	Origin_Port                             = IntParam{"Origin.Port"}
-	Origin_SSH_MaxRetries                   = IntParam{"Origin.SSH.MaxRetries"}
-	Origin_SSH_Port                         = IntParam{"Origin.SSH.Port"}
-	Plugin_DirectorDecisionPercentage       = IntParam{"Plugin.DirectorDecisionPercentage"}
-	Server_DatabaseBackup_MaxCount          = IntParam{"Server.DatabaseBackup.MaxCount"}
-	Server_IssuerPort                       = IntParam{"Server.IssuerPort"}
-	Server_UILoginRateLimit                 = IntParam{"Server.UILoginRateLimit"}
-	Server_WebPort                          = IntParam{"Server.WebPort"}
-	Shoveler_PortHigher                     = IntParam{"Shoveler.PortHigher"}
-	Shoveler_PortLower                      = IntParam{"Shoveler.PortLower"}
-	Transfer_MaxConcurrentJobs              = IntParam{"Transfer.MaxConcurrentJobs"}
-	Transport_MaxIdleConns                  = IntParam{"Transport.MaxIdleConns"}
-	Xrootd_DetailedMonitoringPort           = IntParam{"Xrootd.DetailedMonitoringPort"}
-	Xrootd_LocalMonitoringPort              = IntParam{"Xrootd.LocalMonitoringPort"}
-	Xrootd_ManagerPort                      = IntParam{"Xrootd.ManagerPort"}
-	Xrootd_MaxThreads                       = IntParam{"Xrootd.MaxThreads"}
-	Xrootd_Port                             = IntParam{"Xrootd.Port"}
-	Xrootd_SummaryMonitoringPort            = IntParam{"Xrootd.SummaryMonitoringPort"}
+	Cache_WorkerCount = IntParam{"Cache.WorkerCount"}
+	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
+	ClientAgent_MaxConcurrentJobs = IntParam{"ClientAgent.MaxConcurrentJobs"}
+	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
+	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
+	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
+	Client_WorkerCount = IntParam{"Client.WorkerCount"}
+	Director_AdaptiveSortTruncateConstant = IntParam{"Director.AdaptiveSortTruncateConstant"}
+	Director_CachePresenceCapacity = IntParam{"Director.CachePresenceCapacity"}
+	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
+	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
+	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_FDCacheSize = IntParam{"LocalCache.FDCacheSize"}
+	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
+	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
+	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
+	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
+	Logging_Buffer_BatchLines = IntParam{"Logging.Buffer.BatchLines"}
+	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
+	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
+	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
+	Monitoring_LabelValueLengthLimit = IntParam{"Monitoring.LabelValueLengthLimit"}
+	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
+	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
+	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
+	Monitoring_StorageCriticalThreshold = IntParam{"Monitoring.StorageCriticalThreshold"}
+	Monitoring_StorageWarningThreshold = IntParam{"Monitoring.StorageWarningThreshold"}
+	Origin_Concurrency = IntParam{"Origin.Concurrency"}
+	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
+	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
+	Origin_Metadata_MaxInflight = IntParam{"Origin.Metadata.MaxInflight"}
+	Origin_Metadata_MaxMetadataBytes = IntParam{"Origin.Metadata.MaxMetadataBytes"}
+	Origin_Metadata_RatePerSecond = IntParam{"Origin.Metadata.RatePerSecond"}
+	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
+	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
+	Origin_PStoreInlineMaxBytes = IntParam{"Origin.PStoreInlineMaxBytes"}
+	Origin_PStoreMetadataBackupsToKeep = IntParam{"Origin.PStoreMetadataBackupsToKeep"}
+	Origin_Port = IntParam{"Origin.Port"}
+	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
+	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
+	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
+	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
+	Server_IssuerPort = IntParam{"Server.IssuerPort"}
+	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
+	Server_WebPort = IntParam{"Server.WebPort"}
+	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
+	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
+	Transfer_MaxConcurrentJobs = IntParam{"Transfer.MaxConcurrentJobs"}
+	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
+	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_LocalMonitoringPort = IntParam{"Xrootd.LocalMonitoringPort"}
+	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
+	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
+	Xrootd_Port = IntParam{"Xrootd.Port"}
+	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
 )
 
 var (
 	Origin_PStoreDataScanRate = ByteRateParam{"Origin.PStoreDataScanRate"}
-	Origin_TransferRateLimit  = ByteRateParam{"Origin.TransferRateLimit"}
+	Origin_TransferRateLimit = ByteRateParam{"Origin.TransferRateLimit"}
 )
 
 var (
-	Cache_DirectorTest                       = BoolParam{"Cache.DirectorTest"}
-	Cache_DisableClientX509                  = BoolParam{"Cache.DisableClientX509"}
-	Cache_EnableBroker                       = BoolParam{"Cache.EnableBroker"}
-	Cache_EnableChaosAPI                     = BoolParam{"Cache.EnableChaosAPI"}
-	Cache_EnableEvictionMonitoring           = BoolParam{"Cache.EnableEvictionMonitoring"}
-	Cache_EnableLotman                       = BoolParam{"Cache.EnableLotman"}
-	Cache_EnableOIDC                         = BoolParam{"Cache.EnableOIDC"}
-	Cache_EnablePrefetch                     = BoolParam{"Cache.EnablePrefetch"}
-	Cache_EnableSiteLocalMode                = BoolParam{"Cache.EnableSiteLocalMode"}
-	Cache_EnableTLSClientAuth                = BoolParam{"Cache.EnableTLSClientAuth"}
-	Cache_EnableV2                           = BoolParam{"Cache.EnableV2"}
-	Cache_EnableVoms                         = BoolParam{"Cache.EnableVoms"}
-	Cache_SelfTest                           = BoolParam{"Cache.SelfTest"}
-	Client_AssumeDirectorServerHeader        = BoolParam{"Client.AssumeDirectorServerHeader"}
-	Client_DisableHttpProxy                  = BoolParam{"Client.DisableHttpProxy"}
-	Client_DisableProxyFallback              = BoolParam{"Client.DisableProxyFallback"}
-	Client_EnableOverwrites                  = BoolParam{"Client.EnableOverwrites"}
-	Client_IsPlugin                          = BoolParam{"Client.IsPlugin"}
-	Debug                                    = BoolParam{"Debug"}
-	Director_AssumePresenceAtSingleOrigin    = BoolParam{"Director.AssumePresenceAtSingleOrigin"}
-	Director_CachesPullFromCaches            = BoolParam{"Director.CachesPullFromCaches"}
-	Director_CheckCachePresence              = BoolParam{"Director.CheckCachePresence"}
-	Director_CheckOriginPresence             = BoolParam{"Director.CheckOriginPresence"}
-	Director_EnableBroker                    = BoolParam{"Director.EnableBroker"}
+	Cache_DirectorTest = BoolParam{"Cache.DirectorTest"}
+	Cache_DisableClientX509 = BoolParam{"Cache.DisableClientX509"}
+	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
+	Cache_EnableChaosAPI = BoolParam{"Cache.EnableChaosAPI"}
+	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
+	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
+	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
+	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
+	Cache_EnableSiteLocalMode = BoolParam{"Cache.EnableSiteLocalMode"}
+	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
+	Cache_EnableV2 = BoolParam{"Cache.EnableV2"}
+	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
+	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
+	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
+	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
+	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
+	Client_EnableOverwrites = BoolParam{"Client.EnableOverwrites"}
+	Client_IsPlugin = BoolParam{"Client.IsPlugin"}
+	Debug = BoolParam{"Debug"}
+	Director_AssumePresenceAtSingleOrigin = BoolParam{"Director.AssumePresenceAtSingleOrigin"}
+	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
+	Director_CheckCachePresence = BoolParam{"Director.CheckCachePresence"}
+	Director_CheckOriginPresence = BoolParam{"Director.CheckOriginPresence"}
+	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableFederationMetadataHosting = BoolParam{"Director.EnableFederationMetadataHosting"}
-	Director_EnableOIDC                      = BoolParam{"Director.EnableOIDC"}
-	Director_EnableStat                      = BoolParam{"Director.EnableStat"}
-	Director_FilterCachesInErrorState        = BoolParam{"Director.FilterCachesInErrorState"}
-	DisableHttpProxy                         = BoolParam{"DisableHttpProxy"}
-	DisableProxyFallback                     = BoolParam{"DisableProxyFallback"}
-	Issuer_OIDCPreferClaimsFromIDToken       = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
-	Issuer_UserStripDomain                   = BoolParam{"Issuer.UserStripDomain"}
-	Logging_Client_DisableProgressBars       = BoolParam{"Logging.Client.DisableProgressBars"}
-	Logging_DisableProgressBars              = BoolParam{"Logging.DisableProgressBars"}
-	Logging_Rotation_Disable                 = BoolParam{"Logging.Rotation.Disable"}
-	Logging_Rotation_DisableCompress         = BoolParam{"Logging.Rotation.DisableCompress"}
-	Lotman_EnableAPI                         = BoolParam{"Lotman.EnableAPI"}
-	Monitoring_EnablePrometheus              = BoolParam{"Monitoring.EnablePrometheus"}
-	Monitoring_MetricAuthorization           = BoolParam{"Monitoring.MetricAuthorization"}
-	Monitoring_PromQLAuthorization           = BoolParam{"Monitoring.PromQLAuthorization"}
-	Origin_DirectorTest                      = BoolParam{"Origin.DirectorTest"}
-	Origin_DisableCopies                     = BoolParam{"Origin.DisableCopies"}
-	Origin_DisableDirectClients              = BoolParam{"Origin.DisableDirectClients"}
-	Origin_EnableAtomicUploads               = BoolParam{"Origin.EnableAtomicUploads"}
-	Origin_EnableBroker                      = BoolParam{"Origin.EnableBroker"}
-	Origin_EnableCmsd                        = BoolParam{"Origin.EnableCmsd"}
-	Origin_EnableDirListing                  = BoolParam{"Origin.EnableDirListing"}
-	Origin_EnableDirectReads                 = BoolParam{"Origin.EnableDirectReads"}
-	Origin_EnableDiskUsageCalculation        = BoolParam{"Origin.EnableDiskUsageCalculation"}
-	Origin_EnableFallbackRead                = BoolParam{"Origin.EnableFallbackRead"}
-	Origin_EnableIssuer                      = BoolParam{"Origin.EnableIssuer"}
-	Origin_EnableListings                    = BoolParam{"Origin.EnableListings"}
-	Origin_EnableMacaroons                   = BoolParam{"Origin.EnableMacaroons"}
-	Origin_EnableOIDC                        = BoolParam{"Origin.EnableOIDC"}
-	Origin_EnablePublicReads                 = BoolParam{"Origin.EnablePublicReads"}
-	Origin_EnableReads                       = BoolParam{"Origin.EnableReads"}
-	Origin_EnableStandaloneMode              = BoolParam{"Origin.EnableStandaloneMode"}
-	Origin_EnableTLSClientAuth               = BoolParam{"Origin.EnableTLSClientAuth"}
-	Origin_EnableTransferAPI                 = BoolParam{"Origin.EnableTransferAPI"}
-	Origin_EnableVoms                        = BoolParam{"Origin.EnableVoms"}
-	Origin_EnableWrite                       = BoolParam{"Origin.EnableWrite"}
-	Origin_EnableWrites                      = BoolParam{"Origin.EnableWrites"}
-	Origin_HttpAuthTokenPassthrough          = BoolParam{"Origin.HttpAuthTokenPassthrough"}
-	Origin_Metadata_Enabled                  = BoolParam{"Origin.Metadata.Enabled"}
-	Origin_Multiuser                         = BoolParam{"Origin.Multiuser"}
-	Origin_Posc_Enabled                      = BoolParam{"Origin.Posc.Enabled"}
-	Origin_SSH_AutoAddHostKey                = BoolParam{"Origin.SSH.AutoAddHostKey"}
-	Origin_SSH_TunnelCallback                = BoolParam{"Origin.SSH.TunnelCallback"}
-	Origin_ScitokensMapSubject               = BoolParam{"Origin.ScitokensMapSubject"}
-	Origin_SelfTest                          = BoolParam{"Origin.SelfTest"}
-	Registry_EnableOIDC                      = BoolParam{"Registry.EnableOIDC"}
-	Registry_RequireCacheApproval            = BoolParam{"Registry.RequireCacheApproval"}
-	Registry_RequireKeyChaining              = BoolParam{"Registry.RequireKeyChaining"}
-	Registry_RequireOriginApproval           = BoolParam{"Registry.RequireOriginApproval"}
-	Server_DropPrivileges                    = BoolParam{"Server.DropPrivileges"}
-	Server_EnablePKCS11                      = BoolParam{"Server.EnablePKCS11"}
-	Server_EnablePprof                       = BoolParam{"Server.EnablePprof"}
-	Server_EnableUI                          = BoolParam{"Server.EnableUI"}
-	Server_HealthMonitoringPublic            = BoolParam{"Server.HealthMonitoringPublic"}
-	Server_SSRFProtection_Disabled           = BoolParam{"Server.SSRFProtection.Disabled"}
-	Server_SSRFProtection_SkipDefaultBlocks  = BoolParam{"Server.SSRFProtection.SkipDefaultBlocks"}
-	Server_WebReadOnly                       = BoolParam{"Server.WebReadOnly"}
-	Shoveler_Enable                          = BoolParam{"Shoveler.Enable"}
-	Shoveler_VerifyHeader                    = BoolParam{"Shoveler.VerifyHeader"}
-	StagePlugin_Hook                         = BoolParam{"StagePlugin.Hook"}
-	TLSSkipVerify                            = BoolParam{"TLSSkipVerify"}
-	Topology_DisableCacheX509                = BoolParam{"Topology.DisableCacheX509"}
-	Topology_DisableCaches                   = BoolParam{"Topology.DisableCaches"}
-	Topology_DisableDowntime                 = BoolParam{"Topology.DisableDowntime"}
-	Topology_DisableOriginX509               = BoolParam{"Topology.DisableOriginX509"}
-	Topology_DisableOrigins                  = BoolParam{"Topology.DisableOrigins"}
-	Transfer_EnableOAuth2Clients             = BoolParam{"Transfer.EnableOAuth2Clients"}
-	Xrootd_AutoShutdownEnabled               = BoolParam{"Xrootd.AutoShutdownEnabled"}
-	Xrootd_EnableLocalMonitoring             = BoolParam{"Xrootd.EnableLocalMonitoring"}
+	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
+	Director_EnableStat = BoolParam{"Director.EnableStat"}
+	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
+	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
+	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
+	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
+	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
+	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Logging_Rotation_Disable = BoolParam{"Logging.Rotation.Disable"}
+	Logging_Rotation_DisableCompress = BoolParam{"Logging.Rotation.DisableCompress"}
+	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
+	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
+	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
+	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
+	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
+	Origin_DisableCopies = BoolParam{"Origin.DisableCopies"}
+	Origin_DisableDirectClients = BoolParam{"Origin.DisableDirectClients"}
+	Origin_EnableAtomicUploads = BoolParam{"Origin.EnableAtomicUploads"}
+	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
+	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
+	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
+	Origin_EnableDirectReads = BoolParam{"Origin.EnableDirectReads"}
+	Origin_EnableDiskUsageCalculation = BoolParam{"Origin.EnableDiskUsageCalculation"}
+	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
+	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
+	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
+	Origin_EnableMacaroons = BoolParam{"Origin.EnableMacaroons"}
+	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
+	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
+	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
+	Origin_EnableStandaloneMode = BoolParam{"Origin.EnableStandaloneMode"}
+	Origin_EnableTLSClientAuth = BoolParam{"Origin.EnableTLSClientAuth"}
+	Origin_EnableTransferAPI = BoolParam{"Origin.EnableTransferAPI"}
+	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
+	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
+	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
+	Origin_HttpAuthTokenPassthrough = BoolParam{"Origin.HttpAuthTokenPassthrough"}
+	Origin_Metadata_AllowMultipart = BoolParam{"Origin.Metadata.AllowMultipart"}
+	Origin_Metadata_Enabled = BoolParam{"Origin.Metadata.Enabled"}
+	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
+	Origin_Posc_Enabled = BoolParam{"Origin.Posc.Enabled"}
+	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
+	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
+	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
+	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_EnableOIDC = BoolParam{"Registry.EnableOIDC"}
+	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
+	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
+	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
+	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
+	Server_EnablePKCS11 = BoolParam{"Server.EnablePKCS11"}
+	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
+	Server_EnableUI = BoolParam{"Server.EnableUI"}
+	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
+	Server_SSRFProtection_Disabled = BoolParam{"Server.SSRFProtection.Disabled"}
+	Server_SSRFProtection_SkipDefaultBlocks = BoolParam{"Server.SSRFProtection.SkipDefaultBlocks"}
+	Server_WebReadOnly = BoolParam{"Server.WebReadOnly"}
+	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
+	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
+	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
+	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
+	Topology_DisableCacheX509 = BoolParam{"Topology.DisableCacheX509"}
+	Topology_DisableCaches = BoolParam{"Topology.DisableCaches"}
+	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
+	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
+	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
+	Transfer_EnableOAuth2Clients = BoolParam{"Transfer.EnableOAuth2Clients"}
+	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
+	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
 var (
-	Cache_DefaultCacheTimeout                    = DurationParam{"Cache.DefaultCacheTimeout"}
-	Cache_EvictionMonitoringInterval             = DurationParam{"Cache.EvictionMonitoringInterval"}
-	Cache_MinDirectorRefreshInterval             = DurationParam{"Cache.MinDirectorRefreshInterval"}
-	Cache_SelfTestInterval                       = DurationParam{"Cache.SelfTestInterval"}
-	Cache_SelfTestMaxAge                         = DurationParam{"Cache.SelfTestMaxAge"}
-	Cache_Throttle_EMAWindow                     = DurationParam{"Cache.Throttle.EMAWindow"}
-	Cache_Throttle_RetryAfter                    = DurationParam{"Cache.Throttle.RetryAfter"}
-	ClientAgent_IdleTimeout                      = DurationParam{"ClientAgent.IdleTimeout"}
-	ClientAgent_ProgressUpdateInterval           = DurationParam{"ClientAgent.ProgressUpdateInterval"}
-	Client_SlowTransferRampupTime                = DurationParam{"Client.SlowTransferRampupTime"}
-	Client_SlowTransferWindow                    = DurationParam{"Client.SlowTransferWindow"}
-	Client_StoppedTransferTimeout                = DurationParam{"Client.StoppedTransferTimeout"}
-	Director_AdaptiveSortEWMATimeConstant        = DurationParam{"Director.AdaptiveSortEWMATimeConstant"}
-	Director_AdvertisementTTL                    = DurationParam{"Director.AdvertisementTTL"}
-	Director_CachePresenceTTL                    = DurationParam{"Director.CachePresenceTTL"}
-	Director_FedTokenLifetime                    = DurationParam{"Director.FedTokenLifetime"}
-	Director_MetadataComparisonInterval          = DurationParam{"Director.MetadataComparisonInterval"}
-	Director_OriginCacheHealthTestInterval       = DurationParam{"Director.OriginCacheHealthTestInterval"}
-	Director_RegistryQueryInterval               = DurationParam{"Director.RegistryQueryInterval"}
-	Director_StatTimeout                         = DurationParam{"Director.StatTimeout"}
-	Federation_TopologyReloadInterval            = DurationParam{"Federation.TopologyReloadInterval"}
-	Issuer_AccessTokenLifetime                   = DurationParam{"Issuer.AccessTokenLifetime"}
-	Issuer_AuthorizationCodeLifetime             = DurationParam{"Issuer.AuthorizationCodeLifetime"}
-	Issuer_DynamicClientStaleTimeout             = DurationParam{"Issuer.DynamicClientStaleTimeout"}
-	Issuer_DynamicClientUnusedTimeout            = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
-	Issuer_IDTokenLifetime                       = DurationParam{"Issuer.IDTokenLifetime"}
-	Issuer_RefreshTokenGracePeriod               = DurationParam{"Issuer.RefreshTokenGracePeriod"}
-	Issuer_RefreshTokenLifetime                  = DurationParam{"Issuer.RefreshTokenLifetime"}
-	LocalCache_DefaultMaxAge                     = DurationParam{"LocalCache.DefaultMaxAge"}
-	LocalCache_PrefetchTimeout                   = DurationParam{"LocalCache.PrefetchTimeout"}
-	Logging_Client_ProgressInterval              = DurationParam{"Logging.Client.ProgressInterval"}
-	Logging_Rotation_FlushInterval               = DurationParam{"Logging.Rotation.FlushInterval"}
-	Logging_Rotation_MaxRetentionPeriod          = DurationParam{"Logging.Rotation.MaxRetentionPeriod"}
-	Lotman_DefaultLotDeletionLifetime            = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
-	Lotman_DefaultLotExpirationLifetime          = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
-	Lotman_GarbageCollectionInterval             = DurationParam{"Lotman.GarbageCollectionInterval"}
-	Lotman_LotRecordRetention                    = DurationParam{"Lotman.LotRecordRetention"}
-	Lotman_MaxLotLifetime                        = DurationParam{"Lotman.MaxLotLifetime"}
-	Lotman_MinFillerWidth                        = DurationParam{"Lotman.MinFillerWidth"}
-	Lotman_RenewalCheckInterval                  = DurationParam{"Lotman.RenewalCheckInterval"}
-	Lotman_SchedulingHorizon                     = DurationParam{"Lotman.SchedulingHorizon"}
-	Monitoring_DataRetention                     = DurationParam{"Monitoring.DataRetention"}
-	Monitoring_StorageHealthCheckInterval        = DurationParam{"Monitoring.StorageHealthCheckInterval"}
-	Monitoring_TokenExpiresIn                    = DurationParam{"Monitoring.TokenExpiresIn"}
-	Monitoring_TokenRefreshInterval              = DurationParam{"Monitoring.TokenRefreshInterval"}
-	Origin_DiskUsageCalculationDelay             = DurationParam{"Origin.DiskUsageCalculationDelay"}
-	Origin_DiskUsageCalculationInterval          = DurationParam{"Origin.DiskUsageCalculationInterval"}
-	Origin_Globusv2TokenRefreshInterval          = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
-	Origin_PStoreDataScanInterval                = DurationParam{"Origin.PStoreDataScanInterval"}
-	Origin_PStoreIndexCheckInterval              = DurationParam{"Origin.PStoreIndexCheckInterval"}
-	Origin_PStoreMetadataBackupInterval          = DurationParam{"Origin.PStoreMetadataBackupInterval"}
-	Origin_Metadata_ErrorAfter                   = DurationParam{"Origin.Metadata.ErrorAfter"}
-	Origin_Metadata_MaxBackoff                   = DurationParam{"Origin.Metadata.MaxBackoff"}
-	Origin_Metadata_MinBackoff                   = DurationParam{"Origin.Metadata.MinBackoff"}
-	Origin_Metadata_RequestTimeout               = DurationParam{"Origin.Metadata.RequestTimeout"}
-	Origin_Metadata_TokenLifetime                = DurationParam{"Origin.Metadata.TokenLifetime"}
-	Origin_Metadata_WarnAfter                    = DurationParam{"Origin.Metadata.WarnAfter"}
-	Origin_Posc_FileTimeout                      = DurationParam{"Origin.Posc.FileTimeout"}
-	Origin_Posc_KeepaliveInterval                = DurationParam{"Origin.Posc.KeepaliveInterval"}
-	Origin_SSH_ChallengeTimeout                  = DurationParam{"Origin.SSH.ChallengeTimeout"}
-	Origin_SSH_ConnectTimeout                    = DurationParam{"Origin.SSH.ConnectTimeout"}
-	Origin_SSH_KeepaliveInterval                 = DurationParam{"Origin.SSH.KeepaliveInterval"}
-	Origin_SSH_KeepaliveTimeout                  = DurationParam{"Origin.SSH.KeepaliveTimeout"}
-	Origin_SSH_SessionEstablishTimeout           = DurationParam{"Origin.SSH.SessionEstablishTimeout"}
-	Origin_SelfTestInterval                      = DurationParam{"Origin.SelfTestInterval"}
-	Origin_SelfTestMaxAge                        = DurationParam{"Origin.SelfTestMaxAge"}
-	Origin_UserMapfileRefreshInterval            = DurationParam{"Origin.UserMapfileRefreshInterval"}
+	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
+	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
+	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
+	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
+	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
+	Cache_Throttle_EMAWindow = DurationParam{"Cache.Throttle.EMAWindow"}
+	Cache_Throttle_RetryAfter = DurationParam{"Cache.Throttle.RetryAfter"}
+	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
+	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
+	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
+	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
+	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
+	Director_AdaptiveSortEWMATimeConstant = DurationParam{"Director.AdaptiveSortEWMATimeConstant"}
+	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
+	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
+	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}
+	Director_MetadataComparisonInterval = DurationParam{"Director.MetadataComparisonInterval"}
+	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
+	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
+	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
+	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	Issuer_AccessTokenLifetime = DurationParam{"Issuer.AccessTokenLifetime"}
+	Issuer_AuthorizationCodeLifetime = DurationParam{"Issuer.AuthorizationCodeLifetime"}
+	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
+	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
+	Issuer_IDTokenLifetime = DurationParam{"Issuer.IDTokenLifetime"}
+	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	Issuer_RefreshTokenLifetime = DurationParam{"Issuer.RefreshTokenLifetime"}
+	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
+	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
+	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
+	Logging_Rotation_FlushInterval = DurationParam{"Logging.Rotation.FlushInterval"}
+	Logging_Rotation_MaxRetentionPeriod = DurationParam{"Logging.Rotation.MaxRetentionPeriod"}
+	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
+	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
+	Lotman_GarbageCollectionInterval = DurationParam{"Lotman.GarbageCollectionInterval"}
+	Lotman_LotRecordRetention = DurationParam{"Lotman.LotRecordRetention"}
+	Lotman_MaxLotLifetime = DurationParam{"Lotman.MaxLotLifetime"}
+	Lotman_MinFillerWidth = DurationParam{"Lotman.MinFillerWidth"}
+	Lotman_RenewalCheckInterval = DurationParam{"Lotman.RenewalCheckInterval"}
+	Lotman_SchedulingHorizon = DurationParam{"Lotman.SchedulingHorizon"}
+	Monitoring_DataRetention = DurationParam{"Monitoring.DataRetention"}
+	Monitoring_StorageHealthCheckInterval = DurationParam{"Monitoring.StorageHealthCheckInterval"}
+	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
+	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
+	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
+	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_Globusv2TokenRefreshInterval = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
+	Origin_Metadata_ErrorAfter = DurationParam{"Origin.Metadata.ErrorAfter"}
+	Origin_Metadata_MaxBackoff = DurationParam{"Origin.Metadata.MaxBackoff"}
+	Origin_Metadata_MinBackoff = DurationParam{"Origin.Metadata.MinBackoff"}
+	Origin_Metadata_RequestTimeout = DurationParam{"Origin.Metadata.RequestTimeout"}
+	Origin_Metadata_TokenLifetime = DurationParam{"Origin.Metadata.TokenLifetime"}
+	Origin_Metadata_WarnAfter = DurationParam{"Origin.Metadata.WarnAfter"}
+	Origin_PStoreDataScanInterval = DurationParam{"Origin.PStoreDataScanInterval"}
+	Origin_PStoreIndexCheckInterval = DurationParam{"Origin.PStoreIndexCheckInterval"}
+	Origin_PStoreMetadataBackupInterval = DurationParam{"Origin.PStoreMetadataBackupInterval"}
+	Origin_Posc_FileTimeout = DurationParam{"Origin.Posc.FileTimeout"}
+	Origin_Posc_KeepaliveInterval = DurationParam{"Origin.Posc.KeepaliveInterval"}
+	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
+	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
+	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
+	Origin_SSH_KeepaliveTimeout = DurationParam{"Origin.SSH.KeepaliveTimeout"}
+	Origin_SSH_SessionEstablishTimeout = DurationParam{"Origin.SSH.SessionEstablishTimeout"}
+	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
+	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
+	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}
 	Registry_InactiveRegistrationCleanupInterval = DurationParam{"Registry.InactiveRegistrationCleanupInterval"}
-	Registry_InactiveRegistrationTimeout         = DurationParam{"Registry.InactiveRegistrationTimeout"}
-	Registry_InstitutionsUrlReloadMinutes        = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
-	Server_AdLifetime                            = DurationParam{"Server.AdLifetime"}
-	Server_AdvertisementInterval                 = DurationParam{"Server.AdvertisementInterval"}
-	Server_DatabaseBackup_Frequency              = DurationParam{"Server.DatabaseBackup.Frequency"}
-	Server_GroupInviteLinkExpiration             = DurationParam{"Server.GroupInviteLinkExpiration"}
-	Server_RegistrationRetryInterval             = DurationParam{"Server.RegistrationRetryInterval"}
-	Server_StartupTimeout                        = DurationParam{"Server.StartupTimeout"}
-	Transfer_CredentialIdleTimeout               = DurationParam{"Transfer.CredentialIdleTimeout"}
-	Transport_BrokerEndpointCacheTTL             = DurationParam{"Transport.BrokerEndpointCacheTTL"}
-	Transport_DialerKeepAlive                    = DurationParam{"Transport.DialerKeepAlive"}
-	Transport_DialerTimeout                      = DurationParam{"Transport.DialerTimeout"}
-	Transport_ExpectContinueTimeout              = DurationParam{"Transport.ExpectContinueTimeout"}
-	Transport_IdleConnTimeout                    = DurationParam{"Transport.IdleConnTimeout"}
-	Transport_ResponseHeaderTimeout              = DurationParam{"Transport.ResponseHeaderTimeout"}
-	Transport_TLSHandshakeTimeout                = DurationParam{"Transport.TLSHandshakeTimeout"}
-	Xrootd_AuthRefreshInterval                   = DurationParam{"Xrootd.AuthRefreshInterval"}
-	Xrootd_ConfigUpdateFailureTimeout            = DurationParam{"Xrootd.ConfigUpdateFailureTimeout"}
-	Xrootd_HttpMaxDelay                          = DurationParam{"Xrootd.HttpMaxDelay"}
-	Xrootd_MaxStartupWait                        = DurationParam{"Xrootd.MaxStartupWait"}
-	Xrootd_ShutdownTimeout                       = DurationParam{"Xrootd.ShutdownTimeout"}
+	Registry_InactiveRegistrationTimeout = DurationParam{"Registry.InactiveRegistrationTimeout"}
+	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
+	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
+	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
+	Server_DatabaseBackup_Frequency = DurationParam{"Server.DatabaseBackup.Frequency"}
+	Server_GroupInviteLinkExpiration = DurationParam{"Server.GroupInviteLinkExpiration"}
+	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
+	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
+	Transfer_CredentialIdleTimeout = DurationParam{"Transfer.CredentialIdleTimeout"}
+	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
+	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
+	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
+	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}
+	Transport_IdleConnTimeout = DurationParam{"Transport.IdleConnTimeout"}
+	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
+	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
+	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
+	Xrootd_ConfigUpdateFailureTimeout = DurationParam{"Xrootd.ConfigUpdateFailureTimeout"}
+	Xrootd_HttpMaxDelay = DurationParam{"Xrootd.HttpMaxDelay"}
+	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
+	Xrootd_ShutdownTimeout = DurationParam{"Xrootd.ShutdownTimeout"}
 )
 
 var (
-	GeoIPOverrides                        = ObjectParam{"GeoIPOverrides"}
-	Issuer_AuthorizationTemplates         = ObjectParam{"Issuer.AuthorizationTemplates"}
+	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
+	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
-	LocalCache_StorageDirs                = ObjectParam{"LocalCache.StorageDirs"}
-	Lotman_PolicyDefinitions              = ObjectParam{"Lotman.PolicyDefinitions"}
-	Origin_Exports                        = ObjectParam{"Origin.Exports"}
-	Origin_PStoreStorageDirs              = ObjectParam{"Origin.PStoreStorageDirs"}
-	Registry_CustomRegistrationFields     = ObjectParam{"Registry.CustomRegistrationFields"}
-	Registry_Institutions                 = ObjectParam{"Registry.Institutions"}
-	Shoveler_IPMapping                    = ObjectParam{"Shoveler.IPMapping"}
+	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
+	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
+	Origin_Exports = ObjectParam{"Origin.Exports"}
+	Origin_PStoreStorageDirs = ObjectParam{"Origin.PStoreStorageDirs"}
+	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
+	Registry_Institutions = ObjectParam{"Registry.Institutions"}
+	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
 )
 
 var (
-	Federation_BrokerUrl   = OpaqueParam{"Federation.BrokerUrl"}
+	Federation_BrokerUrl = OpaqueParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = OpaqueParam{"Federation.DirectorUrl"}
-	Federation_JwkUrl      = OpaqueParam{"Federation.JwkUrl"}
+	Federation_JwkUrl = OpaqueParam{"Federation.JwkUrl"}
 	Federation_RegistryUrl = OpaqueParam{"Federation.RegistryUrl"}
 )
 
@@ -2408,507 +2424,511 @@ var paramByEnvVar map[string]Param
 
 func init() {
 	paramByName = map[string]Param{
-		"Cache.ClientStatisticsLocation":               Cache_ClientStatisticsLocation,
-		"Cache.DataLocation":                           Cache_DataLocation,
-		"Cache.DataScanMode":                           Cache_DataScanMode,
-		"Cache.DbLocation":                             Cache_DbLocation,
-		"Cache.ExportLocation":                         Cache_ExportLocation,
-		"Cache.FedTokenLocation":                       Cache_FedTokenLocation,
-		"Cache.FilesBaseSize":                          Cache_FilesBaseSize,
-		"Cache.FilesMaxSize":                           Cache_FilesMaxSize,
-		"Cache.FilesNominalSize":                       Cache_FilesNominalSize,
-		"Cache.HighWaterMark":                          Cache_HighWaterMark,
-		"Cache.LocalRoot":                              Cache_LocalRoot,
-		"Cache.LowWaterMark":                           Cache_LowWaterMark,
-		"Cache.MemoryCacheSize":                        Cache_MemoryCacheSize,
-		"Cache.NamespaceLocation":                      Cache_NamespaceLocation,
-		"Cache.PSSOrigin":                              Cache_PSSOrigin,
-		"Cache.RunLocation":                            Cache_RunLocation,
-		"Cache.SentinelLocation":                       Cache_SentinelLocation,
-		"Cache.StorageLocation":                        Cache_StorageLocation,
-		"Cache.Url":                                    Cache_Url,
-		"Cache.XRootDPrefix":                           Cache_XRootDPrefix,
-		"ClientAgent.DbLocation":                       ClientAgent_DbLocation,
-		"ClientAgent.PidFile":                          ClientAgent_PidFile,
-		"ClientAgent.Socket":                           ClientAgent_Socket,
-		"Client.CredentialFile":                        Client_CredentialFile,
-		"ConfigBase":                                   ConfigBase,
-		"Director.AdvertiseUrl":                        Director_AdvertiseUrl,
-		"Director.CacheSortMethod":                     Director_CacheSortMethod,
-		"Director.DbLocation":                          Director_DbLocation,
-		"Director.DefaultResponse":                     Director_DefaultResponse,
-		"Director.GeoIPLocation":                       Director_GeoIPLocation,
-		"Director.MaxMindKeyFile":                      Director_MaxMindKeyFile,
-		"Director.SupportContactEmail":                 Director_SupportContactEmail,
-		"Director.SupportContactUrl":                   Director_SupportContactUrl,
-		"Federation.DiscoveryUrl":                      Federation_DiscoveryUrl,
-		"Federation.TopologyDowntimeUrl":               Federation_TopologyDowntimeUrl,
-		"Federation.TopologyNamespaceUrl":              Federation_TopologyNamespaceUrl,
-		"Federation.TopologyUrl":                       Federation_TopologyUrl,
-		"GeoLocation":                                  GeoLocation,
-		"IssuerKey":                                    IssuerKey,
-		"IssuerKeysDirectory":                          IssuerKeysDirectory,
-		"Issuer.AuthenticationSource":                  Issuer_AuthenticationSource,
-		"Issuer.GroupFile":                             Issuer_GroupFile,
-		"Issuer.GroupSource":                           Issuer_GroupSource,
-		"Issuer.IssuerClaimValue":                      Issuer_IssuerClaimValue,
-		"Issuer.OIDCAuthenticationUserClaim":           Issuer_OIDCAuthenticationUserClaim,
-		"Issuer.OIDCGroupClaim":                        Issuer_OIDCGroupClaim,
-		"Issuer.OIDCIssuerClaim":                       Issuer_OIDCIssuerClaim,
-		"Issuer.OIDCSubjectClaim":                      Issuer_OIDCSubjectClaim,
-		"Issuer.PublicClientID":                        Issuer_PublicClientID,
-		"Issuer.QDLLocation":                           Issuer_QDLLocation,
-		"Issuer.ScitokensServerLocation":               Issuer_ScitokensServerLocation,
-		"Issuer.TomcatLocation":                        Issuer_TomcatLocation,
-		"LocalCache.ChunkSize":                         LocalCache_ChunkSize,
-		"LocalCache.DataLocation":                      LocalCache_DataLocation,
-		"LocalCache.MemoryCacheSize":                   LocalCache_MemoryCacheSize,
-		"LocalCache.RunLocation":                       LocalCache_RunLocation,
-		"LocalCache.Size":                              LocalCache_Size,
-		"LocalCache.Socket":                            LocalCache_Socket,
-		"Logging.Buffer.MaxSize":                       Logging_Buffer_MaxSize,
-		"Logging.Cache.Http":                           Logging_Cache_Http,
-		"Logging.Cache.Lotman":                         Logging_Cache_Lotman,
-		"Logging.Cache.Ofs":                            Logging_Cache_Ofs,
-		"Logging.Cache.Pfc":                            Logging_Cache_Pfc,
-		"Logging.Cache.Pss":                            Logging_Cache_Pss,
-		"Logging.Cache.PssSetOpt":                      Logging_Cache_PssSetOpt,
-		"Logging.Cache.Scitokens":                      Logging_Cache_Scitokens,
-		"Logging.Cache.Xrd":                            Logging_Cache_Xrd,
-		"Logging.Cache.Xrootd":                         Logging_Cache_Xrootd,
-		"Logging.Level":                                Logging_Level,
-		"Logging.LogLocation":                          Logging_LogLocation,
-		"Logging.Origin.Cms":                           Logging_Origin_Cms,
-		"Logging.Origin.Http":                          Logging_Origin_Http,
-		"Logging.Origin.Ofs":                           Logging_Origin_Ofs,
-		"Logging.Origin.Oss":                           Logging_Origin_Oss,
-		"Logging.Origin.Scitokens":                     Logging_Origin_Scitokens,
-		"Logging.Origin.Xrd":                           Logging_Origin_Xrd,
-		"Logging.Origin.Xrootd":                        Logging_Origin_Xrootd,
-		"Logging.Rotation.Frequency":                   Logging_Rotation_Frequency,
-		"Logging.Rotation.MaxRetentionSize":            Logging_Rotation_MaxRetentionSize,
-		"Logging.Rotation.MaxSize":                     Logging_Rotation_MaxSize,
-		"Lotman.DbLocation":                            Lotman_DbLocation,
-		"Lotman.EnabledPolicy":                         Lotman_EnabledPolicy,
-		"Lotman.LibLocation":                           Lotman_LibLocation,
-		"Lotman.LotHome":                               Lotman_LotHome,
-		"Monitoring.DataLocation":                      Monitoring_DataLocation,
-		"Monitoring.DataRetentionSize":                 Monitoring_DataRetentionSize,
-		"OIDC.AuthorizationEndpoint":                   OIDC_AuthorizationEndpoint,
-		"OIDC.ClientID":                                OIDC_ClientID,
-		"OIDC.ClientIDFile":                            OIDC_ClientIDFile,
-		"OIDC.ClientRedirectHostname":                  OIDC_ClientRedirectHostname,
-		"OIDC.ClientSecretFile":                        OIDC_ClientSecretFile,
-		"OIDC.DeviceAuthEndpoint":                      OIDC_DeviceAuthEndpoint,
-		"OIDC.Issuer":                                  OIDC_Issuer,
-		"OIDC.TokenEndpoint":                           OIDC_TokenEndpoint,
-		"OIDC.UserInfoEndpoint":                        OIDC_UserInfoEndpoint,
-		"Origin.CacheControl":                          Origin_CacheControl,
-		"Origin.DbLocation":                            Origin_DbLocation,
-		"Origin.ExportVolume":                          Origin_ExportVolume,
-		"Origin.FedTokenLocation":                      Origin_FedTokenLocation,
-		"Origin.FederationPrefix":                      Origin_FederationPrefix,
-		"Origin.GlobusClientIDFile":                    Origin_GlobusClientIDFile,
-		"Origin.GlobusClientSecretFile":                Origin_GlobusClientSecretFile,
-		"Origin.GlobusCollectionID":                    Origin_GlobusCollectionID,
-		"Origin.GlobusCollectionName":                  Origin_GlobusCollectionName,
-		"Origin.GlobusConfigLocation":                  Origin_GlobusConfigLocation,
-		"Origin.GlobusIssuerURL":                       Origin_GlobusIssuerURL,
-		"Origin.GlobusTransferAPIBaseUrl":              Origin_GlobusTransferAPIBaseUrl,
-		"Origin.GlobusTransferTokenFile":               Origin_GlobusTransferTokenFile,
-		"Origin.HttpAuthOAuth2ClientID":                Origin_HttpAuthOAuth2ClientID,
-		"Origin.HttpAuthOAuth2ClientSecretFile":        Origin_HttpAuthOAuth2ClientSecretFile,
-		"Origin.HttpAuthOAuth2Issuer":                  Origin_HttpAuthOAuth2Issuer,
-		"Origin.HttpAuthTokenFile":                     Origin_HttpAuthTokenFile,
-		"Origin.HttpServiceUrl":                        Origin_HttpServiceUrl,
-		"Origin.IssuerMode":                            Origin_IssuerMode,
-		"Origin.Metadata.Endpoint":                     Origin_Metadata_Endpoint,
-		"Origin.Metadata.Mode":                         Origin_Metadata_Mode,
-		"Origin.Mode":                                  Origin_Mode,
-		"Origin.MultiuserVarlinkSocketPath":            Origin_MultiuserVarlinkSocketPath,
-		"Origin.NamespacePrefix":                       Origin_NamespacePrefix,
-		"Origin.ObjectProviderURL":                     Origin_ObjectProviderURL,
-		"Origin.PStoreLocation":                        Origin_PStoreLocation,
-		"Origin.PStoreMetadataBackupLocation":          Origin_PStoreMetadataBackupLocation,
-		"Origin.Posc.Prefix":                           Origin_Posc_Prefix,
-		"Origin.RunLocation":                           Origin_RunLocation,
-		"Origin.S3AccessKeyfile":                       Origin_S3AccessKeyfile,
-		"Origin.S3Bucket":                              Origin_S3Bucket,
-		"Origin.S3Region":                              Origin_S3Region,
-		"Origin.S3SecretKeyfile":                       Origin_S3SecretKeyfile,
-		"Origin.S3ServiceName":                         Origin_S3ServiceName,
-		"Origin.S3ServiceUrl":                          Origin_S3ServiceUrl,
-		"Origin.S3UrlStyle":                            Origin_S3UrlStyle,
-		"Origin.SSH.Host":                              Origin_SSH_Host,
-		"Origin.SSH.KnownHostsFile":                    Origin_SSH_KnownHostsFile,
-		"Origin.SSH.PasswordFile":                      Origin_SSH_PasswordFile,
-		"Origin.SSH.PelicanBinaryPath":                 Origin_SSH_PelicanBinaryPath,
-		"Origin.SSH.PrivateKeyFile":                    Origin_SSH_PrivateKeyFile,
-		"Origin.SSH.PrivateKeyPassphraseFile":          Origin_SSH_PrivateKeyPassphraseFile,
-		"Origin.SSH.ProxyJump":                         Origin_SSH_ProxyJump,
-		"Origin.SSH.RemotePelicanBinaryDir":            Origin_SSH_RemotePelicanBinaryDir,
-		"Origin.SSH.User":                              Origin_SSH_User,
-		"Origin.ScitokensDefaultUser":                  Origin_ScitokensDefaultUser,
-		"Origin.ScitokensGroupsClaim":                  Origin_ScitokensGroupsClaim,
-		"Origin.ScitokensNameMapFile":                  Origin_ScitokensNameMapFile,
-		"Origin.ScitokensUnauthenticatedUser":          Origin_ScitokensUnauthenticatedUser,
-		"Origin.ScitokensUsernameClaim":                Origin_ScitokensUsernameClaim,
-		"Origin.StoragePrefix":                         Origin_StoragePrefix,
-		"Origin.StorageType":                           Origin_StorageType,
-		"Origin.TokenAudience":                         Origin_TokenAudience,
-		"Origin.UploadTempLocation":                    Origin_UploadTempLocation,
-		"Origin.Url":                                   Origin_Url,
-		"Origin.XRootDPrefix":                          Origin_XRootDPrefix,
-		"Origin.XRootServiceUrl":                       Origin_XRootServiceUrl,
-		"Plugin.Token":                                 Plugin_Token,
-		"Registry.DbLocation":                          Registry_DbLocation,
-		"Registry.InstitutionsUrl":                     Registry_InstitutionsUrl,
-		"RuntimeDir":                                   RuntimeDir,
-		"Server.AUPCanonicalURL":                       Server_AUPCanonicalURL,
-		"Server.AUPFile":                               Server_AUPFile,
-		"Server.AUPLastUpdated":                        Server_AUPLastUpdated,
-		"Server.DatabaseBackup.Location":               Server_DatabaseBackup_Location,
-		"Server.DbLocation":                            Server_DbLocation,
-		"Server.ExternalWebUrl":                        Server_ExternalWebUrl,
-		"Server.Hostname":                              Server_Hostname,
-		"Server.IssuerHostname":                        Server_IssuerHostname,
-		"Server.IssuerJwks":                            Server_IssuerJwks,
-		"Server.IssuerUrl":                             Server_IssuerUrl,
-		"Server.SessionSecretFile":                     Server_SessionSecretFile,
-		"Server.TLSCACertificateDirectory":             Server_TLSCACertificateDirectory,
-		"Server.TLSCACertificateFile":                  Server_TLSCACertificateFile,
-		"Server.TLSCAKey":                              Server_TLSCAKey,
-		"Server.TLSCertificate":                        Server_TLSCertificate,
-		"Server.TLSCertificateChain":                   Server_TLSCertificateChain,
-		"Server.TLSKey":                                Server_TLSKey,
-		"Server.UIActivationCodeFile":                  Server_UIActivationCodeFile,
-		"Server.UIPasswordFile":                        Server_UIPasswordFile,
-		"Server.UnprivilegedUser":                      Server_UnprivilegedUser,
-		"Server.WebConfigFile":                         Server_WebConfigFile,
-		"Server.WebHost":                               Server_WebHost,
-		"Shoveler.AMQPExchange":                        Shoveler_AMQPExchange,
-		"Shoveler.AMQPTokenLocation":                   Shoveler_AMQPTokenLocation,
-		"Shoveler.MessageQueueProtocol":                Shoveler_MessageQueueProtocol,
-		"Shoveler.PasswordLocation":                    Shoveler_PasswordLocation,
-		"Shoveler.QueueDirectory":                      Shoveler_QueueDirectory,
-		"Shoveler.StompCert":                           Shoveler_StompCert,
-		"Shoveler.StompCertKey":                        Shoveler_StompCertKey,
-		"Shoveler.StompUsername":                       Shoveler_StompUsername,
-		"Shoveler.Topic":                               Shoveler_Topic,
-		"Shoveler.URL":                                 Shoveler_URL,
-		"StagePlugin.MountPrefix":                      StagePlugin_MountPrefix,
-		"StagePlugin.OriginPrefix":                     StagePlugin_OriginPrefix,
-		"StagePlugin.ShadowOriginPrefix":               StagePlugin_ShadowOriginPrefix,
-		"Xrootd.Authfile":                              Xrootd_Authfile,
-		"Xrootd.ConfigFile":                            Xrootd_ConfigFile,
-		"Xrootd.DetailedMonitoringHost":                Xrootd_DetailedMonitoringHost,
-		"Xrootd.LocalMonitoringHost":                   Xrootd_LocalMonitoringHost,
-		"Xrootd.MacaroonsKeyFile":                      Xrootd_MacaroonsKeyFile,
-		"Xrootd.ManagerHost":                           Xrootd_ManagerHost,
-		"Xrootd.Mount":                                 Xrootd_Mount,
-		"Xrootd.RobotsTxtFile":                         Xrootd_RobotsTxtFile,
-		"Xrootd.RunLocation":                           Xrootd_RunLocation,
-		"Xrootd.ScitokensConfig":                       Xrootd_ScitokensConfig,
-		"Xrootd.Sitename":                              Xrootd_Sitename,
-		"Xrootd.SummaryMonitoringHost":                 Xrootd_SummaryMonitoringHost,
-		"Cache.AllowedFederations":                     Cache_AllowedFederations,
-		"Cache.DataLocations":                          Cache_DataLocations,
-		"Cache.MetaLocations":                          Cache_MetaLocations,
-		"Cache.PermittedNamespaces":                    Cache_PermittedNamespaces,
-		"Client.PreferredCaches":                       Client_PreferredCaches,
-		"ConfigLocations":                              ConfigLocations,
-		"Director.CacheResponseHostnames":              Director_CacheResponseHostnames,
-		"Director.FilteredServers":                     Director_FilteredServers,
-		"Director.OriginResponseHostnames":             Director_OriginResponseHostnames,
-		"Issuer.GroupRequirements":                     Issuer_GroupRequirements,
-		"Issuer.RedirectUris":                          Issuer_RedirectUris,
-		"Monitoring.AggregatePrefixes":                 Monitoring_AggregatePrefixes,
-		"OIDC.Scopes":                                  OIDC_Scopes,
-		"Origin.DefaultChecksumTypes":                  Origin_DefaultChecksumTypes,
-		"Origin.ExportVolumes":                         Origin_ExportVolumes,
-		"Origin.SSH.AuthMethods":                       Origin_SSH_AuthMethods,
-		"Origin.SSH.RemotePelicanBinaryOverrides":      Origin_SSH_RemotePelicanBinaryOverrides,
-		"Origin.ScitokensRestrictedPaths":              Origin_ScitokensRestrictedPaths,
-		"Origin.SupportedChecksumTypes":                Origin_SupportedChecksumTypes,
-		"Registry.AdminUsers":                          Registry_AdminUsers,
-		"Server.AdminGroups":                           Server_AdminGroups,
-		"Server.AutoEnrollUsernameClaims":              Server_AutoEnrollUsernameClaims,
-		"Server.CollectionAdminGroups":                 Server_CollectionAdminGroups,
-		"Server.CollectionAdminUsers":                  Server_CollectionAdminUsers,
-		"Server.DirectorUrls":                          Server_DirectorUrls,
-		"Server.Modules":                               Server_Modules,
-		"Server.NewUserDefaultScopes":                  Server_NewUserDefaultScopes,
-		"Server.SSRFProtection.AllowedCIDRs":           Server_SSRFProtection_AllowedCIDRs,
-		"Server.SSRFProtection.BlockedCIDRs":           Server_SSRFProtection_BlockedCIDRs,
-		"Server.TrustedProxies":                        Server_TrustedProxies,
-		"Server.UIAdminUsers":                          Server_UIAdminUsers,
-		"Server.UserAdminGroups":                       Server_UserAdminGroups,
-		"Server.UserAdminUsers":                        Server_UserAdminUsers,
-		"Shoveler.OutputDestinations":                  Shoveler_OutputDestinations,
-		"Transfer.EnabledGroups":                       Transfer_EnabledGroups,
-		"Cache.BlocksToPrefetch":                       Cache_BlocksToPrefetch,
-		"Cache.Concurrency":                            Cache_Concurrency,
-		"Cache.ConcurrencyDegradedThreshold":           Cache_ConcurrencyDegradedThreshold,
-		"Cache.DataScanResampleInterval":               Cache_DataScanResampleInterval,
-		"Cache.EvictionMonitoringMaxDepth":             Cache_EvictionMonitoringMaxDepth,
-		"Cache.Port":                                   Cache_Port,
-		"Cache.Throttle.PendingBufferSize":             Cache_Throttle_PendingBufferSize,
-		"Cache.Throttle.PerOriginActivePercent":        Cache_Throttle_PerOriginActivePercent,
-		"Cache.Throttle.PerOriginPendingSize":          Cache_Throttle_PerOriginPendingSize,
-		"Cache.Throttle.PerOriginStarvingPercent":      Cache_Throttle_PerOriginStarvingPercent,
-		"Cache.WorkerCount":                            Cache_WorkerCount,
-		"ClientAgent.HistoryRetentionDays":             ClientAgent_HistoryRetentionDays,
-		"ClientAgent.MaxConcurrentJobs":                ClientAgent_MaxConcurrentJobs,
-		"Client.DirectorRetries":                       Client_DirectorRetries,
-		"Client.MaximumDownloadSpeed":                  Client_MaximumDownloadSpeed,
-		"Client.MinimumDownloadSpeed":                  Client_MinimumDownloadSpeed,
-		"Client.WorkerCount":                           Client_WorkerCount,
-		"Director.AdaptiveSortTruncateConstant":        Director_AdaptiveSortTruncateConstant,
-		"Director.CachePresenceCapacity":               Director_CachePresenceCapacity,
-		"Director.MaxStatResponse":                     Director_MaxStatResponse,
-		"Director.MinStatResponse":                     Director_MinStatResponse,
-		"Director.StatConcurrencyLimit":                Director_StatConcurrencyLimit,
-		"LocalCache.FDCacheSize":                       LocalCache_FDCacheSize,
-		"LocalCache.HighWaterMarkPercentage":           LocalCache_HighWaterMarkPercentage,
-		"LocalCache.LowWaterMarkPercentage":            LocalCache_LowWaterMarkPercentage,
-		"LocalCache.MaxConcurrentPrefetch":             LocalCache_MaxConcurrentPrefetch,
-		"LocalCache.RevalidationJitter":                LocalCache_RevalidationJitter,
-		"Logging.Buffer.BatchLines":                    Logging_Buffer_BatchLines,
-		"MinimumDownloadSpeed":                         MinimumDownloadSpeed,
-		"Monitoring.LabelLimit":                        Monitoring_LabelLimit,
-		"Monitoring.LabelNameLengthLimit":              Monitoring_LabelNameLengthLimit,
-		"Monitoring.LabelValueLengthLimit":             Monitoring_LabelValueLengthLimit,
-		"Monitoring.PortHigher":                        Monitoring_PortHigher,
-		"Monitoring.PortLower":                         Monitoring_PortLower,
-		"Monitoring.SampleLimit":                       Monitoring_SampleLimit,
-		"Monitoring.StorageCriticalThreshold":          Monitoring_StorageCriticalThreshold,
-		"Monitoring.StorageWarningThreshold":           Monitoring_StorageWarningThreshold,
-		"Origin.Concurrency":                           Origin_Concurrency,
-		"Origin.ConcurrencyDegradedThreshold":          Origin_ConcurrencyDegradedThreshold,
-		"Origin.DiskUsageCalculationRateLimit":         Origin_DiskUsageCalculationRateLimit,
-		"Origin.Metadata.MaxInflight":                  Origin_Metadata_MaxInflight,
-		"Origin.Metadata.RatePerSecond":                Origin_Metadata_RatePerSecond,
-		"Origin.MultiuserMinID":                        Origin_MultiuserMinID,
-		"Origin.MultiuserUmask":                        Origin_MultiuserUmask,
-		"Origin.PStoreInlineMaxBytes":                  Origin_PStoreInlineMaxBytes,
-		"Origin.PStoreMetadataBackupsToKeep":           Origin_PStoreMetadataBackupsToKeep,
-		"Origin.Port":                                  Origin_Port,
-		"Origin.SSH.MaxRetries":                        Origin_SSH_MaxRetries,
-		"Origin.SSH.Port":                              Origin_SSH_Port,
-		"Plugin.DirectorDecisionPercentage":            Plugin_DirectorDecisionPercentage,
-		"Server.DatabaseBackup.MaxCount":               Server_DatabaseBackup_MaxCount,
-		"Server.IssuerPort":                            Server_IssuerPort,
-		"Server.UILoginRateLimit":                      Server_UILoginRateLimit,
-		"Server.WebPort":                               Server_WebPort,
-		"Shoveler.PortHigher":                          Shoveler_PortHigher,
-		"Shoveler.PortLower":                           Shoveler_PortLower,
-		"Transfer.MaxConcurrentJobs":                   Transfer_MaxConcurrentJobs,
-		"Transport.MaxIdleConns":                       Transport_MaxIdleConns,
-		"Xrootd.DetailedMonitoringPort":                Xrootd_DetailedMonitoringPort,
-		"Xrootd.LocalMonitoringPort":                   Xrootd_LocalMonitoringPort,
-		"Xrootd.ManagerPort":                           Xrootd_ManagerPort,
-		"Xrootd.MaxThreads":                            Xrootd_MaxThreads,
-		"Xrootd.Port":                                  Xrootd_Port,
-		"Xrootd.SummaryMonitoringPort":                 Xrootd_SummaryMonitoringPort,
-		"Origin.PStoreDataScanRate":                    Origin_PStoreDataScanRate,
-		"Origin.TransferRateLimit":                     Origin_TransferRateLimit,
-		"Cache.DirectorTest":                           Cache_DirectorTest,
-		"Cache.DisableClientX509":                      Cache_DisableClientX509,
-		"Cache.EnableBroker":                           Cache_EnableBroker,
-		"Cache.EnableChaosAPI":                         Cache_EnableChaosAPI,
-		"Cache.EnableEvictionMonitoring":               Cache_EnableEvictionMonitoring,
-		"Cache.EnableLotman":                           Cache_EnableLotman,
-		"Cache.EnableOIDC":                             Cache_EnableOIDC,
-		"Cache.EnablePrefetch":                         Cache_EnablePrefetch,
-		"Cache.EnableSiteLocalMode":                    Cache_EnableSiteLocalMode,
-		"Cache.EnableTLSClientAuth":                    Cache_EnableTLSClientAuth,
-		"Cache.EnableV2":                               Cache_EnableV2,
-		"Cache.EnableVoms":                             Cache_EnableVoms,
-		"Cache.SelfTest":                               Cache_SelfTest,
-		"Client.AssumeDirectorServerHeader":            Client_AssumeDirectorServerHeader,
-		"Client.DisableHttpProxy":                      Client_DisableHttpProxy,
-		"Client.DisableProxyFallback":                  Client_DisableProxyFallback,
-		"Client.EnableOverwrites":                      Client_EnableOverwrites,
-		"Client.IsPlugin":                              Client_IsPlugin,
-		"Debug":                                        Debug,
-		"Director.AssumePresenceAtSingleOrigin":        Director_AssumePresenceAtSingleOrigin,
-		"Director.CachesPullFromCaches":                Director_CachesPullFromCaches,
-		"Director.CheckCachePresence":                  Director_CheckCachePresence,
-		"Director.CheckOriginPresence":                 Director_CheckOriginPresence,
-		"Director.EnableBroker":                        Director_EnableBroker,
-		"Director.EnableFederationMetadataHosting":     Director_EnableFederationMetadataHosting,
-		"Director.EnableOIDC":                          Director_EnableOIDC,
-		"Director.EnableStat":                          Director_EnableStat,
-		"Director.FilterCachesInErrorState":            Director_FilterCachesInErrorState,
-		"DisableHttpProxy":                             DisableHttpProxy,
-		"DisableProxyFallback":                         DisableProxyFallback,
-		"Issuer.OIDCPreferClaimsFromIDToken":           Issuer_OIDCPreferClaimsFromIDToken,
-		"Issuer.UserStripDomain":                       Issuer_UserStripDomain,
-		"Logging.Client.DisableProgressBars":           Logging_Client_DisableProgressBars,
-		"Logging.DisableProgressBars":                  Logging_DisableProgressBars,
-		"Logging.Rotation.Disable":                     Logging_Rotation_Disable,
-		"Logging.Rotation.DisableCompress":             Logging_Rotation_DisableCompress,
-		"Lotman.EnableAPI":                             Lotman_EnableAPI,
-		"Monitoring.EnablePrometheus":                  Monitoring_EnablePrometheus,
-		"Monitoring.MetricAuthorization":               Monitoring_MetricAuthorization,
-		"Monitoring.PromQLAuthorization":               Monitoring_PromQLAuthorization,
-		"Origin.DirectorTest":                          Origin_DirectorTest,
-		"Origin.DisableCopies":                         Origin_DisableCopies,
-		"Origin.DisableDirectClients":                  Origin_DisableDirectClients,
-		"Origin.EnableAtomicUploads":                   Origin_EnableAtomicUploads,
-		"Origin.EnableBroker":                          Origin_EnableBroker,
-		"Origin.EnableCmsd":                            Origin_EnableCmsd,
-		"Origin.EnableDirListing":                      Origin_EnableDirListing,
-		"Origin.EnableDirectReads":                     Origin_EnableDirectReads,
-		"Origin.EnableDiskUsageCalculation":            Origin_EnableDiskUsageCalculation,
-		"Origin.EnableFallbackRead":                    Origin_EnableFallbackRead,
-		"Origin.EnableIssuer":                          Origin_EnableIssuer,
-		"Origin.EnableListings":                        Origin_EnableListings,
-		"Origin.EnableMacaroons":                       Origin_EnableMacaroons,
-		"Origin.EnableOIDC":                            Origin_EnableOIDC,
-		"Origin.EnablePublicReads":                     Origin_EnablePublicReads,
-		"Origin.EnableReads":                           Origin_EnableReads,
-		"Origin.EnableStandaloneMode":                  Origin_EnableStandaloneMode,
-		"Origin.EnableTLSClientAuth":                   Origin_EnableTLSClientAuth,
-		"Origin.EnableTransferAPI":                     Origin_EnableTransferAPI,
-		"Origin.EnableVoms":                            Origin_EnableVoms,
-		"Origin.EnableWrite":                           Origin_EnableWrite,
-		"Origin.EnableWrites":                          Origin_EnableWrites,
-		"Origin.HttpAuthTokenPassthrough":              Origin_HttpAuthTokenPassthrough,
-		"Origin.Metadata.Enabled":                      Origin_Metadata_Enabled,
-		"Origin.Multiuser":                             Origin_Multiuser,
-		"Origin.Posc.Enabled":                          Origin_Posc_Enabled,
-		"Origin.SSH.AutoAddHostKey":                    Origin_SSH_AutoAddHostKey,
-		"Origin.SSH.TunnelCallback":                    Origin_SSH_TunnelCallback,
-		"Origin.ScitokensMapSubject":                   Origin_ScitokensMapSubject,
-		"Origin.SelfTest":                              Origin_SelfTest,
-		"Registry.EnableOIDC":                          Registry_EnableOIDC,
-		"Registry.RequireCacheApproval":                Registry_RequireCacheApproval,
-		"Registry.RequireKeyChaining":                  Registry_RequireKeyChaining,
-		"Registry.RequireOriginApproval":               Registry_RequireOriginApproval,
-		"Server.DropPrivileges":                        Server_DropPrivileges,
-		"Server.EnablePKCS11":                          Server_EnablePKCS11,
-		"Server.EnablePprof":                           Server_EnablePprof,
-		"Server.EnableUI":                              Server_EnableUI,
-		"Server.HealthMonitoringPublic":                Server_HealthMonitoringPublic,
-		"Server.SSRFProtection.Disabled":               Server_SSRFProtection_Disabled,
-		"Server.SSRFProtection.SkipDefaultBlocks":      Server_SSRFProtection_SkipDefaultBlocks,
-		"Server.WebReadOnly":                           Server_WebReadOnly,
-		"Shoveler.Enable":                              Shoveler_Enable,
-		"Shoveler.VerifyHeader":                        Shoveler_VerifyHeader,
-		"StagePlugin.Hook":                             StagePlugin_Hook,
-		"TLSSkipVerify":                                TLSSkipVerify,
-		"Topology.DisableCacheX509":                    Topology_DisableCacheX509,
-		"Topology.DisableCaches":                       Topology_DisableCaches,
-		"Topology.DisableDowntime":                     Topology_DisableDowntime,
-		"Topology.DisableOriginX509":                   Topology_DisableOriginX509,
-		"Topology.DisableOrigins":                      Topology_DisableOrigins,
-		"Transfer.EnableOAuth2Clients":                 Transfer_EnableOAuth2Clients,
-		"Xrootd.AutoShutdownEnabled":                   Xrootd_AutoShutdownEnabled,
-		"Xrootd.EnableLocalMonitoring":                 Xrootd_EnableLocalMonitoring,
-		"Cache.DefaultCacheTimeout":                    Cache_DefaultCacheTimeout,
-		"Cache.EvictionMonitoringInterval":             Cache_EvictionMonitoringInterval,
-		"Cache.MinDirectorRefreshInterval":             Cache_MinDirectorRefreshInterval,
-		"Cache.SelfTestInterval":                       Cache_SelfTestInterval,
-		"Cache.SelfTestMaxAge":                         Cache_SelfTestMaxAge,
-		"Cache.Throttle.EMAWindow":                     Cache_Throttle_EMAWindow,
-		"Cache.Throttle.RetryAfter":                    Cache_Throttle_RetryAfter,
-		"ClientAgent.IdleTimeout":                      ClientAgent_IdleTimeout,
-		"ClientAgent.ProgressUpdateInterval":           ClientAgent_ProgressUpdateInterval,
-		"Client.SlowTransferRampupTime":                Client_SlowTransferRampupTime,
-		"Client.SlowTransferWindow":                    Client_SlowTransferWindow,
-		"Client.StoppedTransferTimeout":                Client_StoppedTransferTimeout,
-		"Director.AdaptiveSortEWMATimeConstant":        Director_AdaptiveSortEWMATimeConstant,
-		"Director.AdvertisementTTL":                    Director_AdvertisementTTL,
-		"Director.CachePresenceTTL":                    Director_CachePresenceTTL,
-		"Director.FedTokenLifetime":                    Director_FedTokenLifetime,
-		"Director.MetadataComparisonInterval":          Director_MetadataComparisonInterval,
-		"Director.OriginCacheHealthTestInterval":       Director_OriginCacheHealthTestInterval,
-		"Director.RegistryQueryInterval":               Director_RegistryQueryInterval,
-		"Director.StatTimeout":                         Director_StatTimeout,
-		"Federation.TopologyReloadInterval":            Federation_TopologyReloadInterval,
-		"Issuer.AccessTokenLifetime":                   Issuer_AccessTokenLifetime,
-		"Issuer.AuthorizationCodeLifetime":             Issuer_AuthorizationCodeLifetime,
-		"Issuer.DynamicClientStaleTimeout":             Issuer_DynamicClientStaleTimeout,
-		"Issuer.DynamicClientUnusedTimeout":            Issuer_DynamicClientUnusedTimeout,
-		"Issuer.IDTokenLifetime":                       Issuer_IDTokenLifetime,
-		"Issuer.RefreshTokenGracePeriod":               Issuer_RefreshTokenGracePeriod,
-		"Issuer.RefreshTokenLifetime":                  Issuer_RefreshTokenLifetime,
-		"LocalCache.DefaultMaxAge":                     LocalCache_DefaultMaxAge,
-		"LocalCache.PrefetchTimeout":                   LocalCache_PrefetchTimeout,
-		"Logging.Client.ProgressInterval":              Logging_Client_ProgressInterval,
-		"Logging.Rotation.FlushInterval":               Logging_Rotation_FlushInterval,
-		"Logging.Rotation.MaxRetentionPeriod":          Logging_Rotation_MaxRetentionPeriod,
-		"Lotman.DefaultLotDeletionLifetime":            Lotman_DefaultLotDeletionLifetime,
-		"Lotman.DefaultLotExpirationLifetime":          Lotman_DefaultLotExpirationLifetime,
-		"Lotman.GarbageCollectionInterval":             Lotman_GarbageCollectionInterval,
-		"Lotman.LotRecordRetention":                    Lotman_LotRecordRetention,
-		"Lotman.MaxLotLifetime":                        Lotman_MaxLotLifetime,
-		"Lotman.MinFillerWidth":                        Lotman_MinFillerWidth,
-		"Lotman.RenewalCheckInterval":                  Lotman_RenewalCheckInterval,
-		"Lotman.SchedulingHorizon":                     Lotman_SchedulingHorizon,
-		"Monitoring.DataRetention":                     Monitoring_DataRetention,
-		"Monitoring.StorageHealthCheckInterval":        Monitoring_StorageHealthCheckInterval,
-		"Monitoring.TokenExpiresIn":                    Monitoring_TokenExpiresIn,
-		"Monitoring.TokenRefreshInterval":              Monitoring_TokenRefreshInterval,
-		"Origin.DiskUsageCalculationDelay":             Origin_DiskUsageCalculationDelay,
-		"Origin.DiskUsageCalculationInterval":          Origin_DiskUsageCalculationInterval,
-		"Origin.Globusv2TokenRefreshInterval":          Origin_Globusv2TokenRefreshInterval,
-		"Origin.PStoreDataScanInterval":                Origin_PStoreDataScanInterval,
-		"Origin.PStoreIndexCheckInterval":              Origin_PStoreIndexCheckInterval,
-		"Origin.PStoreMetadataBackupInterval":          Origin_PStoreMetadataBackupInterval,
-		"Origin.Metadata.ErrorAfter":                   Origin_Metadata_ErrorAfter,
-		"Origin.Metadata.MaxBackoff":                   Origin_Metadata_MaxBackoff,
-		"Origin.Metadata.MinBackoff":                   Origin_Metadata_MinBackoff,
-		"Origin.Metadata.RequestTimeout":               Origin_Metadata_RequestTimeout,
-		"Origin.Metadata.TokenLifetime":                Origin_Metadata_TokenLifetime,
-		"Origin.Metadata.WarnAfter":                    Origin_Metadata_WarnAfter,
-		"Origin.Posc.FileTimeout":                      Origin_Posc_FileTimeout,
-		"Origin.Posc.KeepaliveInterval":                Origin_Posc_KeepaliveInterval,
-		"Origin.SSH.ChallengeTimeout":                  Origin_SSH_ChallengeTimeout,
-		"Origin.SSH.ConnectTimeout":                    Origin_SSH_ConnectTimeout,
-		"Origin.SSH.KeepaliveInterval":                 Origin_SSH_KeepaliveInterval,
-		"Origin.SSH.KeepaliveTimeout":                  Origin_SSH_KeepaliveTimeout,
-		"Origin.SSH.SessionEstablishTimeout":           Origin_SSH_SessionEstablishTimeout,
-		"Origin.SelfTestInterval":                      Origin_SelfTestInterval,
-		"Origin.SelfTestMaxAge":                        Origin_SelfTestMaxAge,
-		"Origin.UserMapfileRefreshInterval":            Origin_UserMapfileRefreshInterval,
+		"Cache.ClientStatisticsLocation": Cache_ClientStatisticsLocation,
+		"Cache.DataLocation": Cache_DataLocation,
+		"Cache.DataScanMode": Cache_DataScanMode,
+		"Cache.DbLocation": Cache_DbLocation,
+		"Cache.ExportLocation": Cache_ExportLocation,
+		"Cache.FedTokenLocation": Cache_FedTokenLocation,
+		"Cache.FilesBaseSize": Cache_FilesBaseSize,
+		"Cache.FilesMaxSize": Cache_FilesMaxSize,
+		"Cache.FilesNominalSize": Cache_FilesNominalSize,
+		"Cache.HighWaterMark": Cache_HighWaterMark,
+		"Cache.LocalRoot": Cache_LocalRoot,
+		"Cache.LowWaterMark": Cache_LowWaterMark,
+		"Cache.MemoryCacheSize": Cache_MemoryCacheSize,
+		"Cache.NamespaceLocation": Cache_NamespaceLocation,
+		"Cache.PSSOrigin": Cache_PSSOrigin,
+		"Cache.RunLocation": Cache_RunLocation,
+		"Cache.SentinelLocation": Cache_SentinelLocation,
+		"Cache.StorageLocation": Cache_StorageLocation,
+		"Cache.Url": Cache_Url,
+		"Cache.XRootDPrefix": Cache_XRootDPrefix,
+		"ClientAgent.DbLocation": ClientAgent_DbLocation,
+		"ClientAgent.PidFile": ClientAgent_PidFile,
+		"ClientAgent.Socket": ClientAgent_Socket,
+		"Client.CredentialFile": Client_CredentialFile,
+		"ConfigBase": ConfigBase,
+		"Director.AdvertiseUrl": Director_AdvertiseUrl,
+		"Director.CacheSortMethod": Director_CacheSortMethod,
+		"Director.DbLocation": Director_DbLocation,
+		"Director.DefaultResponse": Director_DefaultResponse,
+		"Director.GeoIPLocation": Director_GeoIPLocation,
+		"Director.MaxMindKeyFile": Director_MaxMindKeyFile,
+		"Director.SupportContactEmail": Director_SupportContactEmail,
+		"Director.SupportContactUrl": Director_SupportContactUrl,
+		"Federation.DiscoveryUrl": Federation_DiscoveryUrl,
+		"Federation.TopologyDowntimeUrl": Federation_TopologyDowntimeUrl,
+		"Federation.TopologyNamespaceUrl": Federation_TopologyNamespaceUrl,
+		"Federation.TopologyUrl": Federation_TopologyUrl,
+		"GeoLocation": GeoLocation,
+		"IssuerKey": IssuerKey,
+		"IssuerKeysDirectory": IssuerKeysDirectory,
+		"Issuer.AuthenticationSource": Issuer_AuthenticationSource,
+		"Issuer.GroupFile": Issuer_GroupFile,
+		"Issuer.GroupSource": Issuer_GroupSource,
+		"Issuer.IssuerClaimValue": Issuer_IssuerClaimValue,
+		"Issuer.OIDCAuthenticationUserClaim": Issuer_OIDCAuthenticationUserClaim,
+		"Issuer.OIDCGroupClaim": Issuer_OIDCGroupClaim,
+		"Issuer.OIDCIssuerClaim": Issuer_OIDCIssuerClaim,
+		"Issuer.OIDCSubjectClaim": Issuer_OIDCSubjectClaim,
+		"Issuer.PublicClientID": Issuer_PublicClientID,
+		"Issuer.QDLLocation": Issuer_QDLLocation,
+		"Issuer.ScitokensServerLocation": Issuer_ScitokensServerLocation,
+		"Issuer.TomcatLocation": Issuer_TomcatLocation,
+		"LocalCache.ChunkSize": LocalCache_ChunkSize,
+		"LocalCache.DataLocation": LocalCache_DataLocation,
+		"LocalCache.MemoryCacheSize": LocalCache_MemoryCacheSize,
+		"LocalCache.RunLocation": LocalCache_RunLocation,
+		"LocalCache.Size": LocalCache_Size,
+		"LocalCache.Socket": LocalCache_Socket,
+		"Logging.Buffer.MaxSize": Logging_Buffer_MaxSize,
+		"Logging.Cache.Http": Logging_Cache_Http,
+		"Logging.Cache.Lotman": Logging_Cache_Lotman,
+		"Logging.Cache.Ofs": Logging_Cache_Ofs,
+		"Logging.Cache.Pfc": Logging_Cache_Pfc,
+		"Logging.Cache.Pss": Logging_Cache_Pss,
+		"Logging.Cache.PssSetOpt": Logging_Cache_PssSetOpt,
+		"Logging.Cache.Scitokens": Logging_Cache_Scitokens,
+		"Logging.Cache.Xrd": Logging_Cache_Xrd,
+		"Logging.Cache.Xrootd": Logging_Cache_Xrootd,
+		"Logging.Level": Logging_Level,
+		"Logging.LogLocation": Logging_LogLocation,
+		"Logging.Origin.Cms": Logging_Origin_Cms,
+		"Logging.Origin.Http": Logging_Origin_Http,
+		"Logging.Origin.Ofs": Logging_Origin_Ofs,
+		"Logging.Origin.Oss": Logging_Origin_Oss,
+		"Logging.Origin.Scitokens": Logging_Origin_Scitokens,
+		"Logging.Origin.Xrd": Logging_Origin_Xrd,
+		"Logging.Origin.Xrootd": Logging_Origin_Xrootd,
+		"Logging.Rotation.Frequency": Logging_Rotation_Frequency,
+		"Logging.Rotation.MaxRetentionSize": Logging_Rotation_MaxRetentionSize,
+		"Logging.Rotation.MaxSize": Logging_Rotation_MaxSize,
+		"Lotman.DbLocation": Lotman_DbLocation,
+		"Lotman.EnabledPolicy": Lotman_EnabledPolicy,
+		"Lotman.LibLocation": Lotman_LibLocation,
+		"Lotman.LotHome": Lotman_LotHome,
+		"Monitoring.DataLocation": Monitoring_DataLocation,
+		"Monitoring.DataRetentionSize": Monitoring_DataRetentionSize,
+		"OIDC.AuthorizationEndpoint": OIDC_AuthorizationEndpoint,
+		"OIDC.ClientID": OIDC_ClientID,
+		"OIDC.ClientIDFile": OIDC_ClientIDFile,
+		"OIDC.ClientRedirectHostname": OIDC_ClientRedirectHostname,
+		"OIDC.ClientSecretFile": OIDC_ClientSecretFile,
+		"OIDC.DeviceAuthEndpoint": OIDC_DeviceAuthEndpoint,
+		"OIDC.Issuer": OIDC_Issuer,
+		"OIDC.TokenEndpoint": OIDC_TokenEndpoint,
+		"OIDC.UserInfoEndpoint": OIDC_UserInfoEndpoint,
+		"Origin.CacheControl": Origin_CacheControl,
+		"Origin.DbLocation": Origin_DbLocation,
+		"Origin.ExportVolume": Origin_ExportVolume,
+		"Origin.FedTokenLocation": Origin_FedTokenLocation,
+		"Origin.FederationPrefix": Origin_FederationPrefix,
+		"Origin.GlobusClientIDFile": Origin_GlobusClientIDFile,
+		"Origin.GlobusClientSecretFile": Origin_GlobusClientSecretFile,
+		"Origin.GlobusCollectionID": Origin_GlobusCollectionID,
+		"Origin.GlobusCollectionName": Origin_GlobusCollectionName,
+		"Origin.GlobusConfigLocation": Origin_GlobusConfigLocation,
+		"Origin.GlobusIssuerURL": Origin_GlobusIssuerURL,
+		"Origin.GlobusTransferAPIBaseUrl": Origin_GlobusTransferAPIBaseUrl,
+		"Origin.GlobusTransferTokenFile": Origin_GlobusTransferTokenFile,
+		"Origin.HttpAuthOAuth2ClientID": Origin_HttpAuthOAuth2ClientID,
+		"Origin.HttpAuthOAuth2ClientSecretFile": Origin_HttpAuthOAuth2ClientSecretFile,
+		"Origin.HttpAuthOAuth2Issuer": Origin_HttpAuthOAuth2Issuer,
+		"Origin.HttpAuthTokenFile": Origin_HttpAuthTokenFile,
+		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
+		"Origin.IssuerMode": Origin_IssuerMode,
+		"Origin.Metadata.Endpoint": Origin_Metadata_Endpoint,
+		"Origin.Metadata.MetadataPartName": Origin_Metadata_MetadataPartName,
+		"Origin.Metadata.Mode": Origin_Metadata_Mode,
+		"Origin.Metadata.ObjectPartName": Origin_Metadata_ObjectPartName,
+		"Origin.Mode": Origin_Mode,
+		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
+		"Origin.NamespacePrefix": Origin_NamespacePrefix,
+		"Origin.ObjectProviderURL": Origin_ObjectProviderURL,
+		"Origin.PStoreLocation": Origin_PStoreLocation,
+		"Origin.PStoreMetadataBackupLocation": Origin_PStoreMetadataBackupLocation,
+		"Origin.Posc.Prefix": Origin_Posc_Prefix,
+		"Origin.RunLocation": Origin_RunLocation,
+		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
+		"Origin.S3Bucket": Origin_S3Bucket,
+		"Origin.S3Region": Origin_S3Region,
+		"Origin.S3SecretKeyfile": Origin_S3SecretKeyfile,
+		"Origin.S3ServiceName": Origin_S3ServiceName,
+		"Origin.S3ServiceUrl": Origin_S3ServiceUrl,
+		"Origin.S3UrlStyle": Origin_S3UrlStyle,
+		"Origin.SSH.Host": Origin_SSH_Host,
+		"Origin.SSH.KnownHostsFile": Origin_SSH_KnownHostsFile,
+		"Origin.SSH.PasswordFile": Origin_SSH_PasswordFile,
+		"Origin.SSH.PelicanBinaryPath": Origin_SSH_PelicanBinaryPath,
+		"Origin.SSH.PrivateKeyFile": Origin_SSH_PrivateKeyFile,
+		"Origin.SSH.PrivateKeyPassphraseFile": Origin_SSH_PrivateKeyPassphraseFile,
+		"Origin.SSH.ProxyJump": Origin_SSH_ProxyJump,
+		"Origin.SSH.RemotePelicanBinaryDir": Origin_SSH_RemotePelicanBinaryDir,
+		"Origin.SSH.User": Origin_SSH_User,
+		"Origin.ScitokensDefaultUser": Origin_ScitokensDefaultUser,
+		"Origin.ScitokensGroupsClaim": Origin_ScitokensGroupsClaim,
+		"Origin.ScitokensNameMapFile": Origin_ScitokensNameMapFile,
+		"Origin.ScitokensUnauthenticatedUser": Origin_ScitokensUnauthenticatedUser,
+		"Origin.ScitokensUsernameClaim": Origin_ScitokensUsernameClaim,
+		"Origin.StoragePrefix": Origin_StoragePrefix,
+		"Origin.StorageType": Origin_StorageType,
+		"Origin.TokenAudience": Origin_TokenAudience,
+		"Origin.UploadTempLocation": Origin_UploadTempLocation,
+		"Origin.Url": Origin_Url,
+		"Origin.XRootDPrefix": Origin_XRootDPrefix,
+		"Origin.XRootServiceUrl": Origin_XRootServiceUrl,
+		"Plugin.Token": Plugin_Token,
+		"Registry.DbLocation": Registry_DbLocation,
+		"Registry.InstitutionsUrl": Registry_InstitutionsUrl,
+		"RuntimeDir": RuntimeDir,
+		"Server.AUPCanonicalURL": Server_AUPCanonicalURL,
+		"Server.AUPFile": Server_AUPFile,
+		"Server.AUPLastUpdated": Server_AUPLastUpdated,
+		"Server.DatabaseBackup.Location": Server_DatabaseBackup_Location,
+		"Server.DbLocation": Server_DbLocation,
+		"Server.ExternalWebUrl": Server_ExternalWebUrl,
+		"Server.Hostname": Server_Hostname,
+		"Server.IssuerHostname": Server_IssuerHostname,
+		"Server.IssuerJwks": Server_IssuerJwks,
+		"Server.IssuerUrl": Server_IssuerUrl,
+		"Server.SessionSecretFile": Server_SessionSecretFile,
+		"Server.TLSCACertificateDirectory": Server_TLSCACertificateDirectory,
+		"Server.TLSCACertificateFile": Server_TLSCACertificateFile,
+		"Server.TLSCAKey": Server_TLSCAKey,
+		"Server.TLSCertificate": Server_TLSCertificate,
+		"Server.TLSCertificateChain": Server_TLSCertificateChain,
+		"Server.TLSKey": Server_TLSKey,
+		"Server.UIActivationCodeFile": Server_UIActivationCodeFile,
+		"Server.UIPasswordFile": Server_UIPasswordFile,
+		"Server.UnprivilegedUser": Server_UnprivilegedUser,
+		"Server.WebConfigFile": Server_WebConfigFile,
+		"Server.WebHost": Server_WebHost,
+		"Shoveler.AMQPExchange": Shoveler_AMQPExchange,
+		"Shoveler.AMQPTokenLocation": Shoveler_AMQPTokenLocation,
+		"Shoveler.MessageQueueProtocol": Shoveler_MessageQueueProtocol,
+		"Shoveler.PasswordLocation": Shoveler_PasswordLocation,
+		"Shoveler.QueueDirectory": Shoveler_QueueDirectory,
+		"Shoveler.StompCert": Shoveler_StompCert,
+		"Shoveler.StompCertKey": Shoveler_StompCertKey,
+		"Shoveler.StompUsername": Shoveler_StompUsername,
+		"Shoveler.Topic": Shoveler_Topic,
+		"Shoveler.URL": Shoveler_URL,
+		"StagePlugin.MountPrefix": StagePlugin_MountPrefix,
+		"StagePlugin.OriginPrefix": StagePlugin_OriginPrefix,
+		"StagePlugin.ShadowOriginPrefix": StagePlugin_ShadowOriginPrefix,
+		"Xrootd.Authfile": Xrootd_Authfile,
+		"Xrootd.ConfigFile": Xrootd_ConfigFile,
+		"Xrootd.DetailedMonitoringHost": Xrootd_DetailedMonitoringHost,
+		"Xrootd.LocalMonitoringHost": Xrootd_LocalMonitoringHost,
+		"Xrootd.MacaroonsKeyFile": Xrootd_MacaroonsKeyFile,
+		"Xrootd.ManagerHost": Xrootd_ManagerHost,
+		"Xrootd.Mount": Xrootd_Mount,
+		"Xrootd.RobotsTxtFile": Xrootd_RobotsTxtFile,
+		"Xrootd.RunLocation": Xrootd_RunLocation,
+		"Xrootd.ScitokensConfig": Xrootd_ScitokensConfig,
+		"Xrootd.Sitename": Xrootd_Sitename,
+		"Xrootd.SummaryMonitoringHost": Xrootd_SummaryMonitoringHost,
+		"Cache.AllowedFederations": Cache_AllowedFederations,
+		"Cache.DataLocations": Cache_DataLocations,
+		"Cache.MetaLocations": Cache_MetaLocations,
+		"Cache.PermittedNamespaces": Cache_PermittedNamespaces,
+		"Client.PreferredCaches": Client_PreferredCaches,
+		"ConfigLocations": ConfigLocations,
+		"Director.CacheResponseHostnames": Director_CacheResponseHostnames,
+		"Director.FilteredServers": Director_FilteredServers,
+		"Director.OriginResponseHostnames": Director_OriginResponseHostnames,
+		"Issuer.GroupRequirements": Issuer_GroupRequirements,
+		"Issuer.RedirectUris": Issuer_RedirectUris,
+		"Monitoring.AggregatePrefixes": Monitoring_AggregatePrefixes,
+		"OIDC.Scopes": OIDC_Scopes,
+		"Origin.DefaultChecksumTypes": Origin_DefaultChecksumTypes,
+		"Origin.ExportVolumes": Origin_ExportVolumes,
+		"Origin.SSH.AuthMethods": Origin_SSH_AuthMethods,
+		"Origin.SSH.RemotePelicanBinaryOverrides": Origin_SSH_RemotePelicanBinaryOverrides,
+		"Origin.ScitokensRestrictedPaths": Origin_ScitokensRestrictedPaths,
+		"Origin.SupportedChecksumTypes": Origin_SupportedChecksumTypes,
+		"Registry.AdminUsers": Registry_AdminUsers,
+		"Server.AdminGroups": Server_AdminGroups,
+		"Server.AutoEnrollUsernameClaims": Server_AutoEnrollUsernameClaims,
+		"Server.CollectionAdminGroups": Server_CollectionAdminGroups,
+		"Server.CollectionAdminUsers": Server_CollectionAdminUsers,
+		"Server.DirectorUrls": Server_DirectorUrls,
+		"Server.Modules": Server_Modules,
+		"Server.NewUserDefaultScopes": Server_NewUserDefaultScopes,
+		"Server.SSRFProtection.AllowedCIDRs": Server_SSRFProtection_AllowedCIDRs,
+		"Server.SSRFProtection.BlockedCIDRs": Server_SSRFProtection_BlockedCIDRs,
+		"Server.TrustedProxies": Server_TrustedProxies,
+		"Server.UIAdminUsers": Server_UIAdminUsers,
+		"Server.UserAdminGroups": Server_UserAdminGroups,
+		"Server.UserAdminUsers": Server_UserAdminUsers,
+		"Shoveler.OutputDestinations": Shoveler_OutputDestinations,
+		"Transfer.EnabledGroups": Transfer_EnabledGroups,
+		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
+		"Cache.Concurrency": Cache_Concurrency,
+		"Cache.ConcurrencyDegradedThreshold": Cache_ConcurrencyDegradedThreshold,
+		"Cache.DataScanResampleInterval": Cache_DataScanResampleInterval,
+		"Cache.EvictionMonitoringMaxDepth": Cache_EvictionMonitoringMaxDepth,
+		"Cache.Port": Cache_Port,
+		"Cache.Throttle.PendingBufferSize": Cache_Throttle_PendingBufferSize,
+		"Cache.Throttle.PerOriginActivePercent": Cache_Throttle_PerOriginActivePercent,
+		"Cache.Throttle.PerOriginPendingSize": Cache_Throttle_PerOriginPendingSize,
+		"Cache.Throttle.PerOriginStarvingPercent": Cache_Throttle_PerOriginStarvingPercent,
+		"Cache.WorkerCount": Cache_WorkerCount,
+		"ClientAgent.HistoryRetentionDays": ClientAgent_HistoryRetentionDays,
+		"ClientAgent.MaxConcurrentJobs": ClientAgent_MaxConcurrentJobs,
+		"Client.DirectorRetries": Client_DirectorRetries,
+		"Client.MaximumDownloadSpeed": Client_MaximumDownloadSpeed,
+		"Client.MinimumDownloadSpeed": Client_MinimumDownloadSpeed,
+		"Client.WorkerCount": Client_WorkerCount,
+		"Director.AdaptiveSortTruncateConstant": Director_AdaptiveSortTruncateConstant,
+		"Director.CachePresenceCapacity": Director_CachePresenceCapacity,
+		"Director.MaxStatResponse": Director_MaxStatResponse,
+		"Director.MinStatResponse": Director_MinStatResponse,
+		"Director.StatConcurrencyLimit": Director_StatConcurrencyLimit,
+		"LocalCache.FDCacheSize": LocalCache_FDCacheSize,
+		"LocalCache.HighWaterMarkPercentage": LocalCache_HighWaterMarkPercentage,
+		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
+		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
+		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
+		"Logging.Buffer.BatchLines": Logging_Buffer_BatchLines,
+		"MinimumDownloadSpeed": MinimumDownloadSpeed,
+		"Monitoring.LabelLimit": Monitoring_LabelLimit,
+		"Monitoring.LabelNameLengthLimit": Monitoring_LabelNameLengthLimit,
+		"Monitoring.LabelValueLengthLimit": Monitoring_LabelValueLengthLimit,
+		"Monitoring.PortHigher": Monitoring_PortHigher,
+		"Monitoring.PortLower": Monitoring_PortLower,
+		"Monitoring.SampleLimit": Monitoring_SampleLimit,
+		"Monitoring.StorageCriticalThreshold": Monitoring_StorageCriticalThreshold,
+		"Monitoring.StorageWarningThreshold": Monitoring_StorageWarningThreshold,
+		"Origin.Concurrency": Origin_Concurrency,
+		"Origin.ConcurrencyDegradedThreshold": Origin_ConcurrencyDegradedThreshold,
+		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
+		"Origin.Metadata.MaxInflight": Origin_Metadata_MaxInflight,
+		"Origin.Metadata.MaxMetadataBytes": Origin_Metadata_MaxMetadataBytes,
+		"Origin.Metadata.RatePerSecond": Origin_Metadata_RatePerSecond,
+		"Origin.MultiuserMinID": Origin_MultiuserMinID,
+		"Origin.MultiuserUmask": Origin_MultiuserUmask,
+		"Origin.PStoreInlineMaxBytes": Origin_PStoreInlineMaxBytes,
+		"Origin.PStoreMetadataBackupsToKeep": Origin_PStoreMetadataBackupsToKeep,
+		"Origin.Port": Origin_Port,
+		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
+		"Origin.SSH.Port": Origin_SSH_Port,
+		"Plugin.DirectorDecisionPercentage": Plugin_DirectorDecisionPercentage,
+		"Server.DatabaseBackup.MaxCount": Server_DatabaseBackup_MaxCount,
+		"Server.IssuerPort": Server_IssuerPort,
+		"Server.UILoginRateLimit": Server_UILoginRateLimit,
+		"Server.WebPort": Server_WebPort,
+		"Shoveler.PortHigher": Shoveler_PortHigher,
+		"Shoveler.PortLower": Shoveler_PortLower,
+		"Transfer.MaxConcurrentJobs": Transfer_MaxConcurrentJobs,
+		"Transport.MaxIdleConns": Transport_MaxIdleConns,
+		"Xrootd.DetailedMonitoringPort": Xrootd_DetailedMonitoringPort,
+		"Xrootd.LocalMonitoringPort": Xrootd_LocalMonitoringPort,
+		"Xrootd.ManagerPort": Xrootd_ManagerPort,
+		"Xrootd.MaxThreads": Xrootd_MaxThreads,
+		"Xrootd.Port": Xrootd_Port,
+		"Xrootd.SummaryMonitoringPort": Xrootd_SummaryMonitoringPort,
+		"Origin.PStoreDataScanRate": Origin_PStoreDataScanRate,
+		"Origin.TransferRateLimit": Origin_TransferRateLimit,
+		"Cache.DirectorTest": Cache_DirectorTest,
+		"Cache.DisableClientX509": Cache_DisableClientX509,
+		"Cache.EnableBroker": Cache_EnableBroker,
+		"Cache.EnableChaosAPI": Cache_EnableChaosAPI,
+		"Cache.EnableEvictionMonitoring": Cache_EnableEvictionMonitoring,
+		"Cache.EnableLotman": Cache_EnableLotman,
+		"Cache.EnableOIDC": Cache_EnableOIDC,
+		"Cache.EnablePrefetch": Cache_EnablePrefetch,
+		"Cache.EnableSiteLocalMode": Cache_EnableSiteLocalMode,
+		"Cache.EnableTLSClientAuth": Cache_EnableTLSClientAuth,
+		"Cache.EnableV2": Cache_EnableV2,
+		"Cache.EnableVoms": Cache_EnableVoms,
+		"Cache.SelfTest": Cache_SelfTest,
+		"Client.AssumeDirectorServerHeader": Client_AssumeDirectorServerHeader,
+		"Client.DisableHttpProxy": Client_DisableHttpProxy,
+		"Client.DisableProxyFallback": Client_DisableProxyFallback,
+		"Client.EnableOverwrites": Client_EnableOverwrites,
+		"Client.IsPlugin": Client_IsPlugin,
+		"Debug": Debug,
+		"Director.AssumePresenceAtSingleOrigin": Director_AssumePresenceAtSingleOrigin,
+		"Director.CachesPullFromCaches": Director_CachesPullFromCaches,
+		"Director.CheckCachePresence": Director_CheckCachePresence,
+		"Director.CheckOriginPresence": Director_CheckOriginPresence,
+		"Director.EnableBroker": Director_EnableBroker,
+		"Director.EnableFederationMetadataHosting": Director_EnableFederationMetadataHosting,
+		"Director.EnableOIDC": Director_EnableOIDC,
+		"Director.EnableStat": Director_EnableStat,
+		"Director.FilterCachesInErrorState": Director_FilterCachesInErrorState,
+		"DisableHttpProxy": DisableHttpProxy,
+		"DisableProxyFallback": DisableProxyFallback,
+		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,
+		"Issuer.UserStripDomain": Issuer_UserStripDomain,
+		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
+		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Logging.Rotation.Disable": Logging_Rotation_Disable,
+		"Logging.Rotation.DisableCompress": Logging_Rotation_DisableCompress,
+		"Lotman.EnableAPI": Lotman_EnableAPI,
+		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
+		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
+		"Monitoring.PromQLAuthorization": Monitoring_PromQLAuthorization,
+		"Origin.DirectorTest": Origin_DirectorTest,
+		"Origin.DisableCopies": Origin_DisableCopies,
+		"Origin.DisableDirectClients": Origin_DisableDirectClients,
+		"Origin.EnableAtomicUploads": Origin_EnableAtomicUploads,
+		"Origin.EnableBroker": Origin_EnableBroker,
+		"Origin.EnableCmsd": Origin_EnableCmsd,
+		"Origin.EnableDirListing": Origin_EnableDirListing,
+		"Origin.EnableDirectReads": Origin_EnableDirectReads,
+		"Origin.EnableDiskUsageCalculation": Origin_EnableDiskUsageCalculation,
+		"Origin.EnableFallbackRead": Origin_EnableFallbackRead,
+		"Origin.EnableIssuer": Origin_EnableIssuer,
+		"Origin.EnableListings": Origin_EnableListings,
+		"Origin.EnableMacaroons": Origin_EnableMacaroons,
+		"Origin.EnableOIDC": Origin_EnableOIDC,
+		"Origin.EnablePublicReads": Origin_EnablePublicReads,
+		"Origin.EnableReads": Origin_EnableReads,
+		"Origin.EnableStandaloneMode": Origin_EnableStandaloneMode,
+		"Origin.EnableTLSClientAuth": Origin_EnableTLSClientAuth,
+		"Origin.EnableTransferAPI": Origin_EnableTransferAPI,
+		"Origin.EnableVoms": Origin_EnableVoms,
+		"Origin.EnableWrite": Origin_EnableWrite,
+		"Origin.EnableWrites": Origin_EnableWrites,
+		"Origin.HttpAuthTokenPassthrough": Origin_HttpAuthTokenPassthrough,
+		"Origin.Metadata.AllowMultipart": Origin_Metadata_AllowMultipart,
+		"Origin.Metadata.Enabled": Origin_Metadata_Enabled,
+		"Origin.Multiuser": Origin_Multiuser,
+		"Origin.Posc.Enabled": Origin_Posc_Enabled,
+		"Origin.SSH.AutoAddHostKey": Origin_SSH_AutoAddHostKey,
+		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
+		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
+		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.EnableOIDC": Registry_EnableOIDC,
+		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
+		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
+		"Registry.RequireOriginApproval": Registry_RequireOriginApproval,
+		"Server.DropPrivileges": Server_DropPrivileges,
+		"Server.EnablePKCS11": Server_EnablePKCS11,
+		"Server.EnablePprof": Server_EnablePprof,
+		"Server.EnableUI": Server_EnableUI,
+		"Server.HealthMonitoringPublic": Server_HealthMonitoringPublic,
+		"Server.SSRFProtection.Disabled": Server_SSRFProtection_Disabled,
+		"Server.SSRFProtection.SkipDefaultBlocks": Server_SSRFProtection_SkipDefaultBlocks,
+		"Server.WebReadOnly": Server_WebReadOnly,
+		"Shoveler.Enable": Shoveler_Enable,
+		"Shoveler.VerifyHeader": Shoveler_VerifyHeader,
+		"StagePlugin.Hook": StagePlugin_Hook,
+		"TLSSkipVerify": TLSSkipVerify,
+		"Topology.DisableCacheX509": Topology_DisableCacheX509,
+		"Topology.DisableCaches": Topology_DisableCaches,
+		"Topology.DisableDowntime": Topology_DisableDowntime,
+		"Topology.DisableOriginX509": Topology_DisableOriginX509,
+		"Topology.DisableOrigins": Topology_DisableOrigins,
+		"Transfer.EnableOAuth2Clients": Transfer_EnableOAuth2Clients,
+		"Xrootd.AutoShutdownEnabled": Xrootd_AutoShutdownEnabled,
+		"Xrootd.EnableLocalMonitoring": Xrootd_EnableLocalMonitoring,
+		"Cache.DefaultCacheTimeout": Cache_DefaultCacheTimeout,
+		"Cache.EvictionMonitoringInterval": Cache_EvictionMonitoringInterval,
+		"Cache.MinDirectorRefreshInterval": Cache_MinDirectorRefreshInterval,
+		"Cache.SelfTestInterval": Cache_SelfTestInterval,
+		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
+		"Cache.Throttle.EMAWindow": Cache_Throttle_EMAWindow,
+		"Cache.Throttle.RetryAfter": Cache_Throttle_RetryAfter,
+		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,
+		"ClientAgent.ProgressUpdateInterval": ClientAgent_ProgressUpdateInterval,
+		"Client.SlowTransferRampupTime": Client_SlowTransferRampupTime,
+		"Client.SlowTransferWindow": Client_SlowTransferWindow,
+		"Client.StoppedTransferTimeout": Client_StoppedTransferTimeout,
+		"Director.AdaptiveSortEWMATimeConstant": Director_AdaptiveSortEWMATimeConstant,
+		"Director.AdvertisementTTL": Director_AdvertisementTTL,
+		"Director.CachePresenceTTL": Director_CachePresenceTTL,
+		"Director.FedTokenLifetime": Director_FedTokenLifetime,
+		"Director.MetadataComparisonInterval": Director_MetadataComparisonInterval,
+		"Director.OriginCacheHealthTestInterval": Director_OriginCacheHealthTestInterval,
+		"Director.RegistryQueryInterval": Director_RegistryQueryInterval,
+		"Director.StatTimeout": Director_StatTimeout,
+		"Federation.TopologyReloadInterval": Federation_TopologyReloadInterval,
+		"Issuer.AccessTokenLifetime": Issuer_AccessTokenLifetime,
+		"Issuer.AuthorizationCodeLifetime": Issuer_AuthorizationCodeLifetime,
+		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
+		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
+		"Issuer.IDTokenLifetime": Issuer_IDTokenLifetime,
+		"Issuer.RefreshTokenGracePeriod": Issuer_RefreshTokenGracePeriod,
+		"Issuer.RefreshTokenLifetime": Issuer_RefreshTokenLifetime,
+		"LocalCache.DefaultMaxAge": LocalCache_DefaultMaxAge,
+		"LocalCache.PrefetchTimeout": LocalCache_PrefetchTimeout,
+		"Logging.Client.ProgressInterval": Logging_Client_ProgressInterval,
+		"Logging.Rotation.FlushInterval": Logging_Rotation_FlushInterval,
+		"Logging.Rotation.MaxRetentionPeriod": Logging_Rotation_MaxRetentionPeriod,
+		"Lotman.DefaultLotDeletionLifetime": Lotman_DefaultLotDeletionLifetime,
+		"Lotman.DefaultLotExpirationLifetime": Lotman_DefaultLotExpirationLifetime,
+		"Lotman.GarbageCollectionInterval": Lotman_GarbageCollectionInterval,
+		"Lotman.LotRecordRetention": Lotman_LotRecordRetention,
+		"Lotman.MaxLotLifetime": Lotman_MaxLotLifetime,
+		"Lotman.MinFillerWidth": Lotman_MinFillerWidth,
+		"Lotman.RenewalCheckInterval": Lotman_RenewalCheckInterval,
+		"Lotman.SchedulingHorizon": Lotman_SchedulingHorizon,
+		"Monitoring.DataRetention": Monitoring_DataRetention,
+		"Monitoring.StorageHealthCheckInterval": Monitoring_StorageHealthCheckInterval,
+		"Monitoring.TokenExpiresIn": Monitoring_TokenExpiresIn,
+		"Monitoring.TokenRefreshInterval": Monitoring_TokenRefreshInterval,
+		"Origin.DiskUsageCalculationDelay": Origin_DiskUsageCalculationDelay,
+		"Origin.DiskUsageCalculationInterval": Origin_DiskUsageCalculationInterval,
+		"Origin.Globusv2TokenRefreshInterval": Origin_Globusv2TokenRefreshInterval,
+		"Origin.Metadata.ErrorAfter": Origin_Metadata_ErrorAfter,
+		"Origin.Metadata.MaxBackoff": Origin_Metadata_MaxBackoff,
+		"Origin.Metadata.MinBackoff": Origin_Metadata_MinBackoff,
+		"Origin.Metadata.RequestTimeout": Origin_Metadata_RequestTimeout,
+		"Origin.Metadata.TokenLifetime": Origin_Metadata_TokenLifetime,
+		"Origin.Metadata.WarnAfter": Origin_Metadata_WarnAfter,
+		"Origin.PStoreDataScanInterval": Origin_PStoreDataScanInterval,
+		"Origin.PStoreIndexCheckInterval": Origin_PStoreIndexCheckInterval,
+		"Origin.PStoreMetadataBackupInterval": Origin_PStoreMetadataBackupInterval,
+		"Origin.Posc.FileTimeout": Origin_Posc_FileTimeout,
+		"Origin.Posc.KeepaliveInterval": Origin_Posc_KeepaliveInterval,
+		"Origin.SSH.ChallengeTimeout": Origin_SSH_ChallengeTimeout,
+		"Origin.SSH.ConnectTimeout": Origin_SSH_ConnectTimeout,
+		"Origin.SSH.KeepaliveInterval": Origin_SSH_KeepaliveInterval,
+		"Origin.SSH.KeepaliveTimeout": Origin_SSH_KeepaliveTimeout,
+		"Origin.SSH.SessionEstablishTimeout": Origin_SSH_SessionEstablishTimeout,
+		"Origin.SelfTestInterval": Origin_SelfTestInterval,
+		"Origin.SelfTestMaxAge": Origin_SelfTestMaxAge,
+		"Origin.UserMapfileRefreshInterval": Origin_UserMapfileRefreshInterval,
 		"Registry.InactiveRegistrationCleanupInterval": Registry_InactiveRegistrationCleanupInterval,
-		"Registry.InactiveRegistrationTimeout":         Registry_InactiveRegistrationTimeout,
-		"Registry.InstitutionsUrlReloadMinutes":        Registry_InstitutionsUrlReloadMinutes,
-		"Server.AdLifetime":                            Server_AdLifetime,
-		"Server.AdvertisementInterval":                 Server_AdvertisementInterval,
-		"Server.DatabaseBackup.Frequency":              Server_DatabaseBackup_Frequency,
-		"Server.GroupInviteLinkExpiration":             Server_GroupInviteLinkExpiration,
-		"Server.RegistrationRetryInterval":             Server_RegistrationRetryInterval,
-		"Server.StartupTimeout":                        Server_StartupTimeout,
-		"Transfer.CredentialIdleTimeout":               Transfer_CredentialIdleTimeout,
-		"Transport.BrokerEndpointCacheTTL":             Transport_BrokerEndpointCacheTTL,
-		"Transport.DialerKeepAlive":                    Transport_DialerKeepAlive,
-		"Transport.DialerTimeout":                      Transport_DialerTimeout,
-		"Transport.ExpectContinueTimeout":              Transport_ExpectContinueTimeout,
-		"Transport.IdleConnTimeout":                    Transport_IdleConnTimeout,
-		"Transport.ResponseHeaderTimeout":              Transport_ResponseHeaderTimeout,
-		"Transport.TLSHandshakeTimeout":                Transport_TLSHandshakeTimeout,
-		"Xrootd.AuthRefreshInterval":                   Xrootd_AuthRefreshInterval,
-		"Xrootd.ConfigUpdateFailureTimeout":            Xrootd_ConfigUpdateFailureTimeout,
-		"Xrootd.HttpMaxDelay":                          Xrootd_HttpMaxDelay,
-		"Xrootd.MaxStartupWait":                        Xrootd_MaxStartupWait,
-		"Xrootd.ShutdownTimeout":                       Xrootd_ShutdownTimeout,
-		"GeoIPOverrides":                               GeoIPOverrides,
-		"Issuer.AuthorizationTemplates":                Issuer_AuthorizationTemplates,
-		"Issuer.OIDCAuthenticationRequirements":        Issuer_OIDCAuthenticationRequirements,
-		"LocalCache.StorageDirs":                       LocalCache_StorageDirs,
-		"Lotman.PolicyDefinitions":                     Lotman_PolicyDefinitions,
-		"Origin.Exports":                               Origin_Exports,
-		"Origin.PStoreStorageDirs":                     Origin_PStoreStorageDirs,
-		"Registry.CustomRegistrationFields":            Registry_CustomRegistrationFields,
-		"Registry.Institutions":                        Registry_Institutions,
-		"Shoveler.IPMapping":                           Shoveler_IPMapping,
-		"Federation.BrokerUrl":                         Federation_BrokerUrl,
-		"Federation.DirectorUrl":                       Federation_DirectorUrl,
-		"Federation.JwkUrl":                            Federation_JwkUrl,
-		"Federation.RegistryUrl":                       Federation_RegistryUrl,
+		"Registry.InactiveRegistrationTimeout": Registry_InactiveRegistrationTimeout,
+		"Registry.InstitutionsUrlReloadMinutes": Registry_InstitutionsUrlReloadMinutes,
+		"Server.AdLifetime": Server_AdLifetime,
+		"Server.AdvertisementInterval": Server_AdvertisementInterval,
+		"Server.DatabaseBackup.Frequency": Server_DatabaseBackup_Frequency,
+		"Server.GroupInviteLinkExpiration": Server_GroupInviteLinkExpiration,
+		"Server.RegistrationRetryInterval": Server_RegistrationRetryInterval,
+		"Server.StartupTimeout": Server_StartupTimeout,
+		"Transfer.CredentialIdleTimeout": Transfer_CredentialIdleTimeout,
+		"Transport.BrokerEndpointCacheTTL": Transport_BrokerEndpointCacheTTL,
+		"Transport.DialerKeepAlive": Transport_DialerKeepAlive,
+		"Transport.DialerTimeout": Transport_DialerTimeout,
+		"Transport.ExpectContinueTimeout": Transport_ExpectContinueTimeout,
+		"Transport.IdleConnTimeout": Transport_IdleConnTimeout,
+		"Transport.ResponseHeaderTimeout": Transport_ResponseHeaderTimeout,
+		"Transport.TLSHandshakeTimeout": Transport_TLSHandshakeTimeout,
+		"Xrootd.AuthRefreshInterval": Xrootd_AuthRefreshInterval,
+		"Xrootd.ConfigUpdateFailureTimeout": Xrootd_ConfigUpdateFailureTimeout,
+		"Xrootd.HttpMaxDelay": Xrootd_HttpMaxDelay,
+		"Xrootd.MaxStartupWait": Xrootd_MaxStartupWait,
+		"Xrootd.ShutdownTimeout": Xrootd_ShutdownTimeout,
+		"GeoIPOverrides": GeoIPOverrides,
+		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
+		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,
+		"LocalCache.StorageDirs": LocalCache_StorageDirs,
+		"Lotman.PolicyDefinitions": Lotman_PolicyDefinitions,
+		"Origin.Exports": Origin_Exports,
+		"Origin.PStoreStorageDirs": Origin_PStoreStorageDirs,
+		"Registry.CustomRegistrationFields": Registry_CustomRegistrationFields,
+		"Registry.Institutions": Registry_Institutions,
+		"Shoveler.IPMapping": Shoveler_IPMapping,
+		"Federation.BrokerUrl": Federation_BrokerUrl,
+		"Federation.DirectorUrl": Federation_DirectorUrl,
+		"Federation.JwkUrl": Federation_JwkUrl,
+		"Federation.RegistryUrl": Federation_RegistryUrl,
 	}
 	paramByEnvVar = make(map[string]Param, len(paramByName))
 	for name, p := range paramByName {

@@ -34,7 +34,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -147,14 +149,21 @@ func defaultSignToken(lifetime time.Duration) func(audience, namespace string) (
 }
 
 // Attempt performs one publish to `endpoint` for `event`. The supplied
-// ctx bounds the entire request (including the timeout). The body is
-// the JSON-marshalled event; the bearer JWT is minted just-in-time.
+// ctx bounds the entire request (including the timeout). The bearer
+// JWT is minted just-in-time.
+//
+// Body shape:
+//   - If event.HasMetadataBlob(): multipart/related with the JSON
+//     event as the root part and the opaque blob as the second part.
+//     The blob bytes ride the wire byte-for-byte with the original
+//     Content-Type the uploader supplied.
+//   - Otherwise: plain JSON (unchanged behavior).
 func (p *publisher) Attempt(ctx context.Context, endpoint string, event *ObjectCommitEvent) publishResult {
 	if endpoint == "" {
 		return publishResult{outcome: outcomeNetwork, err: errors.New("metadata publisher: endpoint is empty")}
 	}
 
-	body, err := event.MarshalJSON()
+	jsonBody, err := event.MarshalJSON()
 	if err != nil {
 		return publishResult{outcome: outcomeNetwork, err: fmt.Errorf("marshal event: %w", err)}
 	}
@@ -167,11 +176,16 @@ func (p *publisher) Attempt(ctx context.Context, endpoint string, event *ObjectC
 	attemptCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	bodyReader, contentType, err := buildAttemptBody(jsonBody, event)
+	if err != nil {
+		return publishResult{outcome: outcomeNetwork, err: fmt.Errorf("build attempt body: %w", err)}
+	}
+
+	req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, endpoint, bodyReader)
 	if err != nil {
 		return publishResult{outcome: outcomeNetwork, err: err}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+tokenStr)
 	// Non-RFC headers are namespaced with the X-Pelican- prefix per
 	// project convention. Idempotency-Key is still an IETF draft as
@@ -199,4 +213,79 @@ func (p *publisher) Attempt(ctx context.Context, endpoint string, event *ObjectC
 		return publishResult{outcome: outcomeHTTP4xx, status: resp.StatusCode, err: fmt.Errorf("http %d", resp.StatusCode)}
 	}
 	return publishResult{outcome: outcomeHTTP5xx, status: resp.StatusCode, err: fmt.Errorf("http %d", resp.StatusCode)}
+}
+
+// Wire-format Content-IDs for the multipart/related body. Both are
+// referenced by `start="<event>"` in the outer Content-Type so the
+// receiver can identify the root part without parsing the body.
+const (
+	publisherRootContentID = "<event>"
+	publisherBlobContentID = "<metadata>"
+)
+
+// buildAttemptBody picks the wire shape for one outbound publish.
+//
+//   - Plain JSON when no blob is present (the historical shape).
+//   - multipart/related when a blob is present. The first part is the
+//     JSON event with Content-Type: application/json and Content-ID
+//     "<event>"; the second part is the opaque blob with the
+//     uploader-supplied Content-Type (defaulting to
+//     application/octet-stream if missing) and Content-ID "<metadata>".
+//
+// The returned reader is single-use; callers wrap it directly into
+// http.NewRequestWithContext.
+func buildAttemptBody(jsonBody []byte, event *ObjectCommitEvent) (io.Reader, string, error) {
+	if !event.HasMetadataBlob() {
+		return bytes.NewReader(jsonBody), "application/json", nil
+	}
+
+	// We build the body in memory because the blob is already
+	// capped (Origin.Metadata.MaxMetadataBytes, default 4 MB), the
+	// JSON event is small, and a request-aware retry needs to
+	// rewind the body. A streaming form would require an
+	// io.ReadSeeker built on a buffered tee, which is more
+	// machinery than this size class warrants.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// Root part: the JSON event.
+	rootHeader := textproto.MIMEHeader{}
+	rootHeader.Set("Content-ID", publisherRootContentID)
+	rootHeader.Set("Content-Type", "application/json")
+	rootPart, err := mw.CreatePart(rootHeader)
+	if err != nil {
+		return nil, "", fmt.Errorf("create root part: %w", err)
+	}
+	if _, err := rootPart.Write(jsonBody); err != nil {
+		return nil, "", fmt.Errorf("write root part: %w", err)
+	}
+
+	// Blob part: the opaque metadata bytes.
+	blobCT := strings.TrimSpace(event.MetadataContentType)
+	if blobCT == "" {
+		blobCT = "application/octet-stream"
+	}
+	blobHeader := textproto.MIMEHeader{}
+	blobHeader.Set("Content-ID", publisherBlobContentID)
+	blobHeader.Set("Content-Type", blobCT)
+	blobPart, err := mw.CreatePart(blobHeader)
+	if err != nil {
+		return nil, "", fmt.Errorf("create blob part: %w", err)
+	}
+	if _, err := blobPart.Write(event.MetadataBody); err != nil {
+		return nil, "", fmt.Errorf("write blob part: %w", err)
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, "", fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	// Outer Content-Type names the boundary, the structured-suffix
+	// indicating "this body is a compound document," and the root
+	// part via `start`. RFC 2387 makes `start` optional with a
+	// default of "the first body part," but explicit is friendlier
+	// to consumers.
+	outerCT := fmt.Sprintf(`multipart/related; boundary=%q; type="application/json"; start="%s"`,
+		mw.Boundary(), publisherRootContentID)
+	return &buf, outerCT, nil
 }
