@@ -224,6 +224,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err = transfer.RegisterTransferAPI(ctx, engine, egrp); err != nil {
 			return
 		}
+		// A standalone transfer server has no co-located origin to stand up the
+		// embedded issuer, so register the server-level local issuer here. This
+		// lets clients obtain a pelican.transfer token (iss=GetLocalIssuerUrl)
+		// to authenticate to the transfer API.
+		if err = transfer.RegisterLocalIssuer(ctx, egrp, engine, database.ServerDatabase); err != nil {
+			return
+		}
 		transfer.LaunchCredentialCleanup(ctx, egrp)
 		log.Info("Transfer module enabled")
 	}
