@@ -349,6 +349,34 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 	return job, nil
 }
 
+// SnapshotJobResponse builds the API response for a job, reading the mutable
+// status fields under the read lock. Callers (e.g. CreateJobHandler) may invoke
+// this immediately after CreateJob, while the asynchronous executeJob goroutine
+// is concurrently updating job/transfer status, so the read must be
+// synchronized with those writes.
+func (tm *TransferManager) SnapshotJobResponse(job *TransferJob) JobResponse {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	transfers := make([]TransferResponse, len(job.Transfers))
+	for i, transfer := range job.Transfers {
+		transfers[i] = TransferResponse{
+			TransferID:  transfer.ID,
+			Operation:   transfer.Operation,
+			Source:      transfer.Source,
+			Destination: transfer.Destination,
+			Status:      transfer.Status,
+		}
+	}
+
+	return JobResponse{
+		JobID:     job.ID,
+		Status:    job.Status,
+		CreatedAt: job.CreatedAt,
+		Transfers: transfers,
+	}
+}
+
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
 	defer job.wg.Done() // Signal job completion
