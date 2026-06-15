@@ -401,7 +401,15 @@ var (
 	// Global discovery info.  Using the "once" allows us to delay discovery
 	// until it's first needed, avoiding a web lookup for invoking configuration
 	// Note the 'once' object is a pointer so we can reset the client multiple
-	// times during unit tests
+	// times during unit tests.
+	//
+	// fedDiscoveryMu guards the fedDiscoveryOnce pointer itself: Init{Client,Server}
+	// (and the test reset helpers) reassign it while background goroutines may be
+	// concurrently reading it via GetFederation, e.g. during LaunchModules where
+	// the director starts querying federation info before the local cache module
+	// re-initializes the client.  Always go through resetFedDiscoveryOnce /
+	// loadFedDiscoveryOnce rather than touching fedDiscoveryOnce directly.
+	fedDiscoveryMu   sync.Mutex
 	fedDiscoveryOnce *sync.Once
 	globalFedInfo    atomic.Pointer[pelican_url.FederationDiscovery]
 	globalFedErr     error
@@ -842,10 +850,33 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	return
 }
 
+// resetFedDiscoveryOnce installs a fresh sync.Once so that the next
+// GetFederation re-runs (or re-consults) federation discovery.  It is safe to
+// call while other goroutines may be reading the Once through
+// loadFedDiscoveryOnce.
+func resetFedDiscoveryOnce() {
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
+	fedDiscoveryOnce = &sync.Once{}
+}
+
+// loadFedDiscoveryOnce returns the current federation-discovery Once, lazily
+// creating one if it has not been initialized yet.  Callers invoke Do on the
+// returned value outside the lock; if a concurrent reset swaps the global, the
+// caller simply operates on the prior Once, which is harmless.
+func loadFedDiscoveryOnce() *sync.Once {
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
+	if fedDiscoveryOnce == nil {
+		fedDiscoveryOnce = &sync.Once{}
+	}
+	return fedDiscoveryOnce
+}
+
 // Reset the fedDiscoveryOnce to update federation metadata values for GetFederation().
 // Should only used for unit tests
 func ResetFederationForTest() {
-	fedDiscoveryOnce = &sync.Once{}
+	resetFedDiscoveryOnce()
 }
 
 // Retrieve the federation service information from the configuration.
@@ -855,10 +886,7 @@ func ResetFederationForTest() {
 // If invoked before things are configured, it must be done from a single-threaded
 // context.
 func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error) {
-	if fedDiscoveryOnce == nil {
-		fedDiscoveryOnce = &sync.Once{}
-	}
-	fedDiscoveryOnce.Do(func() {
+	loadFedDiscoveryOnce().Do(func() {
 		var fedInfo pelican_url.FederationDiscovery
 		fedInfo, globalFedErr = discoverFederationImpl(ctx)
 		globalFedInfo.Store(&fedInfo)
@@ -893,10 +921,7 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 
 	// Consume the sync.Once so that subsequent GetFederation calls return the
 	// stored value directly instead of re-running discovery.
-	if fedDiscoveryOnce == nil {
-		fedDiscoveryOnce = &sync.Once{}
-	}
-	fedDiscoveryOnce.Do(func() {})
+	loadFedDiscoveryOnce().Do(func() {})
 }
 
 // RegisterPreCleanup adds a named callback that will be invoked before
@@ -2494,7 +2519,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
 	// instead of deferring it.
-	fedDiscoveryOnce = &sync.Once{}
+	resetFedDiscoveryOnce()
 	if _, err := GetFederation(ctx); err != nil {
 		return err
 	}
@@ -2589,7 +2614,7 @@ func InitClient() error {
 	}
 
 	// Set (or reset) the deferred federation lookup
-	fedDiscoveryOnce = &sync.Once{}
+	resetFedDiscoveryOnce()
 
 	// Set up the log filter mechanisms, e.g., for sensitive secrets
 	initFilterLogging()
@@ -2649,7 +2674,7 @@ func ResetConfig() {
 	ClearServerAds()
 
 	// Reset federation metadata
-	fedDiscoveryOnce = &sync.Once{}
+	resetFedDiscoveryOnce()
 	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
 	globalFedErr = nil
 

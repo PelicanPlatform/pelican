@@ -22,7 +22,6 @@ import (
 	"net"
 	"net/url"
 	"strconv"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -65,7 +64,7 @@ func UpdateConfigFromListener(ln net.Listener) {
 						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
 					}
 				}
-				fedDiscoveryOnce = &sync.Once{}
+				resetFedDiscoveryOnce()
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
 			} else {
 				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)
