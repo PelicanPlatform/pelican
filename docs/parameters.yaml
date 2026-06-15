@@ -2386,7 +2386,7 @@ description: |+
   usages reaches this value. Note that "cache disk usage" is calculated based on the cache's entire set of
   configured disks, not just data directories from those disks.
 
-  The value should be either a percentage integer of total available disk space (default is 90),
+  The value should be either a percentage integer of total available disk space (default is 85),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
 
@@ -2401,7 +2401,7 @@ description: |+
   When the cache's disk usage exceeds this value, file purging is triggered. Note that "cache disk usage"
   is calculated based on the cache's entire set of configured disks, not just data directories from those disks.
 
-  The value should be either a percentage integer of total available disk space (default is 95),
+  The value should be either a percentage integer of total available disk space (default is 89),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
 
@@ -2418,9 +2418,15 @@ description: |+
   cache will begin purging files until it reaches the `Cache.FilesNominal` value. If the cache's disk usage is still in
   excess of the `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase` value.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
@@ -2435,9 +2441,15 @@ description: |+
   the cache will begin purging files until it reaches this value. If the cache's disk usage is still in excess of the
   `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase`.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
@@ -2450,9 +2462,15 @@ description: |+
   A value that sets the "base" cumulative size of files that can be stored in the cache's data directory. This is the
   stopping point for the cache's purging routines.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively.All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for `pfc.diskusage`.
 type: string

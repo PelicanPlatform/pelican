@@ -1668,3 +1668,117 @@ func TestInitServerAcceptsLotmanMaxLotLifetimeAtBounds(t *testing.T) {
 		})
 	}
 }
+
+// The Cache.Files*Size parameters accept either an integer percentage of total
+// disk or an absolute size, and xrootd requires base < nominal < max < low
+// watermark. InitServer enforces that ordering when the operands are expressed
+// the same way (both percentages or both absolute) and otherwise defers to
+// xrootd, which knows the real disk total. These messages are emitted before
+// any Lotman-specific bounds, so the cases below assert on the files-validation
+// messages directly.
+func TestInitServerFilesSizeValidation(t *testing.T) {
+	const orderMsg = "base size must be less than the"
+	const maxBelowLwmMsg = "less than Cache.LowWaterMark"
+
+	cases := []struct {
+		name       string
+		low, high  string
+		base       string
+		nominal    string
+		max        string
+		rejectWith string // substring the error must contain; "" means the files checks must pass
+	}{
+		{"percent ordering below watermark accepted", "85", "89", "70", "75", "80", ""},
+		{"percent max equal to low watermark rejected", "80", "90", "60", "70", "80", maxBelowLwmMsg},
+		{"percent max above low watermark rejected", "80", "90", "60", "70", "85", maxBelowLwmMsg},
+		{"percent base not below nominal rejected", "85", "89", "75", "75", "80", orderMsg},
+		// Absolute files against a percentage watermark can't be ordered without
+		// the disk total, so the max-below-low-watermark check is deferred to xrootd.
+		{"absolute files with percent watermark deferred", "85", "89", "1g", "2g", "3g", ""},
+		// Both absolute: the max-below-low-watermark check can be evaluated here.
+		{"absolute max above absolute low watermark rejected", "2g", "90", "100m", "200m", "3g", maxBelowLwmMsg},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(ResetConfig)
+			mockFederationRoot(t)
+
+			require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+			require.NoError(t, param.Cache_EnableLotman.Set(true))
+			require.NoError(t, param.Cache_LowWaterMark.Set(tc.low))
+			require.NoError(t, param.Cache_HighWaterMark.Set(tc.high))
+			require.NoError(t, param.Cache_FilesBaseSize.Set(tc.base))
+			require.NoError(t, param.Cache_FilesNominalSize.Set(tc.nominal))
+			require.NoError(t, param.Cache_FilesMaxSize.Set(tc.max))
+
+			err := InitServer(context.Background(), server_structs.CacheType)
+			if tc.rejectWith != "" {
+				require.Error(t, err)
+				require.ErrorContains(t, err, tc.rejectWith)
+				return
+			}
+			// InitServer may still fail downstream (no xrootd in place); only
+			// assert that the files-size validators did not reject this config.
+			if err != nil {
+				require.NotContains(t, err.Error(), orderMsg)
+				require.NotContains(t, err.Error(), maxBelowLwmMsg)
+			}
+		})
+	}
+}
+
+// Enabling Lotman should not force operators to hand-size the file-usage purge
+// band: when none of the Cache.Files*Size values are set, SetServerDefaults
+// fills in percentage defaults that sit below the default low watermark. A plain
+// (non-Lotman) cache must be left untouched so its purge behaviour is unchanged.
+func TestLotmanScopedFilesSizeDefaults(t *testing.T) {
+	t.Run("applied when lotman enabled and unset", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(true))
+
+		// InitServer runs SetServerDefaults early; it may fail later for unrelated
+		// reasons, but the defaults are populated by then.
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.Equal(t, "70", param.Cache_FilesBaseSize.GetString())
+		assert.Equal(t, "75", param.Cache_FilesNominalSize.GetString())
+		assert.Equal(t, "80", param.Cache_FilesMaxSize.GetString())
+	})
+
+	t.Run("not applied when lotman disabled", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(false))
+
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.False(t, param.Cache_FilesBaseSize.IsSet())
+		assert.False(t, param.Cache_FilesNominalSize.IsSet())
+		assert.False(t, param.Cache_FilesMaxSize.IsSet())
+	})
+
+	t.Run("operator values are preserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(true))
+		require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
+		require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
+		require.NoError(t, param.Cache_FilesMaxSize.Set("3g"))
+
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.Equal(t, "1g", param.Cache_FilesBaseSize.GetString())
+		assert.Equal(t, "2g", param.Cache_FilesNominalSize.GetString())
+		assert.Equal(t, "3g", param.Cache_FilesMaxSize.GetString())
+	})
+}

@@ -1570,6 +1570,23 @@ func SetServerDefaults(v *viper.Viper) error {
 	if err != nil {
 		return err
 	}
+	// When Lotman manages the cache's space, xrootd's pfc.diskusage requires the
+	// "files" purge band (base < nominal < max). Rather than make operators hand-size
+	// three more values just to turn Lotman on, default them as percentages of total
+	// disk so they scale with any cache and stay ordered below the low watermark
+	// (default 85). They are defaulted only when Lotman is enabled and the operator
+	// hasn't set any of them, which leaves a plain cache untouched and preserves the
+	// existing "set all three or none" rule. Expressing them as percentages (rather
+	// than absolute sizes) is what makes a single set of defaults valid on caches of
+	// any disk size.
+	if v.GetBool(param.Cache_EnableLotman.GetName()) &&
+		!v.IsSet(param.Cache_FilesBaseSize.GetName()) &&
+		!v.IsSet(param.Cache_FilesNominalSize.GetName()) &&
+		!v.IsSet(param.Cache_FilesMaxSize.GetName()) {
+		v.SetDefault(param.Cache_FilesBaseSize.GetName(), "70")
+		v.SetDefault(param.Cache_FilesNominalSize.GetName(), "75")
+		v.SetDefault(param.Cache_FilesMaxSize.GetName(), "80")
+	}
 
 	v.SetDefault(param.Director_EnableFederationMetadataHosting.GetName(), true)
 	v.SetDefault(param.Director_CheckOriginPresence.GetName(), true)
@@ -2021,27 +2038,52 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
 		}
 
-		var base, nominal, max float64
-		var err error
-		// Watermark validation will error if these parameters are not absolute, so we can ignore that output
-		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), true); err != nil {
+		// Like the watermarks, each of these may be given as an integer percentage
+		// of total disk or as an absolute size with a k|m|g|t suffix, so accept both.
+		base, baseIsAbs, err := utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), false)
+		if err != nil {
 			return err
 		}
-		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), true); err != nil {
+		nominal, nominalIsAbs, err := utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), false)
+		if err != nil {
 			return err
 		}
-		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), true); err != nil {
+		max, maxIsAbs, err := utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), false)
+		if err != nil {
 			return err
 		}
-		if base >= nominal || nominal >= max {
-			return errors.Errorf("invalid %s, %s and %s values. The base size must be less than the "+
-				"nominal size, and the nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
-				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
+		// Enforce base < nominal < max. Two values are only directly comparable when
+		// expressed the same way (both percentages or both absolute sizes); a percentage
+		// and an absolute size can't be ordered without the disk total, which may span
+		// multiple disks and isn't known here. xrootd resolves everything to bytes against
+		// the real disk size and re-checks this ordering at startup, so deferring the
+		// mixed case to it is safe.
+		if (baseIsAbs == nominalIsAbs && base >= nominal) ||
+			(nominalIsAbs == maxIsAbs && nominal >= max) ||
+			(baseIsAbs == maxIsAbs && base >= max) {
+			return errors.Errorf("invalid %s/%s/%s values. The base size must be less than the nominal size, and the "+
+				"nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
+				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(),
+				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
 		}
 
-		// File sizes must also be less than the low watermark, but that's not straightforward to check, especially when the cache spread across
-		// multiple disks and the low watermark is configured as a relative value. If such bad config is passed, xrootd will fail to startup with
-		// a message about what to do, and as much as I'd like to handle that early, I'll leave it to xrootd for now.
+		// xrootd additionally requires the max file-usage size to sit below the low
+		// watermark: the file-usage purge band must live inside the headroom the disk
+		// watermark leaves for metadata and any other tenant on the disk (the cache's
+		// data is necessarily a subset of total disk usage). When FilesMaxSize and the
+		// low watermark are expressed the same way we verify it here against a common
+		// basis; the mixed case again needs the disk total, so we defer it to xrootd.
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
+		if err != nil {
+			return err
+		}
+		if maxIsAbs == lwmIsAbs && max >= lowWm {
+			return errors.Errorf("invalid %s value. It must be less than %s so the cache's file-usage purge band stays "+
+				"below the disk low watermark. Got %s (%s) and %s (%s)",
+				param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(),
+				param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(),
+				param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName())
+		}
 	}
 	if param.Cache_EnableLotman.GetBool() {
 		// pfc.diskusage file directives _must_ be set.
