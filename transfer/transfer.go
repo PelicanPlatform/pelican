@@ -34,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/oauth2/issuer"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -62,6 +63,48 @@ func RegisterTransferAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup
 	tm := client_agent.NewTransferManager(ctx, maxJobs, nil)
 
 	return registerTransferRoutes(ctx, engine, egrp, db, tm)
+}
+
+// RegisterLocalIssuer stands up the server-level "local" OIDC issuer used to
+// authenticate clients to a standalone transfer server (one with no co-located
+// origin or director). It registers a single provider whose tokens carry
+// iss = config.GetLocalIssuerUrl() and the (group-gated) pelican.transfer
+// scope, exposing its OIDC discovery, dynamic-client-registration, device-code,
+// and token endpoints under /api/v1.0/issuer/ns/.transfer. A co-located
+// transfer server instead obtains the local issuer through the origin's
+// embedded-issuer setup, so this must only be called on standalone servers to
+// avoid duplicate route registration.
+func RegisterLocalIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, db *gorm.DB) error {
+	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
+	if gracePeriod == 0 {
+		gracePeriod = 5 * time.Minute
+	}
+
+	registry := issuer.NewProviderRegistry()
+	if err := issuer.RegisterLocalProvider(ctx, egrp, registry, db, gracePeriod); err != nil {
+		return errors.Wrap(err, "failed to register local transfer issuer provider")
+	}
+
+	// Non-aborting middleware so issuer handlers (e.g. device-verify) can see
+	// the identity from the login cookie without rejecting unauthenticated
+	// requests outright.
+	issuer.RegisterRoutesWithMiddleware(engine, registry, func(c *gin.Context) {
+		user, userId, groups, _ := web_ui.GetUserGroups(c)
+		if user != "" {
+			c.Set("User", user)
+			if userId != "" {
+				c.Set("UserId", userId)
+			}
+			if len(groups) > 0 {
+				c.Set("Groups", groups)
+			}
+		}
+		c.Next()
+	})
+	issuer.RegisterAdminRoutes(engine, registry, web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
+	log.Info("Transfer server local issuer configured")
+	return nil
 }
 
 // RegisterTransferAPIForOrigin registers the transfer API routes when running

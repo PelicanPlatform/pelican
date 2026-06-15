@@ -46,9 +46,32 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
+// createMasterKeyTable creates the server_master_keys table on an ad-hoc test
+// database. Credential secret encryption (encryptSecret/decryptSecret) derives
+// its key from the server master key stored there, so any test DB that
+// encrypts credentials must have this table.
+func createMasterKeyTable(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`CREATE TABLE IF NOT EXISTS server_master_keys (
+		key_fingerprint TEXT PRIMARY KEY,
+		encrypted_master_key BLOB NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`).Error)
+}
+
+// resetTransferSecretKey clears the cached transfer secret-encryption key so
+// each test re-derives it from its own database's master key. Without this the
+// key cached from a prior test bleeds into the next, breaking isolation.
+func resetTransferSecretKey() {
+	transferSecretKeyMu.Lock()
+	transferSecretKey = nil
+	transferSecretKeyMu.Unlock()
+}
+
 func setupTestEnvironment(t *testing.T) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	server_utils.ResetTestState()
+	resetTransferSecretKey()
 	t.Cleanup(config.ResetConfig)
 	gin.SetMode(gin.TestMode)
 
@@ -61,7 +84,7 @@ func setupTestEnvironment(t *testing.T) (*gin.Engine, *gorm.DB) {
 	})
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set(param.ConfigDir, tmpDir))
+	require.NoError(t, param.Set(param.ConfigBase, tmpDir))
 	require.NoError(t, param.Set(param.IssuerKeysDirectory, filepath.Join(tmpDir, "issuer-keys")))
 	require.NoError(t, param.Set(param.Server_UILoginRateLimit, 100))
 
@@ -77,19 +100,21 @@ func setupTestEnvironment(t *testing.T) (*gin.Engine, *gorm.DB) {
 		},
 	}))
 
+	require.NoError(t, param.Set(param.Server_DbLocation, filepath.Join(tmpDir, "server.sqlite")))
 	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
-	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	database.ServerDatabase = mockDB
-	require.NoError(t, mockDB.Exec("PRAGMA foreign_keys = ON").Error)
-	require.NoError(t, mockDB.AutoMigrate(&database.User{}))
-	require.NoError(t, mockDB.AutoMigrate(&TransferCredential{}))
-	require.NoError(t, mockDB.AutoMigrate(&TransferOAuthClient{}))
-	require.NoError(t, mockDB.AutoMigrate(&TransferJob{}))
-	require.NoError(t, mockDB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_credentials_owner_name ON transfer_credentials(user_id, name)").Error)
-	require.NoError(t, mockDB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_oauth_clients_owner_name ON transfer_oauth_clients(user_id, name)").Error)
+	// Use the real server-database migrations so the full schema (users,
+	// user_scopes, server_master_keys, embedded-issuer, and transfer tables)
+	// is present, rather than hand-migrating a subset that drifts as upstream
+	// evolves the user/credential schema.
+	require.NoError(t, database.InitServerDatabase(server_structs.OriginType))
+	t.Cleanup(func() {
+		_ = database.ShutdownDB()
+		database.ServerDatabase = nil
+	})
+	require.NoError(t, InitTransferDatabase())
+	mockDB := database.ServerDatabase
 
 	tm := client_agent.NewTransferManager(ctx, 5, nil)
 	engine := gin.New()
@@ -417,7 +442,11 @@ func TestTransferJobSubmission(t *testing.T) {
 		var resp TransferJobResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.NotEmpty(t, resp.JobID)
-		assert.Contains(t, []string{"pending", "running"}, resp.Status)
+		// The job executes asynchronously and its source is unreachable, so by
+		// the time the response is serialized it may already have moved past
+		// pending/running to a terminal state; any valid status is acceptable
+		// here since this test only verifies that submission was accepted.
+		assert.Contains(t, []string{"pending", "running", "completed", "failed", "cancelled"}, resp.Status)
 		assert.Len(t, resp.Transfers, 1)
 	})
 
@@ -548,7 +577,7 @@ func TestCredentialCleanup(t *testing.T) {
 	t.Cleanup(config.ResetConfig)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set(param.ConfigDir, tmpDir))
+	require.NoError(t, param.Set(param.ConfigBase, tmpDir))
 	require.NoError(t, param.Set(param.IssuerKeysDirectory, filepath.Join(tmpDir, "issuer-keys")))
 
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
@@ -624,7 +653,7 @@ func TestCredentialTokenProvider(t *testing.T) {
 	t.Cleanup(config.ResetConfig)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set(param.ConfigDir, tmpDir))
+	require.NoError(t, param.Set(param.ConfigBase, tmpDir))
 	require.NoError(t, param.Set(param.IssuerKeysDirectory, filepath.Join(tmpDir, "issuer-keys")))
 
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
@@ -637,9 +666,15 @@ func TestCredentialTokenProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, mockDB.AutoMigrate(&TransferCredential{}))
 	mockDB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_credentials_owner_name ON transfer_credentials(user_id, name)")
+	createMasterKeyTable(t, mockDB)
+	// Secret encryption derives its key from the global server database, so
+	// point it at the test DB and clear any cached key from a prior test.
+	database.ServerDatabase = mockDB
+	t.Cleanup(func() { database.ServerDatabase = nil })
+	resetTransferSecretKey()
 
 	secretToken := "my-secret-access-token"
-	encToken, err := config.EncryptString(secretToken)
+	encToken, err := encryptSecret(secretToken)
 	require.NoError(t, err)
 
 	cred := TransferCredential{

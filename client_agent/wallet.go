@@ -98,8 +98,13 @@ func (w *WalletSession) Close() {
 	w.open = false
 }
 
-// IsOpen reports whether the wallet is currently unlocked.
+// IsOpen reports whether the wallet is currently unlocked. A nil session is
+// treated as a closed wallet so callers (and servers built without a wallet)
+// can query it safely.
 func (w *WalletSession) IsOpen() bool {
+	if w == nil {
+		return false
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.open

@@ -364,16 +364,15 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 	}()
 
 	// Run pelican object get --async with a fake URL (it will fail, but should still spawn the server)
-	// We use a fake URL because we don't want to set up a full federation just to test auto-spawn
+	// We use a fake URL because we don't want to set up a full federation just to test auto-spawn.
+	// The transfer itself fails (the namespace can't be resolved, so credentials can't be warmed),
+	// but the agent is auto-spawned before that, which is what this test verifies.
 	t.Log("Running pelican object get --async to trigger auto-spawn...")
 	getCmd := exec.Command(binaryPath, "object", "get", "--async",
 		"pelican://nonexistent.example.com/test", filepath.Join(tempDir, "output"))
 	getCmd.Env = testEnv
 	getOutput, _ := getCmd.CombinedOutput() // We expect this to fail, so ignore error
 	t.Logf("Get command output: %s", string(getOutput))
-
-	// The command should have output a job ID, indicating the server was spawned
-	assert.Contains(t, string(getOutput), "Job created:", "Should have created a job")
 
 	// Verify server is now running
 	apiClient, err := apiclient.NewAPIClient(socketPath)

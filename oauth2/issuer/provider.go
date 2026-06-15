@@ -454,6 +454,35 @@ func (p *OIDCProvider) Issuer() string {
 	return IssuerURLForNamespace(p.Namespace)
 }
 
+// RegisterLocalProvider creates the server-level "local" transfer issuer and
+// registers it in the given registry under the reserved TransferIssuerNamespace
+// key, starting its dynamic-client cleanup loop.  Its tokens carry
+// iss = config.GetLocalIssuerUrl() and the (group-gated) pelican.transfer
+// scope, so the transfer middleware's LocalIssuer check accepts them without
+// any data-export namespace.  This is shared by the origin (which adds it to
+// the data-namespace registry) and the standalone transfer server (which
+// registers it in a dedicated registry).
+func RegisterLocalProvider(ctx context.Context, egrp *errgroup.Group, registry *ProviderRegistry, db *gorm.DB, gracePeriod time.Duration) error {
+	localIssuerURL := config.GetLocalIssuerUrl()
+	provider, err := NewOIDCProvider(db, localIssuerURL, gracePeriod, TransferIssuerNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to create local transfer issuer provider: %w", err)
+	}
+	registry.Register(TransferIssuerNamespace, provider)
+
+	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+	if unusedTimeout == 0 {
+		unusedTimeout = 1 * time.Hour
+	}
+	staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+	if staleTimeout == 0 {
+		staleTimeout = 336 * time.Hour // 2 weeks
+	}
+	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+	log.Infof("Embedded OIDC issuer: registered local transfer issuer (iss=%s)", localIssuerURL)
+	return nil
+}
+
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
 // Public clients rely on PKCE for security and use token_endpoint_auth_method "none".
 func (p *OIDCProvider) EnsurePublicClient(ctx context.Context, clientID string, redirectURIs []string) error {
