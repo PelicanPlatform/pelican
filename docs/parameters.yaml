@@ -2229,6 +2229,45 @@ type: duration
 default: 24h
 components: ["origin"]
 ---
+name: Origin.Metadata.AllowMultipart
+description: |+
+  When true, the V2 origin accepts uploads whose request body is multipart/form-data with
+  a reserved "metadata" part carrying an opaque per-object metadata blob (e.g. an XML
+  manifest). The blob is stored alongside the queue row and forwarded to the metadata
+  endpoint as a multipart/related body. When false, multipart-form PUTs are rejected with
+  415 Unsupported Media Type. Plain PUTs are unaffected either way.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.Metadata.MaxMetadataBytes
+description: |+
+  Hard cap on the size of the metadata part of a multipart upload. Larger metadata parts
+  cause the upload to be rejected with 413 Payload Too Large before any object bytes are
+  staged. The whole blob is held in memory during the request and stored inline in the
+  publish queue table, so this also bounds per-row size in SQLite.
+type: int
+default: 4194304
+components: ["origin"]
+---
+name: Origin.Metadata.MetadataPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the metadata part of a multipart
+  upload. Configurable so a downstream consumer with a different convention can be
+  accommodated without forking the origin.
+type: string
+default: "metadata"
+components: ["origin"]
+---
+name: Origin.Metadata.ObjectPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the object body part of a
+  multipart upload. See Origin.Metadata.MetadataPartName for the metadata-side
+  configurability rationale.
+type: string
+default: "object"
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################

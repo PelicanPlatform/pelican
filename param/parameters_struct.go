@@ -326,13 +326,17 @@ type Config struct {
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Metadata struct {
+			AllowMultipart bool `mapstructure:"allowmultipart" yaml:"AllowMultipart"`
 			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
 			Endpoint string `mapstructure:"endpoint" yaml:"Endpoint"`
 			ErrorAfter time.Duration `mapstructure:"errorafter" yaml:"ErrorAfter"`
 			MaxBackoff time.Duration `mapstructure:"maxbackoff" yaml:"MaxBackoff"`
 			MaxInflight int `mapstructure:"maxinflight" yaml:"MaxInflight"`
+			MaxMetadataBytes int `mapstructure:"maxmetadatabytes" yaml:"MaxMetadataBytes"`
+			MetadataPartName string `mapstructure:"metadatapartname" yaml:"MetadataPartName"`
 			MinBackoff time.Duration `mapstructure:"minbackoff" yaml:"MinBackoff"`
 			Mode string `mapstructure:"mode" yaml:"Mode"`
+			ObjectPartName string `mapstructure:"objectpartname" yaml:"ObjectPartName"`
 			RatePerSecond int `mapstructure:"ratepersecond" yaml:"RatePerSecond"`
 			RequestTimeout time.Duration `mapstructure:"requesttimeout" yaml:"RequestTimeout"`
 			TokenLifetime time.Duration `mapstructure:"tokenlifetime" yaml:"TokenLifetime"`
@@ -841,13 +845,17 @@ type configWithType struct {
 		HttpServiceUrl struct { Type string; Value string }
 		IssuerMode struct { Type string; Value string }
 		Metadata struct {
+			AllowMultipart struct { Type string; Value bool }
 			Enabled struct { Type string; Value bool }
 			Endpoint struct { Type string; Value string }
 			ErrorAfter struct { Type string; Value time.Duration }
 			MaxBackoff struct { Type string; Value time.Duration }
 			MaxInflight struct { Type string; Value int }
+			MaxMetadataBytes struct { Type string; Value int }
+			MetadataPartName struct { Type string; Value string }
 			MinBackoff struct { Type string; Value time.Duration }
 			Mode struct { Type string; Value string }
+			ObjectPartName struct { Type string; Value string }
 			RatePerSecond struct { Type string; Value int }
 			RequestTimeout struct { Type string; Value time.Duration }
 			TokenLifetime struct { Type string; Value time.Duration }
