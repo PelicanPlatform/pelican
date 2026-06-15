@@ -4363,6 +4363,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 				}
 				return transferResult, transferResult.Error
 			}
+			// The request body is wrapped in io.NopCloser by net/http (we pass an
+			// io.Reader, not an io.ReadCloser), so the transport never closes this
+			// file.  Close it ourselves when the upload finishes -- by the time
+			// uploadObject returns, runPut has produced its response and the body
+			// has been fully read.  Without this the handle leaks until GC runs the
+			// finalizer, which (besides being wasteful) blocks deletion of the file
+			// on Windows.
+			defer file.Close()
 			ioreader = file
 			sizer = &ConstantSizer{size: fileInfo.Size()}
 			fileSizeHint = fileInfo.Size()
