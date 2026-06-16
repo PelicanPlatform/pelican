@@ -121,6 +121,10 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		// cannot.
 		req.Header.Set("User-Agent", getUserAgent(""))
 
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
 		// If the client has a declared GeoLocation, send it as X-Pelican-Coordinate
 		// so the director can use it for client-server matchmaking.
 		if geoStr := param.GeoLocation.GetString(); geoStr != "" {
