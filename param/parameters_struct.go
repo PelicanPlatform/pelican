@@ -213,10 +213,10 @@ type Config struct {
 			ProgressInterval time.Duration `mapstructure:"progressinterval" yaml:"ProgressInterval"`
 		} `mapstructure:"client" yaml:"Client"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
+		EnableLogExports bool `mapstructure:"enablelogexports" yaml:"EnableLogExports"`
 		Level string `mapstructure:"level" yaml:"Level"`
 		LogExports struct {
 			AllowFederationAdmin bool `mapstructure:"allowfederationadmin" yaml:"AllowFederationAdmin"`
-			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
 		} `mapstructure:"logexports" yaml:"LogExports"`
 		LogLocation string `mapstructure:"loglocation" yaml:"LogLocation"`
 		Origin struct {
@@ -704,10 +704,10 @@ type configWithType struct {
 			ProgressInterval struct { Type string; Value time.Duration }
 		}
 		DisableProgressBars struct { Type string; Value bool }
+		EnableLogExports struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogExports struct {
 			AllowFederationAdmin struct { Type string; Value bool }
-			Enabled struct { Type string; Value bool }
 		}
 		LogLocation struct { Type string; Value string }
 		Origin struct {
