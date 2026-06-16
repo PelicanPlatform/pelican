@@ -50,9 +50,9 @@ func validatePrefix(nspath string) (string, error) {
 	} else if components[0] == "view" {
 		return "", errors.New("Cannot register a prefix starting with '/view'")
 	} else if components[0] == "pelican" {
-		// The /pelican namespace is reserved, but /pelican/logging/{serverID} is
+		// The /pelican namespace is reserved, but /pelican/logging/{sitename} is
 		// allowed for origin log-export registrations.
-		if _, ok := server_structs.LoggingNamespaceServerID(nspath); !ok {
+		if _, ok := server_structs.LoggingNamespaceSitename(nspath); !ok {
 			return "", errors.New("Cannot register a prefix starting with '/pelican'")
 		}
 	}

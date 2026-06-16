@@ -372,8 +372,8 @@ func TestValidatePrefix(t *testing.T) {
 	})
 
 	t.Run("logging-namespace-allowed", func(t *testing.T) {
-		got, err := validatePrefix("/pelican/logging/abc1234")
+		got, err := validatePrefix("/pelican/logging/myhost.example.org")
 		require.NoError(t, err)
-		assert.Equal(t, "/pelican/logging/abc1234", got)
+		assert.Equal(t, "/pelican/logging/myhost.example.org", got)
 	})
 }
