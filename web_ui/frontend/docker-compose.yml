@@ -7,7 +7,6 @@ services:
       - ../../:/app
     command: build --clean --snapshot --config .goreleaser.generated.yml
 
-  # Run pelican server with all modules
   pelican-server:
     image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     ports:
