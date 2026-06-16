@@ -210,20 +210,53 @@ func TestCleanupDirectorTestFiles(t *testing.T) {
 }
 
 func TestCleanupOldFilesInDir(t *testing.T) {
-	t.Run("keeps-files-when-under-threshold", func(t *testing.T) {
+	// dirNames returns the sorted file names in dir, for asserting exactly which files survived.
+	dirNames := func(t *testing.T, dir string) []string {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		return names
+	}
+
+	t.Run("keeps-object-when-under-threshold", func(t *testing.T) {
 		dir := t.TempDir()
 		createTestFile(t, dir, "director-test-2025-01-10T10:00:00Z.txt")
 		createTestFile(t, dir, "director-test-2025-01-10T10:00:00Z.txt.cinfo")
 
-		err := cleanupOldFilesInDir(context.Background(), dir, 2)
+		err := cleanupOldFilesInDir(context.Background(), dir, 1)
 		require.NoError(t, err)
 
-		entries, err := os.ReadDir(dir)
-		require.NoError(t, err)
-		assert.Equal(t, 2, len(entries))
+		// A single object is two files (data + .cinfo); both are kept.
+		assert.Equal(t, []string{
+			"director-test-2025-01-10T10:00:00Z.txt",
+			"director-test-2025-01-10T10:00:00Z.txt.cinfo",
+		}, dirNames(t, dir))
 	})
 
-	t.Run("removes-oldest-files", func(t *testing.T) {
+	t.Run("removes-oldest-objects-keeping-pairs-intact", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, hour := range []string{"T08", "T09", "T10"} {
+			createTestFile(t, dir, "director-test-2025-01-10"+hour+":00:00Z.txt")
+			createTestFile(t, dir, "director-test-2025-01-10"+hour+":00:00Z.txt.cinfo")
+		}
+
+		err := cleanupOldFilesInDir(context.Background(), dir, 1)
+		require.NoError(t, err)
+
+		// Only the newest object survives, and it survives as a whole pair.
+		assert.Equal(t, []string{
+			"director-test-2025-01-10T10:00:00Z.txt",
+			"director-test-2025-01-10T10:00:00Z.txt.cinfo",
+		}, dirNames(t, dir))
+	})
+
+	t.Run("falls-back-to-name-order-without-cinfo", func(t *testing.T) {
+		// Data files with no companion .cinfo each form their own single-file object,
+		// so trimming reduces to plain name order.
 		dir := t.TempDir()
 		createTestFile(t, dir, "director-test-2025-01-10T08:00:00Z.txt")
 		createTestFile(t, dir, "director-test-2025-01-10T09:00:00Z.txt")
@@ -233,10 +266,53 @@ func TestCleanupOldFilesInDir(t *testing.T) {
 		err := cleanupOldFilesInDir(context.Background(), dir, 2)
 		require.NoError(t, err)
 
-		entries, err := os.ReadDir(dir)
+		assert.Equal(t, []string{
+			"director-test-2025-01-10T10:00:00Z.txt",
+			"director-test-2025-01-10T11:00:00Z.txt",
+		}, dirNames(t, dir))
+	})
+
+	// Regression test for the pairing concern: a newest object that is mid-write (its
+	// data file exists but its .cinfo has not landed yet) must not cause the previous,
+	// complete pair to be split. A naive "keep the last N files by name" rule would keep
+	// the in-progress .txt plus the previous object's .cinfo, evicting that object's .txt
+	// and leaving an orphaned .cinfo behind.
+	t.Run("in-progress-newest-object-does-not-orphan-previous-pair", func(t *testing.T) {
+		dir := t.TempDir()
+		// Two complete pairs...
+		for _, hour := range []string{"T09", "T10"} {
+			createTestFile(t, dir, "director-test-2025-01-10"+hour+":00:00Z.txt")
+			createTestFile(t, dir, "director-test-2025-01-10"+hour+":00:00Z.txt.cinfo")
+		}
+		// ...plus a newer, in-progress data file whose .cinfo has not been written yet.
+		createTestFile(t, dir, "director-test-2025-01-10T11:00:00Z.txt")
+
+		err := cleanupOldFilesInDir(context.Background(), dir, 2)
 		require.NoError(t, err)
-		assert.Equal(t, 2, len(entries))
-		assert.Equal(t, "director-test-2025-01-10T10:00:00Z.txt", entries[0].Name())
-		assert.Equal(t, "director-test-2025-01-10T11:00:00Z.txt", entries[1].Name())
+
+		// The oldest object (T09) is removed as a unit; the T10 pair stays intact and the
+		// in-progress T11 data file is retained. Critically, no orphaned .cinfo survives.
+		assert.Equal(t, []string{
+			"director-test-2025-01-10T10:00:00Z.txt",
+			"director-test-2025-01-10T10:00:00Z.txt.cinfo",
+			"director-test-2025-01-10T11:00:00Z.txt",
+		}, dirNames(t, dir))
+	})
+
+	// An orphaned .cinfo (its data file already gone) is grouped under its own key and
+	// removed when it ages out, rather than being mistaken for a file to keep.
+	t.Run("orphaned-cinfo-is-removed-with-its-object", func(t *testing.T) {
+		dir := t.TempDir()
+		createTestFile(t, dir, "director-test-2025-01-10T08:00:00Z.txt.cinfo") // orphan: no .txt
+		createTestFile(t, dir, "director-test-2025-01-10T09:00:00Z.txt")
+		createTestFile(t, dir, "director-test-2025-01-10T09:00:00Z.txt.cinfo")
+
+		err := cleanupOldFilesInDir(context.Background(), dir, 1)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{
+			"director-test-2025-01-10T09:00:00Z.txt",
+			"director-test-2025-01-10T09:00:00Z.txt.cinfo",
+		}, dirNames(t, dir))
 	})
 }

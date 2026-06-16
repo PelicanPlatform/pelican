@@ -28,6 +28,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,7 +107,7 @@ func removeTestFile(ctx context.Context, fsPath string) error {
 // There is no batch/directory mode on that endpoint (it uses the xrdhttp-pelican
 // plugin, one path per call), so the per-file cost is intrinsic here. In normal
 // operation it is negligible: the maintenance loop runs every minute and trims today's
-// day-directory to the latest 2 files (see cleanupOldFilesInDir), so a directory has
+// day-directory to the latest test object (see cleanupOldFilesInDir), so a directory has
 // aged out holding only ~6 files by the time it reaches cleanTestDir. The pathological
 // case is a maintenance loop that has been dead or failing for ~a day while xrootd kept
 // accepting the director's writes (15s health-test cadence => up to ~5760 test files,
@@ -219,8 +220,8 @@ func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 
 // cleanupDirectorIDSubtree applies the daily-nested cleanup logic inside a single
 // director's subtree (directorTest/<id>/YYYY-MM-DD/...). Day-directories older than
-// today are removed wholesale; today's directory is trimmed to the latest 2 files
-// (test file + .cinfo). The "keep 2" rule applies per-director, so multiple directors
+// today are removed wholesale; today's directory is trimmed to the latest test object
+// (test file + .cinfo). The "keep latest" rule applies per-director, so multiple directors
 // probing the same cache can each retain their most recent file independently.
 func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) error {
 	entries, err := os.ReadDir(idDirPath)
@@ -237,7 +238,7 @@ func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) e
 				log.WithError(err).Warnf("Failed to remove old director test directory: %s", dateDir)
 			}
 		} else if entry.Name() == todayStr {
-			if err := cleanupOldFilesInDir(ctx, dateDir, 2); err != nil {
+			if err := cleanupOldFilesInDir(ctx, dateDir, 1); err != nil {
 				log.WithError(err).Warnf("Failed to clean up today's director test directory: %s", dateDir)
 			}
 		}
@@ -245,30 +246,47 @@ func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) e
 	return nil
 }
 
-// cleanupOldFilesInDir removes all but the keepCount most recent files in a directory.
-// Files are sorted by name (which includes an RFC3339 timestamp), so the last entries
-// are the most recent.
-func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepCount int) error {
+// cleanupOldFilesInDir removes all but the keepObjects most recent test objects in a
+// directory. A test object is a data file together with its companion ".cinfo" file
+// (e.g. "...T10:00:00Z.txt" and "...T10:00:00Z.txt.cinfo"). Files are grouped into
+// objects by the data-file name (a ".cinfo" file belongs to the object obtained by
+// stripping its ".cinfo" suffix) so the data file and its .cinfo are always kept or
+// removed together. An unpaired data file or orphaned .cinfo simply forms a
+// single-file object under its own key. Objects are ordered by name (which embeds an
+// RFC3339 timestamp), so the last keys are the most recent.
+func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepObjects int) error {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return err
 	}
 
-	var matchingFiles []os.DirEntry
+	// Group files into logical objects keyed by their data-file name.
+	objects := make(map[string][]string)
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			matchingFiles = append(matchingFiles, entry)
+		if entry.IsDir() {
+			continue
 		}
+		name := entry.Name()
+		key := strings.TrimSuffix(name, ".cinfo")
+		objects[key] = append(objects[key], name)
 	}
 
-	if len(matchingFiles) <= keepCount {
+	if len(objects) <= keepObjects {
 		return nil
 	}
 
-	for i := 0; i < len(matchingFiles)-keepCount; i++ {
-		filePath := filepath.Join(dirPath, matchingFiles[i].Name())
-		if err := removeTestFile(ctx, filePath); err != nil {
-			log.WithError(err).Warnf("Failed to remove old test file: %s", filePath)
+	keys := make([]string, 0, len(objects))
+	for key := range objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for i := 0; i < len(keys)-keepObjects; i++ {
+		for _, name := range objects[keys[i]] {
+			filePath := filepath.Join(dirPath, name)
+			if err := removeTestFile(ctx, filePath); err != nil {
+				log.WithError(err).Warnf("Failed to remove old test file: %s", filePath)
+			}
 		}
 	}
 	return nil
