@@ -160,10 +160,11 @@ func fsToNamespacePath(fsPath string) (string, error) {
 	return strings.TrimPrefix(fsPath, nsLoc), nil
 }
 
-// cleanupDirectorTestFiles removes old director test files from the directorTest directory.
-// It handles two layouts:
-//   - Legacy flat files: directorTest/director-test-*.txt (pre-PR, swept entirely).
-//   - Per-director daily-nested: directorTest/<id>/YYYY-MM-DD/director-test-*.txt
+// cleanupDirectorTestFiles removes old director test files in dirTestPath.
+// dirTestPath (i.e. <Cache.NamespaceLocation>/<MonitoringBaseNs>/directorTest)
+// is the directory root of the director-test tree, which may contain two sub-hierarchies:
+//   - Legacy flat files: dirTestPath/director-test-*.txt (swept entirely).
+//   - Per-director daily-nested: dirTestPath/<id>/YYYY-MM-DD/director-test-*.txt
 //     (current). Per-director subtrees are recursed into; within each, day-dirs older
 //     than today are removed wholesale and today's dir is trimmed to the latest 2 files.
 //
