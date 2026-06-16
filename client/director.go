@@ -21,6 +21,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -122,6 +123,17 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		// If the client has a declared GeoLocation, send it as X-Pelican-Coordinate
+		// so the director can use it for client-server matchmaking.
+		if geoStr := param.GeoLocation.GetString(); geoStr != "" {
+			if lat, long, geoErr := utils.ParseCoordinateStr(geoStr); geoErr == nil {
+				req.Header.Set(string(server_structs.XPelicanCoordinateHeaderName),
+					fmt.Sprintf("lat=%g,long=%g", lat, long))
+			} else {
+				log.Warningf("Ignoring invalid %s value %q: %v", param.GeoLocation.GetName(), geoStr, geoErr)
+			}
 		}
 
 		forceDebug, _ := ctx.Value(directorDebugCtxKey{}).(bool)
@@ -352,7 +364,7 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 // servers.
 func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse, error) {
 	var xPelNs server_structs.XPelNs
-	if err := (&xPelNs).ParseRawResponse(dirResp); err != nil {
+	if err := (&xPelNs).ParseRawHeader(&dirResp.Header); err != nil {
 		// Only suppress the specific "header not present" error.  If the header
 		// exists but is malformed, return an error so the caller knows something
 		// is wrong rather than silently continuing with default values.
@@ -369,12 +381,12 @@ func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse,
 	}
 
 	var xPelAuth server_structs.XPelAuth
-	if err := (&xPelAuth).ParseRawResponse(dirResp); err != nil {
+	if err := (&xPelAuth).ParseRawHeader(&dirResp.Header); err != nil {
 		return server_structs.DirectorResponse{}, errors.Wrapf(err, "failed to parse %s header", xPelAuth.GetName())
 	}
 
 	var xPelTokGen server_structs.XPelTokGen
-	if err := (&xPelTokGen).ParseRawResponse(dirResp); err != nil {
+	if err := (&xPelTokGen).ParseRawHeader(&dirResp.Header); err != nil {
 		return server_structs.DirectorResponse{}, errors.Wrapf(err, "failed to parse %s header", xPelTokGen.GetName())
 	}
 

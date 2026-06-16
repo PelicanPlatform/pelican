@@ -1498,6 +1498,10 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 		Downtimes:           adV2.Downtimes,
 		Status:              adV2.Status,
 	}
+	// If the server declared its own geolocation via GeoLocation config, honor it.
+	if adV2.Coordinate != nil {
+		sAd.Coordinate = *adV2.Coordinate
+	}
 	sAd.CopyFrom(adV2)
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)

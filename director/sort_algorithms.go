@@ -363,7 +363,7 @@ func (rs *DistanceSort) String() string {
 }
 func (ds *DistanceSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) ([]server_structs.ServerAd, error) {
 	// getClientCoordinate is guaranteed to give us _some_ coordinate, even if it's random.
-	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr)
+	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr, sCtx.GinCtx)
 	sCtx.RedirectInfo.ClientInfo.Coordinate = clientCoord
 
 	dWeights := computeWeights(sAds, func(_ int, ad server_structs.ServerAd) (float64, bool) {
@@ -396,7 +396,7 @@ func (rs *AdaptiveSort) String() string {
 	return string(server_structs.AdaptiveType)
 }
 func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) ([]server_structs.ServerAd, error) {
-	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr)
+	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr, sCtx.GinCtx)
 	sCtx.RedirectInfo.ClientInfo.Coordinate = clientCoord
 
 	// Helper function to template computing weights and storing them
