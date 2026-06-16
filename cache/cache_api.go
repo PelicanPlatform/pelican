@@ -76,11 +76,17 @@ var dateSubdirPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 // a strict pattern (rather than a prefix check) rejects path-traversal attempts like
 // "/pelican/monitoring/../../etc/passwd", double slashes, and any filename outside the
 // director-test naming convention.
+//
+// The director-id and suffix segments use [^/[:cntrl:]] (not [^/]) so that control
+// characters — newlines, carriage returns, NUL, tab — are rejected. [^/] alone would
+// admit them, since it only excludes the path separator; an accepted "\n" would both
+// reach the downstream evict/token machinery and enable log injection through the
+// %s-formatted path in HandleDirectorEvictRequest's log lines.
 var directorTestFilePattern = regexp.MustCompile(
 	`^` + regexp.QuoteMeta(server_utils.MonitoringBaseNs) +
 		`/` + regexp.QuoteMeta(server_utils.DirectorTestDir) +
-		`/[^/]+/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
-		`-[^/]+$`)
+		`/[^/[:cntrl:]]+/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
+		`-[^/[:cntrl:]]+$`)
 
 // removeTestFile deletes a single director-test file. When Server.DropPrivileges is
 // enabled the file is owned by the xrootd user and the pelican process cannot remove
