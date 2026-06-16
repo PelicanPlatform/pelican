@@ -80,6 +80,11 @@ var (
 
 const (
 	earthRadiusToMilesFactor = 3960
+	earthRadiusToKmFactor    = 6371.0 // mean Earth radius in km, to turn angular distance into km
+
+	// Minimum distance (km) between a server's declared coordinate and its GeoIP-resolved
+	// coordinate before the director logs a location discrepancy.
+	locationDiscrepancyThresholdKm = 100.0
 
 	// A rough lat/long bounding box for the contiguous US. We might eventually make this box
 	// a configurable value, but for now it's hardcoded
@@ -347,9 +352,23 @@ func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coor
 	// through the ad), use it at highest precedence — before GeoIP overrides or MaxMind.
 	if sAd.Coordinate.Source == server_structs.CoordinateSourceDeclared {
 		log.Tracef("Using server-declared coordinate for %s (lat=%f long=%f)", sAd.Name, sAd.Coordinate.Lat, sAd.Coordinate.Long)
+		// The declared coordinate bypasses GeoIP, so the director never gets to "check"
+		// where the server actually appears to be. Compute what GeoIP would have resolved
+		// and log if the declared location is suspiciously far from it.
+		logServerLocationDiscrepancy(sAd)
 		return sAd.Coordinate, nil
 	}
 
+	return resolveServerGeoIPCoordinate(sAd)
+}
+
+// resolveServerGeoIPCoordinate resolves a server's coordinate purely from its hostname via
+// DNS + GeoIP (configured overrides, then MaxMind), ignoring any server-declared coordinate.
+//
+// Coordinates are determined in order of precedence:
+// 1. Configured GeoIP Overrides
+// 2. MaxMind Lookups
+func resolveServerGeoIPCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coordinate, err error) {
 	// Get the IP from the server ad's hostname
 	hostname := sAd.URL.Hostname()
 	addr, err := getIPFromHostname(hostname)
@@ -383,6 +402,43 @@ func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coor
 	}
 
 	return
+}
+
+// logServerLocationDiscrepancy compares a server-declared coordinate against the coordinate the
+// director would have resolved from GeoIP, and logs (at debug level) when they differ by more
+// than locationDiscrepancyThresholdKm. This is purely observational -- it does not change the
+// coordinate used for sorting/redirects.
+//
+// TODO: surface this discrepancy in the director web UI as a follow-up (see issue-2709 next step).
+func logServerLocationDiscrepancy(sAd server_structs.ServerAd) {
+	declared := sAd.Coordinate
+
+	geo, err := resolveServerGeoIPCoordinate(sAd)
+	if err != nil {
+		// No GeoIP fix available (DNS failure, no MaxMind DB, IP not in DB, etc.), so there's
+		// nothing to compare the declared coordinate against.
+		log.Debugf("Cannot compute location discrepancy for declared server %s: %v", sAd.Name, err)
+		return
+	}
+
+	distKm := angularDistanceOnSphere(declared.Lat, declared.Long, geo.Lat, geo.Long) * earthRadiusToKmFactor
+	if distKm <= locationDiscrepancyThresholdKm {
+		return
+	}
+
+	log.WithFields(log.Fields{
+		"server_name":       sAd.Name,
+		"server_type":       string(sAd.Type),
+		"server_url":        sAd.URL.String(),
+		"declared_lat":      declared.Lat,
+		"declared_long":     declared.Long,
+		"geoip_lat":         geo.Lat,
+		"geoip_long":        geo.Long,
+		"geoip_source":      geo.Source,
+		"geoip_accuracy_km": geo.AccuracyRadius,
+		"discrepancy_km":    math.Round(distKm),
+	}).Debugf("Server-declared location for %q differs from its GeoIP-resolved location by %.0f km (threshold %.0f km)",
+		sAd.Name, distKm, locationDiscrepancyThresholdKm)
 }
 
 // Given a client IP address, retrieve the associated geolocation coordinate

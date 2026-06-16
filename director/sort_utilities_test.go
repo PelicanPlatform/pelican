@@ -33,9 +33,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -717,6 +720,78 @@ func TestGetServerCoordinate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// When a server declares its own coordinate, getServerCoordinate still returns the declared
+// value but should additionally compute the discrepancy versus what GeoIP would have resolved
+// and emit a debug log when that discrepancy exceeds locationDiscrepancyThresholdKm.
+func TestServerLocationDiscrepancy(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+
+	// The discrepancy line is logged at debug level, so capture debug entries.
+	hook := test.NewGlobal()
+	origLevel := config.GetEffectiveLogLevel()
+	config.SetLogging(logrus.DebugLevel)
+	t.Cleanup(func() { config.SetLogging(origLevel) })
+
+	const discrepancyMsg = "differs from its GeoIP-resolved location"
+
+	// smallRadiusHostname resolves (via the stubbed MaxMind) to Madison, WI.
+	const madisonLat, madisonLong = 43.07296, -89.40831
+
+	declaredAd := func(name, hostname string, lat, long float64) server_structs.ServerAd {
+		ad := server_structs.ServerAd{URL: mustUrl(hostname)}
+		ad.Initialize(name)
+		ad.Coordinate = server_structs.Coordinate{
+			Lat:    lat,
+			Long:   long,
+			Source: server_structs.CoordinateSourceDeclared,
+		}
+		return ad
+	}
+
+	loggedDiscrepancy := func() bool {
+		for _, e := range hook.AllEntries() {
+			if strings.Contains(e.Message, discrepancyMsg) {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("large discrepancy is logged", func(t *testing.T) {
+		hook.Reset()
+		// Declared in NYC (~1200 km from the GeoIP-resolved Madison).
+		ad := declaredAd("declared-far", smallRadiusHostname, 40.7128, -74.0060)
+		coord, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		// Behavior is unchanged: the declared coordinate is still what's returned.
+		assert.EqualValues(t, server_structs.CoordinateSourceDeclared, coord.Source)
+		assert.Equal(t, 40.7128, coord.Lat)
+		assert.True(t, loggedDiscrepancy(), "expected a discrepancy debug log for a far-off declared location")
+	})
+
+	t.Run("small discrepancy is silent", func(t *testing.T) {
+		hook.Reset()
+		// Declared only a few km from the GeoIP-resolved Madison location.
+		ad := declaredAd("declared-near", smallRadiusHostname, madisonLat+0.05, madisonLong+0.05)
+		_, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		assert.False(t, loggedDiscrepancy(), "did not expect a discrepancy log within the threshold")
+	})
+
+	t.Run("no log when GeoIP cannot resolve", func(t *testing.T) {
+		hook.Reset()
+		// notInMaxMindHostname resolves to an IP the stubbed MaxMind can't place, so there's
+		// no GeoIP coordinate to compare against.
+		ad := declaredAd("declared-nogeoip", notInMaxMindHostname, 40.7128, -74.0060)
+		coord, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		assert.EqualValues(t, server_structs.CoordinateSourceDeclared, coord.Source)
+		assert.False(t, loggedDiscrepancy(), "should not log a discrepancy when GeoIP can't resolve a coordinate")
+	})
 }
 
 func TestGetClientCoordinate(t *testing.T) {
