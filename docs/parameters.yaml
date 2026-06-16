@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -53,6 +53,20 @@ description: |+
 type: filename
 default: ""
 components: ["cache", "director", "origin", "registry"]
+---
+name: GeoLocation
+description: |+
+  A comma-separated string used to configure the lat/lon coordinates of all services that read from the configuration file.
+  When set, this value is used to declare a location to the federation central services, which affects client-server matchmaking decisions and GeoIP-based features.
+  The format of the string should be "lat,lon" where lat and lon are decimal values representing the latitude and longitude, respectively.
+  For example, `GeoLocation: "43.0739,-89.3848"` would indicate a location in Madison, WI.
+  In general, lat/lon coordinates should be restricted to at most 4 decimal places, which are sufficient to provide accuracy to within about 10 meters.
+
+  This provides an alternative to configuring GeoIP overrides for specific IP addresses and is intended for use in environments where GeoIP information is not available or not accurate.
+  When an admin/user-provided geolocation comes from an IP address that also has a configured GeoIP override, the admin/user-provided geolocation will take precedence.
+type: string
+default: ""
+components: ["cache", "client", "origin"]
 ---
 name: Debug
 description: |+

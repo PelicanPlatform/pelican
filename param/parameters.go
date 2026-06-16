@@ -210,6 +210,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Federation.TopologyReloadInterval": false,
 	"Federation.TopologyUrl": false,
 	"GeoIPOverrides": false,
+	"GeoLocation": false,
 	"Issuer.AccessTokenLifetime": false,
 	"Issuer.AuthenticationSource": false,
 	"Issuer.AuthorizationCodeLifetime": false,
@@ -590,6 +591,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Federation.TopologyDowntimeUrl": func(c *Config) string { return c.Federation.TopologyDowntimeUrl },
 	"Federation.TopologyNamespaceUrl": func(c *Config) string { return c.Federation.TopologyNamespaceUrl },
 	"Federation.TopologyUrl": func(c *Config) string { return c.Federation.TopologyUrl },
+	"GeoLocation": func(c *Config) string { return c.GeoLocation },
 	"IssuerKey": func(c *Config) string { return c.IssuerKey },
 	"IssuerKeysDirectory": func(c *Config) string { return c.IssuerKeysDirectory },
 	"Issuer.AuthenticationSource": func(c *Config) string { return c.Issuer.AuthenticationSource },
@@ -1337,6 +1339,7 @@ var allParameterNames = []string{
 	"Federation.TopologyReloadInterval",
 	"Federation.TopologyUrl",
 	"GeoIPOverrides",
+	"GeoLocation",
 	"Issuer.AccessTokenLifetime",
 	"Issuer.AuthenticationSource",
 	"Issuer.AuthorizationCodeLifetime",
@@ -1690,6 +1693,7 @@ var (
 	Federation_TopologyDowntimeUrl = StringParam{"Federation.TopologyDowntimeUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
+	GeoLocation = StringParam{"GeoLocation"}
 	IssuerKey = StringParam{"IssuerKey"}
 	IssuerKeysDirectory = StringParam{"IssuerKeysDirectory"}
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
@@ -2152,6 +2156,7 @@ func init() {
 		"Federation.TopologyDowntimeUrl": Federation_TopologyDowntimeUrl,
 		"Federation.TopologyNamespaceUrl": Federation_TopologyNamespaceUrl,
 		"Federation.TopologyUrl": Federation_TopologyUrl,
+		"GeoLocation": GeoLocation,
 		"IssuerKey": IssuerKey,
 		"IssuerKeysDirectory": IssuerKeysDirectory,
 		"Issuer.AuthenticationSource": Issuer_AuthenticationSource,

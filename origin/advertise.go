@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -223,6 +224,21 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
+
+	if geoStr := param.GeoLocation.GetString(); geoStr != "" {
+		if lat, long, err := utils.ParseCoordinateStr(geoStr); err == nil {
+			coord := server_structs.Coordinate{
+				Lat:    lat,
+				Long:   long,
+				Source: server_structs.CoordinateSourceDeclared,
+				// The service has given us a coordinate, so we assume no accuracy radius
+				AccuracyRadius: 0,
+			}
+			ad.Coordinate = &coord
+		} else {
+			log.Warningf("Ignoring invalid %s value %q: %v", param.GeoLocation.GetName(), geoStr, err)
+		}
+	}
 
 	if len(prefixes) == 0 {
 		if isGlobusBackend {

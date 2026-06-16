@@ -29,10 +29,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -79,6 +81,11 @@ var (
 
 const (
 	earthRadiusToMilesFactor = 3960
+	earthRadiusToKmFactor    = 6371.0 // mean Earth radius in km, to turn angular distance into km
+
+	// Minimum distance (km) between a server's declared coordinate and its GeoIP-resolved
+	// coordinate before the director logs a location discrepancy.
+	locationDiscrepancyThresholdKm = 100.0
 
 	// A rough lat/long bounding box for the contiguous US. We might eventually make this box
 	// a configurable value, but for now it's hardcoded
@@ -342,6 +349,27 @@ func getProjectLabel(ctx context.Context) (project string) {
 // 1. Configured GeoIP Overrides
 // 2. MaxMind Lookups
 func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coordinate, err error) {
+	// If the server declared its own coordinate via GeoLocation config (propagated
+	// through the ad), use it at highest precedence — before GeoIP overrides or MaxMind.
+	if sAd.Coordinate.Source == server_structs.CoordinateSourceDeclared {
+		log.Tracef("Using server-declared coordinate for %s (lat=%f long=%f)", sAd.Name, sAd.Coordinate.Lat, sAd.Coordinate.Long)
+		// The declared coordinate bypasses GeoIP, so the director never gets to "check"
+		// where the server actually appears to be. Compute what GeoIP would have resolved
+		// and log if the declared location is suspiciously far from it.
+		logServerLocationDiscrepancy(sAd)
+		return sAd.Coordinate, nil
+	}
+
+	return resolveServerGeoIPCoordinate(sAd)
+}
+
+// resolveServerGeoIPCoordinate resolves a server's coordinate purely from its hostname via
+// DNS + GeoIP (configured overrides, then MaxMind), ignoring any server-declared coordinate.
+//
+// Coordinates are determined in order of precedence:
+// 1. Configured GeoIP Overrides
+// 2. MaxMind Lookups
+func resolveServerGeoIPCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coordinate, err error) {
 	// Get the IP from the server ad's hostname
 	hostname := sAd.URL.Hostname()
 	addr, err := getIPFromHostname(hostname)
@@ -377,17 +405,73 @@ func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coor
 	return
 }
 
+// logServerLocationDiscrepancy compares a server-declared coordinate against the coordinate the
+// director would have resolved from GeoIP, and logs (at debug level) when they differ by more
+// than locationDiscrepancyThresholdKm. This is purely observational -- it does not change the
+// coordinate used for sorting/redirects.
+//
+// TODO: surface this discrepancy in the director web UI as a follow-up (see issue-2709 next step).
+func logServerLocationDiscrepancy(sAd server_structs.ServerAd) {
+	// Until we have a better way to surface these discrepancies, we'll only do the extra work of getting
+	// GeoIP info via reverse DNS + MaxMind lookup if we intend to log it
+	logLevel := config.GetEffectiveLogLevel()
+	if logLevel < log.DebugLevel {
+		return
+	}
+
+	declared := sAd.Coordinate
+
+	geo, err := resolveServerGeoIPCoordinate(sAd)
+	if err != nil {
+		// No GeoIP fix available (DNS failure, no MaxMind DB, IP not in DB, etc.), so there's
+		// nothing to compare the declared coordinate against.
+		log.Debugf("Cannot compute location discrepancy for declared server %s: %v", sAd.Name, err)
+		return
+	}
+
+	distKm := angularDistanceOnSphere(declared.Lat, declared.Long, geo.Lat, geo.Long) * earthRadiusToKmFactor
+	if distKm <= locationDiscrepancyThresholdKm {
+		return
+	}
+
+	log.WithFields(log.Fields{
+		"server_name":       sAd.Name,
+		"server_type":       string(sAd.Type),
+		"server_url":        sAd.URL.String(),
+		"declared_lat":      declared.Lat,
+		"declared_long":     declared.Long,
+		"geoip_lat":         geo.Lat,
+		"geoip_long":        geo.Long,
+		"geoip_source":      geo.Source,
+		"geoip_accuracy_km": geo.AccuracyRadius,
+		"discrepancy_km":    math.Round(distKm),
+	}).Debugf("Server-declared location for %q differs from its GeoIP-resolved location by %.0f km (threshold %.0f km)",
+		sAd.Name, distKm, locationDiscrepancyThresholdKm)
+}
+
 // Given a client IP address, retrieve the associated geolocation coordinate
 // including provenance metadata (coordinate source, accuracy radius, etc.)
 // This method does not return an error because it will always return a coordinate,
 // so any GeoIP/MaxMind errors generated during the lookup process are handled internally.
 //
 // Coordinates are determined in order of precedence:
-// 1. Configured GeoIP Overrides
-// 2. MaxMind Lookups
-// 3. Random, Geo-Bounded Assignments (when (1), (2) are not available)
-func getClientCoordinate(ctx context.Context, addr netip.Addr) (coord server_structs.Coordinate) {
-	// Check for overrides
+// 1. Client-provided override (from X-Pelican-Coordinate header)
+// 2. Configured GeoIP Overrides
+// 3. MaxMind Lookups
+// 4. Random, Geo-Bounded Assignments (when (1), (2) are not available)
+func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Context) (coord server_structs.Coordinate) {
+	// Check for a client-provided coordinate in the X-Pelican-Coordinate header.
+	// This takes highest precedence — if present and well-formed, use it immediately.
+	if ginCtx != nil {
+		var pelicanCoord server_structs.XPelCoordinate
+		if err := pelicanCoord.ParseRawHeader(&ginCtx.Request.Header); err == nil {
+			coord = pelicanCoord.Coordinate
+			log.Tracef("Using client-provided coordinate from %s header: lat=%f long=%f",
+				pelicanCoord.GetName(), coord.Lat, coord.Long)
+			return
+		}
+	}
+
 	if overrideCoord, exists := checkOverrides(addr); exists {
 		// All coordinate provenance fields should have been handled on GeoOverride unmarshal or cache insertion
 		coord = overrideCoord

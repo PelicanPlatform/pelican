@@ -531,3 +531,57 @@ func TestDirectorTimeout(t *testing.T) {
 	// Verify the error message contains "i/o timeout"
 	assert.Contains(t, err.Error(), "i/o timeout")
 }
+
+// TestQueryDirectorGeoLocationHeader verifies that when GeoLocation is configured,
+// queryDirector attaches the X-Pelican-Coordinate header with the correct value, and
+// that no header is sent when GeoLocation is empty or invalid.
+func TestQueryDirectorGeoLocationHeader(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1,
+	})
+
+	var receivedCoordHeader string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedCoordHeader = r.Header.Get("X-Pelican-Coordinate")
+		http.Redirect(w, r, "http://cache.example.com:8443/foo/bar", http.StatusTemporaryRedirect)
+	}))
+	defer ts.Close()
+
+	pUrl := &pelican_url.PelicanURL{
+		FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: ts.URL},
+		Path:    "/foo/bar",
+	}
+
+	t.Run("HeaderSentWhenGeoLocationSet", func(t *testing.T) {
+		receivedCoordHeader = ""
+		require.NoError(t, param.GeoLocation.Set("43.0739,-89.3848"))
+		t.Cleanup(func() { require.NoError(t, param.GeoLocation.Set("")) })
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Equal(t, "lat=43.0739,long=-89.3848", receivedCoordHeader)
+	})
+
+	t.Run("HeaderNotSentWhenGeoLocationEmpty", func(t *testing.T) {
+		receivedCoordHeader = "sentinel"
+		require.NoError(t, param.GeoLocation.Set(""))
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Empty(t, receivedCoordHeader, "X-Pelican-Coordinate should not be sent when GeoLocation is empty")
+	})
+
+	t.Run("HeaderNotSentWhenGeoLocationInvalid", func(t *testing.T) {
+		receivedCoordHeader = "sentinel"
+		require.NoError(t, param.GeoLocation.Set("not-valid"))
+		t.Cleanup(func() { require.NoError(t, param.GeoLocation.Set("")) })
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Empty(t, receivedCoordHeader, "X-Pelican-Coordinate should not be sent when GeoLocation is invalid")
+	})
+}
