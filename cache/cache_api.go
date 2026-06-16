@@ -145,13 +145,17 @@ func cleanTestDir(ctx context.Context, dirPath string) error {
 // fsToNamespacePath strips the cache namespace-location prefix from an absolute
 // filesystem path, returning the namespace-relative path the evict API expects.
 func fsToNamespacePath(fsPath string) (string, error) {
-	nsLoc := strings.TrimRight(param.Cache_NamespaceLocation.GetString(), "/")
+	nsLoc := param.Cache_NamespaceLocation.GetString()
 	if nsLoc == "" {
-		return "", errors.New("cache namespace location is not configured")
+		return "", errors.Errorf("%s is empty; cannot convert filesystem path to namespace path", param.Cache_NamespaceLocation.GetName())
 	}
-	if !strings.HasPrefix(fsPath, nsLoc+"/") {
-		return "", fmt.Errorf("path %q is not under the cache namespace location", fsPath)
+	// Normalize to exactly one trailing slash, avoiding matching sibling directories
+	nsLoc = strings.TrimRight(nsLoc, "/") + "/"
+	if !strings.HasPrefix(fsPath, nsLoc) {
+		return "", errors.Errorf("filesystem path %q is not under the %s: %s", fsPath, param.Cache_NamespaceLocation.GetName(), nsLoc)
 	}
+	// Trim trailing slash (if any) to fit the evict API's expectation of a path segment; no-op if it is root directory.
+	nsLoc = path.Clean(nsLoc)
 	return strings.TrimPrefix(fsPath, nsLoc), nil
 }
 
