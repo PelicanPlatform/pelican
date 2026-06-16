@@ -407,6 +407,33 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, sysErr
 	}
 
+	// For logging namespace registrations, require the registrant to present the
+	// same public key as the origin already registered under that sitename.  This
+	// prevents namespace squatting: a server that knows a sitename cannot register
+	// /pelican/logging/{sitename} with a different key and ride the auto-approval path.
+	if sitename, ok := server_structs.LoggingNamespaceSitename(data.Prefix); ok {
+		serverReg, err := getServerByName(sitename)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil, permissionDeniedError{Message: fmt.Sprintf(
+					"cannot register logging namespace: no origin with name %q is registered", sitename)}
+			}
+			return false, nil, errors.Wrapf(err, "failed to look up server %q for logging namespace gate", sitename)
+		}
+		if serverReg == nil || len(serverReg.Registration) == 0 {
+			return false, nil, permissionDeniedError{Message: fmt.Sprintf(
+				"cannot register logging namespace: no origin with name %q is registered", sitename)}
+		}
+		originKey, err := validateJwks(serverReg.Registration[0].Pubkey)
+		if err != nil {
+			return false, nil, errors.Wrapf(err, "failed to parse registered pubkey for server %q", sitename)
+		}
+		if !jwk.Equal(key, originKey) {
+			return false, nil, permissionDeniedError{Message: fmt.Sprintf(
+				"cannot register logging namespace: public key does not match the registered key for server %q", sitename)}
+		}
+	}
+
 	var ns server_structs.Registration
 	ns.Prefix = data.Prefix
 
@@ -483,7 +510,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 
 	// Tag logging namespace registrations so the auto-approval logic and API filters
 	// can identify them without parsing the prefix string.
-	if serverID, ok := server_structs.LoggingNamespaceServerID(data.Prefix); ok {
+	if sitename, ok := server_structs.LoggingNamespaceSitename(data.Prefix); ok {
 		if ns.CustomFields == nil {
 			ns.CustomFields = make(map[string]interface{})
 		}
@@ -491,7 +518,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 
 		// Auto-approve when the associated origin is already approved and auto-registration is enabled.
 		if param.Registry_EnableAutoLoggingRegistration.GetBool() {
-			applyLoggingNamespaceAutoApproval(serverID, &ns)
+			applyLoggingNamespaceAutoApproval(sitename, &ns)
 		}
 	}
 
