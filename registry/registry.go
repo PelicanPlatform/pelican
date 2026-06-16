@@ -267,38 +267,122 @@ func keySignChallengeInit(data *registrationData) (map[string]interface{}, error
 }
 
 // applyLoggingNamespaceAutoApproval auto-approves ns if the origin server
-// identified by serverID already has an approved registration.  It mutates
-// ns.AdminMetadata in place on success.  The serverID must be a non-empty
-// 7-character ID from the servers table (the suffix after LoggingNamespacePrefix).
-func applyLoggingNamespaceAutoApproval(serverID string, ns *server_structs.Registration) {
-	// serverID should never be empty here: the only caller extracts it via
-	// LoggingNamespaceServerID, which rejects empty IDs and returns ok=false.
-	// An empty ID reaching this point indicates a programming error.
-	if serverID == "" {
-		log.Errorf("applyLoggingNamespaceAutoApproval called with empty serverID; this is a bug")
+// whose sitename matches the logging namespace prefix already has an approved
+// registration.  It mutates ns.AdminMetadata in place on success.
+// sitename is the Xrootd.Sitename segment extracted from the logging namespace prefix
+// (e.g. "my-origin" from "/pelican/logging/my-origin").
+func applyLoggingNamespaceAutoApproval(sitename string, ns *server_structs.Registration) {
+	// sitename should never be empty here: the only caller extracts it via
+	// LoggingNamespaceSitename, which rejects empty values and returns ok=false.
+	if sitename == "" {
+		log.Errorf("applyLoggingNamespaceAutoApproval called with empty sitename; this is a bug")
 		return
 	}
-	serverReg, err := getServerByID(serverID)
+	serverReg, err := getServerByName(sitename)
 	if err != nil {
-		log.Errorf("Failed to look up server by ID %q for logging namespace auto-approval: %v", serverID, err)
+		log.Errorf("Failed to look up server by name %q for logging namespace auto-approval: %v", sitename, err)
 		return
 	}
-	// getServerByID returns &ServerRegistration{} (ID == "") when the server is
-	// not found (ErrRecordNotFound), and a non-nil populated struct on success.
-	if serverReg.ID == "" {
-		log.Warningf("Server ID %q not found in registry; skipping auto-approval of logging namespace", serverID)
+	if serverReg == nil || serverReg.ID == "" {
+		log.Warningf("No server found with name %q; skipping auto-approval of logging namespace", sitename)
 		return
 	}
 	for _, reg := range serverReg.Registration {
 		if reg.AdminMetadata.Status == server_structs.RegApproved {
+			// Defense-in-depth: verify the incoming key matches the origin's registered
+			// key before auto-approving.  keySignChallengeCommit enforces this too, but
+			// an explicit check here ensures auto-approval is never granted to a
+			// mismatched key even if the call path changes in the future.
+			incomingKey, err := validateJwks(ns.Pubkey)
+			if err != nil {
+				log.Errorf("applyLoggingNamespaceAutoApproval: invalid pubkey on logging namespace registration for %s: %v", sitename, err)
+				return
+			}
+			originKey, err := validateJwks(reg.Pubkey)
+			if err != nil || !jwk.Equal(incomingKey, originKey) {
+				log.Warningf("Skipping logging namespace auto-approval: public key does not match registered key for server %s", sitename)
+				return
+			}
 			ns.AdminMetadata.Status = server_structs.RegApproved
 			ns.AdminMetadata.ApproverID = "system"
 			ns.AdminMetadata.ApprovedAt = time.Now()
-			log.Debugf("Auto-approving logging namespace because origin server %s is approved", serverID)
+			log.Debugf("Auto-approving logging namespace because server %s is approved", sitename)
 			return
 		}
 	}
-	log.Debugf("Skipping logging namespace auto-approval: origin server %s has no approved registration", serverID)
+	log.Debugf("Skipping logging namespace auto-approval: server %s has no approved registration", sitename)
+}
+
+// cascadeApproveLoggingNamespace checks whether an origin with the given sitename
+// has a corresponding logging namespace that is still pending, and if so,
+// auto-approves it.  It is called by the approval flow after an admin approves an
+// origin's primary registration, so that the logging namespace does not get stuck
+// in "pending" when the origin was already pending at the time of logging-namespace
+// registration (the common case for a freshly started origin).
+//
+// The function is best-effort: all failures are logged but not surfaced to the caller.
+func cascadeApproveLoggingNamespace(sitename string) {
+	loggingPrefix := server_structs.LoggingNamespaceForServer(sitename)
+	loggingReg, err := getRegistrationByPrefix(loggingPrefix)
+	if err != nil {
+		// Either the origin has no logging namespace yet, or a DB error.  Either
+		// way there is nothing to cascade-approve.
+		log.Debugf("cascadeApproveLoggingNamespace: no logging namespace found for %s (%v)", sitename, err)
+		return
+	}
+	if loggingReg.AdminMetadata.Status != server_structs.RegPending {
+		return
+	}
+
+	// Defense-in-depth: re-verify the key before cascade-approving using the
+	// server's current registered key (looked up by sitename).
+	serverReg, err := getServerByName(sitename)
+	if err != nil || serverReg == nil || len(serverReg.Registration) == 0 {
+		log.Errorf("cascadeApproveLoggingNamespace: cannot look up server %s: %v", sitename, err)
+		return
+	}
+	loggingKey, err := validateJwks(loggingReg.Pubkey)
+	if err != nil {
+		log.Errorf("cascadeApproveLoggingNamespace: invalid pubkey on logging namespace for %s: %v", sitename, err)
+		return
+	}
+	originKey, err := validateJwks(serverReg.Registration[0].Pubkey)
+	if err != nil || !jwk.Equal(loggingKey, originKey) {
+		log.Warningf("cascadeApproveLoggingNamespace: public key mismatch for logging namespace %s; skipping auto-approval", loggingPrefix)
+		return
+	}
+
+	if err := updateRegistrationStatusById(loggingReg.ID, server_structs.RegApproved, "system"); err != nil {
+		log.Errorf("cascadeApproveLoggingNamespace: failed to approve logging namespace %s: %v", loggingPrefix, err)
+		return
+	}
+	log.Debugf("Auto-approved logging namespace %s after server %s was approved", loggingPrefix, sitename)
+}
+
+// cascadeUpdateLoggingNamespaceKey updates the pubkey of the logging namespace
+// associated with the given sitename to match newPubkey.  It is called when an
+// admin edits an origin's registration and changes its public key, so that the
+// hidden logging namespace stays in sync and the origin can continue to
+// authenticate against it after a key rotation.
+//
+// The function is best-effort: if no logging namespace exists it is a no-op.
+func cascadeUpdateLoggingNamespaceKey(sitename string, newPubkey string) {
+	loggingPrefix := server_structs.LoggingNamespaceForServer(sitename)
+	loggingReg, err := getRegistrationByPrefix(loggingPrefix)
+	if err != nil {
+		// No logging namespace registered yet — nothing to do.
+		log.Debugf("cascadeUpdateLoggingNamespaceKey: no logging namespace found for %s (%v)", sitename, err)
+		return
+	}
+	if loggingReg.Pubkey == newPubkey {
+		return // Already in sync.
+	}
+	loggingReg.Pubkey = newPubkey
+	if err := updateRegistration(loggingReg); err != nil {
+		log.Errorf("cascadeUpdateLoggingNamespaceKey: failed to update pubkey for logging namespace %s: %v", loggingPrefix, err)
+		return
+	}
+	log.Debugf("Updated pubkey for logging namespace %s to match server %s", loggingPrefix, sitename)
 }
 
 // Add namespace prefix if the request passed client and server verification for nonce.
