@@ -1,3 +1,6 @@
+# Config is invalid because the two exports use different GlobusCollectionIDs,
+# which is not supported -- a Globus origin can only expose one collection.
+
 Origin:
   StorageType: "globus"
   GlobusClientIDFile: "SHOULD-OVERRIDE-TEMPFILE"
@@ -11,6 +14,6 @@ Origin:
       IssuerUrls: ["https://foo-issuer.com"]
     - StoragePrefix: "/bar"
       FederationPrefix: "/second/namespace"
-      GlobusCollectionID: "abc123" # The Globus collection UUID
-      GlobusCollectionName: "Pelican >> Globus!"
+      GlobusCollectionID: "123abc" # Different collection -- should be rejected
+      GlobusCollectionName: "Globus << Pelican!"
       Capabilities: ["PublicReads", "DirectReads"]
