@@ -932,7 +932,7 @@ func GetEngine() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	engine.Use(sanitizePathMiddleware)
+	engine.Use(rejectInvalidPathMiddleware)
 
 	// Configure trusted proxies for accurate client IP detection.
 	// By default, trust no proxies so ctx.ClientIP() returns the

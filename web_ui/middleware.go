@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	ratelimit "github.com/JGLTechnologies/gin-rate-limit"
 	"github.com/gin-gonic/gin"
@@ -13,24 +14,30 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
 }
 
-// sanitizePathMiddleware sanitizes the request URL path before it reaches any
-// downstream handler or metrics middleware. Any non-UTF-8 byte sequences in
-// the path are replaced with the Unicode replacement character (U+FFFD). This
-// prevents panics in Prometheus label collection, which requires valid UTF-8
-// strings. RawPath is only sanitized when non-empty; per Go's net/url
-// documentation, RawPath is only set when the encoded form of Path differs
-// from the default encoding, so it is typically empty.
-func sanitizePathMiddleware(ctx *gin.Context) {
-	ctx.Request.URL.Path = utils.EnsureValidUTF8(ctx.Request.URL.Path)
-	if ctx.Request.URL.RawPath != "" {
-		ctx.Request.URL.RawPath = utils.EnsureValidUTF8(ctx.Request.URL.RawPath)
+// rejectInvalidPathMiddleware rejects requests whose URL path is not valid
+// UTF-8 before they reach any downstream handler or metrics middleware. Such
+// paths (e.g. overlong UTF-8 encodings) are malformed and would otherwise
+// panic Prometheus label collection, which requires valid UTF-8 strings.
+// Rather than silently sanitizing the path and passing the request through,
+// we reject it with HTTP 400 Bad Request. RawPath is only checked when
+// non-empty; per Go's net/url documentation, RawPath is only set when the
+// encoded form of Path differs from the default encoding, so it is typically
+// empty.
+func rejectInvalidPathMiddleware(ctx *gin.Context) {
+	if !utf8.ValidString(ctx.Request.URL.Path) ||
+		(ctx.Request.URL.RawPath != "" && !utf8.ValidString(ctx.Request.URL.RawPath)) {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "The request path contains invalid UTF-8 characters",
+		})
+		ctx.Abort()
+		return
 	}
 	ctx.Next()
 }
