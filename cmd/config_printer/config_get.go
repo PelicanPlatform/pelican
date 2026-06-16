@@ -166,6 +166,14 @@ func configGet(cmd *cobra.Command, args []string) {
 				default:
 					fmt.Printf("    # source: %s\n", src.Type)
 				}
+			} else {
+				// Every key flattened from the config struct should resolve to a
+				// source (RecordDefaultKeys tags every viper key at least
+				// "default"). If we ever land here, the key space the tracker
+				// records has drifted from what's printed, so surface it as
+				// "unknown" rather than silently omitting the line or guessing
+				// "default" — we don't actually know the provenance.
+				fmt.Printf("    # source: unknown (this probably indicates a bug)\n")
 			}
 		}
 	}
