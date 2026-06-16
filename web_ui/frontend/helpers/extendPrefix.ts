@@ -19,6 +19,15 @@ const extendPrefix = (
     };
   }
 
+  if (prefix.startsWith('/pelican/logging/')) {
+    // Logging namespaces keep their full prefix (unlike origins/caches, which
+    // are stripped) because these entries are hidden from the UI.
+    return {
+      type: 'pelican',
+      adjustedPrefix: prefix,
+    };
+  }
+
   return {
     type: 'namespace',
     adjustedPrefix: prefix,

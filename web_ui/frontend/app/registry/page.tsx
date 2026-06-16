@@ -66,6 +66,7 @@ export default function Home() {
     return data?.filter(
       ({ namespace }) =>
         namespace.admin_metadata.status === 'Pending' &&
+        namespace.type !== 'pelican' &&
         (user?.user == namespace.admin_metadata.user_id ||
           user?.role == 'admin')
     );
