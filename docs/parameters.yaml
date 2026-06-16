@@ -459,11 +459,12 @@ default: error
 components: ["cache"]
 runtime_configurable: true
 ---
-name: Logging.LogExports.Enabled
+name: Logging.EnableLogExports
 description: |+
-  When true, this server exports its logs via the Pelican logging namespace (`/pelican/logging/{Server.ID}`).
+  When true, this server exports its logs via the Pelican logging namespace (`/pelican/logging/{sitename}`).
   Clients with the appropriate token can retrieve log entries as virtual time-bucketed objects.
   Requires `${Logging.LogLocation}` to be set to a real file path (not empty or `/dev/null`).
+  Requires `${Xrootd.Sitename}` to be set — it is used as the path segment in the logging namespace URL.
   `${IssuerKeysDirectory}` must also be configured so the server can auto-generate access tokens for the logging namespace.
   Defaults to false — log export is opt-in.
 type: bool
@@ -474,7 +475,7 @@ name: Logging.LogExports.AllowFederationAdmin
 description: |+
   When true, the federation issuer URL is added as an authorized issuer for this server's logging namespace,
   allowing federation administrators to read logs from this server using a federation-issued token.
-  Has no effect when `${Logging.LogExports.Enabled}` is false.
+  Has no effect when `${Logging.EnableLogExports}` is false.
   Defaults to false.
 type: bool
 default: false
@@ -3171,11 +3172,11 @@ components: ["registry"]
 ---
 name: Registry.EnableAutoLoggingRegistration
 description: |+
-  When true, the Registry automatically approves logging namespace registrations (`/pelican/logging/{Server.ID}`)
-  submitted by Origins or Caches whose main server registration is already approved.
+  When true, the Registry automatically approves logging namespace registrations (`/pelican/logging/{sitename}`)
+  submitted by Origins whose main server registration is already approved.
   If the server registration is still pending at the time the logging namespace is submitted,
   approval is deferred until the server is approved.
-  This is a federation-level gate distinct from `${Logging.LogExports.Enabled}` on each individual server.
+  This is a federation-level gate distinct from `${Logging.EnableLogExports}` on each individual server.
   Defaults to false.
 type: bool
 default: false

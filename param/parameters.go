@@ -264,9 +264,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Client.DisableProgressBars": false,
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
+	"Logging.EnableLogExports": false,
 	"Logging.Level": true,
 	"Logging.LogExports.AllowFederationAdmin": false,
-	"Logging.LogExports.Enabled": false,
 	"Logging.LogLocation": false,
 	"Logging.Origin.Cms": true,
 	"Logging.Origin.Http": true,
@@ -989,8 +989,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Logging.EnableLogExports": func(c *Config) bool { return c.Logging.EnableLogExports },
 	"Logging.LogExports.AllowFederationAdmin": func(c *Config) bool { return c.Logging.LogExports.AllowFederationAdmin },
-	"Logging.LogExports.Enabled": func(c *Config) bool { return c.Logging.LogExports.Enabled },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
@@ -1399,9 +1399,9 @@ var allParameterNames = []string{
 	"Logging.Client.DisableProgressBars",
 	"Logging.Client.ProgressInterval",
 	"Logging.DisableProgressBars",
+	"Logging.EnableLogExports",
 	"Logging.Level",
 	"Logging.LogExports.AllowFederationAdmin",
-	"Logging.LogExports.Enabled",
 	"Logging.LogLocation",
 	"Logging.Origin.Cms",
 	"Logging.Origin.Http",
@@ -1976,8 +1976,8 @@ var (
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Logging_EnableLogExports = BoolParam{"Logging.EnableLogExports"}
 	Logging_LogExports_AllowFederationAdmin = BoolParam{"Logging.LogExports.AllowFederationAdmin"}
-	Logging_LogExports_Enabled = BoolParam{"Logging.LogExports.Enabled"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
@@ -2430,8 +2430,8 @@ func init() {
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Logging.EnableLogExports": Logging_EnableLogExports,
 		"Logging.LogExports.AllowFederationAdmin": Logging_LogExports_AllowFederationAdmin,
-		"Logging.LogExports.Enabled": Logging_LogExports_Enabled,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
