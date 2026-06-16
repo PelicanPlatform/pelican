@@ -19,11 +19,17 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func TestSourceTracker_RecordAndGet(t *testing.T) {
@@ -81,37 +87,52 @@ func TestSourceTracker_Reset(t *testing.T) {
 	assert.Empty(t, st.AllSources())
 }
 
-func TestSnapshotViperKeys(t *testing.T) {
-	v := viper.New()
-	v.SetDefault("foo", "8444")
-	v.SetDefault("bar", "info")
-
-	snap := snapshotViperKeys(v)
-	assert.Equal(t, "8444", snap["foo"])
-	assert.Equal(t, "info", snap["bar"])
-}
-
-func TestRecordConfigFileDiff(t *testing.T) {
+func TestRecordDefaultKeys(t *testing.T) {
 	st := &SourceTracker{sources: make(map[string]ConfigSource)}
 	v := viper.New()
 	v.SetDefault("foo", "info")
 	v.SetDefault("bar", "8444")
 
-	before := snapshotViperKeys(v)
+	// A key with a pre-existing non-default source must not be reclassified.
+	st.Record("bar", ConfigSource{Type: SourceConfigFile, Detail: "/path/to/file"})
 
-	// Simulate a config file changing Logging.Level.
-	v.Set("foo", "debug")
+	st.RecordDefaultKeys(v)
 
-	st.RecordConfigFileDiff(before, v, "/path/to/file", SourceConfigFile)
-
-	// Logging.Level changed → recorded.
+	// "foo" had no prior source → tagged default.
 	src, ok := st.Get("foo")
 	require.True(t, ok)
-	assert.Equal(t, SourceConfigFile, src.Type)
-	assert.Equal(t, "/path/to/file", src.Detail)
+	assert.Equal(t, SourceDefault, src.Type)
 
-	// Server.WebPort unchanged → NOT recorded.
-	_, ok = st.Get("bar")
+	// "bar" already had a source → left untouched.
+	src, ok = st.Get("bar")
+	require.True(t, ok)
+	assert.Equal(t, SourceConfigFile, src.Type)
+}
+
+func TestRecordConfigFileKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	require.NoError(t, os.WriteFile(path,
+		[]byte("Server:\n  WebHost: 1.2.3.4\nOrigin:\n  ExportVolumes:\n    - /a:/a\n    - /b:/b\n"), 0o600))
+
+	st := &SourceTracker{sources: make(map[string]ConfigSource)}
+	require.NoError(t, st.RecordConfigFileKeys(path, SourceConfigFile))
+
+	// Scalar key recorded.
+	src, ok := st.Get("server.webhost")
+	require.True(t, ok)
+	assert.Equal(t, SourceConfigFile, src.Type)
+	assert.Equal(t, path, src.Detail)
+
+	// StringSlice key recorded too — the case a viper.GetString value-diff could
+	// not detect (it collapses slices to "").
+	src, ok = st.Get("origin.exportvolumes")
+	require.True(t, ok)
+	assert.Equal(t, SourceConfigFile, src.Type)
+	assert.Equal(t, path, src.Detail)
+
+	// A key the file does NOT declare is not recorded.
+	_, ok = st.Get("server.webport")
 	assert.False(t, ok)
 }
 
@@ -133,62 +154,80 @@ func TestRecordEnvVarSources(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TestGlobalSourceTrackerIntegration exercises the global singleton through the
-// full config initialization sequence: RecordDefaultKeys → RecordConfigFileDiff →
-// RecordEnvVarSources, verifying that later stages correctly overwrite earlier ones.
-func TestGlobalSourceTrackerIntegration(t *testing.T) {
+// TestSourceTrackerInitConfigIntegration exercises the source tracker through the
+// real InitConfigInternal sequence (defaults → config files → continued configs →
+// env vars), using on-disk YAML rather than synthetic keys on a hand-built viper.
+// This is the wiring that the unit tests above cannot exercise: in particular the
+// ExperimentalBindStruct + slice-typed behavior that a value-diff approach got
+// wrong. It locks in the regressions called out in review of this PR.
+func TestSourceTrackerInitConfigIntegration(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(ResetConfig)
+
+	// A continued-config directory with two files that set the SAME key to the
+	// SAME value. The lexicographically-later file (b.yaml) is merged last and
+	// must own the attribution ("last writer wins"). A value-diff approach left
+	// this pinned to the first file.
+	contDir := t.TempDir()
+	dup := "Server:\n  ExternalWebUrl: https://dup.example.com\n"
+	require.NoError(t, os.WriteFile(filepath.Join(contDir, "a.yaml"), []byte(dup), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(contDir, "b.yaml"), []byte(dup), 0o600))
+
+	// Primary config: a scalar override, a stringSlice override (a slice param
+	// that HAS a default), and a deprecated/replacement stringSlice pair set
+	// together. The slice override and the deprecated pair are what a
+	// viper.GetString value-diff mislabeled as "default".
+	primary := "ConfigLocations:\n  - " + strings.ReplaceAll(contDir, "\\", "\\\\") + "\n" +
+		"Server:\n  WebHost: 9.9.9.9\n" +
+		"Origin:\n" +
+		"  DefaultChecksumTypes:\n    - md5\n" +
+		"  ExportVolumes:\n    - /user/A:/A\n    - /user/B:/B\n" +
+		"  ExportVolume: /old:/old\n"
+	cfg, err := os.CreateTemp("", "pelican-src-*.yaml")
+	require.NoError(t, err)
+	_, err = cfg.WriteString(primary)
+	require.NoError(t, err)
+	require.NoError(t, cfg.Close())
+	require.NoError(t, param.SetRaw("config", cfg.Name()))
+
+	// An env-var override must be tagged SourceEnvVar.
+	t.Setenv("PELICAN_ORIGIN_PORT", "2718")
+
+	InitConfigInternal(logrus.ErrorLevel)
+
 	st := GetSourceTracker()
-	st.Reset()
-	t.Cleanup(func() { st.Reset() })
+	require.Same(t, st, GetSourceTracker(), "GetSourceTracker should return the same singleton")
 
-	// Verify GetSourceTracker returns the same singleton.
-	require.Same(t, st, GetSourceTracker(), "GetSourceTracker should return the same instance")
-
-	// Stage 1 — Simulate SetParameterDefaults by setting some defaults
-	// and recording them via RecordDefaultKeys. "foo" and "bar" are pure
-	// tracker keys; "origin.port" must be a real param so that
-	// RecordEnvVarSources can resolve PELICAN_ORIGIN_PORT in Stage 3.
-	v := viper.New()
-	v.SetDefault("foo", "info")
-	v.SetDefault("bar", "8444")
-	v.SetDefault("origin.port", "8443")
-	st.RecordDefaultKeys(v)
-
-	src, ok := st.Get("foo")
-	require.True(t, ok, "foo should be recorded after RecordDefaultKeys")
-	assert.Equal(t, SourceDefault, src.Type)
-
-	src, ok = st.Get("bar")
+	// Scalar override → config file.
+	src, ok := st.Get("server.webhost")
 	require.True(t, ok)
-	assert.Equal(t, SourceDefault, src.Type)
+	assert.Equal(t, SourceConfigFile, src.Type, "scalar override should be tagged config-file")
 
-	// Stage 2 — Simulate a config file merge that changes "foo".
-	before := snapshotViperKeys(v)
-	v.Set("foo", "debug") // simulates MergeConfig
-	st.RecordConfigFileDiff(before, v, "/etc/pelican/pelican.yaml", SourceConfigFile)
-
-	src, ok = st.Get("foo")
+	// StringSlice override → config file (regression: previously left "default"
+	// because GetString collapses slices to "").
+	src, ok = st.Get("origin.defaultchecksumtypes")
 	require.True(t, ok)
-	assert.Equal(t, SourceConfigFile, src.Type, "Config file should overwrite default source")
-	assert.Equal(t, "/etc/pelican/pelican.yaml", src.Detail)
+	assert.Equal(t, SourceConfigFile, src.Type, "stringSlice override should be tagged config-file, not default")
 
-	// "bar" was unchanged in Stage 2 → still SourceDefault.
-	src, ok = st.Get("bar")
-	require.True(t, ok)
-	assert.Equal(t, SourceDefault, src.Type, "Unchanged key should remain as default")
-
-	// Stage 3 — Simulate env var setting for origin.port.
-	t.Setenv("PELICAN_ORIGIN_PORT", "9443")
-	st.RecordEnvVarSources()
-
+	// Env-var override → env.
 	src, ok = st.Get("origin.port")
 	require.True(t, ok)
-	assert.Equal(t, SourceEnvVar, src.Type, "Env var should overwrite default source")
+	assert.Equal(t, SourceEnvVar, src.Type, "env override should be tagged env")
 	assert.Equal(t, "PELICAN_ORIGIN_PORT", src.Detail)
 
-	// Verify the full state: 3 keys, each with the correct final source.
-	all := st.AllSources()
-	assert.Equal(t, SourceDefault, all["bar"].Type)
-	assert.Equal(t, SourceConfigFile, all["foo"].Type)
-	assert.Equal(t, SourceEnvVar, all["origin.port"].Type)
+	// Last-writer-wins across two continued-config files that set an identical
+	// value: the later file (b.yaml) must own the source.
+	src, ok = st.Get("server.externalweburl")
+	require.True(t, ok)
+	assert.Equal(t, SourceConfigFile, src.Type)
+	assert.True(t, strings.HasSuffix(src.Detail, "b.yaml"),
+		"last writer (b.yaml) should win; got source %q", src.Detail)
+
+	// Data-loss regression: with the deprecated Origin.ExportVolume and its
+	// replacement Origin.ExportVolumes both set, the replacement must be seen as
+	// user-set so the deprecation handler does NOT overwrite the user's list with
+	// the deprecated scalar.
+	assert.ElementsMatch(t, []string{"/user/A:/A", "/user/B:/B"},
+		param.Origin_ExportVolumes.GetStringSlice(),
+		"user's ExportVolumes list must survive deprecation handling")
 }
