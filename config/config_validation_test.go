@@ -102,8 +102,19 @@ func TestValidateLogExportsConfig(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("error when enabled but Sitename is empty", func(t *testing.T) {
+		t.Cleanup(func() { ResetConfig() })
+		require.NoError(t, param.Logging_EnableLogExports.Set(true))
+		// Xrootd.Sitename defaults to empty.
+		err := ValidateLogExportsConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), param.Xrootd_Sitename.GetName())
+	})
+
 	t.Run("error when enabled but LogLocation is empty", func(t *testing.T) {
-		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		t.Cleanup(func() { ResetConfig() })
+		require.NoError(t, param.Logging_EnableLogExports.Set(true))
+		require.NoError(t, param.Xrootd_Sitename.Set("test-origin"))
 		// Logging.LogLocation defaults to empty string.
 		err := ValidateLogExportsConfig()
 		require.Error(t, err)
@@ -111,7 +122,9 @@ func TestValidateLogExportsConfig(t *testing.T) {
 	})
 
 	t.Run("error when enabled but LogLocation is /dev/null", func(t *testing.T) {
-		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		t.Cleanup(func() { ResetConfig() })
+		require.NoError(t, param.Logging_EnableLogExports.Set(true))
+		require.NoError(t, param.Xrootd_Sitename.Set("test-origin"))
 		require.NoError(t, param.Logging_LogLocation.Set("/dev/null"))
 		err := ValidateLogExportsConfig()
 		require.Error(t, err)
@@ -119,6 +132,7 @@ func TestValidateLogExportsConfig(t *testing.T) {
 	})
 
 	t.Run("warning when enabled and LogLocation set but IssuerKeysDirectory empty", func(t *testing.T) {
+		t.Cleanup(func() { ResetConfig() })
 		hook := test.NewGlobal()
 		defer hook.Reset()
 
@@ -127,7 +141,8 @@ func TestValidateLogExportsConfig(t *testing.T) {
 		require.NoError(t, err)
 		f.Close()
 
-		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		require.NoError(t, param.Logging_EnableLogExports.Set(true))
+		require.NoError(t, param.Xrootd_Sitename.Set("test-origin"))
 		require.NoError(t, param.Logging_LogLocation.Set(logFile))
 		// IssuerKeysDirectory is empty (default).
 
@@ -145,13 +160,15 @@ func TestValidateLogExportsConfig(t *testing.T) {
 	})
 
 	t.Run("success when enabled with real LogLocation and IssuerKeysDirectory", func(t *testing.T) {
+		t.Cleanup(func() { ResetConfig() })
 		tmpDir := t.TempDir()
 		logFile := filepath.Join(tmpDir, "pelican.log")
 		f, err := os.Create(logFile)
 		require.NoError(t, err)
 		f.Close()
 
-		require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+		require.NoError(t, param.Logging_EnableLogExports.Set(true))
+		require.NoError(t, param.Xrootd_Sitename.Set("test-origin"))
 		require.NoError(t, param.Logging_LogLocation.Set(logFile))
 		require.NoError(t, param.IssuerKeysDirectory.Set(tmpDir))
 
