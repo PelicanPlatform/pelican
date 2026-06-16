@@ -26,14 +26,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	pelican_url "github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -432,6 +435,112 @@ func TestGetNsAdHTTPErrors(t *testing.T) {
 		_, err := getNsAd(directorInfo)
 		require.Error(t, err)
 	})
+}
+
+// newTokenCreateTestCmd builds a fresh `token create` command using the same
+// flag-registration code as the real CLI (addTokenCreateFlags), so the test
+// cannot drift from the actual command. Because the flags are registered on a
+// fresh command (and no longer bind to shared package globals), flag state does
+// not leak between test cases.
+func newTokenCreateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "create"}
+	addTokenCreateFlags(cmd)
+	return cmd
+}
+
+// setupTokenCmdTest isolates global config/viper state for a createToken test
+// and quiets logging.
+func setupTokenCmdTest(t *testing.T) {
+	t.Helper()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+}
+
+// TestCreateTokenEarlyValidation covers the fast-feedback validation that
+// happens before any network calls: profile parsing and --expiration handling.
+func TestCreateTokenEarlyValidation(t *testing.T) {
+	testCases := []struct {
+		name       string
+		profile    string
+		expiration string
+		expectErr  string
+	}{
+		{
+			name:      "unknown profile",
+			profile:   "not-a-profile",
+			expectErr: "unable to parse token profile",
+		},
+		{
+			name:       "malformed expiration",
+			profile:    "wlcg",
+			expiration: "tomorrow",
+			expectErr:  "RFC3339",
+		},
+		{
+			name:       "expiration in the past",
+			profile:    "wlcg",
+			expiration: "2000-01-01T00:00:00Z",
+			expectErr:  "already in the past",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTokenCmdTest(t)
+			cmd := newTokenCreateTestCmd()
+			require.NoError(t, cmd.Flags().Set("profile", tc.profile))
+			if tc.expiration != "" {
+				require.NoError(t, cmd.Flags().Set("expiration", tc.expiration))
+			}
+
+			// The arg is never reached for these cases, but createToken expects one.
+			err := createToken(cmd, []string{"pelican://example.com/foo/bar"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.expectErr)
+		})
+	}
+}
+
+// TestCreateTokenDiscoveryFailure verifies that when the pelican URL cannot be
+// parsed/discovered and the user supplies neither --issuer nor --scope-path,
+// createToken surfaces the discovery failure rather than proceeding.
+func TestCreateTokenDiscoveryFailure(t *testing.T) {
+	setupTokenCmdTest(t)
+	cmd := newTokenCreateTestCmd()
+	require.NoError(t, cmd.Flags().Set("read", "true"))
+
+	// A host-less pelican URL fails to parse without any network access.
+	err := createToken(cmd, []string{"pelican:///no/host/path"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Failed to get director info")
+}
+
+// TestCreateTokenOfflineWithIssuer exercises the path where director discovery
+// fails but the user provides enough information (--issuer + --scope-path) for
+// createToken to mint a token without ever reaching a Director. The local
+// signing key is matched against a mock issuer's JWKS.
+func TestCreateTokenOfflineWithIssuer(t *testing.T) {
+	setupTokenCmdTest(t)
+
+	// Generate a local signing key and stand up a mock issuer that advertises it.
+	kDir := filepath.Join(t.TempDir(), "issuer-keys")
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	pubJWKS, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	issuerUrl := test_utils.MockIssuer(t, &pubJWKS)
+
+	cmd := newTokenCreateTestCmd()
+	require.NoError(t, cmd.Flags().Set("read", "true"))
+	require.NoError(t, cmd.Flags().Set("issuer", issuerUrl))
+	require.NoError(t, cmd.Flags().Set("scope-path", "/foo"))
+	require.NoError(t, cmd.Flags().Set("lifetime", "600"))
+
+	// The URL fails to parse, so discovery is skipped and the supplied
+	// --issuer/--scope-path are used instead.
+	err = createToken(cmd, []string{"pelican:///no/host/path"})
+	require.NoError(t, err)
 }
 
 func TestGetIssuerErrorMessages(t *testing.T) {

@@ -120,50 +120,54 @@ These two flags are mutually exclusive.`,
 	}
 )
 
-var (
-	readFlag   bool
-	writeFlag  bool
-	modifyFlag bool
-)
-
 func addScopeFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
-	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
+	cmd.Flags().BoolP("read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
+	cmd.Flags().BoolP("write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
 		"Does not grant the ability to overwrite/modify existing resources.")
-	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
+	cmd.Flags().BoolP("modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
+}
+
+// addTokenCreateFlags registers every flag that the `token create` command and
+// its createToken handler read. It is the single source of truth for that flag
+// set, shared by init() and tests so the two cannot drift apart.
+func addTokenCreateFlags(cmd *cobra.Command) {
+	// Token capabilities
+	addScopeFlags(cmd)
+
+	cmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
+	cmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
+		"the object path without the namespace prefix.")
+
+	// Additional token fields
+	cmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
+		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
+	cmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
+	cmd.Flags().String("expiration", "", "Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.")
+	cmd.MarkFlagsMutuallyExclusive("lifetime", "expiration")
+	cmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
+	cmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
+	cmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
+	cmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
+		"'storage.read:/ storage.create:/'.")
+	cmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
+	cmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
+		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
 }
 
 func init() {
 	rootCmd.AddCommand(tokenCmd)
-	tokenCmd.AddCommand(tokenCreateCmd)
-	tokenCmd.AddCommand(tokenFetchCmd)
 
-	// Token capabilities
-	addScopeFlags(tokenCreateCmd)
+	// Token create command setup
+	tokenCmd.AddCommand(tokenCreateCmd)
+	addTokenCreateFlags(tokenCreateCmd)
+
+	// Token fetch command setup
+	tokenCmd.AddCommand(tokenFetchCmd)
 	addScopeFlags(tokenFetchCmd)
 
 	// Token fetch requires exactly one of read, write or modify
 	tokenFetchCmd.MarkFlagsMutuallyExclusive("read", "write", "modify")
 	tokenFetchCmd.MarkFlagsOneRequired("read", "write", "modify")
-
-	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
-	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
-		"the object path without the namespace prefix.")
-
-	// Additional token fields
-	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
-		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
-	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
-	tokenCreateCmd.Flags().String("expiration", "", "Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.")
-	tokenCreateCmd.MarkFlagsMutuallyExclusive("lifetime", "expiration")
-	tokenCreateCmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
-	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
-	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
-	tokenCreateCmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
-		"'storage.read:/ storage.create:/'.")
-	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
-	tokenCreateCmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
-		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
 }
 
 func splitClaim(claim string) (string, string, error) {
@@ -297,7 +301,6 @@ func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.Names
 	)
 }
 
-
 // Create a token using the provided flags/args
 func createToken(cmd *cobra.Command, args []string) error {
 	err := config.InitClient()
@@ -370,7 +373,13 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 
 	// Grab the namespace ad from the Director -- we'll use this later to validate token scopes.
-	nsAd, err := getNsAd(directorInfo)
+	// This is best-effort: if we can't retrieve it (e.g. transient Director error), we skip the
+	// capability-based scope validation rather than driving it off a zero-value ad, which would
+	// emit misleading warnings.
+	nsAd, nsAdErr := getNsAd(directorInfo)
+	if nsAdErr != nil {
+		log.Warningf("Unable to retrieve namespace information from the Director; skipping validation of requested token scopes against namespace capabilities: %v", nsAdErr)
+	}
 
 	// Handle any raw scopes early -- may be useful for developers/admin who want to create arbitrarily-scoped tokens,
 	// and early handling lets us use this as another mechanism to avoid scope paths.
@@ -414,22 +423,24 @@ func createToken(cmd *cobra.Command, args []string) error {
 	// For each scope we want to add, check against the Director's opinion of which scopes are supported for this resource.
 	// Log an error for any requested scopes that aren't supported, but still add them to the token in case the user knows something we don't.
 	if read {
-		if nsAd.Caps.PublicReads {
-			// Read access is not behind token auth
-			log.Warningf("Director indicates that the resource at %s is publicly readable so a token is not actually required to read it, but the --read flag was provided; adding read scope to token anyway", rawUrl)
-		} else if !nsAd.Caps.Reads {
-			log.Warningf("Director indicates that the resource at %s does not support read operations, but --read flag was provided; adding read scope to token anyway", rawUrl)
+		if nsAdErr == nil {
+			if nsAd.Caps.PublicReads {
+				// Read access is not behind token auth
+				log.Warningf("Director indicates that the resource at %s is publicly readable so a token is not actually required to read it, but the --read flag was provided; adding read scope to token anyway", rawUrl)
+			} else if !nsAd.Caps.Reads {
+				log.Warningf("Director indicates that the resource at %s does not support read operations, but --read flag was provided; adding read scope to token anyway", rawUrl)
+			}
 		}
 		scopes = append(scopes, tokenProfile.ReadScope(sPath))
 	}
 	if write {
-		if !nsAd.Caps.Writes {
+		if nsAdErr == nil && !nsAd.Caps.Writes {
 			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --write flag was provided; adding write scope to token anyway", rawUrl)
-		 }
+		}
 		scopes = append(scopes, tokenProfile.WriteScope(sPath))
 	}
 	if modify {
-		if !nsAd.Caps.Writes {
+		if nsAdErr == nil && !nsAd.Caps.Writes {
 			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --modify flag was provided; adding modify scope to token anyway", rawUrl)
 		}
 		scopes = append(scopes, tokenProfile.ModifyScope(sPath))
@@ -467,12 +478,11 @@ func createToken(cmd *cobra.Command, args []string) error {
 	if keyLoadErr != nil {
 		// If the namespace doesn't require protected reads and doesn't support writes,
 		// a token probably isn't needed at all — give the user a more helpful hint.
-		if !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+		if nsAdErr == nil && !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
 			return errors.Wrapf(keyLoadErr, "failed to load a local signing key; note that the Director reports namespace '%s' does not require auth for reads and does not support writes, so you may not need a token", nsAd.Path)
 		}
 		return keyLoadErr
 	}
-
 
 	kidSet := make(map[string]struct{}, myJWKS.Len())
 	it := myJWKS.Keys(context.Background())
@@ -489,7 +499,7 @@ func createToken(cmd *cobra.Command, args []string) error {
 			// If the namespace doesn't require protected reads and it doesn't support writes, there will likely have been no issuer to discover.
 			// In that case, we warn that the user probably doesn't need to create a token in the first place, but we provide instructions for
 			// supplying an issuer if they know better than we do.
-			if !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+			if nsAdErr == nil && !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
 				return errors.Wrapf(err, "unable to determine issuer for resource %s. This is likely because the Director reports that this namespace does not require token issuance for reads and does not support writes. Are you sure you need a token? You may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
 			} else if len(directorInfo.XPelAuthHdr.Issuers) > 0 {
 				// Issuers were discovered but none match the local signing key — the inner error already
