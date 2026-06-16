@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
@@ -278,6 +279,11 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
+	// Register the transfer API on the origin if enabled
+	if err := transfer.RegisterTransferAPIForOrigin(ctx, engine, egrp); err != nil {
+		return errors.Wrap(err, "failed to register transfer API on origin")
+	}
+
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
 	log.Debug("Register Origin")
 	extUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -375,6 +381,19 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
 
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
+	}
+
+	// Register a server-level "local" issuer for the transfer API into the
+	// shared registry. Its tokens carry iss = config.GetLocalIssuerUrl() and the
+	// (group-gated) pelican.transfer scope, so the transfer middleware's
+	// LocalIssuer check accepts them independent of any data-export namespace —
+	// a transfer-enabled origin can authenticate the CLI even with only public
+	// exports. (A standalone transfer server does the equivalent in its own
+	// launch path via transfer.RegisterLocalIssuer.)
+	if param.Origin_EnableTransferAPI.GetBool() {
+		if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
+			return errors.Wrap(err, "failed to register local transfer issuer")
+		}
 	}
 
 	if registry.First() == nil {

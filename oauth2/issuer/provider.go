@@ -62,6 +62,12 @@ type OIDCProvider struct {
 	// provider is scoped to.
 	Namespace string
 
+	// IssuerURL is the canonical issuer identifier (the "iss" claim) for tokens
+	// minted by this provider, and the base for its OIDC discovery document.
+	// For per-namespace data issuers this is IssuerURLForNamespace(Namespace);
+	// for the server-level transfer issuer it is config.GetLocalIssuerUrl().
+	IssuerURL string
+
 	// AuthzRules holds per-namespace compiled authorization templates.
 	// When set, these are used instead of the global rules from
 	// oa4mp.InitAuthzRules().
@@ -183,6 +189,7 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		strategy:            strategy,
 		privateKey:          privateKey,
 		Namespace:           namespace,
+		IssuerURL:           issuerURL,
 		DeviceCodeHandler:   deviceHandler,
 		RegistrationLimiter: regLimiter,
 	}, nil
@@ -435,6 +442,45 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 // compiled by oa4mp.InitAuthzRules().
 func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
+}
+
+// Issuer returns the canonical issuer URL ("iss" claim / discovery base) for
+// this provider.  It prefers the explicitly-configured IssuerURL and falls
+// back to the per-namespace URL for providers constructed without one.
+func (p *OIDCProvider) Issuer() string {
+	if p.IssuerURL != "" {
+		return p.IssuerURL
+	}
+	return IssuerURLForNamespace(p.Namespace)
+}
+
+// RegisterLocalProvider creates the server-level "local" transfer issuer and
+// registers it in the given registry under the reserved TransferIssuerNamespace
+// key, starting its dynamic-client cleanup loop.  Its tokens carry
+// iss = config.GetLocalIssuerUrl() and the (group-gated) pelican.transfer
+// scope, so the transfer middleware's LocalIssuer check accepts them without
+// any data-export namespace.  This is shared by the origin (which adds it to
+// the data-namespace registry) and the standalone transfer server (which
+// registers it in a dedicated registry).
+func RegisterLocalProvider(ctx context.Context, egrp *errgroup.Group, registry *ProviderRegistry, db *gorm.DB, gracePeriod time.Duration) error {
+	localIssuerURL := config.GetLocalIssuerUrl()
+	provider, err := NewOIDCProvider(db, localIssuerURL, gracePeriod, TransferIssuerNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to create local transfer issuer provider: %w", err)
+	}
+	registry.Register(TransferIssuerNamespace, provider)
+
+	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+	if unusedTimeout == 0 {
+		unusedTimeout = 1 * time.Hour
+	}
+	staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+	if staleTimeout == 0 {
+		staleTimeout = 336 * time.Hour // 2 weeks
+	}
+	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+	log.Infof("Embedded OIDC issuer: registered local transfer issuer (iss=%s)", localIssuerURL)
+	return nil
 }
 
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.

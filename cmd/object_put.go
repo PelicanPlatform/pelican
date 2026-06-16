@@ -190,6 +190,16 @@ func putMain(cmd *cobra.Command, args []string) {
 			}
 		}
 
+		// Warm the wallet (interactively) and open the agent's wallet so the
+		// agent can authorize the upload non-interactively. Skipped when an
+		// explicit token file was provided.
+		if tokenLocation == "" {
+			if err := warmWalletForAsync(ctx, apiClient, []asyncWarmItem{{url: dest, write: true}}); err != nil {
+				log.Errorln("Failed to prepare credentials for async transfer:", err)
+				os.Exit(1)
+			}
+		}
+
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {

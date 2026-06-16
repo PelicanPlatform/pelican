@@ -48,6 +48,7 @@ const (
 	Collection_Read TokenScope = "collection.read"
 	Collection_Modify TokenScope = "collection.modify"
 	Collection_Delete TokenScope = "collection.delete"
+	Pelican_Transfer TokenScope = "pelican.transfer"
 
 	// WLCG Scopes
 	Wlcg_Storage_Read TokenScope = "storage.read"

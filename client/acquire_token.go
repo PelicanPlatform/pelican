@@ -86,11 +86,13 @@ type (
 		TokenName               string
 		Operation               config.TokenOperation
 		EnableAcquire           bool
+		nonInteractive          bool // if true, never fall back to interactive (device-code) acquisition
 		Token                   atomic.Pointer[tokenInfo]
 		Iterator                *tokenContentIterator
 		Sync                    *singleflight.Group
 		authFailureMu           sync.Mutex
 		consecutiveAuthFailures int
+		externalProvider        TokenProvider // optional external provider; if set, Get() delegates to it
 	}
 
 	// An object that iterates through the various possible tokens
@@ -152,6 +154,13 @@ func (tg *tokenGenerator) SetTokenLocation(tokenLocation string) {
 // evaluating all possible tokens
 func (tg *tokenGenerator) SetTokenName(name string) {
 	tg.TokenName = name
+}
+
+// SetExternalProvider configures an external TokenProvider that
+// the generator delegates to on every Get() call.  This bypasses
+// the built-in token acquisition logic entirely.
+func (tg *tokenGenerator) SetExternalProvider(provider TokenProvider) {
+	tg.externalProvider = provider
 }
 
 // Force the use of a specific token for the lifetime of the generator
@@ -425,7 +434,11 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
-		opts := config.TokenGenerationOpts{Operation: tg.Operation}
+		opts := config.TokenGenerationOpts{
+			Operation:      tg.Operation,
+			DiscoveryURL:   tg.Destination.FedInfo.DiscoveryEndpoint,
+			NonInteractive: tg.nonInteractive,
+		}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
@@ -458,6 +471,11 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 //
 // Thread-safe
 func (tg *tokenGenerator) Get() (token string, err error) {
+	// If an external provider is configured, delegate entirely to it.
+	if tg.externalProvider != nil {
+		return tg.externalProvider.Get()
+	}
+
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
@@ -744,12 +762,13 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, errors.Errorf("issuer %s does not support dynamic client registration", issuerUrl)
 	}
 
+	scopes := []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"}
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		ResponseTypes:           []string{"code"},
 		ClientName:              "OSDF Command Line Client",
-		Scopes:                  []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
+		Scopes:                  scopes,
 	}}
 
 	resp, err := drcp.Register()
@@ -757,17 +776,60 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix:                  dirResp.XPelNsHdr.Namespace,
-		ClientID:                resp.ClientID,
-		ClientSecret:            resp.ClientSecret,
-		RegistrationAccessToken: resp.RegistrationAccessToken,
-		RegistrationClientURI:   resp.RegistrationClientURI,
+		Prefix: dirResp.XPelNsHdr.Namespace,
+		ClientRegistration: config.ClientRegistration{
+			ClientID:                resp.ClientID,
+			ClientSecret:            resp.ClientSecret,
+			ClientScopes:            scopes,
+			RegistrationAccessToken: resp.RegistrationAccessToken,
+			RegistrationClientURI:   resp.RegistrationClientURI,
+		},
 	}
 	return &newEntry, nil
 }
 
 // Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
+// refreshTokenEntry refreshes a single stored token in place using its prefix's
+// OAuth2 client registration and the given issuer's token endpoint. On success
+// it updates the entry's access token, expiration, and (when the issuer rotates
+// it) refresh token. It does NOT persist the change to disk. The OAuth2
+// refresh-token grant is non-interactive.
+func refreshTokenEntry(prefixEntry *config.PrefixEntry, tok *config.TokenEntry, issuer string) error {
+	if tok.RefreshToken == "" {
+		return errors.New("token has no refresh token")
+	}
+	issuerInfo, err := config.GetIssuerMetadata(issuer)
+	if err != nil {
+		return err
+	}
+	upstreamConfig := oauth2_upstream.Config{
+		ClientID:     prefixEntry.ClientID,
+		ClientSecret: prefixEntry.ClientSecret,
+		Endpoint: oauth2_upstream.Endpoint{
+			AuthURL:  issuerInfo.AuthURL,
+			TokenURL: issuerInfo.TokenURL,
+		},
+	}
+	upstreamToken := oauth2_upstream.Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		Expiry:       time.Unix(0, 0),
+	}
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, httpClient)
+	newToken, err := upstreamConfig.TokenSource(ctx, &upstreamToken).Token()
+	if err != nil {
+		return err
+	}
+	tok.AccessToken = newToken.AccessToken
+	tok.Expiration = newToken.Expiry.Unix()
+	if len(newToken.RefreshToken) != 0 {
+		tok.RefreshToken = newToken.RefreshToken
+	}
+	return nil
+}
+
 func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
 
 	log.Debugln("Acquiring a token from configuration and OAuth2")
@@ -798,13 +860,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		return "", err
 	}
 
-	prefixIdx := -1
-	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == nsPrefix {
-			prefixIdx = idx
-			break
-		}
-	}
+	fc, prefixIdx := osdfConfig.FindOauthClient(opts.DiscoveryURL, nsPrefix)
 	var prefixEntry *config.PrefixEntry
 	newEntry := false
 	tryTokenGen := false
@@ -821,11 +877,11 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", err
 		}
-		osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, *prefixEntry)
-		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+		fc.OauthClient = append(fc.OauthClient, *prefixEntry)
+		prefixEntry = &fc.OauthClient[len(fc.OauthClient)-1]
 		newEntry = true
 	} else {
-		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
+		prefixEntry = &fc.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
 
 			// Similarly, here, generate a token before registering a new client.
@@ -840,12 +896,12 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				return "", err
 			}
-			osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+			fc.OauthClient[prefixIdx] = *prefixEntry
 			newEntry = true
 		}
 	}
 	if newEntry {
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 	}
@@ -871,37 +927,13 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 
 	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
-		upstreamToken := oauth2_upstream.Token{
-			AccessToken:  tokenToRefresh.AccessToken,
-			RefreshToken: tokenToRefresh.RefreshToken,
-			Expiry:       time.Unix(0, 0),
-		}
-		issuerInfo, err := config.GetIssuerMetadata(issuer)
-		if err == nil {
-			upstreamConfig := oauth2_upstream.Config{
-				ClientID:     prefixEntry.ClientID,
-				ClientSecret: prefixEntry.ClientSecret,
-				Endpoint: oauth2_upstream.Endpoint{
-					AuthURL:  issuerInfo.AuthURL,
-					TokenURL: issuerInfo.TokenURL,
-				}}
-			client := &http.Client{Transport: config.GetTransport()}
-			ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, client)
-			source := upstreamConfig.TokenSource(ctx, &upstreamToken)
-			newToken, err := source.Token()
-			if err != nil {
-				log.Warningln("Failed to renew an expired token:", err)
-			} else {
-				tokenToRefresh.AccessToken = newToken.AccessToken
-				tokenToRefresh.Expiration = newToken.Expiry.Unix()
-				if len(newToken.RefreshToken) != 0 {
-					tokenToRefresh.RefreshToken = newToken.RefreshToken
-				}
-				if err = config.SaveConfigContents(&osdfConfig); err != nil {
-					log.Warningln("Failed to save new token to configuration file:", err)
-				}
-				return newToken.AccessToken, nil
+		if err := refreshTokenEntry(prefixEntry, tokenToRefresh, issuer); err != nil {
+			log.Warningln("Failed to renew an expired token:", err)
+		} else {
+			if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
+				log.Warningln("Failed to save new token to configuration file:", err)
 			}
+			return tokenToRefresh.AccessToken, nil
 		}
 	}
 
@@ -914,6 +946,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 
+	// The only remaining option requires the interactive OAuth2 device-code
+	// flow. Callers without a controlling terminal (e.g. the client agent)
+	// set NonInteractive so we fail with an actionable error instead of
+	// blocking on a prompt the user will never see.
+	if opts.NonInteractive {
+		return "", error_codes.NewAuthorizationError(fmt.Errorf("no usable token in the wallet for %s and interactive acquisition is disabled; acquire credentials first (e.g. via the CLI)", destination.Path))
+	}
+
 	token, err := oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts)
 	if errors.Is(err, oauth2.ErrUnknownClient) {
 		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
@@ -923,8 +963,8 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
-		osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		fc.OauthClient[prefixIdx] = *prefixEntry
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
@@ -950,7 +990,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	Tokens := &prefixEntry.Tokens
 	*Tokens = append(*Tokens, *token)
 
-	if err = config.SaveConfigContents(&osdfConfig); err != nil {
+	if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 		log.Warningln("Failed to save new token to configuration file:", err)
 	}
 

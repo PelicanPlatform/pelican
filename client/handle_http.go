@@ -405,6 +405,9 @@ type (
 	identTransferOptionFedToken                 struct{}
 	identTransferOptionCacheEmbeddedClientMode  struct{}
 	identTransferOptionRequestId                struct{}
+	identTransferOptionTokenProvider            struct{}
+	identTransferOptionSourceTokenProvider      struct{}
+	identTransferOptionNonInteractive           struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -873,6 +876,21 @@ func WithFedToken(provider TokenProvider) TransferOption {
 	return option.New(identTransferOptionFedToken{}, provider)
 }
 
+// WithTokenProvider supplies a dynamic producer for the destination (or, for
+// non-copy transfers, the primary) token.  The provider is queried on every
+// token request, so callers can back it with a refreshable source such as an
+// encrypted credential store.
+func WithTokenProvider(provider TokenProvider) TransferOption {
+	return option.New(identTransferOptionTokenProvider{}, provider)
+}
+
+// WithSourceTokenProvider supplies a dynamic producer for the source token of a
+// third-party-copy transfer.  For a get operation it provides the primary
+// token instead.
+func WithSourceTokenProvider(provider TokenProvider) TransferOption {
+	return option.New(identTransferOptionSourceTokenProvider{}, provider)
+}
+
 // Create an option to provide a source token for a third-party-copy transfer
 func WithSourceToken(token string) TransferOption {
 	return option.New(identTransferOptionSourceToken{}, token)
@@ -915,6 +933,15 @@ func WithRequireChecksum() TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
+}
+
+// WithNonInteractive controls whether token acquisition may fall back to the
+// interactive OAuth2 device-code flow.  When enabled (true), acquisition uses
+// only cached, refreshable, or locally-generatable tokens and fails instead of
+// prompting.  This is intended for callers without a controlling terminal,
+// such as the client agent.
+func WithNonInteractive(enable bool) TransferOption {
+	return option.New(identTransferOptionNonInteractive{}, enable)
 }
 
 // WithSourceAcquireToken controls automatic token acquisition for the source
@@ -965,6 +992,12 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 			if isCopy {
 				srcToken.EnableAcquire = val
 			}
+		case identTransferOptionNonInteractive{}:
+			val := opt.Value().(bool)
+			token.nonInteractive = val
+			if isCopy {
+				srcToken.nonInteractive = val
+			}
 		}
 	}
 
@@ -1006,6 +1039,16 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 				token.EnableAcquire = opt.Value().(bool)
 			} else if upload {
 				token.EnableAcquire = opt.Value().(bool)
+			}
+		case identTransferOptionTokenProvider{}:
+			// The destination (or primary, for non-copy transfers) token is
+			// produced dynamically by an external provider.
+			token.SetExternalProvider(opt.Value().(TokenProvider))
+		case identTransferOptionSourceTokenProvider{}:
+			if isCopy {
+				srcToken.SetExternalProvider(opt.Value().(TokenProvider))
+			} else if !upload {
+				token.SetExternalProvider(opt.Value().(TokenProvider))
 			}
 		}
 	}

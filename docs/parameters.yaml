@@ -4927,3 +4927,65 @@ hidden: true
 default: false
 osdf_default: false
 components: ["director", "registry"]
+---
+##############################
+#  Transfer-level Configs    #
+##############################
+name: Transfer.DbLocation
+description: |+
+  A filepath to the intended location of the transfer server's SQLite database.
+  This database stores credential information, OAuth2 client registrations,
+  and transfer job metadata.
+type: filename
+root_default: /var/lib/pelican/transfer.sqlite
+default: $ConfigBase/transfer.sqlite
+components: ["transfer"]
+---
+name: Transfer.EnabledGroups
+description: |+
+  A list of group names whose members are permitted to use the transfer API.
+  When the transfer API is served by an origin, users with valid tokens
+  containing one of these groups will be granted access.
+  If empty, all authenticated users with a valid token bearing the
+  pelican.transfer scope are allowed.
+type: stringSlice
+default: []
+components: ["origin", "transfer"]
+---
+name: Transfer.CredentialIdleTimeout
+description: |+
+  The duration of inactivity after which stored credentials with no
+  associated active transfer jobs are automatically cleaned up.
+  Set to 0 to disable automatic credential cleanup.
+type: duration
+default: 168h
+components: ["origin", "transfer"]
+---
+name: Transfer.EnableOAuth2Clients
+description: |+
+  When enabled, the transfer server allows users to register OAuth2
+  client credentials (client ID and secret) that can be used for
+  token exchange workflows to obtain renewable access tokens.
+type: bool
+default: false
+components: ["origin", "transfer"]
+---
+name: Transfer.MaxConcurrentJobs
+description: |+
+  The maximum number of concurrent transfer jobs the transfer server
+  can process simultaneously.
+  Set to 0 or negative to use the default value (5).
+type: int
+default: 5
+components: ["origin", "transfer"]
+---
+name: Origin.EnableTransferAPI
+description: |+
+  When enabled, the origin serves the transfer API at /api/v1.0/transfer,
+  allowing authenticated users to submit and manage third-party copy
+  operations through the origin.
+  The transfer API provides credential management and job submission
+  capabilities for federated transfers.
+type: bool
+default: false
+components: ["origin"]

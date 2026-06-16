@@ -106,6 +106,13 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 		return utils.MigrateServerSpecificDB(sqlDB, EmbedRegistryMigrations, "registry_migrations", "registry")
 	case server_structs.OriginType:
 		return utils.MigrateServerSpecificDB(sqlDB, EmbedOriginMigrations, "origin_migrations", "origin")
+	case server_structs.TransferType:
+		// A standalone transfer server runs the embedded "local" issuer, whose
+		// OIDC tables (oidc_*) live in the origin migration set. Reuse that set
+		// (sharing the "origin" goose tracking) so a transfer-only server
+		// provisions them; the handful of origin-specific tables it also creates
+		// are unused but harmless.
+		return utils.MigrateServerSpecificDB(sqlDB, EmbedOriginMigrations, "origin_migrations", "origin")
 	default:
 		log.Debugf("No specific migrations for server type: %s", serverType.String())
 	}

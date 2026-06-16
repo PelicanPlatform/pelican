@@ -21,8 +21,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -91,6 +95,11 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 		flagSet.Bool("direct", false, "Read directly from an origin, bypassing any caches (same as '?directread' query)")
 		flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
 		flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
+		flagSet.String("transfer-server", "", "Submit the transfer to a remote transfer server instead of running locally")
+		flagSet.String("transfer-server-token", "", "Path to a file containing the token for authenticating with the transfer server")
+		flagSet.String("source-credential-id", "", "Credential ID on the transfer server to use for the source")
+		flagSet.String("dest-credential-id", "", "Credential ID on the transfer server to use for the destination")
+		flagSet.String("dest-origin", "", "Use the transfer service at the given destination origin URL (pings it first to verify availability)")
 		objectCmd.AddCommand(copyCmd)
 	}
 }
@@ -181,6 +190,22 @@ func copyMain(cmd *cobra.Command, args []string) {
 			}
 		}
 
+		// Warm the wallet (interactively) and open the agent's wallet so the
+		// agent can authorize both sides of the copy non-interactively. The
+		// sources need a read token and the destination a write token. Skipped
+		// when an explicit token file was provided.
+		if tokenLocation == "" {
+			warmItems := make([]asyncWarmItem, 0, len(source)+1)
+			for _, src := range source {
+				warmItems = append(warmItems, asyncWarmItem{url: src, write: false})
+			}
+			warmItems = append(warmItems, asyncWarmItem{url: dest, write: true})
+			if err := warmWalletForAsync(ctx, apiClient, warmItems); err != nil {
+				log.Errorln("Failed to prepare credentials for async transfer:", err)
+				os.Exit(1)
+			}
+		}
+
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {
@@ -241,6 +266,50 @@ func copyMain(cmd *cobra.Command, args []string) {
 			if !outputJSON {
 				fmt.Printf("Check status with: pelican job status %s\n", jobID)
 			}
+		}
+		return
+	}
+
+	// Check if user wants to submit to a remote transfer server.
+	// --dest-origin pings the origin to discover whether its transfer
+	// service is enabled and, if so, uses it as the transfer server.
+	transferServer, _ := cmd.Flags().GetString("transfer-server")
+	destOrigin, _ := cmd.Flags().GetString("dest-origin")
+	if destOrigin != "" && transferServer != "" {
+		log.Errorln("Cannot specify both --transfer-server and --dest-origin")
+		os.Exit(1)
+	}
+	if destOrigin != "" {
+		originURL := strings.TrimRight(destOrigin, "/")
+		if err := pingTransferService(ctx, originURL); err != nil {
+			log.Errorf("Transfer service not available at %s: %v", originURL, err)
+			os.Exit(1)
+		}
+		transferServer = originURL
+	}
+
+	if transferServer != "" {
+		if len(args) < 2 {
+			log.Errorln("No Source or Destination")
+			err = cmd.Help()
+			if err != nil {
+				log.Errorln("Failed to print out help:", err)
+			}
+			os.Exit(1)
+		}
+		source := args[:len(args)-1]
+		dest := args[len(args)-1]
+
+		isRecursive, _ := cmd.Flags().GetBool("recursive")
+		srcCred, _ := cmd.Flags().GetString("source-credential-id")
+		dstCred, _ := cmd.Flags().GetString("dest-credential-id")
+		serverToken, _ := cmd.Flags().GetString("transfer-server-token")
+		shouldWait, _ := cmd.Flags().GetBool("wait")
+
+		err := submitToTransferServer(ctx, transferServer, serverToken, source, dest, isRecursive, srcCred, dstCred, shouldWait)
+		if err != nil {
+			log.Errorln("Transfer server submission failed:", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -359,4 +428,211 @@ func copyMain(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+}
+
+// submitToTransferServer submits a copy job to a remote transfer server via its API.
+// If credential IDs are not specified, it will attempt to look them up from
+// the local credential file or bootstrap new credentials.
+// tokenFile is an optional path to a file containing a bearer token for the transfer server.
+// If wait is true, the function polls the job status until a terminal state is reached.
+func submitToTransferServer(ctx context.Context, serverURL, tokenFile string, sources []string, dest string, recursive bool, srcCred, dstCred string, wait bool) error {
+	serverURL = strings.TrimRight(serverURL, "/")
+
+	// Read the server token from the file, if provided
+	serverToken, err := readTokenFile(tokenFile)
+	if err != nil {
+		return err
+	}
+
+	// Resolve credentials and authentication token
+	var tokenValue string
+	srcCred, dstCred, tokenValue, err = lookupOrBootstrapCredentials(ctx, serverURL, serverToken, srcCred, dstCred, sources, dest)
+	if err != nil {
+		return errors.Wrap(err, "credential resolution failed")
+	}
+
+	// If lookupOrBootstrap didn't produce a token but we have one from the flag, use it
+	if tokenValue == "" && serverToken != "" {
+		tokenValue = serverToken
+	}
+
+	transfers := make([]map[string]any, len(sources))
+	for i, src := range sources {
+		transfers[i] = map[string]any{
+			"operation":   "copy",
+			"source":      src,
+			"destination": dest,
+			"recursive":   recursive,
+		}
+	}
+
+	reqBody := map[string]interface{}{
+		"transfers": transfers,
+	}
+	if srcCred != "" {
+		reqBody["source_credential_id"] = srcCred
+	}
+	if dstCred != "" {
+		reqBody["dest_credential_id"] = dstCred
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal request")
+	}
+
+	transport := config.GetTransport()
+	httpClient := &http.Client{Transport: transport}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		serverURL+"/api/v1.0/transfer/jobs", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return errors.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tokenValue != "" {
+		req.Header.Set("Authorization", "Bearer "+tokenValue)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to contact transfer server")
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("transfer server returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return errors.Wrap(err, "failed to parse transfer server response")
+	}
+	jobID, _ := result["job_id"].(string)
+
+	if outputJSON && !wait {
+		fmt.Println(string(respBody))
+	} else if !wait {
+		fmt.Printf("Transfer job submitted: %s (status: %s)\n", jobID, result["status"])
+	}
+
+	if !wait {
+		return nil
+	}
+
+	if !outputJSON {
+		fmt.Printf("Transfer job submitted: %s — waiting for completion...\n", jobID)
+	}
+
+	return pollTransferJob(ctx, httpClient, serverURL, jobID, tokenValue)
+}
+
+// pollTransferJob polls the transfer server for the status of a job until
+// it reaches a terminal state (completed, error, or cancelled).
+func pollTransferJob(ctx context.Context, httpClient *http.Client, serverURL, jobID, token string) error {
+	pollURL := serverURL + "/api/v1.0/transfer/jobs/" + jobID
+	pollInterval := 2 * time.Second
+	maxInterval := 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return errors.Wrap(err, "failed to create poll request")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			log.Warnf("Poll request failed: %v; retrying...", err)
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Warnf("Poll returned %d: %s; retrying...", resp.StatusCode, string(body))
+			continue
+		}
+
+		var status map[string]any
+		if err := json.Unmarshal(body, &status); err != nil {
+			log.Warnf("Failed to parse poll response: %v; retrying...", err)
+			continue
+		}
+
+		jobStatus, _ := status["status"].(string)
+		switch jobStatus {
+		case "completed":
+			if outputJSON {
+				fmt.Println(string(body))
+			} else {
+				fmt.Printf("Transfer job %s completed successfully.\n", jobID)
+			}
+			return nil
+		case "error":
+			if outputJSON {
+				fmt.Println(string(body))
+			}
+			errMsg, _ := status["error"].(string)
+			return fmt.Errorf("transfer job %s failed: %s", jobID, errMsg)
+		case "cancelled":
+			if outputJSON {
+				fmt.Println(string(body))
+			}
+			return fmt.Errorf("transfer job %s was cancelled", jobID)
+		default:
+			// Still in progress — increase interval with backoff
+			if pollInterval < maxInterval {
+				pollInterval = pollInterval * 3 / 2
+				if pollInterval > maxInterval {
+					pollInterval = maxInterval
+				}
+			}
+		}
+	}
+}
+
+// pingTransferService checks whether the transfer API is enabled at the given
+// origin URL by issuing a GET to /api/v1.0/transfer/ping.
+func pingTransferService(ctx context.Context, originURL string) error {
+	transport := config.GetTransport()
+	httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+
+	pingURL := originURL + "/api/v1.0/transfer/ping"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pingURL, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create ping request")
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to contact origin")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ping returned HTTP %d; transfer service may not be enabled", resp.StatusCode)
+	}
+
+	var result map[string]any
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return errors.Wrap(err, "failed to parse ping response")
+	}
+	if result["service"] != "transfer" {
+		return fmt.Errorf("unexpected ping response: %s", string(body))
+	}
+
+	return nil
 }

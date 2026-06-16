@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -211,6 +212,28 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		keyChangeCallbacks = append(keyChangeCallbacks, pc.KeyChangeCallback())
 	}
 	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules, keyChangeCallbacks...)
+
+	// Initialize and register the transfer module if enabled as a standalone server
+	if modules.IsEnabled(server_structs.TransferType) {
+		if err = database.InitServerDatabase(server_structs.TransferType); err != nil {
+			return
+		}
+		if err = transfer.InitTransferDatabase(); err != nil {
+			return
+		}
+		if err = transfer.RegisterTransferAPI(ctx, engine, egrp); err != nil {
+			return
+		}
+		// A standalone transfer server has no co-located origin to stand up the
+		// embedded issuer, so register the server-level local issuer here. This
+		// lets clients obtain a pelican.transfer token (iss=GetLocalIssuerUrl)
+		// to authenticate to the transfer API.
+		if err = transfer.RegisterLocalIssuer(ctx, egrp, engine, database.ServerDatabase); err != nil {
+			return
+		}
+		transfer.LaunchCredentialCleanup(ctx, egrp)
+		log.Info("Transfer module enabled")
+	}
 
 	// Start periodic database backup routine
 	database.LaunchPeriodicBackup(ctx, egrp)
