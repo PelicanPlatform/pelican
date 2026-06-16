@@ -223,7 +223,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 	} else {
 		{
-			val := "${ConfigBase}/maxmind/GeoLite2-city.mmdb"
+			val := "${ConfigBase}/maxmind/GeoLite2-City.mmdb"
 			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 			v.SetDefault(param.Director_GeoIPLocation.GetName(), val)
 		}
@@ -971,7 +971,7 @@ func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 			v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		} else {
 			{
-				val := "${ConfigBase}/maxmind/GeoLite2-city.mmdb"
+				val := "${ConfigBase}/maxmind/GeoLite2-City.mmdb"
 				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 				v.SetDefault(param.Director_GeoIPLocation.GetName(), val)
 			}
