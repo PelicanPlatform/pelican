@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -556,6 +557,10 @@ func TestListServersHandlerNameFilter(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Pin the swagger contract: the body must be an empty JSON array "[]",
+		// not "null". Unmarshaling alone would accept both, so assert the raw body.
+		assert.Equal(t, "[]", strings.TrimSpace(w.Body.String()))
 
 		var servers []server_structs.ServerRegistration
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &servers))

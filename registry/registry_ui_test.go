@@ -816,6 +816,27 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Contains(t, string(body), "Validation for Pubkey failed:")
 	})
 
+	t.Run("logging-namespace-rejected", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		// Logging namespaces must only be registered through the automated
+		// key-sign challenge flow (which enforces a key match against the
+		// origin). The human-facing create/update endpoint performs no such
+		// check, so it must reject logging prefixes outright to prevent
+		// squatting another origin's logging namespace.
+		mockNs := server_structs.Registration{Prefix: "/pelican/logging/victim.example.org"}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Logging namespaces are managed automatically")
+	})
+
 	t.Run("missing-institution-returns-400", func(t *testing.T) {
 		require.NoError(t, param.Registry_Institutions.Set([]map[string]string{{"name": "Mock School", "id": "123"}}))
 		resetMockRegistryDB(t)

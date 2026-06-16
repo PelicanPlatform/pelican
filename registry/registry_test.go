@@ -20,14 +20,19 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func TestHandleWildcard(t *testing.T) {
@@ -552,5 +558,141 @@ func TestServerIdGenerationAndStorage(t *testing.T) {
 		if saved.CustomFields != nil {
 			assert.NotContains(t, saved.CustomFields, "server_id")
 		}
+	})
+}
+
+// TestLoggingNamespaceKeyMatchEnforcement verifies that keySignChallengeCommit
+// rejects logging namespace registrations whose public key does not match the
+// already-registered origin key, preventing namespace squatting.
+func TestLoggingNamespaceKeyMatchEnforcement(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(server_utils.ResetTestState)
+
+	tempDir, err := os.MkdirTemp("", "test-logging-squatting-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	ctx := context.Background()
+	require.NoError(t, param.ConfigDir.Set(tempDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempDir, "issuer-keys")))
+	// Pre-populate all five federation fields so InitServer's internal
+	// discoverFederationImpl takes the "all values present" early-return
+	// path and does not attempt live HTTP discovery.
+	const fakeFed = "https://test.example"
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl, fakeFed))
+	require.NoError(t, param.Set(param.Federation_DirectorUrl, fakeFed))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, fakeFed))
+	require.NoError(t, param.Set(param.Federation_JwkUrl, fakeFed+"/.well-known/issuer.jwks"))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, fakeFed))
+	require.NoError(t, config.InitServer(ctx, server_structs.RegistryType))
+
+	// Reset the once-guard so loadServerKeys picks up the freshly generated key.
+	serverCredsLoad = sync.Once{}
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	// Helper: build a JSON-encoded JWK set from an ECDSA key and return both.
+	makeKey := func(t *testing.T) (*ecdsa.PrivateKey, string) {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub, err := jwk.FromRaw(priv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, jwk.AssignKeyID(pub))
+		set := jwk.NewSet()
+		require.NoError(t, set.AddKey(pub))
+		data, err := json.Marshal(set)
+		require.NoError(t, err)
+		return priv, string(data)
+	}
+
+	// Helper: build a fully-signed registrationData for a given prefix and key.
+	// Mirrors what RegisterNamespaceWithRetry does on the client side.
+	makeRegistrationData := func(t *testing.T, prefix string, clientPriv *ecdsa.PrivateKey, pubkeyJSON string) registrationData {
+		t.Helper()
+
+		clientNonce, err := utils.GenerateNonce()
+		require.NoError(t, err)
+
+		serverPriv, err := loadServerKeys()
+		require.NoError(t, err)
+
+		serverNonce, err := utils.GenerateNonce()
+		require.NoError(t, err)
+
+		serverPayload := []byte(clientNonce + serverNonce)
+		serverSig, err := utils.SignPayload(serverPayload, serverPriv)
+		require.NoError(t, err)
+
+		clientPayload := []byte(clientNonce + serverNonce)
+		clientSig, err := utils.SignPayload(clientPayload, clientPriv)
+		require.NoError(t, err)
+
+		return registrationData{
+			ClientNonce:     clientNonce,
+			ClientPayload:   hex.EncodeToString(clientPayload),
+			ClientSignature: hex.EncodeToString(clientSig),
+			ServerNonce:     serverNonce,
+			ServerPayload:   hex.EncodeToString(serverPayload),
+			ServerSignature: hex.EncodeToString(serverSig),
+			Pubkey:          json.RawMessage(pubkeyJSON),
+			Prefix:          prefix,
+			SiteName:        "test-site",
+		}
+	}
+
+	const originHost = "squatting-test.example"
+	originPrefix := server_structs.GetOriginNs(originHost)
+	loggingPrefix := server_structs.LoggingNamespaceForServer(originHost)
+
+	originPriv, originPubkeyJSON := makeKey(t)
+	attackerPriv, attackerPubkeyJSON := makeKey(t)
+
+	// Register the origin namespace with the legitimate key.
+	originNs := server_structs.Registration{
+		Prefix: originPrefix,
+		Pubkey: originPubkeyJSON,
+		AdminMetadata: server_structs.AdminMetadata{
+			// SiteName must match originHost so that AddRegistration creates a Server
+			// record with Name=originHost, which is what LoggingNamespaceSitename
+			// extracts from the logging prefix and getServerByName looks up.
+			SiteName: originHost,
+			Status:   server_structs.RegApproved,
+		},
+	}
+	require.NoError(t, AddRegistration(&originNs))
+
+	ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	t.Run("WrongKeyIsRejected", func(t *testing.T) {
+		// Attacker presents their own key and signs with it — nonce challenge passes
+		// (they own the private key) but the key-match check against the origin must reject them.
+		data := makeRegistrationData(t, loggingPrefix, attackerPriv, attackerPubkeyJSON)
+		_, _, err := keySignChallengeCommit(ginCtx, &data)
+		require.Error(t, err)
+		var permErr permissionDeniedError
+		require.ErrorAs(t, err, &permErr, "expected permissionDeniedError, got: %v", err)
+		assert.Contains(t, permErr.Message, "public key does not match")
+	})
+
+	t.Run("CorrectKeyIsAccepted", func(t *testing.T) {
+		// Legitimate origin registers its logging namespace with the same key.
+		data := makeRegistrationData(t, loggingPrefix, originPriv, originPubkeyJSON)
+		created, _, err := keySignChallengeCommit(ginCtx, &data)
+		require.NoError(t, err)
+		assert.True(t, created, "logging namespace should be created when key matches origin")
+	})
+
+	t.Run("UnregisteredOriginIsRejected", func(t *testing.T) {
+		// No origin registered for this host — must be rejected.
+		const ghostHost = "ghost.squatting-test.example"
+		ghostPriv, ghostPubJSON := makeKey(t)
+		data := makeRegistrationData(t, server_structs.LoggingNamespaceForServer(ghostHost), ghostPriv, ghostPubJSON)
+		_, _, err := keySignChallengeCommit(ginCtx, &data)
+		require.Error(t, err)
+		var permErr permissionDeniedError
+		require.ErrorAs(t, err, &permErr)
+		assert.Contains(t, permErr.Message, "is registered")
 	})
 }
