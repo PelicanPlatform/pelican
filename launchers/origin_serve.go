@@ -287,7 +287,9 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return err
 	}
 	log.Debug("Origin is registered")
-	// Register the logging namespace after the origin prefix, so that Server.ID is available.
+	// Register the logging namespace after the origin prefix: the registry's
+	// key-match gate requires the origin to be registered first so it can verify
+	// the logging namespace is submitted with the origin's registered key.
 	if err := launcher_utils.RegisterLoggingNamespaceWithRetry(ctx, egrp); err != nil {
 		return err
 	}

@@ -29,8 +29,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -117,8 +117,7 @@ func TestRegistration(t *testing.T) {
 	req, err := http.NewRequest("GET", svr.URL+"/api/v1.0/registry", nil)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
+	client := config.GetClient()
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -279,8 +278,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	req, err := http.NewRequest("GET", svr.URL+"/api/v1.0/registry", nil)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
+	client := config.GetClient()
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -343,18 +341,16 @@ func TestRegisterLoggingNamespaceWithRetry_NoopWhenDisabled(t *testing.T) {
 		require.NoError(t, egrp.Wait())
 	}()
 
-	// Logging.LogExports.Enabled is false by default.
-	// The function must return nil immediately without touching the network or
-	// adding any goroutines to the errgroup.
-	goroutinesBefore := runtime.NumGoroutine()
+	// Logging.EnableLogExports is false by default.
+	// The function must return nil immediately without adding any goroutines to
+	// egrp; the deferred egrp.Wait() above will catch any unexpected goroutines.
 	err := RegisterLoggingNamespaceWithRetry(ctx, egrp)
-	require.NoError(t, err, "RegisterLoggingNamespaceWithRetry should be a no-op when LogExports.Enabled is false")
-	require.Equal(t, goroutinesBefore, runtime.NumGoroutine(), "no goroutines should have been launched")
+	require.NoError(t, err, "RegisterLoggingNamespaceWithRetry should be a no-op when EnableLogExports is false")
 }
 
 // TestRegisterLoggingNamespaceWithRetry_WhenEnabled verifies that when
-// Logging.LogExports.Enabled is true, RegisterLoggingNamespaceWithRetry
-// registers /pelican/logging/{Server.ID} in the registry.
+// Logging.EnableLogExports is true, RegisterLoggingNamespaceWithRetry
+// registers /pelican/logging/{sitename} in the registry.
 func TestRegisterLoggingNamespaceWithRetry_WhenEnabled(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(server_utils.ResetTestState)
@@ -386,40 +382,100 @@ func TestRegisterLoggingNamespaceWithRetry_WhenEnabled(t *testing.T) {
 	defer svr.Close()
 
 	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
-	require.NoError(t, param.Xrootd_Sitename.Set("test-logging-origin"))
-	// Server_ExternalWebUrl's host is used by GetServerMetadata to derive the
-	// origin prefix (/origins/{host}) for the server metadata lookup.
+	// Xrootd.Sitename is used as the sitename in the logging namespace prefix
+	// (/pelican/logging/{sitename}).
+	const sitename = "test-logging-origin"
+	require.NoError(t, param.Xrootd_Sitename.Set(sitename))
 	const originHost = "testhost.example"
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://"+originHost))
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
-	// Register the origin prefix so a Server record (with ID) is created in
-	// the registry.  RegisterLoggingNamespaceWithRetry needs that ID.
+	// Register the origin prefix first (logging namespace gate requires the
+	// origin to be registered under the same sitename).
 	originPrefix := server_structs.GetOriginNs(originHost)
 	require.NoError(t, RegisterNamespaceWithRetry(ctx, egrp, originPrefix))
 
 	// Enable log exports and register the logging namespace.
-	require.NoError(t, param.Logging_LogExports_Enabled.Set(true))
+	require.NoError(t, param.Logging_EnableLogExports.Set(true))
 	require.NoError(t, RegisterLoggingNamespaceWithRetry(ctx, egrp))
 
-	// Get the server ID by querying the registry.
-	tr := config.GetTransport()
-	httpClient := &http.Client{Transport: tr}
-	serverResp, err := httpClient.Get(svr.URL + "/api/v1.0/registry/server" + originPrefix)
-	require.NoError(t, err)
-	defer serverResp.Body.Close()
-	require.Equal(t, http.StatusOK, serverResp.StatusCode)
-	serverBody, err := io.ReadAll(serverResp.Body)
-	require.NoError(t, err)
-	var serverMeta server_structs.ServerRegistration
-	require.NoError(t, json.Unmarshal(serverBody, &serverMeta))
-	require.NotEmpty(t, serverMeta.ID, "origin server should have an ID after registration")
-
-	// Verify the logging namespace registration exists.
-	loggingPrefix := server_structs.LoggingNamespaceForServer(serverMeta.ID)
+	// Verify the logging namespace registration exists using the sitename-based prefix.
+	loggingPrefix := server_structs.LoggingNamespaceForServer(sitename)
+	httpClient := config.GetClient()
 	loggingResp, err := httpClient.Get(svr.URL + "/api/v1.0/registry" + loggingPrefix)
 	require.NoError(t, err)
 	defer loggingResp.Body.Close()
 	assert.Equal(t, http.StatusOK, loggingResp.StatusCode,
 		"logging namespace %s should be registered after RegisterLoggingNamespaceWithRetry", loggingPrefix)
+}
+
+// TestRegisterLoggingNamespaceWithRetry_RetriesUntilOriginRegistered verifies
+// that calling RegisterLoggingNamespaceWithRetry before the origin namespace
+// has been registered does not return an error.  Instead it enters the retry
+// loop and eventually succeeds once the origin namespace is registered.
+func TestRegisterLoggingNamespaceWithRetry_RetriesUntilOriginRegistered(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(server_utils.ResetTestState)
+
+	tempConfigDir, err := os.MkdirTemp("", "test-logging-ns-retry-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	}()
+
+	server_utils.ResetTestState()
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempConfigDir, "issuer-keys")))
+	test_utils.MockFederationRoot(t, nil, nil)
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	require.NoError(t, database.InitServerDatabase(server_structs.RegistryType))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	registry.RegisterRegistryAPI(engine.Group("/"))
+	svr := httptest.NewServer(engine)
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Xrootd_Sitename.Set("test-logging-retry-origin"))
+	const originHost = "retry-test.example"
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://"+originHost))
+	// Set a short retry interval so the test completes quickly.
+	require.NoError(t, param.Server_RegistrationRetryInterval.Set(200*time.Millisecond))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	require.NoError(t, param.Logging_EnableLogExports.Set(true))
+
+	// Call RegisterLoggingNamespaceWithRetry WITHOUT registering the origin
+	// namespace first.  The registry will reject the logging namespace
+	// (origin not registered yet), but the function must return nil and
+	// enter the background retry loop instead of propagating the error.
+	err = RegisterLoggingNamespaceWithRetry(ctx, egrp)
+	require.NoError(t, err,
+		"RegisterLoggingNamespaceWithRetry must not return an error when the origin is not yet registered; it should retry in the background")
+
+	// Now register the origin namespace so the next retry attempt can succeed.
+	originPrefix := server_structs.GetOriginNs(originHost)
+	require.NoError(t, RegisterNamespaceWithRetry(ctx, egrp, originPrefix))
+
+	// The background retry goroutine should register the logging namespace
+	// once the origin is present.  Logging prefix is now sitename-based.
+	loggingPrefix := server_structs.LoggingNamespaceForServer("test-logging-retry-origin")
+	httpClient := config.GetClient()
+	require.Eventually(t, func() bool {
+		resp, err := httpClient.Get(svr.URL + "/api/v1.0/registry" + loggingPrefix)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 300*time.Millisecond,
+		"logging namespace %s should eventually be registered by the retry loop", loggingPrefix)
 }

@@ -40,7 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry/registry_client"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -266,61 +265,26 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 }
 
 // RegisterLoggingNamespaceWithRetry registers the logging namespace
-// /pelican/logging/{Server.ID} for the origin server.
-// It is a no-op when Logging.LogExports.Enabled is false.
+// /pelican/logging/{sitename} for the origin server, where sitename is
+// the value of Xrootd.Sitename (the human-readable unique server name).
+// It is a no-op when Logging.EnableLogExports is false.
 //
-// Must be called after the origin server prefix has been registered so that
-// the server record (and its Server.ID) exists in the registry.  If the
-// origin prefix registration is still retrying in the background, the server
-// ID will not yet be available; in that case this function spawns a goroutine
-// in egrp that polls until the ID appears, then calls RegisterNamespaceWithRetry.
+// The logging namespace prefix is derived entirely from local configuration
+// and does not require a registry lookup, so this can be called at any point
+// after server configuration is initialised.  The logging namespace will be
+// submitted as pending if the origin is still awaiting admin approval;
+// Registry.EnableAutoLoggingRegistration controls whether the registry
+// auto-approves it once the associated origin is approved.
 func RegisterLoggingNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
-	if !param.Logging_LogExports_Enabled.GetBool() {
+	if !param.Logging_EnableLogExports.GetBool() {
 		return nil
 	}
-	metadata, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
-	if err != nil {
-		return errors.Wrap(err, "failed to get server metadata for logging namespace registration")
+	sitename := param.Xrootd_Sitename.GetString()
+	if sitename == "" {
+		return errors.Errorf("cannot register logging namespace: %s must be set when %s is true",
+			param.Xrootd_Sitename.GetName(), param.Logging_EnableLogExports.GetName())
 	}
-	// metadata.ID is the 7-character server ID assigned by the registry the
-	// first time the origin's namespace prefix is successfully registered.  It
-	// is empty when the registry has never seen this origin — for example
-	// because the initial namespace registration failed and is still retrying
-	// in the background.  In that case GetServerMetadata returns an empty
-	// ServerRegistration because no server record exists yet.  Spawn a goroutine
-	// that polls until the ID becomes available, then hands off to
-	// RegisterNamespaceWithRetry.
-	if metadata.ID == "" {
-		log.Warning("Server ID is empty; logging namespace registration will be retried once the origin prefix is registered.")
-		retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
-		if retryInterval == 0 {
-			retryInterval = 10 * time.Second
-		}
-		egrp.Go(func() error {
-			ticker := time.NewTicker(retryInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					md, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
-					if err != nil {
-						log.Warningf("Failed to get server metadata while retrying logging namespace registration: %v", err)
-						continue
-					}
-					if md.ID == "" {
-						continue
-					}
-					loggingPrefix := server_structs.LoggingNamespaceForServer(md.ID)
-					log.Debugf("Registering logging namespace %s", loggingPrefix)
-					return RegisterNamespaceWithRetry(ctx, egrp, loggingPrefix)
-				case <-ctx.Done():
-					return nil
-				}
-			}
-		})
-		return nil
-	}
-	loggingPrefix := server_structs.LoggingNamespaceForServer(metadata.ID)
+	loggingPrefix := server_structs.LoggingNamespaceForServer(sitename)
 	log.Debugf("Registering logging namespace %s", loggingPrefix)
 	return RegisterNamespaceWithRetry(ctx, egrp, loggingPrefix)
 }
