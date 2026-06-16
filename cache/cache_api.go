@@ -34,6 +34,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -413,18 +414,29 @@ func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
 // director, which asks the cache to evict old test files via the cache web API endpoint
 // POST /api/v1.0/cache/evictTestFile (see HandleDirectorEvictRequest). This local cleanup
 // catches files that the director failed to evict (e.g., due to network issues or director restarts).
+// Note this intentionally does not use the fsnotify-driven server_utils.LaunchWatcherMaintenance,
+// which would re-trigger the sweep on every test-file write.
 //
 // When Server.DropPrivileges is enabled the pelican process cannot remove xrootd-owned
 // files directly, so cleanupDirectorTestFiles routes removals through the cache's evict
 // API (see removeTestFile). Privilege-on deployments use os.Remove / os.RemoveAll.
-func LaunchDirectorTestFileCleanup(ctx context.Context) {
+func LaunchDirectorTestFileCleanup(ctx context.Context, egrp *errgroup.Group) {
 	dirTestPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
-	server_utils.LaunchWatcherMaintenance(ctx,
-		[]string{dirTestPath},
-		"cache director-based health test clean up",
-		time.Minute,
-		func(notifyEvent bool) error {
-			return cleanupDirectorTestFiles(ctx, dirTestPath)
-		},
-	)
+
+	egrp.Go(func() error {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			// Run immediately on startup, then once every 24h.
+			if err := cleanupDirectorTestFiles(ctx, dirTestPath); err != nil {
+				log.Warningf("Failure during director test file backup cleanup: %v", err)
+			}
+			select {
+			case <-ctx.Done():
+				log.Info("Director test file backup cleanup routine cancelled; shutting down")
+				return nil
+			case <-ticker.C:
+			}
+		}
+	})
 }
