@@ -149,6 +149,13 @@ npm run e2e
 
 ## Generating tokens for local testing
 
+Your issuer location will depend on the combination of origin or director running.
+
+It could be:
+
+- https://localhost:8444
+- https://localhost:8444/api/v1.0/origin
+
 ```bash
 PELICAN_BINARY=./pelican-server
 PELICAN_CONFIG=/etc/pelican/local/pelican.yaml
