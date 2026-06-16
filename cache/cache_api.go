@@ -302,9 +302,6 @@ func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepObjects int) 
 // completes a successful cache health test, it asks the cache to evict the previous test file
 // via this endpoint. The cache then calls its own xrdhttp-pelican evict API using a locally-
 // minted token, matching the self-test authorization pattern (see xrootd/self_monitor.go).
-//
-// This avoids modifying the cache's scitokens configuration to trust the federation issuer,
-// since the cache already trusts its own issuer for the /pelican/monitoring namespace.
 func HandleDirectorEvictRequest(ctx *gin.Context) {
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
@@ -356,7 +353,7 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 	log.Debugf("Successfully evicted director test file via local plugin: %s", reqBody.Path)
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 		Status: server_structs.RespOK,
-		Msg:    "Eviction successful",
+		Msg:    "Eviction successfully scheduled",
 	})
 }
 
@@ -381,7 +378,7 @@ func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
 	tokenCfg := token.NewWLCGToken()
 	tokenCfg.Lifetime = time.Minute
 	tokenCfg.Issuer = issuerUrl
-	tokenCfg.Subject = "cache"
+	tokenCfg.Subject = cacheUrl
 	// xrootd's scitokens plugin treats scope paths as relative to the issuer's
 	// base_path (/pelican/monitoring), so we strip that prefix here. Passing an
 	// absolute scope like /pelican/monitoring/directorTest/... gets the base path

@@ -1128,12 +1128,12 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	return cfg, nil
 }
 
-// BuildCacheNamespaceAds returns the cache's director-advertised namespace ads, augmented
+// buildCacheNsAdsWithIssuer returns the cache's director-advertised namespace ads, augmented
 // with a monitoring-namespace issuer when Cache.SelfTest is enabled. The monitoring issuer
 // authorizes locally-minted tokens the cache uses for self-tests and for evicting director
 // test files via the local xrdhttp-pelican evict API. Centralizing this here ensures both
 // the startup write and the runtime EmitScitokensConfig path produce the same scitokens.cfg.
-func BuildCacheNamespaceAds(cacheServer *cache.CacheServer) ([]server_structs.NamespaceAdV2, error) {
+func buildCacheNsAdsWithIssuer(cacheServer *cache.CacheServer) ([]server_structs.NamespaceAdV2, error) {
 	directorAds := cacheServer.GetNamespaceAds()
 	if !param.Cache_SelfTest.GetBool() {
 		return directorAds, nil
@@ -1164,7 +1164,7 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if _, ok := server.(*origin.OriginServer); ok {
 		return WriteOriginScitokensConfig(false)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
-		nsAds, err := BuildCacheNamespaceAds(cacheServer)
+		nsAds, err := buildCacheNsAdsWithIssuer(cacheServer)
 		if err != nil {
 			return err
 		}
