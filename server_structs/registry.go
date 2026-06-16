@@ -115,13 +115,14 @@ const (
 	// default data-namespace type.
 	RegistrationTypeKey = "type"
 
-	// LoggingRegistrationType is the CustomFields["type"] value written when an Origin or
-	// Cache auto-registers its logging namespace (/pelican/logging/{Server.ID}).
+	// LoggingRegistrationType is the CustomFields["type"] value written when an Origin
+	// auto-registers its logging namespace (/pelican/logging/{hostname}).
 	// Using the CustomFields map avoids any DB schema migration.
 	LoggingRegistrationType = "logging"
 
 	// LoggingNamespacePrefix is the path prefix shared by all logging namespace registrations.
-	// Each server's logging namespace is LoggingNamespacePrefix + "/" + Server.ID.
+	// Each server's logging namespace is LoggingNamespacePrefix + "/" + hostname,
+	// where hostname is the host (and optional port) portion of Server_ExternalWebUrl.
 	LoggingNamespacePrefix = "/pelican/logging"
 )
 
@@ -165,25 +166,31 @@ func (reg *Registration) IsLoggingNamespace() bool {
 }
 
 // LoggingNamespaceForServer returns the full logging namespace path for the
-// given server ID, i.e. LoggingNamespacePrefix + "/" + serverID.
-func LoggingNamespaceForServer(serverID string) string {
-	return LoggingNamespacePrefix + "/" + serverID
+// given server sitename (Xrootd.Sitename), i.e. LoggingNamespacePrefix + "/" + sitename.
+// sitename is the human-readable unique name of the server as registered in the Registry.
+func LoggingNamespaceForServer(sitename string) string {
+	return LoggingNamespacePrefix + "/" + sitename
 }
 
-// LoggingNamespaceServerID extracts the server ID embedded in a logging
-// namespace prefix (e.g. "/pelican/logging/abc1234" → "abc1234", true).
+// LoggingNamespaceSitename extracts the sitename embedded in a logging
+// namespace prefix (e.g. "/pelican/logging/my-origin" → "my-origin", true).
 // Returns "", false if prefix is not a direct child of LoggingNamespacePrefix
-// or has an empty server-ID segment.
-func LoggingNamespaceServerID(prefix string) (string, bool) {
+// or has an empty sitename segment.
+func LoggingNamespaceSitename(prefix string) (string, bool) {
 	const loggingParent = LoggingNamespacePrefix + "/"
 	if !strings.HasPrefix(prefix, loggingParent) {
 		return "", false
 	}
-	id := strings.TrimPrefix(prefix, loggingParent)
-	if id == "" {
+	sitename := strings.TrimPrefix(prefix, loggingParent)
+	if sitename == "" {
 		return "", false
 	}
-	return id, true
+	// Reject prefixes like "/pelican/logging/a/b" — a valid logging namespace
+	// is a direct child of LoggingNamespacePrefix (one path segment only).
+	if strings.Contains(sitename, "/") {
+		return "", false
+	}
+	return sitename, true
 }
 
 func IsValidRegStatus(s string) bool {
