@@ -125,32 +125,41 @@ func (st *SourceTracker) ResetPreservingDynamic() {
 	st.sources = preserved
 }
 
-// snapshotViperKeys returns the set of all keys currently known to viper on the
-// given instance, plus their current values (as strings for comparison).
-func snapshotViperKeys(v *viper.Viper) map[string]string {
-	snap := make(map[string]string)
-	for _, key := range v.AllKeys() {
-		snap[key] = v.GetString(key)
+// RecordConfigFileKeys records every key explicitly declared in the config file
+// at filePath as originating from that file. Rather than diffing viper's merged
+// state before and after a merge, it parses the file on its own and records the
+// keys it actually contains.
+//
+// Recording by presence (rather than by value change) is what makes attribution
+// correct in two cases a before/after value diff cannot handle:
+//   - Complex types: viper.GetString collapses slices/maps/objects to "", so a
+//     value diff cannot see a list or map the user set in a file, and the key is
+//     left mislabeled as a default.
+//   - "Last writer wins": when a later file re-declares a key with the same value
+//     an earlier file already set, there is no value change to diff, so the source
+//     would otherwise stay pinned to the earlier file.
+//
+// This is best-effort provenance metadata: the caller has already merged the file
+// into viper, so a read error here does not affect the loaded configuration.
+// Callers should log, not abort, on error.
+func (st *SourceTracker) RecordConfigFileKeys(filePath string, sourceType ConfigSourceType) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
 	}
-	return snap
-}
+	defer f.Close()
 
-// SnapshotViperKeys is the exported version of snapshotViperKeys, for use by
-// other packages that need to record config file diffs.
-func SnapshotViperKeys(v *viper.Viper) map[string]string {
-	return snapshotViperKeys(v)
-}
-
-// RecordConfigFileDiff compares a pre-merge snapshot (from snapshotViperKeys)
-// against the current state and records any new or changed keys as coming from
-// the given config file path.
-func (st *SourceTracker) RecordConfigFileDiff(before map[string]string, v *viper.Viper, filePath string, sourceType ConfigSourceType) {
-	for _, key := range v.AllKeys() {
-		currentVal := v.GetString(key)
-		if oldVal, existed := before[key]; !existed || oldVal != currentVal {
-			st.Record(key, ConfigSource{Type: sourceType, Detail: filePath})
-		}
+	// Pelican config files are YAML; this matches how the caller merged the file
+	// (InitConfigInternal sets viper's config type to yaml globally).
+	tempV := viper.New()
+	tempV.SetConfigType("yaml")
+	if err := tempV.ReadConfig(f); err != nil {
+		return err
 	}
+	for _, key := range tempV.AllKeys() {
+		st.Record(key, ConfigSource{Type: sourceType, Detail: filePath})
+	}
+	return nil
 }
 
 // RecordEnvVarSources scans the environment for variables matching the

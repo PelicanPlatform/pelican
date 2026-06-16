@@ -969,13 +969,14 @@ func handleContinuedCfg() error {
 			defer fHandle.Close()
 
 			fullPath := filepath.Join(cfgDir, file)
-			preSnap := snapshotViperKeys(viper.GetViper())
 			reader := io.Reader(fHandle)
 			err = viper.MergeConfig(reader)
 			if err != nil {
 				return errors.Wrapf(err, "failed to merge extra configuration file %s", fullPath)
 			}
-			GetSourceTracker().RecordConfigFileDiff(preSnap, viper.GetViper(), fullPath, SourceConfigFile)
+			if err := GetSourceTracker().RecordConfigFileKeys(fullPath, SourceConfigFile); err != nil {
+				log.WithError(err).Warnf("Failed to record config source provenance for %s", fullPath)
+			}
 		}
 	}
 
@@ -1163,7 +1164,8 @@ func initConfigInternalImpl(logLevel log.Level) {
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Source tracking: snapshot before config file merge so we can diff after.
+	// Source tracking: mark the baseline before any config file or env var is
+	// loaded, so later stages can overwrite the relevant entries.
 	st := GetSourceTracker()
 	st.ResetPreservingDynamic()
 
@@ -1173,16 +1175,16 @@ func initConfigInternalImpl(logLevel log.Level) {
 	// tagged as SourceDefault.
 	st.RecordDefaultKeys(viper.GetViper())
 
-	preConfigSnap := snapshotViperKeys(viper.GetViper())
-
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
 		}
 	}
-	// Record which keys the primary config file changed.
+	// Record which keys the primary config file set.
 	if cfgFile := viper.ConfigFileUsed(); cfgFile != "" {
-		st.RecordConfigFileDiff(preConfigSnap, viper.GetViper(), cfgFile, SourceConfigFile)
+		if err := st.RecordConfigFileKeys(cfgFile, SourceConfigFile); err != nil {
+			log.WithError(err).Warnf("Failed to record config source provenance for %s", cfgFile)
+		}
 	}
 
 	// Handle config file specified via <PREFIX>_CONFIG_FILE environment variable
@@ -1197,11 +1199,12 @@ func initConfigInternalImpl(logLevel log.Level) {
 			// If file doesn't exist, continue without it
 		} else {
 			defer fp.Close()
-			preEnvCfgSnap := snapshotViperKeys(viper.GetViper())
 			if err := viper.MergeConfig(fp); err != nil {
 				cobra.CheckErr(errors.Wrapf(err, "failed to read config file specified via %s_CONFIG_FILE", upperPrefix.String()))
 			}
-			st.RecordConfigFileDiff(preEnvCfgSnap, viper.GetViper(), envConfigFile, SourceConfigFile)
+			if err := st.RecordConfigFileKeys(envConfigFile, SourceConfigFile); err != nil {
+				log.WithError(err).Warnf("Failed to record config source provenance for %s", envConfigFile)
+			}
 		}
 	}
 	// Handle any extra yaml configurations specified in the ConfigLocations key
