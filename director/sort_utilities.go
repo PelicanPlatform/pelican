@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -411,6 +412,13 @@ func resolveServerGeoIPCoordinate(sAd server_structs.ServerAd) (coord server_str
 //
 // TODO: surface this discrepancy in the director web UI as a follow-up (see issue-2709 next step).
 func logServerLocationDiscrepancy(sAd server_structs.ServerAd) {
+	// Until we have a better way to surface these discrepancies, we'll only do the extra work of getting
+	// GeoIP info via reverse DNS + MaxMind lookup if we intend to log it
+	logLevel := config.GetEffectiveLogLevel()
+	if logLevel < log.DebugLevel {
+		return
+	}
+
 	declared := sAd.Coordinate
 
 	geo, err := resolveServerGeoIPCoordinate(sAd)
