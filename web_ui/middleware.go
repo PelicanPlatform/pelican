@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	ratelimit "github.com/JGLTechnologies/gin-rate-limit"
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,28 @@ import (
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+}
+
+// rejectInvalidPathMiddleware rejects requests whose URL path is not valid
+// UTF-8 before they reach any downstream handler or metrics middleware. Such
+// paths (e.g. overlong UTF-8 encodings) are malformed and would otherwise
+// panic Prometheus label collection, which requires valid UTF-8 strings.
+// Rather than silently sanitizing the path and passing the request through,
+// we reject it with HTTP 400 Bad Request. RawPath is only checked when
+// non-empty; per Go's net/url documentation, RawPath is only set when the
+// encoded form of Path differs from the default encoding, so it is typically
+// empty.
+func rejectInvalidPathMiddleware(ctx *gin.Context) {
+	if !utf8.ValidString(ctx.Request.URL.Path) ||
+		(ctx.Request.URL.RawPath != "" && !utf8.ValidString(ctx.Request.URL.RawPath)) {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "The request path contains invalid UTF-8 characters",
+		})
+		ctx.Abort()
+		return
+	}
+	ctx.Next()
 }
 
 // ReadOnlyMiddleware blocks unsafe ( state changing ) requests when the server is in read-only mode

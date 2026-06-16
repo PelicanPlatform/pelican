@@ -21,6 +21,7 @@ package utils
 import (
 	"strconv"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -203,6 +204,43 @@ func TestValidateWatermark(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureValidUTF8(t *testing.T) {
+	t.Run("valid-utf8-unchanged", func(t *testing.T) {
+		input := "/api/v1.0/director/object/foo/bar/:path"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+		assert.True(t, utf8.ValidString(result))
+	})
+
+	t.Run("invalid-utf8-replaced", func(t *testing.T) {
+		// Simulate the overlong UTF-8 encoding attack seen in the panic
+		input := "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./:path"
+		result := EnsureValidUTF8(input)
+		assert.True(t, utf8.ValidString(result), "result should be valid UTF-8")
+		assert.False(t, utf8.ValidString(input), "input should be invalid UTF-8 (test sanity check)")
+	})
+
+	t.Run("empty-string", func(t *testing.T) {
+		result := EnsureValidUTF8("")
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("all-ascii", func(t *testing.T) {
+		input := "/simple/ascii/path"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("valid-multibyte-utf8", func(t *testing.T) {
+		// Valid multi-byte UTF-8 (Chinese characters) should pass through unchanged
+		input := "/path/\xe4\xb8\xad\xe6\x96\x87"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+		assert.True(t, utf8.ValidString(result))
+	})
+}
+
 func TestValidateLatLong(t *testing.T) {
 	tests := []struct {
 		name    string

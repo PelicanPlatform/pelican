@@ -479,6 +479,53 @@ func TestMapPrometheusPath(t *testing.T) {
 	})
 }
 
+func TestRejectInvalidPathMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("non-utf8-path-is-rejected", func(t *testing.T) {
+		// Simulate the overlong UTF-8 encoding attack seen in the Director panic.
+		// The raw path /api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file would
+		// trigger a Prometheus panic when used as a label value, so the request
+		// is rejected with 400 Bad Request rather than sanitized and passed on.
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file"
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.True(t, c.IsAborted(), "request must be aborted")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "request must be rejected with 400 Bad Request")
+	})
+
+	t.Run("non-utf8-raw-path-is-rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./file"
+		req.URL.RawPath = "/api/v1.0/director/object/\xc0.\xc0./file"
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.True(t, c.IsAborted(), "request must be aborted")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "request must be rejected with 400 Bad Request")
+	})
+
+	t.Run("valid-utf8-path-passes-through-unchanged", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar.txt", nil)
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.False(t, c.IsAborted(), "valid request must not be aborted")
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar.txt", c.Request.URL.Path)
+	})
+}
+
 func TestServerHostRestart(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()

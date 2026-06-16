@@ -318,6 +318,13 @@ func ParseBytes(sizeStr string) (uint64, error) {
 	return num, nil
 }
 
+// EnsureValidUTF8 returns a copy of s with any invalid UTF-8 byte sequences
+// replaced by the Unicode replacement character (U+FFFD), ensuring the
+// resulting string is valid UTF-8.
+func EnsureValidUTF8(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
+
 // ParseGeoLocationString parses a "lat,lon" string (e.g. "43.0739,-89.3848") into
 // its component float64 values, validating the range via ValidateLatLong.
 func ParseCoordinateStr(s string) (lat, long float64, err error) {
