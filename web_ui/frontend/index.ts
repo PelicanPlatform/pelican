@@ -39,7 +39,7 @@ export interface RegistryNamespace {
   prefix: string;
   adjustedPrefix?: string; // This value is the same when type is 'namespace' otherwise it removes the type value
   pubkey: string;
-  type: 'origin' | 'cache' | 'namespace';
+  type: 'origin' | 'cache' | 'namespace' | 'pelican';
   admin_metadata: NamespaceAdminMetadata;
   custom_fields?: Record<string, any>;
 }

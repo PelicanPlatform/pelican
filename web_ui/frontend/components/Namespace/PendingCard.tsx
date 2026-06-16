@@ -122,7 +122,8 @@ export const PendingCard = ({
               </>
             )}
             {(authenticated?.role == 'admin' ||
-              authenticated?.user == namespace.admin_metadata.user_id) && (
+              authenticated?.user == namespace.admin_metadata.user_id) &&
+              namespace.type !== 'pelican' && (
               <Tooltip title={'Edit Registration'}>
                 <Link
                   href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}

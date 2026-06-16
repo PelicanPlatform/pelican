@@ -99,6 +99,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
               </Tooltip>
               {authenticated?.role == 'admin' && (
                 <>
+                  {namespace.type !== 'pelican' && (
                   <Tooltip title={'Edit Registration'}>
                     <Link
                       href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
@@ -111,6 +112,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       </IconButton>
                     </Link>
                   </Tooltip>
+                  )}
                   {['origin', 'cache'].includes(namespace.type) && (
                     <Tooltip title={'Register Downtime'}>
                       <Link

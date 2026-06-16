@@ -8,7 +8,9 @@ const NamespaceIcon = ({
   color = 'white',
   bgcolor = 'primary.main',
 }: {
-  serverType: 'origin' | 'cache' | 'namespace';
+  // 'pelican' covers internal namespaces (e.g. /pelican/logging/*) that are
+  // intentionally hidden from the UI; the component renders nothing for them.
+  serverType: 'origin' | 'cache' | 'namespace' | 'pelican';
   size?: 'large' | 'medium' | 'small';
   color?: string;
   bgcolor?: string;

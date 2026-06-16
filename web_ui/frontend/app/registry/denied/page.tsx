@@ -46,7 +46,9 @@ export default function Home() {
   const deniedNamespaces = useMemo(
     () =>
       data?.filter(
-        ({ namespace }) => namespace.admin_metadata.status === 'Denied'
+        ({ namespace }) =>
+          namespace.admin_metadata.status === 'Denied' &&
+          namespace.type !== 'pelican'
       ),
     [data]
   );
