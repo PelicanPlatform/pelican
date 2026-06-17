@@ -231,6 +231,94 @@ type: filename
 default: none
 components: ["*"]
 ---
+name: Logging.Rotation.Disable
+description: |+
+  By default, when ${Logging.LogLocation} points at a regular file, Pelican
+  manages log rotation itself: the active log file is rotated whenever either the
+  calendar boundary (set by ${Logging.Rotation.Frequency}) is crossed or the size
+  threshold set by ${Logging.Rotation.MaxSize} is reached; rotated files are
+  compressed (unless ${Logging.Rotation.DisableCompress} is set) and old files
+  pruned per ${Logging.Rotation.MaxRetentionSize} and
+  ${Logging.Rotation.MaxRetentionPeriod}. Set this to true to disable Pelican's
+  built-in rotation entirely (for example, when an external service such as
+  logrotate manages the file).
+
+  Rotation is also automatically disabled when the log target is not a regular
+  file (for example, the empty default which logs to `stderr`, or a special file
+  such as `/dev/stdout`, a pipe, or a device), regardless of this setting.
+  Pelican assumes it is the only process rotating the file; multiple daemons on
+  the same file may be problematic.
+type: bool
+default: false
+components: ["*"]
+---
+name: Logging.Rotation.Frequency
+description: |+
+  How often the active log file is rotated on a calendar boundary, so
+  administrators can find logs by date. Accepted values are "daily", "hourly",
+  and "none" (case-insensitive); use "none" to disable time-based rotation and
+  rely solely on ${Logging.Rotation.MaxSize}.
+
+  Time-based rotation happens at the calendar boundary (local time): "daily"
+  rotates at midnight, "hourly" at the top of each hour. Each rotated file is
+  named for the period during which it was written -- the active file is renamed
+  with a suffix of the period's start: "<logfile>.2006-01-02" for daily and
+  "<logfile>.2006-01-02T15" for hourly. When time-based rotation is disabled
+  ("none"), size-triggered rotations are named with a full timestamp suffix
+  "<logfile>.2006-01-02T15-04-05". If more than one rotation occurs within the
+  same suffix, an incrementing "-N" is appended to keep names unique.
+type: string
+default: daily
+components: ["*"]
+---
+name: Logging.Rotation.MaxSize
+description: |+
+  The size threshold at which the active log file is rotated, e.g. "100MB" or
+  "1GB". Set to "0" to disable size-based rotation and rely solely on
+  ${Logging.Rotation.Frequency}. Size- and time-based rotation may be combined.
+type: string
+default: 1GB
+components: ["*"]
+---
+name: Logging.Rotation.MaxRetentionSize
+description: |+
+  The maximum total size of retained rotated (and compressed) log files, e.g.
+  "10GB". When the combined size of the rotated files would exceed this, the
+  oldest are deleted until it fits (the most recent rotated file is always kept).
+  Set to "0" to not limit retention by size. Applied independently of
+  ${Logging.Rotation.MaxRetentionPeriod}.
+type: string
+default: 10GB
+components: ["*"]
+---
+name: Logging.Rotation.MaxRetentionPeriod
+description: |+
+  The maximum age of retained rotated log files; rotated files older than this
+  are deleted. Set to 0 to not limit retention by age. Applied independently of
+  ${Logging.Rotation.MaxRetentionSize}.
+type: duration
+default: 720h
+components: ["*"]
+---
+name: Logging.Rotation.DisableCompress
+description: |+
+  By default, rotated log files are compressed with gzip (producing a `.gz`
+  suffix) by a background worker after rotation. Set this to true to keep rotated
+  files uncompressed.
+type: bool
+default: false
+components: ["*"]
+---
+name: Logging.Rotation.FlushInterval
+description: |+
+  The maximum interval the asynchronous log writer waits before flushing
+  buffered log lines to the log file. Lower values reduce the window in which
+  buffered lines could be lost; higher values reduce wakeups and syscalls.
+type: duration
+hidden: true
+default: 50ms
+components: ["*"]
+---
 name: Logging.Client.DisableProgressBars
 description: |+
   A bool defining whether the client should emit progress bars to track download progress.
