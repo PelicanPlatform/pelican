@@ -100,18 +100,18 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
               {authenticated?.role == 'admin' && (
                 <>
                   {namespace.type !== 'pelican' && (
-                  <Tooltip title={'Edit Registration'}>
-                    <Link
-                      href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
-                    >
-                      <IconButton
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                        size={size}
+                    <Tooltip title={'Edit Registration'}>
+                      <Link
+                        href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
                       >
-                        <Edit fontSize={size} />
-                      </IconButton>
-                    </Link>
-                  </Tooltip>
+                        <IconButton
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                          size={size}
+                        >
+                          <Edit fontSize={size} />
+                        </IconButton>
+                      </Link>
+                    </Tooltip>
                   )}
                   {['origin', 'cache'].includes(namespace.type) && (
                     <Tooltip title={'Register Downtime'}>
