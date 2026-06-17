@@ -279,6 +279,11 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
   crb enable
   yum-config-manager --setopt=install_weak_deps=False --save
 
+  # Explicitly disable the osg-upcoming* repos. These repos contain
+  # software that is not yet ready for production use (e.g., XRootD 6),
+  # and enabling them can cause dependency failures.
+  yum-config-manager --disable 'osg-upcoming*'
+
   # Install common software.
 
   dnf install -y \
