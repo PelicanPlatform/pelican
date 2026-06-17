@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -105,12 +105,10 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 		os.RemoveAll(tmpPath)
 	})
 
-	test_utils.MockFederationRoot(t, nil, nil)
-
 	// Increase the log level; otherwise, its difficult to debug failures
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
@@ -202,7 +200,6 @@ func TestOrigin(t *testing.T) {
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Server_WebPort.Set(0))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Logging_Origin_Scitokens.Set("debug"))
 
 	mockupCancel := originMockup(ctx, egrp, t)
@@ -259,15 +256,13 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Server_WebPort.Set(0))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Logging_Origin_Scitokens.Set("debug"))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-
 	// Initialize the origin before getting origin exports
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	cfgDir := t.TempDir()
+	require.NoError(t, param.ConfigDir.Set(cfgDir))
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	originExports, err := server_utils.GetOriginExports()
 	require.NoError(t, err)
@@ -310,7 +305,6 @@ func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, fed
 	require.NoError(t, param.Origin_SelfTest.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Server_WebPort.Set(0))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	return originMockup(ctx, egrp, t)
 }
@@ -460,7 +454,6 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Server_WebPort.Set(0))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Logging_Origin_Scitokens.Set("trace"))
 
 	mockupCancel := originMockup(ctx, egrp, t)

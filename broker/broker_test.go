@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -21,6 +21,7 @@
 package broker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -50,21 +51,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
-
-type (
-	ConnLogger struct {
-		net.Conn
-	}
-)
-
-// Return a transport that always dials the given connection
-func getTransport(conn net.Conn) (tr *http.Transport) {
-	tr = config.GetTransport().Clone()
-	tr.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-		return &ConnLogger{conn}, nil
-	}
-	return
-}
 
 // setupTestEngine creates a gin engine for testing, similar to web_ui.GetEngine()
 func setupTestEngine() *gin.Engine {
@@ -144,12 +130,10 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(dirpath, "ns-registry.sqlite")))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/foo"))
 
-	test_utils.MockFederationRoot(t, nil, nil)
+	test_utils.InitServerForTest(t, ctx, server_structs.BrokerType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
-	err := config.InitServer(ctx, server_structs.BrokerType)
-	require.NoError(t, err)
-
-	err = database.InitServerDatabase(server_structs.RegistryType)
+	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 
 	keyset, err := config.GetIssuerPublicJWKS()
@@ -321,8 +305,7 @@ func TestBroker(t *testing.T) {
 
 	go func() {
 		log.Debug("Starting reversed server for connection")
-		// Use ServeTLS since the server has TLS config
-		err := srv.ServeTLS(listener, "", "")
+		err := srv.Serve(listener)
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
@@ -340,20 +323,20 @@ func TestBroker(t *testing.T) {
 	})
 
 	// Wrap the client connection in TLS to match the origin's TLS listener
-	// The broker's reversed connection mechanism always uses TLS
-	tlsConfig := config.GetTransport().TLSClientConfig
+	// and issue a simple HTTPS request over the reversed connection.
+	tlsConfig := config.GetTransport().TLSClientConfig.Clone()
+	if tlsConfig.ServerName == "" {
+		tlsConfig.ServerName = param.Server_Hostname.GetString()
+	}
 	tlsConn := tls.Client(clientConn, tlsConfig)
 	err = tlsConn.HandshakeContext(ctx)
 	require.NoError(t, err)
 
-	// Make a simple HTTPS request against the reversed connection server
-	tr := getTransport(tlsConn)
-	client := http.Client{Transport: tr}
-	url := "https://" + clientConn.RemoteAddr().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://localhost/", nil)
 	require.NoError(t, err)
+	require.NoError(t, req.Write(tlsConn))
 
-	resp, err := client.Do(req)
+	resp, err := http.ReadResponse(bufio.NewReader(tlsConn), req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

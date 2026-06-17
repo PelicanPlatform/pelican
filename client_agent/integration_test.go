@@ -37,13 +37,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -294,9 +294,8 @@ func TestClientAPIIntegration(t *testing.T) {
 	// Set up client API server with proper temp directory handling
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	// Create context with errgroup
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
@@ -538,8 +537,8 @@ func TestClientAPIShutdown(t *testing.T) {
 	// Set up client API server - use short socket name
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
 
 	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)

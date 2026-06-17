@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -66,11 +67,10 @@ func TestRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
-	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, param.Registry_DbLocation.Set(""))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
@@ -97,11 +97,11 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
-	// Re-run the InitServer to reflect the new RegistryUrl set above
-	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	// Re-run the InitServer, then install a mock federation that advertises the test registry URL.
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(&pelican_url.FederationDiscovery{RegistryEndpoint: svr.URL}, nil))
 
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()
@@ -189,19 +189,13 @@ func TestMultiKeysRegistration(t *testing.T) {
 	server_utils.ResetTestState()
 	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
 
-	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
-	// function overrides the IssuerKeysDirectory value if not already set. Since we don't
-	// rely on the federation keys in this test, it's easier to work around the issue than
-	// generate distinct keys for it.
-	test_utils.MockFederationRoot(t, nil, nil)
-
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
 	require.NoError(t, param.Registry_DbLocation.Set(""))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
@@ -256,14 +250,14 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
 	// Remove the original key, forcing us to register with the new one
 	require.NoError(t, os.Remove(filepath.Join(keysDir, dirEntries[0].Name())))
 
-	// Re-run the InitServer to reflect the new RegistryUrl set above
-	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	// Re-run the InitServer, then install a mock federation that advertises the test registry URL.
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(&pelican_url.FederationDiscovery{RegistryEndpoint: svr.URL}, nil))
 
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()

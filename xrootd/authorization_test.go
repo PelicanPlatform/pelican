@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -22,6 +22,8 @@ package xrootd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"io/fs"
 	"net"
@@ -123,8 +125,14 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 		return dialer.DialContext(ctx, svr.Listener.Addr().Network(), svr.Listener.Addr().String())
 	}
 	oldConfig := transport.TLSClientConfig
-	transport.TLSClientConfig = svr.TLS.Clone()
-	transport.TLSClientConfig.InsecureSkipVerify = true
+	certPool := x509.NewCertPool()
+	certPool.AddCert(svr.Certificate())
+	serverURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+	transport.TLSClientConfig = &tls.Config{
+		RootCAs:    certPool,
+		ServerName: serverURL.Hostname(),
+	}
 	t.Cleanup(func() {
 		transport.DialContext = oldDial
 		transport.TLSClientConfig = oldConfig
@@ -135,7 +143,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	require.NoError(t, param.Server_Hostname.Set("sc-origin.chtc.wisc.edu"))
 
 	originServer := &origin.OriginServer{}
-	_, err := getOSDFAuthFiles(originServer)
+	_, err = getOSDFAuthFiles(originServer)
 
 	require.NoError(t, err, "error")
 	server_utils.ResetTestState()
@@ -961,7 +969,7 @@ func TestEmitCfg(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, nil)
+	test_utils.InitClientForTest(t)
 	require.NoError(t, param.Origin_RunLocation.Set(dirname))
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
@@ -1042,7 +1050,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, nil)
+	test_utils.InitClientForTest(t)
 
 	require.NoError(t, param.Origin_RunLocation.Set(dirname))
 
@@ -1077,8 +1085,6 @@ func TestMergeConfig(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.MockFederationRoot(t, nil, nil)
-
 	storageDir := filepath.Join(dirname, "storage")
 	require.NoError(t, os.MkdirAll(storageDir, 0777))
 	require.NoError(t, os.Chmod(storageDir, 0777))
@@ -1102,9 +1108,8 @@ func TestMergeConfig(t *testing.T) {
 
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
-
-			err = config.InitServer(ctx, server_structs.OriginType)
-			require.NoError(t, err)
+			test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+				test_utils.WithLazyFederationMock(nil, nil))
 
 			err = EmitScitokensConfig(&origin.OriginServer{})
 			require.NoError(t, err)
@@ -1298,10 +1303,9 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
-			require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+			cfgDir := t.TempDir()
+			require.NoError(t, param.ConfigDir.Set(cfgDir))
 			require.NoError(t, param.Logging_Level.Set("debug"))
-
-			test_utils.MockFederationRoot(t, nil, nil)
 
 			// Load in test config
 			viper.SetConfigType("yaml")
@@ -1321,9 +1325,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 				}
 				require.NoError(t, param.SetRaw(param.Origin_Exports.GetName(), exports))
 			}
-
-			err = config.InitServer(ctx, server_structs.OriginType)
-			require.NoError(t, err)
+			test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+				test_utils.WithLazyFederationMock(nil, nil))
 
 			// Set extra params if provided
 			for p, val := range tc.extraParams {
@@ -1599,12 +1602,9 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			storageDir := test_utils.GetTmpStoragePrefixDir(t) // Create storage dir with permissions for XRootD daemon user
 			require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 			require.NoError(t, param.Origin_FederationPrefix.Set("/foo/bar"))
-			require.NoError(t, param.TLSSkipVerify.Set(true))
 
-			test_utils.MockFederationRoot(t, nil, nil)
-
-			err := config.InitServer(ctx, server_structs.OriginType)
-			require.NoError(t, err)
+			test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+				test_utils.WithLazyFederationMock(nil, nil))
 
 			issuer, err := GenerateFederationIssuer()
 			require.NoError(t, err)
@@ -1639,10 +1639,8 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
 	require.NoError(t, param.Origin_StorageType.Set(string(server_structs.OriginStoragePosix)))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	// Since this test asserts the static config from resources/test-scitokens-monitoring.cfg
 	// matches the generated/written config, we need to force WriteOriginScitokensConfig to find a
@@ -1651,7 +1649,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	config.SetFederation(pelican_url.FederationDiscovery{DiscoveryEndpoint: "https://federation.example.com/discovery"})
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
-	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
+	err := config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
 	require.NoError(t, err)
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)

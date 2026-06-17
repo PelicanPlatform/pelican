@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -81,12 +81,10 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	// Spin up mock federation discovery endpoint with embedded mock registry URL.
 	fedInfo := pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL}
-	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Mock cached jwks
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err := initServerForTest(t, ctx, server_structs.DirectorType)
-	require.NoError(t, err)
+	initServerForTest(t, ctx, server_structs.DirectorType)
+	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	kSet, err := config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
@@ -259,13 +257,9 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 
 	// Spin up mock federation discovery endpoint with embedded mock registry URL.
 	fedInfo := pelican_url.FederationDiscovery{RegistryEndpoint: registryServerURL}
-	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Initialize director
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "t-issuer-keys")
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(tDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "t-issuer-keys")))
 
 	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
 	// This affects both the server ad cache and the namespaceKeys cache expiration
@@ -275,8 +269,8 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 		require.NoError(t, param.Director_AdvertisementTTL.Set(originalTTL))
 	})
 
-	err = initServerForTest(t, ctx, server_structs.DirectorType)
-	require.NoError(t, err)
+	initServerForTest(t, ctx, server_structs.DirectorType)
+	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Start the TTL cache
 	LaunchTTLCache(ctx, egrp)

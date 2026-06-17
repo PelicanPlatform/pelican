@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -215,11 +215,10 @@ func TestCreateToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "testKeyDir")
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
 	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err := config.InitServer(ctx, server_structs.DirectorType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.DirectorType)
 
 	// Generate a private key to use for the test
-	_, err = config.GetIssuerPublicJWKS()
+	_, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile works

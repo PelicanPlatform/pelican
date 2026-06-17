@@ -250,7 +250,6 @@ func (f *FedTest) Spinup() {
 	require.NoError(f.T, param.Origin_EnableMacaroons.Set(false))
 	require.NoError(f.T, param.Origin_EnableVoms.Set(false))
 	require.NoError(f.T, param.Origin_EnableWrites.Set(true))
-	require.NoError(f.T, param.TLSSkipVerify.Set(true))
 	require.NoError(f.T, param.Server_EnableUI.Set(false))
 	require.NoError(f.T, param.Server_DbLocation.Set(filepath.Join(f.T.TempDir(), "ns-registry.sqlite")))
 	require.NoError(f.T, param.Origin_Port.Set(0))
@@ -266,9 +265,7 @@ func (f *FedTest) Spinup() {
 	require.NoError(f.T, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
 	require.NoError(f.T, param.OIDC_ClientIDFile.Set(oidcClientIDFile))
 	require.NoError(f.T, param.OIDC_ClientSecretFile.Set(oidcClientSecretFile))
-
-	err = config.InitServer(ctx, modules)
-	require.NoError(f.T, err)
+	test_utils.InitServerForTest(f.T, ctx, modules)
 
 	require.NoError(f.T, param.Registry_RequireOriginApproval.Set(false))
 	require.NoError(f.T, param.Registry_RequireCacheApproval.Set(false))
@@ -409,7 +406,6 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
 		require.NoError(t, param.Logging_Level.Set("debug"))
-		require.NoError(t, param.TLSSkipVerify.Set(true))
 
 		if err := config.PrintConfig(); err != nil {
 			return
@@ -450,7 +446,6 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	defer tempObject2.Close()
 
 	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
 	// avoid real web lookups.
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
@@ -514,7 +509,15 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
 	cmd := exec.Command(os.Args[0], "-test.run=TestInfileUploadWithDirAndFiles")
-	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "TEMP_INFILE="+tempInfile.Name(), "TEMP_OUTFILE="+tempOutfilePath, "BEARER_TOKEN="+token)
+	cmd.Env = append(
+		os.Environ(),
+		"RUN_STASHPLUGIN=1",
+		"TEMP_INFILE="+tempInfile.Name(),
+		"TEMP_OUTFILE="+tempOutfilePath,
+		"BEARER_TOKEN="+token,
+		"PELICAN_CONFIGDIR="+fed.TmpPath,
+		"PELICAN_SERVER_TLSCACERTIFICATEFILE="+param.Server_TLSCACertificateFile.GetString(),
+	)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -1722,22 +1725,19 @@ func TestWriteTransferErrorMessage(t *testing.T) {
 
 func TestTransferError404(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err := config.InitClient()
-	require.NoError(t, err)
+	test_utils.InitClientForTest(t)
 
 	// Second server that returns 404
-	secondServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	secondServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer secondServer.Close()
 
 	// First server returns Link header pointing to second server
-	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	directorServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", secondServer.URL)
 		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
 		linkHeader := fmt.Sprintf(`<%s>; rel="duplicate"; pri=1; depth=0`, secondServer.URL)
@@ -1749,8 +1749,6 @@ func TestTransferError404(t *testing.T) {
 	fInfo := pelican_url.FederationDiscovery{
 		DirectorEndpoint: directorServer.URL,
 	}
-
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	test_utils.MockFederationRoot(t, &fInfo, nil)
 	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
@@ -1822,17 +1820,14 @@ func TestTransferError404(t *testing.T) {
 
 func TestTransferErrorSlowTransfer(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err := config.InitClient()
-	require.NoError(t, err)
+	test_utils.InitClientForTest(t)
 
 	// Create a server that sends data very slowly
 	body := strings.Repeat("Hello, World!", 1000) // ~13KB of data
-	slowServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	slowServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "HEAD" {
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			w.WriteHeader(http.StatusOK)
@@ -1858,7 +1853,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	defer slowServer.Close()
 
 	// Create a director server that points to our slow server
-	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	directorServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", slowServer.URL+r.URL.Path)
 		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
 		linkHeader := fmt.Sprintf(`<%s%s>; rel="duplicate"; pri=1; depth=0`, slowServer.URL, r.URL.Path)
@@ -1872,7 +1867,6 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 		DirectorEndpoint: directorServer.URL,
 	}
 
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Client_StoppedTransferTimeout.Set(1*time.Second))
 	require.NoError(t, param.Client_MinimumDownloadSpeed.Set(10000))                  // 10KB/s minimum speed
 	require.NoError(t, param.Client_SlowTransferWindow.Set(500*time.Millisecond))     // Short window to detect slow transfer quickly
@@ -2001,16 +1995,13 @@ func TestTransferErrorDirectorTimeout(t *testing.T) {
 
 func TestTransferErrorHeaderTimeout(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
-	err := config.InitClient()
-	require.NoError(t, err)
+	test_utils.InitClientForTest(t)
 
 	// Create a server that sleeps before sending any response
-	timeoutServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	timeoutServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "HEAD" {
 			// HEAD requests succeed quickly so we can get past the director phase
 			w.Header().Set("Content-Length", "13")
@@ -2028,7 +2019,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	defer timeoutServer.Close()
 
 	// Create a director server that points to our timeout server
-	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	directorServer := test_utils.NewTLSServerForTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", timeoutServer.URL+r.URL.Path)
 		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
 		linkHeader := fmt.Sprintf(`<%s%s>; rel="duplicate"; pri=1; depth=0`, timeoutServer.URL, r.URL.Path)
@@ -2042,7 +2033,6 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 		DirectorEndpoint: directorServer.URL,
 	}
 
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	// Set a very short response header timeout to ensure we hit it first
 	require.NoError(t, param.Transport_ResponseHeaderTimeout.SetString("100ms"))
 	// Set a longer stopped transfer timeout to ensure we don't hit it first

@@ -21,6 +21,7 @@
 package lotman
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -39,12 +41,9 @@ func TestLotmanNewBindings(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
+	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
-	server := getMockDiscoveryHost()
-	defer server.Close()
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
-
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanNewBindings", server.URL, nil)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanNewBindings", param.Federation_DiscoveryUrl.GetString(), nil)
 	defer cleanup()
 	require.True(t, success, "lotman initialisation must succeed before exercising bindings")
 
@@ -127,7 +126,7 @@ func TestLotmanNewBindings(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, owners, "https://another-fake-federation.com")
 		assert.Contains(t, owners, "https://different-fake-federation.com")
-		assert.Contains(t, owners, server.URL)
+		assert.Contains(t, owners, param.Federation_DiscoveryUrl.GetString())
 	})
 
 	t.Run("GetLotsFromDir", func(t *testing.T) {
@@ -234,7 +233,7 @@ func TestLotmanNewBindings(t *testing.T) {
 		// test-2 is a leaf -- safe to delete with no orphan-reassignment options.
 		// The caller must be one of the lot's recursive owners; the federation
 		// (root) issuer always qualifies.
-		require.NoError(t, RemoveLot("test-2", false, false, false, false, server.URL))
+		require.NoError(t, RemoveLot("test-2", false, false, false, false, param.Federation_DiscoveryUrl.GetString()))
 
 		exists, err := LotExists("test-2")
 		require.NoError(t, err)

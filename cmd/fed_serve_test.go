@@ -72,9 +72,13 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpPath, "pelican.yaml"), []byte{}, 0600))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "xrd")))
+	test_utils.ClearFederationURLsForTest(t)
+	require.NoError(t, param.Server_Hostname.Set("localhost"))
+	test_utils.InitServerTLSForTest(t, tmpPath)
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
@@ -94,7 +98,6 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, param.Origin_EnableCmsd.Set(false))
 	require.NoError(t, param.Origin_EnableMacaroons.Set(false))
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
-	require.NoError(t, param.TLSSkipVerify.Set(true))
 	require.NoError(t, param.Server_EnableUI.Set(false))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(t.TempDir(), "ns-registry.sqlite")))
 	require.NoError(t, param.Registry_RequireOriginApproval.Set(false))

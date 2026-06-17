@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -81,14 +82,39 @@ const (
 )
 
 var (
-	federationJWK *jwk.Cache
-	authChecker   AuthChecker
+	federationJWKMu sync.Mutex
+	federationJWK   *jwk.Cache
+	authChecker     AuthChecker
 
 	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
 
 func init() {
 	authChecker = &AuthCheckImpl{}
+}
+
+// federationJWKS returns the shared federation JWKS cache, registering the
+// given JWKS URL on first use of that URL.
+//
+// A single process can verify tokens for more than one federation over its
+// lifetime, most notably across unit tests, which spin up federations on
+// distinct ephemeral ports. Keying the registration on the URL, rather than
+// on whether the cache has been created, keeps verification correct after the
+// federation's JwksUri changes. The mutex guards the lazy initialization and
+// the check-then-register against concurrent request handlers.
+func federationJWKS(ctx context.Context, fedURIFile string) (*jwk.Cache, error) {
+	federationJWKMu.Lock()
+	defer federationJWKMu.Unlock()
+	if federationJWK == nil {
+		federationJWK = jwk.NewCache(ctx)
+	}
+	if !federationJWK.IsRegistered(fedURIFile) {
+		client := &http.Client{Transport: config.GetTransport()}
+		if err := federationJWK.Register(fedURIFile, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+			return nil, errors.Wrap(err, "Failed to register cache for federation's public JWKS")
+		}
+	}
+	return federationJWK, nil
 }
 
 // RegisterServerJWKSResolver allows other packages (e.g. the Registry) to provide a
@@ -147,15 +173,12 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 
 	fedURIFile := fedInfo.JwksUri
 	ctx := context.Background()
-	if federationJWK == nil {
-		client := &http.Client{Transport: config.GetTransport()}
-		federationJWK = jwk.NewCache(ctx)
-		if err := federationJWK.Register(fedURIFile, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return errors.Wrap(err, "Failed to register cache for federation's public JWKS")
-		}
+	cache, err := federationJWKS(ctx, fedURIFile)
+	if err != nil {
+		return err
 	}
 
-	jwks, err := federationJWK.Get(ctx, fedURIFile)
+	jwks, err := cache.Get(ctx, fedURIFile)
 	if err != nil {
 		return errors.Wrap(err, "Failed to get federation's public JWKS")
 	}

@@ -136,6 +136,11 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	// user (nobody) to exercise setfsuid/setfsgid and verify file ownership.
 	// Otherwise, it falls back to a mock lookup as root (no-op identity switch)
 	// to verify basic delegation.
+	//
+	// CAP_SETGID is required in all cases because runAsUser unconditionally
+	// calls setgroups(0) to clear supplementary groups, even when switching
+	// to the current user's own identity.
+	test_utils.SkipUnlessPrivileged(t)
 
 	// Create the temp directory directly under /tmp so an unprivileged user
 	// can traverse to it without needing to chmod arbitrary parent dirs

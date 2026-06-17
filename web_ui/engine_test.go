@@ -46,7 +46,7 @@ import (
 )
 
 // Setup a gin engine that will serve up a /ping endpoint on a Unix domain socket.
-func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
+func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan struct{}, context.CancelFunc, string) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 	require.NoError(t, param.Logging_Level.Set("Debug"))
@@ -54,9 +54,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 	require.NoError(t, param.Server_WebPort.Set(8444))
 	require.NoError(t, param.Origin_Port.Set(8443))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType, test_utils.WithLazyFederationMock(nil, nil))
 	ctx, cancel := context.WithCancel(ctx)
 
 	engine, err := GetEngine()
@@ -71,12 +69,14 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 	ln, err := net.Listen("unix", socketLocation)
 	require.NoError(t, err)
 
-	doneChan := make(chan bool)
+	// Closed (not sent on) when the engine goroutine returns, so that
+	// test teardown can detect shutdown without a receiver rendezvous.
+	// Using close avoids a deadlock if the test fails before
+	// reading from the channel and deferred cleanup calls egrp.Wait().
+	doneChan := make(chan struct{})
 	egrp.Go(func() error {
-		err = runEngineWithListener(ctx, ln, engine, egrp)
-		require.NoError(t, err)
-		doneChan <- true
-		return err
+		defer close(doneChan)
+		return runEngineWithListener(ctx, ln, engine, egrp)
 	})
 
 	transport := config.GetTransport().Clone()
@@ -123,8 +123,7 @@ func TestRunEngine(t *testing.T) {
 	cancel()
 	timeout := time.Tick(3 * time.Second)
 	select {
-	case ok := <-doneChan:
-		require.True(t, ok)
+	case <-doneChan:
 	case <-timeout:
 		require.Fail(t, "Timeout when shutting down the engine")
 	}
@@ -199,8 +198,7 @@ func TestUpdateCert(t *testing.T) {
 	cancel()
 	timeout := time.Tick(3 * time.Second)
 	select {
-	case ok := <-doneChan:
-		require.True(t, ok)
+	case <-doneChan:
 	case <-timeout:
 		require.Fail(t, "Timeout when shutting down the engine")
 	}

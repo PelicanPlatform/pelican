@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2026, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -59,14 +59,18 @@ func createUnsignedJWT(t *testing.T, payload map[string]any) string {
 
 func TestSharingUrl(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	// Construct a local server that we can poke with QueryDirector. Start with a placeholder handler
-	// so that we can update the server.URL with the actual server address in the handler we overwrite later.
 	config.SetLogging(log.DebugLevel)
-	// Placeholder handler
-	handler := func(w http.ResponseWriter, r *http.Request) {}
 
-	server := httptest.NewTLSServer(http.HandlerFunc(handler))
-	defer server.Close()
+	// Construct a local server that we can poke with QueryDirector.
+	// Declare handler before server so that the real handler can close
+	// over server.URL once server is initialized below.
+	var handler func(http.ResponseWriter, *http.Request)
+
+	test_utils.InitClientForTest(t, test_utils.WithInitCfg(map[param.Param]any{
+		param.Logging_Level: "debug",
+	}))
+
+	var server *httptest.Server
 
 	// Actual handler using the updated server.URL
 	handler = func(w http.ResponseWriter, r *http.Request) {
@@ -120,8 +124,7 @@ func TestSharingUrl(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}
-	// Restart the server with the updated handler
-	server.Config.Handler = http.HandlerFunc(handler)
+	server = test_utils.NewTLSServerForTest(t, http.HandlerFunc(handler))
 
 	_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)
@@ -129,11 +132,7 @@ func TestSharingUrl(t *testing.T) {
 	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "password")
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 
-	test_utils.InitClient(t, map[param.Param]any{
-		param.Logging_Level:           "debug",
-		param.TLSSkipVerify:           true,
-		param.Federation_DiscoveryUrl: server.URL,
-	})
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 
 	// Call QueryDirector with the test server URL and a source path
 	testObj, err := url.Parse("/test/foo/bar")

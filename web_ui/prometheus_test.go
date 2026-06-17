@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -63,15 +63,11 @@ func TestPrometheusUnprotected(t *testing.T) {
 	})
 
 	// Create temp dir for the origin key file
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
@@ -111,15 +107,11 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
 	// Create temp dir for the origin key file
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
 	// Setup a private key directory
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
@@ -189,9 +181,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	})
 	require.NoError(t, param.ConfigDir.Set(configDir))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	issuerUrl := config.GetLocalIssuerUrl()
 
@@ -245,16 +236,14 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		// Create a new private key by re-initializing config to point at a new temp dir
 		k2dir := filepath.Join(tDir, "whatever", "testDir2")
 		require.NoError(t, param.IssuerKeysDirectory.Set(k2dir))
-		err = config.InitServer(ctx, server_structs.OriginType)
-		require.NoError(t, err)
+		test_utils.InitServerForTest(t, ctx, server_structs.OriginType)
 
 		token := createToken("monitoring.query", issuerUrl)
 
 		// Re-init the config again, this time pointing at the original key
 		config.ResetIssuerPrivateKeys()
 		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
-		err = config.InitServer(ctx, server_structs.OriginType)
-		require.NoError(t, err)
+		test_utils.InitServerForTest(t, ctx, server_structs.OriginType)
 
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
@@ -323,14 +312,10 @@ func TestPrometheusRulesEndpoint(t *testing.T) {
 	})
 
 	// Create temp dir for the origin key file
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
@@ -407,14 +392,10 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 	})
 
 	// Create temp dir for the origin key file
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(false))
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
