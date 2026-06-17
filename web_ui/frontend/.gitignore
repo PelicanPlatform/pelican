@@ -37,3 +37,12 @@ next-env.d.ts
 
 # generated files
 /public/data/error_codes.json
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+/e2e/.env

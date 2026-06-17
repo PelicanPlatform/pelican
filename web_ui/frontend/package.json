@@ -14,7 +14,10 @@
     "format:fix": "prettier --write --ignore-path .gitignore .",
     "clean": "rm -rf .next & rm -rf out",
     "analyze": "ANALYZE=true next build",
-    "test": "jest"
+    "test": "jest",
+    "e2e": "playwright test",
+    "playwright:save-auth": "playwright codegen --save-storage=auth.json https://localhost:8444",
+    "playwright:generate": "playwright codegen https://localhost:8444"
   },
   "dependencies": {
     "@chtc/web-components": "^1.0.23",
@@ -50,10 +53,12 @@
     "yaml": "^2.3.4"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "@babel/preset-env": "^7.25.7",
     "@babel/preset-react": "^7.25.7",
     "@babel/preset-typescript": "^7.25.7",
     "@next/bundle-analyzer": "^14.2.3",
+    "@playwright/test": "^1.59.1",
     "@types/chroma-js": "^2.4.4",
     "@types/jest": "^29.5.13",
     "@types/js-yaml": "^4.0.9",
