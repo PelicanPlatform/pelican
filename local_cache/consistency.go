@@ -488,6 +488,11 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	// scan in reconcileUsage.
 	usageDuringScan := make(map[StorageUsageKey]int64)
 
+	// Accumulate object counts per (StorageID, NamespaceID) in the same pass so
+	// the object-cap trim reads a cheap counter instead of scanning the LRU
+	// index for every capped lot.
+	objectCountDuringScan := make(map[StorageUsageKey]int64)
+
 	// Track where to resume DB scan after each transaction restart
 	lastDBKey := InstanceHash("")
 	transactionStartTime := time.Now()
@@ -531,6 +536,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 					usageDuringScan[uk] += CalculateFileSize(meta.ContentLength)
 				}
 			}
+
+			// Every metadata entry is one cached object instance; count it in
+			// its (storage, bucket) regardless of size, for object-cap enforcement.
+			objectCountDuringScan[StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}]++
 
 			// Only process entries old enough to avoid races
 			if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
@@ -867,6 +876,48 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 		sl.WithError(err).Warn("Usage reconciliation failed")
 	}
 
+	// Reconcile per-bucket object counts from the same scan so the object-cap
+	// trim has fresh counts without its own full scan.
+	if err := cc.reconcileObjectCounts(ctx, sl, objectCountDuringScan); err != nil {
+		sl.WithError(err).Warn("Object-count reconciliation failed")
+	}
+
+	return nil
+}
+
+// reconcileObjectCounts writes the per-(StorageID, NamespaceID) object counts
+// computed during the metadata scan to the stored object-count counters. The
+// scan is the authoritative source for object counts (they are not maintained
+// on the hot path), so every changed bucket is written and buckets absent from
+// the scan are zeroed.
+func (cc *ConsistencyChecker) reconcileObjectCounts(ctx context.Context, sl *log.Entry, actual map[StorageUsageKey]int64) error {
+	stored, err := cc.db.GetAllObjectCounts()
+	if err != nil {
+		return errors.Wrap(err, "failed to read stored object counts")
+	}
+
+	for key, count := range actual {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if stored[key] == count {
+			continue
+		}
+		if err := cc.db.SetObjectCount(key.StorageID, key.NamespaceID, count); err != nil {
+			sl.WithError(err).WithFields(log.Fields{"storageID": key.StorageID, "namespaceID": key.NamespaceID}).Warn("Failed to set object count")
+		}
+	}
+	// Zero out buckets that no longer have any objects.
+	for key, count := range stored {
+		if _, exists := actual[key]; exists || count == 0 {
+			continue
+		}
+		if err := cc.db.SetObjectCount(key.StorageID, key.NamespaceID, 0); err != nil {
+			sl.WithError(err).WithFields(log.Fields{"storageID": key.StorageID, "namespaceID": key.NamespaceID}).Warn("Failed to zero object count")
+		}
+	}
 	return nil
 }
 

@@ -59,6 +59,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/lotman/core"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -186,6 +187,12 @@ type PersistentCache struct {
 	namespaceMap    map[string]NamespaceID
 	namespaceMapMu  sync.RWMutex
 	nextNamespaceID atomic.Uint32
+
+	// Lot tracking. lotMgr is the (optional) lotman core manager; when nil, lot
+	// tracking is disabled and objects get LotID 0. lotIndex is the in-memory
+	// longest-prefix resolver, rebuilt from lotMgr when lots change.
+	lotMgr   *core.Manager
+	lotIndex *lotIndex
 
 	// Active downloads tracking
 	activeDownloads   map[ObjectHash]*persistentDownload
@@ -380,6 +387,17 @@ type PersistentCacheConfig struct {
 	InlineStorageMaxBytes int
 
 	DefaultFederation string
+
+	// LotManager is the optional lotman core manager. When set, the cache
+	// resolves each object to a storage lot and tracks usage per lot; when nil,
+	// lot tracking is disabled. The cache does not own the manager's lifecycle
+	// or bootstrap (lots are created by the lotman init/renewal code).
+	LotManager *core.Manager
+
+	// LotReconcileInterval is how often the cache pushes per-lot usage into the
+	// lot manager and enforces object-count caps. 0 uses the default. Only
+	// meaningful when LotManager is set.
+	LotReconcileInterval time.Duration
 
 	// DeferConfig delays the initial director namespace fetch until
 	// Config() is called explicitly.  The server launcher sets this to
@@ -628,6 +646,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		directorURL:     directorURL,
 		defaultFed:      defaultFed,
 		ac:              newAuthConfig(ctx, egrp),
+		lotMgr:          cfg.LotManager,
 		namespaceMap:    make(map[string]NamespaceID),
 		activeDownloads: make(map[ObjectHash]*persistentDownload),
 		downloadCtx:     downloadCtx,
@@ -637,6 +656,18 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	}
 	pc.fedTokenReady = make(chan struct{})
 	pc.prestageManager = NewPrestageManager(pc)
+
+	// Build the in-memory lot index from the current set of lots so object
+	// ingest can resolve lots without touching the lot database. A build error
+	// is non-fatal: objects fall to the default lot until the next rebuild.
+	if pc.lotMgr != nil {
+		pc.lotIndex = newLotIndex()
+		if err := pc.lotIndex.rebuildFromManager(pc.lotMgr); err != nil {
+			log.Warnf("Failed to build initial lot index (objects will use the default lot until rebuilt): %v", err)
+		}
+		// Make eviction lot-aware: drain over-quota/expired lots first.
+		pc.eviction.SetLotPlanner(pc)
+	}
 
 	// Restore persisted namespace mappings so that LRU keys and usage
 	// counters from prior runs remain valid.
@@ -653,6 +684,10 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	db.StartGC(ctx, egrp)
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
+	// Periodically push per-lot usage into the lotman core and enforce lots'
+	// object-count caps (both no-ops when lot tracking is disabled).
+	pc.startLotUsageSync(ctx, egrp, cfg.LotReconcileInterval)
+	pc.startObjectCapTrim(ctx, egrp, cfg.LotReconcileInterval)
 
 	// Ensure all resources are released when the context is cancelled.
 	// Without this, the TransferEngine and BadgerDB leak across tests
@@ -1487,6 +1522,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	meta.LastModified = statInfo.ModTime
 	meta.SourceURL = pelicanURL
 	meta.NamespaceID = namespaceID
+	meta.LotID = pc.lotIDOf(namespaceID)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -1909,6 +1945,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				ContentLength: metadata.ObjectSize,
 				SourceURL:     dl.sourceURL,
 				NamespaceID:   dl.namespaceID,
+				LotID:         pc.lotIDOf(dl.namespaceID),
 			}
 			dl.noStoreMeta.SetCacheControl(dl.cacheControl)
 
@@ -2358,6 +2395,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 	meta.SetCacheControl(w.dl.cacheControl)
 	meta.SourceURL = w.dl.sourceURL
 	meta.NamespaceID = w.dl.namespaceID
+	meta.LotID = w.pc.lotIDOf(w.dl.namespaceID)
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
 	meta.EnsureExpires()
@@ -2468,6 +2506,7 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 			ContentLength: int64(len(w.buffer)),
 			SourceURL:     dl.sourceURL,
 			NamespaceID:   dl.namespaceID,
+			LotID:         w.pc.lotIDOf(dl.namespaceID),
 			Completed:     time.Now(),
 			LastValidated: time.Now(),
 			Checksums:     dl.checksums,
@@ -2583,13 +2622,32 @@ func (pc *PersistentCache) normalizePath(objectPath string) string {
 	return u.String()
 }
 
-// getNamespaceID returns or assigns a namespace ID for a path
+// RebuildLotIndex refreshes the in-memory lot index from the lot manager. It is
+// called when lots change (creation/renewal/removal) so subsequently-ingested
+// objects resolve against the current set of lots. No-op when lot tracking is
+// disabled.
+func (pc *PersistentCache) RebuildLotIndex() error {
+	if pc.lotIndex == nil || pc.lotMgr == nil {
+		return nil
+	}
+	return pc.lotIndex.rebuildFromManager(pc.lotMgr)
+}
+
+// getNamespaceID returns or assigns the accounting bucket id for a path. When
+// lot tracking is enabled the bucket is the object's owning lot (resolved by
+// longest-prefix match over federation-qualified lot paths); otherwise it is the
+// legacy first-path-component namespace, preserving namespace fairness when
+// lotman is disabled. Either way the bucket key is a string mapped to a stable,
+// persisted id (reusing the namespace-mapping table), so usage/LRU keys survive
+// restarts.
 func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
-	// Extract namespace prefix from path
-	prefix := extractNamespacePrefix(objectPath)
+	bucketKey := extractNamespacePrefix(objectPath)
+	if pc.lotIndex != nil {
+		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(pc.normalizePath(objectPath), pc.defaultFed))
+	}
 
 	pc.namespaceMapMu.RLock()
-	if id, exists := pc.namespaceMap[prefix]; exists {
+	if id, exists := pc.namespaceMap[bucketKey]; exists {
 		pc.namespaceMapMu.RUnlock()
 		return id
 	}
@@ -2600,20 +2658,30 @@ func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
 	defer pc.namespaceMapMu.Unlock()
 
 	// Double-check after acquiring write lock
-	if id, exists := pc.namespaceMap[prefix]; exists {
+	if id, exists := pc.namespaceMap[bucketKey]; exists {
 		return id
 	}
 
 	id := NamespaceID(pc.nextNamespaceID.Add(1))
-	pc.namespaceMap[prefix] = id
+	pc.namespaceMap[bucketKey] = id
 
 	// Persist the mapping so it survives restarts
-	if err := pc.db.SetNamespaceMapping(prefix, id); err != nil {
-		log.Warnf("Failed to persist namespace mapping %s -> %d: %v", prefix, id, err)
+	if err := pc.db.SetNamespaceMapping(bucketKey, id); err != nil {
+		log.Warnf("Failed to persist bucket mapping %s -> %d: %v", bucketKey, id, err)
 	}
 
-	log.Debugf("Assigned namespace ID %d to prefix %s", id, prefix)
+	log.Debugf("Assigned bucket ID %d to key %s", id, bucketKey)
 	return id
+}
+
+// lotIDOf returns the LotID for an object given its accounting bucket id. When
+// lot tracking is enabled the bucket is the lot, so the LotID equals the bucket
+// id; otherwise there is no lot and it returns 0.
+func (pc *PersistentCache) lotIDOf(bucket NamespaceID) LotID {
+	if pc.lotIndex == nil {
+		return 0
+	}
+	return LotID(bucket)
 }
 
 // extractNamespacePrefix extracts the namespace prefix from a path

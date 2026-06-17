@@ -54,6 +54,12 @@ const (
 	PrefixLRU = "l:"
 	// PrefixUsage stores total bytes used per storage+namespace: u:<storage_id>:<namespace_id>
 	PrefixUsage = "u:"
+	// PrefixObjectCount stores the object count per storage+bucket:
+	// oc:<storage_id>:<namespace_id> -> int64. Unlike PrefixUsage it is not
+	// maintained incrementally; the periodic metadata scan reconciles it (the
+	// object-cap trim adjusts it after evicting). This avoids an O(objects) LRU
+	// scan to count a lot's objects.
+	PrefixObjectCount = "oc:"
 	// PrefixDiskMap stores the mapping of disk IDs to directories
 	PrefixDiskMap = "di:"
 	// PrefixPurgeFirst stores instance hashes marked for priority eviction
@@ -369,6 +375,12 @@ type CacheMetadata struct {
 	// Namespace and storage tracking for fairness-aware eviction
 	NamespaceID NamespaceID `msgpack:"ns"` // ID of the namespace prefix
 	// Usage is tracked per (StorageID, NamespaceID) pair for multi-storage fairness
+
+	// LotID identifies the storage lot that owns this object, resolved at ingest
+	// by longest-prefix match over federation-qualified lot paths. It is the
+	// accounting bucket for lot-aware usage and eviction. 0 means no lot (lot
+	// tracking disabled, or no lotman manager configured).
+	LotID LotID `msgpack:"lot,omitempty"`
 
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
@@ -765,6 +777,12 @@ func ParseLRUKey(key []byte) (storageID StorageID, namespaceID NamespaceID, time
 // Format: u:<storage_id>:<namespace_id>
 func UsageKey(storageID StorageID, namespaceID NamespaceID) []byte {
 	return []byte(fmt.Sprintf("%s%d:%d", PrefixUsage, storageID, namespaceID))
+}
+
+// ObjectCountKey returns the BadgerDB key for the object-count counter per
+// storage+bucket. Format: oc:<storage_id>:<namespace_id>
+func ObjectCountKey(storageID StorageID, namespaceID NamespaceID) []byte {
+	return []byte(fmt.Sprintf("%s%d:%d", PrefixObjectCount, storageID, namespaceID))
 }
 
 // ParseUsageKey extracts the storage ID and namespace ID from a usage key

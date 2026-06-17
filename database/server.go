@@ -115,7 +115,7 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 
 func cleanupStaleServerEntries() error {
 	// Identify stale servers via missing/invalid registrations and remove their services and server rows
-	return ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(ServerDatabase, func(tx *gorm.DB) error {
 		// Query all stale server IDs
 		var staleServerIDs []string
 		rawQuery := `
@@ -274,7 +274,7 @@ func populateNewServerTables() error {
 		len(namespaces), migratedCount, len(namespaces)-migratedCount)
 
 	// Migrate remaining namespaces
-	return ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return utils.WriteTx(ServerDatabase, func(tx *gorm.DB) error {
 		for _, ns := range namespaces {
 			// Skip if already migrated
 			var serviceCount int64

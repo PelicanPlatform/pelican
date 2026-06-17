@@ -1238,6 +1238,72 @@ func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, err
 	return result, nil
 }
 
+// SetObjectCount stores the object count for a (storage, bucket) pair. Object
+// counts are reconciled by the periodic metadata scan and adjusted by the
+// object-cap trim; they are not maintained on the object hot path.
+func (cdb *CacheDB) SetObjectCount(storageID StorageID, namespaceID NamespaceID, count int64) error {
+	if count < 0 {
+		count = 0
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.SetEntry(badger.NewEntry(ObjectCountKey(storageID, namespaceID), encodeUsage(count)).WithDiscard())
+	})
+}
+
+// GetObjectCount returns the stored object count for a (storage, bucket) pair
+// (0 if absent).
+func (cdb *CacheDB) GetObjectCount(storageID StorageID, namespaceID NamespaceID) (int64, error) {
+	var count int64
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(ObjectCountKey(storageID, namespaceID))
+		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return nil
+			}
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			count = decodeUsage(val)
+			return nil
+		})
+	})
+	return count, err
+}
+
+// GetAllObjectCounts returns the object count for every (storage, bucket) pair.
+func (cdb *CacheDB) GetAllObjectCounts() (map[StorageUsageKey]int64, error) {
+	result := make(map[StorageUsageKey]int64)
+	prefix := []byte(PrefixObjectCount)
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			sid, nid, perr := parseObjectCountKey(item.Key())
+			if perr != nil {
+				continue
+			}
+			if verr := item.Value(func(val []byte) error {
+				result[StorageUsageKey{StorageID: sid, NamespaceID: nid}] = decodeUsage(val)
+				return nil
+			}); verr != nil {
+				return verr
+			}
+		}
+		return nil
+	})
+	return result, err
+}
+
+// parseObjectCountKey extracts the storage and namespace ids from an
+// object-count key (oc:<sid>:<nid>).
+func parseObjectCountKey(key []byte) (StorageID, NamespaceID, error) {
+	var sid StorageID
+	var nid NamespaceID
+	_, err := fmt.Sscanf(string(key), PrefixObjectCount+"%d:%d", &sid, &nid)
+	return sid, nid, err
+}
+
 // getUsageByPrefix returns usage for all keys matching the given prefix.
 // Active MergeOperators are consulted first; dormant keys (no operator)
 // are read via a normal prefix scan.

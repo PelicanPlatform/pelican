@@ -56,6 +56,7 @@ type Config struct {
 		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
+		LotUsageReconcileInterval time.Duration `mapstructure:"lotusagereconcileinterval" yaml:"LotUsageReconcileInterval"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MemoryCacheSize string `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
@@ -64,6 +65,7 @@ type Config struct {
 		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
+		PurgeInterval time.Duration `mapstructure:"purgeinterval" yaml:"PurgeInterval"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
@@ -226,9 +228,11 @@ type Config struct {
 		} `mapstructure:"origin" yaml:"Origin"`
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
+		AutoCreateOnDiscover bool `mapstructure:"autocreateondiscover" yaml:"AutoCreateOnDiscover"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultLotDeletionLifetime time.Duration `mapstructure:"defaultlotdeletionlifetime" yaml:"DefaultLotDeletionLifetime"`
 		DefaultLotExpirationLifetime time.Duration `mapstructure:"defaultlotexpirationlifetime" yaml:"DefaultLotExpirationLifetime"`
+		DefaultLotOpportunisticGB int `mapstructure:"defaultlotopportunisticgb" yaml:"DefaultLotOpportunisticGB"`
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		GarbageCollectionInterval time.Duration `mapstructure:"garbagecollectioninterval" yaml:"GarbageCollectionInterval"`
@@ -237,6 +241,7 @@ type Config struct {
 		LotRecordRetention time.Duration `mapstructure:"lotrecordretention" yaml:"LotRecordRetention"`
 		MaxLotLifetime time.Duration `mapstructure:"maxlotlifetime" yaml:"MaxLotLifetime"`
 		MinFillerWidth time.Duration `mapstructure:"minfillerwidth" yaml:"MinFillerWidth"`
+		MonitoringLotMaxObjects int `mapstructure:"monitoringlotmaxobjects" yaml:"MonitoringLotMaxObjects"`
 		PolicyDefinitions any `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
 		RenewalCheckInterval time.Duration `mapstructure:"renewalcheckinterval" yaml:"RenewalCheckInterval"`
 		SchedulingHorizon time.Duration `mapstructure:"schedulinghorizon" yaml:"SchedulingHorizon"`
@@ -542,6 +547,7 @@ type configWithType struct {
 		FilesNominalSize struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
+		LotUsageReconcileInterval struct { Type string; Value time.Duration }
 		LowWatermark struct { Type string; Value string }
 		MemoryCacheSize struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
@@ -550,6 +556,7 @@ type configWithType struct {
 		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
+		PurgeInterval struct { Type string; Value time.Duration }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
@@ -712,9 +719,11 @@ type configWithType struct {
 		}
 	}
 	Lotman struct {
+		AutoCreateOnDiscover struct { Type string; Value bool }
 		DbLocation struct { Type string; Value string }
 		DefaultLotDeletionLifetime struct { Type string; Value time.Duration }
 		DefaultLotExpirationLifetime struct { Type string; Value time.Duration }
+		DefaultLotOpportunisticGB struct { Type string; Value int }
 		EnableAPI struct { Type string; Value bool }
 		EnabledPolicy struct { Type string; Value string }
 		GarbageCollectionInterval struct { Type string; Value time.Duration }
@@ -723,6 +732,7 @@ type configWithType struct {
 		LotRecordRetention struct { Type string; Value time.Duration }
 		MaxLotLifetime struct { Type string; Value time.Duration }
 		MinFillerWidth struct { Type string; Value time.Duration }
+		MonitoringLotMaxObjects struct { Type string; Value int }
 		PolicyDefinitions struct { Type string; Value any }
 		RenewalCheckInterval struct { Type string; Value time.Duration }
 		SchedulingHorizon struct { Type string; Value time.Duration }

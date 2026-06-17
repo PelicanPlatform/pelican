@@ -79,6 +79,8 @@ Cache:
   EnableTLSClientAuth: false
   DisableClientX509: true
   EnableEvictionMonitoring: true
+  LotUsageReconcileInterval: "1m"
+  PurgeInterval: "5m"
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "24h"
@@ -89,6 +91,9 @@ Lotman:
   MinFillerWidth: "0s"
   LotRecordRetention: "1440h"
   GarbageCollectionInterval: "1h"
+  MonitoringLotMaxObjects: 500
+  AutoCreateOnDiscover: true
+  DefaultLotOpportunisticGB: 0
   PolicyDefinitions:
     - PolicyName: "fairshare"
       DivideUnallocated: true
