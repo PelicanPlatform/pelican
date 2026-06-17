@@ -88,10 +88,14 @@ var directorTestFilePattern = regexp.MustCompile(
 		`/[^/[:cntrl:]]+/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
 		`-[^/[:cntrl:]]+$`)
 
-// removeTestFile deletes a single director-test file. When Server.DropPrivileges is
-// enabled the file is owned by the xrootd user and the pelican process cannot remove
-// it directly; in that case it routes the deletion through the cache's own evict API
-// (which executes under xrootd's identity). Otherwise it uses os.Remove.
+// removeTestFile disposes of a single director-test file.
+//   - Without Server.DropPrivileges it calls os.Remove, an immediate, synchronous unlink:
+//     on a nil return the file is gone from disk.
+//   - With Server.DropPrivileges=true the file is owned by the xrootd user and the pelican process
+//     cannot unlink it directly, so it routes through the cache's own evict API (which executes
+//     under xrootd's identity). That path only marks the file as a PFC purge candidate; a nil
+//     return means "eviction requested", and the bytes are unlinked later during PFC's purge
+//     cycle (see evictViaLocalPlugin). Callers must not assume the file is gone in this mode.
 func removeTestFile(ctx context.Context, fsPath string) error {
 	if !param.Server_DropPrivileges.GetBool() {
 		return os.Remove(fsPath)
@@ -103,10 +107,7 @@ func removeTestFile(ctx context.Context, fsPath string) error {
 	return evictViaLocalPlugin(ctx, nsPath)
 }
 
-// cleanTestDir deletes every file under dirPath, which is an old day-directory being
-// removed wholesale. With privileges it uses os.RemoveAll, which wipes the directory
-// and everything below it. Under DropPrivileges it evicts each file via the API and
-// leaves the now-empty directories in place — xrootd reaps empty dirs on its own.
+// cleanTestDir disposes of every file under dirPath
 //
 // Cost note in DropPrivileges mode: each file costs one evict call (a freshly minted WLCG
 // token plus one HTTP GET to the local xrootd evict endpoint) issued sequentially.
@@ -177,7 +178,9 @@ func fsToNamespacePath(fsPath string) (string, error) {
 //
 // Under Server.DropPrivileges, removals are routed through the cache's evict API
 // (see removeTestFile / cleanTestDir) since the pelican process cannot directly
-// delete xrootd-owned files.
+// delete xrootd-owned files. In this mode "removal" only marks files as PFC purge
+// candidates; the bytes are unlinked later during PFC's threshold-gated purge cycle,
+// so files this sweep "cleans up" may still be present on disk for a while afterward.
 func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 	dirInfo, err := os.Stat(dirTestPath)
 	if err != nil {
@@ -302,6 +305,13 @@ func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepObjects int) 
 // completes a successful cache health test, it asks the cache to evict the previous test file
 // via this endpoint. The cache then calls its own xrdhttp-pelican evict API using a locally-
 // minted token, matching the self-test authorization pattern (see xrootd/self_monitor.go).
+//
+// Semantics of "evict": a 2xx from this handler does NOT mean the file has been unlinked from
+// disk. It means the request was authorized, the path passed validation, and xrootd's PFC
+// accepted the file as a purge candidate. PFC performs the physical removal later, during its
+// periodic purge cycle (pfc.diskusage ... purgeinterval ...), and only once the configured
+// disk-usage thresholds are crossed. Under low cache pressure a successfully "evicted" file
+// can remain on disk indefinitely.
 func HandleDirectorEvictRequest(ctx *gin.Context) {
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
@@ -336,24 +346,27 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 	if !directorTestFilePattern.MatchString(reqBody.Path) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Path does not match the expected director test file shape",
+			Msg:    "Path does not match the expected director test file shape; refusing to evict",
 		})
 		return
 	}
 
 	if err := evictViaLocalPlugin(ctx.Request.Context(), reqBody.Path); err != nil {
-		log.Warningf("Failed to evict director test file %s: %v", reqBody.Path, err)
+		log.Warningf("Failed to submit evict request for director test file %s: %v", reqBody.Path, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Eviction failed: " + err.Error(),
+			Msg:    "Failed to submit eviction request: " + err.Error(),
 		})
 		return
 	}
 
-	log.Debugf("Successfully evicted director test file via local plugin: %s", reqBody.Path)
+	// Note: the file is now a PFC purge candidate, not necessarily removed from disk.
+	// Physical removal is deferred to PFC's threshold-gated purge cycle (see the doc
+	// comment on evictViaLocalPlugin).
+	log.Debugf("Marked director test file as PFC purge candidate via local plugin: %s", reqBody.Path)
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 		Status: server_structs.RespOK,
-		Msg:    "Eviction successfully scheduled",
+		Msg:    "Eviction request accepted; file marked as a purge candidate (physical removal deferred to PFC purge cycle)",
 	})
 }
 
@@ -362,10 +375,13 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 // accesses its own XRootD port using the server's own issuer, which is already trusted by the
 // cache's scitokens configuration.
 //
-// Note: a 200 OK response means xrootd's PFC has accepted the file as a purge candidate, not
-// that the on-disk file has been unlinked. PFC defers physical removal to its periodic purge
-// thread, which is gated by the configured disk-usage thresholds (pfc.diskusage). Under low
-// cache pressure the data and meta blocks may persist for some time after a successful evict.
+// Note: a 200 OK from the evict API means xrootd's PFC has accepted the file as a purge
+// candidate, NOT that the on-disk file has been unlinked. PFC defers physical removal to its
+// periodic purge thread (pfc.diskusage ... purgeinterval ...), which only acts once the
+// configured disk-usage thresholds are crossed. Under low cache pressure the file can persist
+// for a long time after a successful evict. When the purge does run, the data block and its
+// companion meta block (.txt.cinfo) are removed together as a unit. A nil return from this
+// function therefore signals "eviction successfully requested", not "file deleted".
 func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
 	issuerUrl, err := config.GetServerIssuerURL()
 	if err != nil {
