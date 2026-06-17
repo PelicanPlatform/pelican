@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -501,4 +502,80 @@ func TestDeleteServerHandler_RemovesDowntimes(t *testing.T) {
 	require.NoError(t, database.ServerDatabase.Model(&server_structs.Registration{}).
 		Where("id = ?", ns.ID).Count(&regCount).Error)
 	assert.Equal(t, int64(0), regCount, "registration should be removed with the server")
+}
+
+func TestListServersHandlerNameFilter(t *testing.T) {
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	namespaces := []server_structs.Registration{
+		{
+			Prefix: "/origins/alpha-filter.edu",
+			Pubkey: "pubkey-alpha-filter",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "Alpha Filter",
+				Status:   server_structs.RegApproved,
+			},
+		},
+		{
+			Prefix: "/origins/beta-filter.edu",
+			Pubkey: "pubkey-beta-filter",
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: "Beta Filter",
+				Status:   server_structs.RegApproved,
+			},
+		},
+	}
+	for i := range namespaces {
+		require.NoError(t, AddRegistration(&namespaces[i]))
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/servers", listServersHandler)
+
+	t.Run("FilterByName_ReturnsMatchingServer", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/servers?name=Alpha+Filter", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var servers []server_structs.ServerRegistration
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &servers))
+		require.Len(t, servers, 1)
+		assert.Equal(t, "Alpha Filter", servers[0].Name)
+	})
+
+	t.Run("FilterByName_NoMatch_ReturnsEmpty", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/servers?name=zzznomatch", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Pin the swagger contract: the body must be an empty JSON array "[]",
+		// not "null". Unmarshaling alone would accept both, so assert the raw body.
+		assert.Equal(t, "[]", strings.TrimSpace(w.Body.String()))
+
+		var servers []server_structs.ServerRegistration
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &servers))
+		assert.Len(t, servers, 0)
+	})
+
+	t.Run("NoNameParam_ReturnsAllServers", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/servers", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var servers []server_structs.ServerRegistration
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &servers))
+		assert.Len(t, servers, 2)
+	})
 }

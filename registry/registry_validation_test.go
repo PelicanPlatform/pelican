@@ -360,4 +360,20 @@ func TestValidatePrefix(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "/caches/192.168.5.21", got)
 	})
+
+	t.Run("pelican-prefix-blocked", func(t *testing.T) {
+		_, err := validatePrefix("/pelican/")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Cannot register a prefix starting with '/pelican'")
+
+		_, err = validatePrefix("/pelican/anythingelse")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Cannot register a prefix starting with '/pelican'")
+	})
+
+	t.Run("logging-namespace-allowed", func(t *testing.T) {
+		got, err := validatePrefix("/pelican/logging/myhost.example.org")
+		require.NoError(t, err)
+		assert.Equal(t, "/pelican/logging/myhost.example.org", got)
+	})
 }

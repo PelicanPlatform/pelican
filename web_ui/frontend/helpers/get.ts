@@ -66,6 +66,11 @@ export const getExtendedNamespaces = async (): Promise<
     } else if (namespace.prefix.startsWith('/origins/')) {
       namespace.type = 'origin';
       namespace.prefix = namespace.prefix.replace('/origins/', '');
+    } else if (namespace.prefix.startsWith('/pelican/logging/')) {
+      // Logging namespaces are intentionally left with their full prefix (not
+      // stripped like origins/caches) because these entries are hidden from the
+      // UI today.
+      namespace.type = 'pelican';
     } else {
       namespace.type = 'namespace';
     }

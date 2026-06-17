@@ -122,20 +122,21 @@ export const PendingCard = ({
               </>
             )}
             {(authenticated?.role == 'admin' ||
-              authenticated?.user == namespace.admin_metadata.user_id) && (
-              <Tooltip title={'Edit Registration'}>
-                <Link
-                  href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
-                >
-                  <IconButton
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                    size={size}
+              authenticated?.user == namespace.admin_metadata.user_id) &&
+              namespace.type !== 'pelican' && (
+                <Tooltip title={'Edit Registration'}>
+                  <Link
+                    href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
                   >
-                    <Edit fontSize={size} />
-                  </IconButton>
-                </Link>
-              </Tooltip>
-            )}
+                    <IconButton
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                      size={size}
+                    >
+                      <Edit fontSize={size} />
+                    </IconButton>
+                  </Link>
+                </Tooltip>
+              )}
           </Box>
         </Box>
       </Box>

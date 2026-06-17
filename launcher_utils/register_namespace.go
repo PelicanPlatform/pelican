@@ -264,7 +264,32 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 	return nil
 }
 
-// Register the namespace. If failed, retry every 10s (default)
+// RegisterLoggingNamespaceWithRetry registers the logging namespace
+// /pelican/logging/{sitename} for the origin server, where sitename is
+// the value of Xrootd.Sitename (the human-readable unique server name).
+// It is a no-op when Logging.EnableLogExports is false.
+//
+// The logging namespace prefix is derived entirely from local configuration
+// and does not require a registry lookup, so this can be called at any point
+// after server configuration is initialised.  The logging namespace will be
+// submitted as pending if the origin is still awaiting admin approval;
+// Registry.EnableAutoLoggingRegistration controls whether the registry
+// auto-approves it once the associated origin is approved.
+func RegisterLoggingNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
+	if !param.Logging_EnableLogExports.GetBool() {
+		return nil
+	}
+	sitename := param.Xrootd_Sitename.GetString()
+	if sitename == "" {
+		return errors.Errorf("cannot register logging namespace: %s must be set when %s is true",
+			param.Xrootd_Sitename.GetName(), param.Logging_EnableLogExports.GetName())
+	}
+	loggingPrefix := server_structs.LoggingNamespaceForServer(sitename)
+	log.Debugf("Registering logging namespace %s", loggingPrefix)
+	return RegisterNamespaceWithRetry(ctx, egrp, loggingPrefix)
+}
+
+// RegisterNamespaceWithRetry registers the namespace. If failed, retries every 10s (default)
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {

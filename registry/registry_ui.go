@@ -34,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -403,6 +404,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 	ns.Prefix = updated_prefix
 
+	// Logging namespaces may only be registered through the automated key-sign
+	// challenge flow (keySignChallengeCommit), which proves the registrant holds
+	// the origin's registered key before allowing /pelican/logging/{sitename}.
+	// This human-facing endpoint performs no such key-match check, so permitting
+	// it here would let any authenticated user squat or reserve another origin's
+	// logging namespace. Reject logging prefixes outright.
+	if _, ok := server_structs.LoggingNamespaceSitename(ns.Prefix); ok {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Logging namespaces are managed automatically by origin servers and cannot be registered or modified through this endpoint"})
+		return
+	}
+
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
 		exists, err := registrationExistsByPrefix(ns.Prefix)
@@ -640,12 +654,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// If the user has privilege to update, go ahead
+		oldNs, _ := getRegistrationById(ns.ID)
 		if err := updateRegistration(&ns); err != nil {
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Fail to update namespace"})
 			return
+		}
+		// When an admin updates an origin's public key, cascade the new key to its
+		// logging namespace so the origin can still authenticate after key rotation.
+		if server_structs.IsOriginNS(ns.Prefix) && oldNs != nil && oldNs.Pubkey != ns.Pubkey {
+			sitename := ns.AdminMetadata.SiteName
+			cascadeUpdateLoggingNamespaceKey(sitename, ns.Pubkey)
 		}
 	}
 }
@@ -792,6 +813,19 @@ func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationS
 			Msg:    "Failed to update namespace"})
 		return
 	}
+
+	// When an origin's registration is approved by an admin and the auto-logging
+	// feature is enabled, cascade-approve any pending logging namespace for that
+	// origin.  The logging namespace is registered at origin startup before the
+	// admin has approved the origin's primary registration, so it cannot
+	// self-approve at registration time and would otherwise stay "pending" forever.
+	if status == server_structs.RegApproved && param.Registry_EnableAutoLoggingRegistration.GetBool() {
+		if reg, lookupErr := getRegistrationById(id); lookupErr == nil && server_structs.IsOriginNS(reg.Prefix) {
+			sitename := reg.AdminMetadata.SiteName
+			cascadeApproveLoggingNamespace(sitename)
+		}
+	}
+
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
@@ -885,13 +919,34 @@ func deleteNamespace(ctx *gin.Context) {
 }
 
 func listServersHandler(ctx *gin.Context) {
-	servers, err := listServers()
-	if err != nil {
-		log.Error(err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to list servers"})
-		return
+	nameQuery := ctx.Query("name")
+	var servers []server_structs.ServerRegistration
+	if nameQuery != "" {
+		server, lookupErr := getServerByName(nameQuery)
+		if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			log.Error(lookupErr)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to list servers"})
+			return
+		}
+		if server != nil {
+			servers = []server_structs.ServerRegistration{*server}
+		}
+	} else {
+		var err error
+		if servers, err = listServers(); err != nil {
+			log.Error(err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to list servers"})
+			return
+		}
+	}
+	if servers == nil {
+		// Both getServerByName (no match) and listServers (empty registry) yield a
+		// nil slice; normalize to an empty array so the response is "[]" not "null".
+		servers = []server_structs.ServerRegistration{}
 	}
 	ctx.JSON(http.StatusOK, servers)
 }

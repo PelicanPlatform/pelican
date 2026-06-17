@@ -109,20 +109,29 @@ func validateConfigKeys() []string {
 // for all server types. It is a no-op if Logging.LogExports.Enabled is false.
 //
 // Rules enforced:
+//   - Xrootd.Sitename must be set (it is used as the logging namespace path segment).
 //   - Logging.LogLocation must be set to an absolute file path other than "/dev/null",
 //     because the virtual-object handler reads that file to assemble log responses.
 //   - If IssuerKeysDirectory is empty the server will not be able to auto-generate access
 //     tokens for the logging namespace; a warning is emitted but startup is not blocked.
 func ValidateLogExportsConfig() error {
-	if !param.Logging_LogExports_Enabled.GetBool() {
+	if !param.Logging_EnableLogExports.GetBool() {
 		return nil
+	}
+
+	if param.Xrootd_Sitename.GetString() == "" {
+		return fmt.Errorf(
+			"%s is true but %s must be set — it is used as the logging namespace path segment (/pelican/logging/{sitename})",
+			param.Logging_EnableLogExports.GetName(),
+			param.Xrootd_Sitename.GetName(),
+		)
 	}
 
 	logLocation := param.Logging_LogLocation.GetString()
 	if !filepath.IsAbs(logLocation) || logLocation == "/dev/null" {
 		return fmt.Errorf(
 			"%s is true but %s must be set to an absolute file path (not \"/dev/null\") to enable log export",
-			param.Logging_LogExports_Enabled.GetName(),
+			param.Logging_EnableLogExports.GetName(),
 			param.Logging_LogLocation.GetName(),
 		)
 	}
@@ -130,7 +139,7 @@ func ValidateLogExportsConfig() error {
 	if param.IssuerKeysDirectory.GetString() == "" {
 		log.Warningf("%s is true but %s is not configured; "+
 			"the server will not be able to auto-generate access tokens for the logging namespace",
-			param.Logging_LogExports_Enabled.GetName(),
+			param.Logging_EnableLogExports.GetName(),
 			param.IssuerKeysDirectory.GetName())
 	}
 

@@ -19,10 +19,15 @@
 package registry
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -799,5 +804,388 @@ func TestDeleteRegistrationByID_RemovesDowntimes(t *testing.T) {
 		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", server.ID).Count(&serverCount).Error
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), serverCount)
+	})
+}
+
+// TestApplyLoggingNamespaceAutoApproval verifies the helper extracted from
+// keySignChallengeCommit that auto-approves logging namespace registrations
+// when Registry.EnableAutoLoggingRegistration is true.
+func TestApplyLoggingNamespaceAutoApproval(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	// genPubkeyJSON returns a JSON-encoded JWK set containing one freshly
+	// generated ECDSA P-256 public key.
+	genPubkeyJSON := func(t *testing.T) (string, jwk.Key) {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub, err := jwk.FromRaw(priv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, jwk.AssignKeyID(pub))
+		set := jwk.NewSet()
+		require.NoError(t, set.AddKey(pub))
+		data, err := json.Marshal(set)
+		require.NoError(t, err)
+		return string(data), pub
+	}
+
+	t.Run("ApprovedOriginAutoApprovesLoggingNS", func(t *testing.T) {
+		pubkeyJSON, _ := genPubkeyJSON(t)
+		const sitename = "ApprovedAutoOrigin"
+		originNs := server_structs.Registration{
+			Prefix: "/origins/approved-auto-test.edu",
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		applyLoggingNamespaceAutoApproval(sitename, &loggingNs)
+
+		assert.Equal(t, server_structs.RegApproved, loggingNs.AdminMetadata.Status)
+		assert.Equal(t, "system", loggingNs.AdminMetadata.ApproverID)
+		assert.False(t, loggingNs.AdminMetadata.ApprovedAt.IsZero())
+	})
+
+	t.Run("WrongKeyDoesNotAutoApprove", func(t *testing.T) {
+		// Register origin with key A; attempt auto-approval with key B.
+		// The approval should be denied even though the origin is approved.
+		pubkeyJSONA, _ := genPubkeyJSON(t)
+		pubkeyJSONB, _ := genPubkeyJSON(t)
+		const sitename = "WrongKeyOrigin"
+		originNs := server_structs.Registration{
+			Prefix: "/origins/wrong-key-test.edu",
+			Pubkey: pubkeyJSONA,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSONB, // different key from origin
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		applyLoggingNamespaceAutoApproval(sitename, &loggingNs)
+
+		assert.Equal(t, server_structs.RegPending, loggingNs.AdminMetadata.Status,
+			"mismatched key should not trigger auto-approval even when origin is approved")
+	})
+
+	t.Run("PendingOriginDoesNotAutoApproveLoggingNS", func(t *testing.T) {
+		pubkeyJSON, _ := genPubkeyJSON(t)
+		const sitename = "PendingAutoOrigin"
+		originNs := server_structs.Registration{
+			Prefix: "/origins/pending-auto-test.edu",
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		applyLoggingNamespaceAutoApproval(sitename, &loggingNs)
+
+		assert.Equal(t, server_structs.RegPending, loggingNs.AdminMetadata.Status,
+			"pending origin should not trigger auto-approval")
+	})
+
+	t.Run("UnknownSitenameDoesNotAutoApprove", func(t *testing.T) {
+		pubkeyJSON, _ := genPubkeyJSON(t)
+		const sitename = "GhostOrigin"
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		applyLoggingNamespaceAutoApproval(sitename, &loggingNs)
+
+		assert.Equal(t, server_structs.RegPending, loggingNs.AdminMetadata.Status,
+			"unknown sitename should not trigger auto-approval")
+	})
+}
+
+// TestCascadeApproveLoggingNamespace verifies that when an admin approves an
+// origin's primary registration, a corresponding pending logging namespace is
+// automatically approved by cascadeApproveLoggingNamespace.
+func TestCascadeApproveLoggingNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	genPubkeyJSON := func(t *testing.T) string {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub, err := jwk.FromRaw(priv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, jwk.AssignKeyID(pub))
+		set := jwk.NewSet()
+		require.NoError(t, set.AddKey(pub))
+		data, err := json.Marshal(set)
+		require.NoError(t, err)
+		return string(data)
+	}
+
+	t.Run("ApprovesLoggingNSAfterOriginApproved", func(t *testing.T) {
+		pubkeyJSON := genPubkeyJSON(t)
+		const sitename = "cascade-test.edu"
+
+		// Register origin as pending (simulating startup before admin approval).
+		originNs := server_structs.Registration{
+			Prefix: "/origins/cascade-origin.edu",
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		// Register logging namespace — also pending because origin wasn't approved yet.
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&loggingNs))
+
+		// Simulate admin approving the origin's primary registration.
+		require.NoError(t, updateRegistrationStatusById(originNs.ID, server_structs.RegApproved, "admin"))
+
+		// Now trigger the cascade (in production this is called by updateNamespaceStatus).
+		cascadeApproveLoggingNamespace(sitename)
+
+		// The logging namespace should now be approved.
+		updated, err := getRegistrationByPrefix(loggingNs.Prefix)
+		require.NoError(t, err)
+		assert.Equal(t, server_structs.RegApproved, updated.AdminMetadata.Status)
+		assert.Equal(t, "system", updated.AdminMetadata.ApproverID)
+		assert.False(t, updated.AdminMetadata.ApprovedAt.IsZero())
+	})
+
+	t.Run("DoesNotOverwriteAlreadyApproved", func(t *testing.T) {
+		pubkeyJSON := genPubkeyJSON(t)
+		const sitename = "already-approved-origin.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/already-approved-host.edu",
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		approvedAt := time.Now().Add(-time.Hour)
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:   sitename,
+				Status:     server_structs.RegApproved,
+				ApproverID: "human-admin",
+				ApprovedAt: approvedAt,
+			},
+		}
+		require.NoError(t, AddRegistration(&loggingNs))
+
+		// Cascade should be a no-op because logging NS is not pending.
+		cascadeApproveLoggingNamespace(sitename)
+
+		updated, err := getRegistrationByPrefix(loggingNs.Prefix)
+		require.NoError(t, err)
+		assert.Equal(t, "human-admin", updated.AdminMetadata.ApproverID,
+			"already-approved logging namespace should not be overwritten by cascade")
+	})
+
+	t.Run("SkipsWhenNoLoggingNS", func(t *testing.T) {
+		pubkeyJSON := genPubkeyJSON(t)
+		const sitename = "no-logging-ns-origin.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/no-logging-ns-host.edu",
+			Pubkey: pubkeyJSON,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		// Should not panic or error when no logging namespace exists.
+		assert.NotPanics(t, func() { cascadeApproveLoggingNamespace(sitename) })
+	})
+
+	t.Run("SkipsKeyMismatch", func(t *testing.T) {
+		pubkeyJSONA := genPubkeyJSON(t)
+		pubkeyJSONB := genPubkeyJSON(t)
+		const sitename = "key-mismatch-origin.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/key-mismatch-host.edu",
+			Pubkey: pubkeyJSONA,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: pubkeyJSONB, // different key
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegPending,
+			},
+		}
+		require.NoError(t, AddRegistration(&loggingNs))
+
+		cascadeApproveLoggingNamespace(sitename)
+
+		updated, err := getRegistrationByPrefix(loggingNs.Prefix)
+		require.NoError(t, err)
+		assert.Equal(t, server_structs.RegPending, updated.AdminMetadata.Status,
+			"key mismatch should prevent cascade approval")
+	})
+}
+
+// TestCascadeUpdateLoggingNamespaceKey verifies that when an admin edits an
+// origin's public key, the associated logging namespace's pubkey is updated
+// in sync by cascadeUpdateLoggingNamespaceKey.
+func TestCascadeUpdateLoggingNamespaceKey(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	genPubkeyJSON := func(t *testing.T) string {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub, err := jwk.FromRaw(priv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, jwk.AssignKeyID(pub))
+		set := jwk.NewSet()
+		require.NoError(t, set.AddKey(pub))
+		data, err := json.Marshal(set)
+		require.NoError(t, err)
+		return string(data)
+	}
+
+	t.Run("UpdatesLoggingNSKeyWhenOriginKeyChanges", func(t *testing.T) {
+		oldKey := genPubkeyJSON(t)
+		newKey := genPubkeyJSON(t)
+		const sitename = "key-update-origin.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/key-update-host.edu",
+			Pubkey: oldKey,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: oldKey,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&loggingNs))
+
+		// Cascade the new key to the logging namespace.
+		cascadeUpdateLoggingNamespaceKey(sitename, newKey)
+
+		updated, err := getRegistrationByPrefix(loggingNs.Prefix)
+		require.NoError(t, err)
+		assert.Equal(t, newKey, updated.Pubkey, "logging namespace pubkey should be updated to match new origin key")
+	})
+
+	t.Run("NoopWhenAlreadyInSync", func(t *testing.T) {
+		key := genPubkeyJSON(t)
+		const sitename = "in-sync-origin.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/in-sync-host.edu",
+			Pubkey: key,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		loggingNs := server_structs.Registration{
+			Prefix: server_structs.LoggingNamespaceForServer(sitename),
+			Pubkey: key,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&loggingNs))
+
+		// Should be a no-op — key is already the same.
+		assert.NotPanics(t, func() { cascadeUpdateLoggingNamespaceKey(sitename, key) })
+
+		updated, err := getRegistrationByPrefix(loggingNs.Prefix)
+		require.NoError(t, err)
+		assert.Equal(t, key, updated.Pubkey)
+	})
+
+	t.Run("NoopWhenNoLoggingNS", func(t *testing.T) {
+		key := genPubkeyJSON(t)
+		const sitename = "no-logging-ns-key-update.edu"
+
+		originNs := server_structs.Registration{
+			Prefix: "/origins/no-logging-key-host.edu",
+			Pubkey: key,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName: sitename,
+				Status:   server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&originNs))
+
+		// Should not panic or error when no logging namespace exists.
+		assert.NotPanics(t, func() { cascadeUpdateLoggingNamespaceKey(sitename, genPubkeyJSON(t)) })
 	})
 }

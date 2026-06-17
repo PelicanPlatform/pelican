@@ -287,6 +287,12 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return err
 	}
 	log.Debug("Origin is registered")
+	// Register the logging namespace after the origin prefix: the registry's
+	// key-match gate requires the origin to be registered first so it can verify
+	// the logging namespace is submitted with the origin's registered key.
+	if err := launcher_utils.RegisterLoggingNamespaceWithRetry(ctx, egrp); err != nil {
+		return err
+	}
 	for _, export := range originExports {
 		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
 			return err
