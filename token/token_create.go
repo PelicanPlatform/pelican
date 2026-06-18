@@ -31,7 +31,6 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
@@ -422,16 +421,20 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		return "", errors.Wrap(err, "Failed to generate token")
 	}
 
-	// Get/assign the kid, needed for verification by the client
+	// Get/assign the KID, needed for verification by the client
 	err = jwk.AssignKeyID(key)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
+		return "", errors.Wrap(err, "Failed to assign KID to the token")
 	}
 
 	log.Debugln("Signing token with key id:", key.KeyID())
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	alg, err := config.SigningAlgorithmForJWK(key)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to sign the deletion token")
+		return "", errors.Wrap(err, "Failed to determine signing algorithm for key")
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(alg, key))
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to sign the token")
 	}
 
 	return string(signed), nil

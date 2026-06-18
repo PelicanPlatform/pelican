@@ -709,6 +709,54 @@ func initKeysMap() {
 	})
 }
 
+// SigningAlgorithmForJWK determines the appropriate JWA signing algorithm
+// for the given JWK key based on its key type. For EC keys, the specific
+// algorithm depends on the curve (P-256→ES256, P-384→ES384, P-521→ES512).
+// For RSA keys, RS256 is returned. For OKP keys (e.g., Ed25519), EdDSA is returned.
+// Unsupported key types and EC curves yield an error rather than a silent
+// default, so a misconfigured key is surfaced at load time instead of producing
+// tokens signed with an algorithm that cannot be verified.
+func SigningAlgorithmForJWK(key jwk.Key) (jwa.SignatureAlgorithm, error) {
+	switch key.KeyType() {
+	case jwa.RSA:
+		return jwa.RS256, nil
+	case jwa.EC:
+		var rawKey interface{}
+		if err := key.Raw(&rawKey); err != nil {
+			return "", errors.Wrap(err, "failed to extract raw EC key to determine signing algorithm")
+		}
+		switch k := rawKey.(type) {
+		case *ecdsa.PrivateKey:
+			return ecSigningAlgorithmForCurve(k.Curve)
+		case *ecdsa.PublicKey:
+			return ecSigningAlgorithmForCurve(k.Curve)
+		default:
+			return "", errors.Errorf("unsupported EC key representation %T for signing", rawKey)
+		}
+	case jwa.OKP:
+		return jwa.EdDSA, nil
+	default:
+		return "", errors.Errorf("unsupported key type for signing: %s", key.KeyType())
+	}
+}
+
+func ecSigningAlgorithmForCurve(curve elliptic.Curve) (jwa.SignatureAlgorithm, error) {
+	switch curve {
+	case elliptic.P256():
+		return jwa.ES256, nil
+	case elliptic.P384():
+		return jwa.ES384, nil
+	case elliptic.P521():
+		return jwa.ES512, nil
+	default:
+		name := "<unknown>"
+		if params := curve.Params(); params != nil {
+			name = params.Name
+		}
+		return "", errors.Errorf("unsupported EC curve %q for signing", name)
+	}
+}
+
 // Helper function to load one .pem file from specified filename
 func LoadSinglePEM(path string) (jwk.Key, error) {
 	contents, err := os.ReadFile(path)
@@ -722,7 +770,11 @@ func LoadSinglePEM(path string) (jwk.Key, error) {
 	}
 
 	// Add the algorithm to the key, needed for verifying tokens elsewhere
-	if err := key.Set(jwk.AlgorithmKey, jwa.ES256); err != nil {
+	alg, err := SigningAlgorithmForJWK(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to determine signing algorithm for key in %s", path)
+	}
+	if err := key.Set(jwk.AlgorithmKey, alg); err != nil {
 		return nil, errors.Wrap(err, "failed to set algorithm")
 	}
 
