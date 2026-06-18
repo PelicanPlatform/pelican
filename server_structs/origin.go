@@ -58,6 +58,19 @@ func (t OriginStorageType) IsPosixLike() bool {
 	}
 }
 
+// UsesXRootD reports whether an origin of this storage type is fronted by an
+// XRootD process. The native "v2" backends (and SSH) are served directly by
+// the pelican process and never launch XRootD. New native backends should be
+// added here rather than duplicating the list of storage-type comparisons.
+func (t OriginStorageType) UsesXRootD() bool {
+	switch t {
+	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2:
+		return false
+	default:
+		return true
+	}
+}
+
 // Convert a string to an OriginStorageType
 func ParseOriginStorageType(storageType string) (ost OriginStorageType, err error) {
 	switch storageType {
