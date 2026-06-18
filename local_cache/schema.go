@@ -322,7 +322,8 @@ type Checksum struct {
 // are reconciled:
 //
 //   - Max-time: LastModified, LastValidated, LastAccessTime, Expires,
-//     Completed — only advance forward (keep the later timestamp).
+//     Completed, DataVerified — only advance forward (keep the later
+//     timestamp).
 //   - Additive: Checksums — union by algorithm; prefer OriginVerified.
 //   - Last-writer-wins: ContentType, ContentLength, VaryHeaders,
 //     CCFlags, CCMaxAge — the incoming value always replaces the old one.
@@ -341,6 +342,7 @@ type CacheMetadata struct {
 	LastValidated time.Time  `msgpack:"lv"`           // When we last validated with origin
 	Completed     time.Time  `msgpack:"c"`            // When download was completed
 	Checksums     []Checksum `msgpack:"ck,omitempty"` // Object checksums
+	DataVerified  time.Time  `msgpack:"dv,omitempty"` // When the on-disk data was last read back and checksum-verified
 
 	// Identification fields
 	ContentType   string   `msgpack:"ct"`            // MIME type
