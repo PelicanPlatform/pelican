@@ -581,9 +581,15 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// Safe: this runs during single-threaded init, before any downloads.
 	storage.chooseDir = eviction.ChooseDiskStorage
 
-	// Initialize consistency checker
+	// Initialize consistency checker.  In "once" data-scan mode the periodic
+	// integrity scan verifies each object's on-disk data a single time and
+	// then skips it, for deployments whose storage already guarantees at-rest
+	// integrity (e.g. ZFS).  Any value other than "once" keeps the default
+	// behaviour of re-verifying every object on each scan cycle.
+	scanOnce := strings.EqualFold(param.Cache_DataScanMode.GetString(), "once")
 	consistency := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MinAgeForCleanup: -1, // Use default grace period
+		SkipVerifiedData: scanOnce,
 	})
 
 	// Get federation info

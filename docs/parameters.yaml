@@ -2660,6 +2660,24 @@ type: bool
 default: true
 components: ["cache"]
 ---
+name: Cache.DataScanMode
+description: |+
+  Controls how the V2 (persistent) cache's periodic data-integrity scan re-verifies on-disk object data.
+
+  Valid values:
+    - "all" (default): every scan cycle re-reads and re-checksums all complete objects. Recommended when the cache
+      relies on Pelican for at-rest integrity.
+    - "once": each object's on-disk data is read back and checksummed exactly once (recording the checksum in the cache
+      database, and comparing it against the origin's reported checksum when one is available). Objects that have already
+      been verified are skipped on subsequent scan cycles. This is intended for deployments whose underlying storage
+      already guarantees at-rest integrity (for example ZFS with scrubbing), where repeatedly re-reading every object is
+      wasteful but recording an initial baseline checksum is still desired.
+
+  Unrecognized values are treated as "all".
+type: string
+default: all
+components: ["cache"]
+---
 name: Cache.EvictionMonitoringInterval
 description: |+
   The interval at which the eviction monitoring will be reported.

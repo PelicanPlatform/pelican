@@ -54,6 +54,10 @@ var (
 	errChannelFull         = errors.New("channel_full")
 	errScanDone            = errors.New("scan_done")
 	errChecksumSkipped     = errors.New("checksum_skipped")
+	// errChecksumAlreadyVerified is returned (in "once" data-scan mode) for an
+	// object whose on-disk data has already been verified, so it is skipped
+	// without being re-read.
+	errChecksumAlreadyVerified = errors.New("checksum_already_verified")
 
 	metadataScanInconsistentObjects = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "pelican_cache_metadata_scan_inconsistent_objects_total",
@@ -117,6 +121,7 @@ type ConsistencyChecker struct {
 	dataScanBytesPerSec int64          // Max bytes per second for data scanning
 	minAgeForCleanup    time.Duration  // Minimum age before cleanup to avoid races
 	checksumTypes       []ChecksumType // Checksum algorithms to calculate/verify
+	skipVerifiedData    bool           // When true, the data scan verifies each object once then skips it
 
 	// Statistics
 	stats   ConsistencyStats
@@ -142,6 +147,13 @@ type ConsistencyConfig struct {
 	// ChecksumTypes specifies which checksums to calculate and verify.
 	// When empty, defaults to []ChecksumType{ChecksumSHA256}.
 	ChecksumTypes []ChecksumType
+	// SkipVerifiedData, when true, makes the data scan verify each object's
+	// on-disk data exactly once (recording the checksum and comparing it
+	// against the origin's reported value when available) and then skip that
+	// object on subsequent scans.  Intended for storage backends that already
+	// guarantee at-rest integrity (e.g. ZFS).  When false (default) every scan
+	// re-verifies all objects.
+	SkipVerifiedData bool
 }
 
 // ConsistencyStats holds statistics from consistency checks
@@ -192,6 +204,7 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 		dataScanBytesPerSec: config.DataScanBytesPerSec,
 		minAgeForCleanup:    config.MinAgeForCleanup,
 		checksumTypes:       checksumTypes,
+		skipVerifiedData:    config.SkipVerifiedData,
 		stopCh:              make(chan struct{}),
 	}
 }
@@ -1235,8 +1248,8 @@ func (cc *ConsistencyChecker) processBatchForDataScan(
 		prevObjects := *objectsVerified
 
 		if err := cc.verifyObjectChecksum(ctx, item.instanceHash, item.meta, bytesLimiter, checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified); err != nil {
-			if errors.Is(err, errChecksumSkipped) {
-				continue // Incomplete object — don't count as verified
+			if errors.Is(err, errChecksumSkipped) || errors.Is(err, errChecksumAlreadyVerified) {
+				continue // Incomplete or already-verified object — don't count as verified
 			}
 			sl.WithError(err).WithField("instanceHash", item.instanceHash).Warn("Error verifying object")
 		}
@@ -1283,11 +1296,18 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 		}
 	}
 
+	// In "verify once" mode, skip objects whose on-disk data has already been
+	// read back and verified.  The expensive read+hash is avoided entirely.
+	if cc.skipVerifiedData && !meta.DataVerified.IsZero() {
+		return errChecksumAlreadyVerified
+	}
+
 	// If no checksums available, calculate and store them
 	if len(meta.Checksums) == 0 {
 		if err := cc.calculateAndStoreChecksums(ctx, instanceHash, meta, bytesLimiter); err != nil {
 			return err
 		}
+		cc.markDataVerified(instanceHash)
 		*objectsVerified++
 		return nil
 	}
@@ -1323,8 +1343,23 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	}
 
 	*bytesVerified += verified
+	cc.markDataVerified(instanceHash)
 	*objectsVerified++
 	return nil
+}
+
+// markDataVerified records that an object's on-disk data has just been read
+// back and checksum-verified.  It is only persisted in "verify once" mode,
+// where the recorded timestamp causes subsequent scans to skip the object;
+// in the default mode it is a no-op to avoid a metadata write per object per
+// scan cycle.
+func (cc *ConsistencyChecker) markDataVerified(instanceHash InstanceHash) {
+	if !cc.skipVerifiedData {
+		return
+	}
+	if err := cc.db.MergeMetadata(instanceHash, &CacheMetadata{DataVerified: time.Now()}); err != nil {
+		log.Warnf("Failed to record data-verified timestamp for %s: %v", instanceHash, err)
+	}
 }
 
 // hashObjectData reads all object data through the storage manager and
