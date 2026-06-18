@@ -20,17 +20,29 @@ package cache
 
 import (
 	"context"
-	"io/fs"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // Check for the sentinel file
@@ -51,57 +63,418 @@ func CheckCacheSentinelLocation() error {
 	return nil
 }
 
-// Periodically scan the ${Cache.NamespaceLocation}/pelican/monitoring directory to clean up test files
-// TODO: Director test files should be under /pelican/monitoring/directorTest and the file names
-// should have director-test- as the prefix
-func LaunchDirectorTestFileCleanup(ctx context.Context) {
-	server_utils.LaunchWatcherMaintenance(ctx,
-		[]string{filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs)},
-		"cache director-based health test clean up",
-		time.Minute,
-		func(notifyEvent bool) error {
-			// We run this function regardless of notifyEvent to do the cleanup
-			dirPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs)
-			dirInfo, err := os.Stat(dirPath)
-			if err != nil {
-				return err
-			} else {
-				if !dirInfo.IsDir() {
-					return errors.New("monitoring path is not a directory: " + dirPath)
-				}
+// dateSubdirPattern matches YYYY-MM-DD directory names used by daily-nested director test files
+var dateSubdirPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// directorTestFilePattern matches the only path shape the eviction endpoint should ever accept:
+//
+//	<MonitoringBaseNs>/<DirectorTestDir>/<director-id>/YYYY-MM-DD/director-test-<suffix>
+//
+// The director-id is a non-empty path segment (typically the director's hostname) that
+// keeps multiple directors from colliding under a shared cache. The suffix is left
+// unconstrained so that both ".txt" and ".cinfo" files are accepted. Matching against
+// a strict pattern (rather than a prefix check) rejects path-traversal attempts like
+// "/pelican/monitoring/../../etc/passwd", double slashes, and any filename outside the
+// director-test naming convention.
+//
+// The director-id and suffix segments use [^/[:cntrl:]] (not [^/]) so that control
+// characters — newlines, carriage returns, NUL, tab — are rejected. [^/] alone would
+// admit them, since it only excludes the path separator; an accepted "\n" would both
+// reach the downstream evict/token machinery and enable log injection through the
+// %s-formatted path in HandleDirectorEvictRequest's log lines.
+var directorTestFilePattern = regexp.MustCompile(
+	`^` + regexp.QuoteMeta(server_utils.MonitoringBaseNs) +
+		`/` + regexp.QuoteMeta(server_utils.DirectorTestDir) +
+		`/[^/[:cntrl:]]+/\d{4}-\d{2}-\d{2}/` + regexp.QuoteMeta(server_utils.DirectorTest.String()) +
+		`-[^/[:cntrl:]]+$`)
+
+// removeTestFile disposes of a single director-test file.
+//   - Without Server.DropPrivileges it calls os.Remove, an immediate, synchronous unlink:
+//     on a nil return the file is gone from disk.
+//   - With Server.DropPrivileges=true the file is owned by the xrootd user and the pelican process
+//     cannot unlink it directly, so it routes through the cache's own evict API (which executes
+//     under xrootd's identity). That path only marks the file as a PFC purge candidate; a nil
+//     return means "eviction requested", and the bytes are unlinked later during PFC's purge
+//     cycle (see evictViaLocalPlugin). Callers must not assume the file is gone in this mode.
+func removeTestFile(ctx context.Context, fsPath string) error {
+	if !param.Server_DropPrivileges.GetBool() {
+		return os.Remove(fsPath)
+	}
+	nsPath, err := fsToNamespacePath(fsPath)
+	if err != nil {
+		return err
+	}
+	return evictViaLocalPlugin(ctx, nsPath)
+}
+
+// cleanTestDir disposes of every file under dirPath
+//
+// Cost note in DropPrivileges mode: each file costs one evict call (a freshly minted WLCG
+// token plus one HTTP GET to the local xrootd evict endpoint) issued sequentially.
+// There is no batch/directory mode on that endpoint (it uses the xrdhttp-pelican
+// plugin, one path per call), so the per-file cost is intrinsic here. In normal
+// operation it is negligible: the maintenance loop runs every minute and trims today's
+// day-directory to the latest test object (see cleanupOldFilesInDir), so a directory has
+// aged out holding only ~6 files by the time it reaches cleanTestDir. The pathological
+// case is a maintenance loop that has been dead or failing for ~a day while xrootd kept
+// accepting the director's writes (15s health-test cadence => up to ~5760 test files,
+// plus .cinfo companions, in a single aged-out day-dir); the first recovered pass would
+// then fire thousands of sequential evict requests. That is slow but bounded and safe:
+// LaunchWatcherMaintenance runs maintenance synchronously in a single goroutine, so
+// passes never overlap or pile up, and the burst is self-limiting (the directory is gone
+// once it drains). Do NOT reuse this on an arbitrarily large or untrimmed directory under
+// DropPrivileges expecting it to be cheap. And there's room for optimization.
+func cleanTestDir(ctx context.Context, dirPath string) error {
+	if !param.Server_DropPrivileges.GetBool() {
+		return os.RemoveAll(dirPath)
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, entry := range entries {
+		entryPath := filepath.Join(dirPath, entry.Name())
+		// Day-directories are expected to be flat. An unexpected nested directory shouldn't
+		// happen, but if one does we still recurse into it and evict its contents.
+		if entry.IsDir() {
+			log.Warnf("Unexpected nested directory %q under director-test day-directory; cleaning up its contents anyway", entryPath)
+			if err := cleanTestDir(ctx, entryPath); err != nil && firstErr == nil {
+				firstErr = err
 			}
-			dirItems, err := os.ReadDir(dirPath)
-			if err != nil {
-				return err
+			continue
+		}
+		if err := removeTestFile(ctx, entryPath); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// fsToNamespacePath strips the cache namespace-location prefix from an absolute
+// filesystem path, returning the namespace-relative path the evict API expects.
+func fsToNamespacePath(fsPath string) (string, error) {
+	nsLoc := param.Cache_NamespaceLocation.GetString()
+	if nsLoc == "" {
+		return "", errors.Errorf("%s is empty; cannot convert filesystem path to namespace path", param.Cache_NamespaceLocation.GetName())
+	}
+	// Normalize to exactly one trailing slash, avoiding matching sibling directories
+	nsLoc = strings.TrimRight(nsLoc, "/") + "/"
+	if !strings.HasPrefix(fsPath, nsLoc) {
+		return "", errors.Errorf("filesystem path %q is not under the %s: %s", fsPath, param.Cache_NamespaceLocation.GetName(), nsLoc)
+	}
+	// Trim trailing slash (if any) to fit the evict API's expectation of a path segment; no-op if it is root directory.
+	nsLoc = path.Clean(nsLoc)
+	return strings.TrimPrefix(fsPath, nsLoc), nil
+}
+
+// cleanupDirectorTestFiles removes old director test files in dirTestPath.
+// dirTestPath (i.e. <Cache.NamespaceLocation>/<MonitoringBaseNs>/directorTest)
+// is the directory root of the director-test tree, which may contain two sub-hierarchies:
+//   - Legacy flat files: dirTestPath/director-test-*.txt (swept entirely).
+//   - Per-director daily-nested: dirTestPath/<id>/YYYY-MM-DD/director-test-*.txt
+//     (current). Per-director subtrees are recursed into; within each, day-dirs older
+//     than today are removed wholesale and today's dir is trimmed to the latest 2 files.
+//
+// Under Server.DropPrivileges, removals are routed through the cache's evict API
+// (see removeTestFile / cleanTestDir) since the pelican process cannot directly
+// delete xrootd-owned files. In this mode "removal" only marks files as PFC purge
+// candidates; the bytes are unlinked later during PFC's threshold-gated purge cycle,
+// so files this sweep "cleans up" may still be present on disk for a while afterward.
+func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
+	dirInfo, err := os.Stat(dirTestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Nothing to clean up yet
+		}
+		return err
+	}
+	if !dirInfo.IsDir() {
+		return errors.New("director test path is not a directory: " + dirTestPath)
+	}
+
+	entries, err := os.ReadDir(dirTestPath)
+	if err != nil {
+		return err
+	}
+
+	todayStr := time.Now().Format("2006-01-02")
+
+	var legacyFiles []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Per-director subtree: directorTest/<id>/YYYY-MM-DD/...
+			idDirPath := filepath.Join(dirTestPath, entry.Name())
+			if err := cleanupDirectorIDSubtree(ctx, idDirPath, todayStr); err != nil {
+				log.WithError(err).Warnf("Failed to clean up director subtree: %s", idDirPath)
 			}
-			directorItems := []fs.DirEntry{}
-			for _, item := range dirItems {
-				if item.IsDir() {
-					continue
-				}
-				// Ignore self tests. They should be handled automatically by self test logic.
-				// "self-test-" is the prefix for self test files, specified in self_monitor.selfTestPrefix
-				// Plain text aims to avoid circular dependency
-				if strings.HasPrefix(item.Name(), "self-test-") {
-					continue
-				}
-				directorItems = append(directorItems, item)
+		} else if strings.HasPrefix(entry.Name(), server_utils.DirectorTest.String()) {
+			// Collect legacy flat files (director-test-* files sitting directly in directorTest/)
+			legacyFiles = append(legacyFiles, entry)
+		}
+	}
+
+	// Clean up legacy flat files
+	if len(legacyFiles) > 0 {
+		for i := 0; i < len(legacyFiles); i++ {
+			filePath := filepath.Join(dirTestPath, legacyFiles[i].Name())
+			if err := removeTestFile(ctx, filePath); err != nil {
+				log.WithError(err).Warnf("Failed to remove legacy director test file: %s", filePath)
 			}
-			if len(directorItems) <= 2 { // At minimum there are the test file and .cinfo file, and we don't want to remove the last two
+		}
+	}
+
+	return nil
+}
+
+// cleanupDirectorIDSubtree applies the daily-nested cleanup logic inside a single
+// director's subtree (directorTest/<id>/YYYY-MM-DD/...). Day-directories older than
+// today are removed wholesale; today's directory is trimmed to the latest test object
+// (test file + .cinfo). The "keep latest" rule applies per-director, so multiple directors
+// probing the same cache can each retain their most recent file independently.
+func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) error {
+	entries, err := os.ReadDir(idDirPath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !dateSubdirPattern.MatchString(entry.Name()) {
+			continue
+		}
+		dateDir := filepath.Join(idDirPath, entry.Name())
+		if entry.Name() < todayStr {
+			if err := cleanTestDir(ctx, dateDir); err != nil {
+				log.WithError(err).Warnf("Failed to remove old director test directory: %s", dateDir)
+			}
+		} else if entry.Name() == todayStr {
+			if err := cleanupOldFilesInDir(ctx, dateDir, 1); err != nil {
+				log.WithError(err).Warnf("Failed to clean up today's director test directory: %s", dateDir)
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupOldFilesInDir removes all but the keepObjects most recent test objects in a
+// directory. A test object is a data file together with its companion ".cinfo" file
+// (e.g. "...T10:00:00Z.txt" and "...T10:00:00Z.txt.cinfo"). Files are grouped into
+// objects by the data-file name (a ".cinfo" file belongs to the object obtained by
+// stripping its ".cinfo" suffix) so the data file and its .cinfo are always kept or
+// removed together. An unpaired data file or orphaned .cinfo simply forms a
+// single-file object under its own key. Objects are ordered by name (which embeds an
+// RFC3339 timestamp), so the last keys are the most recent.
+func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepObjects int) error {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+
+	// Group files into logical objects keyed by their data-file name.
+	objects := make(map[string][]string)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		key := strings.TrimSuffix(name, ".cinfo")
+		objects[key] = append(objects[key], name)
+	}
+
+	if len(objects) <= keepObjects {
+		return nil
+	}
+
+	keys := make([]string, 0, len(objects))
+	for key := range objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for i := 0; i < len(keys)-keepObjects; i++ {
+		for _, name := range objects[keys[i]] {
+			filePath := filepath.Join(dirPath, name)
+			if err := removeTestFile(ctx, filePath); err != nil {
+				log.WithError(err).Warnf("Failed to remove old test file: %s", filePath)
+			}
+		}
+	}
+	return nil
+}
+
+// HandleDirectorEvictRequest handles eviction requests from the director. When the director
+// completes a successful cache health test, it asks the cache to evict the previous test file
+// via this endpoint. The cache then calls its own xrdhttp-pelican evict API using a locally-
+// minted token, matching the self-test authorization pattern (see xrootd/self_monitor.go).
+//
+// Semantics of "evict": a 2xx from this handler does NOT mean the file has been unlinked from
+// disk. It means the request was authorized, the path passed validation, and xrootd's PFC
+// accepted the file as a purge candidate. PFC performs the physical removal later, during its
+// periodic purge cycle (pfc.diskusage ... purgeinterval ...), and only once the configured
+// disk-usage thresholds are crossed. Under low cache pressure a successfully "evicted" file
+// can remain on disk indefinitely.
+func HandleDirectorEvictRequest(ctx *gin.Context) {
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.FederationIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
+	})
+	if !ok || err != nil {
+		msg := "Failed to verify the token"
+		if err != nil {
+			msg = fmt.Sprintf("%s: %v", msg, err)
+		}
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return
+	}
+
+	var reqBody struct {
+		Path string `json:"path"`
+	}
+	if err := ctx.ShouldBindJSON(&reqBody); err != nil || reqBody.Path == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Missing or invalid 'path' in request body",
+		})
+		return
+	}
+
+	// Validate the path matches the director test file shape exactly to prevent
+	// arbitrary evictions (including path-traversal attempts).
+	if !directorTestFilePattern.MatchString(reqBody.Path) {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Path does not match the expected director test file shape; refusing to evict",
+		})
+		return
+	}
+
+	if err := evictViaLocalPlugin(ctx.Request.Context(), reqBody.Path); err != nil {
+		log.Warningf("Failed to submit evict request for director test file %s: %v", reqBody.Path, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to submit eviction request: " + err.Error(),
+		})
+		return
+	}
+
+	// Note: the file is now a PFC purge candidate, not necessarily removed from disk.
+	// Physical removal is deferred to PFC's threshold-gated purge cycle (see the doc
+	// comment on evictViaLocalPlugin).
+	log.Debugf("Marked director test file as PFC purge candidate via local plugin: %s", reqBody.Path)
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "Eviction request accepted; file marked as a purge candidate (physical removal deferred to PFC purge cycle)",
+	})
+}
+
+// evictViaLocalPlugin calls the cache's own xrdhttp-pelican evict API with a locally-minted
+// token. This mirrors how the cache self-test (xrootd/self_monitor.go generateFileTestScitoken)
+// accesses its own XRootD port using the server's own issuer, which is already trusted by the
+// cache's scitokens configuration.
+//
+// Note: a 200 OK from the evict API means xrootd's PFC has accepted the file as a purge
+// candidate, NOT that the on-disk file has been unlinked. PFC defers physical removal to its
+// periodic purge thread (pfc.diskusage ... purgeinterval ...), which only acts once the
+// configured disk-usage thresholds are crossed. Under low cache pressure the file can persist
+// for a long time after a successful evict. When the purge does run, the data block and its
+// companion meta block (.txt.cinfo) are removed together as a unit. A nil return from this
+// function therefore signals "eviction successfully requested", not "file deleted".
+func evictViaLocalPlugin(ctx context.Context, testFilePath string) error {
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		return errors.Wrap(err, "cannot mint evict token: failed to determine server issuer URL")
+	}
+	cacheUrl := param.Cache_Url.GetString()
+	if cacheUrl == "" {
+		return errors.Errorf("%s is empty; cannot call evict API", param.Cache_Url.GetName())
+	}
+	tokenCfg := token.NewWLCGToken()
+	tokenCfg.Lifetime = time.Minute
+	tokenCfg.Issuer = issuerUrl
+	tokenCfg.Subject = cacheUrl
+	// xrootd's scitokens plugin treats scope paths as relative to the issuer's
+	// base_path (/pelican/monitoring), so we strip that prefix here. Passing an
+	// absolute scope like /pelican/monitoring/directorTest/... gets the base path
+	// prepended again, producing /pelican/monitoring/pelican/monitoring/... which
+	// matches nothing. Scoping to the parent day-directory (rather than the file
+	// itself) also covers companion .cinfo files within the same directory.
+	relScope := strings.TrimPrefix(path.Dir(testFilePath), server_utils.MonitoringBaseNs)
+	tokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, relScope))
+	// Use the WLCG "any" audience. The cache's scitokens.cfg is generated without
+	// a [Global] audience_json entry (WriteCacheScitokensConfig does not populate
+	// cfg.Global.Audience the way WriteOriginScitokensConfig does), so the
+	// scitokens plugin rejects tokens with any specific audience. Switching to a
+	// scoped audience would require extending WriteCacheScitokensConfig to add a
+	// cache-side audience first.
+	tokenCfg.AddAudienceAny()
+
+	tok, err := tokenCfg.CreateToken()
+	if err != nil {
+		return errors.Wrap(err, "failed to create evict token")
+	}
+
+	evictUrl, err := url.Parse(cacheUrl)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse %s", param.Cache_Url.GetName())
+	}
+	evictUrl.Path = "/pelican/api/v1.0/evict"
+	q := evictUrl.Query()
+	q.Set("path", testFilePath)
+	q.Set("authz", "Bearer "+tok)
+	evictUrl.RawQuery = q.Encode()
+
+	client := config.GetClient()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, evictUrl.String(), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create evict request")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to send evict request")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("evict API returned status %d: %q", resp.StatusCode, string(body))
+}
+
+// Periodically scan the directorTest directory to clean up test files.
+// Handles both legacy flat files and daily-nested subdirectories (YYYY-MM-DD/).
+//
+// This serves as a backup cleanup mechanism. The primary cleanup is performed by the
+// director, which asks the cache to evict old test files via the cache web API endpoint
+// POST /api/v1.0/cache/evictTestFile (see HandleDirectorEvictRequest). This local cleanup
+// catches files that the director failed to evict (e.g., due to network issues or director restarts).
+// Note this intentionally does not use the fsnotify-driven server_utils.LaunchWatcherMaintenance,
+// which would re-trigger the sweep on every test-file write.
+//
+// When Server.DropPrivileges is enabled the pelican process cannot remove xrootd-owned
+// files directly, so cleanupDirectorTestFiles routes removals through the cache's evict
+// API (see removeTestFile). Privilege-on deployments use os.Remove / os.RemoveAll.
+func LaunchDirectorTestFileCleanup(ctx context.Context, egrp *errgroup.Group) {
+	dirTestPath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs, server_utils.DirectorTestDir)
+
+	egrp.Go(func() error {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			// Run immediately on startup, then once every 24h.
+			if err := cleanupDirectorTestFiles(ctx, dirTestPath); err != nil {
+				log.Warningf("Failure during director test file backup cleanup: %v", err)
+			}
+			select {
+			case <-ctx.Done():
+				log.Info("Director test file backup cleanup routine cancelled; shutting down")
 				return nil
+			case <-ticker.C:
 			}
-			for idx, item := range directorItems {
-				// For all but the latest two files (test file and its .cinfo file)
-				// os.ReadDir sorts dirEntries in order of file names. Since our test file names are timestamped and is string comparable,
-				// the last two files should be the latest test files, which we want to keep
-				if idx < len(dirItems)-2 {
-					err := os.Remove(filepath.Join(dirPath, item.Name()))
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		},
-	)
+		}
+	})
 }

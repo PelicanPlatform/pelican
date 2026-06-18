@@ -115,7 +115,7 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Site-local caches aren't part of the federation, so they don't expect
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
-		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchDirectorTestFileCleanup(ctx, egrp)
 		// Federation token manager is started below, after the PersistentCache
 		// is created, so the token can be delivered in-memory via pc.SetFedToken.
 	}
@@ -288,7 +288,7 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 	// Site-local caches aren't part of the federation, so they don't expect
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
-		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchDirectorTestFileCleanup(ctx, egrp)
 		cache.LaunchFedTokManager(ctx, egrp, cacheServer, func(f *os.File) error {
 			// In drop-privileges mode, the token file is chown'ed to the xrootd user
 			// and group by xrdhttp-pelican plugin by passing command "9" to the plugin.
