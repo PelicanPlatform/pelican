@@ -1,32 +1,31 @@
 ---
-title: pelican cache introspect metadata
+title: pelican server cache introspect verify
 ---
 
-## pelican cache introspect metadata
+## pelican-server cache introspect verify
 
-Show detailed metadata for a cached object
+Verify checksum of a cached object
 
 ### Synopsis
 
-Display detailed metadata for a cached object instance.
+Trigger checksum verification for a cached object.
 
-By default shows the latest cached version. Use --etag to specify
-a particular version, or --instance to specify by instance hash.
+This reads the entire object from disk, decrypts it, and verifies
+that stored checksums (if any) match the actual data.
 
 Example:
-  pelican cache introspect metadata pelican://my-federation/data/file.dat
-  pelican cache introspect metadata /data/file.dat --etag="abc123"
-  pelican cache introspect metadata --instance=<hash>
+  pelican cache introspect verify pelican://my-federation/data/file.dat
+  pelican cache introspect verify /data/file.dat --etag="abc123"
 
 ```
-pelican cache introspect metadata <object-url> [flags]
+pelican-server cache introspect verify <object-url> [flags]
 ```
 
 ### Options
 
 ```
-      --etag string       Specify ETag of the version to inspect
-  -h, --help              help for metadata
+      --etag string       Specify ETag of the version to verify
+  -h, --help              help for verify
       --instance string   Specify instance hash directly
 ```
 
@@ -46,4 +45,4 @@ pelican cache introspect metadata <object-url> [flags]
 
 ### SEE ALSO
 
-* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database
+* [pelican-server cache introspect](/commands-reference/pelican-server/cache/introspect/)	 - Introspect the cache's persistent database

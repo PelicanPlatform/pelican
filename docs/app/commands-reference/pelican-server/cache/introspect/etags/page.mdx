@@ -1,30 +1,30 @@
 ---
-title: pelican cache introspect disk usage
+title: pelican server cache introspect etags
 ---
 
-## pelican cache introspect disk-usage
+## pelican-server cache introspect etags
 
-Compute actual disk usage by walking storage directories
+List all cached ETags for an object
 
 ### Synopsis
 
-Walk all storage directories and sum the actual file sizes on disk.
+List all cached versions (ETags) of a specific object.
 
-This is an EXPENSIVE operation that stats every file in the cache's
-storage directories. For large caches this may take significant time.
+The object URL should be a pelican:// or osdf:// URL, or a bare path
+if the federation context is known.
 
 Example:
-  pelican cache introspect disk-usage
-  pelican cache introspect disk-usage --json
+  pelican cache introspect etags pelican://my-federation/data/file.dat
+  pelican cache introspect etags /data/file.dat
 
 ```
-pelican cache introspect disk-usage [flags]
+pelican-server cache introspect etags <object-url> [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for disk-usage
+  -h, --help   help for etags
 ```
 
 ### Options inherited from parent commands
@@ -43,4 +43,4 @@ pelican cache introspect disk-usage [flags]
 
 ### SEE ALSO
 
-* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database
+* [pelican-server cache introspect](/commands-reference/pelican-server/cache/introspect/)	 - Introspect the cache's persistent database

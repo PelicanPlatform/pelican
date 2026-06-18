@@ -1,31 +1,30 @@
 ---
-title: pelican cache introspect stats
+title: pelican server cache introspect disk usage
 ---
 
-## pelican cache introspect stats
+## pelican-server cache introspect disk-usage
 
-Show cache size statistics
+Compute actual disk usage by walking storage directories
 
 ### Synopsis
 
-Display aggregate size statistics about the cache.
+Walk all storage directories and sum the actual file sizes on disk.
 
-Shows total inline bytes stored in BadgerDB, total number of metadata
-entries, total bytes claimed by metadata, and per-storage-directory
-breakdown. This is a cheap operation that only scans metadata.
+This is an EXPENSIVE operation that stats every file in the cache's
+storage directories. For large caches this may take significant time.
 
 Example:
-  pelican cache introspect stats
-  pelican cache introspect stats --json
+  pelican cache introspect disk-usage
+  pelican cache introspect disk-usage --json
 
 ```
-pelican cache introspect stats [flags]
+pelican-server cache introspect disk-usage [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for stats
+  -h, --help   help for disk-usage
 ```
 
 ### Options inherited from parent commands
@@ -44,4 +43,4 @@ pelican cache introspect stats [flags]
 
 ### SEE ALSO
 
-* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database
+* [pelican-server cache introspect](/commands-reference/pelican-server/cache/introspect/)	 - Introspect the cache's persistent database
