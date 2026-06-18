@@ -647,7 +647,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 			backend = blobBe
 			if blobURL != "" {
-				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, blobURL)
+				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, redactBlobURL(blobURL))
 			} else {
 				log.Infof("Initialized native S3 backend for %s (bucket: %s, region: %s)", export.FederationPrefix, export.S3Bucket, param.Origin_S3Region.GetString())
 			}

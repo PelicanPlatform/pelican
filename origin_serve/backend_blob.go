@@ -31,12 +31,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
 	_ "gocloud.dev/blob/gcsblob"   // register gs:// URL opener
 	_ "gocloud.dev/blob/memblob"   // register mem:// URL opener (useful for testing)
-	_ "gocloud.dev/blob/s3blob"    // register s3:// URL opener
+	"gocloud.dev/blob/s3blob"
 	"gocloud.dev/gcerrors"
 	"golang.org/x/net/webdav"
 
@@ -108,57 +111,51 @@ func buildS3BlobURL(opts BlobBackendOptions) (string, error) {
 // newBlobBackend opens a gocloud.dev/blob bucket according to opts and returns
 // a blobBackend.
 func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
+	ctx := context.Background()
+
 	var (
 		bucket *blob.Bucket
 		err    error
 	)
 
-	blobURL := opts.BlobURL
-	if blobURL == "" {
-		// Build an s3:// URL from the backward-compatible S3-specific fields.
-		blobURL, err = buildS3BlobURL(opts)
+	switch {
+	case opts.BlobURL == "" && opts.AccessKey != "" && opts.SecretKey != "":
+		// Native S3 export with per-export static credentials. Construct an
+		// explicit *s3.Client so each backend carries its own credentials.
+		// Previously the keys were exported into the global process
+		// environment, which meant two S3 exports configured against
+		// different accounts would clobber one another -- whichever was
+		// initialized last won.
+		bucket, err = openS3BucketWithCredentials(ctx, opts)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// If per-export S3 credentials were provided, set them in the environment
-	// so the gocloud AWS credential chain picks them up.
-	//
-	// FIXME(deploy): this mutates global process environment, which has two
-	// real-world consequences in production:
-	//   1. With multiple S3 backends configured against different accounts,
-	//      whichever export is initialized last "wins" -- subsequent SDK
-	//      calls (including from other backends, presigners, debug hooks,
-	//      and any subprocess we spawn) see the last-set credentials.
-	//   2. Because os.Setenv writes to the global env, it leaks into any
-	//      child process inheriting our env (notably the xrootd workers in
-	//      mixed deployments).
-	// The proper fix is to construct an *s3.Client with explicit
-	// aws.Credentials and call s3blob.OpenBucket(ctx, client, bucket, opts)
-	// directly instead of going through blob.OpenBucket(URL). Until then,
-	// per-export AccessKey/SecretKey is only safe when one S3 export is
-	// configured per origin process.
-	if opts.AccessKey != "" && opts.SecretKey != "" {
-		os.Setenv("AWS_ACCESS_KEY_ID", opts.AccessKey)
-		os.Setenv("AWS_SECRET_ACCESS_KEY", opts.SecretKey)
-	} else if strings.HasPrefix(blobURL, "s3://") {
-		// No credentials supplied — request anonymous access unless the env
-		// already has credentials configured.
-		if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
-			// Append anonymous=true so the SDK doesn't try IAM, etc.
+	default:
+		// Generic gocloud.dev path: an explicit BlobURL (s3/gs/azblob/mem), or
+		// an S3 bucket with no per-export credentials (anonymous, or ambient
+		// credentials from the environment / instance role).
+		blobURL := opts.BlobURL
+		if blobURL == "" {
+			// Build an s3:// URL from the backward-compatible S3-specific fields.
+			blobURL, err = buildS3BlobURL(opts)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if strings.HasPrefix(blobURL, "s3://") && os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+			// No credentials available — request anonymous access so the SDK
+			// doesn't probe IAM, instance metadata, etc.
 			if strings.Contains(blobURL, "?") {
 				blobURL += "&anonymous=true"
 			} else {
 				blobURL += "?anonymous=true"
 			}
 		}
-	}
-
-	log.Infof("Opening blob bucket via URL: %s", blobURL)
-	bucket, err = blob.OpenBucket(context.Background(), blobURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open blob bucket from URL %q: %w", blobURL, err)
+		log.Infof("Opening blob bucket via URL: %s", redactBlobURL(blobURL))
+		bucket, err = blob.OpenBucket(ctx, blobURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open blob bucket from URL %q: %w", redactBlobURL(blobURL), err)
+		}
 	}
 
 	// If a storagePrefix is configured, scope all operations to it.
@@ -170,6 +167,83 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 
 	fs := &blobFileSystem{bucket: bucket}
 	return &blobBackend{bucket: bucket, fs: fs}, nil
+}
+
+// openS3BucketWithCredentials opens an S3 bucket using an explicit *s3.Client
+// configured with static, per-export credentials. Unlike opening via an s3://
+// URL (which relies on the ambient AWS credential chain backed by process-wide
+// environment variables), this keeps each export's credentials local to its
+// own client, so multiple S3 exports with distinct accounts can coexist within
+// a single origin process.
+func openS3BucketWithCredentials(ctx context.Context, opts BlobBackendOptions) (*blob.Bucket, error) {
+	if opts.Bucket == "" {
+		return nil, fmt.Errorf("S3 bucket name is required when BlobURL is not set")
+	}
+
+	cfgOpts := []func(*config.LoadOptions) error{
+		config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(opts.AccessKey, opts.SecretKey, ""),
+		),
+	}
+	if opts.Region != "" {
+		cfgOpts = append(cfgOpts, config.WithRegion(opts.Region))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, cfgOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config for bucket %q: %w", opts.Bucket, err)
+	}
+
+	var s3Opts []func(*s3.Options)
+	// Default to path-style addressing (endpoint/bucket/key) unless virtual-host
+	// style is explicitly requested; path-style is required by most
+	// S3-compatible services (MinIO, Ceph) and custom endpoints.
+	if strings.ToLower(opts.URLStyle) != "virtual" {
+		s3Opts = append(s3Opts, func(o *s3.Options) { o.UsePathStyle = true })
+	}
+	if opts.ServiceURL != "" {
+		endpoint := opts.ServiceURL
+		s3Opts = append(s3Opts, func(o *s3.Options) { o.BaseEndpoint = &endpoint })
+	}
+	client := s3.NewFromConfig(awsCfg, s3Opts...)
+
+	log.Infof("Opening S3 bucket %q with per-export credentials (endpoint: %q, region: %q)",
+		opts.Bucket, opts.ServiceURL, opts.Region)
+
+	// Mirror gocloud's URL opener: the S3 upload manager doesn't pick up the
+	// checksum-calculation setting from the config, so propagate it explicitly
+	// to preserve compatibility with third-party S3 providers.
+	return s3blob.OpenBucket(ctx, client, opts.Bucket, &s3blob.Options{
+		RequestChecksumCalculation: awsCfg.RequestChecksumCalculation,
+	})
+}
+
+// redactBlobURL strips any embedded credentials (the userinfo component and
+// well-known secret query parameters) from a blob URL so it is safe to log.
+// Operators may embed secrets directly in Origin.ObjectProviderURL, e.g.
+// "s3://bucket?awssecretkey=...", and those must never reach the logs.
+func redactBlobURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		// If it doesn't parse we can't reason about it; don't risk leaking.
+		return "[unparsable blob URL redacted]"
+	}
+	if u.User != nil {
+		u.User = url.UserPassword("redacted", "redacted")
+	}
+	if q := u.Query(); len(q) > 0 {
+		changed := false
+		for key := range q {
+			switch strings.ToLower(key) {
+			case "awssecretkey", "secretkey", "secret_access_key", "access_key", "awsaccesskeyid", "password", "token":
+				q.Set(key, "redacted")
+				changed = true
+			}
+		}
+		if changed {
+			u.RawQuery = q.Encode()
+		}
+	}
+	return u.Redacted()
 }
 
 func (b *blobBackend) CheckAvailability() error {
@@ -296,8 +370,9 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 	peekIter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix, Delimiter: "/"})
 	if _, peekErr := peekIter.Next(ctx); peekErr == nil {
 		// It is a directory — return a lazy dir handle (a fresh iterator
-		// will be created when Readdir is called).
-		return &blobDirFile{name: name, bucket: fs.bucket, prefix: dirPrefix}, nil
+		// will be created when Readdir is called). Carry the request context
+		// so the deferred listing honours cancellation/deadlines.
+		return &blobDirFile{name: name, bucket: fs.bucket, prefix: dirPrefix, ctx: ctx}, nil
 	}
 
 	// Read mode — open via blob.NewReader (supports seek).
@@ -369,14 +444,65 @@ func (fs *blobFileSystem) RemoveAll(ctx context.Context, name string) error {
 }
 
 // Rename implements webdav.FileSystem.
+//
+// Blob stores have no native rename, so we copy-then-delete. For a leaf object
+// that is a single copy/delete. When oldName refers to a "directory" (a key
+// prefix with children) we must also move every descendant -- otherwise the
+// children would be orphaned under the old prefix. Listing is paginated so
+// memory stays bounded for large trees, and each object is best-effort: a
+// partial failure returns the first error but continues so we don't strand a
+// half-moved tree.
 func (fs *blobFileSystem) Rename(ctx context.Context, oldName, newName string) error {
 	oldKey := blobKey(oldName)
 	newKey := blobKey(newName)
 
+	// Move the object at the exact key, if one exists. A missing object is not
+	// an error here: oldName may be a pure directory prefix with no marker.
 	if err := fs.bucket.Copy(ctx, newKey, oldKey, nil); err != nil {
-		return fmt.Errorf("blob copy %q -> %q: %w", oldKey, newKey, err)
+		if !isNotFound(err) {
+			return fmt.Errorf("blob copy %q -> %q: %w", oldKey, newKey, err)
+		}
+	} else if err := fs.bucket.Delete(ctx, oldKey); err != nil && !isNotFound(err) {
+		return fmt.Errorf("blob delete %q: %w", oldKey, err)
 	}
-	return fs.bucket.Delete(ctx, oldKey)
+
+	// Move every descendant under the directory prefix.
+	oldPrefix := oldKey
+	if oldPrefix != "" && !strings.HasSuffix(oldPrefix, "/") {
+		oldPrefix += "/"
+	}
+	newPrefix := newKey
+	if newPrefix != "" && !strings.HasSuffix(newPrefix, "/") {
+		newPrefix += "/"
+	}
+
+	iter := fs.bucket.List(&blob.ListOptions{Prefix: oldPrefix})
+	var firstErr error
+	for {
+		obj, listErr := iter.Next(ctx)
+		if listErr == io.EOF {
+			break
+		}
+		if listErr != nil {
+			if firstErr == nil {
+				firstErr = listErr
+			}
+			break
+		}
+		destKey := newPrefix + strings.TrimPrefix(obj.Key, oldPrefix)
+		if err := fs.bucket.Copy(ctx, destKey, obj.Key, nil); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("blob copy %q -> %q: %w", obj.Key, destKey, err)
+			}
+			continue
+		}
+		if err := fs.bucket.Delete(ctx, obj.Key); err != nil && !isNotFound(err) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("blob delete %q: %w", obj.Key, err)
+			}
+		}
+	}
+	return firstErr
 }
 
 // Stat implements webdav.FileSystem.
@@ -585,6 +711,7 @@ type blobDirFile struct {
 	name   string
 	bucket *blob.Bucket
 	prefix string
+	ctx    context.Context
 
 	mu   sync.Mutex
 	iter *blob.ListIterator
@@ -629,7 +756,11 @@ func (f *blobDirFile) Readdir(count int) ([]os.FileInfo, error) {
 			break
 		}
 
-		obj, err := f.iter.Next(context.Background())
+		ctx := f.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		obj, err := f.iter.Next(ctx)
 		if err == io.EOF {
 			f.done = true
 			break
