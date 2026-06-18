@@ -86,6 +86,64 @@ func TestBuildS3BlobURL(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// redactBlobURL unit tests
+// ---------------------------------------------------------------------------
+
+func TestRedactBlobURL(t *testing.T) {
+	t.Run("StripsUserinfoPassword", func(t *testing.T) {
+		got := redactBlobURL("s3://AKIAEXAMPLE:supersecret@my-bucket?region=us-east-1")
+		assert.NotContains(t, got, "supersecret")
+		assert.Contains(t, got, "my-bucket")
+	})
+
+	t.Run("RedactsSecretQueryParams", func(t *testing.T) {
+		got := redactBlobURL("s3://my-bucket?awssecretkey=supersecret&region=us-east-1")
+		assert.NotContains(t, got, "supersecret")
+		assert.Contains(t, got, "region=us-east-1")
+	})
+
+	t.Run("LeavesCleanURLUntouched", func(t *testing.T) {
+		in := "s3://my-bucket?region=us-east-1&use_path_style=true"
+		got := redactBlobURL(in)
+		assert.Contains(t, got, "my-bucket")
+		assert.Contains(t, got, "region=us-east-1")
+	})
+
+	t.Run("UnparsableIsFullyRedacted", func(t *testing.T) {
+		got := redactBlobURL("://::not-a-url::")
+		assert.Equal(t, "[unparsable blob URL redacted]", got)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// openS3BucketWithCredentials unit tests
+// ---------------------------------------------------------------------------
+
+// TestOpenS3BucketWithCredentialsDoesNotMutateEnv guards the property that
+// motivated the explicit-client path: per-export credentials must stay local
+// to the client and never be written into the global process environment
+// (where they would clobber other S3 exports). s3blob.OpenBucket is lazy, so
+// no S3 server is contacted.
+func TestOpenS3BucketWithCredentialsDoesNotMutateEnv(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "sentinel-access")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "sentinel-secret")
+
+	bucket, err := openS3BucketWithCredentials(context.Background(), BlobBackendOptions{
+		ServiceURL: "http://127.0.0.1:1", // never contacted; OpenBucket is lazy
+		Region:     "us-east-1",
+		Bucket:     "my-bucket",
+		AccessKey:  "AKIAEXAMPLE",
+		SecretKey:  "supersecret",
+		URLStyle:   "path",
+	})
+	require.NoError(t, err)
+	defer bucket.Close()
+
+	assert.Equal(t, "sentinel-access", os.Getenv("AWS_ACCESS_KEY_ID"))
+	assert.Equal(t, "sentinel-secret", os.Getenv("AWS_SECRET_ACCESS_KEY"))
+}
+
+// ---------------------------------------------------------------------------
 // blobKey unit tests
 // ---------------------------------------------------------------------------
 
