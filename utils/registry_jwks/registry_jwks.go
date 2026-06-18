@@ -95,17 +95,21 @@ func GetJWKSURLFromIssuerURL(issuerUrl string) (string, error) {
 		return "", errors.Wrapf(err, "failed to read response body from %s", issuerUrl)
 	}
 
-	var openIDCfgMap map[string]string
+	// Use a struct instead of map[string]string: some OpenID configuration fields
+	// (e.g. token_endpoint_auth_methods_supported) are JSON arrays, which would
+	// cause Unmarshal to fail if the target type is map[string]string.
+	var openIDCfgMap struct {
+		JwksUri string `json:"jwks_uri"`
+	}
 	err = json.Unmarshal(body, &openIDCfgMap)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to unmarshal openid-configuration for issuer %s", issuerUrl)
 	}
 
-	if keyLoc, ok := openIDCfgMap["jwks_uri"]; ok {
-		return keyLoc, nil
-	} else {
-		return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
+	if openIDCfgMap.JwksUri != "" {
+		return openIDCfgMap.JwksUri, nil
 	}
+	return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
 }
 
 // Given an issuer URL, get the JWKS from the issuer's JWKS URL

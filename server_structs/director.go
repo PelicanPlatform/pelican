@@ -300,6 +300,43 @@ type (
 	}
 
 	AdAfter int // Ternary logic for the `Ad.After` function
+
+	/////////////////////////
+	// Director UI structs //
+	/////////////////////////
+	TokenIssuerResponse struct {
+		BasePaths       []string `json:"basePaths"`
+		RestrictedPaths []string `json:"restrictedPaths"`
+		IssuerUrl       string   `json:"issuer"`
+	}
+
+	// TokenGenResponse creates a response struct for TokenGen
+	TokenGenResponse struct {
+		Strategy         StrategyType `json:"strategy"`
+		VaultServer      string       `json:"vaultServer"`
+		MaxScopeDepth    uint         `json:"maxScopeDepth"`
+		CredentialIssuer string       `json:"issuer"`
+	}
+
+	// NamespaceAdV2Response creates a response struct for NamespaceAdV2
+	NamespaceAdV2Response struct {
+		Path         string                `json:"path"`
+		Caps         Capabilities          `json:"capabilities"`
+		Generation   []TokenGenResponse    `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
+		FromTopology bool                  `json:"fromTopology"`
+	}
+
+	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
+	NamespaceAdV2MappedResponse struct {
+		Path         string                `json:"path"`
+		Caps         Capabilities          `json:"capabilities"`
+		Generation   []TokenGenResponse    `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
+		FromTopology bool                  `json:"fromTopology"`
+		Origins      []string              `json:"origins"`
+		Caches       []string              `json:"caches"`
+	}
 )
 
 var (
