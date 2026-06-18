@@ -1132,19 +1132,21 @@ func WithMetadataChannel(ch chan<- TransferMetadata) TransferOption {
 	return option.New(identTransferOptionMetadataChannel{}, ch)
 }
 
-// WithCacheEmbeddedClientMode sets the client into "cache-embedded"
-// mode.  In this mode, the client queries the director's origin
-// endpoint (/api/v1.0/director/origin/…) instead of the default
-// shortcut endpoint.  This causes the director to redirect to origins
-// rather than to caches, which is the correct behaviour when the
-// transfer client is itself embedded inside a cache process.
+// WithCacheEmbeddedClientMode controls whether the client runs in
+// "cache-embedded" mode.  When enabled, the client queries the
+// director's origin endpoint (/api/v1.0/director/origin/…) instead of
+// the default shortcut endpoint.  This causes the director to redirect
+// to origins rather than to caches, which is the correct behaviour when
+// the transfer client is itself embedded inside a cache process.
 //
-// Without this option, a GET for /test/file.txt is routed through the
-// director's shortcut middleware, which redirects to a cache.  With
-// this option, the same GET is explicitly routed to the origin
-// endpoint so the cache can fetch from the origin.
-func WithCacheEmbeddedClientMode() TransferOption {
-	return option.New(identTransferOptionCacheEmbeddedClientMode{}, true)
+// With it enabled, a GET for /test/file.txt is explicitly routed to the
+// origin endpoint so the cache can fetch from the origin.  When disabled
+// (enabled=false), the same GET is routed through the director's shortcut
+// middleware, which redirects to a cache — the correct behaviour for a
+// site-local cache, which appears to the federation as a client and
+// fetches from other caches rather than directly from origins.
+func WithCacheEmbeddedClientMode(enabled bool) TransferOption {
+	return option.New(identTransferOptionCacheEmbeddedClientMode{}, enabled)
 }
 
 // WithRequestId sets a caller-supplied request ID that is propagated as

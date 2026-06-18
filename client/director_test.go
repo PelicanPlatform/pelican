@@ -227,6 +227,58 @@ func TestQueryDirector(t *testing.T) {
 	}
 }
 
+// TestQueryDirectorCacheMode verifies that the cacheMode flag controls which
+// director endpoint a request is routed through.  An embedded cache fetching
+// from origins uses cacheMode=true and must hit /api/v1.0/director/origin/...,
+// while a site-local cache (which appears to the federation as a client and
+// fetches from other caches) uses cacheMode=false and must hit the director's
+// default shortcut endpoint at the bare object path.
+func TestQueryDirectorCacheMode(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	require.NoError(t, param.Client_DirectorRetries.Set(1))
+
+	testCases := []struct {
+		name         string
+		cacheMode    bool
+		expectedPath string
+	}{
+		{
+			name:         "embedded cache mode routes to origin endpoint",
+			cacheMode:    true,
+			expectedPath: "/api/v1.0/director/origin/foo/bar",
+		},
+		{
+			name:         "client (site-local) mode routes to shortcut endpoint",
+			cacheMode:    false,
+			expectedPath: "/foo/bar",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestedPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestedPath = r.URL.Path
+				w.WriteHeader(http.StatusTemporaryRedirect)
+			}))
+			defer server.Close()
+
+			pUrl := pelican_url.PelicanURL{
+				FedInfo: pelican_url.FederationDiscovery{
+					DirectorEndpoint: server.URL,
+				},
+				Path: "/foo/bar",
+			}
+
+			_, _, err := queryDirector(context.Background(), "GET", &pUrl, "", tc.cacheMode)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedPath, requestedPath)
+		})
+	}
+}
+
 func TestGetDirectorInfoForPath(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
