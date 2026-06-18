@@ -317,6 +317,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"OIDC.Scopes": false,
 	"OIDC.TokenEndpoint": false,
 	"OIDC.UserInfoEndpoint": false,
+	"Origin.AdiosAuthTokenFile": false,
+	"Origin.AdiosServiceUrl": false,
 	"Origin.CacheControl": false,
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
@@ -655,6 +657,8 @@ var stringAccessors = map[string]func(*Config) string{
 	"OIDC.Issuer": func(c *Config) string { return c.OIDC.Issuer },
 	"OIDC.TokenEndpoint": func(c *Config) string { return c.OIDC.TokenEndpoint },
 	"OIDC.UserInfoEndpoint": func(c *Config) string { return c.OIDC.UserInfoEndpoint },
+	"Origin.AdiosAuthTokenFile": func(c *Config) string { return c.Origin.AdiosAuthTokenFile },
+	"Origin.AdiosServiceUrl": func(c *Config) string { return c.Origin.AdiosServiceUrl },
 	"Origin.CacheControl": func(c *Config) string { return c.Origin.CacheControl },
 	"Origin.DbLocation": func(c *Config) string { return c.Origin.DbLocation },
 	"Origin.ExportVolume": func(c *Config) string { return c.Origin.ExportVolume },
@@ -1464,6 +1468,8 @@ var allParameterNames = []string{
 	"OIDC.Scopes",
 	"OIDC.TokenEndpoint",
 	"OIDC.UserInfoEndpoint",
+	"Origin.AdiosAuthTokenFile",
+	"Origin.AdiosServiceUrl",
 	"Origin.CacheControl",
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
@@ -1775,6 +1781,8 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_AdiosAuthTokenFile = StringParam{"Origin.AdiosAuthTokenFile"}
+	Origin_AdiosServiceUrl = StringParam{"Origin.AdiosServiceUrl"}
 	Origin_CacheControl = StringParam{"Origin.CacheControl"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
@@ -2247,6 +2255,8 @@ func init() {
 		"OIDC.Issuer": OIDC_Issuer,
 		"OIDC.TokenEndpoint": OIDC_TokenEndpoint,
 		"OIDC.UserInfoEndpoint": OIDC_UserInfoEndpoint,
+		"Origin.AdiosAuthTokenFile": Origin_AdiosAuthTokenFile,
+		"Origin.AdiosServiceUrl": Origin_AdiosServiceUrl,
 		"Origin.CacheControl": Origin_CacheControl,
 		"Origin.DbLocation": Origin_DbLocation,
 		"Origin.ExportVolume": Origin_ExportVolume,

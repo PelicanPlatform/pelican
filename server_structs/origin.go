@@ -28,6 +28,7 @@ const (
 	OriginStoragePosix    OriginStorageType = "posix"
 	OriginStoragePosixv2  OriginStorageType = "posixv2"
 	OriginStorageSSH      OriginStorageType = "ssh"
+	OriginStorageAdios    OriginStorageType = "adios" // Native ADIOS WebDAV backend (no XRootD)
 	OriginStorageS3       OriginStorageType = "s3"
 	OriginStorageHTTPS    OriginStorageType = "https"
 	OriginStorageGlobus   OriginStorageType = "globus"
@@ -64,7 +65,7 @@ func (t OriginStorageType) IsPosixLike() bool {
 // added here rather than duplicating the list of storage-type comparisons.
 func (t OriginStorageType) UsesXRootD() bool {
 	switch t {
-	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2:
+	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageAdios, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2:
 		return false
 	default:
 		return true
@@ -84,6 +85,8 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStoragePosixv2
 	case string(OriginStorageSSH):
 		ost = OriginStorageSSH
+	case string(OriginStorageAdios):
+		ost = OriginStorageAdios
 	case string(OriginStorageXRoot):
 		ost = OriginStorageXRoot
 	case string(OriginStorageGlobus):
@@ -95,7 +98,7 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 	case string(OriginStorageGlobusv2):
 		ost = OriginStorageGlobusv2
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, s3v2, https, httpsv2, globus, globusv2, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, adios, s3, s3v2, https, httpsv2, globus, globusv2, and xroot)", storageType)
 	}
 	return
 }
