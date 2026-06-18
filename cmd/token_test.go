@@ -455,7 +455,7 @@ func setupTokenCmdTest(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 }
 
 // TestCreateTokenEarlyValidation covers the fast-feedback validation that
