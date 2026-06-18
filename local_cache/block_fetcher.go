@@ -175,7 +175,7 @@ func NewBlockFetcherV2(
 	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
 	// have their own Results() channel and cannot steal results intended for
 	// other callers sharing the same TransferEngine.
-	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode())
+	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create transfer client for block fetcher")
 	}
@@ -531,9 +531,11 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		return
 	}
 	sourceURL.Scheme = "pelican"
-	// The client's cache mode (set on the transfer client) causes
-	// queryDirector to route through the director's origin endpoint,
-	// so origins that disable direct clients are reachable.
+	// The client's cache mode (set on the transfer client, see
+	// useEmbeddedCacheMode) causes queryDirector to route through the
+	// director's origin endpoint, so origins that disable direct clients are
+	// reachable.  In site-local mode embedded mode is disabled and the
+	// director redirects us to other caches instead.
 
 	// Build transfer options with a byte range so we only download the
 	// blocks we actually need instead of the entire object.
