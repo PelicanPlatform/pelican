@@ -417,6 +417,9 @@ func mergeMetadataFields(existing, incoming *CacheMetadata) error {
 	if incoming.Completed.After(existing.Completed) {
 		existing.Completed = incoming.Completed
 	}
+	if incoming.DataVerified.After(existing.DataVerified) {
+		existing.DataVerified = incoming.DataVerified
+	}
 
 	// --- Additive: Checksums ---
 	existing.Checksums = mergeChecksums(existing.Checksums, incoming.Checksums)
