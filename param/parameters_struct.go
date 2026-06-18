@@ -34,6 +34,7 @@ type Config struct {
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
+		DataScanMode string `mapstructure:"datascanmode" yaml:"DataScanMode"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
@@ -520,6 +521,7 @@ type configWithType struct {
 		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
+		DataScanMode struct { Type string; Value string }
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		DirectorTest struct { Type string; Value bool }

@@ -104,6 +104,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.ConcurrencyDegradedThreshold": false,
 	"Cache.DataLocation": false,
 	"Cache.DataLocations": false,
+	"Cache.DataScanMode": false,
 	"Cache.DbLocation": false,
 	"Cache.DefaultCacheTimeout": false,
 	"Cache.DirectorTest": false,
@@ -559,6 +560,7 @@ func paramNameToEnvVar(paramName string) string {
 var stringAccessors = map[string]func(*Config) string{
 	"Cache.ClientStatisticsLocation": func(c *Config) string { return c.Cache.ClientStatisticsLocation },
 	"Cache.DataLocation": func(c *Config) string { return c.Cache.DataLocation },
+	"Cache.DataScanMode": func(c *Config) string { return c.Cache.DataScanMode },
 	"Cache.DbLocation": func(c *Config) string { return c.Cache.DbLocation },
 	"Cache.ExportLocation": func(c *Config) string { return c.Cache.ExportLocation },
 	"Cache.FedTokenLocation": func(c *Config) string { return c.Cache.FedTokenLocation },
@@ -1235,6 +1237,7 @@ var allParameterNames = []string{
 	"Cache.ConcurrencyDegradedThreshold",
 	"Cache.DataLocation",
 	"Cache.DataLocations",
+	"Cache.DataScanMode",
 	"Cache.DbLocation",
 	"Cache.DefaultCacheTimeout",
 	"Cache.DirectorTest",
@@ -1663,6 +1666,7 @@ var allParameterNames = []string{
 var (
 	Cache_ClientStatisticsLocation = StringParam{"Cache.ClientStatisticsLocation"}
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
+	Cache_DataScanMode = StringParam{"Cache.DataScanMode"}
 	Cache_DbLocation = StringParam{"Cache.DbLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
 	Cache_FedTokenLocation = StringParam{"Cache.FedTokenLocation"}
@@ -2127,6 +2131,7 @@ func init() {
 	paramByName = map[string]Param{
 		"Cache.ClientStatisticsLocation": Cache_ClientStatisticsLocation,
 		"Cache.DataLocation": Cache_DataLocation,
+		"Cache.DataScanMode": Cache_DataScanMode,
 		"Cache.DbLocation": Cache_DbLocation,
 		"Cache.ExportLocation": Cache_ExportLocation,
 		"Cache.FedTokenLocation": Cache_FedTokenLocation,
