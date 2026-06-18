@@ -349,6 +349,18 @@ const (
 	CacheModeServer
 )
 
+// useEmbeddedCacheMode reports whether the embedded transfer client should
+// run in cache-embedded mode, i.e. route its upstream fetches through the
+// director's origin endpoint and pull directly from origins.
+//
+// In site-local mode (Cache.EnableSiteLocalMode) the cache deliberately does
+// not join the federation and instead appears to it as a client, fetching
+// objects from other caches rather than from origins.  In that case we
+// disable embedded mode so the director redirects us to caches.
+func useEmbeddedCacheMode() bool {
+	return !param.Cache_EnableSiteLocalMode.GetBool()
+}
+
 // PersistentCacheConfig holds configuration for the persistent cache
 type PersistentCacheConfig struct {
 	// Mode selects which configuration namespace to use for defaults.
@@ -1273,7 +1285,7 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 
 	opts := []client.TransferOption{
 		client.WithToken(token),
-		client.WithCacheEmbeddedClientMode(),
+		client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()),
 		client.WithRequestChecksums(client.KnownChecksumTypes()),
 	}
 	if ft := pc.getFedToken(); ft != "" {
@@ -1392,7 +1404,7 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 	dUrl.Path = objectPath
 	dUrl.Scheme = "pelican"
 
-	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode())}
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
@@ -1451,7 +1463,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	}
 	dUrl.Scheme = "pelican"
 
-	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode())}
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
@@ -1718,10 +1730,12 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		return errors.Wrap(err, "invalid source URL")
 	}
 
-	// Route the request through the director's origin endpoint so that the
-	// director redirects us to the origin.  The client's cache mode causes
-	// queryDirector to use the /api/v1.0/director/origin/ prefix, avoiding
-	// the need for the origin to have the DirectReads capability.
+	// By default, route the request through the director's origin endpoint so
+	// that the director redirects us to the origin.  The client's cache mode
+	// (see useEmbeddedCacheMode) causes queryDirector to use the
+	// /api/v1.0/director/origin/ prefix, avoiding the need for the origin to
+	// have the DirectReads capability.  In site-local mode embedded mode is
+	// disabled and the director instead redirects us to other caches.
 	sourceURL.Scheme = "pelican"
 
 	// Pass the user token and federation token as separate options.
@@ -1752,7 +1766,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	}
 
 	// Create per-request transfer client
-	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(progressCallback), client.WithCacheEmbeddedClientMode())
+	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(progressCallback), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()))
 	if err != nil {
 		return errors.Wrap(err, "failed to create transfer client")
 	}
@@ -1958,7 +1972,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				// size instead of blocking for the entire download.
 				statOpts := []client.TransferOption{
 					client.WithToken(userToken),
-					client.WithCacheEmbeddedClientMode(),
+					client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()),
 				}
 				if fedTP != nil {
 					statOpts = append(statOpts, client.WithFedToken(fedTP))
