@@ -2067,12 +2067,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
 		}
 
-		// xrootd additionally requires the max file-usage size to sit below the low
-		// watermark: the file-usage purge band must live inside the headroom the disk
-		// watermark leaves for metadata and any other tenant on the disk (the cache's
-		// data is necessarily a subset of total disk usage). When FilesMaxSize and the
-		// low watermark are expressed the same way we verify it here against a common
-		// basis; the mixed case again needs the disk total, so we defer it to xrootd.
+		// xrootd additionally requires FilesMaxSize to be below LowWaterark.
+		// FilesMaxSize bounds the cache's own data while LowWatermark bounds total
+		// disk usage, and the cache's data is necessarily a subset of total disk
+		// usage; keeping FilesMaxSize below LowWatermark leaves headroom under
+		// LowWatermark for metadata and any other tenant sharing the disk. When
+		// FilesMaxSize and LowWatermark are expressed the same way we verify it here
+		// against a common basis; the mixed case needs the disk total, so we defer
+		// it to xrootd.
 		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
 		if err != nil {
 			return err
