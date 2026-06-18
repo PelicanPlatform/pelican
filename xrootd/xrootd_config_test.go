@@ -1027,3 +1027,29 @@ func TestPurgeColdFilesAgeFromMaxLotLifetime(t *testing.T) {
 		})
 	}
 }
+
+// pfc.diskusage interprets a bare number as a fraction of disk and a suffixed
+// number as an absolute size. Pelican exposes watermarks and file-usage sizes
+// as integer percentages or suffixed sizes, so cacheSizeToXrootd must rewrite a
+// percentage to its decimal fraction and leave everything else alone.
+func TestCacheSizeToXrootd(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"integer percent becomes fraction", "85", "0.85"},
+		{"low integer percent", "5", "0.05"},
+		{"100 percent becomes 1.00", "100", "1.00"},
+		{"absolute gigabytes pass through", "100g", "100g"},
+		{"absolute terabytes pass through", "1t", "1t"},
+		{"already-decimal fraction passes through", "0.90", "0.90"},
+		{"zero passes through (not a percentage)", "0", "0"},
+		{"empty passes through", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, cacheSizeToXrootd(tc.in))
+		})
+	}
+}

@@ -1107,6 +1107,20 @@ func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	)
 }
 
+// cacheSizeToXrootd translates a Pelican cache watermark / file-usage size into
+// the form xrootd's pfc.diskusage expects. Pelican accepts these values either
+// as a bare integer percentage of total disk (e.g. "85") or as an absolute size
+// suffixed with k|m|g|t (e.g. "1t"). xrootd's cfg2bytes reads a bare number as a
+// decimal fraction of the disk and a suffixed number as an absolute size, so an
+// integer percentage is rewritten as its decimal fraction (85 -> "0.85") while
+// absolute sizes (and any already-fractional value) are passed through untouched.
+func cacheSizeToXrootd(val string) string {
+	if num, err := strconv.Atoi(val); err == nil && num > 0 && num <= 100 {
+		return strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+	}
+	return val
+}
+
 func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
@@ -1153,17 +1167,14 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		}
 		xrdConfig.Cache.PSSOrigin = pssOrigin
 
-		// For cache watermarks, convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
-		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
-			if num <= 100 && num > 0 {
-				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
-			}
-		}
-		if num, err := strconv.Atoi(xrdConfig.Cache.LowWaterMark); err == nil {
-			if num <= 100 && num > 0 {
-				xrdConfig.Cache.LowWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
-			}
-		}
+		// The watermarks and the file-usage sizes may each be given as an integer
+		// percentage of total disk or as an absolute size; normalize the percentage
+		// form to the decimal fraction xrootd expects (absolute sizes pass through).
+		xrdConfig.Cache.HighWaterMark = cacheSizeToXrootd(xrdConfig.Cache.HighWaterMark)
+		xrdConfig.Cache.LowWaterMark = cacheSizeToXrootd(xrdConfig.Cache.LowWaterMark)
+		xrdConfig.Cache.FilesBaseSize = cacheSizeToXrootd(xrdConfig.Cache.FilesBaseSize)
+		xrdConfig.Cache.FilesNominalSize = cacheSizeToXrootd(xrdConfig.Cache.FilesNominalSize)
+		xrdConfig.Cache.FilesMaxSize = cacheSizeToXrootd(xrdConfig.Cache.FilesMaxSize)
 
 		// Set up Lotman config
 		lotmanCfg := LotmanCfg{Enabled: false}
