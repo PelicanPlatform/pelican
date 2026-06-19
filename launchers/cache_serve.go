@@ -92,6 +92,16 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 		return nil, err
 	}
 
+	// The persistent cache has no XRootD process to launch the monitoring
+	// shoveler (which the XRootD-based cache does via xrootd config), so start
+	// it here when enabled.  This lets the in-process XRootD-style monitoring
+	// packets emitted on each served request reach the configured collectors.
+	if param.Shoveler_Enable.GetBool() {
+		if _, err := metrics.LaunchShoveler(ctx, egrp); err != nil {
+			return nil, errors.Wrap(err, "failed to launch monitoring shoveler for persistent cache")
+		}
+	}
+
 	cache.RegisterCacheAPI(engine, ctx, egrp)
 
 	cacheServer := &cache.CacheServer{}
