@@ -2660,6 +2660,22 @@ type: bool
 default: true
 components: ["cache"]
 ---
+name: Cache.EnableChaosAPI
+description: |+
+  Enable the V2 cache's chaos/fault-injection admin API.
+
+  When true, the cache server registers an admin-authenticated endpoint
+  (POST /api/v1.0/cache/introspect/chaos) that deliberately corrupts or truncates
+  the on-disk data of a cached object. This is used by `pelican cache chaos` to
+  exercise the cache's integrity-detection paths.
+
+  This is a destructive testing feature and is disabled by default; it should
+  only be enabled in test/staging environments.
+type: bool
+default: false
+components: ["cache"]
+hidden: true
+---
 name: Cache.DataScanMode
 description: |+
   Controls how the V2 (persistent) cache's periodic data-integrity scan re-verifies on-disk object data.
