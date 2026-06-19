@@ -110,6 +110,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.DirectorTest": false,
 	"Cache.DisableClientX509": false,
 	"Cache.EnableBroker": false,
+	"Cache.EnableChaosAPI": false,
 	"Cache.EnableEvictionMonitoring": false,
 	"Cache.EnableLotman": false,
 	"Cache.EnableOIDC": false,
@@ -960,6 +961,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Cache.DirectorTest": func(c *Config) bool { return c.Cache.DirectorTest },
 	"Cache.DisableClientX509": func(c *Config) bool { return c.Cache.DisableClientX509 },
 	"Cache.EnableBroker": func(c *Config) bool { return c.Cache.EnableBroker },
+	"Cache.EnableChaosAPI": func(c *Config) bool { return c.Cache.EnableChaosAPI },
 	"Cache.EnableEvictionMonitoring": func(c *Config) bool { return c.Cache.EnableEvictionMonitoring },
 	"Cache.EnableLotman": func(c *Config) bool { return c.Cache.EnableLotman },
 	"Cache.EnableOIDC": func(c *Config) bool { return c.Cache.EnableOIDC },
@@ -1243,6 +1245,7 @@ var allParameterNames = []string{
 	"Cache.DirectorTest",
 	"Cache.DisableClientX509",
 	"Cache.EnableBroker",
+	"Cache.EnableChaosAPI",
 	"Cache.EnableEvictionMonitoring",
 	"Cache.EnableLotman",
 	"Cache.EnableOIDC",
@@ -1945,6 +1948,7 @@ var (
 	Cache_DirectorTest = BoolParam{"Cache.DirectorTest"}
 	Cache_DisableClientX509 = BoolParam{"Cache.DisableClientX509"}
 	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
+	Cache_EnableChaosAPI = BoolParam{"Cache.EnableChaosAPI"}
 	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
@@ -2398,6 +2402,7 @@ func init() {
 		"Cache.DirectorTest": Cache_DirectorTest,
 		"Cache.DisableClientX509": Cache_DisableClientX509,
 		"Cache.EnableBroker": Cache_EnableBroker,
+		"Cache.EnableChaosAPI": Cache_EnableChaosAPI,
 		"Cache.EnableEvictionMonitoring": Cache_EnableEvictionMonitoring,
 		"Cache.EnableLotman": Cache_EnableLotman,
 		"Cache.EnableOIDC": Cache_EnableOIDC,

@@ -40,6 +40,7 @@ type Config struct {
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableClientX509 bool `mapstructure:"disableclientx509" yaml:"DisableClientX509"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableChaosAPI bool `mapstructure:"enablechaosapi" yaml:"EnableChaosAPI"`
 		EnableEvictionMonitoring bool `mapstructure:"enableevictionmonitoring" yaml:"EnableEvictionMonitoring"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
@@ -527,6 +528,7 @@ type configWithType struct {
 		DirectorTest struct { Type string; Value bool }
 		DisableClientX509 struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
+		EnableChaosAPI struct { Type string; Value bool }
 		EnableEvictionMonitoring struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
