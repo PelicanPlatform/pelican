@@ -1917,6 +1917,55 @@ func TestDataScan_SkipVerifiedData(t *testing.T) {
 	assert.Equal(t, firstVerified, meta.DataVerified, "DataVerified should not change on a skipped scan")
 }
 
+// TestDataScan_SkipVerifiedResample confirms that "once" mode still re-verifies
+// already-checked objects when ResampleInterval is set, providing a floor of
+// at-rest corruption detection rather than zero.  With ResampleInterval=1 every
+// already-verified object is re-checked, so a second scan re-verifies it.
+func TestDataScan_SkipVerifiedResample(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize+500)
+	for i := range data {
+		data[i] = byte(i % 211)
+	}
+	hash := InstanceHash("eded000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+		SkipVerifiedData:     true,
+		ResampleInterval:     1, // re-verify every already-checked object
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	// With ResampleInterval=1 the object is re-verified on both scans rather
+	// than being permanently skipped after the first.
+	assert.Equal(t, int64(2), checker.GetStats().ObjectsVerified,
+		"ResampleInterval=1 should re-verify the object every cycle")
+}
+
 // TestDataScan_AllModeReverifies confirms that the default (non-skip) mode
 // re-verifies an object on every scan, in contrast to SkipVerifiedData.
 func TestDataScan_AllModeReverifies(t *testing.T) {

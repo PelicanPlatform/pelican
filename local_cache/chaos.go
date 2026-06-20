@@ -22,9 +22,29 @@ package local_cache
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 )
+
+// isHexHash reports whether h consists solely of hexadecimal characters.
+// Instance/object hashes are hex-encoded HMAC-SHA256 digests, so validating
+// this before using a hash to build a filesystem path prevents path traversal
+// from a caller-supplied --instance value.
+func isHexHash(h InstanceHash) bool {
+	if len(h) == 0 {
+		return false
+	}
+	for _, c := range h {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // ChaosInjector injects corruption into a running cache's already-open
 // database and storage, for fault-injection ("chaos") testing of the cache's
@@ -88,6 +108,12 @@ func (ci *ChaosInjector) resolveInstanceHash(objectURL, etag, instanceHash strin
 		hash = ci.db.InstanceHash(etag, objectHash)
 	}
 
+	// Guard against path traversal from a caller-supplied instance hash before
+	// the hash is ever used to construct a filesystem path.
+	if !isHexHash(hash) {
+		return "", nil, errors.Errorf("invalid instance hash %q: must be hexadecimal", hash)
+	}
+
 	meta, err := ci.storage.GetMetadata(hash)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to read object metadata")
@@ -96,6 +122,21 @@ func (ci *ChaosInjector) resolveInstanceHash(objectURL, etag, instanceHash strin
 		return "", nil, errors.Errorf("no cached object found for instance %s", hash)
 	}
 	return hash, meta, nil
+}
+
+// safeChunkPath resolves the on-disk chunk file path and verifies it stays
+// within its storage directory, defending against path traversal.
+func (ci *ChaosInjector) safeChunkPath(storageID StorageID, hash InstanceHash, chunkIndex int) (string, error) {
+	root, ok := ci.storage.GetDirs()[storageID]
+	if !ok {
+		return "", errors.Errorf("unknown storage id %d", storageID)
+	}
+	cleanRoot := filepath.Clean(root)
+	cleanPath := filepath.Clean(ci.storage.getChunkPath(storageID, hash, chunkIndex))
+	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) {
+		return "", errors.Errorf("resolved chunk path %q escapes storage directory %q", cleanPath, cleanRoot)
+	}
+	return cleanPath, nil
 }
 
 // chunkFileForBlock maps a global block number to the on-disk chunk file that
@@ -112,7 +153,10 @@ func (ci *ChaosInjector) chunkFileForBlock(hash InstanceHash, meta *CacheMetadat
 	if storageID == StorageIDInline {
 		return "", 0, 0, errors.Errorf("chunk %d is not yet allocated on disk", chunkIndex)
 	}
-	chunkPath = ci.storage.getChunkPath(storageID, hash, chunkIndex)
+	chunkPath, err = ci.safeChunkPath(storageID, hash, chunkIndex)
+	if err != nil {
+		return "", 0, 0, err
+	}
 
 	// The on-disk offset is the (zero-based) block index within this chunk file
 	// times the encrypted block size.
@@ -172,7 +216,10 @@ func (ci *ChaosInjector) CorruptBlock(objectURL, etag, instanceHash string, bloc
 		numBytes = int(info.Size() - diskOffset)
 	}
 
-	buf := make([]byte, numBytes)
+	// numBytes is bounded by BlockTotalSize above, so a fixed-size stack buffer
+	// suffices and avoids a caller-influenced dynamic allocation.
+	var blockBuf [BlockTotalSize]byte
+	buf := blockBuf[:numBytes]
 	if _, err := f.ReadAt(buf, diskOffset); err != nil {
 		return nil, errors.Wrap(err, "failed to read block bytes")
 	}
@@ -223,7 +270,10 @@ func (ci *ChaosInjector) TruncateObject(objectURL, etag, instanceHash string, ch
 	if storageID == StorageIDInline {
 		return nil, errors.Errorf("chunk %d is not yet allocated on disk", chunkIndex)
 	}
-	chunkPath := ci.storage.getChunkPath(storageID, hash, chunkIndex)
+	chunkPath, err := ci.safeChunkPath(storageID, hash, chunkIndex)
+	if err != nil {
+		return nil, err
+	}
 
 	if dropBytes <= 0 {
 		dropBytes = BlockTotalSize

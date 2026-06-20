@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -1506,7 +1507,10 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	// cached data.  It is admin-authenticated like the rest of introspect.
 	if param.Cache_EnableChaosAPI.GetBool() {
 		adminIntrospect.POST("/chaos", pc.introspectChaosHandler)
+		chaosAPIEnabled.Set(1)
 		log.Warn("Cache chaos/fault-injection API is ENABLED at /api/v1.0/cache/introspect/chaos (Cache.EnableChaosAPI); this can corrupt cached data and should only be used for testing")
+	} else {
+		chaosAPIEnabled.Set(0)
 	}
 
 	return nil
@@ -1788,12 +1792,21 @@ func (pc *PersistentCache) introspectChaosHandler(c *gin.Context) {
 		return
 	}
 
-	atoiQuery := func(name string, def int64) (int64, error) {
+	// atoiQuery parses a query parameter as an integer and enforces an explicit
+	// [min, max] range, so the value can be safely narrowed below.
+	atoiQuery := func(name string, def, min, max int64) (int64, error) {
 		v := c.Query(name)
 		if v == "" {
 			return def, nil
 		}
-		return strconv.ParseInt(v, 10, 64)
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil {
+			return 0, perr
+		}
+		if n < min || n > max {
+			return 0, errors.Errorf("%s=%d is out of range [%d, %d]", name, n, min, max)
+		}
+		return n, nil
 	}
 
 	injector := NewChaosInjector(pc.db, pc.storage)
@@ -1803,23 +1816,23 @@ func (pc *PersistentCache) introspectChaosHandler(c *gin.Context) {
 	switch op {
 	case "corrupt":
 		var block, nbytes int64
-		if block, err = atoiQuery("block", 0); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid block parameter"})
+		if block, err = atoiQuery("block", 0, 0, math.MaxUint32); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if nbytes, err = atoiQuery("bytes", 0); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bytes parameter"})
+		if nbytes, err = atoiQuery("bytes", 0, 0, BlockTotalSize); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		result, err = injector.CorruptBlock(objectURL, etag, instance, uint32(block), int(nbytes))
 	case "truncate":
 		var chunk, drop int64
-		if chunk, err = atoiQuery("chunk", -1); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chunk parameter"})
+		if chunk, err = atoiQuery("chunk", -1, -1, math.MaxInt32); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if drop, err = atoiQuery("drop-bytes", 0); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drop-bytes parameter"})
+		if drop, err = atoiQuery("drop-bytes", 0, 0, math.MaxInt64); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		result, err = injector.TruncateObject(objectURL, etag, instance, int(chunk), drop)

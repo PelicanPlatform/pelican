@@ -105,6 +105,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.DataLocation": false,
 	"Cache.DataLocations": false,
 	"Cache.DataScanMode": false,
+	"Cache.DataScanResampleInterval": false,
 	"Cache.DbLocation": false,
 	"Cache.DefaultCacheTimeout": false,
 	"Cache.DirectorTest": false,
@@ -837,6 +838,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Cache.BlocksToPrefetch": func(c *Config) int { return c.Cache.BlocksToPrefetch },
 	"Cache.Concurrency": func(c *Config) int { return c.Cache.Concurrency },
 	"Cache.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Cache.ConcurrencyDegradedThreshold },
+	"Cache.DataScanResampleInterval": func(c *Config) int { return c.Cache.DataScanResampleInterval },
 	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
 	"Cache.Port": func(c *Config) int { return c.Cache.Port },
 	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
@@ -1240,6 +1242,7 @@ var allParameterNames = []string{
 	"Cache.DataLocation",
 	"Cache.DataLocations",
 	"Cache.DataScanMode",
+	"Cache.DataScanResampleInterval",
 	"Cache.DbLocation",
 	"Cache.DefaultCacheTimeout",
 	"Cache.DirectorTest",
@@ -1889,6 +1892,7 @@ var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
+	Cache_DataScanResampleInterval = IntParam{"Cache.DataScanResampleInterval"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
@@ -2349,6 +2353,7 @@ func init() {
 		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
 		"Cache.Concurrency": Cache_Concurrency,
 		"Cache.ConcurrencyDegradedThreshold": Cache_ConcurrencyDegradedThreshold,
+		"Cache.DataScanResampleInterval": Cache_DataScanResampleInterval,
 		"Cache.EvictionMonitoringMaxDepth": Cache_EvictionMonitoringMaxDepth,
 		"Cache.Port": Cache_Port,
 		"ClientAgent.HistoryRetentionDays": ClientAgent_HistoryRetentionDays,
