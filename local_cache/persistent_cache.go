@@ -590,6 +590,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	consistency := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MinAgeForCleanup: -1, // Use default grace period
 		SkipVerifiedData: scanOnce,
+		ResampleInterval: param.Cache_DataScanResampleInterval.GetInt(),
 	})
 
 	// Get federation info
