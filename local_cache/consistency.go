@@ -107,6 +107,19 @@ var (
 		Name: "pelican_cache_data_scan_bytes_processed_total",
 		Help: "Total bytes processed during data scans",
 	})
+	// dataScanModeOnce is 1 when the data scan is in "once" mode (verify each
+	// object once then skip), which relies on the underlying storage for
+	// ongoing at-rest integrity.  Exported so a misconfigured cache is visible.
+	dataScanModeOnce = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_cache_data_scan_mode_once",
+		Help: "1 when the data-integrity scan is in \"once\" mode (Cache.DataScanMode=once); 0 for full re-verification each cycle",
+	})
+	// chaosAPIEnabled is 1 when the destructive chaos/fault-injection admin API
+	// is registered (Cache.EnableChaosAPI).  It should be 0 in production.
+	chaosAPIEnabled = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_cache_chaos_api_enabled",
+		Help: "1 when the cache chaos/fault-injection admin API is enabled (Cache.EnableChaosAPI); should be 0 in production",
+	})
 )
 
 // ConsistencyChecker verifies cache consistency between database and disk.
@@ -122,6 +135,7 @@ type ConsistencyChecker struct {
 	minAgeForCleanup    time.Duration  // Minimum age before cleanup to avoid races
 	checksumTypes       []ChecksumType // Checksum algorithms to calculate/verify
 	skipVerifiedData    bool           // When true, the data scan verifies each object once then skips it
+	resampleInterval    int            // In skip mode, re-verify ~1/N already-verified objects (0 disables)
 
 	// Statistics
 	stats   ConsistencyStats
@@ -154,6 +168,11 @@ type ConsistencyConfig struct {
 	// guarantee at-rest integrity (e.g. ZFS).  When false (default) every scan
 	// re-verifies all objects.
 	SkipVerifiedData bool
+	// ResampleInterval, when SkipVerifiedData is true, makes the scan still
+	// re-verify roughly 1 in N already-verified objects each cycle, so there is
+	// a nonzero floor of at-rest corruption detection even in "once" mode.
+	// 0 disables re-sampling (pure once).
+	ResampleInterval int
 }
 
 // ConsistencyStats holds statistics from consistency checks
@@ -197,7 +216,7 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 	metadataScanLastStartTime.Set(now)
 	dataScanLastStartTime.Set(now)
 
-	return &ConsistencyChecker{
+	cc := &ConsistencyChecker{
 		db:                  db,
 		storage:             storage,
 		metadataScanLimiter: limiter,
@@ -205,8 +224,26 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 		minAgeForCleanup:    config.MinAgeForCleanup,
 		checksumTypes:       checksumTypes,
 		skipVerifiedData:    config.SkipVerifiedData,
+		resampleInterval:    config.ResampleInterval,
 		stopCh:              make(chan struct{}),
 	}
+
+	// Surface the data-scan mode so a misconfigured cache is visible: emit a
+	// loud warning and export a metric when running in "once" mode, which
+	// relies on the underlying storage (e.g. ZFS scrubbing) for ongoing at-rest
+	// integrity rather than re-reading every object.
+	if config.SkipVerifiedData {
+		dataScanModeOnce.Set(1)
+		if config.ResampleInterval > 0 {
+			log.Warnf("Cache data-integrity scan is in \"once\" mode: each object's on-disk data is verified once and then skipped (re-sampling ~1/%d per cycle). This relies on the underlying storage to detect at-rest corruption; ensure it scrubs (e.g. ZFS).", config.ResampleInterval)
+		} else {
+			log.Warn("Cache data-integrity scan is in \"once\" mode with re-sampling disabled: each object's on-disk data is verified once and then never re-checked. This relies entirely on the underlying storage to detect at-rest corruption; ensure it scrubs (e.g. ZFS).")
+		}
+	} else {
+		dataScanModeOnce.Set(0)
+	}
+
+	return cc
 }
 
 // Start begins the background consistency checking goroutines
@@ -1298,8 +1335,13 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 
 	// In "verify once" mode, skip objects whose on-disk data has already been
 	// read back and verified.  The expensive read+hash is avoided entirely.
+	// A small fraction (~1/resampleInterval) is still re-verified each cycle so
+	// there is a nonzero floor of at-rest corruption detection rather than zero.
 	if cc.skipVerifiedData && !meta.DataVerified.IsZero() {
-		return errChecksumAlreadyVerified
+		if cc.resampleInterval <= 0 || rand.Intn(cc.resampleInterval) != 0 {
+			return errChecksumAlreadyVerified
+		}
+		// Otherwise fall through and re-verify this object (re-sampled).
 	}
 
 	// If no checksums available, calculate and store them
