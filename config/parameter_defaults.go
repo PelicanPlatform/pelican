@@ -635,6 +635,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_XRootDPrefix.GetName(), "origin")
 	// Plugin.DirectorDecisionPercentage
 	v.SetDefault(param.Plugin_DirectorDecisionPercentage.GetName(), 20)
+	// Registry.InactiveRegistrationCleanupInterval
+	v.SetDefault(param.Registry_InactiveRegistrationCleanupInterval.GetName(), "5m")
+	// Registry.InactiveRegistrationTimeout
+	v.SetDefault(param.Registry_InactiveRegistrationTimeout.GetName(), "20m")
 	// Registry.InstitutionsUrlReloadMinutes
 	v.SetDefault(param.Registry_InstitutionsUrlReloadMinutes.GetName(), "15m")
 	// Registry.RequireCacheApproval
