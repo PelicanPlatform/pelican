@@ -717,13 +717,15 @@ func updateServerLastSeen(serverID string) error {
 // is older than cutoff and whose every registration is still Pending, then removes
 // each one via deleteServerByID. Servers with any non-Pending registration are
 // skipped; standalone namespace registrations (no servers row) are untouched.
-func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int64, err error) {
+func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int, err error) {
 	servers, err := listServers()
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "failed to list servers for stale cleanup")
+		return 0, 0, errors.Wrap(err, "failed to list servers for stale pending registration cleanup")
 	}
 
 	for _, srv := range servers {
+		// IsZero guards against servers migrated from DB versions before the last_seen column
+		// was introduced; those rows have a zero timestamp and should never be treated as stale.
 		if srv.LastSeen.IsZero() || !srv.LastSeen.Before(cutoff) {
 			continue
 		}
@@ -740,10 +742,10 @@ func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDelet
 		}
 
 		if err := deleteServerByID(srv.ID); err != nil {
-			log.Warningf("Failed to delete stale server %s (%s): %v", srv.ID, srv.Name, err)
+			log.Warningf("Failed to delete stale server registration (id: %q, name: %q): %v", srv.ID, srv.Name, err)
 			continue
 		}
-		regsDeleted += int64(len(srv.Registration))
+		regsDeleted += len(srv.Registration)
 		serversDeleted++
 	}
 	return regsDeleted, serversDeleted, nil
@@ -924,6 +926,9 @@ func deleteRegistrationByPrefix(prefix string) error {
 	return database.ServerDatabase.Where("prefix = ?", prefix).Delete(&server_structs.Registration{}).Error
 }
 
+// deleteServerByID removes a server and all of its associated data atomically,
+// including its row from the servers table, its prefix(es) and namespace(s) in
+// the registrations table, and its record(s) in the services and downtimes tables.
 func deleteServerByID(id string) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.

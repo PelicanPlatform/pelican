@@ -3257,9 +3257,12 @@ components: ["registry"]
 ---
 name: Registry.InactiveRegistrationTimeout
 description: |+
-  The duration after which a server row is considered stale if its metadata has not been polled.
-  The registry updates servers.last_seen every time a server polls its metadata. The cleanup goroutine
-  deletes every registration linked to stale servers (including the server itself).
+  How long a pending server registration can linger in the registry if it stops running after
+  registering itself. While an Origin or Cache is awaiting admin approval, the registry
+  records the last time the server polled its own registration metadata. If no contact is
+  received within this timeout, the registration and all its associated namespace entries are
+  deleted. Only registrations still in the Pending state are affected; registrations that have
+  already been approved or denied are never removed by this cleanup.
 type: duration
 default: 20m
 components: ["registry"]
