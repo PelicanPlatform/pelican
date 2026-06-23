@@ -413,7 +413,7 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 	log.Debugln("Using the returned sources from the director")
 	// Append the director-provided servers, but skip any whose host:port collides with
 	// a server we've already included. This keeps the '+' fallback from re-adding a
-	// user-configured preferred cache (issue #3526) and drops duplicates within the
+	// user-configured preferred cache and drops duplicates within the
 	// director's own list. We intentionally do NOT deduplicate the preferred servers
 	// against each other: a user may list the same cache multiple times to force
 	// repeated attempts (e.g. when testing or troubleshooting a specific cache).

@@ -1172,12 +1172,65 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3 is director.
+		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3/4/5 are director.
+		// The cap of 3 applies only to the director servers, so all 5 are returned.
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 2)
-		require.Len(t, transfers, 3)
+		require.Len(t, transfers, 5)
 		assert.True(t, transfers[0].Preferred, "cache-1 (idx 0) should be marked preferred")
 		assert.True(t, transfers[1].Preferred, "cache-2 (idx 1) should be marked preferred")
 		assert.False(t, transfers[2].Preferred, "cache-3 (idx 2) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[3].Preferred, "cache-4 (idx 3) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[4].Preferred, "cache-5 (idx 4) should not be marked preferred (director-provided)")
+	})
+
+	// The attempt cap restricts only director-provided servers. If the user supplies more
+	// preferred caches than the cap, every one of them must still be tried, in order.
+	t.Run("AllPreferredTriedRegardlessOfCap", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 6 preferred caches, no director servers, director cap of 3: all 6 are tried.
+		preferredServers := []string{
+			"https://cache-1.com",
+			"https://cache-2.com",
+			"https://cache-3.com",
+			"https://cache-4.com",
+			"https://cache-5.com",
+			"https://cache-6.com",
+		}
+		transfers := getObjectServersToTry(preferredServers, job, 3, "", len(preferredServers))
+		require.Len(t, transfers, 6)
+		for i, transfer := range transfers {
+			assert.True(t, transfer.Preferred, "preferred cache at idx %d should be marked preferred", i)
+		}
+		assert.Equal(t, "https://cache-6.com", transfers[5].Url.String())
+	})
+
+	// With preferred caches exceeding the cap AND director fallbacks present, all preferred
+	// caches are tried plus up to the cap's worth of director servers.
+	t.Run("AllPreferredPlusCappedDirector", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 4 preferred + 4 director, director cap of 3 => 4 preferred + 3 director = 7.
+		servers := []string{
+			"https://pref-1.com", "https://pref-2.com", "https://pref-3.com", "https://pref-4.com",
+			"https://dir-1.com", "https://dir-2.com", "https://dir-3.com", "https://dir-4.com",
+		}
+		transfers := getObjectServersToTry(servers, job, 3, "", 4)
+		require.Len(t, transfers, 7)
+		assert.Equal(t, "https://dir-3.com", transfers[6].Url.String())
+		assert.False(t, transfers[6].Preferred)
 	})
 }
 

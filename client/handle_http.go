@@ -2294,19 +2294,28 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 // the same cache more than once to force repeated attempts); those duplicates are honored here rather than collapsed.
 // nPreferred indicates how many entries at the start of sortedObjectServers came from the user's PreferredCaches
 // configuration; those entries will have Preferred=true in the returned details.
-func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
+//
+// directorServersToTry caps only the director-discovered servers. Every user-supplied preferred cache is always tried:
+// the user asked for those endpoints explicitly, so we honor the full list in order rather than truncating it.
+func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, directorServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
 	oServers := make([]string, 0)
 
+	directorListed := 0
 	for idx, oServer := range sortedObjectServers {
-		if len(oServers) == oServersToTry {
-			break
+		isPreferred := idx < nPreferred
+		if !isPreferred {
+			// The attempt cap applies only to director-discovered servers; preferred caches
+			// (which all sort ahead of director servers) are exempt and always included.
+			if directorListed == directorServersToTry {
+				break
+			}
+			directorListed++
 		}
 		oServers = append(oServers, oServer)
 		td := transferDetailsOptions{
 			NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
 			PackOption: packOption,
 		}
-		isPreferred := idx < nPreferred
 		newTransfers := generateTransferDetails(oServer, td)
 		for i := range newTransfers {
 			newTransfers[i].Preferred = isPreferred
@@ -2363,13 +2372,9 @@ func buildDownloadTransfers(job *clientTransferJob, packOption string) ([]transf
 		sortedServerStrings = append(sortedServerStrings, serverUrl.String())
 	}
 
-	// Make sure we only try as many object servers as we have
-	objectServersToTry := ObjectServersToTry
-	if objectServersToTry > len(sortedServers) {
-		objectServersToTry = len(sortedServers)
-	}
-	log.Debugf("Trying the first %d object servers", objectServersToTry)
-	transfers := getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
+	// The cap applies only to director-discovered servers; all preferred caches are always tried.
+	log.Debugf("Trying all %d preferred object servers plus up to %d director-provided servers", nPreferred, ObjectServersToTry)
+	transfers := getObjectServersToTry(sortedServerStrings, job.job, ObjectServersToTry, packOption, nPreferred)
 
 	if len(transfers) > 0 {
 		log.Traceln("First transfer in list:", transfers[0].Url)
