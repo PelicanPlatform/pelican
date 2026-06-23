@@ -92,7 +92,7 @@ func createTestNamespaces(t *testing.T) []server_structs.Registration {
 func TestServerNamespaceOperations(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	testNamespaces := createTestNamespaces(t)
 
@@ -159,7 +159,7 @@ func TestServerNamespaceOperations(t *testing.T) {
 func TestAddNamespaceCreatesServers(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("AddOriginServer", func(t *testing.T) {
 		ns := server_structs.Registration{
@@ -296,7 +296,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 func TestUpdateNamespaceWithServerTables(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	// Create initial namespace
 	ns := server_structs.Registration{
@@ -346,7 +346,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 func TestServerTableConstraints(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
 		// Generate a proper JWKS for the unique server test
@@ -419,7 +419,7 @@ func TestServerTableConstraints(t *testing.T) {
 func TestServerTableCascadeDelete(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	// Create a namespace which will create a server
 	ns := server_structs.Registration{
@@ -480,7 +480,7 @@ func TestServerTableCascadeDelete(t *testing.T) {
 func TestServerWithMultipleServices(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("ServerWithBothOriginAndCacheWithSameName", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
@@ -712,8 +712,17 @@ func testDowntimeForServer(serverID, serverName string) server_structs.Downtime 
 
 // createPendingServerReg creates a Registration with RegPending status and returns it.
 // The AddRegistration call creates the server row automatically for /origins/ and /caches/ prefixes.
-func createPendingServerReg(t *testing.T, prefix, siteName, pubkey string) server_structs.Registration {
+// If pubkeyOpt is provided, that key is used; otherwise a fresh JWKS is generated automatically.
+func createPendingServerReg(t *testing.T, prefix, siteName string, pubkeyOpt ...string) server_structs.Registration {
 	t.Helper()
+	var pubkey string
+	if len(pubkeyOpt) > 0 {
+		pubkey = pubkeyOpt[0]
+	} else {
+		var err error
+		pubkey, err = test_utils.GenerateJWKS()
+		require.NoError(t, err)
+	}
 	reg := server_structs.Registration{
 		Prefix: prefix,
 		Pubkey: pubkey,
@@ -742,7 +751,7 @@ func setServerLastSeenDirect(t *testing.T, serverID string, ts time.Time) {
 func TestDeleteRegistrationByID_RemovesDowntimes(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("deletes-downtimes-when-last-service-removed", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
@@ -835,7 +844,7 @@ func TestDeleteRegistrationByID_RemovesDowntimes(t *testing.T) {
 func TestUpdateServerLastSeen(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("ErrorOnEmptyID", func(t *testing.T) {
 		err := updateServerLastSeen("")
@@ -844,18 +853,29 @@ func TestUpdateServerLastSeen(t *testing.T) {
 	})
 
 	t.Run("NoErrorOnNonExistentServerID", func(t *testing.T) {
-		// The function updates 0 rows but does not return an error (GORM doesn't
-		// treat zero-row updates as errors by default).
+		defer resetMockRegistryDB(t)
+
+		// A 0-row update is not an error: GORM emits "UPDATE ... WHERE id = ?",
+		// which matches nothing, returns no error, and crucially does NOT insert.
+		// This is what keeps getServerByPrefixHandler race-safe: if the server row
+		// is deleted (e.g. by the inactive-registration cleanup goroutine) between
+		// the read and this last_seen refresh, the refresh silently no-ops instead
+		// of erroring or resurrecting the deleted server as a phantom row.
 		err := updateServerLastSeen("doesnotexist")
 		assert.NoError(t, err)
+
+		// No phantom row should have been created by the no-op update.
+		var count int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).
+			Where("id = ?", "doesnotexist").Count(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), count, "update on a non-existent ID must not insert a row")
 	})
 
 	t.Run("UpdatesTimestampForExistingServer", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/ts-update.edu", "ts-update.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/ts-update.edu", "ts-update.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -880,9 +900,7 @@ func TestUpdateServerLastSeen(t *testing.T) {
 	t.Run("TimestampIncreasesWithRepeatedCalls", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/ts-progress.edu", "ts-progress.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/ts-progress.edu", "ts-progress.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -912,14 +930,12 @@ func TestUpdateServerLastSeen(t *testing.T) {
 func TestDeleteServerByID(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 
 	t.Run("DeletesServerAndCascadedRecords", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/del-cascade.edu", "del-cascade.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/del-cascade.edu", "del-cascade.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -962,11 +978,9 @@ func TestDeleteServerByID(t *testing.T) {
 	t.Run("DeletesDualServiceServer", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		jwks, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-
-		originReg := createPendingServerReg(t, "/origins/dual-del.edu", "dual-del.edu", jwks)
-		cacheReg := createPendingServerReg(t, "/caches/dual-del.edu", "dual-del.edu", jwks)
+		// Different services on a server must share the same key
+		originReg := createPendingServerReg(t, "/origins/dual-del.edu", "dual-del.edu")
+		cacheReg := createPendingServerReg(t, "/caches/dual-del.edu", "dual-del.edu", originReg.Pubkey)
 
 		srv, err := getServerByRegistrationID(originReg.ID)
 		require.NoError(t, err)
@@ -1007,7 +1021,7 @@ func withApprovalRequired(t *testing.T) {
 func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 	withApprovalRequired(t)
 
 	t.Run("EmptyDatabase", func(t *testing.T) {
@@ -1020,9 +1034,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Run("DeletesPendingStaleServer", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/stale-pending.edu", "stale-pending.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/stale-pending.edu", "stale-pending.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -1109,9 +1121,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Run("PreservesRecentPendingServer", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/recent-pending.edu", "recent-pending.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/recent-pending.edu", "recent-pending.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -1124,12 +1134,13 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		assert.Equal(t, int(0), serversDeleted, "recently active pending server should not be deleted")
 	})
 
+	// A pending server registration migrated from a DB version before the last_seen column
+	// was introduced will have a zero timestamp for last_seen. Such registrations should not
+	// be treated as stale.
 	t.Run("SkipsServerWithZeroLastSeen", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/zero-lastseen.edu", "zero-lastseen.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/zero-lastseen.edu", "zero-lastseen.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -1148,22 +1159,19 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Run("MixedStatusPreservesServerWithAnyNonPending", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		jwks, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-
 		// Register origin as pending, then cache as approved (same server name → same server row).
-		pendingReg := createPendingServerReg(t, "/origins/mixed-status.edu", "mixed-status.edu", jwks)
+		pendingReg := createPendingServerReg(t, "/origins/mixed-status.edu", "mixed-status.edu")
 
 		approvedReg := server_structs.Registration{
 			Prefix: "/caches/mixed-status.edu",
-			Pubkey: jwks,
+			Pubkey: pendingReg.Pubkey,
 			AdminMetadata: server_structs.AdminMetadata{
 				SiteName:    "mixed-status.edu",
 				Institution: "Test University",
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err = AddRegistration(&approvedReg)
+		err := AddRegistration(&approvedReg)
 		require.NoError(t, err)
 
 		srv, err := getServerByRegistrationID(pendingReg.ID)
@@ -1179,13 +1187,8 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Run("DeletesMultipleStaleServers", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		jwks1, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		jwks2, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-
-		reg1 := createPendingServerReg(t, "/origins/stale1.edu", "stale1.edu", jwks1)
-		reg2 := createPendingServerReg(t, "/origins/stale2.edu", "stale2.edu", jwks2)
+		reg1 := createPendingServerReg(t, "/origins/stale1.edu", "stale1.edu")
+		reg2 := createPendingServerReg(t, "/origins/stale2.edu", "stale2.edu")
 
 		srv1, err := getServerByRegistrationID(reg1.ID)
 		require.NoError(t, err)
@@ -1205,12 +1208,9 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Run("ReturnCountsForDualServiceStaleServer", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
-		jwks, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-
 		// Same server, two registrations (both pending).
-		reg1 := createPendingServerReg(t, "/origins/dual-stale.edu", "dual-stale.edu", jwks)
-		createPendingServerReg(t, "/caches/dual-stale.edu", "dual-stale.edu", jwks)
+		reg1 := createPendingServerReg(t, "/origins/dual-stale.edu", "dual-stale.edu")
+		createPendingServerReg(t, "/caches/dual-stale.edu", "dual-stale.edu", reg1.Pubkey)
 
 		srv, err := getServerByRegistrationID(reg1.ID)
 		require.NoError(t, err)
@@ -1233,9 +1233,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
 		t.Cleanup(func() { require.NoError(t, param.Registry_RequireOriginApproval.Set(true)) })
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/no-approval.edu", "no-approval.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/no-approval.edu", "no-approval.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
@@ -1256,7 +1254,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 func TestLaunchInactiveRegistrationCleanup(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
 	withApprovalRequired(t)
 
 	t.Run("StopsCleanlyOnContextCancellation", func(t *testing.T) {
@@ -1281,9 +1279,7 @@ func TestLaunchInactiveRegistrationCleanup(t *testing.T) {
 		require.NoError(t, param.Registry_InactiveRegistrationCleanupInterval.Set(10*time.Millisecond))
 		require.NoError(t, param.Registry_InactiveRegistrationTimeout.Set(time.Millisecond))
 
-		pubkey, err := test_utils.GenerateJWKS()
-		require.NoError(t, err)
-		reg := createPendingServerReg(t, "/origins/cleanup-goroutine.edu", "cleanup-goroutine.edu", pubkey)
+		reg := createPendingServerReg(t, "/origins/cleanup-goroutine.edu", "cleanup-goroutine.edu")
 
 		srv, err := getServerByRegistrationID(reg.ID)
 		require.NoError(t, err)
