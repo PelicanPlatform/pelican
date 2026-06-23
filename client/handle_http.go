@@ -2288,37 +2288,30 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 	return details
 }
 
-// Generate the unique list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
-// in the slice of transferAttemptDetails structs.
+// Generate the list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
+// in the slice of transferAttemptDetails structs. The incoming sortedObjectServers list is expected to be deduplicated by
+// generateSortedObjServers, except that intentional duplicates among the user's preferred caches are preserved (a user may list
+// the same cache more than once to force repeated attempts); those duplicates are honored here rather than collapsed.
 // nPreferred indicates how many entries at the start of sortedObjectServers came from the user's PreferredCaches
 // configuration; those entries will have Preferred=true in the returned details.
 func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
-	oServersListed := 0
-	oServerList := make(map[string]bool)
 	oServers := make([]string, 0)
 
 	for idx, oServer := range sortedObjectServers {
-		if oServersListed == oServersToTry {
+		if len(oServers) == oServersToTry {
 			break
 		}
-		// Handle deduplication of any object servers
-		if oServerList[oServer] {
-			continue
-		} else {
-			oServersListed++
-			oServers = append(oServers, oServer)
-			oServerList[oServer] = true
-			td := transferDetailsOptions{
-				NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
-				PackOption: packOption,
-			}
-			isPreferred := idx < nPreferred
-			newTransfers := generateTransferDetails(oServer, td)
-			for i := range newTransfers {
-				newTransfers[i].Preferred = isPreferred
-			}
-			transfers = append(transfers, newTransfers...)
+		oServers = append(oServers, oServer)
+		td := transferDetailsOptions{
+			NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
+			PackOption: packOption,
 		}
+		isPreferred := idx < nPreferred
+		newTransfers := generateTransferDetails(oServer, td)
+		for i := range newTransfers {
+			newTransfers[i].Preferred = isPreferred
+		}
+		transfers = append(transfers, newTransfers...)
 	}
 	log.Debugln("Trying the object servers:", oServers)
 	return transfers

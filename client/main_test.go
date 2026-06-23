@@ -134,6 +134,82 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 		assert.Equal(t, "https://server3.com/foo", oServers[4].String())
 	})
 
+	// A preferred cache that also appears in the director's list must not be
+	// duplicated when the '+' fallback re-incorporates the director servers. The director
+	// copy (matched by host:port) is dropped; the preferred copy is kept up front.
+	t.Run("testPreferredCacheDedupedAgainstDirector", func(t *testing.T) {
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server2.com", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, nPreferred)
+		require.Len(t, oServers, 3)
+		// The preferred server2.com stays first (with the user's path), and the director's
+		// server2.com is filtered out, leaving server1.com and server3.com as fallbacks.
+		assert.Equal(t, "https://server2.com/", oServers[0].String())
+		assert.Equal(t, "https://server1.com/foo", oServers[1].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[2].String())
+	})
+
+	// A user may intentionally list the same cache more than once force repeated attempts.
+	// Those duplicates must be preserved, even though the director
+	// copy of that cache is still filtered out.
+	t.Run("testIntentionalPreferredDuplicatesPreserved", func(t *testing.T) {
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server1.com", Path: "/"},
+			{Scheme: "https", Host: "server1.com", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
+		require.Len(t, oServers, 4)
+		assert.Equal(t, "https://server1.com/", oServers[0].String())
+		assert.Equal(t, "https://server1.com/", oServers[1].String())
+		// Director's server1.com is dropped; server2.com and server3.com remain as fallbacks.
+		assert.Equal(t, "https://server2.com/foo", oServers[2].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[3].String())
+	})
+
+	// The same host on a different port is a distinct cache and must not be deduplicated.
+	t.Run("testSameHostDifferentPortNotDeduped", func(t *testing.T) {
+		portDirResp := server_structs.DirectorResponse{
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "server1.com:8443", Path: "/foo"},
+				{Scheme: "https", Host: "server1.com:8444", Path: "/foo"},
+			},
+		}
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server1.com:8443", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(portDirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, nPreferred)
+		require.Len(t, oServers, 2)
+		assert.Equal(t, "https://server1.com:8443/", oServers[0].String())
+		assert.Equal(t, "https://server1.com:8444/foo", oServers[1].String())
+	})
+
+	// Duplicates within the director's own list are collapsed even when no preferred caches are set.
+	t.Run("testDirectorDuplicatesDeduped", func(t *testing.T) {
+		dupDirResp := server_structs.DirectorResponse{
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "server1.com", Path: "/foo"},
+				{Scheme: "https", Host: "server1.com", Path: "/bar"},
+				{Scheme: "https", Host: "server2.com", Path: "/foo"},
+			},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dupDirResp, []*url.URL{})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, nPreferred)
+		require.Len(t, oServers, 2)
+		assert.Equal(t, "https://server1.com/foo", oServers[0].String())
+		assert.Equal(t, "https://server2.com/foo", oServers[1].String())
+	})
+
 	// Test the function fails if the + character is not at the end of the list
 	t.Run("testPlusNotAtEnd", func(t *testing.T) {
 		preferredOServers := []*url.URL{
