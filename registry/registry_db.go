@@ -718,6 +718,16 @@ func updateServerLastSeen(serverID string) error {
 // each one via deleteServerByID. Servers with any non-Pending registration are
 // skipped; standalone namespace registrations (no servers row) are untouched.
 func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int, err error) {
+	// The cleanup only runs when both Registry.RequireOriginApproval and
+	// Registry.RequireCacheApproval are true. When either is false, registrations of that
+	// type stay Pending in the DB for the lifetime of a healthy server (the approval check
+	// reports Approved regardless of the stored status), so a stale Pending registration is
+	// no longer a reliable signal that a server was abandoned before approval. Skipping the
+	// whole cleanup in that mode avoids deleting legitimate servers.
+	if !param.Registry_RequireOriginApproval.GetBool() || !param.Registry_RequireCacheApproval.GetBool() {
+		return 0, 0, nil
+	}
+
 	servers, err := listServers()
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "failed to list servers for stale pending registration cleanup")

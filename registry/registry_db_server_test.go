@@ -989,16 +989,32 @@ func TestDeleteServerByID(t *testing.T) {
 	})
 }
 
+// withApprovalRequired turns on both registry approval flags for the duration of the
+// test and restores their prior values on cleanup. deleteStaleServerRegistrations is a
+// no-op unless both are set, so the deletion-path tests rely on this.
+func withApprovalRequired(t *testing.T) {
+	t.Helper()
+	origOrigin := param.Registry_RequireOriginApproval.GetBool()
+	origCache := param.Registry_RequireCacheApproval.GetBool()
+	require.NoError(t, param.Registry_RequireOriginApproval.Set(true))
+	require.NoError(t, param.Registry_RequireCacheApproval.Set(true))
+	t.Cleanup(func() {
+		require.NoError(t, param.Registry_RequireOriginApproval.Set(origOrigin))
+		require.NoError(t, param.Registry_RequireCacheApproval.Set(origCache))
+	})
+}
+
 func TestDeleteStaleServerRegistrations(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
+	withApprovalRequired(t)
 
 	t.Run("EmptyDatabase", func(t *testing.T) {
 		regs, servers, err := deleteStaleServerRegistrations(time.Now().UTC())
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), regs)
-		assert.Equal(t, int64(0), servers)
+		assert.Equal(t, int(0), regs)
+		assert.Equal(t, int(0), servers)
 	})
 
 	t.Run("DeletesPendingStaleServer", func(t *testing.T) {
@@ -1017,8 +1033,8 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		cutoff := time.Now().UTC().Add(-1 * time.Hour) // older than 1h is stale
 		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
 		require.NoError(t, err)
-		assert.Equal(t, int64(1), regsDeleted)
-		assert.Equal(t, int64(1), serversDeleted)
+		assert.Equal(t, int(1), regsDeleted)
+		assert.Equal(t, int(1), serversDeleted)
 
 		// Verify removal.
 		var count int64
@@ -1054,8 +1070,8 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		cutoff := time.Now().UTC().Add(-1 * time.Hour)
 		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), regsDeleted, "approved server should not be deleted")
-		assert.Equal(t, int64(0), serversDeleted)
+		assert.Equal(t, int(0), regsDeleted, "approved server should not be deleted")
+		assert.Equal(t, int(0), serversDeleted)
 
 		var count int64
 		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&count).Error
@@ -1087,7 +1103,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 
 		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), serversDeleted, "denied server should not be deleted")
+		assert.Equal(t, int(0), serversDeleted, "denied server should not be deleted")
 	})
 
 	t.Run("PreservesRecentPendingServer", func(t *testing.T) {
@@ -1105,7 +1121,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 
 		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), serversDeleted, "recently active pending server should not be deleted")
+		assert.Equal(t, int(0), serversDeleted, "recently active pending server should not be deleted")
 	})
 
 	t.Run("SkipsServerWithZeroLastSeen", func(t *testing.T) {
@@ -1126,7 +1142,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 
 		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC())
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), serversDeleted, "server with zero last_seen should be skipped")
+		assert.Equal(t, int(0), serversDeleted, "server with zero last_seen should be skipped")
 	})
 
 	t.Run("MixedStatusPreservesServerWithAnyNonPending", func(t *testing.T) {
@@ -1156,7 +1172,7 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 
 		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), serversDeleted,
+		assert.Equal(t, int(0), serversDeleted,
 			"server with at least one approved registration must not be deleted")
 	})
 
@@ -1182,8 +1198,8 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		cutoff := time.Now().UTC().Add(-1 * time.Hour)
 		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
 		require.NoError(t, err)
-		assert.Equal(t, int64(2), regsDeleted)
-		assert.Equal(t, int64(2), serversDeleted)
+		assert.Equal(t, int(2), regsDeleted)
+		assert.Equal(t, int(2), serversDeleted)
 	})
 
 	t.Run("ReturnCountsForDualServiceStaleServer", func(t *testing.T) {
@@ -1203,8 +1219,37 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		cutoff := time.Now().UTC().Add(-1 * time.Hour)
 		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
 		require.NoError(t, err)
-		assert.Equal(t, int64(1), serversDeleted)
-		assert.Equal(t, int64(2), regsDeleted, "both registrations for the dual server should be counted")
+		assert.Equal(t, int(1), serversDeleted)
+		assert.Equal(t, int(2), regsDeleted, "both registrations for the dual server should be counted")
+	})
+
+	t.Run("SkipsCleanupWhenApprovalNotRequired", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		// With approval turned off, a healthy server's registration stays Pending for its
+		// whole lifetime (the approval check reports Approved regardless of stored status),
+		// so a stale Pending registration is no longer a signal of abandonment. Disabling
+		// either flag must short-circuit the whole cleanup.
+		require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
+		t.Cleanup(func() { require.NoError(t, param.Registry_RequireOriginApproval.Set(true)) })
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/no-approval.edu", "no-approval.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int(0), regsDeleted)
+		assert.Equal(t, int(0), serversDeleted, "cleanup must be skipped when approval is not required")
+
+		var count int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count, "stale pending server must survive when approval is off")
 	})
 }
 
@@ -1212,6 +1257,7 @@ func TestLaunchInactiveRegistrationCleanup(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
+	withApprovalRequired(t)
 
 	t.Run("StopsCleanlyOnContextCancellation", func(t *testing.T) {
 		// Use a long interval so the ticker never fires during this subtest.
