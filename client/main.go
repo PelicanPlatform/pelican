@@ -358,6 +358,16 @@ func getUserAgent(project string) (agent string) {
 	return
 }
 
+// objServerKey returns the host:port identity used to deduplicate object servers.
+// For well-formed URLs this is the Host field (which includes the port when present);
+// we fall back to the full string for unusual inputs that don't parse a host.
+func objServerKey(u *url.URL) string {
+	if u.Host != "" {
+		return u.Host
+	}
+	return u.String()
+}
+
 // Given a response from the director with sorted object servers, incorporate any "preferred" servers (origins/caches) that
 // may be passed in from the command line. This should handle the special '+' logic -- if the user provides a list of servers
 // and no +, it means they ONLY want to use the provided servers. Otherwise, we prefer those servers, but also incorporate the
@@ -401,8 +411,25 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 	}
 
 	log.Debugln("Using the returned sources from the director")
-	// We may have some servers from the preferred list
-	objectServers = append(objectServers, dirResp.ObjectServers...)
+	// Append the director-provided servers, but skip any whose host:port collides with
+	// a server we've already included. This keeps the '+' fallback from re-adding a
+	// user-configured preferred cache and drops duplicates within the
+	// director's own list. We intentionally do NOT deduplicate the preferred servers
+	// against each other: a user may list the same cache multiple times to force
+	// repeated attempts (e.g. when testing or troubleshooting a specific cache).
+	seenHosts := make(map[string]bool, len(objectServers))
+	for _, oServer := range objectServers {
+		seenHosts[objServerKey(oServer)] = true
+	}
+	for _, oServer := range dirResp.ObjectServers {
+		key := objServerKey(oServer)
+		if seenHosts[key] {
+			log.Debugf("Skipping director-provided server (%s) that duplicates an already-listed cache\n", oServer)
+			continue
+		}
+		seenHosts[key] = true
+		objectServers = append(objectServers, oServer)
+	}
 
 	if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
 		oHosts := make([]string, len(objectServers))
