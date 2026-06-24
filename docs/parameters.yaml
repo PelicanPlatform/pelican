@@ -3804,8 +3804,11 @@ components: ["origin"]
 name: Issuer.OIDCAuthenticationUserClaim
 description: |+
   The claim to be used as the "username" for the issuer.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`): `sub` for CILogon,
+  or `login` when `Issuer.GroupSource` is `github`.
 type: string
-default: sub
+default: none
 components: ["origin"]
 ---
 name: Issuer.OIDCSubjectClaim
@@ -3816,8 +3819,11 @@ description: |+
 
   If the claim is not found in the user info response, the system will fall back to using the username.
   If the claim value is numeric, it will be converted to a string.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`): `sub` for CILogon,
+  or `id` when `Issuer.GroupSource` is `github`.
 type: string
-default: sub
+default: none
 components: ["origin", "registry", "cache", "director"]
 ---
 name: Issuer.OIDCIssuerClaim
@@ -4064,32 +4070,48 @@ components: ["registry", "origin", "cache", "director"]
 name: OIDC.DeviceAuthEndpoint
 description: |+
   A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration. The default value is set to the URL from CILogon.
+  for authenticated registration.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`):
+  `https://cilogon.org/oauth2/device_authorization` for CILogon, or
+  `https://github.com/login/device/code` when `Issuer.GroupSource` is `github`.
 type: url
-default: "https://cilogon.org/oauth2/device_authorization"
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.TokenEndpoint
 description: |+
   A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration. The default value is set to the URL from CILogon.
+  for authenticated registration.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`):
+  `https://cilogon.org/oauth2/token` for CILogon, or
+  `https://github.com/login/oauth/access_token` when `Issuer.GroupSource` is `github`.
 type: url
-default: "https://cilogon.org/oauth2/token"
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.UserInfoEndpoint
 description: |+
   A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration. The default value is set to the URL from CILogon.
+  for authenticated registration.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`):
+  `https://cilogon.org/oauth2/userinfo` for CILogon, or
+  `https://api.github.com/user` when `Issuer.GroupSource` is `github`.
 type: url
-default: "https://cilogon.org/oauth2/userinfo"
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.AuthorizationEndpoint
 description: |+
-  A URL containing the OIDC authorization endpoint. The default value is set to the URL from CILogon.
+  A URL containing the OIDC authorization endpoint.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`):
+  `https://cilogon.org/authorize` for CILogon, or
+  `https://github.com/login/oauth/authorize` when `Issuer.GroupSource` is `github`.
 type: url
-default: "https://cilogon.org/authorize"
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.Issuer
@@ -4098,23 +4120,29 @@ description: |+
   device auth). The URL should not contain a path unless your authentication server enables multi-tenant support.
 
   If the OIDC auto-discovery failed, Pelican will fall back to use individual endpoints set in the configuration. For
-  any unset endpoints, Pelican will use default values, which are from CILogon.
+  any unset endpoints, Pelican will use default values selected from the OAuth flavor (`Issuer.GroupSource`).
 
   **Note**: If you explicitly set the OIDC endpoints (AuthorizationEndpoint, TokenEndpoint, etc.), those values will
   take precedence over auto-discovery. This is useful for OAuth2 providers like GitHub that don't support OIDC discovery.
 
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`): `https://cilogon.org` for CILogon,
+  or `https://github.com` when `Issuer.GroupSource` is `github`.
+
   For CILogon, it's https://cilogon.org
   For Globus, it's https://auth.globus.org
-  For GitHub OAuth2, set this to https://github.com and explicitly configure the individual endpoints
+  For GitHub OAuth2, it's https://github.com
 type: url
-default: https://cilogon.org
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.Scopes
 description: |+
   A list of scopes to request from the authentication provider.
+
+  The default is selected from the OAuth flavor (`Issuer.GroupSource`): `["openid", "email", "profile"]`
+  for CILogon, or `["user", "read:org"]` when `Issuer.GroupSource` is `github`.
 type: stringSlice
-default: ["openid", "email", "profile"]
+default: none
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientRedirectHostname

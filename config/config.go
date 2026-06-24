@@ -1551,6 +1551,10 @@ func SetServerDefaults(v *viper.Viper) error {
 	// the base default ("none") and the client default ("warn").
 	ApplyServerDefaults(v)
 
+	// Register OIDC/OAuth2 endpoint and claim defaults based on the configured OAuth
+	// flavor (CILogon by default, GitHub when Issuer.GroupSource == "github").
+	setOAuthFlavorDefaults(v)
+
 	// Deprecated param defaults: excluded from generated SetParameterDefaults
 	// because deprecated params are skipped during generation. Keep these until
 	// the params are fully removed.
@@ -1767,6 +1771,69 @@ func ApplyLogLevelInheritance(v *viper.Viper) {
 			v.Set(name, infoDefault)
 		} else {
 			v.Set(name, effectiveLevel)
+		}
+	}
+}
+
+// OAuthFlavor decides the default values for OIDC/OAuth2 config params.
+// Pelican ships two flavors: CILogon (the federation default) and GitHub.
+// The flavor is selected at runtime from Issuer.GroupSource.
+type OAuthFlavor string
+
+const (
+	OAuthFlavorCILogon OAuthFlavor = "cilogon"
+	OAuthFlavorGitHub  OAuthFlavor = "github"
+)
+
+// oauthFlavorFromGroupSource maps an Issuer.GroupSource value to an OAuthFlavor.
+// Only "github" selects the GitHub flavor; every other value (none, file, oidc,
+// internal, unset) falls back to CILogon so existing deployments are unaffected.
+func oauthFlavorFromGroupSource(groupSource string) OAuthFlavor {
+	if strings.EqualFold(groupSource, string(OAuthFlavorGitHub)) {
+		return OAuthFlavorGitHub
+	}
+	return OAuthFlavorCILogon
+}
+
+// oauthFlavorDefaults holds the OIDC/OAuth2 endpoint and claim defaults for each OAuth
+// flavor. These params carry "default: none" in parameters.yaml so this map is the
+// single source of their defaults; the per-flavor values are documented per-param in
+// parameters.yaml.
+var oauthFlavorDefaults = map[OAuthFlavor]map[string]any{
+	OAuthFlavorCILogon: {
+		param.OIDC_Issuer.GetName():                        "https://cilogon.org",
+		param.OIDC_AuthorizationEndpoint.GetName():         "https://cilogon.org/authorize",
+		param.OIDC_TokenEndpoint.GetName():                 "https://cilogon.org/oauth2/token",
+		param.OIDC_UserInfoEndpoint.GetName():              "https://cilogon.org/oauth2/userinfo",
+		param.OIDC_DeviceAuthEndpoint.GetName():            "https://cilogon.org/oauth2/device_authorization",
+		param.OIDC_Scopes.GetName():                        []string{"openid", "email", "profile"},
+		param.Issuer_OIDCAuthenticationUserClaim.GetName(): "sub",
+		param.Issuer_OIDCSubjectClaim.GetName():            "sub",
+	},
+	OAuthFlavorGitHub: {
+		param.OIDC_Issuer.GetName():                        "https://github.com",
+		param.OIDC_AuthorizationEndpoint.GetName():         "https://github.com/login/oauth/authorize",
+		param.OIDC_TokenEndpoint.GetName():                 "https://github.com/login/oauth/access_token",
+		param.OIDC_UserInfoEndpoint.GetName():              "https://api.github.com/user",
+		param.OIDC_DeviceAuthEndpoint.GetName():            "https://github.com/login/device/code",
+		param.OIDC_Scopes.GetName():                        []string{"user", "read:org"},
+		param.Issuer_OIDCAuthenticationUserClaim.GetName(): "login",
+		param.Issuer_OIDCSubjectClaim.GetName():            "id",
+	},
+}
+
+func setOAuthFlavorDefaults(v *viper.Viper) {
+	flavor := oauthFlavorFromGroupSource(v.GetString(param.Issuer_GroupSource.GetName()))
+	if flavor == OAuthFlavorGitHub {
+		log.Debug("GitHub group source detected; applying GitHub OAuth2 endpoint and claim defaults")
+	}
+	st := GetSourceTracker()
+	for key, val := range oauthFlavorDefaults[flavor] {
+		// Use v.SetDefault so any value the user set via config
+		// file or env still wins through viper's normal precedence
+		v.SetDefault(key, val)
+		if src, ok := st.Get(strings.ToLower(key)); !ok || src.Type == SourceDefault {
+			st.Record(strings.ToLower(key), ConfigSource{Type: SourceDefault})
 		}
 	}
 }

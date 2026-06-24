@@ -274,16 +274,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_DynamicClientUnusedTimeout.GetName(), "1h")
 	// Issuer.IDTokenLifetime
 	v.SetDefault(param.Issuer_IDTokenLifetime.GetName(), "1h")
-	// Issuer.OIDCAuthenticationUserClaim
-	v.SetDefault(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "sub")
 	// Issuer.OIDCGroupClaim
 	v.SetDefault(param.Issuer_OIDCGroupClaim.GetName(), "groups")
 	// Issuer.OIDCIssuerClaim
 	v.SetDefault(param.Issuer_OIDCIssuerClaim.GetName(), "iss")
 	// Issuer.OIDCPreferClaimsFromIDToken
 	v.SetDefault(param.Issuer_OIDCPreferClaimsFromIDToken.GetName(), false)
-	// Issuer.OIDCSubjectClaim
-	v.SetDefault(param.Issuer_OIDCSubjectClaim.GetName(), "sub")
 	// Issuer.PublicClientID
 	v.SetDefault(param.Issuer_PublicClientID.GetName(), "pelican-public-client")
 	// Issuer.QDLLocation
@@ -458,8 +454,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Monitoring_TokenExpiresIn.GetName(), "1h")
 	// Monitoring.TokenRefreshInterval
 	v.SetDefault(param.Monitoring_TokenRefreshInterval.GetName(), "5m")
-	// OIDC.AuthorizationEndpoint
-	v.SetDefault(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/authorize")
 	// OIDC.ClientIDFile
 	{
 		val := "${ConfigBase}/oidc-client-id"
@@ -472,16 +466,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 		v.SetDefault(param.OIDC_ClientSecretFile.GetName(), val)
 	}
-	// OIDC.DeviceAuthEndpoint
-	v.SetDefault(param.OIDC_DeviceAuthEndpoint.GetName(), "https://cilogon.org/oauth2/device_authorization")
-	// OIDC.Issuer
-	v.SetDefault(param.OIDC_Issuer.GetName(), "https://cilogon.org")
-	// OIDC.Scopes
-	v.SetDefault(param.OIDC_Scopes.GetName(), []string{"openid", "email", "profile"})
-	// OIDC.TokenEndpoint
-	v.SetDefault(param.OIDC_TokenEndpoint.GetName(), "https://cilogon.org/oauth2/token")
-	// OIDC.UserInfoEndpoint
-	v.SetDefault(param.OIDC_UserInfoEndpoint.GetName(), "https://cilogon.org/oauth2/userinfo")
 	// Origin.ConcurrencyDegradedThreshold
 	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
 	// Origin.DbLocation
