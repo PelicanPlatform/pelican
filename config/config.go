@@ -1243,11 +1243,6 @@ func initConfigInternalImpl(logLevel log.Level) {
 		cobra.CheckErr(err)
 	}
 
-	// Auto-fill GitHub OAuth2 endpoints and claim names when GroupSource is "github".
-	// This runs after all config sources are merged so GroupSource is readable,
-	// and early enough that pelican config get also reflects the filled values.
-	cobra.CheckErr(applyGitHubOAuthDefaults())
-
 	// Use configuration to set the logging level, which must be fed to
 	// the logging library and isn't accessed directly through viper
 	err = setLoggingInternal()
@@ -1556,6 +1551,10 @@ func SetServerDefaults(v *viper.Viper) error {
 	// the base default ("none") and the client default ("warn").
 	ApplyServerDefaults(v)
 
+	// Register OIDC/OAuth2 endpoint and claim defaults based on the configured OAuth
+	// flavor (CILogon by default, GitHub when Issuer.GroupSource == "github").
+	setOAuthFlavorDefaults(v)
+
 	// Deprecated param defaults: excluded from generated SetParameterDefaults
 	// because deprecated params are skipped during generation. Keep these until
 	// the params are fully removed.
@@ -1776,92 +1775,67 @@ func ApplyLogLevelInheritance(v *viper.Viper) {
 	}
 }
 
-// cilogonOIDCDefaults holds the OIDC values that defaults.yaml seeds for CILogon.
-// Because defaults.yaml is loaded via MergeConfig (not viper.SetDefault), these
-// values show up as IsSet()=true even when the user never wrote them. We use these
-// constants to distinguish "came from defaults.yaml" from "user explicitly set".
-var cilogonOIDCDefaults = struct {
-	issuer             string
-	authorizationEndpt string
-	tokenEndpt         string
-	userInfoEndpt      string
-	deviceAuthEndpt    string
-	scopes             []string
-	authUserClaim      string
-}{
-	issuer:             "https://cilogon.org",
-	authorizationEndpt: "https://cilogon.org/authorize",
-	tokenEndpt:         "https://cilogon.org/oauth2/token",
-	userInfoEndpt:      "https://cilogon.org/oauth2/userinfo",
-	deviceAuthEndpt:    "https://cilogon.org/oauth2/device_authorization",
-	scopes:             []string{"openid", "email", "profile"},
-	authUserClaim:      "sub",
+// OAuthFlavor decides the default values for OIDC/OAuth2 config params.
+// Pelican ships two flavors: CILogon (the federation default) and GitHub.
+// The flavor is selected at runtime from Issuer.GroupSource.
+type OAuthFlavor string
+
+const (
+	OAuthFlavorCILogon OAuthFlavor = "cilogon"
+	OAuthFlavorGitHub  OAuthFlavor = "github"
+)
+
+// oauthFlavorFromGroupSource maps an Issuer.GroupSource value to an OAuthFlavor.
+// Only "github" selects the GitHub flavor; every other value (none, file, oidc,
+// internal, unset) falls back to CILogon so existing deployments are unaffected.
+func oauthFlavorFromGroupSource(groupSource string) OAuthFlavor {
+	if strings.EqualFold(groupSource, string(OAuthFlavorGitHub)) {
+		return OAuthFlavorGitHub
+	}
+	return OAuthFlavorCILogon
 }
 
-// isOIDCParamUserSet returns true only if the string parameter was explicitly set
-// by the user (not just populated from defaults.yaml).
-// defaults.yaml is loaded via MergeConfig, making IsSet() return true for all its
-// keys. We work around this by treating a value that still matches the known
-// defaults.yaml default as "not user-set".
-func isOIDCParamUserSet(p param.StringParam, defaultVal string) bool {
-	return p.IsSet() && p.GetString() != defaultVal
+// oauthFlavorDefaults holds the OIDC/OAuth2 endpoint and claim defaults for each OAuth
+// flavor. These params carry "default: none" in parameters.yaml so this map is the
+// single source of their defaults; the per-flavor values are documented per-param in
+// parameters.yaml.
+var oauthFlavorDefaults = map[OAuthFlavor]map[string]any{
+	OAuthFlavorCILogon: {
+		param.OIDC_Issuer.GetName():                        "https://cilogon.org",
+		param.OIDC_AuthorizationEndpoint.GetName():         "https://cilogon.org/authorize",
+		param.OIDC_TokenEndpoint.GetName():                 "https://cilogon.org/oauth2/token",
+		param.OIDC_UserInfoEndpoint.GetName():              "https://cilogon.org/oauth2/userinfo",
+		param.OIDC_DeviceAuthEndpoint.GetName():            "https://cilogon.org/oauth2/device_authorization",
+		param.OIDC_Scopes.GetName():                        []string{"openid", "email", "profile"},
+		param.Issuer_OIDCAuthenticationUserClaim.GetName(): "sub",
+		param.Issuer_OIDCSubjectClaim.GetName():            "sub",
+	},
+	OAuthFlavorGitHub: {
+		param.OIDC_Issuer.GetName():                        "https://github.com",
+		param.OIDC_AuthorizationEndpoint.GetName():         "https://github.com/login/oauth/authorize",
+		param.OIDC_TokenEndpoint.GetName():                 "https://github.com/login/oauth/access_token",
+		param.OIDC_UserInfoEndpoint.GetName():              "https://api.github.com/user",
+		param.OIDC_DeviceAuthEndpoint.GetName():            "https://github.com/login/device/code",
+		param.OIDC_Scopes.GetName():                        []string{"user", "read:org"},
+		param.Issuer_OIDCAuthenticationUserClaim.GetName(): "login",
+		param.Issuer_OIDCSubjectClaim.GetName():            "id",
+	},
 }
 
-// applyGitHubOAuthDefaults sets GitHub-specific OAuth2 endpoint and claim defaults
-// when Issuer.GroupSource is set to "github". This spares operators from having to
-// manually specify every fixed GitHub endpoint and claim name.
-// Values that the user has explicitly set (i.e. differ from the CILogon defaults
-// that defaults.yaml seeds) are never overwritten.
-func applyGitHubOAuthDefaults() error {
-	if strings.ToLower(param.Issuer_GroupSource.GetString()) != "github" {
-		return nil
+func setOAuthFlavorDefaults(v *viper.Viper) {
+	flavor := oauthFlavorFromGroupSource(v.GetString(param.Issuer_GroupSource.GetName()))
+	if flavor == OAuthFlavorGitHub {
+		log.Debug("GitHub group source detected; applying GitHub OAuth2 endpoint and claim defaults")
 	}
-	log.Info("GitHub group source detected; auto-filling GitHub OAuth2 endpoint and claim defaults")
-	defaults := map[string]interface{}{}
-
-	if !isOIDCParamUserSet(param.OIDC_Issuer, cilogonOIDCDefaults.issuer) {
-		defaults[param.OIDC_Issuer.GetName()] = "https://github.com"
-	}
-	if !isOIDCParamUserSet(param.OIDC_AuthorizationEndpoint, cilogonOIDCDefaults.authorizationEndpt) {
-		defaults[param.OIDC_AuthorizationEndpoint.GetName()] = "https://github.com/login/oauth/authorize"
-	}
-	if !isOIDCParamUserSet(param.OIDC_TokenEndpoint, cilogonOIDCDefaults.tokenEndpt) {
-		defaults[param.OIDC_TokenEndpoint.GetName()] = "https://github.com/login/oauth/access_token"
-	}
-	if !isOIDCParamUserSet(param.OIDC_UserInfoEndpoint, cilogonOIDCDefaults.userInfoEndpt) {
-		defaults[param.OIDC_UserInfoEndpoint.GetName()] = "https://api.github.com/user"
-	}
-	if !isOIDCParamUserSet(param.OIDC_DeviceAuthEndpoint, cilogonOIDCDefaults.deviceAuthEndpt) {
-		defaults[param.OIDC_DeviceAuthEndpoint.GetName()] = "https://github.com/login/device/code"
-	}
-	// For scopes, compare the sorted slice against the known CILogon default.
-	currentScopes := param.OIDC_Scopes.GetStringSlice()
-	scopesAreDefault := len(currentScopes) == len(cilogonOIDCDefaults.scopes)
-	if scopesAreDefault {
-		for i, s := range cilogonOIDCDefaults.scopes {
-			if currentScopes[i] != s {
-				scopesAreDefault = false
-				break
-			}
+	st := GetSourceTracker()
+	for key, val := range oauthFlavorDefaults[flavor] {
+		// Use v.SetDefault so any value the user set via config
+		// file or env still wins through viper's normal precedence
+		v.SetDefault(key, val)
+		if src, ok := st.Get(strings.ToLower(key)); !ok || src.Type == SourceDefault {
+			st.Record(strings.ToLower(key), ConfigSource{Type: SourceDefault})
 		}
 	}
-	if !param.OIDC_Scopes.IsSet() || scopesAreDefault {
-		defaults[param.OIDC_Scopes.GetName()] = []string{"user", "read:org"}
-	}
-	if !isOIDCParamUserSet(param.Issuer_OIDCAuthenticationUserClaim, cilogonOIDCDefaults.authUserClaim) {
-		defaults[param.Issuer_OIDCAuthenticationUserClaim.GetName()] = "login"
-	}
-	// OIDCSubjectClaim has no defaults.yaml entry, so IsSet() is reliable here.
-	if !param.Issuer_OIDCSubjectClaim.IsSet() {
-		defaults[param.Issuer_OIDCSubjectClaim.GetName()] = "id"
-	}
-
-	if len(defaults) > 0 {
-		if err := param.MultiSet(defaults); err != nil {
-			return errors.Wrap(err, "failed to apply GitHub OAuth2 defaults")
-		}
-	}
-	return nil
 }
 
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
