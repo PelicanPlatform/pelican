@@ -75,7 +75,7 @@ func RegisterLotsAPI(router *gin.RouterGroup) error {
 	return nil
 }
 
-func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
+func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
 	return false
 }
@@ -116,7 +116,7 @@ func RemoveLot(string, bool, bool, bool, bool, string) error {
 	return errUnsupported
 }
 
-func LaunchRenewalRoutine(_ context.Context, _ func() []server_structs.NamespaceAdV2) {
+func LaunchRenewalRoutine(_ context.Context, _ func() []server_structs.NamespaceAd) {
 	log.Warningln("LotMan is not supported on this platform. Skipping renewal routine...")
 }
 

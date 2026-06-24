@@ -118,13 +118,13 @@ import (
 // alert on the warning above and re-tune quotas; the alternative —
 // silently dropping the lot — would create a coverage gap that the
 // next tick would just refill.
-func allocateEpochAwareQuotas(prop *renewalProposal, existing []Lot, fedAds []server_structs.NamespaceAdV2, cfg renewalConfig) {
+func allocateEpochAwareQuotas(prop *renewalProposal, existing []Lot, fedAds []server_structs.NamespaceAd, cfg renewalConfig) {
 	if prop == nil || len(prop.newLots) == 0 {
 		return
 	}
 	_ = fedAds // reserved for future per-namespace overrides; once the
 	// director starts populating lot-policy fields on
-	// server_structs.NamespaceAdV2, this allocator will read them here
+	// server_structs.NamespaceAd, this allocator will read them here
 	// to override defaults like the (N+1)/(N+2) divisor or per-NS
 	// dedicated/opportunistic ratios.
 

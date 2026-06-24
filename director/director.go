@@ -88,7 +88,7 @@ type (
 	// be at most one supported namespace for each server that's the "best match"
 	copyAd struct {
 		ServerAd    server_structs.ServerAd
-		NamespaceAd server_structs.NamespaceAdV2
+		NamespaceAd server_structs.NamespaceAd
 	}
 
 	// Special Director redirect errors
@@ -370,7 +370,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 }
 
 // Generate the link header for the response, which encodes our metalink-prioritized list of redirect servers
-func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2) {
+func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd server_structs.NamespaceAd) {
 	reqPath := getObjectPathFromRequest(ctx)
 
 	// if err != nil, depth == 0, which is the default value for depth
@@ -409,7 +409,7 @@ func corsHeadersMiddleware(ginCtx *gin.Context) {
 // Generates the X-Pelican-Authorization header (when applicable) for responses that have
 // issued a request where token generation may be needed. This header informs the client
 // of the issuer that can be used to generate a token for the requested resource.
-func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAd) {
 	if len(namespaceAd.Issuer) != 0 {
 		issStrings := []string{}
 		for _, tokIss := range namespaceAd.Issuer {
@@ -421,13 +421,13 @@ func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.Namespa
 
 // Generates the X-Pelican-Token-Generation header (when applicable) for responses that have
 // issued a request where token generation may be needed.
-func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAd) {
 	if len(namespaceAd.Generation) != 0 {
 		tokenGen := ""
 		first := true
 		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
-		// to fix this because the token gen header uses the issuer URL from NamespaceAdV2.Generation.CredentialIssuer, whereas basepaths
-		// come from NamespaceAdV2.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
+		// to fix this because the token gen header uses the issuer URL from NamespaceAd.Generation.CredentialIssuer, whereas basepaths
+		// come from NamespaceAd.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
 		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
 		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
 		var basePath string
@@ -465,7 +465,7 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 
 // Generate the X-Pelican-Namespace header, which includes information about the namespace and whether token auth is required
 // for reading from this namespace
-func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) {
+func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAd) {
 	var collUrl string
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	for _, oAd := range oAds {
@@ -678,7 +678,7 @@ func mapQueriesToCaps(ctx *gin.Context) string {
 	return capsStr
 }
 
-func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) {
+func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAd, requestId uuid.UUID) {
 	reqPath := getObjectPathFromRequest(ctx)
 	if len(chosenAds) == 0 {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -968,7 +968,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				Path:   "/api/v1.0/director/healthTest",
 			},
 		}
-		monitoringNs := server_structs.NamespaceAdV2{
+		monitoringNs := server_structs.NamespaceAd{
 			Path: server_utils.MonitoringBaseNs,
 			Caps: server_structs.Capabilities{
 				PublicReads: true,
@@ -1192,32 +1192,32 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		}
 	}
 
-	adV2 := server_structs.OriginAdvertiseV2{}
-	err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
+	ad := server_structs.OriginAdvertise{}
+	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
 	if err != nil {
-		log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err)
+		log.Debugf("Failed to parse %s registration from service %q at %s: %v", sType, service, ctx.RemoteIP(), err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration", sType),
+			Msg:    fmt.Sprintf("invalid %s registration: %v", sType, err),
 		})
 		return
 	}
 
 	// Check every namespace path to strip the trailing slash
-	for i := range adV2.Namespaces {
-		adV2.Namespaces[i].Path = server_utils.RemoveTrailingSlash(adV2.Namespaces[i].Path)
+	for i := range ad.Namespaces {
+		ad.Namespaces[i].Path = server_utils.RemoveTrailingSlash(ad.Namespaces[i].Path)
 	}
 
 	// Filter the advertised prefixes in the cache server ad
 	// based on the allowed prefixes for caches data.
 	if sType == server_structs.CacheType {
 		// Parse URL to extract hostname
-		parsedURL, err := url.Parse(adV2.DataURL)
+		parsedURL, err := url.Parse(ad.DataURL)
 		if err != nil {
 			log.Debugln("Failed to parse data URL for cache:", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
+				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", ad.DataURL, err.Error()),
 			})
 			return
 		}
@@ -1231,10 +1231,10 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		//
 		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
 		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
-			filteredNamespaces := []server_structs.NamespaceAdV2{}
+			filteredNamespaces := []server_structs.NamespaceAd{}
 			filteredPaths := []string{} // Collect filtered prefixes
 
-			for _, namespace := range adV2.Namespaces {
+			for _, namespace := range ad.Namespaces {
 				// Default allow for paths starting with "/pelican/"
 				if strings.HasPrefix(namespace.Path, "/pelican/") {
 					filteredNamespaces = append(filteredNamespaces, namespace)
@@ -1254,19 +1254,19 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				log.Infof("Filtered out prefixes: %v in the server ad for cache %s", filteredPaths, cacheHostname)
 			}
 
-			adV2.Namespaces = filteredNamespaces
+			ad.Namespaces = filteredNamespaces
 		}
 	}
 
 	// Set to ctx for metrics handler downstream
-	ctx.Set("serverName", adV2.Name)
-	ctx.Set("serverWebUrl", adV2.WebURL)
+	ctx.Set("serverName", ad.Name)
+	ctx.Set("serverWebUrl", ad.WebURL)
 
 	// Iterate over each advertised namespace and join the paths together
 	// into a string where each path is separated by a space
 	// i.e. "<path> <path> <path>"
 	var namespacePaths string
-	for _, namespace := range adV2.Namespaces {
+	for _, namespace := range ad.Namespaces {
 		path := namespace.Path
 		namespacePaths = fmt.Sprintf("%s %s", namespacePaths, path)
 	}
@@ -1276,7 +1276,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Verify server registration
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
 
-	registryPrefix := server_utils.RemoveTrailingSlash(adV2.RegistryPrefix)
+	registryPrefix := server_utils.RemoveTrailingSlash(ad.RegistryPrefix)
 	verifyServer := true
 	if registryPrefix == "" {
 		if sType == server_structs.OriginType {
@@ -1285,7 +1285,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		} else {
 			// For caches <= 7.8.1, they don't have RegistryPrefix
 			// so we fall back to Name
-			registryPrefix = server_structs.GetCacheNs(adV2.Name)
+			registryPrefix = server_structs.GetCacheNs(ad.Name)
 		}
 	}
 
@@ -1303,34 +1303,34 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), adV2.Name, approvalErrMsg)})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), ad.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 				return
 			} else {
-				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), adV2.Name, registryPrefix, err)
+				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), ad.Name, registryPrefix, err)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 				})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 				return
 			}
 		}
 		if !ok {
-			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
+			log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Authorization token verification failed. Token missing required scope",
 			})
-			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 			return
 		}
 	}
 
 	// For origin, also verify namespace registrations
 	if sType == server_structs.OriginType {
-		for _, namespace := range adV2.Namespaces {
+		for _, namespace := range ad.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
 			ok, err := verifyAdvertiseToken(engineCtx, token, namespace.Path)
@@ -1338,26 +1338,26 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
-					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 					return
 				} else {
-					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), adV2.Name, err)
+					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), ad.Name, err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
-					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 					return
 				}
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid token scope\n",
-					sType, adV2.Name, namespace.Path)
+					sType, ad.Name, namespace.Path)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    "Authorization token verification failed. Token missing required scope",
 				})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 				return
 			}
 		}
@@ -1366,30 +1366,30 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
 	// then we can fallback to the request version
 	// otherwise, we set the version to unknown because our sources of truth are not available
-	if adV2.Version == "" && reqVer != nil {
-		adV2.Version = reqVer.String()
-	} else if adV2.Version != "" && reqVer != nil {
-		parsedAdVersion, err := version.NewVersion(adV2.Version)
+	if ad.Version == "" && reqVer != nil {
+		ad.Version = reqVer.String()
+	} else if ad.Version != "" && reqVer != nil {
+		parsedAdVersion, err := version.NewVersion(ad.Version)
 		if err != nil {
 			// ad version was not a valid version, so we fallback to the request version
-			adV2.Version = reqVer.String()
+			ad.Version = reqVer.String()
 		} else if !parsedAdVersion.Equal(reqVer) {
-			// if the reqVer doesn't match the adV2.version, we should use the adV2.version
-			adV2.Version = parsedAdVersion.String()
+			// if the reqVer doesn't match the ad.version, we should use the ad.version
+			ad.Version = parsedAdVersion.String()
 		}
-	} else if adV2.Version == "" {
-		adV2.Version = "unknown"
+	} else if ad.Version == "" {
+		ad.Version = "unknown"
 	}
 
-	sn := adV2.Name
+	sn := ad.Name
 	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
-	applyServerDowntimes(sn, adV2.Downtimes)
+	applyServerDowntimes(sn, ad.Downtimes)
 
 	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
-	if adV2.Status != "" { // For backward compatibility, we only process this if it is set
+	if ad.Status != "" { // For backward compatibility, we only process this if it is set
 		// If the server is about to shutdown, we silently put it into downtime.
 		// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
-		if metrics.ParseHealthStatus(adV2.Status) == metrics.StatusShuttingDown {
+		if metrics.ParseHealthStatus(ad.Status) == metrics.StatusShuttingDown {
 			filteredServersMutex.Lock()
 			// Inspect the existing downtime status for this server
 			existingFilterType, isServerFiltered := filteredServers[sn]
@@ -1414,25 +1414,25 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	// Forward to other directors, if applicable
-	forwardServiceAd(engineCtx, &adV2, sType, nil)
+	forwardServiceAd(engineCtx, &ad, sType, nil)
 
 	// Correct any clock skews detected in the client
 	now := time.Now()
-	if skew := now.Sub(adV2.Now); !adV2.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
-		lifetime := adV2.GetExpiration().Sub(adV2.Now)
+	if skew := now.Sub(ad.Now); !ad.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
+		lifetime := ad.GetExpiration().Sub(ad.Now)
 		if lifetime > 0 {
-			adV2.Expiration = now.Add(lifetime)
+			ad.Expiration = now.Add(lifetime)
 		}
 	}
-	adV2.Now = time.Time{}
+	ad.Now = time.Time{}
 
-	finishRegisterServeAd(engineCtx, ctx, &adV2, sType)
+	finishRegisterServeAd(engineCtx, ctx, &ad, sType)
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
-func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
-	log.Debugf("finishRegisterServeAd received %+v", adV2)
-	st := adV2.StorageType
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType) {
+	log.Debugf("finishRegisterServeAd received %+v", ad)
+	st := ad.StorageType
 	// Defaults to POSIX
 	if st == "" {
 		st = server_structs.OriginStoragePosix
@@ -1440,62 +1440,62 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 	// Disable director test if the server isn't POSIX-like (posix / posixv2).
 	// Remote-protocol backends (S3, HTTPS, Globus, etc.) cannot accept the
 	// probe-file write/read that the director test relies on.
-	if !st.IsPosixLike() && !adV2.DisableDirectorTest {
-		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, adV2.Name, string(st))
-		adV2.DisableDirectorTest = true
+	if !st.IsPosixLike() && !ad.DisableDirectorTest {
+		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, ad.Name, string(st))
+		ad.DisableDirectorTest = true
 	}
 
-	adUrl, err := url.Parse(adV2.DataURL)
+	adUrl, err := url.Parse(ad.DataURL)
 	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.DataURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, ad.DataURL), // Origin.URL / Cache.URL
 		})
 		return
 	}
 
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+	adWebUrl, err := url.Parse(ad.WebURL)
+	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", ad.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s %s is not a valid URL", param.Server_ExternalWebUrl.GetName(), sType, adV2.WebURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. %s %s is not a valid URL", param.Server_ExternalWebUrl.GetName(), sType, ad.WebURL),
 		})
 		return
 	}
 
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	brokerUrl, err := url.Parse(ad.BrokerURL)
 	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		log.Warningf("Failed to parse broker URL %s: %s", ad.BrokerURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, ad.BrokerURL),
 		})
 	}
 
 	sAd := server_structs.ServerAd{
-		ServerID:            adV2.ServerID,
-		RegistryPrefix:      adV2.RegistryPrefix,
+		ServerID:            ad.ServerID,
+		RegistryPrefix:      ad.RegistryPrefix,
 		StorageType:         st,
-		DisableDirectorTest: adV2.DisableDirectorTest,
+		DisableDirectorTest: ad.DisableDirectorTest,
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,
 		BrokerURL:           *brokerUrl,
 		Type:                sType.String(),
-		Caps:                adV2.Caps,
-		RequiredFeatures:    adV2.RequiredFeatures,
+		Caps:                ad.Caps,
+		RequiredFeatures:    ad.RequiredFeatures,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
-		Downtimes:           adV2.Downtimes,
-		Status:              adV2.Status,
+		Downtimes:           ad.Downtimes,
+		Status:              ad.Status,
 	}
 	// If the server declared its own geolocation via GeoLocation config, honor it.
-	if adV2.Coordinate != nil {
-		sAd.Coordinate = *adV2.Coordinate
+	if ad.Coordinate != nil {
+		sAd.Coordinate = *ad.Coordinate
 	}
-	sAd.CopyFrom(adV2)
+	sAd.CopyFrom(ad)
 
-	recordAd(engineCtx, sAd, &adV2.Namespaces)
+	recordAd(engineCtx, sAd, &ad.Namespaces)
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }
@@ -1580,16 +1580,27 @@ func discoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
+// listNamespacesV1Deprecated keeps the removed V1 namespace-listing path plumbed so it
+// returns a deprecation notice instead of a 404, and so no future handler is accidentally
+// bound to it. The V1 ad format is gone; this endpoint serves no data.
+func listNamespacesV1Deprecated(ctx *gin.Context) {
+	ctx.Header("Warning", `299 - "Deprecated API: use GET /api/v2.0/director/listNamespaces"`)
+	ctx.JSON(299, server_structs.SimpleApiResp{
+		Status: server_structs.RespFailed,
+		Msg:    "the GET /api/v1.0/director/listNamespaces endpoint is deprecated and no longer returns data; use GET /api/v2.0/director/listNamespaces",
+	})
+}
+
 func listNamespacesV2(ctx *gin.Context) {
-	namespacesAdsV2 := listNamespacesFromOrigins()
-	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
+	namespacesAds := listNamespacesFromOrigins()
+	namespacesAds = append(namespacesAds, server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
 			Reads:       true,
 		},
 		Path: server_utils.MonitoringBaseNs,
 	})
-	ctx.JSON(http.StatusOK, namespacesAdsV2)
+	ctx.JSON(http.StatusOK, namespacesAds)
 }
 
 func getPrefixByPath(ctx *gin.Context) {
@@ -1832,6 +1843,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/getFedToken", getFedToken)
+		directorAPIV1.GET("/listNamespaces", listNamespacesV1Deprecated)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)

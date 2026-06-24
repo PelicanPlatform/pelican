@@ -74,7 +74,7 @@ func TestGetAdsForPath(t *testing.T) {
 			- Record the ads
 			- Query for a few paths and make sure the correct ads are returned
 	*/
-	nsAd1 := server_structs.NamespaceAdV2{
+	nsAd1 := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{PublicReads: false},
 		Path: "/chtc",
 		Issuer: []server_structs.TokenIssuer{{
@@ -86,7 +86,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd2 := server_structs.NamespaceAdV2{
+	nsAd2 := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{PublicReads: true},
 		Path: "/chtc/PUBLIC",
 		Issuer: []server_structs.TokenIssuer{{
@@ -98,7 +98,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd3 := server_structs.NamespaceAdV2{
+	nsAd3 := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{PublicReads: true},
 		Path: "/chtc/PUBLIC2/",
 		Issuer: []server_structs.TokenIssuer{{
@@ -110,7 +110,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAdTopo1 := server_structs.NamespaceAdV2{
+	nsAdTopo1 := server_structs.NamespaceAd{
 		Caps:         server_structs.Capabilities{PublicReads: true},
 		Path:         "/chtc",
 		FromTopology: true,
@@ -123,7 +123,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAdTopoOnly := server_structs.NamespaceAdV2{
+	nsAdTopoOnly := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{PublicReads: false},
 		Path: "/foo",
 		Issuer: []server_structs.TokenIssuer{{
@@ -181,10 +181,10 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 	originAdTopo1.Initialize("topology origin 1")
 
-	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
-	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
-	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2, nsAdTopoOnly}
-	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1, nsAdTopoOnly}
+	o1Slice := []server_structs.NamespaceAd{nsAd1}
+	o2Slice := []server_structs.NamespaceAd{nsAd2, nsAd3}
+	c1Slice := []server_structs.NamespaceAd{nsAd1, nsAd2, nsAdTopoOnly}
+	topoSlice := []server_structs.NamespaceAd{nsAdTopo1, nsAdTopoOnly}
 	recordAd(context.Background(), originAd2, &o2Slice)
 	recordAd(context.Background(), originAd1, &o1Slice)
 	// Add a server from Topology that serves /chtc namespace
@@ -307,7 +307,7 @@ func TestAllPredicatesPass(t *testing.T) {
 	ctx := &gin.Context{}
 	ad := copyAd{
 		ServerAd:    server_structs.ServerAd{},
-		NamespaceAd: server_structs.NamespaceAdV2{},
+		NamespaceAd: server_structs.NamespaceAd{},
 	}
 
 	alwaysTrue := func(ctx *gin.Context, ad copyAd) bool { return true }
@@ -416,7 +416,7 @@ func TestOriginSupportsVerb(t *testing.T) {
 				ServerAd: server_structs.ServerAd{
 					Caps: tc.serverCaps,
 				},
-				NamespaceAd: server_structs.NamespaceAdV2{
+				NamespaceAd: server_structs.NamespaceAd{
 					Caps: tc.nsCaps,
 				},
 			}
@@ -506,7 +506,7 @@ func TestOriginSupportsQuery(t *testing.T) {
 				ServerAd: server_structs.ServerAd{
 					Caps: tc.serverCaps,
 				},
-				NamespaceAd: server_structs.NamespaceAdV2{
+				NamespaceAd: server_structs.NamespaceAd{
 					Caps: tc.nsCaps,
 				},
 			}
@@ -841,7 +841,7 @@ func TestCacheNotFromTopoIfPubReads(t *testing.T) {
 				ServerAd: server_structs.ServerAd{
 					FromTopology: tc.fromTopo,
 				},
-				NamespaceAd: server_structs.NamespaceAdV2{
+				NamespaceAd: server_structs.NamespaceAd{
 					Caps: server_structs.Capabilities{
 						PublicReads: tc.publicReads,
 					},

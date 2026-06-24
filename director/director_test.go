@@ -56,7 +56,7 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func NamespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) bool {
+func NamespaceAdContainsPath(ns []server_structs.NamespaceAd, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -296,10 +296,10 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -338,7 +338,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertise{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -370,7 +370,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertise{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAd{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -398,7 +398,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV2{{Path: "/foo/bar",
+		ad := server_structs.OriginAdvertise{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{Path: "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}}}}}
 
 		jsonad, err := json.Marshal(ad)
@@ -428,10 +428,10 @@ func TestDirectorRegistration(t *testing.T) {
 
 		brokerUrl := "https://broker-url.org/some/path?origin=foo"
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			DataURL:   "https://or-url.org",
 			BrokerURL: brokerUrl,
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 				Caps:   server_structs.Capabilities{PublicReads: true},
@@ -477,11 +477,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/caches/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
@@ -524,11 +524,11 @@ func TestDirectorRegistration(t *testing.T) {
 		allowedPrefixesForCaches.Store(&allowedPrefixes)
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/caches/test",
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{
+			Namespaces: []server_structs.NamespaceAd{
 				{
 					Path:   "/foo/bar",
 					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -584,11 +584,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
@@ -617,11 +617,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "", // For Pelican <7.8.1, there's no such field
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
@@ -651,11 +651,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -692,11 +692,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -732,11 +732,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -772,11 +772,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -812,10 +812,10 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -849,10 +849,10 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -885,10 +885,10 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -924,10 +924,10 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{
+		ad := server_structs.OriginAdvertise{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -982,11 +982,11 @@ func TestDirectorRegistration(t *testing.T) {
 		}
 		isurl := url.URL{}
 		isurl.Path = ts.URL
-		baseAd := server_structs.OriginAdvertiseV2{
+		baseAd := server_structs.OriginAdvertise{
 			RegistryPrefix: "/caches/test",
 			DataURL:        "https://cache-url.org",
 			WebURL:         "https://localhost:8844",
-			Namespaces: []server_structs.NamespaceAdV2{{
+			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
@@ -1379,7 +1379,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 	mockCacheServerAd.Initialize("2-test-cache-server")
 
-	mockNamespaceAd := server_structs.NamespaceAdV2{
+	mockNamespaceAd := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: false,
 		},
@@ -1535,16 +1535,16 @@ func TestDiscoverOriginCache(t *testing.T) {
 		serverAds.DeleteAll()
 		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockPelicanOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 		// Server fetched from topology should not be present in SD response
 		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockTopoOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 		serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockCacheServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
@@ -1595,20 +1595,20 @@ func TestDiscoverOriginCache(t *testing.T) {
 		// Add multiple same serverAds
 		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockPelicanOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockPelicanOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockPelicanOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 		// Server fetched from topology should not be present in SD response
 		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
 			ServerAd:     mockTopoOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
@@ -1893,7 +1893,7 @@ func TestRedirects(t *testing.T) {
 		}
 		pelCacheAd.Initialize("pel-cache")
 
-		nsAd := server_structs.NamespaceAdV2{
+		nsAd := server_structs.NamespaceAd{
 			Caps: server_structs.Capabilities{PublicReads: true},
 			Path: "/my/server/3",
 			Issuer: []server_structs.TokenIssuer{{
@@ -1905,7 +1905,7 @@ func TestRedirects(t *testing.T) {
 			},
 		}
 
-		cSlice := []server_structs.NamespaceAdV2{nsAd}
+		cSlice := []server_structs.NamespaceAd{nsAd}
 		recordAd(context.Background(), pelCacheAd, &cSlice)
 
 		recorder := httptest.NewRecorder()
@@ -1989,7 +1989,7 @@ func TestHeaderGenFuncs(t *testing.T) {
 		BasePaths: []string{"/my/server"},
 		IssuerUrl: issUrl,
 	}
-	authedNamespaceAd := server_structs.NamespaceAdV2{
+	authedNamespaceAd := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: false,
 			Reads:       true,
@@ -2000,7 +2000,7 @@ func TestHeaderGenFuncs(t *testing.T) {
 		Path:       "/my/server",
 	}
 
-	publicNamespaceAd := server_structs.NamespaceAdV2{
+	publicNamespaceAd := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
 		},

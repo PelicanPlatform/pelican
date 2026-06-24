@@ -41,7 +41,7 @@ import (
 
 type (
 	authConfig struct {
-		ns         atomic.Pointer[[]server_structs.NamespaceAdV2]
+		ns         atomic.Pointer[[]server_structs.NamespaceAd]
 		issuers    atomic.Pointer[map[string]bool]
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
 		tokenAuthz *ttlcache.Cache[string, authzResult]
@@ -129,7 +129,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	return
 }
 
-func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
+func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAd) error {
 	issuers := make(map[string]bool)
 	for _, nsAd := range nsAds {
 		for _, issuer := range nsAd.Issuer {
@@ -156,7 +156,7 @@ func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
 // nsAdsAuthzEqual reports whether two namespace-ad slices are semantically
 // identical for authorization purposes (paths, capabilities, and issuer
 // configuration).
-func nsAdsAuthzEqual(old, new []server_structs.NamespaceAdV2) bool {
+func nsAdsAuthzEqual(old, new []server_structs.NamespaceAd) bool {
 	if len(old) != len(new) {
 		return false
 	}

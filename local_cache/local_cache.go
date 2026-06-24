@@ -833,7 +833,7 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 
 func (sc *LocalCache) updateConfig() error {
 	// Get the endpoint of the director
-	var respNS []server_structs.NamespaceAdV2
+	var respNS []server_structs.NamespaceAd
 
 	fedInfo, err := config.GetFederation(sc.ctx)
 	if err != nil {

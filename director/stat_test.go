@@ -156,68 +156,68 @@ func TestQueryServersForObject(t *testing.T) {
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.CacheType.String()}
 		mockServerAd5.Initialize("cache1")
-		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
-		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
-		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
-		mockNsAd3 := server_structs.NamespaceAdV2{Path: "/foo/bar/barz"}
-		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
-		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
-		mockNsPrivateTopo := server_structs.NamespaceAdV2{Path: "/protected/topology"}
-		mockNsPrivateTopoNoAuth := server_structs.NamespaceAdV2{Path: "/protected/topology/noauth"}
-		mockNsPublicTopo := server_structs.NamespaceAdV2{Path: "/public/topology", Caps: server_structs.Capabilities{PublicReads: true}}
-		mockMixNsPrivateTopo := server_structs.NamespaceAdV2{Path: "/mix/protected"}
-		mockMixNsPublicTopo := server_structs.NamespaceAdV2{Path: "/mix/public", Caps: server_structs.Capabilities{PublicReads: true}}
-		mockNsCacheOnly := server_structs.NamespaceAdV2{Path: "/foo/cache/only"}
+		mockNsAd0 := server_structs.NamespaceAd{Path: "/foo"}
+		mockNsAd1 := server_structs.NamespaceAd{Path: "/foo/bar"}
+		mockNsAd2 := server_structs.NamespaceAd{Path: "/foo/x"}
+		mockNsAd3 := server_structs.NamespaceAd{Path: "/foo/bar/barz"}
+		mockNsAd4 := server_structs.NamespaceAd{Path: "/unrelated"}
+		mockNsAd5 := server_structs.NamespaceAd{Path: "/caches/hostname"}
+		mockNsPrivateTopo := server_structs.NamespaceAd{Path: "/protected/topology"}
+		mockNsPrivateTopoNoAuth := server_structs.NamespaceAd{Path: "/protected/topology/noauth"}
+		mockNsPublicTopo := server_structs.NamespaceAd{Path: "/public/topology", Caps: server_structs.Capabilities{PublicReads: true}}
+		mockMixNsPrivateTopo := server_structs.NamespaceAd{Path: "/mix/protected"}
+		mockMixNsPublicTopo := server_structs.NamespaceAd{Path: "/mix/public", Caps: server_structs.Capabilities{PublicReads: true}}
+		mockNsCacheOnly := server_structs.NamespaceAd{Path: "/foo/cache/only"}
 		serverAds.Set(mockServerAd1.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAd1,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd0},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsAd0},
 			}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd2.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAd2,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsAd1},
 			}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd3.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAd3,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsAd1, mockNsAd4},
 			}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd4.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAd4,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsAd2, mockNsAd3},
 			}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd5.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAd5,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd5, mockNsAd0, mockNsAd1, mockNsCacheOnly},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsAd5, mockNsAd0, mockNsAd1, mockNsCacheOnly},
 			}, ttlcache.DefaultTTL)
 		// Test a topology server with protected object access
 		serverAds.Set(mockServerAdPrivateTopology.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAdPrivateTopology,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsPrivateTopo},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsPrivateTopo},
 			}, ttlcache.DefaultTTL,
 		)
 		// Test a topology server with public object access
 		serverAds.Set(mockServerAdPublicTopology.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAdPublicTopology,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsPublicTopo},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsPublicTopo},
 			}, ttlcache.DefaultTTL,
 		)
 		// Test a topology server with protected object access but does not have AuthURL set
 		serverAds.Set(mockServerAdPrivateTopologyWOAuthUrl.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockServerAdPrivateTopologyWOAuthUrl,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNsPrivateTopoNoAuth},
+				NamespaceAds: []server_structs.NamespaceAd{mockNsPrivateTopoNoAuth},
 			}, ttlcache.DefaultTTL,
 		)
 		serverAds.Set(mockTopoPubServerMixNs.URL.String(),
 			&server_structs.Advertisement{
 				ServerAd:     mockTopoPubServerMixNs,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockMixNsPrivateTopo, mockMixNsPublicTopo},
+				NamespaceAds: []server_structs.NamespaceAd{mockMixNsPrivateTopo, mockMixNsPublicTopo},
 			}, ttlcache.DefaultTTL,
 		)
 	}
@@ -865,12 +865,12 @@ func TestCache(t *testing.T) {
 		Caps: server_structs.Capabilities{PublicReads: true},
 	}
 	mockCacheAd.Initialize("cache")
-	mockNsAd := server_structs.NamespaceAdV2{Path: "/foo"}
+	mockNsAd := server_structs.NamespaceAd{Path: "/foo"}
 	serverAds.Set(
 		mockCacheAd.URL.String(),
 		&server_structs.Advertisement{
 			ServerAd:     mockCacheAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd},
+			NamespaceAds: []server_structs.NamespaceAd{mockNsAd},
 		},
 		ttlcache.DefaultTTL,
 	)
@@ -1079,7 +1079,7 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 	}
 	cacheAd.Initialize("my-cache")
 
-	bestNSAd := server_structs.NamespaceAdV2{
+	bestNSAd := server_structs.NamespaceAd{
 		Path: "/foo",
 		Caps: server_structs.Capabilities{PublicReads: true},
 	}

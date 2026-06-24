@@ -245,13 +245,13 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 // Given a Director's redirect response, re-query the Director's UI endpoint to get the full namespace ad information.
 // This can be used later to determine what capabilities the namespace supports in comparison with the requested
 // token scopes.
-func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.NamespaceAdV2Response, error) {
+func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.NamespaceAdResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		return server_structs.NamespaceAdV2Response{}, errors.Wrap(err, "unable to get federation info from config")
+		return server_structs.NamespaceAdResponse{}, errors.Wrap(err, "unable to get federation info from config")
 	}
 
 	client := config.GetClient()
@@ -260,19 +260,19 @@ func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.Names
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
 			"failed to create request for Director server lookup at %s", reqURL)
 	}
 
 	response, err := client.Do(request)
 	if err != nil {
-		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
 			"failed to query Director for server ads at %s", reqURL)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return server_structs.NamespaceAdV2Response{}, errors.Errorf(
+		return server_structs.NamespaceAdResponse{}, errors.Errorf(
 			"Director server lookup at %s returned status code %d",
 			reqURL,
 			response.StatusCode,
@@ -280,10 +280,10 @@ func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.Names
 	}
 
 	// Parse the response body into a slice of server ads
-	var nsAds []server_structs.NamespaceAdV2Response
+	var nsAds []server_structs.NamespaceAdResponse
 	err = json.NewDecoder(response.Body).Decode(&nsAds)
 	if err != nil {
-		return server_structs.NamespaceAdV2Response{}, errors.Wrapf(err,
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
 			"failed to decode Director response for namespace ads at %s", reqURL)
 	}
 
@@ -295,7 +295,7 @@ func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.Names
 		}
 	}
 
-	return server_structs.NamespaceAdV2Response{}, errors.Errorf(
+	return server_structs.NamespaceAdResponse{}, errors.Errorf(
 		"no namespace advertisement found for namespace %s",
 		namespace,
 	)

@@ -239,14 +239,14 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 	).Set(statusWeight)
 }
 
-// recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
+// recordAd does following for an incoming ServerAd and []NamespaceAd pair:
 //
 //  1. Update the ServerAd by setting server location and updating server topology attribute
-//  2. Record the ServerAd and NamespaceAdV2 to the TTL cache
+//  2. Record the ServerAd and NamespaceAd to the TTL cache
 //  3. Set up the server `stat` call utilities
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
-func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
+func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAd) (updatedAd server_structs.ServerAd) {
 	if sAd.URL.String() == "" {
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return

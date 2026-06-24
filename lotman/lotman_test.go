@@ -80,7 +80,7 @@ func withoutCacheDataLocations() lotmanTestOption {
 // Initialize Lotman
 // If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
 // so that underlying metadata discovery can happen against the mock discovery host
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2, opts ...lotmanTestOption) (bool, func()) {
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAd, opts ...lotmanTestOption) (bool, func()) {
 	o := lotmanTestOpts{}
 	for _, opt := range opts {
 		opt(&o)

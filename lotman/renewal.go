@@ -264,7 +264,7 @@ type renewalConfig struct {
 // The planner does NOT extend existing lots. Every lot is immutable
 // after creation; renewal is exclusively the job of minting fresh
 // successors.
-func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2, existing []Lot) renewalProposal {
+func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAd, existing []Lot) renewalProposal {
 	prop := renewalProposal{}
 
 	if cfg.PeriodMs <= 0 || cfg.DefaultLifetimeMs <= 0 {
@@ -573,7 +573,7 @@ func parentNamespacePath(path string, existing []Lot, planned map[string][]*Lot)
 // dedupeNamespacePaths returns the set of distinct, non-monitoring
 // namespace paths advertised by the federation. Order is alphabetical
 // for deterministic output.
-func dedupeNamespacePaths(ads []server_structs.NamespaceAdV2) []string {
+func dedupeNamespacePaths(ads []server_structs.NamespaceAd) []string {
 	seen := map[string]struct{}{}
 	for _, a := range ads {
 		p := normaliseLotPath(a.Path)
@@ -606,7 +606,7 @@ func isMonitoringPath(p string) bool {
 // issuerForPath returns the first ad's issuer URL for the supplied
 // namespace path, or "" when the path is not in `ads` (use the federation
 // fallback) or the matching ad declares no issuer.
-func issuerForPath(p string, ads []server_structs.NamespaceAdV2) string {
+func issuerForPath(p string, ads []server_structs.NamespaceAd) string {
 	target := normaliseLotPath(p)
 	for _, a := range ads {
 		if normaliseLotPath(a.Path) != target {
@@ -641,7 +641,7 @@ func (l Lot) ExpirationTimeIsSentinel() bool {
 //
 // getNamespaceAds is supplied by the cache server so the routine reads
 // the live ad set on every tick (rather than capturing a stale snapshot).
-func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_structs.NamespaceAdV2) {
+func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_structs.NamespaceAd) {
 	interval := param.Lotman_RenewalCheckInterval.GetDuration()
 	if interval <= 0 {
 		interval = time.Hour
@@ -757,7 +757,7 @@ func resolveSuccessorParent(path string, successorCreate int64, existing []Lot, 
 
 // runRenewalTick executes one cycle of the renewal scheduler. Errors are
 // logged and swallowed so a transient failure does not crash the cache.
-func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAdV2, period time.Duration) {
+func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAd, period time.Duration) {
 	ads := getNamespaceAds()
 	if len(ads) == 0 {
 		// Distinguish cold-start (cache just booted, director may not

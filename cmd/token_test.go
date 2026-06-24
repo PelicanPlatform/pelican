@@ -260,7 +260,7 @@ func TestGetIssuer(t *testing.T) {
 // namespaces endpoint (/api/v1.0/director_ui/namespaces) with the provided
 // namespace ads. It injects the server URL directly into the federation config
 // so that getNsAd can reach it, and resets federation state on cleanup.
-func mockDirectorNsEndpoint(t *testing.T, nsAds []server_structs.NamespaceAdV2Response) string {
+func mockDirectorNsEndpoint(t *testing.T, nsAds []server_structs.NamespaceAdResponse) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1.0/director_ui/namespaces" {
@@ -287,22 +287,22 @@ func TestGetNsAd(t *testing.T) {
 	t.Cleanup(config.ResetFederationForTest)
 
 	// A minimal namespace ad used across several cases.
-	readNs := server_structs.NamespaceAdV2Response{
+	readNs := server_structs.NamespaceAdResponse{
 		Path: "/test/prefix",
 		Caps: server_structs.Capabilities{Reads: true, Writes: false},
 	}
-	writeNs := server_structs.NamespaceAdV2Response{
+	writeNs := server_structs.NamespaceAdResponse{
 		Path: "/write/prefix",
 		Caps: server_structs.Capabilities{Reads: true, Writes: true},
 	}
-	publicNs := server_structs.NamespaceAdV2Response{
+	publicNs := server_structs.NamespaceAdResponse{
 		Path: "/public/prefix",
 		Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
 	}
 
 	testCases := []struct {
 		name        string
-		nsAds       []server_structs.NamespaceAdV2Response
+		nsAds       []server_structs.NamespaceAdResponse
 		namespace   string // what the DirectorResponse reports as the namespace
 		expectError bool
 		expectCaps  server_structs.Capabilities
@@ -310,7 +310,7 @@ func TestGetNsAd(t *testing.T) {
 	}{
 		{
 			name:        "matching namespace found",
-			nsAds:       []server_structs.NamespaceAdV2Response{readNs, writeNs},
+			nsAds:       []server_structs.NamespaceAdResponse{readNs, writeNs},
 			namespace:   "/test/prefix",
 			expectError: false,
 			expectCaps:  readNs.Caps,
@@ -318,7 +318,7 @@ func TestGetNsAd(t *testing.T) {
 		},
 		{
 			name:        "matching namespace with trailing slash normalised",
-			nsAds:       []server_structs.NamespaceAdV2Response{readNs},
+			nsAds:       []server_structs.NamespaceAdResponse{readNs},
 			namespace:   "/test/prefix/",
 			expectError: false,
 			expectCaps:  readNs.Caps,
@@ -326,7 +326,7 @@ func TestGetNsAd(t *testing.T) {
 		},
 		{
 			name:        "write-capable namespace found",
-			nsAds:       []server_structs.NamespaceAdV2Response{writeNs},
+			nsAds:       []server_structs.NamespaceAdResponse{writeNs},
 			namespace:   "/write/prefix",
 			expectError: false,
 			expectCaps:  writeNs.Caps,
@@ -334,7 +334,7 @@ func TestGetNsAd(t *testing.T) {
 		},
 		{
 			name:        "public-read namespace found",
-			nsAds:       []server_structs.NamespaceAdV2Response{publicNs},
+			nsAds:       []server_structs.NamespaceAdResponse{publicNs},
 			namespace:   "/public/prefix",
 			expectError: false,
 			expectCaps:  publicNs.Caps,
@@ -342,13 +342,13 @@ func TestGetNsAd(t *testing.T) {
 		},
 		{
 			name:        "namespace not in Director response",
-			nsAds:       []server_structs.NamespaceAdV2Response{readNs},
+			nsAds:       []server_structs.NamespaceAdResponse{readNs},
 			namespace:   "/does/not/exist",
 			expectError: true,
 		},
 		{
 			name:        "empty namespace list",
-			nsAds:       []server_structs.NamespaceAdV2Response{},
+			nsAds:       []server_structs.NamespaceAdResponse{},
 			namespace:   "/test/prefix",
 			expectError: true,
 		},

@@ -312,7 +312,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 			Listings:    listings,
 			DirectReads: true, // Topology namespaces should probably always have this turned on
 		}
-		nsAd := server_structs.NamespaceAdV2{
+		nsAd := server_structs.NamespaceAd{
 			Path:         ns.Path,
 			Caps:         caps,
 			Generation:   []server_structs.TokenGen{tGen},
@@ -337,7 +337,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 					existingAd.ServerAd = consolidatedAd
 				} else {
 					// New entry
-					originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+					originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAd{nsAd}}
 				}
 			}
 		}
@@ -351,7 +351,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 					existingAd.ServerAd = consolidatedAd
 				} else {
 					// New entry
-					cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+					cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAd{nsAd}}
 				}
 			}
 		}

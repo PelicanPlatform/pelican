@@ -52,7 +52,7 @@ type (
 		RedirectInfo    *server_structs.RedirectInfo
 		// Fields used by AdaptiveSort to generate the availability map after truncation.
 		GinCtx       *gin.Context
-		NamespaceAd  server_structs.NamespaceAdV2
+		NamespaceAd  server_structs.NamespaceAd
 		RequestId    uuid.UUID
 		IsOriginSort bool
 	}
@@ -83,7 +83,7 @@ const (
 // coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts
 // will be effectively random the first time, but subsequent requests within a short time period will still likely
 // generate cache hits.
-func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID, isOriginSort bool, precomputedAvailMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
+func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, nsAd server_structs.NamespaceAd, requestId uuid.UUID, isOriginSort bool, precomputedAvailMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
 	sortMethod := server_structs.SortType(param.Director_CacheSortMethod.GetString())
 	redirectInfo.DirectorSortMethod = sortMethod.String()
 	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
@@ -141,7 +141,7 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 // path is the longest logical prefix of the request path. For example, for path
 // `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, the function should return
 // the namespace ad for `/foo/bar`.
-func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAdV2) *server_structs.NamespaceAdV2 {
+func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAd) *server_structs.NamespaceAd {
 	// Normalize incoming path if needed --> adding the trailing / makes
 	// basic prefix matching safer
 	if !strings.HasSuffix(reqPath, "/") {
@@ -149,7 +149,7 @@ func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAd
 	}
 
 	var bestFedPrefix string
-	var bestNamespace *server_structs.NamespaceAdV2
+	var bestNamespace *server_structs.NamespaceAd
 	for _, ns := range namespaceAds {
 		// Create a copy of ns to avoid reusing the loop variable
 		currentNS := ns
@@ -204,7 +204,7 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 			continue
 		}
 
-		var nsAd *server_structs.NamespaceAdV2
+		var nsAd *server_structs.NamespaceAd
 		if nsAd = getLongestNSMatch(reqPath, ad.NamespaceAds); nsAd == nil {
 			// This server doesn't support the requested namespace, skip it
 			continue

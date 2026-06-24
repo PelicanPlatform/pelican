@@ -61,7 +61,7 @@ type (
 		Copies      bool `json:"Copies"`
 	}
 
-	NamespaceAdV2 struct {
+	NamespaceAd struct {
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
 		Generation   []TokenGen    `json:"token-generation"`
@@ -149,14 +149,14 @@ type (
 	Advertisement struct {
 		sync.RWMutex
 		ServerAd
-		NamespaceAds []NamespaceAdV2
+		NamespaceAds []NamespaceAd
 	}
 
 	StrategyType string
 	SortType     string
 
-	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
-	OriginAdvertiseV2 struct {
+	// OriginAdvertise is the struct used to advertise BOTH Origin and Cache server to the director
+	OriginAdvertise struct {
 		ServerBaseAd
 		ServerID string `json:"serverId"`
 		// The namespace prefix to register/look up the server in the registry.
@@ -173,7 +173,7 @@ type (
 		// express what the origin is willing to do on the namespace's behalf. This helps us work
 		// around the lack of a concept for "globally-defined" namespaces.
 		Caps                Capabilities      `json:"capabilities"`
-		Namespaces          []NamespaceAdV2   `json:"namespaces"`
+		Namespaces          []NamespaceAd     `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
@@ -298,8 +298,8 @@ type (
 		CredentialIssuer string       `json:"issuer"`
 	}
 
-	// NamespaceAdV2Response creates a response struct for NamespaceAdV2
-	NamespaceAdV2Response struct {
+	// NamespaceAdResponse creates a response struct for NamespaceAd
+	NamespaceAdResponse struct {
 		Path         string                `json:"path"`
 		Caps         Capabilities          `json:"capabilities"`
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`
@@ -307,8 +307,8 @@ type (
 		FromTopology bool                  `json:"fromTopology"`
 	}
 
-	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
-	NamespaceAdV2MappedResponse struct {
+	// NamespaceAdMappedResponse creates a response struct for NamespaceAd with mapped origins and caches
+	NamespaceAdMappedResponse struct {
 		Path         string                `json:"path"`
 		Caps         Capabilities          `json:"capabilities"`
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`

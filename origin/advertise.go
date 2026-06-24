@@ -78,7 +78,7 @@ func (server *OriginServer) GetRequiredFeatures() []features.Feature {
 	return requiredFeatures
 }
 
-func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertise, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	serverIssuerUrlStr, err := config.GetServerIssuerURL()
@@ -96,7 +96,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		return nil, errors.Wrap(err, "unable to parse the server's issuer url")
 	}
 
-	var nsAds []server_structs.NamespaceAdV2
+	var nsAds []server_structs.NamespaceAd
 	var prefixes []string
 	ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
@@ -146,7 +146,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 			tokGen.CredentialIssuer = issuerUrls[0].IssuerUrl
 		}
 
-		nsAds = append(nsAds, server_structs.NamespaceAdV2{
+		nsAds = append(nsAds, server_structs.NamespaceAd{
 			Caps: server_structs.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
 				Reads:       reads,
@@ -193,7 +193,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		}
 	}
 
-	ad := server_structs.OriginAdvertiseV2{
+	ad := server_structs.OriginAdvertise{
 		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        dataUrlToAdvertise,

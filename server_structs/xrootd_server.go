@@ -25,9 +25,9 @@ import (
 type (
 	XRootDServer interface {
 		GetServerType() ServerType
-		SetNamespaceAds([]NamespaceAdV2)
-		GetNamespaceAds() []NamespaceAdV2
-		CreateAdvertisement(name string, id string, serverUrl string, serverWebUrl string, downtimes []Downtime) (*OriginAdvertiseV2, error)
+		SetNamespaceAds([]NamespaceAd)
+		GetNamespaceAds() []NamespaceAd
+		CreateAdvertisement(name string, id string, serverUrl string, serverWebUrl string, downtimes []Downtime) (*OriginAdvertise, error)
 		GetNamespaceAdsFromDirector() error
 		GetAdTokCfg(string) (AdTokCfg, error) // Given a director URL, configuration a token for advertising
 		GetFedTokLocation() string
@@ -41,7 +41,7 @@ type (
 	}
 
 	NamespaceHolder struct {
-		namespaceAds []NamespaceAdV2
+		namespaceAds []NamespaceAd
 	}
 
 	AdTokCfg struct {
@@ -97,10 +97,10 @@ func IsServerPrefix(ns string) bool {
 	return IsCacheNS(ns) || IsOriginNS(ns)
 }
 
-func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {
+func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAd) {
 	ns.namespaceAds = ads
 }
 
-func (ns *NamespaceHolder) GetNamespaceAds() []NamespaceAdV2 {
+func (ns *NamespaceHolder) GetNamespaceAds() []NamespaceAd {
 	return ns.namespaceAds
 }

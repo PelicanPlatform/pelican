@@ -49,7 +49,7 @@ func TestForwardService(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://external-url"))
 
 	ctx := context.Background()
-	ad := &server_structs.OriginAdvertiseV2{
+	ad := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -134,7 +134,7 @@ func TestForwardServiceAd(t *testing.T) {
 	directorAds.Set("dir2", dir2, 15*time.Minute)
 
 	// Build a fake service ad
-	svcAd := &server_structs.OriginAdvertiseV2{
+	svcAd := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -225,7 +225,7 @@ func TestForwardServiceAdSeenByPreventsLoop(t *testing.T) {
 	directorAds.Set("dir2", dir2, 15*time.Minute)
 	directorAds.Set("dir3", dir3, 15*time.Minute)
 
-	svcAd := &server_structs.OriginAdvertiseV2{
+	svcAd := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -345,7 +345,7 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 				directorAds.Set(name, info, 15*time.Minute)
 			}
 
-			svcAd := &server_structs.OriginAdvertiseV2{
+			svcAd := &server_structs.OriginAdvertise{
 				ServerBaseAd: server_structs.ServerBaseAd{
 					Name:         "origin-1",
 					InstanceID:   "origin-inst",
@@ -425,7 +425,7 @@ func TestForwardServiceSeenBySerialized(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://external-url"))
 
 	ctx := context.Background()
-	ad := &server_structs.OriginAdvertiseV2{
+	ad := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
