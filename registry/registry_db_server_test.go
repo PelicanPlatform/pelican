@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -737,6 +738,34 @@ func createPendingServerReg(t *testing.T, prefix, siteName string, pubkeyOpt ...
 	return reg
 }
 
+// createPendingNamespaceReg adds a Pending data-namespace registration (a non-server prefix,
+// e.g. "/apple/juice") with the given SiteName and pubkey, mimicking what an origin
+// auto-registers for the namespaces it hosts. AddRegistration does not create a servers/services
+// row for such a prefix, so it is exactly the orphan that reapOrphanedPendingNamespaces targets.
+func createPendingNamespaceReg(t *testing.T, prefix, siteName, pubkey string) server_structs.Registration {
+	t.Helper()
+	reg := server_structs.Registration{
+		Prefix: prefix,
+		Pubkey: pubkey,
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    siteName,
+			Institution: "Test University",
+			Status:      server_structs.RegPending,
+		},
+	}
+	require.NoError(t, AddRegistration(&reg))
+	return reg
+}
+
+// registrationExists reports whether a registration row with the given ID is still present.
+func registrationExists(t *testing.T, id int) bool {
+	t.Helper()
+	var count int64
+	err := database.ServerDatabase.Model(&server_structs.Registration{}).Where("id = ?", id).Count(&count).Error
+	require.NoError(t, err)
+	return count > 0
+}
+
 // setServerLastSeenDirect directly updates the last_seen column in the DB.
 func setServerLastSeenDirect(t *testing.T, serverID string, ts time.Time) {
 	t.Helper()
@@ -1223,6 +1252,91 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		assert.Equal(t, int(2), regsDeleted, "both registrations for the dual server should be counted")
 	})
 
+	t.Run("ReapsOrphanedPendingNamespaces", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		key, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Stale, all-pending origin and the two namespaces it auto-registered for itself
+		// (same SiteName + key, no services link).
+		originReg := createPendingServerReg(t, "/origins/apple.edu", "apple.edu", key)
+		juice := createPendingNamespaceReg(t, "/apple/juice", "apple.edu", key)
+		cider := createPendingNamespaceReg(t, "/apple/cider", "apple.edu", key)
+
+		// Control: an unrelated namespace under a different site name must survive.
+		otherKey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		banana := createPendingNamespaceReg(t, "/banana/bread", "banana.edu", otherKey)
+
+		srv, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		// Only the server's own registration is counted; reaped namespaces are not.
+		assert.Equal(t, int(1), regsDeleted, "reaped namespaces must not be counted as regsDeleted")
+		assert.Equal(t, int(1), serversDeleted)
+
+		assert.False(t, registrationExists(t, juice.ID), "orphaned pending namespace /apple/juice should be reaped")
+		assert.False(t, registrationExists(t, cider.ID), "orphaned pending namespace /apple/cider should be reaped")
+		assert.True(t, registrationExists(t, banana.ID), "namespace of a different site must be preserved")
+	})
+
+	t.Run("PreservesApprovedNamespaceOnReap", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		key, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		originReg := createPendingServerReg(t, "/origins/apple.edu", "apple.edu", key)
+
+		// Same SiteName + key, but the namespace was independently approved: it must survive even
+		// though its origin is reaped.
+		approvedNs := server_structs.Registration{
+			Prefix: "/apple/juice",
+			Pubkey: key,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "apple.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		require.NoError(t, AddRegistration(&approvedNs))
+
+		srv, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int(1), serversDeleted)
+		assert.True(t, registrationExists(t, approvedNs.ID), "approved namespace must not be reaped")
+	})
+
+	t.Run("PreservesNamespaceWithDifferentKey", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		originKey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		nsKey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		originReg := createPendingServerReg(t, "/origins/apple.edu", "apple.edu", originKey)
+		// Same SiteName but a different key — not owned by this origin, must survive.
+		ns := createPendingNamespaceReg(t, "/apple/juice", "apple.edu", nsKey)
+
+		srv, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int(1), serversDeleted)
+		assert.True(t, registrationExists(t, ns.ID), "namespace registered under a different key must not be reaped")
+	})
+
 	t.Run("SkipsCleanupWhenApprovalNotRequired", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 
@@ -1248,6 +1362,43 @@ func TestDeleteStaleServerRegistrations(t *testing.T) {
 		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&count).Error
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), count, "stale pending server must survive when approval is off")
+	})
+}
+
+func TestReapOrphanedPendingNamespaces(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
+
+	parseKeys := func(t *testing.T, jwks string) jwk.Set {
+		t.Helper()
+		set, err := jwk.ParseString(jwks)
+		require.NoError(t, err)
+		return set
+	}
+
+	t.Run("SkipsEmptySiteNameIdentity", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		key, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// A pending namespace with an empty SiteName, inserted directly because AddRegistration
+		// rejects an empty SiteName. An identity with an empty SiteName must never match it,
+		// otherwise one stale server with a blank name would sweep up unrelated rows.
+		ns := server_structs.Registration{
+			Prefix: "/apple/juice",
+			Pubkey: key,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "Test University",
+				Status:      server_structs.RegPending,
+			},
+		}
+		require.NoError(t, database.ServerDatabase.Create(&ns).Error)
+
+		err = reapOrphanedPendingNamespaces([]serverIdentity{{siteName: "", keys: parseKeys(t, key)}})
+		require.NoError(t, err)
+		assert.True(t, registrationExists(t, ns.ID), "namespace must survive an empty-SiteName identity")
 	})
 }
 
