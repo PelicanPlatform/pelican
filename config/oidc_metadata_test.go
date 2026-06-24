@@ -19,6 +19,7 @@
 package config
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -29,22 +30,39 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-func TestApplyGitHubOAuthDefaults(t *testing.T) {
+func TestSetOAuthFlavorDefaults(t *testing.T) {
 	t.Cleanup(ResetConfig)
 
-	t.Run("no-op-when-group-source-not-github", func(t *testing.T) {
+	// setOAuthFlavorDefaults registers defaults directly on viper; refresh the cached
+	// param.Config so the typed accessors reflect them (InitServer and the config tool
+	// do the same after SetServerDefaults).
+	refresh := func(t *testing.T) {
+		_, err := param.Refresh()
+		require.NoError(t, err)
+	}
+
+	t.Run("cilogon-defaults-when-group-source-not-github", func(t *testing.T) {
 		ResetConfig()
 		SetBaseDefaultsInConfig(viper.GetViper())
-		require.NoError(t, applyGitHubOAuthDefaults())
-		assert.Equal(t, cilogonOIDCDefaults.issuer, param.OIDC_Issuer.GetString())
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
+
+		assert.Equal(t, "https://cilogon.org", param.OIDC_Issuer.GetString())
+		assert.Equal(t, "https://cilogon.org/authorize", param.OIDC_AuthorizationEndpoint.GetString())
+		assert.Equal(t, "https://cilogon.org/oauth2/token", param.OIDC_TokenEndpoint.GetString())
+		assert.Equal(t, "https://cilogon.org/oauth2/userinfo", param.OIDC_UserInfoEndpoint.GetString())
+		assert.Equal(t, "https://cilogon.org/oauth2/device_authorization", param.OIDC_DeviceAuthEndpoint.GetString())
+		assert.Equal(t, []string{"openid", "email", "profile"}, param.OIDC_Scopes.GetStringSlice())
+		assert.Equal(t, "sub", param.Issuer_OIDCAuthenticationUserClaim.GetString())
+		assert.Equal(t, "sub", param.Issuer_OIDCSubjectClaim.GetString())
 	})
 
-	t.Run("fills-all-github-values-from-cilogon-defaults", func(t *testing.T) {
+	t.Run("github-defaults-when-group-source-github", func(t *testing.T) {
 		ResetConfig()
-		// Load defaults.yaml so all OIDC params are "IsSet" with CILogon values
 		SetBaseDefaultsInConfig(viper.GetViper())
 		require.NoError(t, param.Issuer_GroupSource.Set("github"))
-		require.NoError(t, applyGitHubOAuthDefaults())
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
 
 		assert.Equal(t, "https://github.com", param.OIDC_Issuer.GetString())
 		assert.Equal(t, "https://github.com/login/oauth/authorize", param.OIDC_AuthorizationEndpoint.GetString())
@@ -56,38 +74,74 @@ func TestApplyGitHubOAuthDefaults(t *testing.T) {
 		assert.Equal(t, "id", param.Issuer_OIDCSubjectClaim.GetString())
 	})
 
+	t.Run("records-flavor-default-provenance", func(t *testing.T) {
+		ResetConfig()
+		SetBaseDefaultsInConfig(viper.GetViper())
+		require.NoError(t, param.Issuer_GroupSource.Set("github"))
+		setOAuthFlavorDefaults(viper.GetViper())
+
+		// The flavor defaults are set after RecordDefaultKeys, so the dispatcher must
+		// record them itself — otherwise `config get --verbose` reports "unknown".
+		src, ok := GetSourceTracker().Get(strings.ToLower(param.OIDC_Issuer.GetName()))
+		require.True(t, ok)
+		assert.Equal(t, SourceDefault, src.Type)
+	})
+
 	t.Run("case-insensitive-group-source", func(t *testing.T) {
 		ResetConfig()
 		SetBaseDefaultsInConfig(viper.GetViper())
 		require.NoError(t, param.Issuer_GroupSource.Set("GitHub"))
-		require.NoError(t, applyGitHubOAuthDefaults())
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
 		assert.Equal(t, "https://github.com", param.OIDC_Issuer.GetString())
 	})
 
-	t.Run("user-set-issuer-not-overwritten", func(t *testing.T) {
+	t.Run("non-github-group-sources-fall-back-to-cilogon", func(t *testing.T) {
+		for _, gs := range []string{"none", "file", "oidc", "internal"} {
+			ResetConfig()
+			SetBaseDefaultsInConfig(viper.GetViper())
+			require.NoError(t, param.Issuer_GroupSource.Set(gs))
+			setOAuthFlavorDefaults(viper.GetViper())
+			refresh(t)
+			assert.Equal(t, "https://cilogon.org", param.OIDC_Issuer.GetString(), "group source %q should use CILogon", gs)
+		}
+	})
+
+	t.Run("user-set-issuer-wins-and-keeps-its-provenance", func(t *testing.T) {
 		ResetConfig()
 		SetBaseDefaultsInConfig(viper.GetViper())
 		require.NoError(t, param.Issuer_GroupSource.Set("github"))
-		require.NoError(t, param.OIDC_Issuer.Set("https://my-custom-oauth.example.com"))
-		require.NoError(t, applyGitHubOAuthDefaults())
-		assert.Equal(t, "https://my-custom-oauth.example.com", param.OIDC_Issuer.GetString())
+		// A value set via Set() (override) outranks SetDefault, so the flavor default
+		// must not clobber it (e.g. a GitHub Enterprise issuer)...
+		require.NoError(t, param.OIDC_Issuer.Set("https://github-enterprise.example.com"))
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
+		assert.Equal(t, "https://github-enterprise.example.com", param.OIDC_Issuer.GetString())
+		// ...and its non-default provenance is preserved, not downgraded to default.
+		src, ok := GetSourceTracker().Get(strings.ToLower(param.OIDC_Issuer.GetName()))
+		require.True(t, ok)
+		assert.NotEqual(t, SourceDefault, src.Type)
+		// Params the user did not set still receive GitHub values.
+		assert.Equal(t, "https://api.github.com/user", param.OIDC_UserInfoEndpoint.GetString())
 	})
 
-	t.Run("user-set-scopes-not-overwritten", func(t *testing.T) {
+	t.Run("user-set-scopes-win-over-flavor-default", func(t *testing.T) {
 		ResetConfig()
 		SetBaseDefaultsInConfig(viper.GetViper())
 		require.NoError(t, param.Issuer_GroupSource.Set("github"))
 		require.NoError(t, param.OIDC_Scopes.Set([]string{"user", "read:org", "repo"}))
-		require.NoError(t, applyGitHubOAuthDefaults())
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
 		assert.Equal(t, []string{"user", "read:org", "repo"}, param.OIDC_Scopes.GetStringSlice())
 	})
 
-	t.Run("user-set-auth-claim-not-overwritten", func(t *testing.T) {
+	t.Run("user-set-auth-claim-wins-over-flavor-default", func(t *testing.T) {
 		ResetConfig()
 		SetBaseDefaultsInConfig(viper.GetViper())
 		require.NoError(t, param.Issuer_GroupSource.Set("github"))
 		require.NoError(t, param.Issuer_OIDCAuthenticationUserClaim.Set("email"))
-		require.NoError(t, applyGitHubOAuthDefaults())
+		setOAuthFlavorDefaults(viper.GetViper())
+		refresh(t)
 		assert.Equal(t, "email", param.Issuer_OIDCAuthenticationUserClaim.GetString())
 	})
 }
