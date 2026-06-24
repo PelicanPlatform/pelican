@@ -1,8 +1,0 @@
-Logging:
-  Cache:
-    Scitokens: debug
-Origin:
-  StorageType: https
-  FederationPrefix: /my-prefix
-  StoragePrefix: /test
-  EnablePublicReads: true

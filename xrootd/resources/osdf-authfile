@@ -1,7 +1,0 @@
-# Example OSDF authfile (with only a few entries)
-# DN: /CN=sc-origin.chtc.wisc.edu
-u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
-# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
-u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
-# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
-u 3af6a420.0 /chtc/PROTECTED/sc-origin lr

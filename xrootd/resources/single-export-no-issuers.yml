@@ -1,8 +1,0 @@
-Origin:
-  StorageType: "posix"
-
-  Exports:
-    - StoragePrefix: /<WILL BE REPLACED IN TEST>
-      FederationPrefix: /first/namespace
-      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
-      # No issuers should inherit server's issuer

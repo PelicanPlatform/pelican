@@ -1,2 +1,0 @@
-export const DEFAULT_PAGE_SIZE = 10;
-export const DEFAULT_PAGE_SIZE_OPTIONS = [DEFAULT_PAGE_SIZE, 25, 50, 100];

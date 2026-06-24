@@ -1,8 +1,0 @@
-# POSIX (XRootD-based) origin with authenticated reads and writes for TPC testing
-Origin:
-  StorageType: "posix"
-  EnableDirectReads: true
-  Exports:
-    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
-      FederationPrefix: /test/tpc
-      Capabilities: ["Reads", "Writes", "DirectReads", "Listings", "Copies"]
