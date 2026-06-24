@@ -57,6 +57,15 @@ func setupMockRegistryDB(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
 
+	// A ":memory:" SQLite database is private to the connection that created it. Tests
+	// like the inactive registration cleanup run a goroutine that queries the DB
+	// concurrently with the main test, so if the pool opens a second connection it lands
+	// on a fresh, table-less database and queries fail intermittently with "no such
+	// table". Pin the pool to a single connection so every caller shares one DB.
+	sqlDB, err := mockDB.DB()
+	require.NoError(t, err, "Error getting underlying sql.DB from mock registry DB")
+	sqlDB.SetMaxOpenConns(1)
+
 	// Enable foreign key constraints for SQLite
 	err = database.ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err, "Error enabling foreign key constraints")

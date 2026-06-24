@@ -239,6 +239,7 @@ func buildServerRegistration(server server_structs.Server, services []server_str
 		Note:      server.Note,
 		CreatedAt: server.CreatedAt,
 		UpdatedAt: server.UpdatedAt,
+		LastSeen:  server.LastSeen,
 	}
 
 	for _, service := range services {
@@ -303,6 +304,7 @@ func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegist
 		Note:      service.Server.Note,
 		CreatedAt: service.Server.CreatedAt,
 		UpdatedAt: service.Server.UpdatedAt,
+		LastSeen:  service.Server.LastSeen,
 	}
 
 	for _, svc := range allServices {
@@ -674,7 +676,9 @@ func AddRegistration(ns *server_structs.Registration) error {
 				if isCache {
 					existingServer.IsCache = true
 				}
-				existingServer.UpdatedAt = time.Now()
+				now := time.Now().UTC()
+				existingServer.UpdatedAt = now
+				existingServer.LastSeen = now
 
 				if err := tx.Save(&existingServer).Error; err != nil {
 					return errors.Wrapf(err, "failed to update server service(s): %s", ns.AdminMetadata.SiteName)
@@ -692,6 +696,171 @@ func AddRegistration(ns *server_structs.Registration) error {
 
 		return nil
 	})
+}
+
+// updateServerLastSeen sets servers.last_seen = now (UTC). Called from getServerByPrefixHandler
+// when a server polls its metadata (e.g. each advertisement cycle).
+func updateServerLastSeen(serverID string) error {
+	if serverID == "" {
+		return errors.New("server ID is required to update last_seen")
+	}
+	result := database.ServerDatabase.Model(&server_structs.Server{}).
+		Where("id = ?", serverID).
+		Update("last_seen", time.Now().UTC())
+	if result.Error != nil {
+		return errors.Wrapf(result.Error, "failed to update last_seen for server %q", serverID)
+	}
+	return nil
+}
+
+// serverIdentity links the server with the namespaces it registered in the Registry.
+type serverIdentity struct {
+	siteName string
+	keys     jwk.Set
+}
+
+// deleteStaleServerRegistrations uses listServers to find servers whose last_seen
+// is older than cutoff and whose every registration is still Pending, then removes
+// each one via deleteServerByID. Servers with any non-Pending registration are
+// skipped. After the stale servers are gone, reapOrphanedPendingNamespaces removes the
+// still-Pending namespace registered by those servers.
+func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int, err error) {
+	// The cleanup only runs when both Registry.RequireOriginApproval and
+	// Registry.RequireCacheApproval are true. When either is false, registrations of that
+	// type stay Pending in the DB for the lifetime of a healthy server (the approval check
+	// reports Approved regardless of the stored status), so a stale Pending registration is
+	// no longer a reliable signal that a server was abandoned before approval. Skipping the
+	// whole cleanup in that mode avoids deleting legitimate servers.
+	if !param.Registry_RequireOriginApproval.GetBool() || !param.Registry_RequireCacheApproval.GetBool() {
+		return 0, 0, nil
+	}
+
+	servers, err := listServers()
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "failed to list servers for stale pending registration cleanup")
+	}
+
+	staleServerIdentities := make([]serverIdentity, 0)
+	for _, srv := range servers {
+		// IsZero guards against servers migrated from DB versions before the last_seen column
+		// was introduced; those rows have a zero timestamp and should never be treated as stale.
+		if srv.LastSeen.IsZero() || !srv.LastSeen.Before(cutoff) {
+			continue
+		}
+
+		allPending := true
+		for _, reg := range srv.Registration {
+			if reg.AdminMetadata.Status != server_structs.RegPending {
+				allPending = false
+				break
+			}
+		}
+		if !allPending {
+			continue
+		}
+
+		// Capture the server's identity before deleting it so we can reap the namespaces it
+		// auto-registered. servers.name is the SiteName the server used when registering,
+		// and all of a server's registrations share same issuer key(s), so we use the
+		// first registration's pubkey.
+		var keys jwk.Set
+		if len(srv.Registration) > 0 {
+			if parsed, perr := jwk.ParseString(srv.Registration[0].Pubkey); perr == nil {
+				keys = parsed
+			} else {
+				log.Warningf("Stale server %q (id %q): failed to parse pubkey for orphan namespace cleanup; its namespaces won't be reaped: %v", srv.Name, srv.ID, perr)
+			}
+		}
+
+		if err := deleteServerByID(srv.ID); err != nil {
+			log.Warningf("Failed to delete stale server registration (id: %q, name: %q): %v", srv.ID, srv.Name, err)
+			continue
+		}
+		regsDeleted += len(srv.Registration)
+		serversDeleted++
+
+		if keys != nil && srv.Name != "" {
+			staleServerIdentities = append(staleServerIdentities, serverIdentity{siteName: srv.Name, keys: keys})
+		}
+	}
+
+	// Reap orphaned pending namespaces registered by stale servers
+	if len(staleServerIdentities) > 0 {
+		if rerr := reapOrphanedPendingNamespaces(staleServerIdentities); rerr != nil {
+			// Reaping orphans is best-effort cleanup; the stale servers were already removed, so
+			// log and report failure rather than killing the whole job.
+			log.Warningf("Failed to reap orphaned pending namespaces after stale server cleanup: %v", rerr)
+		}
+	}
+
+	return regsDeleted, serversDeleted, nil
+}
+
+// getRegistrationsByServerIdentity returns the namespace registrations (excluding server registrations)
+// whose (SiteName, pubkey) pair matches one of the given server identities.
+func getRegistrationsByServerIdentity(identities []serverIdentity) ([]server_structs.Registration, error) {
+	// servers.name is unique, so each SiteName maps to exactly one identity's key set.
+	keysByName := make(map[string]jwk.Set, len(identities))
+	for _, s := range identities {
+		if s.siteName == "" || s.keys == nil {
+			continue
+		}
+		keysByName[s.siteName] = s.keys
+	}
+	if len(keysByName) == 0 {
+		return nil, nil
+	}
+
+	// namespaces candidates: every prefix that isn't a server prefix. SiteName lives inside the
+	// JSON-serialized admin_metadata column and Pubkey is a JWKS blob, so both are matched in Go
+	// rather than in SQL.
+	var candidates []server_structs.Registration
+	if err := database.ServerDatabase.
+		Where("NOT prefix LIKE ? AND NOT prefix LIKE ?", "/origins/%", "/caches/%").
+		Find(&candidates).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to query candidate namespaces for orphan cleanup")
+	}
+
+	matches := make([]server_structs.Registration, 0)
+	for _, ns := range candidates {
+		// Empty SiteName never appears in keysByName (we skip empty-name servers above)
+		keys, ok := keysByName[ns.AdminMetadata.SiteName]
+		if !ok {
+			continue
+		}
+		nsKeys, perr := jwk.ParseString(ns.Pubkey)
+		if perr != nil {
+			log.Warningf("Skipping orphan check for namespace %q: failed to parse its pubkey: %v", ns.Prefix, perr)
+			continue
+		}
+		if !compareJwks(keys, nsKeys) {
+			continue
+		}
+		matches = append(matches, ns)
+	}
+	return matches, nil
+}
+
+// reapOrphanedPendingNamespaces deletes pending namespaces registered by stale servers
+func reapOrphanedPendingNamespaces(staleServers []serverIdentity) error {
+	candidates, err := getRegistrationsByServerIdentity(staleServers)
+	if err != nil {
+		return err
+	}
+
+	for _, ns := range candidates {
+		if ns.AdminMetadata.Status != server_structs.RegPending {
+			continue
+		}
+		// Deletions are best-effort: a failure on one namespace is logged and the rest continue.
+		if err := deleteRegistrationByID(ns.ID); err != nil {
+			log.Warningf("Failed to delete orphaned pending namespace %q (site %q): %v", ns.Prefix, ns.AdminMetadata.SiteName, err)
+			continue
+		}
+		log.Infof("Inactive registration cleanup: removed orphaned pending namespace %q previously registered by stale server %q", ns.Prefix, ns.AdminMetadata.SiteName)
+	}
+
+	return nil
 }
 
 func updateRegistration(ns *server_structs.Registration) error {
@@ -869,6 +1038,9 @@ func deleteRegistrationByPrefix(prefix string) error {
 	return database.ServerDatabase.Where("prefix = ?", prefix).Delete(&server_structs.Registration{}).Error
 }
 
+// deleteServerByID removes a server and all of its associated data atomically,
+// including its row from the servers table, its prefix(es) and namespace(s) in
+// the registrations table, and its record(s) in the services and downtimes tables.
 func deleteServerByID(id string) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
