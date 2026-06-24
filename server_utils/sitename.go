@@ -89,7 +89,9 @@ func getServerMetadataFromReg(ctx context.Context, prefix string) (server server
 // under /origins; otherwise, we look it up under /caches.
 func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (metadata server_structs.ServerRegistration, err error) {
 
-	// Fetch server metadata from the registry, if not, fall back server name to Xrootd.Sitename.
+	// Fetch server metadata from the registry. A failed lookup is logged and
+	// swallowed. After the fetch, a non-empty Xrootd.Sitename takes priority
+	// over the registry-fetched name
 	if server.IsEnabled(server_structs.DirectorType) {
 		exturlStr := param.Server_ExternalWebUrl.GetString()
 		var extUrl *url.URL
@@ -111,27 +113,28 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+			err = nil
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 		metadata, err = getServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
+			err = nil
 		}
 	}
 
-	if metadata.Name == "" {
-		log.Infof("Server name from the registry is empty, fall back to %s: %s", param.Xrootd_Sitename.GetName(), param.Xrootd_Sitename.GetString())
-		metadata.Name = param.Xrootd_Sitename.GetString()
-	} else {
+	// Prioritize the server name from the local configuration over the registry
+	if param.Xrootd_Sitename.GetString() != "" {
 		// Warn the user if the server name from the registry does not match the local configuration
-		if metadata.Name != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
+		if metadata.Name != param.Xrootd_Sitename.GetString() {
 			log.Warningf("Server name mismatch detected:\n"+
 				"  Registered server name: %q\n"+
 				"  Local sitename:      %q\n"+
-				"Pelican will use the registered server name as your server name.\n"+
+				"Pelican will use the local sitename as your server name.\n"+
 				"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
 				metadata.Name, param.Xrootd_Sitename.GetString())
+			metadata.Name = param.Xrootd_Sitename.GetString()
 		}
 	}
 	if metadata.Name == "" {
