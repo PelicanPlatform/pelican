@@ -90,7 +90,7 @@ func getServerMetadataFromReg(ctx context.Context, prefix string) (server server
 func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (metadata server_structs.ServerRegistration, err error) {
 
 	// Fetch server metadata from the registry. A failed lookup is logged and
-	// swallowedy. After the fetch, a non-empty Xrootd.Sitename takes priority
+	// swallowed. After the fetch, a non-empty Xrootd.Sitename takes priority
 	// over the registry-fetched name
 	if server.IsEnabled(server_structs.DirectorType) {
 		exturlStr := param.Server_ExternalWebUrl.GetString()
