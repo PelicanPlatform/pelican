@@ -550,6 +550,14 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 			v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), val)
 		}
 	}
+	// Origin.GlobusIssuerURL
+	v.SetDefault(param.Origin_GlobusIssuerURL.GetName(), "https://auth.globus.org/")
+	// Origin.GlobusTransferAPIBaseUrl
+	v.SetDefault(param.Origin_GlobusTransferAPIBaseUrl.GetName(), "https://transfer.api.globusonline.org/v0.10/")
+	// Origin.Globusv2TokenRefreshInterval
+	v.SetDefault(param.Origin_Globusv2TokenRefreshInterval.GetName(), "5m")
+	// Origin.HttpAuthTokenPassthrough
+	v.SetDefault(param.Origin_HttpAuthTokenPassthrough.GetName(), false)
 	// Origin.IssuerMode
 	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
 	// Origin.Multiuser
