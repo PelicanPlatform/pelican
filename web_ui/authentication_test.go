@@ -1076,3 +1076,34 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 		assert.Equal(t, expected, getResult)
 	})
 }
+
+func TestRequireAuthMiddlewareAddsLoginAttemptToNextURL(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/protected", RequireAuthMiddleware, func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	router.GET("/protected-query", RequireAuthMiddleware, func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+
+	t.Run("plain-path", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/protected", nil)
+		require.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusTemporaryRedirect, recorder.Code)
+		assert.Equal(t, "/api/v1.0/auth/oauth/login?nextUrl=%2Fprotected%3FfromLogin%3Dtrue", recorder.Header().Get("Location"))
+	})
+
+	t.Run("existing-query", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/protected-query?foo=bar", nil)
+		require.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusTemporaryRedirect, recorder.Code)
+		assert.Equal(t, "/api/v1.0/auth/oauth/login?nextUrl=%2Fprotected-query%3Ffoo%3Dbar%26fromLogin%3Dtrue", recorder.Header().Get("Location"))
+	})
+}
