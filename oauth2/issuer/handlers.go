@@ -19,6 +19,7 @@
 package issuer
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -48,6 +49,16 @@ const (
 	// maxClientNameLen is the maximum length (in bytes) of a client_name.
 	maxClientNameLen = 128
 )
+
+// requestBoundContext returns the net/http request context from a Gin
+// handler. *gin.Context implements context.Context but is mutable request
+// state that Gin modifies throughout the request lifecycle; passing it
+// where a context.Context is needed exposes that mutable state to callers
+// that may hold it concurrently. ctx.Request.Context() is the safe,
+// immutable context that carries only cancellation and deadline semantics.
+func requestBoundContext(ctx *gin.Context) context.Context {
+	return ctx.Request.Context()
+}
 
 // IssuerURL returns the base issuer URL for this server (without any namespace path).
 // It is simply the server's external web URL.
@@ -323,7 +334,7 @@ func handleClientCredentialsPing(ctx *gin.Context, provider *OIDCProvider) {
 		return
 	}
 
-	client, err := provider.Storage().GetClient(ctx, clientID)
+	client, err := provider.Storage().GetClient(requestBoundContext(ctx), clientID)
 	if err != nil {
 		ctx.Header("WWW-Authenticate", "Basic")
 		ctx.JSON(http.StatusUnauthorized, gin.H{
@@ -464,7 +475,7 @@ func handleDeviceAuthorization(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		client, err := provider.Storage().GetClient(ctx, clientID)
+		client, err := provider.Storage().GetClient(requestBoundContext(ctx), clientID)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client", "error_description": "Unknown client"})
 			return
@@ -555,13 +566,13 @@ func handleDeviceVerify(provider *OIDCProvider) gin.HandlerFunc {
 		// can show the requested scopes and client info on the consent page.
 		if userCode := ctx.Query("user_code"); userCode != "" {
 			userCode = strings.ToUpper(strings.TrimSpace(userCode))
-			if dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(ctx, userCode); err == nil {
+			if dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(requestBoundContext(ctx), userCode); err == nil {
 				var scopes []string
 				if jsonErr := json.Unmarshal([]byte(dc.Scopes), &scopes); jsonErr == nil {
 					resp["scopes"] = scopes
 				}
 				resp["client_id"] = dc.ClientID
-				if rec, err := provider.Storage().GetClientRecord(ctx, dc.ClientID); err == nil && rec.ClientName != "" {
+				if rec, err := provider.Storage().GetClientRecord(requestBoundContext(ctx), dc.ClientID); err == nil && rec.ClientName != "" {
 					resp["client_name"] = rec.ClientName
 				}
 			}
@@ -624,7 +635,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		userCode = strings.ToUpper(strings.TrimSpace(userCode))
 
 		if action == "deny" {
-			if err := provider.Storage().DenyDeviceCodeSession(ctx, userCode); err != nil {
+			if err := provider.Storage().DenyDeviceCodeSession(requestBoundContext(ctx), userCode); err != nil {
 				log.WithError(err).Warn("Embedded issuer: failed to deny device code")
 			}
 			ctx.JSON(http.StatusOK, gin.H{"status": "denied"})
@@ -632,7 +643,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		// Look up the device code
-		dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(ctx, userCode)
+		dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(requestBoundContext(ctx), userCode)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "Invalid or expired user code"})
 			return
@@ -652,7 +663,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		// The first user to approve a device code for this client becomes the
 		// only user who can ever use it.  For statically registered clients
 		// BindClientToUser is a no-op.
-		if err := provider.Storage().BindClientToUser(ctx, dc.ClientID, user); err != nil {
+		if err := provider.Storage().BindClientToUser(requestBoundContext(ctx), dc.ClientID, user); err != nil {
 			log.WithError(err).Warnf("Embedded issuer: user %s cannot use client %s (bound to different user)", user, dc.ClientID)
 			ctx.JSON(http.StatusForbidden, gin.H{"status": "error", "error": "This client is registered to a different user"})
 			return
@@ -701,7 +712,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		// Also enforce the client's configured scope allow-list: a device
 		// client limited to certain scopes must not obtain broader scopes
 		// even if the user's authorization rules would permit them.
-		clientObj, clientErr := provider.Storage().GetClient(ctx, dc.ClientID)
+		clientObj, clientErr := provider.Storage().GetClient(requestBoundContext(ctx), dc.ClientID)
 		if clientErr != nil {
 			log.WithError(clientErr).Warn("Embedded issuer: failed to load client for scope filtering")
 			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to load client"})
@@ -720,7 +731,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, grantedScopes)
 		sessionData, _ := json.Marshal(session)
 
-		if err := provider.Storage().ApproveDeviceCodeSession(ctx, userCode, user, grantedScopes, sessionData); err != nil {
+		if err := provider.Storage().ApproveDeviceCodeSession(requestBoundContext(ctx), userCode, user, grantedScopes, sessionData); err != nil {
 			log.WithError(err).Warn("Embedded issuer: failed to approve device code")
 			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to approve device code"})
 			return
@@ -747,7 +758,7 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 		return
 	}
 
-	client, err := provider.Storage().GetClient(ctx, clientID)
+	client, err := provider.Storage().GetClient(requestBoundContext(ctx), clientID)
 	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
 		return
@@ -1137,7 +1148,7 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 			Public:        false,
 		}
 
-		if err := provider.Storage().CreateDynamicClient(ctx, client, clientIP, hashedRAT, req.ClientName); err != nil {
+		if err := provider.Storage().CreateDynamicClient(requestBoundContext(ctx), client, clientIP, hashedRAT, req.ClientName); err != nil {
 			log.WithError(err).Warn("Embedded issuer: failed to register client")
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 			return
@@ -1185,7 +1196,7 @@ func handleClientConfigurationRead(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		record, err := provider.Storage().ValidateRegistrationAccessToken(requestBoundContext(ctx), clientID, rat)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
 			return
@@ -1225,7 +1236,7 @@ func handleClientConfigurationUpdate(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		record, err := provider.Storage().ValidateRegistrationAccessToken(requestBoundContext(ctx), clientID, rat)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
 			return
@@ -1271,7 +1282,7 @@ func handleClientConfigurationUpdate(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		if len(updates) > 0 {
-			if err := provider.Storage().UpdateDynamicClient(ctx, clientID, updates); err != nil {
+			if err := provider.Storage().UpdateDynamicClient(requestBoundContext(ctx), clientID, updates); err != nil {
 				log.WithError(err).Warn("Embedded issuer: failed to update dynamic client")
 				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 				return
@@ -1279,7 +1290,7 @@ func handleClientConfigurationUpdate(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		// Re-read and return updated metadata
-		updated, err := provider.Storage().GetClientRecord(ctx, clientID)
+		updated, err := provider.Storage().GetClientRecord(requestBoundContext(ctx), clientID)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 			return
@@ -1318,7 +1329,7 @@ func handleClientConfigurationDelete(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		record, err := provider.Storage().ValidateRegistrationAccessToken(requestBoundContext(ctx), clientID, rat)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
 			return
@@ -1329,7 +1340,7 @@ func handleClientConfigurationDelete(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		deleted, err := provider.Storage().DeleteClient(ctx, clientID)
+		deleted, err := provider.Storage().DeleteClient(requestBoundContext(ctx), clientID)
 		if err != nil || !deleted {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 			return

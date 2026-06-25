@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -990,7 +990,9 @@ var (
 		Help: "Statistics about connection calls.",
 	}, []string{"type"})
 
+	lastStatsMu      sync.Mutex
 	lastStats        SummaryStat
+	lastOssStatsMu   sync.Mutex
 	lastOssStats     OSSStatsGs
 	lastS3CacheStats OssS3CacheGs
 	lastXrdCurlStats struct {
@@ -1902,6 +1904,8 @@ func HandleSummaryPacket(packet []byte) error {
 		// We only care about the xrootd summary packets
 		return nil
 	}
+	lastStatsMu.Lock()
+	defer lastStatsMu.Unlock()
 	for _, stat := range summaryStats.Stats {
 		switch stat.Id {
 
@@ -2212,6 +2216,8 @@ func handleOSSStats(blobs [][]byte) error {
 	}
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
+	lastOssStatsMu.Lock()
+	defer lastOssStatsMu.Unlock()
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		ossStats := OSSStatsGs{}
@@ -2306,7 +2312,6 @@ func handleOSSStats(blobs [][]byte) error {
 		// Found and processed the last valid event, so we are done
 		break
 	}
-
 	return nil
 }
 

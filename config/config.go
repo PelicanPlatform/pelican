@@ -167,6 +167,7 @@ var (
 	// until it's first needed, avoiding a web lookup for invoking configuration
 	// Note the 'once' object is a pointer so we can reset the client multiple
 	// times during unit tests
+	fedDiscoveryMu   sync.Mutex
 	fedDiscoveryOnce *sync.Once
 	globalFedInfo    atomic.Pointer[pelican_url.FederationDiscovery]
 	globalFedErr     error
@@ -213,6 +214,22 @@ var (
 	// Production code should NOT modify this value.
 	sysConfigLocation string = filepath.Join("/etc", "pelican")
 )
+
+func resetFederationDiscoveryState() {
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
+
+	fedDiscoveryOnce = &sync.Once{}
+}
+
+func clearGlobalFederationState() {
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
+
+	fedDiscoveryOnce = &sync.Once{}
+	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
+	globalFedErr = nil
+}
 
 func init() {
 	en := en.New()
@@ -605,9 +622,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 }
 
 // Reset the fedDiscoveryOnce to update federation metadata values for GetFederation().
-// Should only used for unit tests
+// Should only be used for unit tests.
 func ResetFederationForTest() {
-	fedDiscoveryOnce = &sync.Once{}
+	resetFederationDiscoveryState()
 }
 
 // Retrieve the federation service information from the configuration.
@@ -617,6 +634,9 @@ func ResetFederationForTest() {
 // If invoked before things are configured, it must be done from a single-threaded
 // context.
 func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error) {
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
+
 	if fedDiscoveryOnce == nil {
 		fedDiscoveryOnce = &sync.Once{}
 	}
@@ -649,6 +669,9 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 	}); err != nil {
 		log.WithError(err).Warn("Failed to update federation configuration")
 	}
+
+	fedDiscoveryMu.Lock()
+	defer fedDiscoveryMu.Unlock()
 
 	globalFedInfo.Store(&fd)
 	globalFedErr = nil
@@ -2327,8 +2350,8 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if err := GenerateSessionSecret(); err != nil {
 		return err
 	}
-	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
-	setupTransport()
+	// After we know we have the certs we need, call initTransport (which uses those certs for its TLSConfig)
+	initTransport()
 
 	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
 	// of http handlers by calling config.GetCSRFHandler()
@@ -2342,7 +2365,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
 	// instead of deferring it.
-	fedDiscoveryOnce = &sync.Once{}
+	resetFederationDiscoveryState()
 	if _, err := GetFederation(ctx); err != nil {
 		return err
 	}
@@ -2431,7 +2454,7 @@ func InitClient() error {
 	}
 
 	// Set (or reset) the deferred federation lookup
-	fedDiscoveryOnce = &sync.Once{}
+	resetFederationDiscoveryState()
 
 	// Set up the log filter mechanisms, e.g., for sensitive secrets
 	initFilterLogging()
@@ -2477,9 +2500,7 @@ func ResetConfig() {
 	logging.ResetLogFlush()
 
 	// Clear cached transport object
-	onceTransport = sync.Once{}
-	transport = nil
-	basicTransport = nil
+	resetTransport()
 
 	// Clear cached SSRF transport object
 	ResetSSRFTransportForTest()
@@ -2491,9 +2512,7 @@ func ResetConfig() {
 	ClearServerAds()
 
 	// Reset federation metadata
-	fedDiscoveryOnce = &sync.Once{}
-	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
-	globalFedErr = nil
+	clearGlobalFederationState()
 
 	warnDeprecatedOnce = sync.Once{}
 	warnDebugOnce = sync.Once{}

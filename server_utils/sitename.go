@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,6 +36,12 @@ import (
 )
 
 var (
+	// baseAdMu guards baseAdOnce, baseAd, and baseAdErr. sync.Once serializes
+	// concurrent calls through it, but does not protect against a concurrent
+	// assignment to the Once variable itself. ResetTestState zeroes all three
+	// with plain assignments; without baseAdMu those writes race with
+	// concurrent calls to IsDirectorAdFromSelf that are reading the same vars.
+	baseAdMu   sync.Mutex
 	baseAdOnce sync.Once
 	baseAd     server_structs.ServerBaseAd
 	baseAdErr  error
@@ -150,6 +156,9 @@ func IsDirectorAdFromSelf(ctx context.Context, ad server_structs.ServerBaseAdInt
 	if ad == nil {
 		return false, fmt.Errorf("received nil advertisement")
 	}
+
+	baseAdMu.Lock()
+	defer baseAdMu.Unlock()
 
 	baseAdOnce.Do(func() {
 		var metadata server_structs.ServerRegistration

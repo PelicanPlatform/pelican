@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -337,6 +337,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	for _, option := range options {
 		option(&cfg)
 	}
+	reqHandler := stat.ReqHandler
 
 	ads := []server_structs.ServerAd{}
 
@@ -429,7 +430,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 				metrics.PelicanDirectorStatActive.With(activeLabels).Inc()
 				defer metrics.PelicanDirectorStatActive.With(activeLabels).Dec()
 
-				metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
+				metadata, err = reqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
 
 				var reqNotFound *headReqNotFoundErr
 				cancelErr := &headReqCancelledErr{}
@@ -437,7 +438,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 					// If the request returns 403 or 500, it could be because we request a digest and xrootd
 					// does not have this turned on, or had trouble calculating the checksum
 					// Retry without digest
-					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
+					metadata, err = reqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
 				// If get a 404, record it in the cache.

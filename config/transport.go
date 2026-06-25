@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -53,6 +53,7 @@ var (
 	clientNoProxy *http.Client
 
 	// Once to ensure we only set up the transport once
+	transportMu   sync.Mutex
 	onceTransport sync.Once
 
 	// Static dialer for the transport
@@ -64,9 +65,7 @@ var (
 // This transport will use the global dialer function set by SetTransportDialer,
 // allowing it to be broker-aware.
 func GetTransport() *http.Transport {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return transport
 }
 
@@ -75,25 +74,19 @@ func GetTransport() *http.Transport {
 // This uses the global dialer function set by SetTransportDialer, allowing it
 // to be broker-aware
 func GetClient() *http.Client {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return client
 }
 
 // Returns a basic transport object that does not use the broker-aware dialer.
 func GetBasicTransport() *http.Transport {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return basicTransport
 }
 
 // Returns a transport object that does not use any HTTP(S) proxy
 func GetTransportNoProxy() *http.Transport {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return transportNoProxy
 }
 
@@ -101,9 +94,7 @@ func GetTransportNoProxy() *http.Transport {
 //
 // This allows special handling of redirect headers by the client
 func GetClientNoRedirect() *http.Client {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return clientNoRedirect
 }
 
@@ -111,9 +102,7 @@ func GetClientNoRedirect() *http.Client {
 //
 // This allows bypassing of proxies for the GET/PUT in the client methods
 func GetClientNoProxy() *http.Client {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return clientNoProxy
 }
 
@@ -121,10 +110,37 @@ func GetClientNoProxy() *http.Client {
 //
 // This uses the golang default dialer and will not use the broker.
 func GetBasicClient() *http.Client {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	initTransport()
 	return basicClient
+}
+
+// initTransport runs setupTransport at most once per init cycle, under
+// transportMu. The mutex is necessary because sync.Once serializes
+// concurrent calls *through* it, but does not protect against a concurrent
+// resetTransport overwriting the onceTransport variable itself or the
+// transport pointers.
+func initTransport() {
+	transportMu.Lock()
+	defer transportMu.Unlock()
+	onceTransport.Do(setupTransport)
+}
+
+// resetTransport clears all cached transports and resets the once guard so
+// the next call to initTransport rebuilds them. It must hold transportMu
+// for the same reason initTransport does: a plain write to onceTransport or
+// to the transport pointer variables races with concurrent reads in the
+// getters.
+func resetTransport() {
+	transportMu.Lock()
+	defer transportMu.Unlock()
+	onceTransport = sync.Once{}
+	transport = nil
+	transportNoProxy = nil
+	basicTransport = nil
+	client = nil
+	basicClient = nil
+	clientNoRedirect = nil
+	clientNoProxy = nil
 }
 
 // Override the global transport's dialer function.
