@@ -29,6 +29,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -330,4 +331,203 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
+}
+
+// TestRegistrationOldKeyStillInKeyset verifies that when a namespace was registered
+// under a key that is still present in the issuer keyset but is no longer the active
+// (lexicographically-first) key, registerNamespacePrep treats the namespace as
+// already registered instead of failing with "already registered under a different key".
+func TestRegistrationOldKeyStillInKeyset(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	tempConfigDir, err := os.MkdirTemp("", "test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+
+	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
+	// function overrides the IssuerKeysDirectory value if not already set.
+	test_utils.MockFederationRoot(t, nil, nil)
+
+	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
+
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	require.NoError(t, database.InitServerDatabase(server_structs.RegistryType))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	registry.RegisterRegistryAPI(engine.Group("/"))
+	svr := httptest.NewServer(engine)
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	prefix := param.Origin_FederationPrefix.GetString()
+
+	// Register the namespace under the origin's current (and only) issuer key.
+	oldKey, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	require.False(t, isRegistered)
+	require.NoError(t, registerNamespaceImpl(oldKey, prefix, "mock_site_name", registerURL))
+
+	// Add a new key whose filename sorts before the original so it becomes the active
+	// key, while keeping the original (registered) key in the keyset.
+	newKeyPath := filepath.Join(keysDir, "00_active.pem")
+	require.NoError(t, config.GeneratePrivateKey(newKeyPath, elliptic.P256(), false))
+	keysChange, err := config.RefreshKeys()
+	require.NoError(t, err)
+	require.True(t, keysChange)
+
+	// The active key should now differ from the key the namespace was registered under,
+	// and both keys should be present in the keyset.
+	activeKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	require.NotEqual(t, oldKey.KeyID(), activeKey.KeyID())
+	require.Equal(t, 2, len(config.GetIssuerPrivateKeys()))
+
+	// The active key alone does NOT match the registry entry...
+	status, err := keyIsRegistered(activeKey, registerURL, prefix)
+	require.NoError(t, err)
+	require.Equal(t, keyMismatch, status)
+
+	// ...but registerNamespacePrep must still recognize the namespace as ours because
+	// the old key remains in the keyset. Before the keyset-wide check this returned a
+	// "registered under a different key" error.
+	_, _, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	require.True(t, isRegistered)
+}
+
+// fetchRegistryKids returns the sorted key IDs the registry has recorded for a prefix.
+func fetchRegistryKids(t *testing.T, registryUrl, prefix string) []string {
+	t.Helper()
+	req, err := http.NewRequest("GET", registryUrl+"/api/v1.0/registry", nil)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Transport: config.GetTransport()}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, 200, resp.StatusCode)
+
+	entries := []server_structs.Registration{}
+	require.NoError(t, json.Unmarshal(body, &entries))
+	kids := []string{}
+	for _, e := range entries {
+		if e.Prefix != prefix {
+			continue
+		}
+		keySet, err := jwk.Parse([]byte(e.Pubkey))
+		require.NoError(t, err)
+		for i := 0; i < keySet.Len(); i++ {
+			k, ok := keySet.Key(i)
+			require.True(t, ok)
+			kids = append(kids, k.KeyID())
+		}
+	}
+	sort.Strings(kids)
+	return kids
+}
+
+// TestReconcileKeysWhenAlreadyRegistered verifies that when an origin restarts with an
+// extra issuer key that was dropped into the issuer-keys directory while it was down, the
+// already-registered startup path reconciles the registry so it records the full keyset.
+// It also covers the case where the newly-added key is the active (signing) key while the
+// already-registered key is only a secondary key in the set.
+func TestReconcileKeysWhenAlreadyRegistered(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	tempConfigDir, err := os.MkdirTemp("", "test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+
+	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
+	// function overrides the IssuerKeysDirectory value if not already set.
+	test_utils.MockFederationRoot(t, nil, nil)
+
+	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
+
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+	require.NoError(t, database.InitServerDatabase(server_structs.RegistryType))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	registry.RegisterRegistryAPI(engine.Group("/"))
+	svr := httptest.NewServer(engine)
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
+	require.NoError(t, param.Xrootd_Sitename.Set("mock_site_name"))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	prefix := param.Origin_FederationPrefix.GetString()
+
+	// Register the namespace under the origin's initial (and only) issuer key.
+	firstKey, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	require.False(t, isRegistered)
+	require.NoError(t, registerNamespaceImpl(firstKey, prefix, "mock_site_name", registerURL))
+	registeredKid := firstKey.KeyID()
+
+	// The registry should currently hold exactly the first key.
+	require.Equal(t, []string{registeredKid}, fetchRegistryKids(t, svr.URL, prefix))
+
+	// Simulate a new key dropped into the issuer-keys directory while the origin was down.
+	// The "00_" filename sorts first, so it becomes the active/signing key, while the
+	// already-registered key becomes a secondary key in the set.
+	newKeyPath := filepath.Join(keysDir, "00_active.pem")
+	require.NoError(t, config.GeneratePrivateKey(newKeyPath, elliptic.P256(), false))
+	keysChange, err := config.RefreshKeys()
+	require.NoError(t, err)
+	require.True(t, keysChange)
+	newKey, err := config.LoadSinglePEM(newKeyPath)
+	require.NoError(t, err)
+	newKid := newKey.KeyID()
+
+	// The active key is now the new (unregistered) key.
+	activeKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	require.Equal(t, newKid, activeKey.KeyID())
+	require.NotEqual(t, registeredKid, newKid)
+
+	// "Restart": the namespace is already registered (under firstKey), so the all-keys
+	// initial registration is skipped -- the reconcile must push the full keyset instead.
+	require.NoError(t, RegisterNamespaceWithRetry(ctx, egrp, prefix))
+
+	// The registry should now record BOTH keys.
+	expected := []string{registeredKid, newKid}
+	sort.Strings(expected)
+	require.Equal(t, expected, fetchRegistryKids(t, svr.URL, prefix))
 }
