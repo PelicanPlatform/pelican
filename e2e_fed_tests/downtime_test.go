@@ -148,7 +148,11 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	tk.Lifetime = 5 * time.Minute
 	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
 	tk.AddScopes(token_scopes.WebUi_Access)
-	tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
+	tk.Claims = map[string]string{
+		"user_id":  "test-user-id", // Required by GetUserGroups
+		"oidc_sub": "admin-user",   // Must match Server_UIAdminUsers entry
+		"oidc_iss": param.OIDC_Issuer.GetString(),
+	}
 	tok, err := tk.CreateToken()
 	require.NoError(t, err)
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))

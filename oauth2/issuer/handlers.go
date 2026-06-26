@@ -396,7 +396,7 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		if serverDB == nil {
 			serverDB = provider.storage.db
 		}
-		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, user, groups)
+		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, userID, groups)
 		if colErr != nil {
 			log.WithError(colErr).Warn("Embedded issuer: failed to get collection scopes")
 		} else {
@@ -670,7 +670,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		if serverDB == nil {
 			serverDB = provider.storage.db
 		}
-		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, user, groups)
+		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, userID, groups)
 		if colErr == nil {
 			allowedScopes = append(allowedScopes, collectionScopes...)
 			matchedGroups = oa4mp.MergeGroups(matchedGroups, collectionGroups)

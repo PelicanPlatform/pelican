@@ -205,6 +205,7 @@ func handleUpdateGroup(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.Description, userId, isAdmin); err != nil {
@@ -331,6 +332,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
 
@@ -462,6 +464,7 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
 
@@ -620,6 +623,7 @@ func handleUpdateUser(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	// Verify authorization: only the user themselves or an admin can update
@@ -704,6 +708,7 @@ func handleDeleteGroup(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	if err := database.DeleteGroup(database.ServerDatabase, id, userId, isAdmin); err != nil {
@@ -766,6 +771,7 @@ func handleDeleteUser(ctx *gin.Context) {
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
+		Issuer:   ctx.GetString("OIDCIss"),
 	})
 
 	if err := database.DeleteUser(database.ServerDatabase, id, userId, isAdmin); err != nil {

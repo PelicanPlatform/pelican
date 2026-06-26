@@ -47,9 +47,14 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 	if len(groups) > 0 {
 		tk.AddGroups(groups...)
 	}
-	// Add OIDC claims required by GetUserGroups
+	// oidc_iss must match OIDC.Issuer (the identity provider), not the Pelican server URL.
+	// CheckAdmin compares identity.Issuer against param.OIDC_Issuer to prevent (sub, issuer)
+	// collisions when an operator switches identity providers.
+	oidcIssuer := param.OIDC_Issuer.GetString()
 	tk.Claims = map[string]string{
-		"user_id": subject,
+		"user_id":  subject,
+		"oidc_sub": subject,
+		"oidc_iss": oidcIssuer,
 	}
 	tok, err := tk.CreateToken()
 	require.NoError(t, err, "Failed to create token")

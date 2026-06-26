@@ -523,9 +523,11 @@ func TestCheckAdmin(t *testing.T) {
 		user          string
 		id            string
 		sub           string
+		issuer        string
 		groups        []string
 		adminUsers    []string
 		adminGroups   []string
+		oidcIssuer    string // when set, configures OIDC.Issuer param
 		expectedAdmin bool
 		expectedMsg   string
 	}{
@@ -539,13 +541,25 @@ func TestCheckAdmin(t *testing.T) {
 			expectedMsg:   "",
 		},
 		{
-			name:          "user-in-admin-users-list",
+			name:          "user-in-admin-users-list-by-sub",
 			user:          "admin1",
+			sub:           "admin1-oidc-sub",
+			issuer:        "https://cilogon.org",
 			groups:        nil,
-			adminUsers:    []string{"admin1", "admin2"},
+			adminUsers:    []string{"admin1-oidc-sub", "admin2-oidc-sub"},
 			adminGroups:   nil,
 			expectedAdmin: true,
 			expectedMsg:   "",
+		},
+		{
+			name:          "username-in-admin-users-but-sub-is-not",
+			user:          "admin1",
+			sub:           "different-oidc-sub",
+			groups:        nil,
+			adminUsers:    []string{"admin1", "admin2"},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
 			name:          "user-not-in-admin-users-list",
@@ -584,10 +598,12 @@ func TestCheckAdmin(t *testing.T) {
 			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "user-in-admin-group-and-admin-users",
+			name:          "user-in-admin-group-and-admin-users-by-sub",
 			user:          "user1",
+			sub:           "user1-oidc-sub",
+			issuer:        "https://cilogon.org",
 			groups:        []string{"pelican-admins"},
-			adminUsers:    []string{"user1"},
+			adminUsers:    []string{"user1-oidc-sub"},
 			adminGroups:   []string{"pelican-admins"},
 			expectedAdmin: true,
 			expectedMsg:   "",
@@ -602,10 +618,12 @@ func TestCheckAdmin(t *testing.T) {
 			expectedMsg:   "",
 		},
 		{
-			name:          "user-in-admin-users-not-in-admin-group",
+			name:          "user-sub-in-admin-users-not-in-admin-group",
 			user:          "user1",
+			sub:           "user1-oidc-sub",
+			issuer:        "https://cilogon.org",
 			groups:        []string{"pelican-users"},
-			adminUsers:    []string{"user1"},
+			adminUsers:    []string{"user1-oidc-sub"},
 			adminGroups:   []string{"pelican-admins"},
 			expectedAdmin: true,
 			expectedMsg:   "",
@@ -655,38 +673,40 @@ func TestCheckAdmin(t *testing.T) {
 			expectedAdmin: false,
 			expectedMsg:   "You don't have permission to perform this action",
 		},
-		// Test cases for ID-based admin matching (#3050)
+		// Test cases verifying only Sub is used for admin matching
 		{
-			name:          "user-matched-by-id",
+			name:          "id-in-admin-users-but-sub-is-not",
 			user:          "user1",
 			id:            "internal-id-123",
 			adminUsers:    []string{"internal-id-123"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
 			name:          "user-matched-by-sub",
 			user:          "user1",
 			sub:           "http://cilogon.org/serverA/users/12345",
+			issuer:        "https://cilogon.org",
 			adminUsers:    []string{"http://cilogon.org/serverA/users/12345"},
 			adminGroups:   nil,
 			expectedAdmin: true,
 			expectedMsg:   "",
 		},
 		{
-			name:          "user-matched-by-id-not-username",
+			name:          "id-in-admin-users-sub-absent",
 			user:          "user1",
 			id:            "internal-id-456",
 			adminUsers:    []string{"internal-id-456", "other-admin"},
 			adminGroups:   nil,
-			expectedAdmin: true,
-			expectedMsg:   "",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
 			name:          "user-matched-by-sub-not-username",
 			user:          "user1",
 			sub:           "oidc-sub-789",
+			issuer:        "https://cilogon.org",
 			adminUsers:    []string{"oidc-sub-789"},
 			adminGroups:   nil,
 			expectedAdmin: true,
@@ -723,14 +743,36 @@ func TestCheckAdmin(t *testing.T) {
 			expectedMsg:   "You don't have permission to perform this action",
 		},
 		{
-			name:          "username-changed-but-id-still-matches",
+			name:          "username-changed-but-sub-still-matches",
 			user:          "new-display-name",
 			id:            "stable-id-001",
 			sub:           "oidc-sub-001",
-			adminUsers:    []string{"stable-id-001"},
+			issuer:        "https://cilogon.org",
+			adminUsers:    []string{"oidc-sub-001"},
 			adminGroups:   nil,
 			expectedAdmin: true,
 			expectedMsg:   "",
+		},
+		{
+			name:          "sub-matches-but-issuer-mismatch-when-oidc-issuer-configured",
+			user:          "user1",
+			sub:           "oidc-sub-001",
+			issuer:        "https://evil-provider.example.com",
+			adminUsers:    []string{"oidc-sub-001"},
+			adminGroups:   nil,
+			oidcIssuer:    "https://cilogon.org",
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "sub-matches-issuer-absent-denied",
+			user:          "user1",
+			sub:           "oidc-sub-001",
+			issuer:        "",
+			adminUsers:    []string{"oidc-sub-001"},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
 		},
 	}
 
@@ -750,6 +792,11 @@ func TestCheckAdmin(t *testing.T) {
 				require.NoError(t, param.Server_AdminGroups.Set(tc.adminGroups))
 			}
 
+			// Configure OIDC.Issuer if specified (used to validate issuer in CheckAdmin)
+			if tc.oidcIssuer != "" {
+				require.NoError(t, param.OIDC_Issuer.Set(tc.oidcIssuer))
+			}
+
 			// Call CheckAdmin
 			var isAdmin bool
 			var msg string
@@ -757,6 +804,7 @@ func TestCheckAdmin(t *testing.T) {
 				Username: tc.user,
 				ID:       tc.id,
 				Sub:      tc.sub,
+				Issuer:   tc.issuer,
 				Groups:   tc.groups,
 			}
 			isAdmin, msg = CheckAdmin(identity)
@@ -799,16 +847,19 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1-oidc-sub", "admin2-oidc-sub"}))
 				ctx.Set("User", "admin1")
+				ctx.Set("OIDCSub", "admin1-oidc-sub")
+				ctx.Set("OIDCIss", "https://test-issuer.example.com")
 			},
 			expectedCode: http.StatusOK,
 		},
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1-oidc-sub", "admin2-oidc-sub"}))
 				ctx.Set("User", "user")
+				ctx.Set("OIDCSub", "user-oidc-sub")
 			},
 			expectedCode:  http.StatusForbidden,
 			expectedError: "You don't have permission to perform this action",
@@ -825,8 +876,10 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2", "admin3"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1-sub", "admin2-sub", "admin3-sub"}))
 				ctx.Set("User", "admin2")
+				ctx.Set("OIDCSub", "admin2-sub")
+				ctx.Set("OIDCIss", "https://test-issuer.example.com")
 			},
 			expectedCode: http.StatusOK,
 		},
