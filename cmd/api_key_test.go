@@ -190,14 +190,14 @@ func TestApiKeyGenerateValidation(t *testing.T) {
 
 	t.Run("invalid-expiration-format", func(t *testing.T) {
 		apiKeyScopes = "monitoring.query"
-		apiKeyExpiration = "2026-12-31"
+		apiKeyExpiration = "12/31/2026"
 		apiKeyServerURLStr = "https://example.com:8447"
 		apiKeyTokenLocation = ""
 
 		cmd := &cobra.Command{}
 		err := generateApiKey(cmd, []string{})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expiration must be in RFC3339 format")
+		assert.Contains(t, err.Error(), "expiration must be 'never', a date")
 	})
 
 	t.Run("invalid-expiration-natural-language", func(t *testing.T) {
@@ -209,7 +209,33 @@ func TestApiKeyGenerateValidation(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := generateApiKey(cmd, []string{})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expiration must be in RFC3339 format")
+		assert.Contains(t, err.Error(), "expiration must be 'never', a date")
+	})
+
+	t.Run("date-only-expiration-accepted", func(t *testing.T) {
+		apiKeyScopes = "monitoring.query"
+		apiKeyExpiration = "2026-12-31"
+		apiKeyServerURLStr = "https://example.com:8447"
+		apiKeyTokenLocation = "/nonexistent/path"
+
+		cmd := &cobra.Command{}
+		err := generateApiKey(cmd, []string{})
+		// Should pass expiration validation and fail at token fetch instead
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Token file not found")
+	})
+
+	t.Run("never-expiration-accepted", func(t *testing.T) {
+		apiKeyScopes = "monitoring.query"
+		apiKeyExpiration = "never"
+		apiKeyServerURLStr = "https://example.com:8447"
+		apiKeyTokenLocation = "/nonexistent/path"
+
+		cmd := &cobra.Command{}
+		err := generateApiKey(cmd, []string{})
+		// Should pass expiration validation and fail at token fetch instead
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Token file not found")
 	})
 
 	t.Run("missing-server-url", func(t *testing.T) {
@@ -402,6 +428,67 @@ func TestApiKeyGenerateWithMockServer(t *testing.T) {
 		// Should fail at token fetch, not at scope validation
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Token file not found")
+	})
+}
+
+func TestParseExpiration(t *testing.T) {
+	t.Run("empty-returns-error", func(t *testing.T) {
+		_, err := parseExpiration("")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--expiration flag is required")
+	})
+
+	t.Run("never", func(t *testing.T) {
+		result, err := parseExpiration("never")
+		require.NoError(t, err)
+		assert.Equal(t, "never", result)
+	})
+
+	t.Run("rfc3339", func(t *testing.T) {
+		result, err := parseExpiration("2026-12-31T23:59:59Z")
+		require.NoError(t, err)
+		assert.Equal(t, "2026-12-31T23:59:59Z", result)
+	})
+
+	t.Run("rfc3339-with-offset", func(t *testing.T) {
+		result, err := parseExpiration("2026-12-31T23:59:59+05:00")
+		require.NoError(t, err)
+		assert.Equal(t, "2026-12-31T23:59:59+05:00", result)
+	})
+
+	t.Run("date-only-converts-to-midnight-utc", func(t *testing.T) {
+		result, err := parseExpiration("2026-12-31")
+		require.NoError(t, err)
+		assert.Equal(t, "2026-12-31T00:00:00Z", result)
+	})
+
+	t.Run("date-only-another-date", func(t *testing.T) {
+		result, err := parseExpiration("2025-06-15")
+		require.NoError(t, err)
+		assert.Equal(t, "2025-06-15T00:00:00Z", result)
+	})
+
+	t.Run("invalid-format", func(t *testing.T) {
+		_, err := parseExpiration("next week")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expiration must be 'never', a date")
+	})
+
+	t.Run("invalid-date-format-slash", func(t *testing.T) {
+		_, err := parseExpiration("12/31/2026")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expiration must be 'never', a date")
+	})
+
+	t.Run("invalid-partial-date", func(t *testing.T) {
+		_, err := parseExpiration("2026-12")
+		require.Error(t, err)
+	})
+
+	t.Run("invalid-z-with-offset", func(t *testing.T) {
+		_, err := parseExpiration("2026-06-30T09:00:00Z-05:00")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RFC3339 (e.g., 2025-12-31T23:59:59Z or 2025-12-31T18:59:59-05:00)")
 	})
 }
 
