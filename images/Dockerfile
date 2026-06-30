@@ -81,7 +81,7 @@ ARG LOTMAN_RELEASE=
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.6.2
+ARG XRDCL_PELICAN_VER=1.7.1
 ARG XRDCL_PELICAN_RELEASE=
 # ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_LOTMAN_SRC_BUILD=true
