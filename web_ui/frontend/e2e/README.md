@@ -121,6 +121,12 @@ Authentication is handled via a Bearer token injected as an `Authorization` head
 
 No login UI interaction or session state is required — the token is applied globally at the project level.
 
+### Object Browser (upload/download) — extra requirement
+
+The Origin Object Browser tests (`origin/objectBrowser.spec.ts`) are different from the rest: they drive the real data path, PUT/GET-ing files against the Origin's data endpoint with a token the in-page client mints from the **embedded issuer**. The bearer token injected at the project level authorizes the web-UI _API_, not the object browser's data requests, so these tests need the browser client to actually **log in to the issuer**.
+
+Because `OriginClient` auto-logs-in on mount (silent, then a full-page redirect), running these without an authenticated session simply redirects the page to `/view/login`. The tests detect that (the upload input never renders) and **skip** rather than fail. To actually run them, point the `origin` project at a running Origin where the object browser can authenticate — i.e. provide a logged-in session (e.g. a saved `storageState`, see `playwright codegen --save-storage`) and ensure the issuer's `/authorize` honors the flow (silent `prompt=none`, or interactive). These tests are tagged `@mutating @slow @federation`.
+
 ## Test tags
 
 Tests use title-based tags to control which tests run in which environments.
@@ -158,19 +164,19 @@ It could be:
 
 ```bash
 PELICAN_BINARY=./pelican-server
-PELICAN_CONFIG=/etc/pelican/local/pelican.yaml
+PELICAN_CONFIG=/etc/pelican
 
 TOKEN=$("$PELICAN_BINARY" origin token create \
   --config "$PELICAN_CONFIG/pelican.yaml" \
   --private-key "$PELICAN_CONFIG/issuer.jwk" \
   --profile wlcg \
   --scope "web_ui.access monitoring.query monitoring.scrape" \
-  --issuer https://localhost:8444 \
+  --issuer https://localhost:8444/api/v1.0/origin \
   --subject admin \
-  --audience https://localhost:8444 \
+  --audience https://localhost:8444/api/v1.0/origin \
   --claim "oidc_iss=https://localhost:8444" \
   --claim "oidc_sub=admin" \
-  --claim "user_id=a3bb1eff")
+  --claim "user_id=4d70825b")
 ```
 
 Then you can use the generated token to make authenticated requests:

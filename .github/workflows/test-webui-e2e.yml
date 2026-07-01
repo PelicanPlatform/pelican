@@ -170,9 +170,14 @@ jobs:
             Exports:
               - FederationPrefix: /test/github-actions
                 StoragePrefix: /etc/pelican
-                Capabilities:
-                  - Reads
+                capabilities:
+                  - DirectReads
+                  - Writes
                   - Listings
+                  - Reads
+                AuthorizationTemplates:
+                  - actions: [ "read", "modify" ]
+                    prefix: /$USER
           Federation:
             DiscoveryUrl: https://localhost:8444
           EOF
