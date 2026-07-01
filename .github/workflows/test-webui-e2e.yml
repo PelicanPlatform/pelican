@@ -139,7 +139,7 @@ jobs:
             Level: info
           Origin:
             Exports:
-              - FederationPrefix: /💯
+              - FederationPrefix: /test
                 StoragePrefix: /etc/pelican
                 capabilities:
                   - DirectReads
