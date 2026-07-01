@@ -43,6 +43,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_BlocksToPrefetch.GetName(), 0)
 	// Cache.ConcurrencyDegradedThreshold
 	v.SetDefault(param.Cache_ConcurrencyDegradedThreshold.GetName(), 90)
+	// Cache.DataScanMode
+	v.SetDefault(param.Cache_DataScanMode.GetName(), "all")
+	// Cache.DataScanResampleInterval
+	v.SetDefault(param.Cache_DataScanResampleInterval.GetName(), 100)
 	// Cache.DefaultCacheTimeout
 	v.SetDefault(param.Cache_DefaultCacheTimeout.GetName(), "9.5s")
 	// Cache.DirectorTest
@@ -51,6 +55,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_DisableClientX509.GetName(), true)
 	// Cache.EnableBroker
 	v.SetDefault(param.Cache_EnableBroker.GetName(), true)
+	// Cache.EnableChaosAPI
+	v.SetDefault(param.Cache_EnableChaosAPI.GetName(), false)
 	// Cache.EnableEvictionMonitoring
 	v.SetDefault(param.Cache_EnableEvictionMonitoring.GetName(), true)
 	// Cache.EnableLotman

@@ -2660,6 +2660,61 @@ type: bool
 default: true
 components: ["cache"]
 ---
+name: Cache.EnableChaosAPI
+description: |+
+  Enable the V2 cache's chaos/fault-injection admin API.
+
+  When true, the cache server registers an admin-authenticated endpoint
+  (POST /api/v1.0/cache/introspect/chaos) that deliberately corrupts or truncates
+  the on-disk data of a cached object. This is used by `pelican cache chaos` to
+  exercise the cache's integrity-detection paths.
+
+  This is a destructive testing feature and is disabled by default; it should
+  only be enabled in test/staging environments.
+type: bool
+default: false
+components: ["cache"]
+hidden: true
+---
+name: Cache.DataScanMode
+description: |+
+  Controls how the V2 (persistent) cache's periodic data-integrity scan re-verifies on-disk object data.
+
+  Valid values:
+    - "all" (default): every scan cycle re-reads and re-checksums all complete objects. Recommended when the cache
+      relies on Pelican for at-rest integrity.
+    - "once": each object's on-disk data is read back and checksummed exactly once (recording the checksum in the cache
+      database, and comparing it against the origin's reported checksum when one is available). Objects that have already
+      been verified are skipped on subsequent scan cycles. This is intended for deployments whose underlying storage
+      already guarantees at-rest integrity (for example ZFS with scrubbing), where repeatedly re-reading every object is
+      wasteful but recording an initial baseline checksum is still desired.
+
+  Important: "once" mode trusts the underlying storage to detect bitrot after the initial check. The cache cannot verify
+  that the storage actually scrubs, so it emits a loud startup warning and exports the `pelican_cache_data_scan_mode_once`
+  metric (set to 1) whenever this mode is active. To retain a floor of at-rest detection even in this mode, the scan still
+  re-verifies a small fraction of already-checked objects each cycle (see ${Cache.DataScanResampleInterval}).
+
+  Note that "once" mode cannot detect corruption that was present at ingest (before the first scan): the first scan records
+  whatever is on disk as the baseline. Detecting bad-at-ingest data requires a full-file or origin checksum on the
+  download/completion path, which is independent of this setting.
+
+  Unrecognized values are treated as "all".
+type: string
+default: all
+components: ["cache"]
+---
+name: Cache.DataScanResampleInterval
+description: |+
+  When ${Cache.DataScanMode} is "once", the data-integrity scan still re-verifies roughly 1 in N already-checked objects
+  on each cycle, so there is a nonzero floor of at-rest corruption detection rather than none. This is the value of N.
+
+  The default of 100 re-checks about 1% of already-verified objects per scan cycle. Set to 0 to disable re-sampling
+  entirely (pure "once": each object is verified exactly once and never re-checked). Has no effect when
+  ${Cache.DataScanMode} is "all".
+type: int
+default: 100
+components: ["cache"]
+---
 name: Cache.EvictionMonitoringInterval
 description: |+
   The interval at which the eviction monitoring will be reported.

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -45,10 +46,12 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -123,8 +126,9 @@ func isConnectionError(err error) bool {
 // chunked transfer-encoding, which is required for HTTP/1.1 trailers.
 type trailerWriter struct {
 	http.ResponseWriter
-	writeErr    *error
-	sendTrailer bool
+	writeErr     *error
+	sendTrailer  bool
+	bytesWritten int64
 }
 
 func (tw *trailerWriter) Header() http.Header {
@@ -142,6 +146,7 @@ func (tw *trailerWriter) WriteHeader(code int) {
 
 func (tw *trailerWriter) Write(p []byte) (int, error) {
 	n, err := tw.ResponseWriter.Write(p)
+	tw.bytesWritten += int64(n)
 	if err != nil && *tw.writeErr == nil {
 		*tw.writeErr = err
 	}
@@ -539,7 +544,8 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 
 		var writeErr error
-		if _, err := io.Copy(w, reader); err != nil {
+		nServed, err := io.Copy(w, reader)
+		if err != nil {
 			writeErr = err
 		}
 		if sendTrailer {
@@ -549,6 +555,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Header().Set("X-Transfer-Status", trailerVal)
 		}
+		pc.emitTransferMonitoring(r, objectPath, nServed, startTime, bearerToken)
 		reqLog.WithFields(log.Fields{
 			"status":   200,
 			"cache":    "pass-through",
@@ -616,10 +623,64 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	if meta != nil && !meta.Completed.IsZero() && meta.Completed.Before(startTime) {
 		cacheStatus = "hit"
 	}
+	pc.emitTransferMonitoring(r, objectPath, wrappedWriter.bytesWritten, startTime, bearerToken)
 	reqLog.WithFields(log.Fields{
 		"cache":    cacheStatus,
 		"duration": time.Since(startTime).Round(time.Millisecond).String(),
 	}).Info("Request complete")
+}
+
+// emitTransferMonitoring emits an XRootD-style monitoring record for a served
+// GET, mirroring what the POSIXv2 origin emits.  It is a no-op when the
+// monitoring shoveler is disabled or when no bytes were served (e.g. a 304).
+// The packets flow to the shoveler's internal channel and on to the configured
+// monitoring collectors.
+func (pc *PersistentCache) emitTransferMonitoring(r *http.Request, objectPath string, bytesServed int64, start time.Time, bearerToken string) {
+	if bytesServed <= 0 || !param.Shoveler_Enable.GetBool() {
+		return
+	}
+
+	event := metrics.TransferEvent{
+		Path:         objectPath,
+		ReadBytes:    bytesServed,
+		ReadOps:      1,
+		ClientIP:     cacheClientIP(r),
+		AuthProtocol: "https",
+		UserAgent:    r.UserAgent(),
+		Project:      utils.ExtractProjectFromUserAgent(r.Header.Values("User-Agent")),
+		StartTime:    start,
+		EndTime:      time.Now(),
+	}
+
+	// Best-effort user attribution from the (already-authorized) token.  The
+	// token signature is not re-verified here; it is used only for monitoring.
+	if bearerToken != "" {
+		if tok, err := token.UnsafeParseClaims(bearerToken); err == nil {
+			event.UserDN = tok.Subject()
+			event.Issuer = tok.Issuer()
+		}
+	}
+
+	metrics.EmitTransferEvent(event)
+}
+
+// cacheClientIP extracts the client IP from a request, preferring the
+// X-Forwarded-For / X-Real-IP headers set by a fronting proxy and falling back
+// to the connection's remote address.
+func cacheClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.IndexByte(xff, ','); idx >= 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return strings.TrimSpace(xrip)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // servePropfindFromCache synthesizes a WebDAV multistatus response from
@@ -1441,6 +1502,17 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	adminIntrospect.POST("/consistency", pc.introspectConsistencyHandler)
 	log.Info("Cache introspection API registered at /api/v1.0/cache/introspect/")
 
+	// Register the destructive chaos/fault-injection endpoint only when
+	// explicitly enabled (Cache.EnableChaosAPI), since it deliberately corrupts
+	// cached data.  It is admin-authenticated like the rest of introspect.
+	if param.Cache_EnableChaosAPI.GetBool() {
+		adminIntrospect.POST("/chaos", pc.introspectChaosHandler)
+		chaosAPIEnabled.Set(1)
+		log.Warn("Cache chaos/fault-injection API is ENABLED at /api/v1.0/cache/introspect/chaos (Cache.EnableChaosAPI); this can corrupt cached data and should only be used for testing")
+	} else {
+		chaosAPIEnabled.Set(0)
+	}
+
 	return nil
 }
 
@@ -1698,6 +1770,81 @@ func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
 		}
 	}
 
+	c.JSON(http.StatusOK, result)
+}
+
+// introspectChaosHandler injects corruption into a cached object for
+// fault-injection testing.  It is only registered when Cache.EnableChaosAPI is
+// true and is admin-authenticated.
+//
+// POST /api/v1.0/cache/introspect/chaos?op=corrupt|truncate&url=...&etag=...&instance=...
+//
+//	corrupt:  &block=<n>&bytes=<n>
+//	truncate: &chunk=<n>&drop-bytes=<n>
+func (pc *PersistentCache) introspectChaosHandler(c *gin.Context) {
+	op := c.Query("op")
+	objectURL := c.Query("url")
+	etag := c.Query("etag")
+	instance := c.Query("instance")
+
+	if objectURL == "" && instance == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url or instance query parameter is required"})
+		return
+	}
+
+	// atoiQuery parses a query parameter as an integer and enforces an explicit
+	// [min, max] range, so the value can be safely narrowed below.
+	atoiQuery := func(name string, def, min, max int64) (int64, error) {
+		v := c.Query(name)
+		if v == "" {
+			return def, nil
+		}
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil {
+			return 0, perr
+		}
+		if n < min || n > max {
+			return 0, errors.Errorf("%s=%d is out of range [%d, %d]", name, n, min, max)
+		}
+		return n, nil
+	}
+
+	injector := NewChaosInjector(pc.db, pc.storage)
+
+	var result *ChaosResult
+	var err error
+	switch op {
+	case "corrupt":
+		var block, nbytes int64
+		if block, err = atoiQuery("block", 0, 0, math.MaxUint32); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if nbytes, err = atoiQuery("bytes", 0, 0, BlockTotalSize); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		result, err = injector.CorruptBlock(objectURL, etag, instance, uint32(block), int(nbytes))
+	case "truncate":
+		var chunk, drop int64
+		if chunk, err = atoiQuery("chunk", -1, -1, math.MaxInt32); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if drop, err = atoiQuery("drop-bytes", 0, 0, math.MaxInt64); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		result, err = injector.TruncateObject(objectURL, etag, instance, int(chunk), drop)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "op must be 'corrupt' or 'truncate'"})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 

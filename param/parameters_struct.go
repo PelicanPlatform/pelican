@@ -34,11 +34,14 @@ type Config struct {
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
+		DataScanMode string `mapstructure:"datascanmode" yaml:"DataScanMode"`
+		DataScanResampleInterval int `mapstructure:"datascanresampleinterval" yaml:"DataScanResampleInterval"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableClientX509 bool `mapstructure:"disableclientx509" yaml:"DisableClientX509"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableChaosAPI bool `mapstructure:"enablechaosapi" yaml:"EnableChaosAPI"`
 		EnableEvictionMonitoring bool `mapstructure:"enableevictionmonitoring" yaml:"EnableEvictionMonitoring"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
@@ -522,11 +525,14 @@ type configWithType struct {
 		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
+		DataScanMode struct { Type string; Value string }
+		DataScanResampleInterval struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		DirectorTest struct { Type string; Value bool }
 		DisableClientX509 struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
+		EnableChaosAPI struct { Type string; Value bool }
 		EnableEvictionMonitoring struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }

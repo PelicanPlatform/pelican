@@ -1856,6 +1856,164 @@ func TestDataScan_MissingChecksum(t *testing.T) {
 		"stored checksum should match SHA-256 of original data")
 }
 
+// TestDataScan_SkipVerifiedData verifies the "verify once" data-scan mode
+// (SkipVerifiedData): the first scan reads back and checksums the object,
+// records a DataVerified timestamp, and counts it as verified; subsequent
+// scans skip the already-verified object instead of re-reading it.
+func TestDataScan_SkipVerifiedData(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize+500)
+	for i := range data {
+		data[i] = byte(i % 211)
+	}
+	hash := InstanceHash("dddd000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+		SkipVerifiedData:     true,
+	})
+
+	// First scan: the object has no checksum, so it is read back, checksummed,
+	// marked verified, and counted.
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	assert.Equal(t, int64(1), checker.GetStats().ObjectsVerified, "first scan should verify the object once")
+
+	meta, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.Len(t, meta.Checksums, 1, "first scan should record a checksum")
+	require.False(t, meta.DataVerified.IsZero(), "first scan should record a DataVerified timestamp")
+	firstVerified := meta.DataVerified
+
+	// Second scan: the object is already verified, so it must be skipped — the
+	// verified counter does not advance and DataVerified is unchanged.
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	assert.Equal(t, int64(1), checker.GetStats().ObjectsVerified, "second scan should skip the already-verified object")
+
+	meta, err = storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.Equal(t, firstVerified, meta.DataVerified, "DataVerified should not change on a skipped scan")
+}
+
+// TestDataScan_SkipVerifiedResample confirms that "once" mode still re-verifies
+// already-checked objects when ResampleInterval is set, providing a floor of
+// at-rest corruption detection rather than zero.  With ResampleInterval=1 every
+// already-verified object is re-checked, so a second scan re-verifies it.
+func TestDataScan_SkipVerifiedResample(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize+500)
+	for i := range data {
+		data[i] = byte(i % 211)
+	}
+	hash := InstanceHash("eded000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+		SkipVerifiedData:     true,
+		ResampleInterval:     1, // re-verify every already-checked object
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	// With ResampleInterval=1 the object is re-verified on both scans rather
+	// than being permanently skipped after the first.
+	assert.Equal(t, int64(2), checker.GetStats().ObjectsVerified,
+		"ResampleInterval=1 should re-verify the object every cycle")
+}
+
+// TestDataScan_AllModeReverifies confirms that the default (non-skip) mode
+// re-verifies an object on every scan, in contrast to SkipVerifiedData.
+func TestDataScan_AllModeReverifies(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize+500)
+	for i := range data {
+		data[i] = byte(i % 211)
+	}
+	hash := InstanceHash("cccc000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+		// SkipVerifiedData defaults to false ("all" mode).
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
+	assert.Equal(t, int64(2), checker.GetStats().ObjectsVerified, "all mode should re-verify on every scan")
+
+	// In all mode the DataVerified timestamp is never recorded.
+	meta, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.True(t, meta.DataVerified.IsZero(), "all mode should not record DataVerified")
+}
+
 // TestMultiDirStoragePlacement verifies that multi-directory storage works
 // end-to-end: objects land in different directories, per-directory size stats
 // are correct, and storage IDs are persisted in metadata.

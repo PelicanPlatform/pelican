@@ -104,11 +104,14 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.ConcurrencyDegradedThreshold": false,
 	"Cache.DataLocation": false,
 	"Cache.DataLocations": false,
+	"Cache.DataScanMode": false,
+	"Cache.DataScanResampleInterval": false,
 	"Cache.DbLocation": false,
 	"Cache.DefaultCacheTimeout": false,
 	"Cache.DirectorTest": false,
 	"Cache.DisableClientX509": false,
 	"Cache.EnableBroker": false,
+	"Cache.EnableChaosAPI": false,
 	"Cache.EnableEvictionMonitoring": false,
 	"Cache.EnableLotman": false,
 	"Cache.EnableOIDC": false,
@@ -561,6 +564,7 @@ func paramNameToEnvVar(paramName string) string {
 var stringAccessors = map[string]func(*Config) string{
 	"Cache.ClientStatisticsLocation": func(c *Config) string { return c.Cache.ClientStatisticsLocation },
 	"Cache.DataLocation": func(c *Config) string { return c.Cache.DataLocation },
+	"Cache.DataScanMode": func(c *Config) string { return c.Cache.DataScanMode },
 	"Cache.DbLocation": func(c *Config) string { return c.Cache.DbLocation },
 	"Cache.ExportLocation": func(c *Config) string { return c.Cache.ExportLocation },
 	"Cache.FedTokenLocation": func(c *Config) string { return c.Cache.FedTokenLocation },
@@ -836,6 +840,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Cache.BlocksToPrefetch": func(c *Config) int { return c.Cache.BlocksToPrefetch },
 	"Cache.Concurrency": func(c *Config) int { return c.Cache.Concurrency },
 	"Cache.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Cache.ConcurrencyDegradedThreshold },
+	"Cache.DataScanResampleInterval": func(c *Config) int { return c.Cache.DataScanResampleInterval },
 	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
 	"Cache.Port": func(c *Config) int { return c.Cache.Port },
 	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
@@ -960,6 +965,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Cache.DirectorTest": func(c *Config) bool { return c.Cache.DirectorTest },
 	"Cache.DisableClientX509": func(c *Config) bool { return c.Cache.DisableClientX509 },
 	"Cache.EnableBroker": func(c *Config) bool { return c.Cache.EnableBroker },
+	"Cache.EnableChaosAPI": func(c *Config) bool { return c.Cache.EnableChaosAPI },
 	"Cache.EnableEvictionMonitoring": func(c *Config) bool { return c.Cache.EnableEvictionMonitoring },
 	"Cache.EnableLotman": func(c *Config) bool { return c.Cache.EnableLotman },
 	"Cache.EnableOIDC": func(c *Config) bool { return c.Cache.EnableOIDC },
@@ -1239,11 +1245,14 @@ var allParameterNames = []string{
 	"Cache.ConcurrencyDegradedThreshold",
 	"Cache.DataLocation",
 	"Cache.DataLocations",
+	"Cache.DataScanMode",
+	"Cache.DataScanResampleInterval",
 	"Cache.DbLocation",
 	"Cache.DefaultCacheTimeout",
 	"Cache.DirectorTest",
 	"Cache.DisableClientX509",
 	"Cache.EnableBroker",
+	"Cache.EnableChaosAPI",
 	"Cache.EnableEvictionMonitoring",
 	"Cache.EnableLotman",
 	"Cache.EnableOIDC",
@@ -1669,6 +1678,7 @@ var allParameterNames = []string{
 var (
 	Cache_ClientStatisticsLocation = StringParam{"Cache.ClientStatisticsLocation"}
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
+	Cache_DataScanMode = StringParam{"Cache.DataScanMode"}
 	Cache_DbLocation = StringParam{"Cache.DbLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
 	Cache_FedTokenLocation = StringParam{"Cache.FedTokenLocation"}
@@ -1888,6 +1898,7 @@ var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
+	Cache_DataScanResampleInterval = IntParam{"Cache.DataScanResampleInterval"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
@@ -1947,6 +1958,7 @@ var (
 	Cache_DirectorTest = BoolParam{"Cache.DirectorTest"}
 	Cache_DisableClientX509 = BoolParam{"Cache.DisableClientX509"}
 	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
+	Cache_EnableChaosAPI = BoolParam{"Cache.EnableChaosAPI"}
 	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
@@ -2135,6 +2147,7 @@ func init() {
 	paramByName = map[string]Param{
 		"Cache.ClientStatisticsLocation": Cache_ClientStatisticsLocation,
 		"Cache.DataLocation": Cache_DataLocation,
+		"Cache.DataScanMode": Cache_DataScanMode,
 		"Cache.DbLocation": Cache_DbLocation,
 		"Cache.ExportLocation": Cache_ExportLocation,
 		"Cache.FedTokenLocation": Cache_FedTokenLocation,
@@ -2348,6 +2361,7 @@ func init() {
 		"Cache.BlocksToPrefetch": Cache_BlocksToPrefetch,
 		"Cache.Concurrency": Cache_Concurrency,
 		"Cache.ConcurrencyDegradedThreshold": Cache_ConcurrencyDegradedThreshold,
+		"Cache.DataScanResampleInterval": Cache_DataScanResampleInterval,
 		"Cache.EvictionMonitoringMaxDepth": Cache_EvictionMonitoringMaxDepth,
 		"Cache.Port": Cache_Port,
 		"ClientAgent.HistoryRetentionDays": ClientAgent_HistoryRetentionDays,
@@ -2401,6 +2415,7 @@ func init() {
 		"Cache.DirectorTest": Cache_DirectorTest,
 		"Cache.DisableClientX509": Cache_DisableClientX509,
 		"Cache.EnableBroker": Cache_EnableBroker,
+		"Cache.EnableChaosAPI": Cache_EnableChaosAPI,
 		"Cache.EnableEvictionMonitoring": Cache_EnableEvictionMonitoring,
 		"Cache.EnableLotman": Cache_EnableLotman,
 		"Cache.EnableOIDC": Cache_EnableOIDC,
