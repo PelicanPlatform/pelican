@@ -1026,6 +1026,25 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 		transferErrorData = append(transferErrorData, transferError)
 	}
 
+	// Handle result-level (post-transfer) errors that aren't attached to any individual
+	// attempt, e.g. a checksum mismatch: the download attempts all succeeded, so the
+	// error lives only on result.Error and neither the per-attempt loop nor the early-
+	// failure block above captured it. Without this, such a result would be reported as
+	// TransferSuccess=false with no ErrorType/PelicanErrorCode. Only add it when nothing
+	// was already recorded so a normal per-attempt failure still yields a single entry.
+	if result != nil && result.Error != nil && len(transferErrorData) == 0 {
+		adErr = developerData.Set("TransferError1", result.Error.Error())
+		if adErr != nil {
+			log.Errorf("Failed to set TransferError1: %s", adErr)
+		}
+		adErr = developerData.Set("IsRetryable1", client.IsRetryable(result.Error))
+		if adErr != nil {
+			log.Errorf("Failed to set IsRetryable1: %s", adErr)
+		}
+		transferError := createTransferError(result.Error)
+		transferErrorData = append(transferErrorData, transferError)
+	}
+
 	// Add checksum information if provided
 	if len(clientChecksums) > 0 {
 		clientChecksumsData := classad.New()
