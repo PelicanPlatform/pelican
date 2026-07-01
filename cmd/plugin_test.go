@@ -1264,6 +1264,62 @@ func TestCreateTransferError(t *testing.T) {
 	})
 }
 
+// Test that addDataToClassAd classifies result-level (post-transfer) errors.
+// A checksum mismatch is set on result.Error after the download attempts have all
+// succeeded (attempt.Error == nil), so it must still populate TransferErrorData with
+// the proper ErrorType/PelicanErrorCode rather than being reported with no code.
+func TestAddDataToClassAdResultLevelError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Checksum mismatch: attempts succeeded, error lives only on result.Error.
+	t.Run("ChecksumMismatch", func(t *testing.T) {
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 1)
+
+		errorType, ok := classad.GetAs[string](errorDataList[0], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", errorType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[0], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+		devErrType, ok := classad.GetAs[string](teDevData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, checksumErr.ErrorType(), devErrType)
+	})
+
+	// Regression: when a per-attempt error already captured the failure, the
+	// result-level branch must not add a duplicate TransferErrorData entry.
+	t.Run("PerAttemptErrorNotDuplicated", func(t *testing.T) {
+		attemptErr := error_codes.NewContact_ConnectionSetupError(errors.New("connection refused"))
+		result := &client.TransferResults{
+			Error: attemptErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", Error: attemptErr},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 1)
+	})
+}
+
 // Test recursive downloads from the plugin
 func TestPluginRecursiveDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
