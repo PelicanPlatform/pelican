@@ -119,14 +119,25 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 		// namespace for backward compatibility; clients should use the
 		// per-namespace discovery endpoints at /api/v1.0/issuer/ns/<prefix>/.well-known/openid-configuration.
 		if param.Origin_EnableIssuer.GetBool() {
+			// The embedded/OA4MP issuer routes are mounted on the bare web
+			// root (e.g. /api/v1.0/issuer/ns/<prefix>), and the issuer stamps
+			// tokens with iss = <ExternalWebUrl>/api/v1.0/issuer/ns/<prefix>.
+			// issuerStr (from GetServerIssuerURL) may carry the co-located
+			// "/api/v1.0/origin" sub-path used for the origin's base issuer
+			// identity; building the issuer endpoints on top of it would
+			// double the path and advertise an issuer that matches neither
+			// the route mount nor the token's iss claim.  Always base the
+			// issuer endpoints (and jwks) on the bare external web URL.
+			issuerBaseUrl := param.Server_ExternalWebUrl.GetString()
 			issuerMode := param.Origin_IssuerMode.GetString()
 			if issuerMode == "embedded" || issuerMode == "" {
 				originExports, exErr := GetOriginExports()
 				if exErr == nil {
 					for _, oe := range originExports {
 						if (oe.Capabilities.Reads && !oe.Capabilities.PublicReads) || oe.Capabilities.Writes {
-							serviceUri := issuerStr + "/api/v1.0/issuer/ns" + oe.FederationPrefix
+							serviceUri := issuerBaseUrl + "/api/v1.0/issuer/ns" + oe.FederationPrefix
 							cfg.Issuer = serviceUri
+							cfg.JwksUri = issuerBaseUrl + jwksPath
 							cfg.TokenEndpoint = serviceUri + "/token"
 							cfg.UserInfoEndpoint = serviceUri + "/userinfo"
 							cfg.RevocationEndpoint = serviceUri + "/revoke"
@@ -143,7 +154,8 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 				}
 			} else {
 				// OA4MP mode — legacy single-issuer endpoints
-				serviceUri := issuerStr + "/api/v1.0/issuer"
+				serviceUri := issuerBaseUrl + "/api/v1.0/issuer"
+				cfg.JwksUri = issuerBaseUrl + jwksPath
 				cfg.TokenEndpoint = serviceUri + "/token"
 				cfg.UserInfoEndpoint = serviceUri + "/userinfo"
 				cfg.RevocationEndpoint = serviceUri + "/revoke"

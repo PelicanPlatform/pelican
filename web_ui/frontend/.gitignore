@@ -37,6 +37,8 @@ next-env.d.ts
 
 # generated files
 /public/data/error_codes.json
+# copied from @pelicanplatform/web-client by the copy-sw npm script
+/public/downloadServiceWorker.js
 
 # Playwright
 node_modules/

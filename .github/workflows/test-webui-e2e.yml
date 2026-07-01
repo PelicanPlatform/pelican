@@ -139,11 +139,16 @@ jobs:
             Level: info
           Origin:
             Exports:
-              - FederationPrefix: /test/github-actions
+              - FederationPrefix: /test
                 StoragePrefix: /etc/pelican
-                Capabilities:
-                  - Reads
+                capabilities:
+                  - DirectReads
+                  - Writes
                   - Listings
+                  - Reads
+                AuthorizationTemplates:
+                  - actions: [ "read", "modify" ]
+                    prefix: /$USER
           Federation:
             DiscoveryUrl: https://localhost:8444
           EOF
@@ -188,9 +193,10 @@ jobs:
             --issuer https://localhost:8444/api/v1.0/origin \
             --lifetime 7200 \
             --subject admin \
-            --audience https://localhost:8444 \
+            --audience https://localhost:8444/api/v1.0/origin \
             --claim "oidc_iss=https://localhost:8444/api/v1.0/origin" \
-            --claim "oidc_sub=admin")
+            --claim "oidc_sub=admin" \
+            --claim "user_id=any-string-works-here")
           echo "PELICAN_E2E_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
       - name: Install npm dependencies and Playwright browsers
         working-directory: web_ui/frontend

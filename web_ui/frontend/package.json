@@ -3,7 +3,10 @@
   "version": "7.2.0",
   "private": true,
   "scripts": {
+    "copy-sw": "cp node_modules/@pelicanplatform/web-client/dist/serviceWorker/downloadServiceWorker.js public/downloadServiceWorker.js",
+    "predev": "npm run copy-sw",
     "dev": "next dev --turbo",
+    "prebuild": "npm run copy-sw",
     "build": "next build",
     "build:help": "next build --help",
     "build:debug": "next build --debug",
@@ -27,6 +30,8 @@
     "@mui/material": "^7",
     "@mui/x-date-pickers": "^8",
     "@mui/x-tree-view": "^8",
+    "@pelicanplatform/components": "^1.6.4",
+    "@pelicanplatform/web-client": "^1.6.4",
     "@sgratzl/chartjs-chart-boxplot": "^4.4.2",
     "babel-plugin-react-compiler": "^19.1.0-rc.3",
     "chart.js": "^4.4.4",
@@ -82,6 +87,6 @@
     "typescript": "5.1.6"
   },
   "engines": {
-    "node": "20"
+    "node": "24"
   }
 }
