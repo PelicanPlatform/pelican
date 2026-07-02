@@ -798,7 +798,7 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 //
 // Pure data transform: no lotman C calls. The tree pipeline lives in
 // lot_tree.go and is fully unit-tested without dlopen.
-func configLotsFromFedPrefixesNested(nsAds []server_structs.NamespaceAdV2, federationIssuer string, rootDedGB float64) map[string]Lot {
+func configLotsFromFedPrefixesNested(nsAds []server_structs.NamespaceAd, federationIssuer string, rootDedGB float64) map[string]Lot {
 	out := make(map[string]Lot)
 
 	// Synthetic root lot used only as the seed for the allocator: it carries
@@ -1081,11 +1081,11 @@ func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIs
 // On a fresh DB (very first startup) lotman has no path index yet and
 // GetLotsForPath may return either an empty list or an error; both
 // outcomes are treated as "not covered" so init proceeds normally.
-func filterAdsAlreadyScheduled(adsFromFed []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+func filterAdsAlreadyScheduled(adsFromFed []server_structs.NamespaceAd) []server_structs.NamespaceAd {
 	nowMs := time.Now().UnixMilli()
 	windowEndMs := nowMs + param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds()
 
-	out := make([]server_structs.NamespaceAdV2, 0, len(adsFromFed))
+	out := make([]server_structs.NamespaceAd, 0, len(adsFromFed))
 	for _, ad := range adsFromFed {
 		path := normaliseLotPath(ad.Path)
 		if path == "" || path == "/" {
@@ -1131,7 +1131,7 @@ func filterAdsAlreadyScheduled(adsFromFed []server_structs.NamespaceAdV2) []serv
 
 // Initialize the lot configurations based on provided policy, discovered namespaces,
 // and available cache space, handling any necessary merges and validations along the way.
-func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
+func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	var internalLots []Lot
 
 	policies, err := GetPolicyMap()
@@ -1364,7 +1364,7 @@ func checkLotmanVersionCompatibility() bool {
 
 // Initialize the LotMan library and bind its functions to the global vars
 // We also perform a bit of extra setup such as setting the lotman db location
-func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
+func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 	log.Infof("Initializing LotMan...")
 
 	// dlopen the LotMan library

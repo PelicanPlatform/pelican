@@ -36,9 +36,9 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
+func listNamespacesFromOrigins() []server_structs.NamespaceAd {
 	ads := getServerAdsSnapshot()
-	namespaces := make([]server_structs.NamespaceAdV2, 0, len(ads))
+	namespaces := make([]server_structs.NamespaceAd, 0, len(ads))
 	for _, ad := range ads {
 		if ad.Type == server_structs.OriginType.String() {
 			namespaces = append(namespaces, ad.NamespaceAds...)

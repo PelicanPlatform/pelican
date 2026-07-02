@@ -81,11 +81,11 @@ type (
 	// ad itself.  Having the director ad helps detect forwarding
 	// loops -- we can break early if we detect we're talking to ourself!
 	forwardAd struct {
-		DirectorAd *server_structs.DirectorAd        `json:"director-ad"`
-		AdType     string                            `json:"ad-type"`
-		Now        time.Time                         `json:"now"`
-		ServiceAd  *server_structs.OriginAdvertiseV2 `json:"service-ad,omitempty"`
-		SeenBy     []string                          `json:"seen-by,omitempty"`
+		DirectorAd *server_structs.DirectorAd      `json:"director-ad"`
+		AdType     string                          `json:"ad-type"`
+		Now        time.Time                       `json:"now"`
+		ServiceAd  *server_structs.OriginAdvertise `json:"service-ad,omitempty"`
+		SeenBy     []string                        `json:"seen-by,omitempty"`
 	}
 )
 
@@ -237,7 +237,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 // this ad. The current director is added to seenBy before forwarding, and any
 // director already in seenBy is skipped. This prevents infinite forwarding
 // loops when 3 or more directors are present.
-func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
+func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertise, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(engineCtx)
 	if err != nil {
 		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)
@@ -266,7 +266,7 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 // Forward a director ad to the single director represented by the `dir` object.
 //
 // Note: the implementation is similar to `forwardService` but there are two
-// functions to avoid refactoring the DirectorAd and OriginAdvertiseV2 to have
+// functions to avoid refactoring the DirectorAd and OriginAdvertise to have
 // a common interface.
 func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 	forwardAd := &forwardAd{
@@ -302,7 +302,7 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 //
 // The seenBy list tracks which directors have already processed this ad to
 // prevent forwarding loops.
-func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
+func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(ctx)
 	if err != nil {
 		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)

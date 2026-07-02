@@ -63,7 +63,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	// First boot: large cache + one namespace ad so a descendant lot is
 	// minted alongside root/default.
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/foo", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
 
@@ -133,7 +133,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	require.NoError(t, param.Lotman_MaxLotLifetime.Set(10*time.Minute))
 	require.NoError(t, param.Lotman_MinFillerWidth.Set(0))
 
-	runRenewalTick(func() []server_structs.NamespaceAdV2 { return ads }, time.Second)
+	runRenewalTick(func() []server_structs.NamespaceAd { return ads }, time.Second)
 }
 
 func filterSentinels(names []string) []string {

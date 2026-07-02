@@ -76,12 +76,12 @@ func TestConcurrentReadAndWriteFFI(t *testing.T) {
 	require.NoError(t, param.Lotman_MinFillerWidth.Set(0))
 
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/foo", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 		{Path: "/foo/bar", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 		{Path: "/baz", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
-	getAds := func() []server_structs.NamespaceAdV2 { return ads }
+	getAds := func() []server_structs.NamespaceAd { return ads }
 
 	// Seed the DB with one tick so reads have something to look at.
 	runRenewalTick(getAds, time.Second)

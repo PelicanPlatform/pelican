@@ -61,23 +61,12 @@ type (
 		Copies      bool `json:"Copies"`
 	}
 
-	NamespaceAdV2 struct {
+	NamespaceAd struct {
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
 		Generation   []TokenGen    `json:"token-generation"`
 		Issuer       []TokenIssuer `json:"token-issuer"`
 		FromTopology bool          `json:"from-topology"`
-	}
-
-	NamespaceAdV1 struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
 	}
 
 	// Downtime represents a server downtime event
@@ -160,14 +149,14 @@ type (
 	Advertisement struct {
 		sync.RWMutex
 		ServerAd
-		NamespaceAds []NamespaceAdV2
+		NamespaceAds []NamespaceAd
 	}
 
 	StrategyType string
 	SortType     string
 
-	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
-	OriginAdvertiseV2 struct {
+	// OriginAdvertise is the struct used to advertise BOTH Origin and Cache server to the director
+	OriginAdvertise struct {
 		ServerBaseAd
 		ServerID string `json:"serverId"`
 		// The namespace prefix to register/look up the server in the registry.
@@ -184,7 +173,7 @@ type (
 		// express what the origin is willing to do on the namespace's behalf. This helps us work
 		// around the lack of a concept for "globally-defined" namespaces.
 		Caps                Capabilities      `json:"capabilities"`
-		Namespaces          []NamespaceAdV2   `json:"namespaces"`
+		Namespaces          []NamespaceAd     `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
@@ -192,15 +181,6 @@ type (
 		RequiredFeatures    []string          `json:"requiredFeatures"`
 		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
-	}
-
-	OriginAdvertiseV1 struct {
-		Name        string          `json:"name"`
-		URL         string          `json:"url" binding:"required"` // This is the url for origin's XRootD service and file transfer
-		WebURL      string          `json:"web_url,omitempty"`      // This is the url for origin's web engine and APIs
-		Namespaces  []NamespaceAdV1 `json:"namespaces"`
-		Writes      bool            `json:"enablewrite"`
-		DirectReads bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
 
 	DirectorTestResult struct {
@@ -318,8 +298,8 @@ type (
 		CredentialIssuer string       `json:"issuer"`
 	}
 
-	// NamespaceAdV2Response creates a response struct for NamespaceAdV2
-	NamespaceAdV2Response struct {
+	// NamespaceAdResponse creates a response struct for NamespaceAd
+	NamespaceAdResponse struct {
 		Path         string                `json:"path"`
 		Caps         Capabilities          `json:"capabilities"`
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`
@@ -327,8 +307,8 @@ type (
 		FromTopology bool                  `json:"fromTopology"`
 	}
 
-	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
-	NamespaceAdV2MappedResponse struct {
+	// NamespaceAdMappedResponse creates a response struct for NamespaceAd with mapped origins and caches
+	NamespaceAdMappedResponse struct {
 		Path         string                `json:"path"`
 		Caps         Capabilities          `json:"capabilities"`
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`
@@ -707,193 +687,6 @@ func (ad *Advertisement) GetIOLoad() float64 {
 	ad.RLock()
 	defer ad.RUnlock()
 	return ad.IOLoad
-}
-
-func ConvertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
-	// Converts a list of V2 namespace ads to a list of V1 namespace ads.
-	// This is for backwards compatibility in the case an old version of a client calls
-	// out to a newer version of the director
-	nsV1 := []NamespaceAdV1{}
-
-	for _, nsAd := range nsV2 {
-		if len(nsAd.Issuer) != 0 {
-			for _, iss := range nsAd.Issuer {
-				for _, bp := range iss.BasePaths {
-					v1Ad := NamespaceAdV1{
-						Path:          nsAd.Path,
-						RequireToken:  !nsAd.Caps.PublicReads,
-						Issuer:        iss.IssuerUrl,
-						BasePath:      bp,
-						Strategy:      nsAd.Generation[0].Strategy,
-						VaultServer:   nsAd.Generation[0].VaultServer,
-						MaxScopeDepth: nsAd.Generation[0].MaxScopeDepth,
-					}
-					nsV1 = append(nsV1, v1Ad)
-				}
-			}
-		} else {
-			v1Ad := NamespaceAdV1{
-				Path:         nsAd.Path,
-				RequireToken: false,
-			}
-			nsV1 = append(nsV1, v1Ad)
-		}
-	}
-
-	return nsV1
-}
-
-func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) []NamespaceAdV2 {
-	//Convert a list of V1 namespace ads to a list of V2 namespace ads, note that this
-	//isn't the most efficient way of doing so (an interactive search as opposed to some sort
-	//of index or hash based search)
-
-	var wr bool
-	var fallback bool
-	var credurl url.URL
-
-	if oAd != nil {
-		fallback = oAd.DirectReads
-		wr = oAd.Writes
-	} else {
-		fallback = true
-		wr = false
-	}
-	nsAdsV2 := []NamespaceAdV2{}
-	for _, nsAd := range nsAdsV1 {
-		nsFound := false
-		for i := range nsAdsV2 {
-			//Namespace exists, so check if issuer already exists
-			if nsAdsV2[i].Path == nsAd.Path {
-				nsFound = true
-				issFound := false
-				tokIssuers := nsAdsV2[i].Issuer
-				for j := range tokIssuers {
-					//Issuer exists, so add the basepaths to the list
-					if tokIssuers[j].IssuerUrl == nsAd.Issuer {
-						issFound = true
-						bps := tokIssuers[j].BasePaths
-						bps = append(bps, nsAd.BasePath)
-						tokIss := &nsAdsV2[i].Issuer[j]
-						(*tokIss).BasePaths = bps
-						break
-					}
-				}
-				//Issuer doesn't exist for the URL, so create a new one
-				if nsAd.RequireToken {
-					if !issFound {
-						if oAd != nil {
-							urlPtr, err := url.Parse(oAd.URL)
-							if err != nil {
-								credurl = nsAd.Issuer
-							} else {
-								credurl = *urlPtr
-							}
-						} else {
-							credurl = nsAd.Issuer
-						}
-
-						tIss := TokenIssuer{
-							BasePaths:       []string{nsAd.BasePath},
-							RestrictedPaths: []string{},
-							IssuerUrl:       nsAd.Issuer,
-						}
-						v2NS := &nsAdsV2[i]
-						tis := append(nsAdsV2[i].Issuer, tIss)
-						(*v2NS).Issuer = tis
-						if len(nsAdsV2[i].Generation) == 0 {
-							tGen := TokenGen{
-								Strategy:         nsAd.Strategy,
-								VaultServer:      nsAd.VaultServer,
-								MaxScopeDepth:    nsAd.MaxScopeDepth,
-								CredentialIssuer: credurl,
-							}
-							(*v2NS).Generation = []TokenGen{tGen}
-						}
-					}
-				}
-			}
-			break
-		}
-		//Namespace doesn't exist for the Path, so create a new one
-		if !nsFound {
-			if oAd != nil {
-				urlPtr, err := url.Parse(oAd.URL)
-				if err != nil {
-					credurl = nsAd.Issuer
-				} else {
-					credurl = *urlPtr
-				}
-			} else {
-				credurl = nsAd.Issuer
-			}
-
-			caps := Capabilities{
-				PublicReads: !nsAd.RequireToken,
-				Reads:       true,
-				Writes:      wr,
-				Listings:    true,
-				DirectReads: fallback,
-			}
-
-			newNS := NamespaceAdV2{
-				Caps: caps,
-				Path: nsAd.Path,
-			}
-
-			if nsAd.RequireToken {
-				tGen := []TokenGen{{
-					Strategy:         nsAd.Strategy,
-					VaultServer:      nsAd.VaultServer,
-					MaxScopeDepth:    nsAd.MaxScopeDepth,
-					CredentialIssuer: credurl,
-				}}
-				tIss := []TokenIssuer{{
-					BasePaths:       []string{nsAd.BasePath},
-					RestrictedPaths: []string{},
-					IssuerUrl:       nsAd.Issuer,
-				}}
-
-				newNS.Generation = tGen
-				newNS.Issuer = tIss
-			}
-
-			nsAdsV2 = append(nsAdsV2, newNS)
-		}
-	}
-	return nsAdsV2
-}
-
-// Converts a V1 origin advertisement to a V2 origin advertisement
-func ConvertOriginAdV1ToV2(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
-
-	nsAdsV2 := ConvertNamespaceAdsV1ToV2(oAd1.Namespaces, &oAd1)
-	tokIssuers := []TokenIssuer{}
-
-	for _, v2Ad := range nsAdsV2 {
-		tokIssuers = append(tokIssuers, v2Ad.Issuer...)
-	}
-
-	//Origin Capabilities may be different from Namespace Capabilities, but since the original
-	//origin didn't contain capabilities, these are currently the defaults - we might want to potentially
-	//change this in the future
-	caps := Capabilities{
-		PublicReads: true,
-		Reads:       true,
-		Writes:      oAd1.Writes,
-		Listings:    true,
-		DirectReads: oAd1.DirectReads,
-	}
-
-	oAd2 := OriginAdvertiseV2{
-		DataURL:    oAd1.URL,
-		WebURL:     oAd1.WebURL,
-		Caps:       caps,
-		Namespaces: nsAdsV2,
-		Issuer:     tokIssuers,
-	}
-	oAd2.Initialize(oAd1.Name)
-	return oAd2
 }
 
 func ServerAdsToServerNameURL(ads []ServerAd) (output string) {

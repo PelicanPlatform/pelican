@@ -2638,7 +2638,7 @@ func extractNamespacePrefix(objectPath string) string {
 
 // updateConfig updates the cache configuration from the director
 func (pc *PersistentCache) updateConfig() error {
-	var respNS []server_structs.NamespaceAdV2
+	var respNS []server_structs.NamespaceAd
 
 	fedInfo, err := config.GetFederation(pc.ctx)
 	if err != nil {

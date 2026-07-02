@@ -49,14 +49,14 @@ type (
 // Can use this mechanism to override the minimum for the sake of tests
 var MinFedTokenTickerRate = 1 * time.Minute
 
-func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertise, error) {
 	registryPrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 
 	// Get the overall health status as reported by the cache.
 	status := metrics.GetHealthStatus().OverallStatus
 
 	nsAds := server.GetNamespaceAds()
-	ad := server_structs.OriginAdvertiseV2{
+	ad := server_structs.OriginAdvertise{
 		ServerID:            id,
 		RegistryPrefix:      registryPrefix,
 		DataURL:             originUrl,
@@ -125,13 +125,13 @@ func (server *CacheServer) SetFilters() {
 	}
 }
 
-func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.NamespaceAd) []server_structs.NamespaceAd {
 	/*
 	* Filters out ads based on the namespaces listed in server.NamespaceFilter
 	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
 	* from the director and the ones provided might differ.
 	 */
-	filteredAds := []server_structs.NamespaceAdV2{}
+	filteredAds := []server_structs.NamespaceAd{}
 	if len(server.namespaceFilter) > 0 {
 		for _, ad := range nsAds {
 			ns := ad.Path
@@ -168,19 +168,19 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.Name
 
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Get the endpoint of the director
-	var respNS []server_structs.NamespaceAdV2
+	var respNS []server_structs.NamespaceAd
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
 		return err
 	}
 	if fedInfo.DirectorEndpoint == "" {
-		return errors.New("No director specified; give the federation name (-f)")
+		return errors.New("no director specified; give the federation name (-f)")
 	}
 
 	directorEndpointURL, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
-		return errors.Wrap(err, "Unable to parse director url")
+		return errors.Wrap(err, "unable to parse director url")
 	}
 
 	// Create the listNamespaces url
@@ -189,34 +189,14 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		return err
 	}
 
-	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
-	// from the 1.0 endpoint and convert from V1 to V2
 	tr := config.GetTransport()
 	respData, err := utils.MakeRequest(context.Background(), tr, directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			directorNSListEndpointURL, err = url.JoinPath(fedInfo.DirectorEndpoint, "api", "v1.0", "director", "listNamespaces")
-			if err != nil {
-				return err
-			}
-			respData, err = utils.MakeRequest(context.Background(), tr, directorNSListEndpointURL, "GET", nil, nil)
-			var respNSV1 []server_structs.NamespaceAdV1
-			if err != nil {
-				return errors.Wrap(err, "Failed to make request")
-			} else {
-				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
-					return errors.Wrapf(err, "Failed to make request: %v", err)
-				}
-				respNS = server_structs.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
-			}
-		} else {
-			return errors.Wrap(err, "Failed to make request")
-		}
-	} else {
-		err = json.Unmarshal(respData, &respNS)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
-		}
+		return errors.Wrap(err, "failed to make request")
+	}
+	err = json.Unmarshal(respData, &respNS)
+	if err != nil {
+		return errors.Wrapf(err, "failed to marshal response in to JSON: %v", err)
 	}
 
 	if len(server.namespaceFilter) > 0 {

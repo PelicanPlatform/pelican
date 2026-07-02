@@ -590,7 +590,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 }
 
 // Helper function to check whether we should stat caches when generating availability maps
-func shouldStatCaches(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) bool {
+func shouldStatCaches(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAd) bool {
 	reqParams := getRequestParameters(ctx.Request)
 	if reqParams.Has(pelican_url.QuerySkipStat) || // The client indicates they want to avoid stats
 		reqParams.Has(pelican_url.QueryDirectRead) || // The client explicitly asked for a direct read from origin; no need to stat caches
@@ -606,7 +606,7 @@ func shouldStatCaches(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, be
 }
 
 // Helper function to check whether we should stat origins when generating availability maps
-func shouldStatOrigins(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) bool {
+func shouldStatOrigins(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAd) bool {
 	reqParams := getRequestParameters(ctx.Request)
 	if reqParams.Has(pelican_url.QuerySkipStat) || // The client indicates they want to avoid stats
 		!param.Director_CheckOriginPresence.GetBool() || // The Director is configured to not to stat origins
@@ -624,7 +624,7 @@ func shouldStatOrigins(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, b
 // Generate the availability maps for origins and caches based on the stat query results. Used in redirection sorting.
 // The function should determine whether it needs to stat the origins and caches based on the request parameters.
 // If stat checks are skipped for both origins and caches, assume all are available.
-func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2, requestId uuid.UUID) (map[string]bool, map[string]bool, error) {
+func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs.ServerAd, bestNSAd server_structs.NamespaceAd, requestId uuid.UUID) (map[string]bool, map[string]bool, error) {
 	reqPath := getObjectPathFromRequest(ctx)
 	reqParams := getRequestParameters(ctx.Request)
 

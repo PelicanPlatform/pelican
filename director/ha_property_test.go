@@ -266,9 +266,9 @@ func makeTestDirector(t *testing.T, name string, ttl time.Duration) chan *forwar
 	return ch
 }
 
-// makeTestServiceAd builds a minimal OriginAdvertiseV2 for use in forwarding tests.
-func makeTestServiceAd() *server_structs.OriginAdvertiseV2 {
-	return &server_structs.OriginAdvertiseV2{
+// makeTestServiceAd builds a minimal OriginAdvertise for use in forwarding tests.
+func makeTestServiceAd() *server_structs.OriginAdvertise {
+	return &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "origin-1",
 			InstanceID:   "origin-inst",
