@@ -43,21 +43,34 @@ import {
 import { login } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
-// isSameOriginPath reports whether a returnURL is a safe same-origin
-// path to navigate to. Rejects absolute URLs, protocol-relative
-// "//host" values, and the backslash variant "/\host" that browsers
-// normalize into a protocol-relative URL — all of which would be
-// open-redirect vectors when fed to window.location.href.
-const isSameOriginPath = (raw: string): boolean => {
+// safeSameOriginPath validates a candidate returnURL and returns a
+// same-origin, path-only destination that is safe to hand to
+// window.location.href — or null if the candidate isn't safe.
+//
+// It parses the candidate against the current origin and requires the
+// resolved origin to match ours, which rejects:
+//   - absolute URLs to another site ("https://evil.example"),
+//   - protocol-relative "//host" and the "/\host" backslash variant that
+//     browsers normalize into a protocol-relative URL (open redirect),
+//   - "javascript:" URLs, which parse to an opaque (non-matching) origin
+//     (DOM-XSS via a script-scheme navigation).
+//
+// Crucially it returns only the parsed URL's path components
+// (pathname+search+hash), never the raw attacker-controlled string, so
+// the navigation sink can never receive a scheme or a foreign host. That
+// closes both the open-redirect and the client-side-XSS vectors.
+const safeSameOriginPath = (raw: string): string | null => {
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
-    return false;
+    return null;
   }
   try {
-    return (
-      new URL(raw, window.location.origin).origin === window.location.origin
-    );
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.origin !== window.location.origin) {
+      return null;
+    }
+    return parsed.pathname + parsed.search + parsed.hash;
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -115,21 +128,21 @@ const PasswordLogin = () => {
       // The router applies basePath ("/view") on its own, so strip it here.
       if (returnUrl && returnUrl.includes('/view')) {
         router.push(returnUrl.replace(`/view`, '') || '/');
-
-        // If the returnUrl is some other relative path, use a full navigation
-        // since it's outside the SPA's route table. Require it to resolve
-        // same-origin — a bare `startsWith('/')` check admits a
-        // protocol-relative "//evil.com" (or the backslash variant
-        // "/\evil.com", which browsers normalize to "//evil.com") and
-        // turns this into an open redirect after login.
-      } else if (returnUrl && isSameOriginPath(returnUrl)) {
-        window.location.href = returnUrl;
-
-        // Default to the landing page. Use an absolute path: relative hrefs
-        // to router.push behave inconsistently with Next's basePath, which
-        // is why a non-admin (no returnURL set) appeared to "go nowhere".
       } else {
-        router.push('/');
+        // Otherwise it's a path outside the SPA route table, so use a full
+        // navigation — but only to a validated same-origin path. safePath
+        // is either the sanitized path-only destination or null; when
+        // null we fall back to the landing page rather than navigating to
+        // an attacker-controlled value. Use an absolute path for the
+        // fallback: relative hrefs to router.push behave inconsistently
+        // with Next's basePath (a non-admin with no returnURL appeared to
+        // "go nowhere" otherwise).
+        const safePath = returnUrl ? safeSameOriginPath(returnUrl) : null;
+        if (safePath) {
+          window.location.href = safePath;
+        } else {
+          router.push('/');
+        }
       }
     } else {
       setLoading(false);
