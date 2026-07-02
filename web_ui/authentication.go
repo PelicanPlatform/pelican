@@ -472,8 +472,88 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	}
 }
 
+// isSameOriginRequest is the CSRF guard for cookie-authenticated,
+// state-changing requests. Cross-site request forgery works by getting
+// a victim's browser to send an authenticated request the victim didn't
+// intend — it relies on the browser ATTACHING the session cookie
+// automatically. Two facts let us block that cheaply here:
+//
+//   - A Bearer-token request (CLI, API token, inter-server) is never
+//     CSRF-vulnerable: the browser doesn't attach an Authorization
+//     header on its own, so a forged cross-site request can't carry one.
+//     We exempt those (they still authenticate normally).
+//   - A genuine same-origin browser request carries an Origin (or, on
+//     older browsers, Referer) header whose origin equals this server's.
+//     A cross-site forgery carries the ATTACKER's origin. So requiring
+//     the Origin/Referer to match this server rejects the forgery while
+//     letting the real UI through — with no token plumbing on the
+//     client.
+//
+// This is defense-in-depth on top of the login cookie's SameSite=Strict
+// (which already stops modern browsers from attaching the cookie
+// cross-site); it also covers the SameSite gaps (very old browsers,
+// certain same-site sub-origin scenarios).
+//
+// Returns true (allow) for safe methods, Bearer-authenticated requests,
+// same-origin requests, and requests with no Origin/Referer at all (not
+// a browser-driven cross-site POST — SameSite=Strict is the backstop and
+// this keeps non-browser cookie clients and tests working). Returns
+// false ONLY when a cookie-authenticated, state-changing request carries
+// an Origin/Referer that does not match this server.
+func isSameOriginRequest(ctx *gin.Context) bool {
+	switch ctx.Request.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	}
+	if strings.HasPrefix(ctx.GetHeader("Authorization"), "Bearer ") {
+		return true
+	}
+
+	origin := ctx.GetHeader("Origin")
+	if origin == "" {
+		if ref := ctx.GetHeader("Referer"); ref != "" {
+			if u, err := url.Parse(ref); err == nil && u.Host != "" {
+				origin = u.Scheme + "://" + u.Host
+			}
+		}
+	}
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Host == "" {
+		return false
+	}
+	// Same-origin if the Origin host matches the host the browser
+	// addressed (the request's own Host) ...
+	if strings.EqualFold(originURL.Host, ctx.Request.Host) {
+		return true
+	}
+	// ... or the operator-configured external web URL (covers reverse-proxy
+	// deployments where the inbound Host differs from the public URL).
+	if ext := param.Server_ExternalWebUrl.GetString(); ext != "" {
+		if extURL, perr := url.Parse(ext); perr == nil && extURL.Host != "" &&
+			strings.EqualFold(originURL.Host, extURL.Host) {
+			return true
+		}
+	}
+	return false
+}
+
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
+	// CSRF: reject cross-origin cookie-authenticated mutations before
+	// doing anything else. Bearer-token and safe-method requests are
+	// exempt (see isSameOriginRequest).
+	if !isSameOriginRequest(ctx) {
+		ctx.AbortWithStatusJSON(http.StatusForbidden,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Cross-origin request rejected (CSRF protection)",
+			})
+		return
+	}
+
 	user, userId, groups, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		if err != nil {

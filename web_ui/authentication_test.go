@@ -815,6 +815,45 @@ func TestCheckAdmin(t *testing.T) {
 	}
 }
 
+func TestIsSameOriginRequest(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://pelican.example.org:8444"))
+	t.Cleanup(func() { _ = param.Server_ExternalWebUrl.Set("") })
+
+	const host = "pelican.example.org:8444"
+	newReq := func(method string, hdrs map[string]string) *gin.Context {
+		req := httptest.NewRequest(method, "https://"+host+"/api/v1.0/groups", nil)
+		req.Host = host
+		for k, v := range hdrs {
+			req.Header.Set(k, v)
+		}
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = req
+		return ctx
+	}
+
+	cases := []struct {
+		name  string
+		ctx   *gin.Context
+		allow bool
+	}{
+		{"GET is always safe", newReq(http.MethodGet, map[string]string{"Origin": "https://evil.example"}), true},
+		{"bearer token is exempt", newReq(http.MethodPost, map[string]string{"Authorization": "Bearer abc", "Origin": "https://evil.example"}), true},
+		{"no Origin or Referer is allowed", newReq(http.MethodPost, nil), true},
+		{"same-origin (matches Host) is allowed", newReq(http.MethodPost, map[string]string{"Origin": "https://" + host}), true},
+		{"same-origin (matches ExternalWebUrl) is allowed", newReq(http.MethodDelete, map[string]string{"Origin": "https://pelican.example.org:8444"}), true},
+		{"Referer fallback same-origin is allowed", newReq(http.MethodPost, map[string]string{"Referer": "https://" + host + "/view/groups"}), true},
+		{"cross-origin POST is rejected", newReq(http.MethodPost, map[string]string{"Origin": "https://evil.example"}), false},
+		{"cross-origin PATCH via Referer is rejected", newReq(http.MethodPatch, map[string]string{"Referer": "https://evil.example/x"}), false},
+		{"opaque null origin is rejected", newReq(http.MethodPost, map[string]string{"Origin": "null"}), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.allow, isSameOriginRequest(tc.ctx))
+		})
+	}
+}
+
 func TestAdminAuthHandler(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Define test cases
