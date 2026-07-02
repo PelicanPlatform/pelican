@@ -167,7 +167,7 @@ func TestForwardDirector(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	var listDirectorCount atomic.Int32
-	var adPostCount atomic.Int32
+	var registerOriginCount, registerCacheCount, registerDirectorCount atomic.Int32
 	dirAd := &server_structs.DirectorAd{}
 	dirAd.Initialize("fake-director")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -181,8 +181,17 @@ func TestForwardDirector(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write(buf)
 			require.NoError(t, err)
-		} else if req.Method == "POST" && (req.URL.Path == "/api/v1.0/director/registerDirector" || req.URL.Path == "/api/v1.0/director/registerOrigin" || req.URL.Path == "/api/v1.0/director/registerCache") {
-			adPostCount.Add(1)
+		} else if req.Method == "POST" {
+			switch req.URL.Path {
+			case "/api/v1.0/director/registerOrigin":
+				registerOriginCount.Add(1)
+			case "/api/v1.0/director/registerCache":
+				registerCacheCount.Add(1)
+			case "/api/v1.0/director/registerDirector":
+				registerDirectorCount.Add(1)
+			default:
+				return
+			}
 			_, err := io.Copy(io.Discard, req.Body)
 			assert.NoError(t, err)
 			req.Body.Close()
@@ -195,5 +204,19 @@ func TestForwardDirector(t *testing.T) {
 
 	fed_test_utils.NewFedTest(t, "")
 	assert.Equal(t, 1, int(listDirectorCount.Load()))
-	assert.Equal(t, 7, int(adPostCount.Load()))
+	// The director forwards each server ad it receives to peer directors.
+	// The origin (2) and cache (1) forwards are deterministic. The
+	// director's own ad, however, is re-advertised on a periodic timer, so
+	// the number of registerDirector forwards that land within the
+	// fed-test startup window races with how long startup takes: a fast
+	// run sees 4, a slower run sees 5+. Asserting an exact grand total
+	// (previously `== 7`) is therefore timing-flaky and fails
+	// intermittently on slow CI runners — the more so as unrelated startup
+	// work (migrations, bootstrap) grows. Assert the deterministic
+	// per-type forwards exactly and the periodic director forward as a
+	// lower bound, which still verifies forwarding happens without
+	// depending on wall-clock timing.
+	assert.Equal(t, 2, int(registerOriginCount.Load()), "origin ad should be forwarded to the peer director")
+	assert.Equal(t, 1, int(registerCacheCount.Load()), "cache ad should be forwarded to the peer director")
+	assert.GreaterOrEqual(t, int(registerDirectorCount.Load()), 4, "director ad should be forwarded to the peer director")
 }

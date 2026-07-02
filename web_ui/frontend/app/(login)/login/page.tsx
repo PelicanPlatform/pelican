@@ -53,7 +53,9 @@ const isSameOriginPath = (raw: string): boolean => {
     return false;
   }
   try {
-    return new URL(raw, window.location.origin).origin === window.location.origin;
+    return (
+      new URL(raw, window.location.origin).origin === window.location.origin
+    );
   } catch {
     return false;
   }
