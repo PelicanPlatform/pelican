@@ -47,8 +47,10 @@ func withMockEffectiveScopes(t *testing.T, fn func(userID string) []token_scopes
 //   - keeps user-grantable scopes only when the creator's CURRENT
 //     effective set still contains them (so a permission revocation
 //     immediately reaches into already-issued API tokens),
-//   - leaves capabilities untouched when the token has no recorded
-//     creator (legacy rows minted before CreatedBy was added),
+//   - drops user-grantable scopes (but keeps bearer-authority ones)
+//     when the token has no recorded creator (legacy rows minted before
+//     CreatedBy was added) — an unattributable token can't be trusted to
+//     wield a revocable management scope, so fail closed,
 //   - drops every user-grantable scope when the hook is unset (a
 //     binary that linked api_token but never wired the hook can't
 //     prove the creator's authority — fail closed).
@@ -105,18 +107,20 @@ func TestIntersectWithUserScopes(t *testing.T) {
 			"a deleted/inactive user (hook returns nil) loses every user-grantable scope on every API token they minted")
 	})
 
-	t.Run("empty createdBy leaves capabilities untouched", func(t *testing.T) {
+	t.Run("empty createdBy fails closed for user-grantable, keeps the rest", func(t *testing.T) {
 		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
-			// Hook would drop everything if invoked.
+			// Hook would drop everything if invoked; but with an empty
+			// createdBy the hook is never called and the effective set is
+			// nil, so user-grantable scopes are dropped anyway.
 			return nil
 		})
 		caps := []string{
-			token_scopes.Server_Admin.String(),      // user-grantable
-			token_scopes.Monitoring_Scrape.String(), // not user-grantable
+			token_scopes.Server_Admin.String(),      // user-grantable — drop (unattributable)
+			token_scopes.Monitoring_Scrape.String(), // not user-grantable — keep
 		}
 		got := intersectWithUserScopes(caps, "")
-		assert.ElementsMatch(t, caps, got,
-			"a row minted before the CreatedBy column existed has no creator to intersect against — pre-existing semantics apply, regardless of grantability")
+		assert.Equal(t, []string{token_scopes.Monitoring_Scrape.String()}, got,
+			"a row with no recorded creator (legacy, pre-CreatedBy) cannot be attributed to any current authority, so its user-grantable scopes are dropped — fail closed — while bearer-authority scopes pass through")
 	})
 
 	t.Run("nil hook drops every user-grantable scope", func(t *testing.T) {
@@ -206,13 +210,23 @@ func TestValidateScopesForCreator(t *testing.T) {
 			"data-plane and inter-server scopes are bearer-token authority — granted by an admin, not derived from a user role")
 	})
 
-	t.Run("empty createdBy is permissive — legacy/system caller", func(t *testing.T) {
+	t.Run("empty createdBy fails closed for user-grantable scopes", func(t *testing.T) {
 		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope { return nil })
 		err := validateScopesForCreator([]string{
 			token_scopes.Server_UserAdmin.String(),
 		}, "")
+		require.Error(t, err,
+			"an unattributable (empty createdBy) token has no creator to intersect against, so it cannot be trusted to wield a management scope — fail closed, same posture as the nil-hook case")
+		assert.Contains(t, err.Error(), token_scopes.Server_UserAdmin.String())
+	})
+
+	t.Run("empty createdBy still allows non-grantable scopes", func(t *testing.T) {
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope { return nil })
+		err := validateScopesForCreator([]string{
+			token_scopes.Monitoring_Scrape.String(),
+		}, "")
 		assert.NoError(t, err,
-			"with no creator, there's nothing to intersect against — same posture as Verify on legacy rows")
+			"data-plane / inter-server scopes are pure bearer authority — they pass through even without an attributable creator")
 	})
 
 	t.Run("nil hook fails closed for user-grantable scopes", func(t *testing.T) {

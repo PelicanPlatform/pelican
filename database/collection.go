@@ -1090,13 +1090,22 @@ func CreateShare(db *gorm.DB, req CreateShareReq) (*Collection, error) {
 	}
 
 	// Namespace must equal the parent's or be a path-descendant.
-	// Strip trailing slashes for comparison, then either equality or
-	// a "<parent>/" prefix match counts. Empty namespace defaults to
-	// the parent's exact namespace.
-	ns := strings.TrimRight(req.Namespace, "/")
+	// Canonicalize (and reject scope-corrupting characters) BEFORE the
+	// prefix comparison so the descendant check and the later scope mint
+	// operate on the same value — otherwise a traversal like
+	// "/parent/../../secret" would slip past the prefix check here and
+	// clean to "/secret" at mint time. Empty namespace defaults to the
+	// parent's exact namespace.
 	parentNS := strings.TrimRight(parent.Namespace, "/")
-	if ns == "" {
+	var ns string
+	if strings.TrimRight(req.Namespace, "/") == "" {
 		ns = parentNS
+	} else {
+		cleaned, err := CleanNamespacePath(req.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		ns = strings.TrimRight(cleaned, "/")
 	}
 	if ns != parentNS && !strings.HasPrefix(ns, parentNS+"/") {
 		return nil, errors.New("share namespace must equal or be a path-descendant of the parent's namespace")
@@ -1634,11 +1643,18 @@ func validateACL(db *gorm.DB, collection *Collection, user, userID string, group
 
 	// for each acl, check if a user's group is the group in the ACL and has the required role
 	for _, acl := range collection.ACLs {
+		// Skip expired grants and keep scanning — a caller may hold the
+		// required role through more than one group, and ACL row order is
+		// not deterministic. Returning ErrForbidden on the first expired
+		// match (as this did previously) would intermittently deny a user
+		// who also has a still-valid grant, purely based on iteration
+		// order. This mirrors EffectiveCollectionRole, which likewise
+		// `continue`s past expired rows.
+		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+			continue
+		}
 		for _, group := range groups {
 			if acl.GroupID == group && slices.Contains(roles, acl.Role) {
-				if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
-					return ErrForbidden
-				}
 				return nil
 			}
 		}
@@ -2300,10 +2316,19 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 		updates["description"] = *description
 	}
 	if authTemplateEligible != nil {
-		// Refuse outright for non-admin callers — see the field's
-		// docstring on Group. The owner of a group cannot give it
-		// authz-template authority on their own.
-		if !isAdmin && !isUserAdminCaller {
+		// Only a full system admin may set this bit — NOT a user_admin.
+		// auth_template_eligible is the boundary that stops a group's
+		// *name* from conferring authority: EffectiveScopesForIdentity
+		// grants Server.AdminGroups-matched (or authz-template-matched)
+		// scopes only to groups whose eligibility bit is set. If a
+		// server.user_admin could flip it, they could self-escalate to
+		// server.admin — take a group whose name coincides with a
+		// Server.AdminGroups entry, own/administer it, set the bit, and
+		// every member (themselves included) inherits server.admin, a
+		// strictly higher privilege than the user_admin they hold. So
+		// this must require the system-admin scope, not the user-admin
+		// one. (The owner of a group still cannot set it on their own.)
+		if !isAdmin {
 			return ErrForbidden
 		}
 		updates["auth_template_eligible"] = *authTemplateEligible
@@ -2353,11 +2378,47 @@ func UpdateGroupOwnership(db *gorm.DB, id string, ownerID, adminID *string, admi
 			}
 			updates["owner_id"] = *ownerID
 		}
-		if adminID != nil {
-			updates["admin_id"] = *adminID
-		}
+		// Resolve the effective admin_type for validation: the incoming
+		// value if provided, otherwise the group's current one. admin_id
+		// and admin_type must stay consistent because the authorization
+		// helpers (isGroupOwnerOrAdmin, ListGroupsVisibleToUser) branch on
+		// admin_type and treat admin_id as either a User.ID or a Group.ID
+		// accordingly. Writing an unvalidated admin_type would leave the
+		// delegation silently non-matching; writing a dangling admin_id
+		// would point authority at a non-existent principal.
+		effectiveAdminType := group.AdminType
 		if adminType != nil {
+			if *adminType != AdminTypeUser && *adminType != AdminTypeGroup && *adminType != "" {
+				return fmt.Errorf("invalid admin type %q: must be %q or %q", string(*adminType), AdminTypeUser, AdminTypeGroup)
+			}
+			effectiveAdminType = *adminType
 			updates["admin_type"] = *adminType
+		}
+		if adminID != nil {
+			// Verify the referenced admin principal exists, interpreting
+			// admin_id per the effective admin_type. An empty admin_id
+			// clears the delegation and needs no lookup.
+			if *adminID != "" {
+				switch effectiveAdminType {
+				case AdminTypeUser:
+					if err := tx.First(&User{}, "id = ?", *adminID).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return errors.New("admin user does not exist")
+						}
+						return err
+					}
+				case AdminTypeGroup:
+					if err := tx.First(&Group{}, "id = ?", *adminID).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return errors.New("admin group does not exist")
+						}
+						return err
+					}
+				default:
+					return errors.New("cannot set admin_id without a valid admin_type ('user' or 'group')")
+				}
+			}
+			updates["admin_id"] = *adminID
 		}
 
 		if len(updates) == 0 {
@@ -2927,9 +2988,31 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 		previousOwnerID = collection.OwnerID
 		collectionID = collection.ID
 
-		// Atomic transfer: bump owner_id + the legacy owner-username
-		// audit field together, mark the invite redeemed.
+		// Claim the link FIRST with a race-safe conditional update —
+		// the same guard the group and password redeem paths use. The
+		// in-memory `RedeemedBy != ""` check above is not sufficient on
+		// its own: two concurrent redemptions can both read the link as
+		// unredeemed and both proceed, each performing the (last-writer-
+		// wins) ownership transfer. Marking redeemed_by only where it is
+		// still '' and aborting when no row is affected makes the
+		// single-use invariant hold under concurrency. We do it before
+		// the transfer so a losing racer never touches owner_id.
 		now := time.Now()
+		claim := tx.Model(&GroupInviteLink{}).
+			Where("id = ? AND redeemed_by = ''", link.ID).
+			Updates(map[string]interface{}{
+				"redeemed_by": redeemer.ID,
+				"redeemed_at": &now,
+			})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			return errors.New("invite link has already been redeemed")
+		}
+
+		// Atomic transfer: bump owner_id + the legacy owner-username
+		// audit field together.
 		if err := tx.Model(&Collection{}).
 			Where("id = ?", link.CollectionID).
 			Updates(map[string]interface{}{
@@ -2959,14 +3042,6 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 			}
 		}
 
-		if err := tx.Model(&GroupInviteLink{}).
-			Where("id = ?", link.ID).
-			Updates(map[string]interface{}{
-				"redeemed_by": redeemer.ID,
-				"redeemed_at": &now,
-			}).Error; err != nil {
-			return err
-		}
 		return nil
 	})
 	if err != nil {

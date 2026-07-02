@@ -76,8 +76,17 @@ var (
 //     minted, on the next call.
 //
 // userID may be empty (legacy rows minted before CreatedBy was
-// recorded) — in that case we leave capabilities untouched, since we
-// have no creator to intersect against.
+// recorded). In that case we cannot attribute the token to any current
+// authority, so we FAIL CLOSED on the user-grantable scopes: they are
+// dropped, exactly as when the EffectiveScopesForUser hook is unset.
+// Otherwise a management scope (server.admin / user_admin /
+// collection_admin, or web_ui.access / monitoring.query) minted before
+// the created_by column existed would survive forever, immune to the
+// revocation-via-intersection contract — a strictly-worse default than
+// requiring the operator to re-mint the handful of pre-column tokens.
+// Non-user-grantable (data-plane / inter-server) scopes still pass
+// through, because those are pure bearer authority, not derived from a
+// creator's role.
 //
 // validateScopesForCreator (below) is the create-time companion: same
 // filter, but returns an error listing every scope that would be
@@ -86,11 +95,11 @@ var (
 // auth decision in milliseconds, while CreateApiKey wants to refuse
 // (and tell the admin which scopes they can't grant).
 func intersectWithUserScopes(capabilities []string, userID string) []string {
-	if userID == "" {
-		return capabilities
-	}
+	// Empty userID (legacy row) falls through with a nil effective set,
+	// so every user-grantable scope is dropped below — fail closed. See
+	// the docstring for why we no longer pass these through untouched.
 	var effective []token_scopes.TokenScope
-	if EffectiveScopesForUser != nil {
+	if userID != "" && EffectiveScopesForUser != nil {
 		effective = EffectiveScopesForUser(userID)
 	}
 	hasEffective := make(map[token_scopes.TokenScope]struct{}, len(effective))
@@ -124,7 +133,9 @@ func intersectWithUserScopes(capabilities []string, userID string) []string {
 // honest.
 //
 // Edge cases follow intersectWithUserScopes:
-//   - empty userID → pass through (legacy / system caller)
+//   - empty userID → drop all user-grantable scopes (fail closed). In
+//     practice the create path always supplies a creator, so this only
+//     bites tests / direct callers.
 //   - hook unset → drop all user-grantable scopes (fail closed)
 //   - unknown scope strings → treated as non-grantable, pass through
 func validateScopesForCreator(capabilities []string, userID string) error {

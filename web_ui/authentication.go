@@ -215,6 +215,32 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		}
 	}
 
+	// Fallback: locally-minted tokens that carry only a subject and no
+	// user_id claim (notably the CLI admin token minted by
+	// fetchOrGenerateWebAPIAdminToken, which signs with the issuer key
+	// but has no user row handy to stamp an ID from). Because we have
+	// already proven the token was issued by *this* server — signature
+	// verified against our JWKS and issuer pinned to GetLocalIssuerUrl()
+	// above — the subject is trustworthy: only the issuer-key holder can
+	// mint such a token, and the user-management API is exactly the
+	// operator surface that key represents. Resolve the subject to a
+	// user row so RequireAUPCompliance and the /users,/groups handlers
+	// (which key off UserId) accept the request. User rows for local
+	// accounts carry issuer == Server.ExternalWebUrl (see
+	// BootstrapAdminAndBackfillOwners), so we pin the lookup to that
+	// issuer rather than matching a username across every OIDC realm.
+	if userId == "" && database.ServerDatabase != nil {
+		externalURL := param.Server_ExternalWebUrl.GetString()
+		if externalURL != "" {
+			var resolved database.User
+			if lookupErr := database.ServerDatabase.
+				Where("username = ? AND issuer = ?", user, externalURL).
+				First(&resolved).Error; lookupErr == nil {
+				userId = resolved.ID
+			}
+		}
+	}
+
 	// Extract oidc_sub claim for admin checks against UIAdminUsers
 	if oidcSubIface, ok := verified.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
@@ -313,16 +339,23 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	// federation registration tokens, file-transfer test tokens, ...)
 	// and a cookie reader that only checks the signature would happily
 	// accept any of them as a session token. Adding the issuer +
-	// audience match pins the cookie to the login flow specifically —
-	// only setLoginCookie sets both to Server.ExternalWebUrl.
-	externalUrl := param.Server_ExternalWebUrl.GetString()
-	if externalUrl == "" {
+	// audience match pins the cookie to the login flow specifically.
+	//
+	// Pin to config.GetLocalIssuerUrl() — the SAME value setLoginCookie
+	// stamps into the cookie's iss and aud (see the loginCookieTokenCfg
+	// setup there). Using param.Server_ExternalWebUrl directly here would
+	// break the co-located origin+director topology, where the local
+	// issuer is the namespaced "<ExternalWebUrl>/api/v1.0/origin" and the
+	// cookie's claims therefore never equal the bare ExternalWebUrl —
+	// every authenticated request would 401 in a permanent logout loop.
+	localIssuer := config.GetLocalIssuerUrl()
+	if localIssuer == "" {
 		err = errors.New("Server.ExternalWebUrl is not configured; cannot validate login cookie")
 		return
 	}
 	if err = jwt.Validate(parsed,
-		jwt.WithIssuer(externalUrl),
-		jwt.WithAudience(externalUrl),
+		jwt.WithIssuer(localIssuer),
+		jwt.WithAudience(localIssuer),
 	); err != nil {
 		return
 	}
@@ -422,9 +455,14 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 		return
 	}
 
-	// One cookie should be used for all path
-	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
+	// One cookie should be used for all path.
+	// SetSameSite must be called BEFORE SetCookie: gin reads the
+	// configured SameSite mode at SetCookie time, so setting it
+	// afterwards would emit the login cookie with no SameSite attribute
+	// (falling back to the browser default) instead of the intended
+	// Strict.
 	ctx.SetSameSite(http.SameSiteStrictMode)
+	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
 
 	// Track last login time
 	if userRecord.ID != "" {
@@ -1045,8 +1083,9 @@ func resetLoginHandler(ctx *gin.Context) {
 }
 
 func logoutHandler(ctx *gin.Context) {
-	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
+	// SetSameSite before SetCookie (see setLoginCookie for why).
 	ctx.SetSameSite(http.SameSiteStrictMode)
+	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
 	ctx.Set("User", "")
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{

@@ -34,6 +34,8 @@ package database
 // that hold the hash live in this file and stay package-private.
 
 import (
+	"errors"
+
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -121,6 +123,18 @@ func VerifyUserPassword(db *gorm.DB, username, plaintext, issuer string) (*User,
 	}
 	user, err := GetUserByID(db, cred.ID)
 	if err != nil {
+		// The narrow userCredential projection has no gorm.DeletedAt
+		// field, so the SELECT above still matches a soft-deleted row;
+		// GetUserByID (which does carry DeletedAt) then returns
+		// ErrRecordNotFound. Collapse that into ErrInvalidPassword so a
+		// soft-deleted account is indistinguishable from a wrong password
+		// — otherwise a correct-password attempt returns a 500 while a
+		// wrong one returns 401, turning the login endpoint into a
+		// password-confirmation / account-existence oracle for deleted
+		// users.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidPassword
+		}
 		return nil, err
 	}
 	if user.Status == UserStatusInactive {

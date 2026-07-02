@@ -56,10 +56,28 @@ export interface AUPDocument {
 // resolveReturnURL accepts a returnURL query string only when it is a
 // same-origin path. Without this guard, a malicious link could send
 // signed users to an attacker-controlled domain after acceptance.
+//
+// The naive `startsWith('/') && !startsWith('//')` check is NOT enough:
+// browsers normalize a backslash to a forward slash when resolving a
+// URL, so "/\evil.com" (and "/\\evil.com") parses as a protocol-relative
+// "//evil.com" and navigates off-origin — a classic open-redirect
+// bypass. Rather than enumerate escape variants, resolve the value
+// against the current origin with the URL parser and require the result
+// to stay same-origin; anything else falls back to "/".
 const resolveReturnURL = (raw: string | null): string => {
   if (!raw) return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
+  // Must be a path reference, not an absolute or scheme-relative URL.
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
+    return '/';
+  }
+  try {
+    const resolved = new URL(raw, window.location.origin);
+    if (resolved.origin !== window.location.origin) return '/';
+    // Return only the path+query+hash so we never echo an absolute URL.
+    return resolved.pathname + resolved.search + resolved.hash;
+  } catch {
+    return '/';
+  }
 };
 
 // Page wraps Body in a Suspense boundary because useSearchParams (used

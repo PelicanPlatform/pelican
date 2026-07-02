@@ -676,6 +676,22 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
+	// Canonicalize and reject scope-corrupting characters up front, then
+	// use the cleaned value for BOTH the export-prefix check and
+	// persistence. A collection namespace is later spliced verbatim into
+	// storage.* token scopes; validating the raw form but storing a
+	// different one would let a traversal ("/export/../../secret") pass
+	// the prefix check and mint a scope outside the export.
+	cleanedNamespace, err := database.CleanNamespacePath(req.Namespace)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid namespace: %v", err),
+		})
+		return
+	}
+	req.Namespace = cleanedNamespace
+
 	// Validate that the namespace is *within* an exported prefix.
 	// Collections aren't limited to top-level exports — operators
 	// regularly want a collection rooted at a sub-path of a larger

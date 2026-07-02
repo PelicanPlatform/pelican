@@ -43,6 +43,22 @@ import {
 import { login } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
+// isSameOriginPath reports whether a returnURL is a safe same-origin
+// path to navigate to. Rejects absolute URLs, protocol-relative
+// "//host" values, and the backslash variant "/\host" that browsers
+// normalize into a protocol-relative URL — all of which would be
+// open-redirect vectors when fed to window.location.href.
+const isSameOriginPath = (raw: string): boolean => {
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
+    return false;
+  }
+  try {
+    return new URL(raw, window.location.origin).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+};
+
 const PasswordLogin = () => {
   const dispatch = useContext(AlertDispatchContext);
 
@@ -99,8 +115,12 @@ const PasswordLogin = () => {
         router.push(returnUrl.replace(`/view`, '') || '/');
 
         // If the returnUrl is some other relative path, use a full navigation
-        // since it's outside the SPA's route table.
-      } else if (returnUrl && returnUrl.startsWith('/')) {
+        // since it's outside the SPA's route table. Require it to resolve
+        // same-origin — a bare `startsWith('/')` check admits a
+        // protocol-relative "//evil.com" (or the backslash variant
+        // "/\evil.com", which browsers normalize to "//evil.com") and
+        // turns this into an open redirect after login.
+      } else if (returnUrl && isSameOriginPath(returnUrl)) {
         window.location.href = returnUrl;
 
         // Default to the landing page. Use an absolute path: relative hrefs

@@ -26,7 +26,7 @@
 	"customizations": {
 		"vscode": {
 			"settings": {
-				"go.gopath": "/root/go",
+				"go.gopath": "/home/vscode/go",
 				"go.goroot": "/usr/local/go",
 				"go.useLanguageServer": true
 			},
@@ -39,10 +39,19 @@
 	},
 	"postCreateCommand": "go install github.com/go-delve/delve/cmd/dlv@latest",
 	"remoteEnv": {
-		"PATH": "/usr/local/go/bin:/root/go/bin:${containerEnv:PATH}"
+		"GOPATH": "/home/vscode/go",
+		"PATH": "/usr/local/go/bin:/home/vscode/go/bin:${containerEnv:PATH}"
 	},
-	"remoteUser": "root",
+	"remoteUser": "vscode",
 	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": false,
+			"installOhMyZsh": false,
+			"username": "vscode",
+			"userUid": "automatic",
+			"userGid": "automatic",
+			"upgradePackages": false
+		},
 		"ghcr.io/devcontainers/features/git:1": {
 			"version": "latest"
 		}
