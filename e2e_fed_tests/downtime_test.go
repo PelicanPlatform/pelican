@@ -141,27 +141,29 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to join downtime creation path")
 	cacheWebUrl.Path = downtimeCreationPath
 
-	// Mint a login cookie for the cache server. The cookie path in
-	// GetUserGroups now pins both `iss` and `aud` to the receiving
-	// server's own ExternalWebUrl (auth-layer security pass — see
-	// the comment around jwt.WithIssuer/jwt.WithAudience in
-	// authentication.go), so a single federation-wide cookie can no
-	// longer authenticate against multiple servers. We mint a
-	// token per server for the cookie: this one is bound to the cache.
-	mintCookieFor := func(t *testing.T, externalWebUrl string) string {
+	// Mint a login cookie the same way setLoginCookie does: issuer and
+	// audience are config.GetLocalIssuerUrl(). GetUserGroups verifies the
+	// cookie's iss/aud against that same value, and the collection/scope
+	// routes re-verify via checkLocalIssuer, which also requires
+	// GetLocalIssuerUrl() — so a session cookie must carry it (it differs
+	// from the bare ExternalWebUrl in the co-located origin+director
+	// topology this fed test runs). All the receiving servers share this
+	// process's local issuer, so one issuer value works for each.
+	mintCookieFor := func(t *testing.T) string {
 		t.Helper()
+		localIssuer := config.GetLocalIssuerUrl()
 		tk := token.NewWLCGToken()
-		tk.Issuer = externalWebUrl
+		tk.Issuer = localIssuer
 		tk.Subject = "admin-user"
 		tk.Lifetime = 5 * time.Minute
-		tk.AddAudiences(externalWebUrl)
+		tk.AddAudiences(localIssuer)
 		tk.AddScopes(token_scopes.WebUi_Access)
 		tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
 		out, err := tk.CreateToken()
 		require.NoError(t, err)
 		return out
 	}
-	cacheTok := mintCookieFor(t, cacheWebUrlStr)
+	cacheTok := mintCookieFor(t)
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))
 	downtimeCreationReq.Header.Set("Content-Type", "application/json")
 	downtimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: cacheTok})
@@ -192,9 +194,9 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	}
 	registryDowntimebody, _ := json.Marshal(downtimeByFedAdmin)
 	require.NotEmpty(t, registryDowntimebody, "Failed to marshal registry downtime creation request")
-	// Same per-server cookie story as the cache POST above —
-	// the registry pins iss/aud to its own ExternalWebUrl.
-	registryTok := mintCookieFor(t, fedInfo.RegistryEndpoint)
+	// Same session-cookie story as the cache POST above — issuer/audience
+	// are this process's config.GetLocalIssuerUrl().
+	registryTok := mintCookieFor(t)
 	registryDowntimeCreationReq, _ := http.NewRequest("POST", registryUrl.String(), bytes.NewBuffer(registryDowntimebody))
 	registryDowntimeCreationReq.Header.Set("Content-Type", "application/json")
 	registryDowntimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: registryTok})

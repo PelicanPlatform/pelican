@@ -341,24 +341,23 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	// accept any of them as a session token. Adding the issuer +
 	// audience match pins the cookie to the login flow specifically.
 	//
-	// Pin to param.Server_ExternalWebUrl — the SAME value setLoginCookie
-	// stamps into the cookie's iss and aud. A login cookie is a web-UI
-	// SESSION token, bound to this server's own web origin; it is NOT a
-	// data-plane token, so it deliberately does NOT carry the namespaced
-	// "<ExternalWebUrl>/api/v1.0/origin" issuer that GetLocalIssuerUrl()
-	// returns in the co-located origin+director case. Both mint and
-	// verify use the bare ExternalWebUrl, which is topology-independent,
-	// so co-located servers authenticate correctly (an earlier mismatch
-	// here — mint via GetLocalIssuerUrl(), verify via ExternalWebUrl —
-	// was the co-located "permanent logout loop" bug).
-	externalUrl := param.Server_ExternalWebUrl.GetString()
-	if externalUrl == "" {
+	// Pin to config.GetLocalIssuerUrl() — the SAME value setLoginCookie
+	// stamps into the cookie's iss and aud. This MUST match GetLocalIssuerUrl
+	// (not the bare Server.ExternalWebUrl) because the collection/scope
+	// routes independently re-verify the very same cookie via token.Verify
+	// -> checkLocalIssuer, which requires issuer == GetLocalIssuerUrl().
+	// The two forms diverge only in the co-located origin+director topology
+	// ("<ExternalWebUrl>/api/v1.0/origin"); pinning both mint and verify to
+	// GetLocalIssuerUrl() keeps the cookie acceptable on BOTH paths there
+	// (an ExternalWebUrl mismatch was the co-located auth failure).
+	localIssuer := config.GetLocalIssuerUrl()
+	if localIssuer == "" {
 		err = errors.New("Server.ExternalWebUrl is not configured; cannot validate login cookie")
 		return
 	}
 	if err = jwt.Validate(parsed,
-		jwt.WithIssuer(externalUrl),
-		jwt.WithAudience(externalUrl),
+		jwt.WithIssuer(localIssuer),
+		jwt.WithAudience(localIssuer),
 	); err != nil {
 		return
 	}
@@ -420,16 +419,23 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 
 	loginCookieTokenCfg := token.NewWLCGToken()
 	loginCookieTokenCfg.Lifetime = loginLifetime
-	// A login cookie is a web-UI session token bound to this server's own
-	// web origin, so it uses the bare Server.ExternalWebUrl as both issuer
-	// and audience — NOT config.GetLocalIssuerUrl(), whose namespaced
-	// "<ExternalWebUrl>/api/v1.0/origin" form (co-located origin+director)
-	// is a data-plane issuer irrelevant to sessions. GetUserGroups
-	// verifies against the same ExternalWebUrl; keeping both on the bare,
-	// topology-independent URL is what makes co-located logins work.
-	externalUrl := param.Server_ExternalWebUrl.GetString()
-	loginCookieTokenCfg.Issuer = externalUrl
-	loginCookieTokenCfg.AddAudiences(externalUrl)
+	// Issue the login cookie with config.GetLocalIssuerUrl() as both issuer
+	// and audience. This value must match on BOTH cookie-verification
+	// paths, and one of them pins it:
+	//   - GetUserGroups (below) reads the cookie directly and we verify
+	//     iss/aud against the SAME GetLocalIssuerUrl().
+	//   - collection/scope routes re-check the cookie via token.Verify ->
+	//     checkLocalIssuer, which REQUIRES the issuer to equal
+	//     config.GetLocalIssuerUrl() (token/token_verify.go).
+	// The bare Server.ExternalWebUrl differs from GetLocalIssuerUrl() in
+	// the co-located origin+director topology (the latter is
+	// "<ExternalWebUrl>/api/v1.0/origin"), so using ExternalWebUrl here
+	// would authenticate on the GetUserGroups path but be rejected by
+	// checkLocalIssuer on the collection routes. GetLocalIssuerUrl()
+	// satisfies both and is topology-correct.
+	localIssuer := config.GetLocalIssuerUrl()
+	loginCookieTokenCfg.Issuer = localIssuer
+	loginCookieTokenCfg.AddAudiences(localIssuer)
 	loginCookieTokenCfg.Subject = userRecord.Username
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access)
 	loginCookieTokenCfg.AddGroups(groups...)
