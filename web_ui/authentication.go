@@ -341,21 +341,24 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	// accept any of them as a session token. Adding the issuer +
 	// audience match pins the cookie to the login flow specifically.
 	//
-	// Pin to config.GetLocalIssuerUrl() — the SAME value setLoginCookie
-	// stamps into the cookie's iss and aud (see the loginCookieTokenCfg
-	// setup there). Using param.Server_ExternalWebUrl directly here would
-	// break the co-located origin+director topology, where the local
-	// issuer is the namespaced "<ExternalWebUrl>/api/v1.0/origin" and the
-	// cookie's claims therefore never equal the bare ExternalWebUrl —
-	// every authenticated request would 401 in a permanent logout loop.
-	localIssuer := config.GetLocalIssuerUrl()
-	if localIssuer == "" {
+	// Pin to param.Server_ExternalWebUrl — the SAME value setLoginCookie
+	// stamps into the cookie's iss and aud. A login cookie is a web-UI
+	// SESSION token, bound to this server's own web origin; it is NOT a
+	// data-plane token, so it deliberately does NOT carry the namespaced
+	// "<ExternalWebUrl>/api/v1.0/origin" issuer that GetLocalIssuerUrl()
+	// returns in the co-located origin+director case. Both mint and
+	// verify use the bare ExternalWebUrl, which is topology-independent,
+	// so co-located servers authenticate correctly (an earlier mismatch
+	// here — mint via GetLocalIssuerUrl(), verify via ExternalWebUrl —
+	// was the co-located "permanent logout loop" bug).
+	externalUrl := param.Server_ExternalWebUrl.GetString()
+	if externalUrl == "" {
 		err = errors.New("Server.ExternalWebUrl is not configured; cannot validate login cookie")
 		return
 	}
 	if err = jwt.Validate(parsed,
-		jwt.WithIssuer(localIssuer),
-		jwt.WithAudience(localIssuer),
+		jwt.WithIssuer(externalUrl),
+		jwt.WithAudience(externalUrl),
 	); err != nil {
 		return
 	}
@@ -417,8 +420,16 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 
 	loginCookieTokenCfg := token.NewWLCGToken()
 	loginCookieTokenCfg.Lifetime = loginLifetime
-	loginCookieTokenCfg.Issuer = config.GetLocalIssuerUrl()
-	loginCookieTokenCfg.AddAudiences(config.GetLocalIssuerUrl())
+	// A login cookie is a web-UI session token bound to this server's own
+	// web origin, so it uses the bare Server.ExternalWebUrl as both issuer
+	// and audience — NOT config.GetLocalIssuerUrl(), whose namespaced
+	// "<ExternalWebUrl>/api/v1.0/origin" form (co-located origin+director)
+	// is a data-plane issuer irrelevant to sessions. GetUserGroups
+	// verifies against the same ExternalWebUrl; keeping both on the bare,
+	// topology-independent URL is what makes co-located logins work.
+	externalUrl := param.Server_ExternalWebUrl.GetString()
+	loginCookieTokenCfg.Issuer = externalUrl
+	loginCookieTokenCfg.AddAudiences(externalUrl)
 	loginCookieTokenCfg.Subject = userRecord.Username
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access)
 	loginCookieTokenCfg.AddGroups(groups...)
