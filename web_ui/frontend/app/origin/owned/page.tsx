@@ -103,12 +103,19 @@ const OwnedCollectionsHome: React.FC = () => {
     alertOnError(GroupService.getAll, 'Failed to load groups', dispatch)
   );
 
-  // Filter to collections this user owns. The backend stamps the
-  // creator's username onto Collection.owner at create time; comparing
-  // to me.username matches that wire shape.
+  // Filter to collections this user owns. ownerId (the User.ID slug) is
+  // the authoritative ownership handle: on an ownership transfer the
+  // backend rewrites ownerId but deliberately leaves the legacy
+  // Collection.owner username field untouched (it's an audit trail), so
+  // matching on username would hide every collection this user received
+  // via transfer or an ownership invite. Match ownerId first, and fall
+  // back to the username only for pre-migration rows that never had an
+  // ownerId populated.
   const ownedCollections = useMemo(() => {
     if (!me || !allCollections) return undefined;
-    return allCollections.filter((c) => c.owner === me.username);
+    return allCollections.filter((c) =>
+      c.ownerId ? c.ownerId === me.id : c.owner === me.username
+    );
   }, [me, allCollections]);
 
   if (meLoading || collectionsLoading || groupsLoading || !me) {

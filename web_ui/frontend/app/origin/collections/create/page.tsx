@@ -123,11 +123,22 @@ const Page = () => {
       const response = await alertOnError(
         async () =>
           fetchApi(async () =>
-            fetch(`/api/v1.0/groups/${groupId}/invite-links`, {
+            // The route is POST /groups/:id/invites (not
+            // .../invite-links), and the request shape is
+            // CreateInviteLinkReq { isSingleUse, expiresIn } where
+            // expiresIn is a Go duration string — "168h", NOT a numeric
+            // "expiresInHours" field (which the server silently ignores,
+            // falling back to Server.GroupInviteLinkExpiration).
+            //
+            // Single-use: this link grants admin-group membership (full
+            // collection management), so it must be one-shot — a
+            // forwarded/leaked multi-use link would admit unlimited
+            // redeemers until expiry.
+            fetch(`/api/v1.0/groups/${groupId}/invites`, {
               method: 'POST',
               body: JSON.stringify({
-                isSingleUse: false,
-                expiresInHours: 168, // 7 days
+                isSingleUse: true,
+                expiresIn: '168h', // 7 days
               }),
             })
           ),
@@ -136,7 +147,15 @@ const Page = () => {
       );
       if (response?.ok) {
         const data = await response.json();
-        setInviteLink(data.inviteToken || '');
+        // Surface a clickable redeem link, not the bare token — the
+        // dialog promises a "link" and every other invite surface builds
+        // this same URL form.
+        const token = data.inviteToken || '';
+        setInviteLink(
+          token
+            ? `${window.location.origin}/view/invite/redeem?token=${encodeURIComponent(token)}`
+            : ''
+        );
         setShowInviteDialog(true);
       }
     } catch {

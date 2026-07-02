@@ -1,0 +1,39 @@
+---
+title: pelican server server user set status
+---
+
+## pelican-server server user set-status
+
+Update user status (active|inactive)
+
+### Synopsis
+
+Set a user's account status to 'active' or 'inactive'.
+Display name is a separate, human-only field; use 'pelican server user update'
+to change it (or have the user edit it themselves under their profile).
+
+```
+pelican-server server user set-status <user-id> [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for set-status
+      --status string   Status: 'active' or 'inactive'
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server server user](/commands-reference/pelican-server/server/user/)	 - Manage users on a Pelican server

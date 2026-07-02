@@ -233,7 +233,7 @@ instead.
 
 	originCmd.AddCommand(originCollectionCmd)
 	// User and group management has moved to `pelican server` — see
-	// cmd/origin_groups.go (which now attaches its commands there).
+	// cmd/server_users_groups.go (which now attaches its commands there).
 	// Users and groups are component-agnostic: a registry, cache, or
 	// director can host them just as well as an origin.
 	originCmd.AddCommand(sshAuthCmd)

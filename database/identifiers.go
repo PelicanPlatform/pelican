@@ -20,8 +20,10 @@ package database
 
 import (
 	"errors"
+	"path"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // ErrInvalidIdentifier is returned when a user-supplied name (a username
@@ -159,4 +161,43 @@ func SanitizeIdentifier(s string) string {
 		return ""
 	}
 	return out
+}
+
+// ErrInvalidNamespacePath is returned when a federation namespace path
+// (a collection or share namespace — a '/'-rooted object path, NOT a
+// machine identifier) fails validation. Surface it as a bad-request.
+var ErrInvalidNamespacePath = errors.New("invalid namespace path: must be an absolute '/'-rooted path with no whitespace, control characters, or ':'")
+
+// CleanNamespacePath validates and canonicalizes a federation namespace
+// path. It is the single choke point for namespaces that later get
+// spliced into token scope strings (e.g. storage.read:/foo,
+// share.access:/id) and compared by path prefix. Two properties it
+// guarantees, each closing a concrete escalation path:
+//
+//  1. It returns path.Clean'd output, so a prefix check performed on the
+//     result and a scope minted from the result can never disagree.
+//     Without this, a raw-string prefix check accepts a traversal like
+//     "/org/foo/../../secret" (it literally starts with "/org/foo/")
+//     while the mint-side path.Clean turns it into "/secret" — granting
+//     a storage scope on a prefix entirely outside the parent.
+//
+//  2. It rejects whitespace, control characters, and ':'. The WLCG scope
+//     claim is space-delimited and ':' separates a scope from its path,
+//     so a namespace like "/parent/x storage.modify:/etc" would split
+//     into two scopes downstream — injecting an authorization the caller
+//     never held.
+//
+// Callers must use the returned, cleaned value for BOTH the authorization
+// prefix check and persistence; validating the raw input but storing or
+// minting from a different form would reopen property (1).
+func CleanNamespacePath(ns string) (string, error) {
+	if ns == "" || !strings.HasPrefix(ns, "/") {
+		return "", ErrInvalidNamespacePath
+	}
+	for _, r := range ns {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || r == ':' {
+			return "", ErrInvalidNamespacePath
+		}
+	}
+	return path.Clean(ns), nil
 }

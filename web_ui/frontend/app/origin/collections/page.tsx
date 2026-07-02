@@ -100,6 +100,7 @@ const Page = () => {
     }
   );
 
+  const dispatch = useContext(AlertDispatchContext);
   const [search, setSearch] = useState<string>('');
   const searchedData = useFuse<CollectionSummary>(collections || [], search);
 
@@ -144,10 +145,21 @@ const Page = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this collection?')) return;
-    const resp = await fetch(`/api/v1.0/origin_ui/collections/${id}`, {
-      method: 'DELETE',
-    });
-    if (resp.ok) {
+    // Go through CollectionService.delete (secureFetch + error
+    // extraction) wrapped in alertOnError, so a failed delete — e.g. a
+    // non-owner hitting the owner-only server gate, or a 500 — surfaces
+    // an alert instead of silently doing nothing (which read as
+    // "success" and prompted confused retries). Only re-fetch the list
+    // when the delete actually succeeded.
+    const ok = await alertOnError(
+      async () => {
+        await CollectionService.delete(id);
+        return true;
+      },
+      'Failed to delete collection',
+      dispatch
+    );
+    if (ok) {
       mutate();
     }
   };
@@ -427,13 +439,24 @@ const CollectionCard: React.FC<{
               <ShareIcon />
             </IconButton>
           )}
-          <IconButton
-            color='error'
-            onClick={onDelete}
-            title='Delete collection'
-          >
-            <Delete />
-          </IconButton>
+          {/*
+            Gate delete on the same per-row canEdit signal as the pencil
+            so read-only callers don't get a destructive affordance that
+            can only 403. Deletion is ultimately owner-only server-side
+            (admin-group membership doesn't satisfy DeleteCollection), so
+            canEdit is a superset — a rare admin-group member may still
+            see it and get the (now surfaced) error, but pure viewers no
+            longer do.
+          */}
+          {c.canEdit && (
+            <IconButton
+              color='error'
+              onClick={onDelete}
+              title='Delete collection'
+            >
+              <Delete />
+            </IconButton>
+          )}
           <Tooltip title={open ? 'Hide details' : 'Show details'}>
             <IconButton
               size='small'
