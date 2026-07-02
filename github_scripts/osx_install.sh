@@ -92,6 +92,16 @@ popd
 
 git clone --recurse-submodules --branch v0.6.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
+# xrootd-s3-http builds with -Wall -Werror and bundles nlohmann/json 3.11.2,
+# whose `operator "" _json` (a space before the literal suffix) trips the
+# -Wdeprecated-literal-operator diagnostic in newer clang (Xcode 26.x),
+# turning the third-party header into a hard build error. We can't edit the
+# vendored header, and nlohmann only fixed the syntax in 3.11.3, so silence
+# just this one diagnostic. Appended AFTER -Wall/-Werror in their CMakeLists
+# so it wins. Use the plain -Wno- form (not -Wno-error=): clang honors it,
+# while GCC/older compilers that don't know the option ignore it silently
+# rather than erroring on an unknown -Wno-error= target.
+sed -i.bak 's/-Wall -Werror/-Wall -Werror -Wno-deprecated-literal-operator/' CMakeLists.txt
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
