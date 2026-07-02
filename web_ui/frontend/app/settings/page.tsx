@@ -24,19 +24,26 @@ import React, { useContext } from 'react';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import { RestartBox } from '@/app/config/components';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
+// Restart-server is a system-admin-only operation. The /settings
+// layout now admits user_admin too (so /settings/users is reachable),
+// so this page re-tightens to ['admin'] — without it a user-admin
+// would see a "Restart" button that 403s.
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
 
   return (
-    <Box width={'100%'}>
-      <SettingHeader
-        title={'Restart Server'}
-        description={
-          'Restarting the server will cause a temporary service outage, please use with caution.'
-        }
-      />
-      <RestartBox />
-    </Box>
+    <AuthenticatedContent redirect allowedRoles={['admin']}>
+      <Box width={'100%'}>
+        <SettingHeader
+          title={'Restart Server'}
+          description={
+            'Restarting the server will cause a temporary service outage, please use with caution.'
+          }
+        />
+        <RestartBox />
+      </Box>
+    </AuthenticatedContent>
   );
 }

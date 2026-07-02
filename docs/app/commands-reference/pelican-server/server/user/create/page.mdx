@@ -1,0 +1,60 @@
+---
+title: pelican server server user create
+---
+
+## pelican-server server user create
+
+Create a new user
+
+### Synopsis
+
+Create a new user. There are three onboarding flavors — pick the one
+that matches what you know about the user:
+
+  1. Local user (username + password login):
+       pelican server user create --username alice [--display-name "Alice"]
+       pelican server user invite-password &lt;user-id&gt;   # hand the link to the user
+     The admin never sees or chooses the password — the user picks one when
+     they redeem the link.
+
+  2. OIDC user, identity already known (pre-bind):
+       pelican server user create --username alice \
+           --sub abc-123 --issuer https://oidc.example/
+     The next OIDC login matching (sub, issuer) is linked to this account.
+     Use this when you have the user's IdP-issued subject claim in advance.
+
+  3. OIDC user, identity NOT yet known (onboarding link):
+       pelican server user invite-onboard
+     Issues a single-use link the user follows AFTER logging in via OIDC.
+     Their first OIDC identity claims the new account.
+
+Admins do NOT set passwords directly in any flow.
+
+```
+pelican-server server user create [flags]
+```
+
+### Options
+
+```
+      --display-name string   Display name
+  -h, --help                  help for create
+      --issuer string         OIDC issuer URL (external/OIDC users only)
+      --sub string            OIDC subject claim (external/OIDC users only)
+      --username string       Username (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server server user](/commands-reference/pelican-server/server/user/)	 - Manage users on a Pelican server

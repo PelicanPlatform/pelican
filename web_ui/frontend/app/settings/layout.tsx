@@ -43,6 +43,12 @@ export default function RootLayout({
           redirect
           trustThenValidate
           allowedRoles={['admin']}
+          // server.user_admin (granted directly or via group membership)
+          // also gets into the settings shell. Per-page gates below
+          // tighten back to system-admin where appropriate (AUP editor,
+          // API tokens, etc.). The Users sub-page is the headline use
+          // case; SubNavigation hides items the caller can't reach.
+          anyScopes={['server.user_admin']}
           boxProps={{ width: '100%' }}
         >
           <PaddedContent>

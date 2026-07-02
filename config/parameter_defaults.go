@@ -635,6 +635,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_XRootDPrefix.GetName(), "origin")
 	// Plugin.DirectorDecisionPercentage
 	v.SetDefault(param.Plugin_DirectorDecisionPercentage.GetName(), 20)
+	// Registry.EnableOIDC
+	v.SetDefault(param.Registry_EnableOIDC.GetName(), false)
 	// Registry.InactiveRegistrationCleanupInterval
 	v.SetDefault(param.Registry_InactiveRegistrationCleanupInterval.GetName(), "5m")
 	// Registry.InactiveRegistrationTimeout
@@ -659,6 +661,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_AdLifetime.GetName(), "10m")
 	// Server.AdvertisementInterval
 	v.SetDefault(param.Server_AdvertisementInterval.GetName(), "1m")
+	// Server.AutoEnrollUsernameClaims
+	v.SetDefault(param.Server_AutoEnrollUsernameClaims.GetName(), []string{"preferred_username", "email", "sub"})
 	// Server.DatabaseBackup.Frequency
 	v.SetDefault(param.Server_DatabaseBackup_Frequency.GetName(), "24h")
 	// Server.DatabaseBackup.Location
@@ -691,8 +695,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_EnablePprof.GetName(), false)
 	// Server.EnableUI
 	v.SetDefault(param.Server_EnableUI.GetName(), true)
+	// Server.GroupInviteLinkExpiration
+	v.SetDefault(param.Server_GroupInviteLinkExpiration.GetName(), "168h")
 	// Server.HealthMonitoringPublic
 	v.SetDefault(param.Server_HealthMonitoringPublic.GetName(), false)
+	// Server.NewUserDefaultScopes
+	v.SetDefault(param.Server_NewUserDefaultScopes.GetName(), []string{"web_ui.access"})
 	// Server.RegistrationRetryInterval
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
 	// Server.SSRFProtection.Disabled

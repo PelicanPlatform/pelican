@@ -9,20 +9,16 @@ interface ServerNameProps {
 }
 
 const ServerName = ({ defaultName }: ServerNameProps) => {
-  const {
-    data: metadataHistory,
-    error,
-    isLoading,
-  } = useApiSWR<ServerLocalMetadata[]>(
+  const { data: metadata, isLoading } = useApiSWR<ServerLocalMetadata>(
     'Failed to fetch server name',
-    '/api/v1.0/server/localMetadata/history',
-    async () => await fetch('/api/v1.0/server/localMetadata/history'),
-    { fallbackData: defaultName }
+    '/api/v1.0/server/localMetadata',
+    async () => await fetch('/api/v1.0/server/localMetadata'),
+    { fallbackData: { name: defaultName } as ServerLocalMetadata }
   );
 
   return (
     <Typography variant='h6' component='div' sx={{ flexGrow: 1 }} gutterBottom>
-      {isLoading ? <Skeleton /> : metadataHistory?.[0]?.name}
+      {isLoading ? <Skeleton /> : metadata?.name ?? defaultName}
     </Typography>
   );
 };

@@ -285,6 +285,19 @@ func (um *UserMapper) ExtractUserInfo(tokenClaims map[string]interface{}, reques
 // The token is parsed without verification (assumes it was already verified upstream)
 // Returns a userInfo struct suitable for caching with token authorization information
 func (um *UserMapper) MapTokenToUser(tokenStr string) *userInfo {
+	// Defense-in-depth for the share design: shares are unsupported
+	// on multi-user backends (the data plane can't safely impersonate
+	// the share OWNER's OS-level identity when each request is
+	// already remapped to its bearer's). Phase 3 of the share rollout
+	// refuses creation when Origin.Multiuser is on, so a properly
+	// configured origin will never reach this branch — but if an
+	// operator flips multi-user on AFTER shares already exist, any
+	// leftover share token must be refused here rather than silently
+	// served as the wrong user.
+	if shareTokenForbiddenInMultiuser(tokenStr) {
+		return nil
+	}
+
 	// Parse token without verification (it should have been verified upstream by getAcls)
 	tok, err := token.UnsafeParseClaims(tokenStr)
 	if err != nil {

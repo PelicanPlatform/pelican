@@ -1,102 +1,46 @@
-import { getObjectValue } from '@/helpers/util';
-import { getConfig } from '@/helpers/api';
 import { WellKnownConfiguration } from '@/types';
-import { Config } from '@/components/configuration';
 
-/**
- * Get federation URLs
- */
-export const getFederationUrls = async () => {
-  try {
-    // Get the configuration
-    const response = await getConfig();
-    const config = (await response.json()) as Config;
+interface FederationInfo extends WellKnownConfiguration {
+  discovery_endpoint?: string;
+  broker_endpoint?: string;
+}
 
-    // Map the configuration to federation URLs
-    const federationUrls = configurationToFederationUrls(config);
-
-    // If there is a discovery URL, attempt to get the well-known configuration
-    const discoveryUrl = getObjectValue<string>(config, [
-      'Federation',
-      'DiscoveryUrl',
-    ]);
-    const discoveredUrls = discoveryUrl
-      ? await discoverConfiguration(discoveryUrl)
-      : {};
-
-    // Merge the two sets of URLs, with discovered URLs taking precedence
-    return {
-      ...federationUrls,
-      ...discoveredUrls,
-    };
-  } catch (e) {
-    console.error(e);
-    return [];
-  }
-};
-
-/**
- * Pull federation URLs from the configuration and map to friendly names for display
- * @param config
- */
-const configurationToFederationUrls = (config: Config) => {
-  return UrlData.reduce(
-    (acc, { key, text }) => {
-      const url = getObjectValue<string>(config, key);
-      if (url) {
-        acc[text] = url;
-      }
-      return acc;
-    },
-    {} as { [key: string]: string }
-  );
-};
-
-const UrlData = [
-  { key: ['Federation', 'DirectorUrl'], text: 'Director' },
-  { key: ['Federation', 'RegistryUrl'], text: 'Registry' },
-  { key: ['Federation', 'JwkUrl'], text: 'JWK' },
+const LABEL_MAP: { key: keyof FederationInfo; text: string }[] = [
+  { key: 'director_endpoint', text: 'Director' },
+  { key: 'namespace_registration_endpoint', text: 'Registry' },
+  { key: 'jwks_uri', text: 'JWK' },
 ];
 
 /**
- * Discovery URL handler
+ * Get federation URLs from the local server's /api/v1.0/federation endpoint.
  *
- * Goes to the discovery URL and fetches the well-known pelican configuration
- * then maps the values to friendly names
+ * The endpoint returns the resolved federation discovery info and is
+ * accessible to any authenticated user, so non-admin dashboards can render
+ * director/registry links without needing access to the admin-only /config.
  */
-export const discoverConfiguration = async (discoveryUrl: string) => {
+export const getFederationUrls = async (): Promise<{
+  [key: string]: string;
+}> => {
   try {
-    // Go to the discovery endpoint and get the well-known configuration
-    const url = new URL('/.well-known/pelican-configuration', discoveryUrl);
-    const response = await fetch(url.toString());
+    const response = await fetch('/api/v1.0/federation');
     if (!response.ok) {
-      throw new Error(`Error fetching discovery URL: ${response.statusText}`);
+      return {};
     }
-    const wellKnownConfiguration =
-      (await response.json()) as WellKnownConfiguration;
-
-    // Consume the well-known configuration and map to friendly names
-    return Object.keys(DISCOVERY_LABEL_MAP).reduce(
-      (acc, key) => {
-        const typedKey = key as keyof WellKnownConfiguration;
-        if (wellKnownConfiguration[typedKey]) {
-          acc[DISCOVERY_LABEL_MAP[typedKey]] = wellKnownConfiguration[
-            typedKey
-          ] as string;
+    const info = (await response.json()) as FederationInfo;
+    return LABEL_MAP.reduce(
+      (acc, { key, text }) => {
+        const url = info[key];
+        if (url) {
+          acc[text] = url;
         }
         return acc;
       },
       {} as { [key: string]: string }
     );
-  } catch {
+  } catch (e) {
+    console.error(e);
     return {};
   }
-};
-
-const DISCOVERY_LABEL_MAP: WellKnownConfiguration = {
-  director_endpoint: 'Director',
-  namespace_registration_endpoint: 'Registry',
-  jwks_uri: 'JWK',
 };
 
 export default getFederationUrls;

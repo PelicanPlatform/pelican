@@ -104,7 +104,15 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	if modules.IsEnabled(server_structs.RegistryType) ||
+	// OAuth2/OIDC client routes are needed only when at least one
+	// enabled module wants to log users in via a third-party IdP. The
+	// registry used to force this on unconditionally — predating the
+	// new local-user/password scheme — so it now follows the same
+	// EnableOIDC opt-in pattern as the other components. When all four
+	// flags are false the server still works for local-password and
+	// API-token authentication; only the OIDC code-exchange flow is
+	// absent.
+	if (modules.IsEnabled(server_structs.RegistryType) && param.Registry_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {

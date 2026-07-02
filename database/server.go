@@ -74,6 +74,41 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
 
+	// Post-migration bootstrap: ensure the built-in admin user record
+	// exists and that every group has a real owner. These need to run
+	// at startup rather than as SQL migrations because they depend on
+	// runtime config (Server.ExternalWebUrl). Idempotent.
+	if err := BootstrapAdminAndBackfillOwners(ServerDatabase); err != nil {
+		// Don't fail startup — log and continue. The most common cause
+		// of failure here is ExternalWebUrl not being set yet on a
+		// brand-new install where bootstrap will be retried later
+		// (e.g. on the first admin login via init code).
+		log.Warnf("Post-migration bootstrap incomplete: %v", err)
+	}
+
+	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.
+	// Pre-existing accounts (created before the knob existed, or on
+	// older builds) wouldn't otherwise carry the operator-configured
+	// baseline because the auto-grant path triggers only at user
+	// creation. See BackfillNewUserDefaultScopes for the one-shot
+	// semantics — subsequent edits to the config do not propagate
+	// retroactively, by design.
+	if err := BackfillNewUserDefaultScopes(ServerDatabase); err != nil {
+		log.Warnf("NewUserDefaultScopes backfill incomplete: %v", err)
+	}
+
+	// NOTE: we deliberately do NOT mirror Server.UIAdminUsers /
+	// Server.AdminGroups (or the User-/Collection-admin variants)
+	// into user_scopes / group_scopes at startup. Doing so would
+	// surprise operators: removing a name from the config file
+	// would leave the corresponding scope grant alive in the DB,
+	// silently preserving admin privileges that the operator
+	// intended to revoke. The config-driven lists are evaluated
+	// live on every request inside EffectiveScopesForIdentity so
+	// they always reflect the current file, and DB-stored grants
+	// stay reserved for grants made deliberately through the
+	// management API.
+
 	// Data cleanup - remove stale entries in the `servers` and `services` tables
 	// They are caused by the damaged foreign key constraint in `services` table and we didn't update webUI to use server deletion API in time.
 	// See https://opensciencegrid.atlassian.net/browse/OPS-438

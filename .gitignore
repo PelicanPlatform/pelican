@@ -20,3 +20,9 @@ e2e_fed_tests.test
 *.test
 /client.test
 /pelican
+
+# Used to drop files into the context of the project
+/reference/
+
+# Compiled scope generator binary (source is generate/scope_generator.go)
+/generate/generate

@@ -423,6 +423,54 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Downtime deleted successfully"})
 }
 
+// HandleGetFederationInfo returns the resolved federation discovery info
+// (director, registry, JWK URLs, etc.) for any authenticated user. These
+// values are otherwise only reachable via the admin-only /config endpoint,
+// which prevents non-admin users from rendering basic federation links on
+// the dashboard. The values are not sensitive: directors publish them at
+// /.well-known/pelican-configuration for anonymous client discovery.
+func HandleGetFederationInfo(ctx *gin.Context) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to resolve federation info: " + err.Error(),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, fedInfo)
+}
+
+// HandleGetServerLocalMetadata returns the most recent locally cached server metadata
+// entry (just the current name/type) for Origins/Caches.
+func HandleGetServerLocalMetadata(ctx *gin.Context) {
+	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server metadata is not available on this server type",
+		})
+		return
+	}
+
+	entry, err := database.GetServerLocalMetadata()
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No server metadata recorded yet",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to fetch server metadata: " + err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, entry)
+}
+
 // HandleGetServerLocalMetadataHistory returns the locally cached server metadata history for Origins/Caches.
 func HandleGetServerLocalMetadataHistory(ctx *gin.Context) {
 	// Ensure we only serve this endpoint for Origin/Cache instances.

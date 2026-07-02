@@ -1,10 +1,12 @@
 import React, { useContext } from 'react';
+import useSWR from 'swr';
 import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditContext';
 import { Box, Button, Typography } from '@mui/material';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { getUser } from '@/helpers/login';
 
 const EditDowntimePageHeader = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
+  const { data: user } = useSWR('getUser', getUser);
 
   return (
     <Box
@@ -13,7 +15,7 @@ const EditDowntimePageHeader = () => {
       justifyContent={'space-between'}
     >
       <Typography variant={'h4'}>Service Downtime</Typography>
-      <AuthenticatedContent allowedRoles={['admin']}>
+      {user?.role === 'admin' && (
         <Button
           variant={'contained'}
           color={'primary'}
@@ -23,7 +25,7 @@ const EditDowntimePageHeader = () => {
         >
           Create Downtime
         </Button>
-      </AuthenticatedContent>
+      )}
     </Box>
   );
 };

@@ -836,6 +836,58 @@ var originCollectionsACLRevokeCmd = &cobra.Command{
 	},
 }
 
+// ===== Ownership-transfer invite =====
+//
+// Mints a single-use invite link that, when redeemed by an
+// authenticated user, transfers ownership of the collection to that
+// user. The link is always single-use server-side regardless of any
+// client preference (ownership transfer is by definition one-shot).
+
+var originCollectionsOwnershipInviteCmd = &cobra.Command{
+	Use:   "ownership-invite",
+	Short: "Manage collection ownership-transfer invite links",
+}
+
+var originCollectionsOwnershipInviteCreateCmd = &cobra.Command{
+	Use:   "create <id>",
+	Short: "Mint an ownership-transfer invite for a collection",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		if err := config.InitClient(); err != nil {
+			return errors.Wrap(err, "failed to initialize client")
+		}
+
+		id := args[0]
+		endpoint := fmt.Sprintf("/collections/%s/ownership-invites", id)
+
+		req := origin.CreateCollectionOwnershipInviteReq{}
+		if cmd.Flags().Changed("expires-in") {
+			v, _ := cmd.Flags().GetString("expires-in")
+			req.ExpiresIn = v
+		}
+
+		respBody, err := makeCollectionAPIRequest(ctx, http.MethodPost, endpoint, req, token_scopes.Collection_Modify, id)
+		if err != nil {
+			return err
+		}
+
+		var res origin.CreateCollectionOwnershipInviteRes
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+
+		fmt.Println("Ownership-transfer invite created successfully!")
+		fmt.Printf("Token:       %s\n", res.InviteToken)
+		fmt.Printf("Link ID:     %s\n", res.ID)
+		fmt.Printf("Expires At:  %s\n", res.ExpiresAt.Format(time.RFC3339))
+		fmt.Printf("Single Use:  %v\n", res.IsSingleUse)
+		fmt.Println("\nShare the token with the intended new owner. The token is shown only once;")
+		fmt.Println("redeeming it transfers ownership of this collection to the redeemer.")
+		return nil
+	},
+}
+
 func init() {
 	// Use global --json flag from root.go for JSON output
 
@@ -857,6 +909,8 @@ func init() {
 	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "Group ID for the ACL (required)")
 	originCollectionsACLRevokeCmd.Flags().String("role", "", "Role for the ACL (required)")
 
+	originCollectionsOwnershipInviteCreateCmd.Flags().String("expires-in", "", "Expiration duration as a Go duration string (e.g. '168h'); defaults to 7 days server-side")
+
 	// Register commands
 	originCollectionCmd.AddCommand(originCollectionsListCmd)
 	originCollectionCmd.AddCommand(originCollectionsCreateCmd)
@@ -865,6 +919,7 @@ func init() {
 	originCollectionCmd.AddCommand(originCollectionsDeleteCmd)
 	originCollectionCmd.AddCommand(originCollectionsMetadataCmd)
 	originCollectionCmd.AddCommand(originCollectionsACLCmd)
+	originCollectionCmd.AddCommand(originCollectionsOwnershipInviteCmd)
 
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataGetCmd)
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataSetCmd)
@@ -873,4 +928,6 @@ func init() {
 	originCollectionsACLCmd.AddCommand(originCollectionsACLListCmd)
 	originCollectionsACLCmd.AddCommand(originCollectionsACLGrantCmd)
 	originCollectionsACLCmd.AddCommand(originCollectionsACLRevokeCmd)
+
+	originCollectionsOwnershipInviteCmd.AddCommand(originCollectionsOwnershipInviteCreateCmd)
 }

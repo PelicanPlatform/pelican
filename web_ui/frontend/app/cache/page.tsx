@@ -22,10 +22,12 @@ import { Box, Grid, Typography } from '@mui/material';
 
 import StatusBox from '@/components/StatusBox';
 import FederationOverview from '@/components/FederationOverview';
+import ServerName from '@/components/ServerName';
 
 export default function Home() {
   return (
     <Box width={'100%'}>
+      <ServerName defaultName={'Cache'} />
       <Grid container spacing={2}>
         <Grid
           size={{

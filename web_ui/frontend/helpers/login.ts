@@ -92,12 +92,26 @@ export const getUser = async (): Promise<User> => {
 
     const json = await response.json();
 
-    // If authenticated, store status and csrf token
+    // requires_aup / aup_version are set by whoamiHandler when an
+    // AUP is configured AND the caller hasn't yet accepted the
+    // active version. Surface them on the User object so
+    // AuthenticatedContent can redirect to /aup before any
+    // protected page mounts (the gate would otherwise turn into a
+    // stream of 403s with no way to actually find the policy).
     const user = {
       authenticated: json['authenticated'],
       user: json['user'] == '' ? null : json['user'],
       role: json['role'] == '' ? null : json['role'],
+      // Optional human label from the User row. Always-mounted UI
+      // (e.g. the navbar's user menu) prefers this over `user`.
+      displayName: json['displayName'] || undefined,
+      // scopes is the caller's effective user-grantable scope set;
+      // see User.scopes in @/index. Falls back to [] so callers can
+      // unconditionally `.includes(...)` without null-guards.
+      scopes: Array.isArray(json['scopes']) ? json['scopes'] : [],
       csrf_token: response.headers.get('X-CSRF-Token'),
+      requiresAup: !!json['requires_aup'],
+      aupVersion: json['aup_version'] || undefined,
     };
 
     return user;
