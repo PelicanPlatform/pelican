@@ -158,6 +158,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${Cache.Port}", v.GetString(param.Cache_Port.GetName()))
 		v.SetDefault(param.Cache_Url.GetName(), val)
 	}
+	// Cache.WorkerCount
+	v.SetDefault(param.Cache_WorkerCount.GetName(), 100)
 	// Cache.XRootDPrefix
 	v.SetDefault(param.Cache_XRootDPrefix.GetName(), "cache")
 	// Client.AssumeDirectorServerHeader
