@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,6 +20,17 @@ import (
 )
 
 var ServerDatabase *gorm.DB
+
+// openedServerDatabases tracks every handle InitServerDatabase has opened this
+// process. When several servers run in one process (the fed tests launch
+// origin+cache+director+registry together) each call reassigns the global
+// ServerDatabase, so a plain ShutdownDB that only closed the current global
+// would leak the earlier handles -- each a WAL SQLite database holding several
+// file descriptors. ShutdownDB closes all tracked handles instead.
+var (
+	openedServerDatabases   []*gorm.DB
+	openedServerDatabasesMu sync.Mutex
+)
 
 //go:embed universal_migrations/*.sql
 var EmbedUniversalMigrations embed.FS
@@ -53,6 +65,9 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return err
 	}
 	ServerDatabase = tdb
+	openedServerDatabasesMu.Lock()
+	openedServerDatabases = append(openedServerDatabases, tdb)
+	openedServerDatabasesMu.Unlock()
 
 	// Enable foreign key constraints for SQLite
 	if err := ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
@@ -491,19 +506,34 @@ func GetDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
 }
 
 func ShutdownDB() error {
-	if ServerDatabase == nil {
-		return nil
+	// Close every handle opened this process, not just the current global. When
+	// several servers share the global in one process (the fed tests), a later
+	// InitServerDatabase reassigns ServerDatabase, so closing only the current
+	// one would leak the earlier handles' file descriptors across restarts.
+	openedServerDatabasesMu.Lock()
+	dbs := openedServerDatabases
+	openedServerDatabases = nil
+	openedServerDatabasesMu.Unlock()
+
+	var firstErr error
+	for _, db := range dbs {
+		sqldb, err := db.DB()
+		if err != nil {
+			log.Errorln("Failure when getting database instance from gorm:", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err = sqldb.Close(); err != nil {
+			log.Errorln("Failure when shutting down the database:", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
-	sqldb, err := ServerDatabase.DB()
-	if err != nil {
-		log.Errorln("Failure when getting database instance from gorm:", err)
-		return err
-	}
-	err = sqldb.Close()
-	if err != nil {
-		log.Errorln("Failure when shutting down the database:", err)
-	}
-	return err
+	ServerDatabase = nil
+	return firstErr
 }
 
 // Convert IsOrigin/IsCache boolean to a string for the service_names table.
