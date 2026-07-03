@@ -4,6 +4,7 @@ package web_ui
 import (
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -15,6 +16,30 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// loginRateLimitStores caches one rate-limit store per limit value.
+// gin-rate-limit's InMemoryStore starts a background cleanup goroutine that it
+// never stops, and RegisterAuthEndpoints runs on every web-engine launch, so a
+// fresh store per call would leak a goroutine each time. Reuse one store per
+// limit for the lifetime of the process instead.
+var (
+	loginRateLimitStores   = map[int]ratelimit.Store{}
+	loginRateLimitStoresMu sync.Mutex
+)
+
+func loginRateLimitStore(limit int) ratelimit.Store {
+	loginRateLimitStoresMu.Lock()
+	defer loginRateLimitStoresMu.Unlock()
+	if store, ok := loginRateLimitStores[limit]; ok {
+		return store
+	}
+	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
+		Rate:  time.Second,
+		Limit: uint(limit),
+	})
+	loginRateLimitStores[limit] = store
+	return store
+}
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
@@ -63,10 +88,7 @@ func loginRateLimitMiddleware(limit int) gin.HandlerFunc {
 		limit = 1
 	}
 
-	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
-		Rate:  time.Second,
-		Limit: uint(limit),
-	})
+	store := loginRateLimitStore(limit)
 
 	return ratelimit.RateLimiter(store, &ratelimit.Options{
 		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
