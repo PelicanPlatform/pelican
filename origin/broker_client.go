@@ -178,7 +178,12 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				// the test harness, leaving us blind when the tunnel's TLS
 				// handshake silently times out (a challenge during TestBrokerApi
 				// flakiness).
-				srvLogger := stdlog.New(log.StandardLogger().WriterLevel(log.WarnLevel), "broker-server: ", 0)
+				// WriterLevel starts a background scanner goroutine backed by an
+				// os.Pipe; keep a handle so it is closed when this one-shot
+				// connection finishes, otherwise every broker connection leaks
+				// the goroutine and the pipe's file descriptors.
+				brokerWarnWriter := log.StandardLogger().WriterLevel(log.WarnLevel)
+				srvLogger := stdlog.New(brokerWarnWriter, "broker-server: ", 0)
 				srv := http.Server{
 					Handler:           http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
 					ErrorLog:          srvLogger,
@@ -189,6 +194,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				// race on a shared named return; the data race detector
 				// flagged this in TestBrokerApi.
 				go func(fields log.Fields) {
+					defer brokerWarnWriter.Close()
 					// A one-shot listener should do a single "accept" then shutdown.
 					log.WithFields(fields).Debug("Origin starting to serve broker reverse connection")
 					serveErr := srv.Serve(listener)
