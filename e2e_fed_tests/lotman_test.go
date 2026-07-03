@@ -130,10 +130,10 @@ func TestPersistentCache_LotUsageTracked(t *testing.T) {
 	require.NoError(t, param.Lotman_EnableAPI.Set(true))
 	// Enabling LotMan requires the cache sizing/watermark parameters to be set.
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("50g"))
 	require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
 	require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
-	require.NoError(t, param.Cache_FilesMaxSize.Set("100g"))
+	require.NoError(t, param.Cache_FilesMaxSize.Set("40g"))
 	// Push per-lot usage into the lot database promptly so the assertion does
 	// not have to wait the default minute.
 	require.NoError(t, param.Cache_LotUsageReconcileInterval.Set(time.Second))

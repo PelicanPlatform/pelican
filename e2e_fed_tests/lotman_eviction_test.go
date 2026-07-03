@@ -108,7 +108,7 @@ func TestPersistentCache_LotEviction(t *testing.T) {
 	// Small absolute watermarks so a handful of small downloads exceed the high
 	// watermark and trigger eviction (no need to fill gigabytes). The cache's
 	// eviction loop checks every ~10s and evicts down to the low watermark.
-	require.NoError(t, param.Cache_LowWatermark.Set("2m"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("2m"))
 	require.NoError(t, param.Cache_HighWaterMark.Set("4m"))
 	// EnableLotman requires all three file-size directives; keep them below the
 	// low watermark and base < nominal < max.
@@ -119,7 +119,7 @@ func TestPersistentCache_LotEviction(t *testing.T) {
 	// planner sees fresh usage on each pass.
 	require.NoError(t, param.Cache_LotUsageReconcileInterval.Set(time.Second))
 
-	lowWmBytes, err := utils.ParseBytes(param.Cache_LowWatermark.GetString())
+	lowWmBytes, err := utils.ParseBytes(param.Cache_LowWaterMark.GetString())
 	require.NoError(t, err)
 	highWmBytes, err := utils.ParseBytes(param.Cache_HighWaterMark.GetString())
 	require.NoError(t, err)

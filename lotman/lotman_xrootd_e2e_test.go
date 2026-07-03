@@ -227,7 +227,7 @@ func TestV1Cache_LoadsGoLotManSharedLibrary(t *testing.T) {
 	require.NoError(t, param.Cache_FilesBaseSize.Set("128k"))
 	require.NoError(t, param.Cache_FilesNominalSize.Set("256k"))
 	require.NoError(t, param.Cache_FilesMaxSize.Set("512k"))
-	require.NoError(t, param.Cache_LowWatermark.Set("1m"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("1m"))
 	require.NoError(t, param.Cache_HighWaterMark.Set("2m"))
 	// Run the pfc purge thread as often as XRootD allows (its minimum is 60s) so
 	// eviction happens within the test window.
