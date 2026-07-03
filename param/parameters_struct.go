@@ -74,6 +74,7 @@ type Config struct {
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
 		Url string `mapstructure:"url" yaml:"Url"`
+		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
 	Client struct {
@@ -576,6 +577,7 @@ type configWithType struct {
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
+		WorkerCount struct { Type string; Value int }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {

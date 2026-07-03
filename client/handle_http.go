@@ -774,7 +774,17 @@ func (tr TransferResults) ID() string {
 // Returns a new transfer engine object whose lifetime is tied
 // to the provided context.  Will launcher worker goroutines to
 // handle the underlying transfers
+// NewTransferEngine creates a transfer engine using the client's configured
+// worker count (Client.WorkerCount).
 func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
+	return NewTransferEngineWithWorkers(ctx, param.Client_WorkerCount.GetInt())
+}
+
+// NewTransferEngineWithWorkers creates a transfer engine with an explicit
+// number of transfer workers, overriding the Client.WorkerCount default.  This
+// lets embedded consumers (e.g. the cache) run with more concurrency than a
+// command-line client would.  A workerCount <= 0 is an error.
+func NewTransferEngineWithWorkers(ctx context.Context, workerCount int) (te *TransferEngine, err error) {
 	// If we did not initClient yet, we should fail to avoid unexpected/undesired behavior
 	if !config.IsClientInitialized() {
 		return nil, errors.New("client has not been initialized, unable to create transfer engine")
@@ -808,7 +818,6 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		dirRespCache:       NewDirRespCache(5 * time.Minute),
 		prestageAPISupport: make(map[string]bool),
 	}
-	workerCount := param.Client_WorkerCount.GetInt()
 	if workerCount <= 0 {
 		return nil, errors.New("worker count must be a positive integer")
 	}

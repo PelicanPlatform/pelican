@@ -2537,6 +2537,18 @@ default: false
 components: ["cache"]
 hidden: true
 ---
+name: Cache.WorkerCount
+description: |+
+  The number of concurrent transfer workers the V2 (persistent) cache uses to fetch objects from upstream
+  origins/caches on a cache miss.
+
+  The cache embeds the Pelican transfer engine, which otherwise defaults to the command-line client's
+  ${Client.WorkerCount} (a small value tuned for a single interactive client). That is far too low for a busy cache
+  serving many clients concurrently, so the cache uses this larger default instead.
+type: int
+default: 100
+components: ["cache"]
+---
 name: Cache.AllowedFederations
 description: |+
   A list of federation discovery URLs (or host:port values) that this cache is allowed to serve.

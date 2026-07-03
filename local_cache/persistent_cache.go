@@ -627,7 +627,20 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize client")
 	}
 
-	te, err := client.NewTransferEngine(ctx)
+	// The cache server serves many clients concurrently, so it needs far more
+	// transfer workers than the command-line client's small default
+	// (Client.WorkerCount).  Use Cache.WorkerCount for the server; the
+	// client-side local cache keeps the client default.
+	var te *client.TransferEngine
+	if cfg.Mode == CacheModeServer {
+		workers := param.Cache_WorkerCount.GetInt()
+		if workers <= 0 {
+			workers = 100
+		}
+		te, err = client.NewTransferEngineWithWorkers(ctx, workers)
+	} else {
+		te, err = client.NewTransferEngine(ctx)
+	}
 	if err != nil {
 		db.Close()
 		return nil, errors.Wrap(err, "failed to create transfer engine")
