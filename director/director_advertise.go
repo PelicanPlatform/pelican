@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,12 @@ type (
 	// Structure representing a remote director and the
 	// channel to interact with the corresponding goroutine
 	directorInfo struct {
-		ad             *server_structs.DirectorAd
+		// ad is the most recent DirectorAd for this remote director.  It is
+		// replaced as newer ads arrive (under directorAdMutex) but is also read
+		// by the long-lived forwarding goroutines, which do NOT hold the lock;
+		// it is therefore an atomic.Pointer so those reads are race-free (and
+		// still observe ad updates).
+		ad             atomic.Pointer[server_structs.DirectorAd]
 		forwardAdChan  chan *forwardAdInfo // Channel for ads for forwarding from the director handler to the internal buffer
 		internalAdChan chan *forwardAdInfo // Channel for ads from the internal buffer to the HTTP client forwarder goroutine.
 		cancel         context.CancelFunc
@@ -147,8 +153,10 @@ func listDirectors(ctx *gin.Context) {
 			// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
 			items := directorAds.Items()
 			for _, item := range items {
-				if item.Value() != nil && item.Value().ad != nil {
-					ads = append(ads, *item.Value().ad)
+				if item.Value() != nil {
+					if ad := item.Value().ad.Load(); ad != nil {
+						ads = append(ads, *ad)
+					}
 				}
 			}
 		}
@@ -251,13 +259,14 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 	items := directorAds.Items()
 	for _, item := range items {
 		dinfo := item.Value()
-		if dinfo.ad == nil {
+		ad := dinfo.ad.Load()
+		if ad == nil {
 			continue
 		}
-		if slices.Contains(seenBy, dinfo.ad.Name) {
+		if slices.Contains(seenBy, ad.Name) {
 			continue
 		}
-		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
+		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, ad); err == nil && !self {
 			dinfo.forwardService(engineCtx, serviceAd, sType, seenBy)
 		}
 	}
@@ -268,6 +277,16 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 // Note: the implementation is similar to `forwardService` but there are two
 // functions to avoid refactoring the DirectorAd and OriginAdvertiseV2 to have
 // a common interface.
+// advertiseURL returns the remote director's advertise URL from the current
+// ad, reading the atomic pointer so it is safe to call from the forwarding
+// goroutines without holding directorAdMutex.
+func (dir *directorInfo) advertiseURL() string {
+	if ad := dir.ad.Load(); ad != nil {
+		return ad.AdvertiseUrl
+	}
+	return ""
+}
+
 func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 	forwardAd := &forwardAd{
 		DirectorAd: ad,
@@ -277,7 +296,7 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 
 	var buf *bytes.Buffer
 	if adBytes, err := json.Marshal(forwardAd); err != nil {
-		log.Errorln("Failed to marshal director ad to JSON when sending to", dir.ad.AdvertiseUrl, ":", err)
+		log.Errorln("Failed to marshal director ad to JSON when sending to", dir.advertiseURL(), ":", err)
 		return
 	} else {
 		buf = bytes.NewBuffer(adBytes)
@@ -326,7 +345,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 
 	var buf *bytes.Buffer
 	if adBytes, err := json.Marshal(forwardAd); err != nil {
-		log.Errorln("Failed to marshal service ad to JSON when sending to", dir.ad.AdvertiseUrl, ":", err)
+		log.Errorln("Failed to marshal service ad to JSON when sending to", dir.advertiseURL(), ":", err)
 		return
 	} else {
 		buf = bytes.NewBuffer(adBytes)
@@ -347,7 +366,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 // ad per known director endpoint.  The second goroutine will read on ad off the
 // queue at a time and send it to the remote director
 func (dir *directorInfo) launchForwardAds(ctx context.Context, egrp *errgroup.Group) {
-	advertiseUrl := dir.ad.AdvertiseUrl
+	advertiseUrl := dir.advertiseURL()
 	dir.internalAdChan = make(chan *forwardAdInfo) // Note no buffering: we only send an ad to the director forwarding goroutine when it is ready
 
 	// This goroutine coalesces pending ads into only the latest update
@@ -407,7 +426,7 @@ func (dir *directorInfo) getDirectorToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	tokenCfg.Issuer = fedInfo.DiscoveryEndpoint
-	aud, err := token.GetWLCGAudience(dir.ad.AdvertiseUrl)
+	aud, err := token.GetWLCGAudience(dir.advertiseURL())
 	if err != nil {
 		return "", err
 	}
@@ -532,10 +551,11 @@ func sendMyAd(ctx context.Context) {
 	items := directorAds.Items()
 	for _, item := range items {
 		dinfo := item.Value()
-		if dinfo.ad == nil {
+		ad := dinfo.ad.Load()
+		if ad == nil {
 			continue
 		}
-		if self, err := server_utils.IsDirectorAdFromSelf(ctx, dinfo.ad); err == nil && !self {
+		if self, err := server_utils.IsDirectorAdFromSelf(ctx, ad); err == nil && !self {
 			dinfo.forwardDirector(directorAd)
 		}
 	}
@@ -567,16 +587,18 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 	}
 	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
 		if item.Value() != nil {
-			if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
-				item.Value().ad = directorAd
+			if after := directorAd.After(item.Value().ad.Load()); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
+				item.Value().ad.Store(directorAd)
 				directorAds.Set(directorAd.Name, item.Value(), adTTL)
 				if after == server_structs.AdAfterTrue {
 					// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
 					items := directorAds.Items()
 					for _, item := range items {
-						if item.Value() != nil && item.Value().ad != nil {
-							if self, err := server_utils.IsDirectorAdFromSelf(ctx, item.Value().ad); err == nil && !self {
-								item.Value().forwardDirector(directorAd)
+						if item.Value() != nil {
+							if ad := item.Value().ad.Load(); ad != nil {
+								if self, err := server_utils.IsDirectorAdFromSelf(ctx, ad); err == nil && !self {
+									item.Value().forwardDirector(directorAd)
+								}
 							}
 						}
 					}
@@ -584,7 +606,7 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 			}
 		}
 	} else {
-		info.ad = directorAd
+		info.ad.Store(directorAd)
 		var fwdCtx context.Context
 		fwdCtx, info.cancel = context.WithCancel(ctx)
 		info.forwardAdChan = make(chan *forwardAdInfo, 5)
