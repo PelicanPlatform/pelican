@@ -301,7 +301,12 @@ func getTickerRate(tok string) time.Duration {
 	tokenLifetime, err := calcTokLifetime(tok)
 	if err != nil {
 		tokenLifetime = param.Director_FedTokenLifetime.GetDuration()
-		log.Errorf("Failed to calculate lifetime of federation token: %v.", err)
+		// An empty token is expected before the first fetch (e.g. when the
+		// persistent cache defers its initial fetch until after registration);
+		// only surface a genuine parse failure of a non-empty token.
+		if tok != "" {
+			log.Errorf("Failed to calculate lifetime of federation token: %v.", err)
+		}
 	}
 	tickerRate = tokenLifetime / 3
 	return validateTickerRate(tickerRate, tokenLifetime)
@@ -315,38 +320,16 @@ func getTickerRate(tok string) time.Duration {
 // new token is obtained.  The persistent cache uses this to keep the
 // token in memory.
 //
-// retryNow, if non-nil, is a channel that triggers an immediate token
-// fetch.  The launcher signals it after the cache is first registered
-// and advertised to the director so the token manager does not have to
-// wait for the next ticker fire.
+// retryNow, if non-nil, is a channel the launcher signals after the cache has
+// been registered and advertised to the director.  When it is provided, the
+// manager DEFERS its first token fetch until that signal, guaranteeing the
+// first getFedToken request is not made before the cache is registered (which
+// would fail).  When it is nil, the manager fetches immediately at startup.
 func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc, onTokenUpdate func(string), retryNow <-chan struct{}) {
-	// Do our initial token fetch+set, then turn things over to the ticker
-	tok, err := server_utils.CreateFedTok(ctx, cache)
-	if err != nil {
-		log.Errorf("Failed to get a federation token: %v", err)
-	}
-
-	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
-	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
-	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
-	// gives us a bit of buffer in the event the Director is down for a short period of time.
-	tickerRate := getTickerRate(tok)
-
-	// Set up the federation token directories in the cache
-	err = server_utils.SetupFedTokDirs(cache)
-	if err != nil {
+	// Set up the federation token directories in the cache.  This is
+	// independent of having a token, so do it up front.
+	if err := server_utils.SetupFedTokDirs(cache); err != nil {
 		log.Errorf("Failed to setup federation token directory: %v", err)
-	}
-
-	// Set the token in the cache
-	err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
-	if err != nil {
-		log.Errorf("Failed to set the federation token: %v", err)
-	}
-
-	// Deliver the initial token to the in-memory consumer (if any).
-	if onTokenUpdate != nil && tok != "" {
-		onTokenUpdate(tok)
 	}
 
 	// refreshFedTok performs a single fetch-and-set cycle, returning
@@ -375,25 +358,57 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		return newRate, newTok
 	}
 
+	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
+	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
+	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
+	// gives us a bit of buffer in the event the Director is down for a short period of time.
+	tickerRate := getTickerRate("")
+
+	// When retryNow is nil there is no external "registered & advertised"
+	// signal to wait for (e.g. the XRootD cache), so fetch immediately as
+	// before.  When retryNow is provided (the persistent cache), we instead
+	// defer the first fetch until the launcher signals that the cache has been
+	// registered and advertised to the director — requesting a federation token
+	// before the cache is registered is guaranteed to fail and can leave stale
+	// negative state at the director.
+	if retryNow == nil {
+		tickerRate, _ = refreshFedTok(tickerRate)
+	}
+
 	// TODO: Figure out what to do if the Director starts issuing tokens with a different
 	// lifetime --> we can adjust ticker period dynamically, but what's the sensible thing to do?
 	fedTokTicker := time.NewTicker(tickerRate)
 	egrp.Go(func() error {
 		defer fedTokTicker.Stop()
+
+		doRefresh := func() {
+			newRate, _ := refreshFedTok(tickerRate)
+			if newRate != tickerRate {
+				fedTokTicker.Reset(newRate)
+				tickerRate = newRate
+			}
+		}
+
+		// Force the ordering: for the persistent cache, the first token fetch
+		// happens only after the launcher signals registration+advertisement
+		// (retryNow).  The ticker acts as a fallback so we still fetch even if
+		// the signal is somehow missed.
+		if retryNow != nil {
+			select {
+			case <-retryNow:
+			case <-fedTokTicker.C:
+			case <-ctx.Done():
+				return nil
+			}
+			doRefresh()
+		}
+
 		for {
 			select {
 			case <-fedTokTicker.C:
-				newRate, _ := refreshFedTok(tickerRate)
-				if newRate != tickerRate {
-					fedTokTicker.Reset(newRate)
-					tickerRate = newRate
-				}
+				doRefresh()
 			case <-retryNow:
-				newRate, _ := refreshFedTok(tickerRate)
-				if newRate != tickerRate {
-					fedTokTicker.Reset(newRate)
-					tickerRate = newRate
-				}
+				doRefresh()
 			case <-ctx.Done():
 				return nil
 			}
