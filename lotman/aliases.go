@@ -56,16 +56,13 @@ var (
 	bytesToGB             = lotjson.BytesToGB
 	gbPtrToBytes          = lotjson.GbPtrToBytes
 	bytesToGBPtr          = lotjson.BytesToGBPtr
-	gbPtrToBytesPtr       = lotjson.GbPtrToBytesPtr
 	int64PtrValue         = lotjson.Int64PtrValue
-	derefOrZero           = lotjson.DerefOrZero
 	pathSpecsFromLotPaths = lotjson.PathSpecsFromLotPaths
 	mergeMPAToCore        = lotjson.MergeMPAToCore
 	mpaToCore             = lotjson.MpaToCore
 	attrValuesToAdapter   = lotjson.AttrValuesToAdapter
 	parentAttrToCore      = lotjson.ParentAttrToCore
 	lotToSpec             = lotjson.LotToSpec
-	coreMPAToAdapter      = lotjson.CoreMPAToAdapter
 	lotViewToAdapter      = lotjson.LotViewToAdapter
 	splitStorage          = lotjson.SplitStorage
 	usageRowToLotUsage    = lotjson.UsageRowToLotUsage
