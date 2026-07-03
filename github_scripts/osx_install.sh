@@ -46,7 +46,7 @@ pushd dependencies
 # Install scitokens first, which our xrootd build relies on
 git clone https://github.com/scitokens/scitokens-cpp.git
 pushd scitokens-cpp
-git checkout v1.1.3
+git checkout v1.4.1
 mkdir build
 cd build
 export SCITOKENS_CPP_DIR=$PWD/release_dir
