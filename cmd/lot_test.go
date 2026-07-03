@@ -162,7 +162,7 @@ func TestLotCommandsAgainstMockServer(t *testing.T) {
 	// verification (no InsecureSkipVerify). The generated cert's SANs include
 	// the configured Server.Hostname.
 	dir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Server_Hostname.Set("localhost"))
 	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, config.InitServer(context.Background(), server_structs.OriginType))

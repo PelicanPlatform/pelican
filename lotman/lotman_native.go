@@ -953,34 +953,38 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 // dedicated SQLite database under Lotman.LotHome, so Pelican shares that same
 // on-disk file (SQLite WAL supports concurrent multi-process access) and widens
 // its ownership/permissions to the daemon user.
-func lotmanDatabase() (*gorm.DB, error) {
+// lotmanDatabase returns the lot database and whether lotman owns it (and must
+// therefore close it). The V2 cache shares the Pelican server database (not
+// owned; ownsDB=false); the V1 cache opens a dedicated lots.sqlite under
+// lot_home (owned; ownsDB=true).
+func lotmanDatabase() (db *gorm.DB, ownsDB bool, err error) {
 	if param.Cache_EnableV2.GetBool() {
 		if database.ServerDatabase == nil {
-			return nil, errors.New("the Pelican server database is not initialized")
+			return nil, false, errors.New("the Pelican server database is not initialized")
 		}
-		return database.ServerDatabase, nil
+		return database.ServerDatabase, false, nil
 	}
 
 	// V1: a dedicated SQLite under lot_home, shareable with the xrootd-user purge plugin.
 	lotHome := param.Lotman_LotHome.GetString()
 	if lotHome == "" {
-		return nil, errors.New("Lotman.LotHome must be set for the XRootD (V1) cache")
+		return nil, false, errors.New("Lotman.LotHome must be set for the XRootD (V1) cache")
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to determine daemon UID for the lot database directory")
+		return nil, false, errors.Wrap(err, "unable to determine daemon UID for the lot database directory")
 	}
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to determine daemon GID for the lot database directory")
+		return nil, false, errors.Wrap(err, "unable to determine daemon GID for the lot database directory")
 	}
 	if err := config.MkdirAll(lotHome, 0o777, uid, gid); err != nil {
-		return nil, errors.Wrap(err, "unable to create the lot database directory")
+		return nil, false, errors.Wrap(err, "unable to create the lot database directory")
 	}
 	dbPath := filepath.Join(lotHome, "lots.sqlite")
-	db, err := dbutils.InitSQLiteDB(dbPath)
+	db, err = dbutils.InitSQLiteDB(dbPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to open the lot database")
+		return nil, false, errors.Wrap(err, "unable to open the lot database")
 	}
 	// Widen ownership/permissions so the xrootd-user purge plugin can also open
 	// the database file and its WAL/shared-memory siblings.
@@ -991,7 +995,7 @@ func lotmanDatabase() (*gorm.DB, error) {
 			_ = os.Chmod(p, 0o666)
 		}
 	}
-	return db, nil
+	return db, true, nil
 }
 
 // federationQualifyAds prepends the configured federation prefix (set by the V2
@@ -1032,7 +1036,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// under lot_home) and apply the lot-schema migrations. Strict hierarchy is
 	// always enabled so the reservation invariants are enforced from the very
 	// first lot creation.
-	db, err := lotmanDatabase()
+	db, ownsDB, err := lotmanDatabase()
 	if err != nil {
 		log.Errorf("Error acquiring lot database: %v", err)
 		return false
@@ -1050,7 +1054,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		log.Errorf("Error applying lot schema migrations: %v", err)
 		return false
 	}
-	setManager(m)
+	installManager(m, ownsDB)
 
 	initializedLots, err = initLots(adsFromFed)
 	if err != nil {

@@ -48,6 +48,11 @@ func requireManager() (*core.Manager, error) {
 var (
 	mgr   *core.Manager
 	mgrMu sync.RWMutex
+	// mgrOwnsDB is true when lotman opened the manager's database itself (the V1
+	// dedicated lots.sqlite under lot_home) and is therefore responsible for
+	// closing it. It is false for the V2 cache, whose manager runs on the shared
+	// Pelican server database owned (and closed) by the server.
+	mgrOwnsDB bool
 
 	// fedPrefix, when non-empty, is prepended to every namespace ad path during
 	// lot auto-creation so V2 (persistent cache) lots are federation-qualified
@@ -74,12 +79,42 @@ func GetManager() *core.Manager {
 	return getManager()
 }
 
-// setManager installs the process-wide manager (called by InitLotman, and by
-// tests that exercise the wrappers against an in-memory database).
+// setManager installs the process-wide manager (called by tests that exercise
+// the wrappers against a database they own and close themselves). It does not
+// touch the previous manager's connection; use installManager for the
+// lotman-owned lifecycle.
 func setManager(m *core.Manager) {
 	mgrMu.Lock()
 	defer mgrMu.Unlock()
 	mgr = m
+}
+
+// installManager replaces the process-wide manager on (re)initialization. If the
+// previous manager's database was opened by lotman (V1 dedicated lots.sqlite),
+// its handle is closed first so re-init does not leak a connection; the V2
+// shared server database is left open. ownsDB records whether lotman opened the
+// new manager's database.
+func installManager(m *core.Manager, ownsDB bool) {
+	mgrMu.Lock()
+	defer mgrMu.Unlock()
+	if mgr != nil && mgrOwnsDB {
+		_ = mgr.Close()
+	}
+	mgr = m
+	mgrOwnsDB = ownsDB
+}
+
+// shutdownManager releases the process-wide manager, closing its database only
+// if lotman owns it (V1). Intended for orderly shutdown and test cleanup; the
+// V2 shared server database is never closed here.
+func shutdownManager() {
+	mgrMu.Lock()
+	defer mgrMu.Unlock()
+	if mgr != nil && mgrOwnsDB {
+		_ = mgr.Close()
+	}
+	mgr = nil
+	mgrOwnsDB = false
 }
 
 // SetFederationPrefix sets the path prefix prepended to namespace ad paths

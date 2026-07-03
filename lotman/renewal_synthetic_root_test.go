@@ -62,6 +62,11 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	require.NoError(t, param.Lotman_SchedulingHorizon.Set(48*time.Hour))
 	require.NoError(t, param.Lotman_RenewalCheckInterval.Set(1*time.Hour))
 	require.NoError(t, param.Lotman_LotHome.Set(t.TempDir()))
+	// This test drives the V1 path, where InitLotman opens a dedicated
+	// lots.sqlite under lot_home that lotman owns. Close it before t.TempDir's
+	// cleanup removes the directory; on Windows an open handle blocks removal.
+	// Registered after the lot_home t.TempDir above so it runs first (LIFO).
+	t.Cleanup(shutdownManager)
 
 	_ = config.InitServer(context.Background(), server_structs.CacheType)
 
