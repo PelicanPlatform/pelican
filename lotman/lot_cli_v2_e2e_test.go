@@ -175,10 +175,10 @@ func TestLotCLI_V2_CRUDAndAccounting(t *testing.T) {
 	require.NoError(t, param.Cache_EnableLotman.Set(true))
 	require.NoError(t, param.Lotman_EnableAPI.Set(true))
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("50g"))
 	require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
 	require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
-	require.NoError(t, param.Cache_FilesMaxSize.Set("100g"))
+	require.NoError(t, param.Cache_FilesMaxSize.Set("40g"))
 	require.NoError(t, param.Cache_LotUsageReconcileInterval.Set(time.Second))
 
 	// Build the CLI binary (lazily, once) before standing up the federation.
