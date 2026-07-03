@@ -21,28 +21,17 @@ package local_cache
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 
 	"github.com/pkg/errors"
 )
 
-// isHexHash reports whether h consists solely of hexadecimal characters.
-// Instance/object hashes are hex-encoded HMAC-SHA256 digests, so validating
-// this before using a hash to build a filesystem path prevents path traversal
-// from a caller-supplied --instance value.
-func isHexHash(h InstanceHash) bool {
-	if len(h) == 0 {
-		return false
-	}
-	for _, c := range h {
-		switch {
-		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
-		default:
-			return false
-		}
-	}
-	return true
-}
+// hexHashPattern matches a non-empty hexadecimal string.  Instance/object
+// hashes are hex-encoded HMAC-SHA256 digests, so validating a hash against this
+// (anchored) pattern before it is used to build a filesystem path prevents path
+// traversal from a caller-supplied instance value — a hex-only string cannot
+// contain a path separator or "..".
+var hexHashPattern = regexp.MustCompile(`^[0-9a-fA-F]+$`)
 
 // ChaosInjector injects corruption into a running cache's already-open
 // database and storage, for fault-injection ("chaos") testing of the cache's
@@ -108,7 +97,7 @@ func (ci *ChaosInjector) resolveInstanceHash(objectURL, etag, instanceHash strin
 
 	// Guard against path traversal from a caller-supplied instance hash before
 	// the hash is ever used to construct a filesystem path.
-	if !isHexHash(hash) {
+	if !hexHashPattern.MatchString(string(hash)) {
 		return "", nil, errors.Errorf("invalid instance hash %q: must be hexadecimal", hash)
 	}
 
@@ -123,18 +112,20 @@ func (ci *ChaosInjector) resolveInstanceHash(objectURL, etag, instanceHash strin
 }
 
 // safeChunkPath resolves the on-disk chunk file path and verifies it stays
-// within its storage directory, defending against path traversal.
+// within its storage directory, defending against path traversal.  The
+// object-relative portion is built from the (already hex-validated) instance
+// hash; filepath.IsLocal confirms it cannot escape the storage root before it
+// is joined to the trusted directory.
 func (ci *ChaosInjector) safeChunkPath(storageID StorageID, hash InstanceHash, chunkIndex int) (string, error) {
 	root, ok := ci.storage.GetDirs()[storageID]
 	if !ok {
 		return "", errors.Errorf("unknown storage id %d", storageID)
 	}
-	cleanRoot := filepath.Clean(root)
-	cleanPath := filepath.Clean(ci.storage.getChunkPath(storageID, hash, chunkIndex))
-	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) {
-		return "", errors.Errorf("resolved chunk path %q escapes storage directory %q", cleanPath, cleanRoot)
+	rel := GetChunkPath(GetInstanceStoragePath(hash), chunkIndex)
+	if !filepath.IsLocal(rel) {
+		return "", errors.Errorf("refusing non-local chunk path %q for instance %s", rel, hash)
 	}
-	return cleanPath, nil
+	return filepath.Join(root, rel), nil
 }
 
 // chunkFileForBlock maps a global block number to the on-disk chunk file that
