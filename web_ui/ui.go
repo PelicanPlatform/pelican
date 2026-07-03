@@ -1226,8 +1226,12 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 	config := &tls.Config{
 		GetCertificate: getCert,
 	}
+	// WriterLevel spins up a background scanner goroutine backed by an os.Pipe;
+	// keep a handle so it can be closed on shutdown, otherwise every web-engine
+	// launch leaks the goroutine and the pipe's file descriptors.
+	warnWriter := log.StandardLogger().WriterLevel(log.WarnLevel)
 	logWriter := builtin_log.New(
-		log.StandardLogger().WriterLevel(log.WarnLevel),
+		warnWriter,
 		"",
 		0,
 	)
@@ -1245,6 +1249,8 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		<-ctx.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// Stop the ErrorLog's WriterLevel scanner goroutine and release its pipe.
+		defer warnWriter.Close()
 		err = server.Shutdown(ctx)
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			log.Errorln("Failed to shutdown server:", err)
