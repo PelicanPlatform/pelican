@@ -110,13 +110,22 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	// using it, resulting in "error: unlinkat <tmpPath>: directory not empty"
 	t.Cleanup(func() {
 		cancel()
-		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
-		}
-		err := os.RemoveAll(tmpPath)
-		require.NoError(t, err)
+		waitErr := egrp.Wait()
+		// Always remove the temp dir and reset global state, even when the servers
+		// exited with an error. egrp.Wait has already blocked until every server
+		// goroutine returned, so the servers are down by now; the only thing left
+		// is process-global state. Asserting on waitErr *before* this cleanup (the
+		// previous behavior) made require.NoError abort the cleanup on any launch
+		// failure, skipping ResetTestState -- which leaked viper/param state into
+		// every subsequent fed test in the process and turned a single failed
+		// launch into a cascade of failures. Do the cleanup first, assert last.
+		rmErr := os.RemoveAll(tmpPath)
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
 		server_utils.ResetTestState()
+		if waitErr != nil && waitErr != context.Canceled && waitErr != http.ErrServerClosed {
+			require.NoError(t, waitErr)
+		}
+		require.NoError(t, rmErr)
 	})
 
 	modules := server_structs.ServerType(0)
