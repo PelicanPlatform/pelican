@@ -39,6 +39,14 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
+	// Close the handle before t.TempDir's cleanup removes the file: on Windows an
+	// open SQLite handle keeps the file locked and RemoveAll fails the test.
+	// Registered after t.TempDir() above, so it runs first (cleanups are LIFO).
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return db
 }
 

@@ -119,6 +119,9 @@ func newCoreTestManager(t *testing.T) *core.Manager {
 	if err := m.Migrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// Close the DB before t.TempDir's cleanup removes the file: on Windows an
+	// open SQLite handle keeps the file locked and RemoveAll fails the test.
+	t.Cleanup(func() { _ = m.Close() })
 	return m
 }
 

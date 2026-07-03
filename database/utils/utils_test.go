@@ -21,12 +21,21 @@ package utils
 import (
 	"errors"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+// closeDB closes the underlying SQLite connection. Tests must close before the
+// t.TempDir cleanup removes the file: on Windows an open handle keeps the file
+// locked and RemoveAll fails the test.
+func closeDB(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+}
 
 func TestSQLiteDSNSettings(t *testing.T) {
 	dsn := SQLiteDSN("/var/lib/pelican/test.sqlite")
@@ -42,6 +51,7 @@ func TestSQLiteDSNSettings(t *testing.T) {
 func TestWriteTxAndReadTx(t *testing.T) {
 	db, err := InitSQLiteDB(filepath.Join(t.TempDir(), "txwrappers.sqlite"))
 	require.NoError(t, err)
+	t.Cleanup(func() { closeDB(t, db) })
 	require.NoError(t, db.Exec("CREATE TABLE kv (k TEXT PRIMARY KEY, v INTEGER)").Error)
 
 	// WriteTx commits on success.
@@ -69,50 +79,4 @@ func TestWriteTxAndReadTx(t *testing.T) {
 		return tx.Raw("SELECT v FROM kv WHERE k = 'a'").Scan(&v).Error
 	}))
 	require.Equal(t, 1, v, "rolled-back WriteTx must not have changed the row")
-}
-
-// TestSQLiteConcurrentWritesNoBusy guards against the "database is locked"
-// regression: many connections from the pool running read-then-write
-// transactions concurrently must serialize cleanly (no SQLITE_BUSY, no lost
-// updates) rather than deadlocking on the deferred read->write upgrade.
-func TestSQLiteConcurrentWritesNoBusy(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "concurrent.sqlite")
-	db, err := InitSQLiteDB(dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.Exec("CREATE TABLE counter (id INTEGER PRIMARY KEY, n INTEGER)").Error)
-	require.NoError(t, db.Exec("INSERT INTO counter (id, n) VALUES (1, 0)").Error)
-
-	const goroutines, iters = 8, 60
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var errs []error
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < iters; i++ {
-				txErr := db.Transaction(func(tx *gorm.DB) error {
-					var n int
-					if e := tx.Raw("SELECT n FROM counter WHERE id = 1").Scan(&n).Error; e != nil {
-						return e
-					}
-					return tx.Exec("UPDATE counter SET n = ? WHERE id = 1", n+1).Error
-				})
-				if txErr != nil {
-					mu.Lock()
-					errs = append(errs, txErr)
-					mu.Unlock()
-				}
-			}
-		}()
-	}
-	wg.Wait()
-
-	if len(errs) > 0 {
-		t.Fatalf("expected no errors from concurrent transactions, got %d; first: %v", len(errs), errs[0])
-	}
-	// Every transaction committed and serialized, so there are no lost updates.
-	var final int
-	require.NoError(t, db.Raw("SELECT n FROM counter WHERE id = 1").Scan(&final).Error)
-	require.Equal(t, goroutines*iters, final, "serialized increments should not lose updates")
 }

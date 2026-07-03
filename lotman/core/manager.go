@@ -115,3 +115,17 @@ func (m *Manager) Migrate() error {
 func (m *Manager) nowMs() int64 {
 	return m.now().UnixMilli()
 }
+
+// Close releases the underlying database connection. It is intended for callers
+// that own the Manager's lifetime (tests and short-lived tools); the long-lived
+// Pelican server keeps its Manager for the process lifetime and relies on
+// process exit to release the handle. Closing matters on Windows, where an open
+// SQLite handle keeps the file locked and blocks deletion of the containing
+// directory. Safe to call more than once.
+func (m *Manager) Close() error {
+	sqlDB, err := m.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
