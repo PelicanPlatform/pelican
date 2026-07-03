@@ -41,7 +41,10 @@ func TestServerStaysCgoFree(t *testing.T) {
 	const wantEngine = "github.com/pelicanplatform/pelican/lotman/core"
 
 	for _, tags := range []string{"server", "client server"} {
-		out, err := exec.Command("go", "list", "-deps", "-tags", tags, cmdPkg).CombinedOutput()
+		// -buildvcs=false: this only needs the dependency graph, and stamping VCS
+		// info runs git, which fails ("error obtaining VCS status", exit 128) when
+		// the CI checkout is owned by a different user than the test process.
+		out, err := exec.Command("go", "list", "-deps", "-buildvcs=false", "-tags", tags, cmdPkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list -deps -tags %q %s failed: %v\n%s", tags, cmdPkg, err, out)
 		}

@@ -145,7 +145,10 @@ func useLegacyLotmanABI() bool {
 func buildGoLotManSO(t *testing.T, dir string) string {
 	t.Helper()
 	out := filepath.Join(dir, "libLotMan.so")
-	args := []string{"build", "-buildmode=c-shared"}
+	// -buildvcs=false: stamping VCS info runs git, which fails ("error obtaining
+	// VCS status", exit 128) when the CI checkout is owned by a different user
+	// than the test process; the shared library needs no version stamp.
+	args := []string{"build", "-buildmode=c-shared", "-buildvcs=false"}
 	if useLegacyLotmanABI() {
 		t.Log("building Go libLotMan.so with the legacy lotman C ABI to match the installed plugin")
 		args = append(args, "-tags", "lotman_legacy_api")
