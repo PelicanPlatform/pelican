@@ -515,6 +515,24 @@ func ShutdownDB() error {
 	openedServerDatabases = nil
 	openedServerDatabasesMu.Unlock()
 
+	// Also close the current global handle when it was assigned without going
+	// through InitServerDatabase (e.g. tests that set ServerDatabase directly
+	// from utils.InitSQLiteDB, and so never registered it above).  Otherwise its
+	// file handle leaks and, on Windows, the SQLite file cannot be removed by
+	// t.TempDir() cleanup ("being used by another process").
+	if ServerDatabase != nil {
+		alreadyTracked := false
+		for _, db := range dbs {
+			if db == ServerDatabase {
+				alreadyTracked = true
+				break
+			}
+		}
+		if !alreadyTracked {
+			dbs = append(dbs, ServerDatabase)
+		}
+	}
+
 	var firstErr error
 	for _, db := range dbs {
 		sqldb, err := db.DB()
