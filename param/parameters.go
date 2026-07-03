@@ -144,6 +144,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.SentinelLocation": false,
 	"Cache.StorageLocation": false,
 	"Cache.Url": false,
+	"Cache.WorkerCount": false,
 	"Cache.XRootDPrefix": false,
 	"Client.AssumeDirectorServerHeader": false,
 	"Client.CredentialFile": false,
@@ -863,6 +864,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Cache.DataScanResampleInterval": func(c *Config) int { return c.Cache.DataScanResampleInterval },
 	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
 	"Cache.Port": func(c *Config) int { return c.Cache.Port },
+	"Cache.WorkerCount": func(c *Config) int { return c.Cache.WorkerCount },
 	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
 	"ClientAgent.MaxConcurrentJobs": func(c *Config) int { return c.ClientAgent.MaxConcurrentJobs },
 	"Client.DirectorRetries": func(c *Config) int { return c.Client.DirectorRetries },
@@ -1307,6 +1309,7 @@ var allParameterNames = []string{
 	"Cache.SentinelLocation",
 	"Cache.StorageLocation",
 	"Cache.Url",
+	"Cache.WorkerCount",
 	"Cache.XRootDPrefix",
 	"Client.AssumeDirectorServerHeader",
 	"Client.CredentialFile",
@@ -1943,6 +1946,7 @@ var (
 	Cache_DataScanResampleInterval = IntParam{"Cache.DataScanResampleInterval"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
+	Cache_WorkerCount = IntParam{"Cache.WorkerCount"}
 	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
 	ClientAgent_MaxConcurrentJobs = IntParam{"ClientAgent.MaxConcurrentJobs"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
@@ -2417,6 +2421,7 @@ func init() {
 		"Cache.DataScanResampleInterval": Cache_DataScanResampleInterval,
 		"Cache.EvictionMonitoringMaxDepth": Cache_EvictionMonitoringMaxDepth,
 		"Cache.Port": Cache_Port,
+		"Cache.WorkerCount": Cache_WorkerCount,
 		"ClientAgent.HistoryRetentionDays": ClientAgent_HistoryRetentionDays,
 		"ClientAgent.MaxConcurrentJobs": ClientAgent_MaxConcurrentJobs,
 		"Client.DirectorRetries": Client_DirectorRetries,
