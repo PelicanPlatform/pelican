@@ -30,6 +30,10 @@ import (
 // usage path through the real C entry points (via the Go-typed bridge).
 func TestCSharedRoundTrip(t *testing.T) {
 	resetStateForTest()
+	// Close the manager's DB handle when the test ends. defer runs before
+	// t.TempDir's (t.Cleanup-registered) removal, so the SQLite file is unlocked
+	// before RemoveAll -- required on Windows, where an open handle blocks it.
+	defer resetStateForTest()
 
 	setContextStrGo("lot_home", t.TempDir())
 	setContextStrGo("caller", "https://fed.example")

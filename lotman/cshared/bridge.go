@@ -171,9 +171,14 @@ func goStringSlice(list **C.char) []string {
 }
 
 // resetStateForTest clears the process-global manager and context so each test
-// starts from a clean slate.
+// starts from a clean slate. It closes the current manager's database handle
+// first: on Windows an open SQLite handle keeps the file locked, which blocks
+// removal of a test's temp lot_home directory.
 func resetStateForTest() {
 	mgrMu.Lock()
+	if mgr != nil {
+		_ = mgr.Close()
+	}
 	mgr = nil
 	mgrLotHome = ""
 	mgrMu.Unlock()

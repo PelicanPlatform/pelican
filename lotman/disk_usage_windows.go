@@ -1,4 +1,4 @@
-//go:build !unix && !windows
+//go:build windows
 
 /***************************************************************
  *
@@ -20,11 +20,20 @@
 
 package lotman
 
-import "github.com/pkg/errors"
+import "golang.org/x/sys/windows"
 
-// getDiskUsage is unsupported on platforms that are neither unix nor Windows
-// (both have real implementations). This stub lets the package compile on any
-// remaining GOOS so the lot engine and REST API remain available there.
+// getDiskUsage reports total and free bytes for the volume backing path, using
+// the Win32 GetDiskFreeSpaceEx call.
 func getDiskUsage(path string) (total uint64, free uint64, err error) {
-	return 0, 0, errors.New("disk usage discovery is not supported on this platform")
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	// freeToCaller accounts for per-user quotas; totalFree is the raw volume
+	// free space. Lot accounting wants the actual free bytes, so use totalFree.
+	var freeToCaller, totalBytes, totalFree uint64
+	if err = windows.GetDiskFreeSpaceEx(pathPtr, &freeToCaller, &totalBytes, &totalFree); err != nil {
+		return 0, 0, err
+	}
+	return totalBytes, totalFree, nil
 }
