@@ -746,6 +746,29 @@ func objectMetadataFromContext(ctx context.Context) CustomFields {
 	return v
 }
 
+// sourceEtagKey carries a remote source's ETag through OpenFile so
+// the close hook can persist it alongside the commit row. Populated
+// by the TPC handler after the source GET returns its ETag.
+type sourceEtagKey struct{}
+
+// withSourceEtag stashes a non-empty source ETag on the context.
+// Empty values are ignored so a caller can pipe getResp.Header.Get()
+// through unconditionally.
+func withSourceEtag(ctx context.Context, etag string) context.Context {
+	if etag == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, sourceEtagKey{}, etag)
+}
+
+// sourceEtagFromContext returns the stashed source ETag, or "".
+func sourceEtagFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(sourceEtagKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // extractObjectMetadataFromRequest parses the X-Pelican-Object-Metadata
 // header off `r` and stores the resulting map on the returned request's
 // context. Also stashes the request's declared Content-Length (for PUTs)

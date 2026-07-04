@@ -432,6 +432,10 @@ func RecordCommitCloseHook(dao *objectMetadataDAO, namespace string, trackExtra 
 			Actor:        usernameFromContext(ctx),
 			Extra:        custom,
 			TrackExtra:   trackExtra,
+			// Populated by the TPC handler before it OpenFiles the
+			// destination; "" for direct PUTs (which will store
+			// NULL, clearing any stale value from a prior TPC).
+			SourceEtag: sourceEtagFromContext(ctx),
 		})
 	}
 }
