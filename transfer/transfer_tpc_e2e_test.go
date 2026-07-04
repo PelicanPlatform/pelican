@@ -91,10 +91,11 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		// The cmd package is gated behind the client/server build tags; build the
-		// client-flavored binary (matching the real `pelican` binary) so the
-		// object/transfer subcommands are present.
-		buildCmd := exec.Command("go", "build", "-tags", "client", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
+		// The cmd package is gated behind the client/server build tags. Build with
+		// both so the binary has the client-only `object copy` command AND the
+		// server-only `origin serve` command (the cross-origin test launches a
+		// second origin as a subprocess); `transfer *` are available under either.
+		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
 		buildCmd.Env = os.Environ()
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
