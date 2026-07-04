@@ -224,9 +224,10 @@ func (c *CredentialConfig) GetPrefixEntry(discoveryURL, prefix string) *PrefixEn
 // falls back to the legacy OSDF section.  It returns nil if no
 // matching entry exists in either.
 func (c *CredentialConfig) GetTransferServerEntry(discoveryURL, serverURL string) *TransferServerEntry {
+	serverURL = trimServerURL(serverURL)
 	fc := c.GetFederationCredentials(discoveryURL)
 	for idx := range fc.TransferServers {
-		if fc.TransferServers[idx].ServerURL == serverURL {
+		if trimServerURL(fc.TransferServers[idx].ServerURL) == serverURL {
 			return &fc.TransferServers[idx]
 		}
 	}
@@ -234,13 +235,19 @@ func (c *CredentialConfig) GetTransferServerEntry(discoveryURL, serverURL string
 	// server, also search the legacy OSDF section as a fallback.
 	if fc != &c.OSDF {
 		for idx := range c.OSDF.TransferServers {
-			if c.OSDF.TransferServers[idx].ServerURL == serverURL {
+			if trimServerURL(c.OSDF.TransferServers[idx].ServerURL) == serverURL {
 				return &c.OSDF.TransferServers[idx]
 			}
 		}
 	}
 	return nil
 }
+
+// trimServerURL normalizes a transfer-server URL for comparison by removing any
+// trailing slash, so "https://x/" and "https://x" resolve to the same entry.
+// Both the stored and the looked-up URL must go through this so the two lookup
+// paths (GetTransferServerEntry, FindTransferServer) stay consistent.
+func trimServerURL(s string) string { return strings.TrimRight(s, "/") }
 
 // FindCredential searches the TransferServerEntry's credentials for one that
 // matches the given issuer URL and contains all of the required scopes.
@@ -311,15 +318,16 @@ func (c *CredentialConfig) FindOauthClient(discoveryURL, prefix string) (fc *Fed
 // federation-specific section (where new entries should be appended)
 // and -1.
 func (c *CredentialConfig) FindTransferServer(discoveryURL, serverURL string) (fc *FederationCredentials, idx int) {
+	serverURL = trimServerURL(serverURL)
 	fc = c.EnsureFederationCredentials(discoveryURL)
 	for i := range fc.TransferServers {
-		if strings.TrimRight(fc.TransferServers[i].ServerURL, "/") == serverURL {
+		if trimServerURL(fc.TransferServers[i].ServerURL) == serverURL {
 			return fc, i
 		}
 	}
 	if fc != &c.OSDF {
 		for i := range c.OSDF.TransferServers {
-			if strings.TrimRight(c.OSDF.TransferServers[i].ServerURL, "/") == serverURL {
+			if trimServerURL(c.OSDF.TransferServers[i].ServerURL) == serverURL {
 				return &c.OSDF, i
 			}
 		}

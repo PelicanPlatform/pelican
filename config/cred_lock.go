@@ -89,17 +89,26 @@ func UpsertPrefixEntry(discoveryURL string, entry *PrefixEntry) error {
 			return err
 		}
 		fc := cfg.EnsureFederationCredentials(discoveryURL)
-		replaced := false
+		// Update the entry wherever it already lives. A matching entry may exist
+		// in the legacy OSDF section (FindOauthClient falls back to it); updating
+		// only the federation section would append a duplicate and orphan the
+		// OSDF entry along with its registration-access token. Mirror that
+		// fallback here so the in-memory and persisted sections stay consistent.
 		for i := range fc.OauthClient {
 			if fc.OauthClient[i].Prefix == entry.Prefix {
 				fc.OauthClient[i] = *entry
-				replaced = true
-				break
+				return SaveConfigContents(&cfg)
 			}
 		}
-		if !replaced {
-			fc.OauthClient = append(fc.OauthClient, *entry)
+		if fc != &cfg.OSDF {
+			for i := range cfg.OSDF.OauthClient {
+				if cfg.OSDF.OauthClient[i].Prefix == entry.Prefix {
+					cfg.OSDF.OauthClient[i] = *entry
+					return SaveConfigContents(&cfg)
+				}
+			}
 		}
+		fc.OauthClient = append(fc.OauthClient, *entry)
 		return SaveConfigContents(&cfg)
 	})
 }
