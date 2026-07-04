@@ -287,17 +287,17 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	require.NoError(t, param.SetRaw("config", outputPath))
 
-	servers, _, err := launchers.LaunchModules(ctx, modules)
-	require.NoError(t, err)
-
-	ft.Pids = make([]int, 0, 2)
-	for _, server := range servers {
-		ft.Pids = append(ft.Pids, server.GetPids()...)
-	}
-
-	var discoveryServer *httptest.Server
-	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
-	// servers, because they populate the param values we use to set the metadata.
+	// Set up the federation discovery httptest.Server *before* launching the
+	// pelican servers.  The origin generates its scitokens.cfg during
+	// LaunchModules and pins the federation-issuer entry to
+	// fedInfo.DiscoveryEndpoint at write time; if we set that after LaunchModules
+	// returns, the initial scitokens.cfg has the wrong (or empty) federation
+	// issuer URL and rejects federation tokens with
+	// "Token issuer ... is not in list of allowed issuers" until the xrootd
+	// scitokens plugin's periodic reload picks up the regenerated file (up to
+	// 60s later).  The discovery handler is a closure over param values that
+	// are read at request time, so it stays correct even though it's registered
+	// before those values are populated by LaunchModules.
 	//
 	// The handler also serves /.well-known/openid-configuration and
 	// /.well-known/issuer.jwks so that the discovery URL can act as an
@@ -307,6 +307,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	// so without the OIDC endpoints any federation token whose issuer is
 	// this URL would fail verification (the verifier fetches the issuer's
 	// openid-configuration to locate the JWKS).
+	var discoveryServer *httptest.Server
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/pelican-configuration":
@@ -345,7 +346,9 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 			http.NotFound(w, r)
 		}
 	}
-	// Use the generated server certificate instead of httptest's self-signed cert
+	// Use the generated server certificate instead of httptest's self-signed cert.
+	// config.InitServer (called above) has already run GenerateCert, so the cert
+	// and key files exist on disk by the time we reach this point.
 	discoveryServer = httptest.NewUnstartedServer(http.HandlerFunc(handler))
 	cert, err := config.LoadCertificate(param.Server_TLSCertificateChain.GetString())
 	require.NoError(t, err, "Failed to load server certificate")
@@ -378,12 +381,22 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	t.Cleanup(discoveryServer.Close)
 
-	// Set the discovery URL in both viper and the global fed info object
+	// Set the discovery URL in both viper and the global fed info object BEFORE
+	// LaunchModules so the origin's initial scitokens.cfg picks up the correct
+	// federation issuer.
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(discoveryServer.URL))
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "error getting federation info")
 	fedInfo.DiscoveryEndpoint = discoveryServer.URL
 	config.SetFederation(fedInfo)
+
+	servers, _, err := launchers.LaunchModules(ctx, modules)
+	require.NoError(t, err)
+
+	ft.Pids = make([]int, 0, 2)
+	for _, server := range servers {
+		ft.Pids = append(ft.Pids, server.GetPids()...)
+	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
