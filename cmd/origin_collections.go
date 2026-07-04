@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/oauth2/issuer"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -298,9 +299,18 @@ func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body
 		scopeStr = scopeStr + ":" + collectionID
 	}
 
+	// Collection operations are control-plane: the origin's collections API is
+	// gated by web_ui.AuthHandler, which requires a bearer token whose issuer is
+	// the origin's *local* issuer (config.GetLocalIssuerUrl). Discover that
+	// issuer explicitly rather than the origin's bare web URL — the base-URL OIDC
+	// document describes the origin's data-namespace issuer, whose tokens the
+	// collections API rejects. The local issuer mints the namespace-agnostic
+	// collection.* management scopes for us.
+	localIssuerURL := strings.TrimRight(originWebUrl, "/") + "/api/v1.0/issuer/ns" + issuer.LocalIssuerNamespace
+
 	// Get OAuth token with collection-specific scope
 	scopes := []string{scopeStr}
-	token, err := acquireOAuthToken(ctx, originWebUrl, scopes)
+	token, err := acquireOAuthToken(ctx, localIssuerURL, scopes)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to acquire OAuth token")
 	}

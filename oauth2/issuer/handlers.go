@@ -1162,12 +1162,18 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 		}
 		responseTypes := []string{} // no interactive response types
 
-		// pelican.transfer is a protocol-level (standard) scope; include it so
-		// dynamically-registered clients (e.g. the transfer CLI) can obtain a
-		// token carrying it. Without it the device-code grant's client-scope
-		// filter would strip pelican.transfer and the transfer API would reject
-		// the resulting token.
-		scopes := []string{"openid", "offline_access", "wlcg", "pelican.transfer", "storage.read:/", "storage.modify:/", "storage.create:/"}
+		// pelican.transfer and the collection.* management scopes are
+		// authorization-gated (transferAccessAllowed / GetUserCollectionScopes
+		// decide at issuance whether the user actually gets them), but they must
+		// appear in the client's scope list so dynamically-registered CLIs — the
+		// transfer CLI and the collections CLI — can carry them: the device-code
+		// grant's client-scope filter strips any scope the client isn't
+		// registered for, even when the user's authorization would grant it.
+		// The collection.* scopes are namespace-agnostic control-plane scopes
+		// (the collections API is gated by the local issuer, not per data export).
+		scopes := []string{"openid", "offline_access", "wlcg", "pelican.transfer",
+			"storage.read:/", "storage.modify:/", "storage.create:/",
+			"collection.read:/", "collection.create:/", "collection.modify:/", "collection.delete:/"}
 
 		client := &fosite.DefaultClient{
 			ID:            clientID,
