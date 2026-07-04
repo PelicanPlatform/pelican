@@ -294,6 +294,8 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		rateLimiter: afs.rateLimiter,
 		userID:      userID,
 		ctx:         ctx,
+		obs:         afs.obs,
+		webdavName:  name,
 	}, nil
 }
 
@@ -444,6 +446,14 @@ type aferoFile struct {
 	rateLimiter *htb.HTB                   // Optional rate limiter
 	userID      string                     // User ID for rate limiting
 	ctx         context.Context            // Context from OpenFile for rate limiting
+
+	// obs and webdavName are populated when the enclosing
+	// aferoFileSystem has observation enabled — they let DeadProps()
+	// look up the current row for this path and surface
+	// Pelican-specific properties on PROPFIND. Nil / empty
+	// otherwise; DeadProps() returns no props in that case.
+	obs        *observationConfig
+	webdavName string
 }
 
 // Readdir implements webdav.File

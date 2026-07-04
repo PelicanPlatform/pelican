@@ -49,7 +49,8 @@ func applyObjectMetadataSchemaForTest(t *testing.T, db *gorm.DB) {
 		    last_modified   DATETIME NOT NULL,
 		    last_accessed   DATETIME,
 		    actor           TEXT     NOT NULL DEFAULT '',
-		    deleted_at      DATETIME
+		    deleted_at      DATETIME,
+		    source_etag     TEXT
 		);
 		CREATE UNIQUE INDEX idx_object_metadata_live ON object_metadata(namespace, object_path)
 		    WHERE deleted_at IS NULL;
@@ -80,7 +81,8 @@ func applyObjectMetadataSchemaForTest(t *testing.T, db *gorm.DB) {
 		    backend_mtime   DATETIME,
 		    checksums_json  TEXT     NOT NULL DEFAULT '{}',
 		    actor           TEXT     NOT NULL DEFAULT '',
-		    extra           TEXT     NOT NULL DEFAULT '{}'
+		    extra           TEXT     NOT NULL DEFAULT '{}',
+		    source_etag     TEXT
 		);
 		CREATE INDEX idx_object_history_path  ON object_metadata_history(namespace, object_path, event_ts);
 		CREATE INDEX idx_object_history_event ON object_metadata_history(event_type, event_ts);

@@ -97,6 +97,12 @@ type ObjectMetadataRow struct {
 	LastAccessed *time.Time `gorm:"column:last_accessed"`
 	Actor        string     `gorm:"column:actor;not null;default:''"`
 	DeletedAt    *time.Time `gorm:"column:deleted_at"`
+	// SourceEtag is the ETag returned by the remote source during a
+	// third-party copy (TPC) that produced this row. NULL for objects
+	// uploaded directly. Cleared by any subsequent write that
+	// invalidates the object (RecordCommit, RecordExternalChange)
+	// because the stored ETag would no longer describe the source.
+	SourceEtag *string `gorm:"column:source_etag"`
 }
 
 func (ObjectMetadataRow) TableName() string { return "object_metadata" }
@@ -129,6 +135,10 @@ type ObjectMetadataHistoryRow struct {
 	ChecksumsJSON string     `gorm:"column:checksums_json;not null;default:'{}'"`
 	Actor         string     `gorm:"column:actor;not null;default:''"`
 	Extra         string     `gorm:"column:extra;not null;default:'{}'"`
+	// SourceEtag is a snapshot of the live row's source_etag at the
+	// moment of the event. Populated on the 'source_etag' event only;
+	// other event types leave it NULL.
+	SourceEtag *string `gorm:"column:source_etag"`
 }
 
 func (ObjectMetadataHistoryRow) TableName() string { return "object_metadata_history" }
@@ -146,6 +156,11 @@ type ObjectMetadataEventInput struct {
 	Actor        string         // token sub at request time; "" if unknown
 	Extra        map[string]any // X-Pelican-Object-Metadata; ignored if TrackExtra=false for the ns
 	TrackExtra   bool           // resolved at call time from per-export overrides
+	// SourceEtag is the ETag returned by a remote source during a
+	// third-party copy that produced this commit. Empty for direct
+	// PUTs; RecordCommit persists NULL in that case, which clears
+	// any stale source_etag from a prior TPC.
+	SourceEtag string
 }
 
 // objectMetadataDAO is the storage layer. Stateless beyond its
@@ -180,30 +195,36 @@ func (d *objectMetadataDAO) RecordCommit(ctx context.Context, in ObjectMetadataE
 		{
 			SQL: `INSERT INTO object_metadata_history
 				(event_id, namespace, object_path, event_type, event_ts,
-				 size, etag, etag_source, backend_mtime, actor, extra)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+				 size, etag, etag_source, backend_mtime, actor, extra, source_etag)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			Args: []any{
 				eventID, in.Namespace, in.ObjectPath, string(ObjectEventCommit), now,
 				in.Size, in.ETag, string(in.EtagSource), in.BackendMtime, in.Actor, extraJSON,
+				nullableString(in.SourceEtag),
 			},
 		},
 		{
 			// Conflict scope is the partial unique index on live
 			// rows: (namespace, object_path) WHERE deleted_at IS NULL.
+			// source_etag rides the same UPSERT: a TPC commit sets
+			// it to the upstream ETag; a direct PUT (in.SourceEtag
+			// == "") stores NULL, which naturally clears any stale
+			// value left by an earlier TPC to the same path.
 			SQL: `INSERT INTO object_metadata
 				(namespace, object_path, size, etag, etag_source,
-				 backend_mtime, created_at, last_modified, actor)
-				VALUES (?,?,?,?,?,?,?,?,?)
+				 backend_mtime, created_at, last_modified, actor, source_etag)
+				VALUES (?,?,?,?,?,?,?,?,?,?)
 				ON CONFLICT(namespace, object_path) WHERE deleted_at IS NULL DO UPDATE SET
 					size          = excluded.size,
 					etag          = excluded.etag,
 					etag_source   = excluded.etag_source,
 					backend_mtime = excluded.backend_mtime,
 					last_modified = excluded.last_modified,
-					actor         = excluded.actor`,
+					actor         = excluded.actor,
+					source_etag   = excluded.source_etag`,
 			Args: []any{
 				in.Namespace, in.ObjectPath, in.Size, in.ETag, string(in.EtagSource),
-				in.BackendMtime, now, now, in.Actor,
+				in.BackendMtime, now, now, in.Actor, nullableString(in.SourceEtag),
 			},
 		},
 	}
@@ -548,6 +569,16 @@ func encodeExtra(trackExtra bool, m map[string]any) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// nullableString maps "" → nil (persisted as SQL NULL) so an unset
+// string field doesn't get stored as an empty-string literal that a
+// LookupLive would then have to disambiguate.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // ErrObjectMetadataNotFound is the sentinel some helpers return when
