@@ -279,7 +279,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		issuerMode := param.Origin_IssuerMode.GetString()
 		var issuerHealthCheckUrl string
 		if issuerMode == "embedded" || issuerMode == "" {
-			// For the embedded issuer, use the first auth-requiring export's namespace.
+			// For the embedded issuer, health-check the first auth-requiring
+			// export's namespace discovery.
 			originExports, exErr := server_utils.GetOriginExports()
 			if exErr == nil {
 				for _, oe := range originExports {
@@ -290,9 +291,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 					}
 				}
 			}
+			// No export requires authentication (an all-public origin), but the
+			// embedded issuer still registers the server's local issuer for
+			// transfer/collection auth. Health-check that instead of the
+			// namespace-less OA4MP path, which the embedded issuer never serves.
+			if issuerHealthCheckUrl == "" {
+				issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() +
+					"/api/v1.0/issuer/ns" + server_structs.LocalIssuerNamespace + "/.well-known/openid-configuration"
+			}
 		}
 		if issuerHealthCheckUrl == "" {
-			// Fallback for OA4MP mode or if no auth-requiring export found
+			// Fallback for OA4MP mode.
 			issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
 		}
 		if err = server_utils.WaitUntilWorking(ctx, "GET", issuerHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
