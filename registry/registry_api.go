@@ -121,6 +121,13 @@ func LaunchRegistryMetrics(ctx context.Context, egrp *errgroup.Group) {
 					continue
 				}
 				metrics.PelicanRegistryFederationNamespaces.WithLabelValues(server_structs.RegPending.LowerString()).Set(float64(numPending))
+
+				numIncomplete, err := getCountofFederationNamespacesByStatus(server_structs.RegIncomplete)
+				if err != nil {
+					log.Warningln("Failed to update namespace metric for incomplete namespaces.", err.Error())
+					continue
+				}
+				metrics.PelicanRegistryFederationNamespaces.WithLabelValues(server_structs.RegIncomplete.LowerString()).Set(float64(numIncomplete))
 			}
 		}
 	})

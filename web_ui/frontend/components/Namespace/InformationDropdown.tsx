@@ -5,6 +5,7 @@ import {
   InformationSpan,
   NamespaceAdminMetadata,
 } from '@/components';
+import { getStatusDisplayName } from '@/components/Namespace';
 
 interface InformationDropdownProps {
   adminMetadata: NamespaceAdminMetadata;
@@ -29,7 +30,7 @@ const InformationDropdown = ({
       name: 'Security Contact User ID',
       value: adminMetadata.security_contact_user_id,
     },
-    { name: 'Status', value: adminMetadata.status },
+    { name: 'Status', value: getStatusDisplayName(adminMetadata.status) },
     { name: 'Approver ID', value: adminMetadata.approver_id.toString() },
     { name: 'Approved At', value: approvedAt },
     {

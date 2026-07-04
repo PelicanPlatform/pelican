@@ -45,8 +45,8 @@ type RegistrationStatus string
 // endpoint to tell the UI if a field is required. For other validator tags,
 // visit: https://pkg.go.dev/github.com/go-playground/validator/v10
 type AdminMetadata struct {
-	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
-	Description           string             `json:"description"`
+	UserID                string             `json:"user_id" post:"exclude" validate:"required"` // "sub" claim of user JWT who requested registration
+	Description           string             `json:"description" validate:"required"`
 	SiteName              string             `json:"site_name"`
 	Institution           string             `json:"institution" validate:"required"`                                                                                // the unique identifier of the institution
 	SecurityContactUserID string             `json:"security_contact_user_id" description:"User Identifier of the user responsible for the security of the service"` // "sub" claim of user who is responsible for taking security concern
@@ -105,6 +105,10 @@ type (
 )
 
 const (
+	// RegIncomplete: auto-registered by an origin/cache; the human-facing
+	// registration form has not been completed and submitted yet.
+	RegIncomplete RegistrationStatus = "Incomplete"
+	// RegPending: registration form submitted; awaiting admin review.
 	RegPending  RegistrationStatus = "Pending"
 	RegApproved RegistrationStatus = "Approved"
 	RegDenied   RegistrationStatus = "Denied"
@@ -137,7 +141,7 @@ func (Registration) TableName() string {
 }
 
 func IsValidRegStatus(s string) bool {
-	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+	return s == "Incomplete" || s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
 
 // Server represents a Pelican server (origin or cache) in the registry

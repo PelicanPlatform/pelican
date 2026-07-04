@@ -310,7 +310,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 					"/complete-prefix",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 			},
 		)
@@ -355,19 +355,19 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 					"/complete-prefix-1",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 				mockNamespace(
 					"/complete-prefix-2",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 				mockNamespace(
 					"/foo/bar",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 			},
 		)
