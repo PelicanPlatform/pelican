@@ -730,9 +730,10 @@ func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDelet
 			continue
 		}
 
+		// Incomplete counts the same as Pending here: both mean unreviewed registration
 		allPending := true
 		for _, reg := range srv.Registration {
-			if reg.AdminMetadata.Status != server_structs.RegPending {
+			if reg.AdminMetadata.Status != server_structs.RegPending && reg.AdminMetadata.Status != server_structs.RegIncomplete {
 				allPending = false
 				break
 			}
@@ -831,7 +832,7 @@ func reapOrphanedPendingNamespaces(staleServers []serverIdentity) error {
 	}
 
 	for _, ns := range candidates {
-		if ns.AdminMetadata.Status != server_structs.RegPending {
+		if ns.AdminMetadata.Status != server_structs.RegPending && ns.AdminMetadata.Status != server_structs.RegIncomplete {
 			continue
 		}
 		// Deletions are best-effort: a failure on one namespace is logged and the rest continue.

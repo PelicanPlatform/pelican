@@ -993,7 +993,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"}}
+		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name", Description: "test description"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1048,7 +1048,7 @@ func TestCreateNamespace(t *testing.T) {
 		mockNs := server_structs.Registration{
 			Prefix:        "/foo",
 			Pubkey:        pubKeyStr,
-			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"},
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name", Description: "test description"},
 			CustomFields:  customFieldsVals,
 		}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -1559,6 +1559,7 @@ func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
 				UserID:      "",
 				Status:      server_structs.RegPending,
 				SiteName:    "test-site-name",
+				Description: "test description",
 			},
 		}
 		require.NoError(t, insertMockDBData([]server_structs.Registration{stored}))

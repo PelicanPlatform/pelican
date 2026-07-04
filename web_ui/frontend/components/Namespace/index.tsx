@@ -3,6 +3,7 @@ import Card, { CardProps } from './Card';
 import CreateNamespaceCard from './CreateNamespaceCard';
 import CardSkeleton from './CardSkeleton';
 import PendingCard, { PendingCardProps } from './PendingCard';
+import IncompleteCard from './IncompleteCard';
 import NamespaceCardList from './NamespaceCardList';
 import NamespaceIcon from './NamespaceIcon';
 
@@ -12,7 +13,25 @@ export {
   CreateNamespaceCard,
   CardSkeleton,
   PendingCard,
+  IncompleteCard,
   NamespaceIcon,
+};
+
+export type RegistrationStatus =
+  | 'Incomplete'
+  | 'Pending'
+  | 'Approved'
+  | 'Denied'
+  | 'Unknown';
+
+// Human-facing labels for registration statuses
+export const getStatusDisplayName = (status: RegistrationStatus): string => {
+  switch (status) {
+    case 'Pending':
+      return 'Pending (Ready to review)';
+    default:
+      return status;
+  }
 };
 
 export interface NamespaceAdminMetadata {
@@ -21,7 +40,7 @@ export interface NamespaceAdminMetadata {
   site_name: string;
   institution: string;
   security_contact_user_id: string;
-  status: 'Pending' | 'Approved' | 'Denied' | 'Unknown';
+  status: RegistrationStatus;
   approver_id: number;
   approved_at: string;
   created_at: string;
