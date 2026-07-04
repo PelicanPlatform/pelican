@@ -28,6 +28,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 // handleCreateOAuthClient handles POST /api/v1.0/transfer/oauth-clients
@@ -79,6 +80,11 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// A client registered by a system administrator is shared: any caller
+		// with the pelican.transfer scope may bootstrap credentials with it.
+		// A client registered by a non-admin user is private to that user.
+		adminConfigured := web_ui.IsSystemAdminUserID(db, owner.UserID)
+
 		client := TransferOAuthClient{
 			ID:                    uuid.New().String(),
 			UserID:                owner.UserID,
@@ -88,6 +94,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 			EncryptedClientSecret: encClientSecret,
 			GrantTypes:            req.GrantTypes,
 			Scopes:                req.Scopes,
+			AdminConfigured:       adminConfigured,
 			CreatedAt:             time.Now(),
 			UpdatedAt:             time.Now(),
 		}

@@ -517,37 +517,6 @@ func VerifyAndExtract(ctx *gin.Context, authOption AuthOption) (*VerifyResult, i
 	return result, status, true, nil
 }
 
-// ExtractGroups extracts group membership claims from a verified JWT.
-// It checks the provided claim names in order and returns groups from the
-// first claim that contains a list. This handles both WLCG tokens
-// (which use "wlcg.groups") and SciTokens (which may use a configurable
-// group claim).
-func ExtractGroups(tok jwt.Token, claimNames ...string) []string {
-	for _, claim := range claimNames {
-		groupsIface, ok := tok.Get(claim)
-		if !ok {
-			continue
-		}
-		switch groups := groupsIface.(type) {
-		case []interface{}:
-			result := make([]string, 0, len(groups))
-			for _, g := range groups {
-				if s, ok := g.(string); ok {
-					result = append(result, s)
-				}
-			}
-			if len(result) > 0 {
-				return result
-			}
-		case []string:
-			if len(groups) > 0 {
-				return groups
-			}
-		}
-	}
-	return nil
-}
-
 // CheckOriginIssuer verifies a token whose issuer claim matches Origin.Url.
 // This is used when Origin.Url differs from Server.ExternalWebUrl but the
 // origin uses the same signing key. It is a standalone function (not part of

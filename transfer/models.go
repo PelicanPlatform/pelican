@@ -45,16 +45,20 @@ func (TransferCredential) TableName() string {
 
 // TransferOAuthClient represents a stored OAuth2 client registration.
 type TransferOAuthClient struct {
-	ID                    string    `gorm:"primaryKey;column:id" json:"id"`
-	UserID                string    `gorm:"column:user_id;not null" json:"-"`
-	Name                  string    `gorm:"column:name;not null" json:"name"`
-	IssuerURL             string    `gorm:"column:issuer_url;not null" json:"issuer_url"`
-	EncryptedClientID     string    `gorm:"column:encrypted_client_id;not null;default:''" json:"-"`
-	EncryptedClientSecret string    `gorm:"column:encrypted_client_secret;not null;default:''" json:"-"`
-	GrantTypes            string    `gorm:"column:grant_types;not null;default:''" json:"grant_types,omitempty"`
-	Scopes                string    `gorm:"column:scopes;not null;default:''" json:"scopes,omitempty"`
-	CreatedAt             time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt             time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID                    string `gorm:"primaryKey;column:id" json:"id"`
+	UserID                string `gorm:"column:user_id;not null" json:"-"`
+	Name                  string `gorm:"column:name;not null" json:"name"`
+	IssuerURL             string `gorm:"column:issuer_url;not null" json:"issuer_url"`
+	EncryptedClientID     string `gorm:"column:encrypted_client_id;not null;default:''" json:"-"`
+	EncryptedClientSecret string `gorm:"column:encrypted_client_secret;not null;default:''" json:"-"`
+	GrantTypes            string `gorm:"column:grant_types;not null;default:''" json:"grant_types,omitempty"`
+	Scopes                string `gorm:"column:scopes;not null;default:''" json:"scopes,omitempty"`
+	// AdminConfigured marks a client an administrator registered for shared use;
+	// any caller with the pelican.transfer scope may bootstrap with it. Clients a
+	// non-admin user registers are private to that user.
+	AdminConfigured bool      `gorm:"column:admin_configured;not null;default:false" json:"admin_configured"`
+	CreatedAt       time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
 
 // TableName overrides the default GORM table name.
