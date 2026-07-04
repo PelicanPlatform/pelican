@@ -65,7 +65,7 @@ type secondOrigin struct {
 // federation discovery URL. Unlike that test's origin, this one enables the
 // embedded issuer and requires a token to read (no PublicReads), so a storage
 // token is genuinely needed on the source side.
-func launchSecondOrigin(t *testing.T, ctx context.Context, host, user, password string) secondOrigin {
+func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password string) secondOrigin {
 	t.Helper()
 
 	pelicanBinary := getPelicanBinary(t)
@@ -230,7 +230,7 @@ Xrootd:
 
 // waitForStatus polls url until it returns wantStatus, the subprocess exits, or
 // the context is done.
-func waitForStatus(t *testing.T, ctx context.Context, url string, wantStatus int, exitCh <-chan error, logPath, name string) {
+func waitForStatus(t testing.TB, ctx context.Context, url string, wantStatus int, exitCh <-chan error, logPath, name string) {
 	t.Helper()
 	hc := &http.Client{Transport: config.GetTransport(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	deadline := time.Now().Add(45 * time.Second)
@@ -260,7 +260,7 @@ func waitForStatus(t *testing.T, ctx context.Context, url string, wantStatus int
 
 // waitForRegistration polls the director stat endpoint until it responds with a
 // redirect (namespace routable) rather than a 5xx/connection error.
-func waitForRegistration(t *testing.T, ctx context.Context, url string, exitCh <-chan error, logPath string) {
+func waitForRegistration(t testing.TB, ctx context.Context, url string, exitCh <-chan error, logPath string) {
 	t.Helper()
 	hc := &http.Client{Transport: config.GetTransport(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	deadline := time.Now().Add(45 * time.Second)
@@ -289,7 +289,7 @@ func waitForRegistration(t *testing.T, ctx context.Context, url string, exitCh <
 	}
 }
 
-func dumpFileToLog(t *testing.T, path string) {
+func dumpFileToLog(t testing.TB, path string) {
 	t.Helper()
 	if data, err := os.ReadFile(path); err == nil {
 		t.Logf("===== %s =====\n%s\n=====", path, string(data))
@@ -298,7 +298,7 @@ func dumpFileToLog(t *testing.T, path string) {
 
 // storageTokenForIssuer mints a WLCG storage token with the given issuer,
 // subject, and resource scopes, signed by the server's (shared) issuer key.
-func storageTokenForIssuer(t *testing.T, issuer, subject string, scopes ...token_scopes.ResourceScope) string {
+func storageTokenForIssuer(t testing.TB, issuer, subject string, scopes ...token_scopes.ResourceScope) string {
 	t.Helper()
 	tc := token.NewWLCGToken()
 	tc.Lifetime = 10 * time.Minute
@@ -312,14 +312,14 @@ func storageTokenForIssuer(t *testing.T, issuer, subject string, scopes ...token
 }
 
 // writeTokenFile writes a token to a temp file and returns its path.
-func writeTokenFile(t *testing.T, name, tok string) string {
+func writeTokenFile(t testing.TB, name, tok string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), name)
 	require.NoError(t, os.WriteFile(p, []byte(tok), 0600))
 	return p
 }
 
-func readFileString(t *testing.T, path string) string {
+func readFileString(t testing.TB, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -329,7 +329,7 @@ func readFileString(t *testing.T, path string) string {
 // pollTransferJob polls the transfer server for a job's status until it reaches
 // a terminal state or the timeout elapses, returning the last observed status.
 // It logs the full job record when the job ends in a non-completed state.
-func pollTransferJob(t *testing.T, ctx context.Context, serverURL, token, jobID string, timeout time.Duration) string {
+func pollTransferJob(t testing.TB, ctx context.Context, serverURL, token, jobID string, timeout time.Duration) string {
 	t.Helper()
 	hc := &http.Client{Transport: config.GetTransport()}
 	url := serverURL + "/api/v1.0/transfer/jobs/" + jobID
@@ -364,7 +364,7 @@ var credIDRe = regexp.MustCompile(`id:\s*([0-9a-fA-F-]+)`)
 
 // cliCredentialAdd stores a storage token as a credential on the transfer
 // server via the CLI and returns the new credential's ID.
-func cliCredentialAdd(t *testing.T, cliPath, serverURL, transferTokenFile, name, tokenFile, issuer string, env []string) string {
+func cliCredentialAdd(t testing.TB, cliPath, serverURL, transferTokenFile, name, tokenFile, issuer string, env []string) string {
 	t.Helper()
 	cmd := exec.Command(cliPath, "transfer", "credential", "add",
 		"--server", serverURL,

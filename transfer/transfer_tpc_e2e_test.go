@@ -76,7 +76,7 @@ type deviceApproval struct {
 }
 
 // getPelicanBinary builds the pelican binary once and returns its path.
-func getPelicanBinary(t *testing.T) string {
+func getPelicanBinary(t testing.TB) string {
 	t.Helper()
 	buildOnce.Do(func() {
 		binaryName := "pelican"
@@ -119,7 +119,7 @@ func randomString(n int) string {
 
 // simulateUserApproval handles the device-code approval flow by logging in
 // and approving the device code via the issuer's API.
-func simulateUserApproval(t *testing.T, serverURL, namespace, userCode, password string) {
+func simulateUserApproval(t testing.TB, serverURL, namespace, userCode, password string) {
 	t.Helper()
 
 	jar, err := cookiejar.New(nil)
@@ -213,7 +213,7 @@ Transfer:
 
 // setupFedForTransferTPC starts a federation with the transfer API enabled and
 // creates users for authentication.
-func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, adminPassword, testUserPassword string, dataDir string) {
+func setupFedForTransferTPC(t testing.TB) (ft *fed_test_utils.FedTest, adminPassword, testUserPassword string, dataDir string) {
 	t.Helper()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -266,7 +266,7 @@ func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, adminPass
 
 // createIssuerOAuthClient creates a token-exchange-enabled OIDC client on the
 // embedded issuer's admin API.  Returns (clientID, clientSecret).
-func createIssuerOAuthClient(t *testing.T, serverURL, adminPassword, namespace string) (string, string) {
+func createIssuerOAuthClient(t testing.TB, serverURL, adminPassword, namespace string) (string, string) {
 	t.Helper()
 
 	// The issuer admin API requires an authenticated admin session. Log in as
@@ -320,7 +320,7 @@ func createIssuerOAuthClient(t *testing.T, serverURL, adminPassword, namespace s
 
 // registerOAuthClientOnTransferServer registers an OAuth client on the transfer
 // server so that token-exchange bootstrap is available for the given issuer.
-func registerOAuthClientOnTransferServer(t *testing.T, serverURL, bearerToken, issuerURL, clientID, clientSecret string) {
+func registerOAuthClientOnTransferServer(t testing.TB, serverURL, bearerToken, issuerURL, clientID, clientSecret string) {
 	t.Helper()
 
 	httpClient := &http.Client{Transport: config.GetTransport()}
@@ -353,7 +353,7 @@ func registerOAuthClientOnTransferServer(t *testing.T, serverURL, bearerToken, i
 
 // generateTransferScopeToken creates a WLCG token with the pelican.transfer
 // scope for authenticating with the transfer server API.
-func generateTransferScopeToken(t *testing.T) string {
+func generateTransferScopeToken(t testing.TB) string {
 	t.Helper()
 
 	issuer, err := config.GetServerIssuerURL()
@@ -372,7 +372,7 @@ func generateTransferScopeToken(t *testing.T) string {
 }
 
 // generateStorageToken creates a WLCG token with given storage scopes.
-func generateStorageToken(t *testing.T, scopes ...token_scopes.ResourceScope) string {
+func generateStorageToken(t testing.TB, scopes ...token_scopes.ResourceScope) string {
 	t.Helper()
 
 	issuer, err := config.GetServerIssuerURL()
@@ -394,7 +394,7 @@ func generateStorageToken(t *testing.T, scopes ...token_scopes.ResourceScope) st
 // logging in (if needed) and following the redirect chain to the callback
 // endpoint on the transfer server. This completes the authorization code
 // bootstrap flow.
-func simulateAuthCodeApproval(t *testing.T, serverURL, authorizeURL, password string) {
+func simulateAuthCodeApproval(t testing.TB, serverURL, authorizeURL, password string) {
 	t.Helper()
 
 	jar, err := cookiejar.New(nil)
