@@ -93,6 +93,14 @@ func newTransferHTTPClient() (*http.Client, string, string, error) {
 	}
 	serverURL = strings.TrimRight(serverURL, "/")
 
+	// Initialize the client configuration so the shared transport honors TLS
+	// settings (CA bundle, TLSSkipVerify) before we contact the server. Without
+	// this the transport is built from an uninitialized config and rejects the
+	// server's certificate.
+	if err := config.InitClient(); err != nil {
+		return nil, "", "", errors.Wrap(err, "failed to initialize client configuration")
+	}
+
 	tokenValue := ""
 	if transferToken != "" {
 		tokenBytes, err := os.ReadFile(transferToken)
