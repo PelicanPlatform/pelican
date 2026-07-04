@@ -143,10 +143,10 @@ func TestBatcher_StopNoLostOpsUnderConcurrency(t *testing.T) {
 
 	const senders = 50
 	var (
-		wg          sync.WaitGroup
-		ok          atomic.Int64
-		failed      atomic.Int64
-		hangBudget  = 5 * time.Second
+		wg           sync.WaitGroup
+		ok           atomic.Int64
+		failed       atomic.Int64
+		hangBudget   = 5 * time.Second
 		hangDeadline = time.After(hangBudget)
 	)
 	wg.Add(senders)

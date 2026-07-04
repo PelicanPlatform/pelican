@@ -285,13 +285,13 @@ func (p *poscFileSystem) OpenFile(ctx context.Context, name string, flag int, pe
 		f, err := p.inner.OpenFile(ctx, tempPath, stagingFlags, stagingPerm)
 		if err == nil {
 			pf := &poscFile{
-				File:     f,
-				fs:       p,
-				ctx:      ctx,
-				tempPath: tempPath,
+				File:      f,
+				fs:        p,
+				ctx:       ctx,
+				tempPath:  tempPath,
 				finalPath: path.Clean("/" + strings.TrimLeft(name, "/")),
-				perm:     perm,
-				mtime:    p.clock(),
+				perm:      perm,
+				mtime:     p.clock(),
 			}
 			// If the configured ETag policy needs a streaming
 			// hash, grab one from the pool now so every Write
@@ -521,8 +521,8 @@ type poscFile struct {
 	// poscFileSystem.SetEtagPolicy. Once finalized, the digest is
 	// stored in finalizedDigest so the post-rename FileInfo wrap
 	// can return it.
-	streamingHasher  hash.Hash
-	finalizedDigest  string
+	streamingHasher hash.Hash
+	finalizedDigest string
 
 	prev *poscFile
 	next *poscFile
