@@ -575,7 +575,6 @@ func (c *metadataController) jitter(base time.Duration) time.Duration {
 	return base + add/2
 }
 
-
 func (c *metadataController) recordAttempt(namespace string, mode PublishMode, res publishResult, elapsed time.Duration) {
 	metadataPublishAttemptsTotal.WithLabelValues(namespace, string(mode), string(res.outcome)).Inc()
 	metadataPublishLatency.WithLabelValues(namespace, string(mode)).Observe(elapsed.Seconds())
@@ -770,20 +769,4 @@ func extractObjectMetadataFromRequest(r *http.Request) *http.Request {
 		return r
 	}
 	return r.WithContext(ctx)
-}
-
-// pathInNamespace returns the federation-relative path of an object
-// given the per-export `prefix`. Keeping it tiny so we can unit-test it.
-func pathInNamespace(federationPrefix, full string) string {
-	if federationPrefix == "" || federationPrefix == "/" {
-		return full
-	}
-	rel := strings.TrimPrefix(full, federationPrefix)
-	if rel == "" {
-		rel = "/"
-	}
-	if !strings.HasPrefix(rel, "/") {
-		rel = "/" + rel
-	}
-	return path.Join(federationPrefix, rel)
 }

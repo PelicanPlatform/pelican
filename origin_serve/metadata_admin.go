@@ -201,8 +201,8 @@ func queueHealthHandler(c *gin.Context) {
 	}
 	state := computeHealthState(stats.OldestCreatedAt, time.Now().UTC(), metadataCtl.warnAfter, metadataCtl.errorAfter)
 	out := gin.H{
-		"state":     state,
-		"total":     stats.Total,
+		"state":         state,
+		"total":         stats.Total,
 		"per_namespace": stats.PerNamespace,
 	}
 	if stats.OldestCreatedAt != nil {
