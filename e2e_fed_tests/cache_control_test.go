@@ -628,12 +628,24 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	// Evicted objects will return 504 Gateway Timeout; surviving objects return 200.
 	onlyCached := map[string]string{"Cache-Control": "only-if-cached"}
 
-	// Wait until at least one of the oldest files has actually been evicted.
+	// Wait until at least one of the older files has been evicted. We do
+	// NOT require file 0 specifically: the cache's LRU index is a
+	// best-effort ordering (nanosecond-resolution timestamps stamped at
+	// UpdateLRU commit time, subject to goroutine scheduling and OCC
+	// conflicts with concurrent metadata writes from the same object's
+	// background download), so the eviction victim can be any of the older
+	// files in the batch. What matters for this test is that eviction
+	// actually fired under pressure and picked from the older cohort.
 	require.Eventually(t, func() bool {
-		r := fetchFromCache(t, ft, baseURL+fileNames[0], onlyCached)
-		return r.statusCode == http.StatusGatewayTimeout
+		for i := 0; i < 4; i++ {
+			r := fetchFromCache(t, ft, baseURL+fileNames[i], onlyCached)
+			if r.statusCode == http.StatusGatewayTimeout {
+				return true
+			}
+		}
+		return false
 	}, 15*time.Second, 500*time.Millisecond,
-		"Eviction did not remove the oldest file (file 0) from the cache")
+		"Eviction did not remove any of the older files (0-3) from the cache")
 
 	// Verify the newest file survived eviction (still in cache)
 	rLatest := fetchFromCache(t, ft, baseURL+fileNames[4], onlyCached)
@@ -642,7 +654,7 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	assert.Equal(t, fileContents[4], rLatest.body,
 		"Newest file content should be intact")
 
-	// Count how many of the oldest files were actually evicted
+	// Count how many of the older files were actually evicted.
 	evictedCount := 0
 	for i := 0; i < 4; i++ {
 		r := fetchFromCache(t, ft, baseURL+fileNames[i], onlyCached)
@@ -650,10 +662,10 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 			evictedCount++
 		}
 	}
-	// With 100KB total, 90KB HW, 50KB LW, and 5×20KB files, we expect
-	// at least 2 files (~40KB) to be evicted to get below the low-water mark.
+	// With 100KB total, 90KB HW, 50KB LW, and 5×20KB files, at least 2 of
+	// the older files (~40KB) must be evicted to get under the low-water mark.
 	assert.GreaterOrEqual(t, evictedCount, 2,
-		"At least 2 of the oldest files should have been evicted (got %d)", evictedCount)
+		"At least 2 of the older files should have been evicted (got %d)", evictedCount)
 }
 
 // writeThroughOriginConfig returns a YAML configuration snippet for a

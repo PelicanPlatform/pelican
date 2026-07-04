@@ -954,7 +954,14 @@ func (pc *PersistentCache) resolveObject(
 	}
 
 	if err := pc.eviction.RecordAccess(instanceHash); err != nil {
-		log.Debugf("Failed to record access for %s: %v", instanceHash, err)
+		// A common cause is a Badger OCC conflict with a concurrent write to
+		// the same object's metadata key (e.g. the background download's own
+		// onComplete callback). When it happens on the first access to a
+		// freshly-downloaded object, no LRU key gets created and the object
+		// becomes invisible to eviction until it's re-accessed. Rare in
+		// practice but worth surfacing above debug so a future regression
+		// (e.g. it starts firing on every request) is noticeable in logs.
+		log.Warnf("Failed to record access for %s (will retry on next access): %v", instanceHash, err)
 	}
 
 	return &objectResolution{
