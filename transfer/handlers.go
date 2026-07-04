@@ -110,18 +110,12 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			}
 		}
 
-		// Create the job via the transfer manager
-		job, err := tm.CreateJob(agentTransfers, options)
-		if err != nil {
-			log.Errorf("Failed to create transfer job: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
-				Code:  "INTERNAL",
-				Error: "Failed to create transfer job: " + err.Error(),
-			})
-			return
-		}
-
-		// Persist the job record with owner info
+		// Durably record the job BEFORE starting execution, under an ID we
+		// choose. The persisted row (with the full request body and credential
+		// refs) is the precondition for the job running: if this write fails we
+		// never submit, so there is no orphaned in-flight job, and the eager
+		// completion callback and the crash-recovery reconciler can always find
+		// the row for a job that has begun.
 		reqBody, _ := json.Marshal(req)
 		var srcCredID, dstCredID *string
 		if req.SourceCredentialID != "" {
@@ -131,20 +125,43 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			dstCredID = &req.DestCredentialID
 		}
 
+		jobID := uuid.NewString()
+		now := time.Now()
 		dbJob := TransferJob{
-			ID:                 job.ID,
+			ID:                 jobID,
 			UserID:             owner.UserID,
-			AgentJobID:         &job.ID,
+			AgentJobID:         &jobID,
 			SourceCredentialID: srcCredID,
 			DestCredentialID:   dstCredID,
 			RequestBody:        string(reqBody),
-			CreatedAt:          job.CreatedAt,
-			UpdatedAt:          time.Now(),
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}
-
 		if err := db.Create(&dbJob).Error; err != nil {
 			log.Errorf("Failed to persist transfer job: %v", err)
-			// The job is already running in the transfer manager; log the DB error but report success
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  "INTERNAL",
+				Error: "Failed to record transfer job",
+			})
+			return
+		}
+
+		// Start execution under the same ID.
+		job, err := tm.CreateJobWithID(jobID, agentTransfers, options)
+		if err != nil {
+			log.Errorf("Failed to create transfer job: %v", err)
+			// The row exists but the job never started; mark it terminal so it
+			// isn't left dangling (and isn't resurrected by the reconciler).
+			db.Model(&TransferJob{}).Where("id = ?", jobID).Updates(map[string]any{
+				"completed_at": time.Now(),
+				"error":        "failed to start job: " + err.Error(),
+				"updated_at":   time.Now(),
+			})
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  "INTERNAL",
+				Error: "Failed to create transfer job: " + err.Error(),
+			})
+			return
 		}
 
 		c.JSON(http.StatusCreated, TransferJobResponse{
