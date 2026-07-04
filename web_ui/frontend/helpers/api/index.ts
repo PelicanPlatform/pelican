@@ -269,6 +269,30 @@ export const claimNamespace = async (
   );
 };
 
+/**
+ * Mints a single-use ownership-transfer invite for a namespace
+ * registration; the redeemer becomes the new owner. Owner/admin only.
+ * @param id Namespace ID
+ * @param expiresIn Optional Go duration string (e.g. "168h"); server
+ *   defaults to 7 days
+ */
+export const createRegistrationOwnershipInvite = async (
+  id: number,
+  expiresIn?: string
+): Promise<Response> => {
+  return await fetchApi(
+    async () =>
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/ownership-invites`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expiresIn: expiresIn ?? '' }),
+        }
+      )
+  );
+};
+
 export const postGeneralNamespace = async (
   data: RegistryNamespace
 ): Promise<Response> => {
