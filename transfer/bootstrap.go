@@ -101,10 +101,32 @@ type bootstrapSession struct {
 	StartCode string // opaque code for the short redirect URL (separate from SessionID)
 	AuthURL   string // full issuer authorization URL (stored so the start redirect can use it)
 	State     string // CSRF state parameter
-	Status    string // "pending", "complete", "error"
-	CredID    string
-	Error     string
 	CreatedAt time.Time
+
+	// mu guards the mutable result fields below. The OAuth callback handler
+	// (browser goroutine) and the CLI poll handler (poll goroutine) both touch
+	// them concurrently, and the store mutex only guards the map, not the
+	// pointed-to struct. Use setResult/result rather than the fields directly.
+	mu     sync.Mutex
+	status string // "pending", "complete", "error"
+	credID string
+	errMsg string
+}
+
+// setResult atomically records the terminal outcome of a bootstrap session.
+func (s *bootstrapSession) setResult(status, credID, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = status
+	s.credID = credID
+	s.errMsg = errMsg
+}
+
+// result atomically reads the session's status, credential ID, and error.
+func (s *bootstrapSession) result() (status, credID, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status, s.credID, s.errMsg
 }
 
 // bootstrapSessionStore is a simple in-memory store for active bootstrap sessions.
@@ -249,13 +271,16 @@ func generateStartCode() (string, error) {
 }
 
 // findOAuthClientForGrant looks up an OAuth client registered for the given
-// issuer that supports the specified grant type. When requestedScopes is
-// non-empty, clients whose scopes column covers all requested scopes are
-// preferred. Clients with no scope information are returned as a fallback,
-// sorted after those with known matching scopes.
-func findOAuthClientForGrant(db *gorm.DB, issuerURL, requiredGrant string, requestedScopes []string) (*TransferOAuthClient, error) {
+// issuer that supports the specified grant type. Only clients the requester may
+// use are considered: those the requester registered themselves (user_id match)
+// or admin-configured shared clients. When requestedScopes is non-empty, clients
+// whose scopes column covers all requested scopes are preferred. Clients with no
+// scope information are returned as a fallback, sorted after those with known
+// matching scopes.
+func findOAuthClientForGrant(db *gorm.DB, issuerURL, requesterUserID, requiredGrant string, requestedScopes []string) (*TransferOAuthClient, error) {
 	var clients []TransferOAuthClient
-	if err := db.Where("issuer_url = ?", issuerURL).Find(&clients).Error; err != nil {
+	if err := db.Where("issuer_url = ? AND (admin_configured = ? OR user_id = ?)",
+		issuerURL, true, requesterUserID).Find(&clients).Error; err != nil {
 		return nil, err
 	}
 
@@ -320,6 +345,15 @@ func scopesContainAll(haystack, needles []string) bool {
 // registered OAuth client, so it cannot be used to fetch arbitrary URLs.
 func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		owner, err := getOwner(c)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  "INTERNAL",
+				Error: "Failed to determine request owner",
+			})
+			return
+		}
+
 		issuerURL := c.Query("issuer")
 		if issuerURL == "" {
 			c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -329,14 +363,17 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// SSRF allow-list: only contact issuers that already have a registered
-		// OAuth client. Server-assisted bootstrap (token-exchange,
-		// authorization-code) requires such a client anyway, so this loses no
-		// functionality while preventing the metadata fetch from being aimed at
-		// an arbitrary URL. device_code is discoverable by the CLI directly
-		// against the issuer and does not need a server-side fetch.
+		// SSRF allow-list: only contact issuers that already have an OAuth client
+		// the caller may use (their own, or an admin-configured shared one).
+		// Server-assisted bootstrap (token-exchange, authorization-code) requires
+		// such a client anyway, so this loses no functionality while preventing
+		// the metadata fetch from being aimed at an arbitrary URL. device_code is
+		// discoverable by the CLI directly against the issuer and does not need a
+		// server-side fetch.
 		var clientCount int64
-		if err := db.Model(&TransferOAuthClient{}).Where("issuer_url = ?", issuerURL).Count(&clientCount).Error; err != nil {
+		if err := db.Model(&TransferOAuthClient{}).
+			Where("issuer_url = ? AND (admin_configured = ? OR user_id = ?)", issuerURL, true, owner.UserID).
+			Count(&clientCount).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to look up OAuth clients",
@@ -368,7 +405,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		// registered client with that grant type
 		for _, gt := range issuerMeta.GrantTypes {
 			if gt == "urn:ietf:params:oauth:grant-type:token-exchange" {
-				if _, err := findOAuthClientForGrant(db, issuerURL, gt, nil); err == nil {
+				if _, err := findOAuthClientForGrant(db, issuerURL, owner.UserID, gt, nil); err == nil {
 					methods = append(methods, "token_exchange")
 				}
 				break
@@ -378,7 +415,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		// authorization_code is supported if the issuer has an auth endpoint
 		// and we have a registered client with that grant type
 		if issuerMeta.AuthURL != "" {
-			if _, err := findOAuthClientForGrant(db, issuerURL, "authorization_code", nil); err == nil {
+			if _, err := findOAuthClientForGrant(db, issuerURL, owner.UserID, "authorization_code", nil); err == nil {
 				methods = append(methods, "authorization_code")
 			}
 		}
@@ -423,7 +460,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		// Find an OAuth client for this issuer that supports token exchange.
 		// Use the requested scopes (if any) for scope-aware matching.
 		requestedScopes := strings.Fields(req.Scopes)
-		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, "urn:ietf:params:oauth:grant-type:token-exchange", requestedScopes)
+		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "urn:ietf:params:oauth:grant-type:token-exchange", requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -530,7 +567,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		// Find an OAuth client for this issuer that supports authorization_code
 		requestedScopes := strings.Fields(req.Scopes)
-		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, "authorization_code", requestedScopes)
+		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "authorization_code", requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -620,7 +657,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 			StartCode: startCode,
 			AuthURL:   authURL.String(),
 			State:     state,
-			Status:    "pending",
+			status:    "pending",
 			CreatedAt: time.Now(),
 		}
 		globalBootstrapStore.put(session)
@@ -660,7 +697,11 @@ func handleStartRedirect() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Param("code")
 		sess, ok := globalBootstrapStore.getByStartCode(code)
-		if !ok || sess.Status != "pending" {
+		if !ok {
+			redirectToBootstrapResult(c, "error", "Unknown or expired bootstrap session")
+			return
+		}
+		if status, _, _ := sess.result(); status != "pending" {
 			redirectToBootstrapResult(c, "error", "Unknown or expired bootstrap session")
 			return
 		}
@@ -699,8 +740,7 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 		errDesc := c.DefaultQuery("error_description", "Authorization was denied")
 		if errCode != "" && state != "" {
 			if sess, ok := globalBootstrapStore.getByState(state); ok {
-				sess.Status = "error"
-				sess.Error = errDesc
+				sess.setResult("error", "", errDesc)
 			}
 		}
 		if errCode != "" {
@@ -720,33 +760,29 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	// Find an OAuth client for this issuer that supports authorization_code.
 	// Use scope-aware matching with the session's requested scopes.
 	requestedScopes := strings.Fields(sess.Scopes)
-	oauthClient, err := findOAuthClientForGrant(db, sess.IssuerURL, "authorization_code", requestedScopes)
+	oauthClient, err := findOAuthClientForGrant(db, sess.IssuerURL, sess.Owner.UserID, "authorization_code", requestedScopes)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "OAuth client not found for issuer"
+		sess.setResult("error", "", "OAuth client not found for issuer")
 		redirectToBootstrapResult(c, "error", "OAuth client not found for issuer")
 		return
 	}
 
 	clientID, err := decryptSecret(oauthClient.EncryptedClientID)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "Failed to decrypt credentials"
+		sess.setResult("error", "", "Failed to decrypt credentials")
 		redirectToBootstrapResult(c, "error", "Internal error")
 		return
 	}
 	clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "Failed to decrypt credentials"
+		sess.setResult("error", "", "Failed to decrypt credentials")
 		redirectToBootstrapResult(c, "error", "Internal error")
 		return
 	}
 
 	issuerMeta, err := globalIssuerCache.get(sess.IssuerURL)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "Failed to contact issuer"
+		sess.setResult("error", "", "Failed to contact issuer")
 		redirectToBootstrapResult(c, "error", "Failed to contact issuer")
 		return
 	}
@@ -761,8 +797,7 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	})
 	token, err := exchangeCodeForToken(tokenCtx, issuerMeta.TokenURL, clientID, clientSecret, code, redirectURI)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "Token exchange failed: " + err.Error()
+		sess.setResult("error", "", "Token exchange failed: "+err.Error())
 		log.Errorf("Auth code token exchange failed: %v", err)
 		redirectToBootstrapResult(c, "error", "Token exchange with issuer failed")
 		return
@@ -778,15 +813,13 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	cred, err := createCredentialFromToken(db, sess.Owner, sess.Name, sess.IssuerURL,
 		token.AccessToken, token.RefreshToken, credScopes)
 	if err != nil {
-		sess.Status = "error"
-		sess.Error = "Failed to store credential"
+		sess.setResult("error", "", "Failed to store credential")
 		log.Errorf("Failed to create credential from auth code: %v", err)
 		redirectToBootstrapResult(c, "error", "Failed to store credential")
 		return
 	}
 
-	sess.Status = "complete"
-	sess.CredID = cred.ID
+	sess.setResult("complete", cred.ID, "")
 
 	redirectToBootstrapResult(c, "success", "Credential created successfully")
 }
@@ -823,17 +856,18 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		status, credID, errMsg := sess.result()
 		resp := AuthCodeBootstrapStatus{
 			SessionID: sessionID,
-			Status:    sess.Status,
-			Error:     sess.Error,
+			Status:    status,
+			Error:     errMsg,
 		}
 
-		if sess.Status == "complete" {
-			resp.CredentialID = sess.CredID
+		if status == "complete" {
+			resp.CredentialID = credID
 			// Include the credential response
 			var cred TransferCredential
-			if err := db.Where("id = ?", sess.CredID).First(&cred).Error; err == nil {
+			if err := db.Where("id = ?", credID).First(&cred).Error; err == nil {
 				resp.Credential = credentialToResponse(&cred)
 			}
 			// Clean up the session
@@ -894,16 +928,9 @@ func exchangeCodeForToken(ctx context.Context, tokenURL, clientID, clientSecret,
 }
 
 // createCredentialFromToken creates a new TransferCredential with the given
-// token information, encrypting the tokens before storage.
-//
-// TODO: The encryption approach (config.EncryptString / config.DecryptString)
-// should be replaced with a centralized encryption helper in the transfer
-// module. The target design uses a master secret encrypted by the server's
-// issuer keys (any known key can decrypt) and a bootstrap secret derived from
-// that master key. This work exists on a separate branch. For now we use the
-// config encryption/decryption functions and centralize access through
-// encryptSecret / decryptSecret helpers (below) so only one call site needs
-// to change when the other branch merges.
+// token information, encrypting the tokens before storage via the
+// encryptSecret helper (see transfer/encryption.go), which derives its key
+// from the server master key.
 func createCredentialFromToken(db *gorm.DB, owner ownerIdentity, name, issuerURL, accessToken, refreshToken, scopes string) (*TransferCredential, error) {
 	encAccessToken, err := encryptSecret(accessToken)
 	if err != nil {

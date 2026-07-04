@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS transfer_oauth_clients (
     encrypted_client_secret TEXT NOT NULL DEFAULT '',
     grant_types TEXT NOT NULL DEFAULT '',
     scopes TEXT NOT NULL DEFAULT '',
+    -- admin_configured marks a client an administrator registered for shared use:
+    -- any caller holding the pelican.transfer scope may bootstrap credentials with
+    -- it. Clients registered by a non-admin user are private to that user.
+    admin_configured INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

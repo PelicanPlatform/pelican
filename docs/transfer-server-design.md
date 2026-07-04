@@ -84,14 +84,14 @@ A **credential** (`transfer_credentials`) is an encrypted storage token owned by
 
 ### 4.1 Encryption at rest
 
-Secrets are encrypted before they touch the database and decrypted only when needed, through two choke-point helpers in `bootstrap.go`:
+Secrets are encrypted before they touch the database and decrypted only when needed, through two choke-point helpers in `transfer/encryption.go`:
 
 ```
-encryptSecret(plaintext)  → config.EncryptString(plaintext)
-decryptSecret(ciphertext) → config.DecryptString(ciphertext)
+encryptSecret(plaintext)  → AES-GCM under transferSecretKey
+decryptSecret(ciphertext) → AES-GCM under transferSecretKey
 ```
 
-> **Planned change (TODO in code):** the current `config.EncryptString` / `config.DecryptString` approach is intended to be replaced by a centralized, master-secret-based scheme (a master secret wrapped by the server's issuer keys, with a derived bootstrap secret). Routing all crypto through `encryptSecret`/`decryptSecret` means only one call site changes when that work lands.
+`transferSecretKey` is a 32-byte AES key derived (HKDF) from the **server master key** on first use and cached; the master key itself is loaded via `database.LoadOrCreateMasterKey`. This is the centralized, master-secret-based scheme the module was designed around — routing all crypto through `encryptSecret`/`decryptSecret` kept the change to a single choke point.
 
 The same helpers encrypt the confidential OAuth **client** secrets in `transfer_oauth_clients`.
 
@@ -296,7 +296,7 @@ Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 ## 9. Security & operational notes
 
 - **Two scopes of trust.** A `pelican.transfer` token only authorizes *use of the API*; it conveys no storage rights. Storage rights live in the encrypted credentials, which are bound to the resolved user and never returned by the API (the `-`/omitted JSON tags on token fields).
-- **Secrets at rest.** Access tokens, refresh tokens, and OAuth client secrets are all encrypted before storage; the encryption scheme is slated to move to a master-secret design (§4.1).
+- **Secrets at rest.** Access tokens, refresh tokens, and OAuth client secrets are all encrypted before storage under a key derived from the server master key (§4.1).
 - **Auth-code session locality.** Because bootstrap sessions are in-memory, the browser callback and the CLI poll must hit the same server process. A multi-replica deployment needs sticky routing for `/api/callback*` and the poll endpoint, or a shared session store, before the auth-code flow is HA.
 - **Start-code vs. session-id separation.** The auth-code flow deliberately keeps the pollable session ID out of the terminal-visible URL.
 - **Group gating is cookie-only by design.** API bearer tokens bypass `Transfer.EnabledGroups`; restrict issuance of `pelican.transfer` tokens accordingly if group confinement matters for programmatic access.
@@ -313,6 +313,5 @@ Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 
 ## 11. Known limitations / future work
 
-- Master-secret-based encryption for credentials and client secrets is not yet wired in (§4.1).
 - Bootstrap sessions are in-memory only; the auth-code flow is not HA (§9).
 - `device_code` is surfaced by discovery but completed by the CLI feeding token-exchange; there is no standalone server-completed device-code-to- credential endpoint (§5.5).

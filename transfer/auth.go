@@ -39,17 +39,30 @@ const (
 	ctxKeyOwnerUserID = "TransferOwnerUserID"
 )
 
-// TransferAuthMiddleware verifies that the request has a valid token with
+// TransferAuthMiddleware verifies that the request carries a valid token with
 // the pelican.transfer scope. It accepts tokens from the local issuer
-// (Server.ExternalWebUrl), the federation issuer, and — when the transfer
+// (config.GetLocalIssuerUrl), the federation issuer, and — when the transfer
 // API runs on an origin — the origin's issuer (Origin.Url).
 //
-// Group membership (Transfer.EnabledGroups) is checked only when the token
-// arrives via a cookie (web-UI session). Bearer tokens presented via the
-// Authorization header are not subject to the group check.
+// Authorization depends on the token source:
+//   - Bearer tokens (Authorization header): the pelican.transfer scope IS the
+//     authorization. The Transfer.EnabledGroups gate is applied when the scope
+//     is minted — the local issuer only grants pelican.transfer to members of
+//     the configured groups (see transferAccessAllowed in oauth2/issuer). A
+//     federation- or origin-issued pelican.transfer token is trusted as issued
+//     (the operator opts into those issuers by accepting them here).
+//   - Cookie (web-UI session): additionally re-checked against
+//     Transfer.EnabledGroups below, using the groups the local issuer stamped
+//     into the login cookie.
 //
-// The token's issuer and subject are resolved to a users-table entry and
-// the resulting user ID is stored in the gin context for downstream handlers.
+// Groups are read from the verified token's wlcg.groups claim rather than
+// web_ui.GetUserGroups: that helper short-circuits to the (unset) context
+// "Groups" once VerifyAndExtract has stored "User", and token verification
+// deliberately keeps wlcg.groups out of the gin context (federated group claims
+// must not be trusted as local identity).
+//
+// The token's issuer and subject are resolved to a users-table entry and the
+// resulting user ID is stored in the gin context for downstream handlers.
 func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authOption := token.AuthOption{
@@ -68,13 +81,14 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 			if originURL != "" && originURL != serverURL {
 				if originErr := token.CheckOriginIssuer(c, extractRawToken(c),
 					[]token_scopes.TokenScope{token_scopes.Pelican_Transfer}, false); originErr == nil {
-					// Re-extract the verified token that CheckOriginIssuer stored in context
-					result = &token.VerifyResult{}
+					// Re-extract the verified token that CheckOriginIssuer stored
+					// in context. Origin-issued tokens are always presented as
+					// bearer credentials, so mark the source Header explicitly
+					// (CheckOriginIssuer does not set it) — this keeps the
+					// cookie-only group check below from firing on a stale source.
+					result = &token.VerifyResult{Source: token.Header}
 					if t, exists := c.Get("VerifiedToken"); exists {
 						result.Token = t.(jwt.Token)
-					}
-					if s, exists := c.Get("TokenSource"); exists {
-						result.Source = token.TokenSource(s.(string))
 					}
 					ok = true
 				}
@@ -108,13 +122,11 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Group membership is only enforced for cookie-based authentication
-		// (web-UI sessions). Bearer tokens in the Authorization header are
-		// not subject to the group check — their scopes are sufficient.
-		enabledGroups := param.Transfer_EnabledGroups.GetStringSlice()
-		if len(enabledGroups) > 0 && result.Source == token.Cookie {
-			groups := token.ExtractGroups(result.Token, "wlcg.groups")
-			if !groupsOverlap(groups, enabledGroups) {
+		// Cookie (web-UI) sessions are additionally gated on Transfer.EnabledGroups.
+		// Bearer tokens are authorized by their pelican.transfer scope alone (the
+		// issuer applied the group gate when it minted the scope).
+		if enabledGroups := param.Transfer_EnabledGroups.GetStringSlice(); len(enabledGroups) > 0 && result.Source == token.Cookie {
+			if !groupsOverlap(tokenGroups(result.Token), enabledGroups) {
 				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{
 					Code:  "FORBIDDEN",
 					Error: "User is not a member of any permitted transfer group",
@@ -154,6 +166,31 @@ func extractRawToken(c *gin.Context) string {
 		return cookie
 	}
 	return ""
+}
+
+// tokenGroups returns the wlcg.groups claim from a verified token. Groups are
+// read from the token (not web_ui.GetUserGroups) because that helper returns
+// the unset context "Groups" once VerifyAndExtract has stored "User", and token
+// verification deliberately keeps wlcg.groups out of the gin context.
+func tokenGroups(tok jwt.Token) []string {
+	v, ok := tok.Get("wlcg.groups")
+	if !ok {
+		return nil
+	}
+	switch g := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(g))
+		for _, x := range g {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return g
+	default:
+		return nil
+	}
 }
 
 // groupsOverlap returns true if any element in userGroups appears in
