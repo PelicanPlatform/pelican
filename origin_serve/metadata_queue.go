@@ -324,10 +324,10 @@ func (q *publishQueue) ListPending(opts listOptions) ([]*MetadataPublishRow, err
 // queueStats is a small struct describing the current state of the
 // queue. Used by the metrics scraper and the admin _health endpoint.
 type queueStats struct {
-	Total            int64
-	OldestCreatedAt  *time.Time
-	PerNamespace     map[string]int64
-	PerNamespaceOld  map[string]time.Time
+	Total           int64
+	OldestCreatedAt *time.Time
+	PerNamespace    map[string]int64
+	PerNamespaceOld map[string]time.Time
 }
 
 // NextDueAt returns the smallest next_attempt_at across all rows. The
