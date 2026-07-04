@@ -932,10 +932,11 @@ func updateRegistration(ns *server_structs.Registration) error {
 		ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
 		ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
 		// Ownership is likewise internal: the owner is written only through
-		// claimRegistration (or the create path stamping the session's user
-		// ID), never from a request body — otherwise an owner or admin PUT
-		// could clear or reassign the owner and re-open the registration for
-		// claiming by any key holder.
+		// claimRegistration, an ownership-transfer invite redemption
+		// (database.RedeemRegistrationOwnershipInviteLink), or the create
+		// path stamping the session's user ID — never from a request body —
+		// otherwise an owner or admin PUT could clear or reassign the owner
+		// and re-open the registration for claiming by any key holder.
 		ns.AdminMetadata.UserID = existingNsAdmin.UserID
 		ns.AdminMetadata.UpdatedAt = time.Now()
 

@@ -1279,8 +1279,8 @@ definitions:
     description: >-
       Pre-redemption metadata returned by GET /invites/info. Lets the
       redemption UI render the right form (password entry vs.
-      confirm-join-group vs. accept-collection-ownership) without
-      consuming the token. Intentionally omits creator and target user
+      confirm-join-group vs. accept-collection-ownership vs.
+      accept-registration-ownership) without consuming the token. Intentionally omits creator and target user
       to avoid leaking information beyond what the token-bearer already
       implicitly knows.
     properties:
@@ -1290,6 +1290,7 @@ definitions:
           - group
           - password
           - collection_ownership
+          - registration_ownership
       expiresAt:
         type: string
         format: date-time
@@ -1313,6 +1314,15 @@ definitions:
       collectionNamespace:
         type: string
         description: Path prefix the collection is rooted at (e.g. "/research/dataset-A"). Shown in the redemption UI so the recipient sees what they're claiming.
+      registrationId:
+        type: integer
+        description: Present only when kind=registration_ownership.
+      registrationPrefix:
+        type: string
+        description: Namespace prefix of the registration (e.g. "/origins/example.org") for kind=registration_ownership. Shown in the redemption UI so the recipient sees what they're claiming.
+      registrationSiteName:
+        type: string
+        description: Site name from the registration's admin metadata; friendly label for kind=registration_ownership.
   ScopeCatalogEntry:
     type: object
     description: >-
@@ -3889,6 +3899,79 @@ paths:
           description: Internal server error
           schema:
             type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /registry_ui/namespaces/{id}/ownership-invites:
+    post:
+      tags:
+        - "registry_ui"
+      summary: Mint a single-use ownership-transfer invite for a registration
+      description: >-
+        `Authentication Required`. Mints a single-use invite link that,
+        when redeemed by an authenticated user, transfers ownership of
+        the registration (the Pelican user ID recorded in its admin
+        metadata) to the redeemer. Issued only to the registration's
+        current owner or to a registry admin — admins can mint these to
+        rescue registrations whose stored owner is a legacy value
+        (CILogon sub URL, pre-7.28 login name) no session can match.
+
+
+        Single-use is forced server-side; no client toggle. Default
+        expiration is 7 days; supply `expiresIn` (a Go duration string)
+        to override.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          required: true
+          type: integer
+          description: Registration ID.
+        - in: body
+          name: body
+          required: false
+          schema:
+            type: object
+            properties:
+              expiresIn:
+                type: string
+                description: Go duration string ("168h" = 7 days). Defaults to 7d.
+      responses:
+        "201":
+          description: Invite minted; the plaintext token is shown ONCE here.
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+              inviteToken:
+                type: string
+                description: Plaintext token. Shown only on creation.
+              expiresAt:
+                type: string
+                format: date-time
+              isSingleUse:
+                type: boolean
+        "400":
+          description: Invalid namespace ID or invalid expiresIn duration.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller is neither the registration's owner nor an admin.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Namespace not found.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error.
+          schema:
             $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/{id}/approve:
     patch:
@@ -6673,6 +6756,67 @@ paths:
               collectionId:
                 type: string
               previousOwnerId:
+                type: string
+        "400":
+          description: Token missing, expired, revoked, already used, or wrong kind.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite link not found.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /invites/redeem/registration-ownership:
+    post:
+      tags:
+        - invites
+      summary: Redeem a registration-ownership invite
+      description: >-
+        `Authentication Required`. Consumes a single-use ownership-
+        transfer invite — the authenticated caller becomes the owner of
+        the referenced registry registration (their Pelican user ID is
+        written into the registration's admin metadata; the invite is
+        marked redeemed in the same transaction). The previous owner, if
+        any, loses ownership at the same moment.
+
+
+        The caller must be authenticated — anonymous redemption would
+        let link-holders make ANYBODY the owner. Ordinary user
+        accounts (existing or self-enrolled via OIDC on first login)
+        are accepted; brand-new local-password users need to be
+        onboarded separately first (admin-issued password-set invite).
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - token
+            properties:
+              token:
+                type: string
+                description: Plaintext invite token from the link.
+      responses:
+        "200":
+          description: Ownership transferred to the calling user.
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+              message:
+                type: string
+              registrationId:
+                type: integer
+              registrationPrefix:
                 type: string
         "400":
           description: Token missing, expired, revoked, already used, or wrong kind.

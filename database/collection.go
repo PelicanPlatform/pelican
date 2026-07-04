@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -470,12 +472,18 @@ type GroupMember struct {
 //     authenticated — we need a real user to transfer ownership to.
 //     Forced single-use: ownership transfer is by definition a
 //     one-shot operation.
+//   - InviteKindRegistrationOwnership: redeem-time, the *caller's* user
+//     becomes the owner of the registry registration named by
+//     RegistrationID (their Pelican User.ID is written into the
+//     registration's admin metadata). Caller must be authenticated.
+//     Forced single-use, mirroring collection-ownership invites.
 type InviteKind string
 
 const (
-	InviteKindGroup               InviteKind = "group"
-	InviteKindPassword            InviteKind = "password"
-	InviteKindCollectionOwnership InviteKind = "collection_ownership"
+	InviteKindGroup                 InviteKind = "group"
+	InviteKindPassword              InviteKind = "password"
+	InviteKindCollectionOwnership   InviteKind = "collection_ownership"
+	InviteKindRegistrationOwnership InviteKind = "registration_ownership"
 )
 
 // AuthMethod records how the *creator* of a record was authenticated at
@@ -544,7 +552,11 @@ type GroupInviteLink struct {
 	// names the collection whose ownership transfers to the redeemer.
 	// Empty for every other kind.
 	CollectionID string `gorm:"not null;default:''" json:"collectionId"`
-	HashedToken  string `gorm:"column:invite_token;not null;unique" json:"-"`
+	// RegistrationID is set when Kind == InviteKindRegistrationOwnership;
+	// names the registry registration whose ownership transfers to the
+	// redeemer. Zero for every other kind.
+	RegistrationID int    `gorm:"not null;default:0" json:"registrationId"`
+	HashedToken    string `gorm:"column:invite_token;not null;unique" json:"-"`
 	// TokenPrefix is the first few characters of the *plaintext* token,
 	// captured at mint time. It is NOT a credential — too narrow to brute
 	// force into the bcrypt hash — but is enough to label, sort, and
@@ -3061,6 +3073,118 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 		return "", "", err
 	}
 	return collectionID, previousOwnerID, nil
+}
+
+// CreateRegistrationOwnershipInviteLink mints a single-use invite that,
+// when redeemed by an authenticated user, transfers ownership of the
+// registry registration to that user. Unlike the collection variant,
+// the ownership gate (only the registration's current owner or a
+// registry admin may mint) is enforced by the caller: the registration
+// permission model lives in the registry package, which is the only
+// caller of this helper.
+//
+// Single-use is forced — ownership transfer is by definition a
+// one-shot operation.
+func CreateRegistrationOwnershipInviteLink(db *gorm.DB, registrationID int, createdByUserID string, expiresAt time.Time, authMethod AuthMethod, authMethodID string) (*GroupInviteLink, string, error) {
+	if registrationID <= 0 {
+		return nil, "", errors.New("registrationID is required")
+	}
+	return mintInviteLink(db, GroupInviteLink{
+		Kind:           InviteKindRegistrationOwnership,
+		RegistrationID: registrationID,
+		CreatedBy:      createdByUserID,
+		AuthMethod:     authMethod,
+		AuthMethodID:   authMethodID,
+		ExpiresAt:      expiresAt,
+		IsSingleUse:    true,
+	})
+}
+
+// RedeemRegistrationOwnershipInviteLink consumes a plaintext ownership
+// invite and records the redeemer's Pelican User.ID as the owner of the
+// registry registration. The link is marked redeemed in the same
+// transaction so subsequent redemption attempts fail.
+//
+// Returns (registrationID, registrationPrefix, error); the prefix lets
+// the redemption page tell the user what they now own.
+func RedeemRegistrationOwnershipInviteLink(db *gorm.DB, plaintext string, redeemerUserID string) (int, string, error) {
+	if redeemerUserID == "" {
+		return 0, "", errors.New("redeemer user ID is required")
+	}
+	var registrationID int
+	var registrationPrefix string
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var links []GroupInviteLink
+		if err := tx.Where("revoked = 0 AND expires_at > ? AND kind = ?", time.Now(), InviteKindRegistrationOwnership).Find(&links).Error; err != nil {
+			return err
+		}
+		var link *GroupInviteLink
+		for i := range links {
+			if err := bcrypt.CompareHashAndPassword([]byte(links[i].HashedToken), []byte(plaintext)); err == nil {
+				link = &links[i]
+				break
+			}
+		}
+		if link == nil {
+			return gorm.ErrRecordNotFound
+		}
+		// Single-use is the only supported mode, but check defensively
+		// in case a future schema relaxes that constraint.
+		if link.IsSingleUse && link.RedeemedBy != "" {
+			return errors.New("invite link has already been redeemed")
+		}
+		// The registration must still exist and the redeemer must be a
+		// real, active user.
+		var reg server_structs.Registration
+		if err := tx.First(&reg, "id = ?", link.RegistrationID).Error; err != nil {
+			return err
+		}
+		var redeemer User
+		if err := tx.First(&redeemer, "id = ?", redeemerUserID).Error; err != nil {
+			return err
+		}
+		if redeemer.Status != UserStatusActive {
+			return errors.New("redeemer's account is not active")
+		}
+		registrationID = reg.ID
+		registrationPrefix = reg.Prefix
+
+		// Claim the link FIRST with a race-safe conditional update, the
+		// same guard the other redeem paths use, so two concurrent
+		// redemptions can't both perform the transfer.
+		now := time.Now()
+		claim := tx.Model(&GroupInviteLink{}).
+			Where("id = ? AND redeemed_by = ''", link.ID).
+			Updates(map[string]interface{}{
+				"redeemed_by": redeemer.ID,
+				"redeemed_at": &now,
+			})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			return errors.New("invite link has already been redeemed")
+		}
+
+		// The owner lives inside the JSON-serialized admin metadata, so
+		// transfer via read-modify-write within this transaction.
+		reg.AdminMetadata.UserID = redeemer.ID
+		reg.AdminMetadata.UpdatedAt = now
+		adminMetadataBytes, err := json.Marshal(reg.AdminMetadata)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&server_structs.Registration{}).
+			Where("id = ?", reg.ID).
+			Update("admin_metadata", string(adminMetadataBytes)).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	return registrationID, registrationPrefix, nil
 }
 
 // mintInviteLink fills in the bookkeeping (id, token, hash, prefix) and

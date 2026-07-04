@@ -5,8 +5,15 @@ import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   IconButton,
   Paper,
+  TextField,
   Tooltip,
   Typography,
   useMediaQuery,
@@ -17,6 +24,7 @@ import {
   Download,
   Edit,
   Person,
+  SwapHoriz,
 } from '@mui/icons-material';
 import Link from 'next/link';
 import ConfirmButton from '@chtc/web-components/ConfirmButton';
@@ -24,7 +32,11 @@ import ConfirmButton from '@chtc/web-components/ConfirmButton';
 import InformationDropdown from './InformationDropdown';
 import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 import { userOwnsNamespace } from '@/components/Namespace/index';
-import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
+import {
+  createRegistrationOwnershipInvite,
+  deleteNamespace,
+  NAMESPACE_KEY,
+} from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
@@ -43,7 +55,25 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
 
   const dispatch = useContext(AlertDispatchContext);
   const [transition, setTransition] = useState<boolean>(false);
+  const [transferDialogOpen, setTransferDialogOpen] = useState<boolean>(false);
+  const [transferLink, setTransferLink] = useState<string | undefined>(
+    undefined
+  );
   const { mutate } = useSWRConfig();
+
+  const mintTransferInvite = async () => {
+    const response = await alertOnError(
+      async () => await createRegistrationOwnershipInvite(namespace.id),
+      "Couldn't create ownership transfer invite",
+      dispatch
+    );
+    if (response) {
+      const created = await response.json();
+      setTransferLink(
+        `${window.location.origin}/view/invite/redeem/?token=${encodeURIComponent(created.inviteToken)}`
+      );
+    }
+  };
 
   return (
     <>
@@ -97,20 +127,74 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                   </IconButton>
                 </a>
               </Tooltip>
+              {(authenticated?.role == 'admin' ||
+                userOwnsNamespace(authenticated, namespace)) && (
+                <>
+                  <Tooltip title={'Transfer Ownership'}>
+                    <IconButton
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        setTransferDialogOpen(true);
+                      }}
+                      size={size}
+                    >
+                      <SwapHoriz fontSize={size} />
+                    </IconButton>
+                  </Tooltip>
+                  <Dialog
+                    open={transferDialogOpen}
+                    onClose={() => {
+                      setTransferDialogOpen(false);
+                      setTransferLink(undefined);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    fullWidth
+                  >
+                    <DialogTitle>Transfer Ownership</DialogTitle>
+                    <DialogContent>
+                      <DialogContentText>
+                        Generate a single-use invite link and send it to the new
+                        owner. Whoever redeems it (after logging in to their own
+                        account) becomes the owner of this registration. The
+                        link expires after 7 days.
+                      </DialogContentText>
+                      {transferLink && (
+                        <TextField
+                          fullWidth
+                          margin={'dense'}
+                          label={'Invite Link'}
+                          value={transferLink}
+                          onFocus={(e) => e.target.select()}
+                          slotProps={{ input: { readOnly: true } }}
+                          helperText={
+                            'Copy this link now; it is shown only once.'
+                          }
+                        />
+                      )}
+                    </DialogContent>
+                    <DialogActions>
+                      <Button
+                        onClick={() => {
+                          setTransferDialogOpen(false);
+                          setTransferLink(undefined);
+                        }}
+                      >
+                        Close
+                      </Button>
+                      {!transferLink && (
+                        <Button
+                          variant={'contained'}
+                          onClick={mintTransferInvite}
+                        >
+                          Generate Link
+                        </Button>
+                      )}
+                    </DialogActions>
+                  </Dialog>
+                </>
+              )}
               {authenticated?.role == 'admin' && (
                 <>
-                  <Tooltip title={'Edit Registration'}>
-                    <Link
-                      href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
-                    >
-                      <IconButton
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                        size={size}
-                      >
-                        <Edit fontSize={size} />
-                      </IconButton>
-                    </Link>
-                  </Tooltip>
                   {['origin', 'cache'].includes(namespace.type) && (
                     <Tooltip title={'Register Downtime'}>
                       <Link

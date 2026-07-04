@@ -36,6 +36,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
@@ -944,6 +945,135 @@ func claimNamespace(ctx *gin.Context) {
 	})
 }
 
+// createRegistrationOwnershipInviteReq is the body for
+// POST /namespaces/:id/ownership-invites. ExpiresIn is a Go duration
+// string; absent or empty defaults to 7 days. The link is always
+// single-use — ownership transfer is a one-shot operation.
+type createRegistrationOwnershipInviteReq struct {
+	ExpiresIn string `json:"expiresIn,omitempty"`
+}
+
+// createRegistrationOwnershipInviteRes mirrors the collection-ownership
+// invite response shape so the frontend's link displayer can consume it
+// without a kind-specific adapter.
+type createRegistrationOwnershipInviteRes struct {
+	ID          string    `json:"id"`
+	InviteToken string    `json:"inviteToken"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	IsSingleUse bool      `json:"isSingleUse"`
+}
+
+// Mint a single-use invite that, when redeemed by an authenticated user,
+// transfers ownership of the registration to that user. Only the current
+// owner or a registry admin may mint one.
+//
+// POST /namespaces/:id/ownership-invites
+func createRegistrationOwnershipInvite(ctx *gin.Context) {
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		log.Error("Failed to get user groups: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user groups"})
+		return
+	}
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You need to login to perform this action"})
+		return
+	}
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid ID format. ID must a positive integer"})
+		return
+	}
+	exists, err := registrationExistsById(id)
+	if err != nil {
+		log.Error("Error checking if namespace exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error checking if namespace exists"})
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Namespace not found"})
+		return
+	}
+
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin, _ := web_ui.CheckAdmin(identity)
+	if !isAdmin {
+		belongsTo, err := registrationBelongsToUser(id, userId)
+		if err != nil {
+			log.Error("Error checking if namespace belongs to the user: ", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error checking if namespace belongs to the user"})
+			return
+		}
+		if !belongsTo {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Only the owner of a registration or an admin can transfer its ownership"})
+			return
+		}
+	}
+
+	req := createRegistrationOwnershipInviteReq{}
+	if ctx.Request.ContentLength > 0 {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid request body: " + err.Error()})
+			return
+		}
+	}
+	expiry := 7 * 24 * time.Hour
+	if req.ExpiresIn != "" {
+		d, parseErr := time.ParseDuration(req.ExpiresIn)
+		if parseErr != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid expiresIn (Go duration): %v", parseErr)})
+			return
+		}
+		expiry = d
+	}
+
+	authMethod, authMethodID := web_ui.CaptureAuthMethod(ctx)
+	creator := userId
+	if creator == "" {
+		creator = user
+	}
+	link, plaintext, err := database.CreateRegistrationOwnershipInviteLink(
+		database.ServerDatabase, id, creator, time.Now().Add(expiry), authMethod, authMethodID,
+	)
+	if err != nil {
+		log.Errorf("Failed to mint ownership invite for registration %d: %v", id, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to mint ownership invite"})
+		return
+	}
+	ctx.JSON(http.StatusCreated, createRegistrationOwnershipInviteRes{
+		ID:          link.ID,
+		InviteToken: plaintext,
+		ExpiresAt:   link.ExpiresAt,
+		IsSingleUse: link.IsSingleUse,
+	})
+}
+
 func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationStatus) {
 	user := ctx.GetString("User")
 	idStr := ctx.Param("id")
@@ -1213,6 +1343,7 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.DELETE("/namespaces/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteNamespace)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 		registryWebAPI.POST("/namespaces/:id/claim", web_ui.AuthHandler, claimNamespace)
+		registryWebAPI.POST("/namespaces/:id/ownership-invites", web_ui.AuthHandler, createRegistrationOwnershipInvite)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, server_structs.RegApproved)
 		})
