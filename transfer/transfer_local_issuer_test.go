@@ -107,16 +107,16 @@ func TestTransferOnlyServerLocalIssuer(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, "transfer", resp["service"])
-		assert.Equal(t, issuer.TransferIssuerServiceURL(), resp["issuer"],
+		assert.Equal(t, issuer.LocalIssuerServiceURL(), resp["issuer"],
 			"ping should advertise the local issuer's discovery URL")
 	})
 
 	t.Run("LocalIssuerDiscoveryReachable", func(t *testing.T) {
 		// The discovery document is served by the embedded-issuer routes under
-		// the reserved /.transfer namespace and must identify itself with the
-		// local issuer URL (what the transfer middleware's LocalIssuer check
-		// trusts), not the per-namespace route path.
-		discoveryPath := "/api/v1.0/issuer/ns" + issuer.TransferIssuerNamespace + "/.well-known/openid-configuration"
+		// the reserved /pelican/local-issuer namespace and must identify itself
+		// with the local issuer URL (what the transfer middleware's LocalIssuer
+		// check trusts), not the per-namespace route path.
+		discoveryPath := "/api/v1.0/issuer/ns" + issuer.LocalIssuerNamespace + "/.well-known/openid-configuration"
 		w := doRequest(t, engine, "GET", discoveryPath, nil, "")
 		require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
 

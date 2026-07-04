@@ -48,7 +48,7 @@ func handlePing() gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"service": "transfer",
-			"issuer":  issuer.TransferIssuerServiceURL(),
+			"issuer":  issuer.LocalIssuerServiceURL(),
 		})
 	}
 }

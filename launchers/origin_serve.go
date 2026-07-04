@@ -440,8 +440,8 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
 	}
 
-	// Register a server-level "local" issuer for the transfer API into the
-	// shared registry. Its tokens carry iss = config.GetLocalIssuerUrl() and the
+	// Register the server's "local" issuer for the transfer API into the shared
+	// registry. Its tokens carry iss = config.GetLocalIssuerUrl() and the
 	// (group-gated) pelican.transfer scope, so the transfer middleware's
 	// LocalIssuer check accepts them independent of any data-export namespace —
 	// a transfer-enabled origin can authenticate the CLI even with only public
@@ -449,7 +449,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	// launch path via transfer.RegisterLocalIssuer.)
 	if param.Origin_EnableTransferAPI.GetBool() {
 		if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
-			return errors.Wrap(err, "failed to register local transfer issuer")
+			return errors.Wrap(err, "failed to register local issuer")
 		}
 	}
 

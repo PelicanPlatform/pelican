@@ -51,14 +51,19 @@ const (
 	maxClientNameLen = 128
 )
 
-// TransferIssuerNamespace is the reserved registry/route key for the
-// server-level "local" issuer that mints pelican.transfer tokens.  It is NOT a
-// data-export namespace; the provider registered under this key is constructed
-// with issuerURL = config.GetLocalIssuerUrl() so its tokens carry the local
-// issuer identifier (which the transfer middleware's LocalIssuer check trusts),
-// independent of any origin export.  The leading dot keeps it from colliding
-// with real federation prefixes.
-const TransferIssuerNamespace = "/.transfer"
+// LocalIssuerNamespace is the reserved registry/route key for the server's
+// "local" OIDC issuer -- the generic embedded issuer that mints tokens under
+// the server's own identity (iss = config.GetLocalIssuerUrl()), independent of
+// any data-export namespace.  The provider registered under this key carries
+// the local issuer identifier the server trusts for its own operations; today
+// that is the pelican.transfer scope the transfer API's LocalIssuer check
+// accepts, but the issuer is not transfer-specific.
+//
+// The key lives under Pelican's reserved /pelican space so it can never collide
+// with a registrable federation prefix: validatePrefix rejects any prefix whose
+// first component is "pelican" (see registry/registry_validation.go), which
+// makes /pelican/local-issuer structurally impossible to register as a namespace.
+const LocalIssuerNamespace = "/pelican/local-issuer"
 
 // IssuerURL returns the base issuer URL for this server (without any namespace path).
 // It is simply the server's external web URL.
@@ -83,13 +88,12 @@ func ServiceURIForNamespace(issuerURL, namespace string) string {
 	return issuerURL + "/api/v1.0/issuer/ns" + namespace
 }
 
-// TransferIssuerServiceURL returns the OIDC discovery base URL for the
-// server-level transfer issuer.  Clients fetch
-// <url>/.well-known/openid-configuration here to discover its device-code,
-// token, and registration endpoints; the tokens it mints carry
-// iss = config.GetLocalIssuerUrl().
-func TransferIssuerServiceURL() string {
-	return ServiceURIForNamespace(IssuerURL(), TransferIssuerNamespace)
+// LocalIssuerServiceURL returns the OIDC discovery base URL for the server's
+// local issuer.  Clients fetch <url>/.well-known/openid-configuration here to
+// discover its device-code, token, and registration endpoints; the tokens it
+// mints carry iss = config.GetLocalIssuerUrl().
+func LocalIssuerServiceURL() string {
+	return ServiceURIForNamespace(IssuerURL(), LocalIssuerNamespace)
 }
 
 // RegisterRoutesWithMiddleware registers all embedded OIDC issuer routes on the
