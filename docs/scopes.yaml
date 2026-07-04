@@ -315,5 +315,8 @@ description: >-
   Permits the bearer to submit, view, and cancel transfer jobs through the transfer API.
   On an origin-based transfer service, only get/put operations are allowed.
   On a standalone transfer server, copy operations between arbitrary origins are permitted.
+  Not granted by default: an administrator must grant it to a user or group (or
+  configure Transfer.EnabledGroups) before the local issuer will mint it.
 issuedBy: ["origin", "transfer"]
 acceptedBy: ["origin", "transfer"]
+userGrantable: true
