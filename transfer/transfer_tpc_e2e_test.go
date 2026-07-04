@@ -213,7 +213,7 @@ Transfer:
 
 // setupFedForTransferTPC starts a federation with the transfer API enabled and
 // creates users for authentication.
-func setupFedForTransferTPC(t testing.TB) (ft *fed_test_utils.FedTest, adminPassword, testUserPassword string, dataDir string) {
+func setupFedForTransferTPC(t testing.TB, storageType string) (ft *fed_test_utils.FedTest, adminPassword, testUserPassword string, dataDir string) {
 	t.Helper()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -259,6 +259,9 @@ func setupFedForTransferTPC(t testing.TB) (ft *fed_test_utils.FedTest, adminPass
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "testuser"), 0755))
 
 	originConfig := fmt.Sprintf(transferTPCOriginConfig, dataDir)
+	// The template defaults to the Go-native posixv2 backend; swap in the
+	// requested backend (e.g. "posix" runs XRootD) so callers can compare them.
+	originConfig = strings.Replace(originConfig, "StorageType: posixv2", "StorageType: "+storageType, 1)
 	ft = fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
 	return
@@ -489,7 +492,7 @@ func simulateAuthCodeApproval(t testing.TB, serverURL, authorizeURL, password st
 //  5. Monitors stdout+stderr for device-code verification URLs and approves them
 //  6. Verifies the destination file exists with correct content
 func TestTransferTPCViaOriginE2E(t *testing.T) {
-	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t)
+	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t, "posixv2")
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	hostname := param.Server_Hostname.GetString()
@@ -721,7 +724,7 @@ done:
 //  6. Submit a transfer job
 //  7. Poll until completion and verify the destination file
 func TestTransferTPCDirectCredentialE2E(t *testing.T) {
-	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t)
+	ft, adminPassword, testUserPassword, _ := setupFedForTransferTPC(t, "posixv2")
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	hostname := param.Server_Hostname.GetString()
