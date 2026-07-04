@@ -149,6 +149,17 @@ func RegisterTransferAPIForOrigin(ctx context.Context, engine *gin.Engine, egrp 
 
 // registerTransferRoutes sets up all the route handlers
 func registerTransferRoutes(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, db *gorm.DB, tm *client_agent.TransferManager) error {
+	// Crash recovery: the transfer manager starts empty, so any job left in
+	// flight when the server last stopped can never finish on its own. Fail
+	// those rows before serving so clients stop polling and can resubmit.
+	if err := reconcileInterruptedJobs(db); err != nil {
+		return errors.Wrap(err, "failed to reconcile interrupted transfer jobs")
+	}
+	// Persist terminal job outcomes eagerly (as they happen) rather than lazily
+	// on a client status poll, so the durable record is poll-independent and
+	// crash recovery is accurate.
+	tm.SetJobCompletionCallback(persistTerminalJob(db))
+
 	// Public (unauthenticated) endpoints
 	publicGroup := engine.Group("/api/v1.0/transfer", web_ui.ServerHeaderMiddleware)
 	{

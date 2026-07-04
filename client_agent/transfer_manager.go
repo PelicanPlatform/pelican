@@ -80,6 +80,35 @@ type TransferManager struct {
 	cancel                 context.CancelFunc
 	eg                     *errgroup.Group
 	backgroundTasksStarted bool
+	onJobTerminal          func(*TransferJob)
+}
+
+// SetJobCompletionCallback registers a function invoked exactly once per job
+// when it reaches a terminal state (completed, failed, or cancelled). The
+// callback runs on the job's own execution goroutine, after the terminal status
+// is recorded and before the job's WaitGroup is released, and it is not holding
+// the manager lock. The transfer server uses it to eagerly persist the terminal
+// outcome to its database rather than waiting for a client status poll.
+func (tm *TransferManager) SetJobCompletionCallback(cb func(*TransferJob)) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.onJobTerminal = cb
+}
+
+// fireJobTerminal invokes the registered completion callback if the job is in a
+// terminal state. Safe to call unconditionally at job teardown.
+func (tm *TransferManager) fireJobTerminal(job *TransferJob) {
+	tm.mu.RLock()
+	cb := tm.onJobTerminal
+	status := job.Status
+	tm.mu.RUnlock()
+	if cb == nil {
+		return
+	}
+	switch status {
+	case StatusCompleted, StatusFailed, StatusCancelled:
+		cb(job)
+	}
 }
 
 // NewTransferManager creates a new transfer manager
@@ -271,10 +300,18 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 
 // CreateJob creates a new transfer job
 func (tm *TransferManager) CreateJob(requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
+	return tm.CreateJobWithID(uuid.New().String(), requests, options)
+}
+
+// CreateJobWithID submits a job under a caller-supplied ID instead of a
+// manager-generated one. This lets a caller durably record the job (e.g. in its
+// own database) under that ID BEFORE execution begins, so a completion callback
+// or a crash-recovery scan can rely on the record already existing. Behaves
+// identically to CreateJob otherwise.
+func (tm *TransferManager) CreateJobWithID(jobID string, requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	jobID := uuid.New().String()
 	jobCtx, jobCancel := context.WithCancel(tm.ctx)
 
 	job := &TransferJob{
@@ -380,6 +417,11 @@ func (tm *TransferManager) SnapshotJobResponse(job *TransferJob) JobResponse {
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
 	defer job.wg.Done() // Signal job completion
+	// Fire the terminal callback (if any) on every exit path — normal
+	// completion/failure and both cancellation paths all leave the job in a
+	// terminal state. Registered after wg.Done so (LIFO) it runs first, i.e. the
+	// terminal outcome is persisted before waiters observe completion.
+	defer tm.fireJobTerminal(job)
 
 	// Acquire semaphore slot
 	select {
