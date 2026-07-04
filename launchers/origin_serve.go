@@ -440,22 +440,21 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
 	}
 
-	// Register the server's "local" issuer for the transfer API into the shared
-	// registry. Its tokens carry iss = config.GetLocalIssuerUrl() and the
-	// (group-gated) pelican.transfer scope, so the transfer middleware's
-	// LocalIssuer check accepts them independent of any data-export namespace —
-	// a transfer-enabled origin can authenticate the CLI even with only public
+	// Register the server's "local" issuer into the shared registry. It is the
+	// generic local-identity issuer (iss = config.GetLocalIssuerUrl()) behind
+	// every local-identity OAuth flow, independent of any data-export namespace:
+	//   - the (group-gated) pelican.transfer scope the transfer middleware's
+	//     LocalIssuer check accepts, and
+	//   - the namespace-agnostic collection.* management scopes the collections
+	//     API accepts (verified by web_ui.AuthHandler, which also pins the issuer
+	//     to GetLocalIssuerUrl()).
+	// It is registered whenever the embedded issuer is enabled — not gated on any
+	// one feature — so those flows always have a discovery endpoint, and so a
+	// transfer-enabled origin can authenticate the CLI even with only public
 	// exports. (A standalone transfer server does the equivalent in its own
 	// launch path via transfer.RegisterLocalIssuer.)
-	if param.Origin_EnableTransferAPI.GetBool() {
-		if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
-			return errors.Wrap(err, "failed to register local issuer")
-		}
-	}
-
-	if registry.First() == nil {
-		log.Info("Embedded OIDC issuer: no exports require authentication; no issuers registered")
-		return nil
+	if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
+		return errors.Wrap(err, "failed to register local issuer")
 	}
 
 	// Apply a non-aborting middleware to the issuer route group so that

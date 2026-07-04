@@ -188,12 +188,16 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		return false
 	}
 
-	// Verify issuer matches local issuer
-	serverURL := param.Server_ExternalWebUrl.GetString()
+	// Verify issuer matches the server's local issuer. Use
+	// config.GetLocalIssuerUrl() (not param.Server_ExternalWebUrl directly) so the
+	// co-located origin+director case — where local tokens carry the namespaced
+	// "<ExternalWebUrl>/api/v1.0/origin" issuer — is handled correctly, matching
+	// what checkLocalIssuer / extractUserFromBearerToken pin against.
+	localIssuer := config.GetLocalIssuerUrl()
 	tokenIssuer := tok.Issuer()
-	log.Debugf("verifyCollectionScope: Comparing issuer - server: %s, token: %s", serverURL, tokenIssuer)
-	if serverURL != tokenIssuer {
-		log.Debugf("verifyCollectionScope: Issuer mismatch - expected %s, got %s", serverURL, tokenIssuer)
+	log.Debugf("verifyCollectionScope: Comparing issuer - local: %s, token: %s", localIssuer, tokenIssuer)
+	if localIssuer == "" || localIssuer != tokenIssuer {
+		log.Debugf("verifyCollectionScope: Issuer mismatch - expected %s, got %s", localIssuer, tokenIssuer)
 		return false
 	}
 
