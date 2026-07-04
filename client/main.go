@@ -21,13 +21,16 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	goerrors "errors"
 	"fmt"
+	"iter"
 	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"math/rand"
@@ -40,6 +43,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -424,36 +428,75 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 
 }
 
-// Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
-func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
-	// First, create a handler for any panics that occur
+// WalkFunc is the callback signature accepted by Walk. It mirrors
+// fs.WalkDirFunc: a successful entry arrives as (info, nil); an error
+// attributable to a specific path in the walk arrives as
+// (FileInfo{Name: path, IsCollection: ...}, err). Returning a non-nil error
+// unwinds the walk with that error, except for the SkipSubtree and SkipAll
+// sentinels below which alter control flow without failing the walk.
+type WalkFunc func(FileInfo, error) error
+
+// SkipSubtree, when returned from a WalkFunc invoked on a collection entry (or
+// on an error tuple for a subtree that could not be listed), tells Walk not to
+// descend into that subtree but to continue with the next sibling. Analogous
+// to fs.SkipDir.
+var SkipSubtree = errors.New("client: skip subtree")
+
+// SkipAll, when returned from a WalkFunc, tells Walk to end the walk cleanly.
+// Walk itself returns nil in that case. Analogous to fs.SkipAll.
+var SkipAll = errors.New("client: skip all")
+
+// Walk lists remoteObject and hands each entry to fn in walk order. It is
+// the streaming primitive that DoList and WalkSeq are built on. The callback
+// receives (FileInfo, error) where a non-nil error identifies a specific
+// subtree that could not be listed; a nil return from fn after such an error
+// tells Walk to continue with the next sibling, and SkipSubtree is an
+// explicit synonym for the same behavior. SkipAll ends the walk cleanly.
+// Any other non-nil return from fn aborts the walk with that error.
+//
+// Walk is a lower-level replacement for the historical DoList (which buffers
+// results into a slice and aborts on the first error). Prefer Walk when the
+// result set may be large or when the caller wants to keep going past
+// per-subtree failures. See cmd/object_du.go for an example.
+func Walk(ctx context.Context, remoteObject string, fn WalkFunc, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic captured while attempting to perform Walk:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
-			err = errors.New(ret)
+			err = errors.Errorf("Unrecoverable error (panic) captured in Walk: %v", r)
 		}
 	}()
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
-	}
-
+	// The transfer engine isn't strictly needed for a listing (listHttpEmit
+	// uses its own WebDAV client), but historical Walk callers assume its
+	// setup+teardown always happens. Create + shutdown one for a single-arg
+	// Walk; WalkMany hoists this out so N walks share a single engine.
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
+		if shutErr := te.Shutdown(); shutErr != nil {
+			log.Errorln("Failure when shutting down transfer engine:", shutErr)
 		}
 	}()
+	return walkOn(ctx, te, remoteObject, fn, options...)
+}
+
+// walkOn is Walk without the transfer-engine dance; the caller owns the
+// TransferEngine (te is currently unused at the listing layer, but WalkMany
+// forwards a shared one anyway so the resource story matches what callers
+// expect). Panic recovery, options parsing, and SkipAll unwrapping happen
+// here, since they must apply to every Walk-shaped listing.
+func walkOn(ctx context.Context, _ *TransferEngine, remoteObject string, fn WalkFunc, options ...TransferOption) error {
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
+	}
 
 	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Get our token if needed
@@ -479,7 +522,6 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		case identTransferOptionCollectionsUrl{}:
 			collectionsOverride = option.Value().(string)
 		case identTransferOptionRecursive{}:
-			// Option overrides query parameter
 			recursive = option.Value().(bool)
 		case identTransferOptionDepth{}:
 			depth = option.Value().(int)
@@ -489,7 +531,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if dirResp.XPelNsHdr.RequireToken {
 		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
-			return nil, errors.Wrap(err, "failed to get token for transfer")
+			return errors.Wrap(err, "failed to get token for transfer")
 		}
 	} else {
 		token = nil
@@ -497,16 +539,189 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if collectionsOverride != "" {
 		collectionsOverrideUrl, err := url.Parse(collectionsOverride)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to parse collections URL override")
+			return errors.Wrap(err, "unable to parse collections URL override")
 		}
 		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
-	fileInfos, err = listHttp(pUrl, dirResp, token, recursive, depth)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to perform list request")
+	// listHttpEmit already understands SkipSubtree at every level; Walk
+	// promotes SkipAll from any level to a clean nil return so the sentinel
+	// stays out of the callers' error paths.
+	if err := listHttpEmit(pUrl, dirResp, token, recursive, depth, fn); err != nil {
+		if errors.Is(err, SkipAll) {
+			return nil
+		}
+		return errors.Wrap(err, "failed to perform list request")
+	}
+	return nil
+}
+
+// WalkManyFunc is the callback accepted by WalkMany. It matches WalkFunc but
+// also identifies which of the caller-supplied roots the entry came from,
+// enabling per-root accumulation without threading additional state through.
+// Because WalkMany dispatches concurrently, fn may be invoked from multiple
+// goroutines; implementations must be safe for concurrent use.
+type WalkManyFunc func(root string, info FileInfo, err error) error
+
+// WalkMany walks each entry in roots concurrently, capped at parallelism (or
+// param.Client_WorkerCount when parallelism <= 0), and reuses a single
+// TransferEngine across all walks. fn receives (root, info, err) so callers
+// can attribute each entry back to its argument; return semantics match Walk
+// (nil to continue, SkipSubtree to prune a subtree in that root's walk,
+// SkipAll to end that walk cleanly, other error to abort that walk).
+//
+// A per-root failure does not stop the other walks; WalkMany returns
+// errors.Join of every root-level error observed, or nil if every walk
+// finished cleanly.
+func WalkMany(ctx context.Context, roots []string, parallelism int, fn WalkManyFunc, options ...TransferOption) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform WalkMany:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			err = errors.Errorf("Unrecoverable error (panic) captured in WalkMany: %v", r)
+		}
+	}()
+
+	if len(roots) == 0 {
+		return nil
 	}
 
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if shutErr := te.Shutdown(); shutErr != nil {
+			log.Errorln("Failure when shutting down transfer engine:", shutErr)
+		}
+	}()
+
+	return fanOutWalk(ctx, roots, parallelism, fn, func(root string, cb WalkFunc) error {
+		return walkOn(ctx, te, root, cb, options...)
+	})
+}
+
+// fanOutWalk is the concurrency plumbing behind WalkMany, separated so it can
+// be exercised in tests without spinning up a TransferEngine or the HTTP
+// listing pipeline. runWalk performs the actual walk for a given root and
+// dispatches entries through cb. parallelism follows WalkMany semantics
+// (<=0 defaults to param.Client_WorkerCount, capped at len(roots)).
+func fanOutWalk(ctx context.Context, roots []string, parallelism int, fn WalkManyFunc, runWalk func(root string, cb WalkFunc) error) error {
+	if parallelism <= 0 {
+		parallelism = param.Client_WorkerCount.GetInt()
+	}
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > len(roots) {
+		parallelism = len(roots)
+	}
+
+	// Bounded semaphore: N slots throttle how many walks run concurrently.
+	sem := make(chan struct{}, parallelism)
+	var (
+		wg     sync.WaitGroup
+		errsMu sync.Mutex
+		errs   []error
+	)
+	for _, root := range roots {
+		root := root
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errsMu.Lock()
+				errs = append(errs, errors.Wrapf(ctx.Err(), "walk %q cancelled before start", root))
+				errsMu.Unlock()
+				return
+			}
+			defer func() { <-sem }()
+
+			if walkErr := runWalk(root, func(info FileInfo, emitErr error) error {
+				return fn(root, info, emitErr)
+			}); walkErr != nil {
+				errsMu.Lock()
+				errs = append(errs, errors.Wrapf(walkErr, "walk %q", root))
+				errsMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return goerrors.Join(errs...)
+}
+
+// DoList collects every FileInfo returned by Walk into a slice and returns
+// it. It preserves its historical abort-on-first-error behavior: any
+// walk-time error (including a single unreadable subtree) is returned and
+// partial results are discarded. Prefer Walk or WalkSeq when you want to
+// keep going past per-subtree failures.
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
+	err = Walk(ctx, remoteObject, func(info FileInfo, emitErr error) error {
+		if emitErr != nil {
+			return emitErr
+		}
+		fileInfos = append(fileInfos, info)
+		return nil
+	}, options...)
+	if err != nil {
+		return nil, err
+	}
 	return fileInfos, nil
+}
+
+// errStopIter is returned from the callback inside walkAsSeq to unwind the
+// underlying walk when a range-over-func caller breaks out of its loop. It
+// never escapes walkAsSeq -- the wrapper filters it before deciding whether
+// to yield a terminal (zero, error) tuple.
+var errStopIter = errors.New("client: iteration stopped")
+
+// walkAsSeq converts a Walk-shaped run into an iter.Seq2. It is the core of
+// WalkSeq extracted so unit tests can exercise the range-over-func semantics
+// (early-break, per-entry error propagation, zero-value guarantees) without
+// spinning up the full transfer engine and Director stack.
+func walkAsSeq(run func(fn WalkFunc) error) iter.Seq2[FileInfo, error] {
+	return func(yield func(FileInfo, error) bool) {
+		stopped := false
+		err := run(func(info FileInfo, emitErr error) error {
+			if !yield(info, emitErr) {
+				stopped = true
+				return errStopIter
+			}
+			return nil
+		})
+		if stopped {
+			// Caller broke out; they already have every value they wanted
+			// and shouldn't receive a synthetic error for their own break.
+			return
+		}
+		if err != nil {
+			yield(FileInfo{}, err)
+		}
+	}
+}
+
+// WalkSeq is a range-over-func (iter.Seq2) adapter over Walk. It walks
+// remoteObject the same way Walk does but presents each entry as one loop
+// iteration, e.g.:
+//
+//	for info, err := range client.WalkSeq(ctx, url, options...) {
+//	    if err != nil {
+//	        // per-subtree failure; keep going or return err to abort
+//	        continue
+//	    }
+//	    // handle info
+//	}
+//
+// If the caller breaks out of the loop early the walk is aborted immediately
+// and no synthetic terminal error tuple is yielded. If the walk fails at a
+// step that isn't attributable to a specific path (e.g. Director lookup), one
+// final (zero, err) tuple is yielded so the loop body observes the error
+// before the range ends.
+func WalkSeq(ctx context.Context, remoteObject string, options ...TransferOption) iter.Seq2[FileInfo, error] {
+	return walkAsSeq(func(fn WalkFunc) error {
+		return Walk(ctx, remoteObject, fn, options...)
+	})
 }
 
 // DoDelete queries the director using the DELETE HTTP method, retrieves the token, and initializes the delete operation.
