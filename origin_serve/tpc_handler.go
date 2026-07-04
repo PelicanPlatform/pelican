@@ -228,9 +228,16 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend, exportPre
 
 	totalSize := getResp.ContentLength // may be -1 if unknown
 
+	// Capture the source's ETag now so the destination's close hook
+	// can persist it on the commit. Stored on the OpenFile context;
+	// RecordCommitCloseHook reads it via sourceEtagFromContext and
+	// includes it in the batched commit row. Empty ETag from the
+	// source is fine — withSourceEtag treats it as a no-op.
+	openCtx := withSourceEtag(c.Request.Context(), getResp.Header.Get("ETag"))
+
 	// Open the destination file for writing via the backend's WebDAV filesystem
 	fs := backend.FileSystem()
-	destFile, err := fs.OpenFile(c.Request.Context(), cleanDestPath,
+	destFile, err := fs.OpenFile(openCtx, cleanDestPath,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		log.WithFields(fields).Errorf("Failed to open destination file: %v", err)
