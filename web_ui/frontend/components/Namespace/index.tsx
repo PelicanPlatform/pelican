@@ -1,4 +1,4 @@
-import { RegistryNamespace } from '@/index';
+import { RegistryNamespace, User } from '@/index';
 import Card, { CardProps } from './Card';
 import CreateNamespaceCard from './CreateNamespaceCard';
 import CardSkeleton from './CardSkeleton';
@@ -46,6 +46,19 @@ export interface NamespaceAdminMetadata {
   created_at: string;
   updated_at: string;
 }
+
+// Owners are recorded by the stable Pelican user ID only; legacy owner
+// strings (e.g. CILogon subs) never match until transferred.
+export const userOwnsNamespace = (
+  user: User | undefined,
+  namespace: RegistryNamespace
+): boolean => {
+  const owner = namespace.admin_metadata.user_id;
+  if (user === undefined || !owner) {
+    return false;
+  }
+  return user.user_id === owner;
+};
 
 export interface FlatObject {
   [key: string]: Exclude<any, object>;

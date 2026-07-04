@@ -1202,7 +1202,11 @@ func checkStatusHandler(ctx *gin.Context) {
 				Msg:    "Server error when getting federation information: " + err.Error(),
 			})
 		}
-		if server_structs.IsCacheNS(prefix) {
+		if ns.AdminMetadata.UserID == "" {
+			// Unowned registrations go through the claim page first, which
+			// binds the registration to the logged-in user before editing.
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/claim/?id=%d", fed.RegistryEndpoint, ns.ID)
+		} else if server_structs.IsCacheNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		} else if server_structs.IsOriginNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.RegistryEndpoint, ns.ID)

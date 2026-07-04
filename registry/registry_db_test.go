@@ -962,3 +962,58 @@ func TestGetTopoPrefixString(t *testing.T) {
 		assert.Equal(t, "/foo, /bar, /barz", re)
 	})
 }
+
+// TestClaimRegistration pins the contract of the one place ownership is
+// written: only unowned rows can be claimed, only for a non-empty owner, and
+// a repeated claim conflicts instead of silently overwriting the first owner.
+func TestClaimRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	insertUnowned := func(t *testing.T) int {
+		require.NoError(t, insertMockDBData([]server_structs.Registration{{Prefix: "/foo", Pubkey: "mock-key"}}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+		return id
+	}
+
+	t.Run("empty-owner-is-refused", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.Error(t, claimRegistration(id, ""))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID, "a refused claim must not write an owner")
+	})
+
+	t.Run("unowned-row-is-claimed", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.NoError(t, claimRegistration(id, "u-owner-id"))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-owner-id", got.AdminMetadata.UserID)
+	})
+
+	t.Run("second-claim-conflicts-and-does-not-overwrite", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.NoError(t, claimRegistration(id, "u-first-id"))
+		require.ErrorIs(t, claimRegistration(id, "u-second-id"), errRegistrationAlreadyOwned)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-first-id", got.AdminMetadata.UserID, "the losing claim must not overwrite the first owner")
+	})
+
+	t.Run("missing-registration", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.ErrorIs(t, claimRegistration(404404, "u-owner-id"), errRegistrationNotFound)
+	})
+}

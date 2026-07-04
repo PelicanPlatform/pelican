@@ -3812,6 +3812,84 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+  /registry_ui/namespaces/{id}/claim:
+    post:
+      tags:
+        - "registry_ui"
+      summary: Claim an unowned namespace registration for the logged-in user
+      description: "`Authentication Required`
+
+
+        Bind an unowned (auto-registered) namespace registration to the logged-in user.
+        The `access_token` must be minted by the registered server and is verified against
+        the registration's stored public key with scope `registry.edit_registration` —
+        possession of a token signed by the registration's private key proves the caller
+        operates the registered server.
+
+
+        The recorded owner is the caller's stable Pelican user ID; a session without one
+        (e.g. the CLI admin token) cannot take ownership and receives 403.
+
+
+        Re-claiming a registration the caller already owns succeeds idempotently. A
+        registration owned by another user returns 409; ownership can then only be
+        transferred by the current owner or a federation administrator.
+        "
+      operationId: claimNamespaceById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace registration to claim
+          required: true
+          type: integer
+        - name: access_token
+          in: query
+          description: Access token minted by the registered server, signed by the private key matching the registration's stored public key, carrying the scope `registry.edit_registration`
+          required: true
+          type: string
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Success. The registration is now owned by the logged-in user (also returned when the caller already owns it)
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModelV2"
+        "400":
+          description: Invalid namespace ID, or the `access_token` query parameter is missing
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: The access token failed verification against the registration's stored public key, or the session carries no Pelican user ID to record as the owner
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Namespace not found because it does not exist
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "409":
+          description: The registration is already owned by another user
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/{id}/approve:
     patch:
       tags:
