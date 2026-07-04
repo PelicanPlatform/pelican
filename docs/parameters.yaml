@@ -4367,6 +4367,17 @@ type: duration
 default: 10s
 components: ["cache", "origin"]
 ---
+name: Server.RegistrationCompletionLinkFile
+description: |+
+  While any of this server's registrations at the federation registry is incomplete, the
+  "complete server registration" request link (carrying a fresh short-lived access token)
+  is re-written to this file on every registration completeness poll cycle and echoed to
+  the server's logs. The file is removed once no incomplete registration remains.
+  Set to an empty string to disable writing the file; the link is then only logged.
+type: filename
+default: ${ConfigBase}/server-registration-completion-link
+components: ["cache", "origin"]
+---
 name: Server.UILoginRateLimit
 description: |+
   The maximum number of requests a user can be made under the same IP address per second against the login endpoint
