@@ -234,8 +234,10 @@ var (
 	// is too generous for the read traffic, or the batcher is back-
 	// pressured (so forced flushes aren't draining the map quickly
 	// enough). When tracking is off, objectMetaAccess is nil and the
-	// gauge reports 0.
-	objMetaAccessDepth = promauto.NewGaugeFunc(
+	// gauge reports 0. Assigned to _ because the value is only used
+	// via the callback (registered with the default registry) — we
+	// never read the returned GaugeFunc.
+	_ = promauto.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: "pelican_origin_object_metadata",
 			Name:      "access_debouncer_depth",

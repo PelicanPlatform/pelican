@@ -485,7 +485,6 @@ func (b *sqliteBatcher) run(ctx context.Context) {
 			}
 			if len(batch) > 0 {
 				b.flush(batch)
-				batch = nil
 			}
 			disarmTimer()
 			return
