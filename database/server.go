@@ -550,7 +550,17 @@ func ShutdownDB() error {
 			}
 		}
 	}
-	ServerDatabase = nil
+	// Deliberately leave ServerDatabase pointing at the (now-closed) handle
+	// rather than niling it here. Server subsystems (notably
+	// LaunchPeriodicAdvertise) run in the same errgroup as the goroutine that
+	// calls ShutdownDB and can race one more iteration through
+	// UpsertServerLocalMetadata / GetIncompleteDowntimes after the DB has been
+	// closed. A nil global turns that race into a SIGSEGV in gorm.getInstance;
+	// keeping the wrapper non-nil turns it into a graceful
+	// "sql: database is closed" error the caller can log and drop. sql.DB.Close
+	// is idempotent, so a subsequent ShutdownDB call re-closing this handle is
+	// safe. Tests that need to force reinitialization set ServerDatabase = nil
+	// themselves.
 	return firstErr
 }
 
