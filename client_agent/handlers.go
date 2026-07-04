@@ -78,12 +78,32 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 		return
 	}
 
+	// Synchronous mode: when the client asks for an event stream, deliver the
+	// whole transfer over this one connection — the first event carries the job
+	// ID (so the client can persist it and reconnect to /jobs/:id/events if the
+	// stream drops), then status until terminal.
+	if wantsEventStream(c) {
+		s.transferManager.StreamJobEvents(c, job.ID, "")
+		return
+	}
+
 	// Build response. Read the job's mutable status fields under the transfer
 	// manager's lock, since the job's asynchronous execution goroutine may
 	// already be updating them.
 	resp := s.transferManager.SnapshotJobResponse(job)
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// JobEventsHandler streams a job's status as Server-Sent Events until it reaches
+// a terminal state. GET /api/v1.0/transfer-agent/jobs/:job_id/events.
+func (s *Server) JobEventsHandler(c *gin.Context) {
+	jobID := c.Param("job_id")
+	if _, err := s.transferManager.GetJob(jobID); err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Code: ErrCodeNotFound, Error: "Job not found"})
+		return
+	}
+	s.transferManager.StreamJobEvents(c, jobID, "")
 }
 
 // GetJobStatusHandler handles GET /api/v1.0/transfer-agent/jobs/:job_id

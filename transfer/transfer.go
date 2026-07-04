@@ -203,6 +203,8 @@ func registerTransferRoutes(ctx context.Context, engine *gin.Engine, egrp *errgr
 		transferGroup.POST("/jobs", handleCreateTransferJob(db, tm))
 		transferGroup.GET("/jobs", handleListTransferJobs(db, tm))
 		transferGroup.GET("/jobs/:job_id", handleGetTransferJob(db, tm))
+		// SSE stream of a job's status for poll-free waiting.
+		transferGroup.GET("/jobs/:job_id/events", handleTransferJobEvents(db, tm))
 		transferGroup.DELETE("/jobs/:job_id", handleCancelTransferJob(db, tm))
 	}
 
