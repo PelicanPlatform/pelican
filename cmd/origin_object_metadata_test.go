@@ -32,6 +32,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -86,11 +87,15 @@ func writeFakeAdminTokenFile(t *testing.T) string {
 	return path
 }
 
-// runCLI invokes a single rootCmd invocation under SetArgs. It
-// restores the test-process state on completion so subsequent tests
-// see a clean rootCmd.
+// runCLI invokes a single rootCmd invocation under SetArgs. Every
+// call resets the context so a canceled context left on rootCmd by
+// a prior test doesn't cascade into ours; cobra's cmd.Context()
+// returns the parent-command context and never resets between
+// Execute() calls.
 func runCLI(t *testing.T, args []string) {
 	t.Helper()
+	rootCmd.SetContext(context.Background())
+	t.Cleanup(func() { rootCmd.SetContext(context.TODO()) })
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("rootCmd.Execute(%v): %v", args, err)

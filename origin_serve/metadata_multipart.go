@@ -232,8 +232,8 @@ func (e *multipartShapeError) Error() string {
 	}
 	return "multipart shape: " + e.message
 }
-func (e *multipartShapeError) Unwrap() error  { return e.cause }
-func (e *multipartShapeError) status() int    { return e.code }
+func (e *multipartShapeError) Unwrap() error   { return e.cause }
+func (e *multipartShapeError) status() int     { return e.code }
 func (e *multipartShapeError) userMsg() string { return e.message }
 
 // splitMultipartParts reads the first two parts off `mr`. The first
