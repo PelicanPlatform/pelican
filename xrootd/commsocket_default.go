@@ -35,15 +35,36 @@ func init() {
 	g_cache_fds = [2]int{-1, -1}
 }
 
+// closeFds closes any still-open ends of a control socketpair and resets the
+// slots to -1. Pelican keeps BOTH ends of each xrootd control socketpair open
+// for the launcher's lifetime: fds[0] sends CA/cert updates (see sendChildFD)
+// and, under DropPrivileges, fds[1] relays kill signals (see KillFunc); the
+// child inherits its own copy of fds[1] via ExtraFiles. When a launcher is
+// replaced -- e.g. a new federation is stood up in the same process, as fed
+// tests do repeatedly -- the previous pair is never otherwise closed, so both
+// descriptors leak. On Linux the high default ulimit hides it; on macOS
+// (kqueue, ulimit -n 256) the accumulation exhausts the FD table across a
+// package and cascades into "Unable to setup primary monitor collector".
+func closeFds(fds *[2]int) {
+	for i, fd := range fds {
+		if fd >= 0 {
+			_ = syscall.Close(fd)
+			fds[i] = -1
+		}
+	}
+}
+
 // Set the global copy of the origin's communication FDs
 // To be used later for sending updated CAs and host certificates.
 func setOriginFds(fds [2]int) {
+	closeFds(&g_origin_fds)
 	g_origin_fds = fds
 }
 
 // Set the global copy of the cache's communication FDs
 // To be used later for sending updated CAs and host certificates.
 func setCacheFds(fds [2]int) {
+	closeFds(&g_cache_fds)
 	g_cache_fds = fds
 }
 
