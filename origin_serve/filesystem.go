@@ -20,12 +20,14 @@ package origin_serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +39,11 @@ import (
 	"github.com/pelicanplatform/pelican/htb"
 	"github.com/pelicanplatform/pelican/metrics"
 )
+
+// errPathTraversal is returned by fullPath when the incoming name contains
+// a ".." component. Surfaces to the webdav handler as a plain error;
+// callers do not need to distinguish it from other filesystem errors.
+var errPathTraversal = errors.New("aferoFileSystem: path contains '..' segment")
 
 // autoCreateDirFs wraps an afero.Fs to automatically create parent directories
 // when opening a file for writing
@@ -199,14 +206,20 @@ func (afs *aferoFileSystem) Mkdir(ctx context.Context, name string, perm os.File
 		slowHistogram: metrics.StorageSlowMkdirTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return err
+	}
 	// Use webdav logger if available
 	return afs.fs.MkdirAll(fullPath, perm)
 }
 
 // OpenFile implements webdav.FileSystem
 func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return nil, err
+	}
 	username := usernameFromContext(ctx)
 	if afs.logger != nil {
 		afs.logger(nil, nil) // Use the logger provided by webdav
@@ -295,7 +308,10 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 		slowHistogram: metrics.StorageSlowUnlinkTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return err
+	}
 	if err := afs.fs.RemoveAll(fullPath); err != nil {
 		return err
 	}
@@ -327,8 +343,14 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 		slowHistogram: metrics.StorageSlowRenameTime,
 	}, usernameFromContext(ctx))()
 
-	oldPath := afs.fullPath(oldName)
-	newPath := afs.fullPath(newName)
+	oldPath, err := afs.fullPath(oldName)
+	if err != nil {
+		return err
+	}
+	newPath, err := afs.fullPath(newName)
+	if err != nil {
+		return err
+	}
 	if err := afs.fs.Rename(oldPath, newPath); err != nil {
 		return err
 	}
@@ -365,7 +387,10 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 		slowHistogram: metrics.StorageSlowStatTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return nil, err
+	}
 	info, err := afs.fs.Stat(fullPath)
 	if err != nil {
 		// ENOENT may indicate an external_delete; let observation
@@ -383,12 +408,28 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 	return wrapped, nil
 }
 
-// fullPath converts a webdav path to a full filesystem path
-func (afs *aferoFileSystem) fullPath(name string) string {
-	if afs.prefix == "" {
-		return name
+// fullPath converts a webdav path to a full filesystem path, rejecting
+// any input that contains a ".." segment. The production callers pair
+// this type with OsRootFs which already refuses traversal at the syscall
+// boundary; this check is defense-in-depth for future callers that
+// might wire a non-sandboxed backend, and also breaks the taint trace
+// CodeQL follows from webdav name → afero sink.
+//
+// Anchoring the input at "/" before path.Clean is what actually
+// normalizes any residual "." or "//" — path.Join alone doesn't do
+// this when afs.prefix is empty, which is the shape used by the
+// prod handlers.go call site.
+func (afs *aferoFileSystem) fullPath(name string) (string, error) {
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return "", errPathTraversal
+		}
 	}
-	return path.Join(afs.prefix, name)
+	cleaned := path.Clean("/" + strings.TrimLeft(name, "/"))
+	if afs.prefix == "" {
+		return cleaned, nil
+	}
+	return path.Join(afs.prefix, cleaned), nil
 }
 
 // aferoFile wraps an afero.File to implement webdav.File
