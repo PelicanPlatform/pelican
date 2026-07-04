@@ -48,9 +48,13 @@ import (
 // Unlike the manager-level microbenchmark in client_agent, this exercises the
 // whole stack a real deployment pays per job: the authenticated HTTP submit,
 // per-user credential decryption, the source HEAD against origin #2, the
-// destination WebDAV COPY against origin #1, xrootd on both ends, and the
-// transfer_jobs bookkeeping. It is the honest answer to "how quickly can we run
-// 100 transfer jobs" for the two-origin topology.
+// destination WebDAV COPY against origin #1, the storage backend on both ends,
+// and the transfer_jobs bookkeeping. It is the honest answer to "how quickly can
+// we run 100 transfer jobs" for the two-origin topology.
+//
+// It runs the batch twice, once per storage backend, to compare how each serves
+// the third-party COPY: "posixv2" (Pelican's Go-native HTTP origin) vs "posix"
+// (XRootD). The sub-benchmark name carries the backend.
 //
 // Topology (mirrors TestTransferTPCCrossOriginE2E):
 //   - origin #1 hosts the transfer API and user1's /data/user1 write area;
@@ -67,9 +71,22 @@ import (
 // It needs the xrootd client plugins on the environment (XRD_PLUGINCONFDIR), the
 // same as the TPC e2e tests.
 func BenchmarkTransferTPCCrossOrigin(b *testing.B) {
+	// Compare the storage backends that actually serve the third-party COPY:
+	// posixv2 (Pelican's Go-native HTTP origin) vs posix (XRootD). Each backend
+	// runs on its own fresh two-origin federation.
+	for _, backend := range []string{"posixv2", "posix"} {
+		b.Run("backend="+backend, func(b *testing.B) {
+			runCrossOriginTPCBench(b, backend)
+		})
+	}
+}
+
+// runCrossOriginTPCBench runs the 100-job cross-origin TPC benchmark with both
+// origins configured to use the given storage backend ("posixv2" or "posix").
+func runCrossOriginTPCBench(b *testing.B, storageType string) {
 	const numJobs = 100
 
-	ft, _, _, dataDir := setupFedForTransferTPC(b)
+	ft, _, _, dataDir := setupFedForTransferTPC(b, storageType)
 	require.NoError(b, param.Server_SSRFProtection_Disabled.Set(true))
 	config.ResetSSRFTransportForTest()
 
@@ -83,7 +100,7 @@ func BenchmarkTransferTPCCrossOrigin(b *testing.B) {
 
 	ctx, cancel := context.WithCancel(ft.Ctx)
 	defer cancel()
-	o2 := launchSecondOrigin(b, ctx, host, user2, user2Password)
+	o2 := launchSecondOrigin(b, ctx, host, user2, user2Password, storageType)
 
 	// Seed a single small source file on origin #2 (read concurrently by all jobs).
 	srcDir := filepath.Join(o2.storageDir, user2)

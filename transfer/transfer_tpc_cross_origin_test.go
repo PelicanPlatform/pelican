@@ -65,7 +65,7 @@ type secondOrigin struct {
 // federation discovery URL. Unlike that test's origin, this one enables the
 // embedded issuer and requires a token to read (no PublicReads), so a storage
 // token is genuinely needed on the source side.
-func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password string) secondOrigin {
+func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password, storageType string) secondOrigin {
 	t.Helper()
 
 	pelicanBinary := getPelicanBinary(t)
@@ -75,7 +75,14 @@ func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password 
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	configDir := filepath.Join(origin2Dir, "config")
 	require.NoError(t, os.MkdirAll(configDir, 0755))
-	runtimeDir := filepath.Join(origin2Dir, "runtime")
+	// xrootd's admin/socket path lives under RunLocation and must fit the OS
+	// Unix-socket limit (~104 bytes on macOS). t.TempDir() can exceed it —
+	// especially under a b.Run sub-benchmark whose name inflates the path — so
+	// anchor the runtime dir in a short /tmp path.
+	runtimeBase, err := os.MkdirTemp("/tmp", "xt")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeBase) })
+	runtimeDir := filepath.Join(runtimeBase, "run")
 	require.NoError(t, os.MkdirAll(runtimeDir, 0755))
 
 	// Find a free port for the second origin.
@@ -170,6 +177,8 @@ Xrootd:
 		storageDir, fedPrefix,
 		logPath, runtimeDir,
 	)
+	// Swap the default posixv2 backend for the requested one ("posix" runs XRootD).
+	configContent = strings.Replace(configContent, "StorageType: posixv2", "StorageType: "+storageType, 1)
 	require.NoError(t, os.WriteFile(configFile, []byte(configContent), 0644))
 
 	cmd := exec.CommandContext(ctx, pelicanBinary, "origin", "serve", "--config", configFile)
@@ -396,7 +405,7 @@ func cliCredentialAdd(t testing.TB, cliPath, serverURL, transferTokenFile, name,
 //     runs `object copy --transfer-server ...` referencing them, moving the file
 //     from origin #2 to origin #1.
 func TestTransferTPCCrossOriginE2E(t *testing.T) {
-	ft, _, testUserPassword, dataDir := setupFedForTransferTPC(t)
+	ft, _, testUserPassword, dataDir := setupFedForTransferTPC(t, "posixv2")
 	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
 	config.ResetSSRFTransportForTest()
 
@@ -411,7 +420,7 @@ func TestTransferTPCCrossOriginE2E(t *testing.T) {
 	// Launch the independent second origin and wait for it to join the fed.
 	ctx, cancel := context.WithCancel(ft.Ctx)
 	defer cancel()
-	o2 := launchSecondOrigin(t, ctx, host, user2, user2Password)
+	o2 := launchSecondOrigin(t, ctx, host, user2, user2Password, "posixv2")
 	_ = testUserPassword
 
 	// Seed user2's source file on origin #2's storage (owned by the xrootd daemon).
