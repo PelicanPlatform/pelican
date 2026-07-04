@@ -153,7 +153,9 @@ func registrationExistsById(id int) (bool, error) {
 	}
 }
 
-func registrationBelongsToUserId(id int, userId string) (bool, error) {
+// registrationBelongsToUser reports whether the registration's recorded owner
+// matches the caller's Pelican user ID. An anonymous caller (empty userId) owns nothing.
+func registrationBelongsToUser(id int, userId string) (bool, error) {
 	var result server_structs.Registration
 	err := database.ServerDatabase.First(&result, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -161,7 +163,47 @@ func registrationBelongsToUserId(id int, userId string) (bool, error) {
 	} else if err != nil {
 		return false, errors.Wrap(err, "error retrieving registration")
 	}
-	return result.AdminMetadata.UserID == userId, nil
+	return userId != "" && result.AdminMetadata.UserID == userId, nil
+}
+
+// errRegistrationAlreadyOwned reports that a claim repeated or lost a race:
+// the registration already carries a non-empty owner. Handlers translate it
+// to an HTTP conflict (or forbidden, on the tokenized-edit leg).
+var errRegistrationAlreadyOwned = errors.New("registration already has an owner")
+
+// errRegistrationNotFound is the typed not-found error for registration
+// lookups so handlers can map it to a 404 without string matching.
+var errRegistrationNotFound = errors.New("registration not found in database")
+
+// claimRegistration atomically binds an unowned registration to owner (a
+// Pelican user ID). It is the only place ownership is written. Generic updates
+// never touch ownership (updateRegistration carries the stored owner forward).
+func claimRegistration(id int, owner string) error {
+	if owner == "" {
+		return errors.New("cannot claim a registration for an empty owner")
+	}
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		// Re-checked the owner is empty inside the transaction, so two concurrent
+		// claims cannot both succeed (SQLite serializes the write; the loser sees
+		// the committed owner or fails to commit, but not a silent overwrite).
+		ns := server_structs.Registration{}
+		if err := tx.First(&ns, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.Wrapf(errRegistrationNotFound, "registration with id %d", id)
+			}
+			return errors.Wrap(err, "error retrieving registration")
+		}
+		if ns.AdminMetadata.UserID != "" {
+			return errRegistrationAlreadyOwned
+		}
+		ns.AdminMetadata.UserID = owner
+		ns.AdminMetadata.UpdatedAt = time.Now()
+		adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
+		if err != nil {
+			return errors.Wrap(err, "Error marshaling admin metadata")
+		}
+		return tx.Model(&server_structs.Registration{}).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+	})
 }
 
 func getRegistrationJwksById(id int) (jwk.Set, error) {
@@ -357,14 +399,25 @@ func listServers() ([]server_structs.ServerRegistration, error) {
 	return results, nil
 }
 
+// getRegistrationById is used by read-only callers
 func getRegistrationById(id int) (*server_structs.Registration, error) {
+	return getRegistrationByIdTx(database.ServerDatabase, id)
+}
+
+// getRegistrationByIdTx is used by anything that writes back fields
+// derived from the read (updateRegistration, updateRegistrationStatusById)
+// through their own write transaction: an outside read lets a concurrent
+// admin_metadata writer (claimRegistration, an ownership-transfer
+// redemption) commit between the read and the write and be silently
+// overwritten with the stale pinned values.
+func getRegistrationByIdTx(db *gorm.DB, id int) (*server_structs.Registration, error) {
 	if id < 1 {
 		return nil, errors.New("Invalid id. id must be a positive number")
 	}
 	ns := server_structs.Registration{}
-	err := database.ServerDatabase.Last(&ns, id).Error
+	err := db.Last(&ns, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, errors.Errorf("registration with id %d not found in database", id)
+		return nil, errors.Wrapf(errRegistrationNotFound, "registration with id %d", id)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "error retrieving pubkey")
 	}
@@ -847,34 +900,45 @@ func reapOrphanedPendingNamespaces(staleServers []serverIdentity) error {
 }
 
 func updateRegistration(ns *server_structs.Registration) error {
-	existingNs, err := getRegistrationById(ns.ID)
-	if err != nil || existingNs == nil {
-		return errors.Wrap(err, "Failed to get registration")
-	}
-	if ns.Prefix == "" {
-		ns.Prefix = existingNs.Prefix
-	}
-	if ns.Pubkey == "" {
-		ns.Pubkey = existingNs.Pubkey
-	}
-	// We intentionally exclude updating "identity" as this should only be updated
-	// when user registered through Pelican client with identity
-	ns.Identity = existingNs.Identity
-
-	existingNsAdmin := existingNs.AdminMetadata
-	// We prevent the following fields from being modified by the user for now.
-	// They are meant for "internal" use only.
-	// We also don't allow changing Status other than explicitly
-	// call updateRegistrationStatusById
-	ns.AdminMetadata.CreatedAt = existingNsAdmin.CreatedAt
-	ns.AdminMetadata.Status = existingNsAdmin.Status
-	ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
-	ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
-	ns.AdminMetadata.UpdatedAt = time.Now()
-
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
+	// The read of the stored row happens INSIDE the transaction: the pinned
+	// fields below (ownership especially) must come from the row this
+	// transaction replaces, or a concurrent claim/ownership transfer that
+	// commits between an outside read and the Save would be silently
+	// reverted.
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		existingNs, err := getRegistrationByIdTx(tx, ns.ID)
+		if err != nil || existingNs == nil {
+			return errors.Wrap(err, "Failed to get registration")
+		}
+		if ns.Prefix == "" {
+			ns.Prefix = existingNs.Prefix
+		}
+		if ns.Pubkey == "" {
+			ns.Pubkey = existingNs.Pubkey
+		}
+		// We intentionally exclude updating "identity" as this should only be updated
+		// when user registered through Pelican client with identity
+		ns.Identity = existingNs.Identity
+
+		existingNsAdmin := existingNs.AdminMetadata
+		// We prevent the following fields from being modified by the user for now.
+		// They are meant for "internal" use only.
+		// We also don't allow changing Status other than explicitly
+		// call updateRegistrationStatusById
+		ns.AdminMetadata.CreatedAt = existingNsAdmin.CreatedAt
+		ns.AdminMetadata.Status = existingNsAdmin.Status
+		ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
+		ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
+		// Ownership is likewise internal: the owner is written only through
+		// claimRegistration (or the create path stamping the session's user
+		// ID), never from a request body — otherwise an owner or admin PUT
+		// could clear or reassign the owner and re-open the registration for
+		// claiming by any key holder.
+		ns.AdminMetadata.UserID = existingNsAdmin.UserID
+		ns.AdminMetadata.UpdatedAt = time.Now()
+
 		// Update the registration first
 		if err := tx.Save(ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to update registration: %s", ns.AdminMetadata.SiteName)
@@ -907,27 +971,32 @@ func updateRegistration(ns *server_structs.Registration) error {
 }
 
 func updateRegistrationStatusById(id int, status server_structs.RegistrationStatus, approverId string) error {
-	ns, err := getRegistrationById(id)
-	if err != nil {
-		return errors.Wrap(err, "Error getting registration by id")
-	}
-
-	ns.AdminMetadata.Status = status
-	ns.AdminMetadata.UpdatedAt = time.Now()
-	if status == server_structs.RegApproved {
-		if approverId == "" {
-			return errors.New("approverId can't be empty to approve")
+	// Read-modify-write of the admin_metadata JSON column: the read must
+	// happen inside the write transaction (see getRegistrationByIdTx) or a
+	// concurrent owner write would be reverted by this stale marshal.
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		ns, err := getRegistrationByIdTx(tx, id)
+		if err != nil {
+			return errors.Wrap(err, "Error getting registration by id")
 		}
-		ns.AdminMetadata.ApproverID = approverId
-		ns.AdminMetadata.ApprovedAt = time.Now()
-	}
 
-	adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
-	if err != nil {
-		return errors.Wrap(err, "Error marshaling admin metadata")
-	}
+		ns.AdminMetadata.Status = status
+		ns.AdminMetadata.UpdatedAt = time.Now()
+		if status == server_structs.RegApproved {
+			if approverId == "" {
+				return errors.New("approverId can't be empty to approve")
+			}
+			ns.AdminMetadata.ApproverID = approverId
+			ns.AdminMetadata.ApprovedAt = time.Now()
+		}
 
-	return database.ServerDatabase.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+		adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
+		if err != nil {
+			return errors.Wrap(err, "Error marshaling admin metadata")
+		}
+
+		return tx.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+	})
 }
 
 func setRegistrationPubKey(prefix string, pubkeyDbString string) error {

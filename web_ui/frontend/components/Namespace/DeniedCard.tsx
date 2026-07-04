@@ -4,7 +4,7 @@ import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Check, Delete, Person } from '@mui/icons-material';
 import { Alert, RegistryNamespace, User } from '@/index';
 import InformationDropdown from './InformationDropdown';
-import { NamespaceIcon } from '@/components/Namespace/index';
+import { NamespaceIcon, userOwnsNamespace } from '@/components/Namespace/index';
 import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
 import { useSWRConfig } from 'swr';
 import {
@@ -58,23 +58,22 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
           <NamespaceTitle namespace={namespace} />
           <Box display={'flex'}>
             <Box my={'auto'} display={'flex'} flexDirection={'row'}>
-              {authenticated !== undefined &&
-                authenticated.user == namespace.admin_metadata.user_id && (
-                  <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
-                    <Tooltip title={'Created By You'}>
-                      <Avatar
-                        sx={{
-                          height: '40px',
-                          width: '40px',
-                          my: 'auto',
-                          mr: 2,
-                        }}
-                      >
-                        <Person />
-                      </Avatar>
-                    </Tooltip>
-                  </Box>
-                )}
+              {userOwnsNamespace(authenticated, namespace) && (
+                <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
+                  <Tooltip title={'Created By You'}>
+                    <Avatar
+                      sx={{
+                        height: '40px',
+                        width: '40px',
+                        my: 'auto',
+                        mr: 2,
+                      }}
+                    >
+                      <Person />
+                    </Avatar>
+                  </Tooltip>
+                </Box>
+              )}
               {authenticated?.role == 'admin' && (
                 <>
                   <Tooltip title={'Delete Registration'}>

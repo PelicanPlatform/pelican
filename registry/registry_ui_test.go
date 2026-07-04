@@ -337,8 +337,8 @@ func TestListNamespacesForUser(t *testing.T) {
 
 	mockUserNss := func() []server_structs.Registration {
 		return []server_structs.Registration{
-			mockNamespace("/foo", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegPending}),
-			mockNamespace("/bar", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegApproved}),
+			mockNamespace("/foo", "", "", server_structs.AdminMetadata{UserID: "u-mock-id", Status: server_structs.RegPending}),
+			mockNamespace("/bar", "", "", server_structs.AdminMetadata{UserID: "u-mock-id", Status: server_structs.RegApproved}),
 		}
 	}()
 
@@ -397,6 +397,7 @@ func TestListNamespacesForUser(t *testing.T) {
 				router := gin.Default()
 				router.GET("/namespaces/user", func(ctx *gin.Context) {
 					ctx.Set("User", "mockUser")
+					ctx.Set("UserId", "u-mock-id")
 				}, listNamespacesForUser)
 				router.ServeHTTP(w, req)
 			} else {
@@ -428,7 +429,7 @@ func TestGetNamespace(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
+	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "u-mock-id"})
 
 	tests := []struct {
 		description  string
@@ -439,8 +440,10 @@ func TestGetNamespace(t *testing.T) {
 		userName     string
 	}{
 		{
-			description:  "valid-request-with-empty-key",
-			expectedCode: http.StatusOK,
+			// An anonymous caller (empty username) must not be treated as the
+			// owner of an unclaimed registration (empty user_id)
+			description:  "valid-request-without-user-is-forbidden",
+			expectedCode: http.StatusForbidden,
 			validID:      true,
 		},
 		{
@@ -519,6 +522,12 @@ func TestGetNamespace(t *testing.T) {
 				router := gin.Default()
 				router.GET("/test/:id", func(ctx *gin.Context) {
 					ctx.Set("User", tc.userName)
+					// Ownership is matched on the Pelican user ID, never the username
+					if tc.userName == "mockUser" {
+						ctx.Set("UserId", "u-mock-id")
+					} else if tc.userName == "randomUser" {
+						ctx.Set("UserId", "u-random-id")
+					}
 				}, getNamespace)
 				router.ServeHTTP(w, req)
 			} else {
@@ -758,6 +767,7 @@ func TestCreateNamespace(t *testing.T) {
 	router := gin.Default()
 	router.POST("/namespaces", func(ctx *gin.Context) {
 		ctx.Set("User", "admin")
+		ctx.Set("UserId", "u-admin-id")
 		createUpdateNamespace(ctx, false)
 	})
 
@@ -1011,7 +1021,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
-		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, "u-admin-id", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
@@ -1068,7 +1078,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
-		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, "u-admin-id", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
@@ -1109,7 +1119,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo/bar", nss[0].Prefix)
-		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, "u-admin-id", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		config.ResetConfig()
@@ -1151,7 +1161,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo", nss[0].Prefix)
-		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, "u-admin-id", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		config.ResetConfig()
@@ -1175,6 +1185,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	router := gin.Default()
 	router.PUT("/namespaces/:id", func(ctx *gin.Context) {
 		ctx.Set("User", "mockUser")
+		ctx.Set("UserId", "u-mock-id")
 		createUpdateNamespace(ctx, true)
 	})
 
@@ -1285,7 +1296,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			Pubkey: pubKeyStr,
 			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "1000",
-				UserID:      "mockUser",                 // same as currently sign-in user
+				UserID:      "u-mock-id",                // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
 				SiteName:    "test-site-name",
 			},
@@ -1325,7 +1336,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser",                // same as currently sign-in user
+				UserID:      "u-mock-id",               // same as currently sign-in user
 				Status:      server_structs.RegPending, // but it's approved
 				SiteName:    "test-site-name",
 			},
@@ -1371,7 +1382,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser",                 // same as currently sign-in user
+				UserID:      "u-mock-id",                // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
 				SiteName:    "test-site-name",
 			},
@@ -1435,6 +1446,7 @@ func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
 	router := gin.Default()
 	router.PUT("/namespaces/:id", func(ctx *gin.Context) {
 		ctx.Set("User", "mockUser")
+		ctx.Set("UserId", "u-mock-id")
 		createUpdateNamespace(ctx, true)
 	})
 
@@ -1579,8 +1591,297 @@ func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
 
 		got, err := getRegistrationById(id)
 		require.NoError(t, err)
-		assert.Equal(t, "mockUser", got.AdminMetadata.UserID, "unowned registration should be claimable")
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "unowned registration should be claimable")
 		assert.Equal(t, storedJWKS, got.Pubkey)
+	})
+}
+
+// TestUpdateNamespaceOwnerNeverFromBody is a regression test for the
+// ownership back door: a PUT body must never set, change, or clear the
+// recorded owner. Ownership transitions only through the claim flow
+// (claimRegistration); the update path carries the stored owner forward
+// regardless of what the request body says — and must not depend on the web
+// form happening to round-trip user_id.
+func TestUpdateNamespaceOwnerNeverFromBody(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(func() { server_utils.ResetTestState() })
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mockInsts := []registrationFieldOption{{ID: "1000"}}
+	require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+
+	_, _, storedJWKS, err := test_utils.GenerateJWK()
+	require.NoError(t, err)
+
+	newRouter := func(user, userId string) *gin.Engine {
+		router := gin.Default()
+		router.PUT("/namespaces/:id", func(ctx *gin.Context) {
+			ctx.Set("User", user)
+			ctx.Set("UserId", userId)
+			createUpdateNamespace(ctx, true)
+		})
+		return router
+	}
+
+	mockOwned := func() server_structs.Registration {
+		return server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Description: "mock description",
+				Institution: "1000",
+				UserID:      "u-mock-id",
+				Status:      server_structs.RegPending,
+				SiteName:    "test-site-name",
+			},
+		}
+	}
+
+	putBody := func(t *testing.T, router *gin.Engine, id int, body server_structs.Registration) *httptest.ResponseRecorder {
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(payload))
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("owner-cannot-reassign-owner", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockOwned()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		body := mockOwned()
+		body.AdminMetadata.UserID = "u-victim-id" // attempted reassignment
+		body.AdminMetadata.SiteName = "new-site-name"
+		w := putBody(t, newRouter("mockUser", "u-mock-id"), id, body)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "body-supplied user_id must not change the owner")
+		assert.Equal(t, "new-site-name", got.AdminMetadata.SiteName, "legitimate field edits still apply")
+	})
+
+	t.Run("owner-edit-works-without-user-id-in-body", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockOwned()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		body := mockOwned()
+		body.AdminMetadata.UserID = ""
+		w := putBody(t, newRouter("mockUser", "u-mock-id"), id, body)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "an omitted user_id must neither fail validation nor clear the owner")
+	})
+
+	t.Run("admin-edit-cannot-clear-owner", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockOwned()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		body := mockOwned()
+		body.AdminMetadata.UserID = "" // e.g. a scripted admin PUT with a partial body
+		// The built-in "admin" username carries the server.admin scope
+		w := putBody(t, newRouter("admin", "u-admin-id"), id, body)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "an admin edit must not clear or take the owner")
+	})
+}
+
+// TestClaimNamespaceHandler exercises POST /namespaces/:id/claim against the
+// mock DB: the auth guards, the key-possession proof against the STORED
+// public key, idempotent re-claims by the owner, and the conflict answer for
+// everyone else.
+func TestClaimNamespaceHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(func() { server_utils.ResetTestState() })
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mintEditToken := func(t *testing.T, privKey jwk.Key) string {
+		tok, err := jwt.NewBuilder().
+			Claim("scope", token_scopes.Registry_EditRegistration.String()).
+			Build()
+		require.NoError(t, err)
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, privKey))
+		require.NoError(t, err)
+		return string(signed)
+	}
+
+	newRouter := func(user, userId string) *gin.Engine {
+		router := gin.Default()
+		router.POST("/namespaces/:id/claim", func(ctx *gin.Context) {
+			if user != "" {
+				ctx.Set("User", user)
+			}
+			if userId != "" {
+				ctx.Set("UserId", userId)
+			}
+			claimNamespace(ctx)
+		})
+		return router
+	}
+
+	insertUnowned := func(t *testing.T, jwksStr string) int {
+		require.NoError(t, insertMockDBData([]server_structs.Registration{{
+			Prefix: "/foo",
+			Pubkey: jwksStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Status: server_structs.RegIncomplete,
+			},
+		}}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+		return id
+	}
+
+	post := func(router *gin.Engine, id string, token string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		target := "/namespaces/" + id + "/claim"
+		if token != "" {
+			target += "?access_token=" + url.QueryEscape(token)
+		}
+		req, _ := http.NewRequest("POST", target, nil)
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("login-required", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		privKey, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+
+		w := post(newRouter("", ""), strconv.Itoa(id), mintEditToken(t, privKey))
+		assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+	})
+
+	t.Run("user-id-required", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		privKey, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+
+		// e.g. the CLI admin token: a session with a username but no user row
+		w := post(newRouter("mockUser", ""), strconv.Itoa(id), mintEditToken(t, privKey))
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID, "a refused claim must not write an owner")
+	})
+
+	t.Run("access-token-required", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		_, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+
+		w := post(newRouter("mockUser", "u-mock-id"), strconv.Itoa(id), "")
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	})
+
+	t.Run("invalid-id-format", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		w := post(newRouter("mockUser", "u-mock-id"), "abc", "dummy-token")
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	})
+
+	t.Run("unknown-id-not-found", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		w := post(newRouter("mockUser", "u-mock-id"), "404404", "dummy-token")
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+	})
+
+	t.Run("wrong-key-token-rejected", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		_, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+
+		attackerPriv, _, _, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+
+		w := post(newRouter("mockUser", "u-mock-id"), strconv.Itoa(id), mintEditToken(t, attackerPriv))
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID, "a rejected token must not write an owner")
+	})
+
+	t.Run("valid-claim-records-user-id", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		privKey, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+
+		w := post(newRouter("mockUser", "u-mock-id"), strconv.Itoa(id), mintEditToken(t, privKey))
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "the claim must record the caller's Pelican user ID")
+	})
+
+	t.Run("re-claim-by-owner-is-idempotent", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		privKey, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+		router := newRouter("mockUser", "u-mock-id")
+		token := mintEditToken(t, privKey)
+
+		w := post(router, strconv.Itoa(id), token)
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+
+		// A stale link, browser back, or lost response replays the claim
+		w = post(router, strconv.Itoa(id), token)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode, "re-claiming your own registration must succeed")
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID)
+	})
+
+	t.Run("claim-of-owned-registration-conflicts", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		privKey, _, jwksStr, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		id := insertUnowned(t, jwksStr)
+		token := mintEditToken(t, privKey)
+
+		w := post(newRouter("mockUser", "u-mock-id"), strconv.Itoa(id), token)
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+
+		// A second operator with log access presents the same valid token
+		w = post(newRouter("otherUser", "u-other-id"), strconv.Itoa(id), token)
+		assert.Equal(t, http.StatusConflict, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "a conflicting claim must not steal ownership")
 	})
 }
 
