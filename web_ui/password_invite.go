@@ -193,6 +193,13 @@ type inviteInfoResp struct {
 	CollectionID        string `json:"collectionId,omitempty"`
 	CollectionName      string `json:"collectionName,omitempty"`
 	CollectionNamespace string `json:"collectionNamespace,omitempty"`
+	// RegistrationID + RegistrationPrefix + RegistrationSiteName are
+	// populated when Kind == InviteKindRegistrationOwnership. The prefix
+	// is the load-bearing detail: it is what the redeemer is actually
+	// accepting ownership of, so always render it on the confirm page.
+	RegistrationID       int    `json:"registrationId,omitempty"`
+	RegistrationPrefix   string `json:"registrationPrefix,omitempty"`
+	RegistrationSiteName string `json:"registrationSiteName,omitempty"`
 }
 
 // handleGetInviteInfo lets the redemption UI peek at a token *without*
@@ -253,6 +260,17 @@ func handleGetInviteInfo(ctx *gin.Context) {
 			resp.CollectionID = coll.ID
 			resp.CollectionName = coll.Name
 			resp.CollectionNamespace = coll.Namespace
+		}
+	}
+	if link.Kind == database.InviteKindRegistrationOwnership && link.RegistrationID != 0 {
+		// Resolve the registration's prefix + site name so the confirm
+		// page can say what the redeemer is about to own. Errors are
+		// non-fatal — the page still renders, just less helpfully.
+		var reg server_structs.Registration
+		if err := database.ServerDatabase.Select("id", "prefix", "admin_metadata").Where("id = ?", link.RegistrationID).First(&reg).Error; err == nil {
+			resp.RegistrationID = reg.ID
+			resp.RegistrationPrefix = reg.Prefix
+			resp.RegistrationSiteName = reg.AdminMetadata.SiteName
 		}
 	}
 	ctx.JSON(http.StatusOK, resp)

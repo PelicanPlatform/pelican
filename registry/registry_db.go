@@ -176,8 +176,9 @@ var errRegistrationAlreadyOwned = errors.New("registration already has an owner"
 var errRegistrationNotFound = errors.New("registration not found in database")
 
 // claimRegistration atomically binds an unowned registration to owner (a
-// Pelican user ID). It is the only place ownership is written. Generic updates
-// never touch ownership (updateRegistration carries the stored owner forward).
+// Pelican user ID). Ownership is written in two places: here and in an
+// ownership-transfer invite redemption. Generic updates never touch
+// ownership (updateRegistration carries the stored owner forward).
 func claimRegistration(id int, owner string) error {
 	if owner == "" {
 		return errors.New("cannot claim a registration for an empty owner")
@@ -202,7 +203,13 @@ func claimRegistration(id int, owner string) error {
 		if err != nil {
 			return errors.Wrap(err, "Error marshaling admin metadata")
 		}
-		return tx.Model(&server_structs.Registration{}).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+		if err := tx.Model(&server_structs.Registration{}).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error; err != nil {
+			return err
+		}
+		// A change of owner invalidates any outstanding ownership-transfer
+		// invites (e.g. minted by an admin while the registration was
+		// unowned): they were issued under authority that no longer holds.
+		return database.RevokeRegistrationOwnershipInviteLinks(tx, id)
 	})
 }
 
@@ -932,10 +939,11 @@ func updateRegistration(ns *server_structs.Registration) error {
 		ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
 		ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
 		// Ownership is likewise internal: the owner is written only through
-		// claimRegistration (or the create path stamping the session's user
-		// ID), never from a request body — otherwise an owner or admin PUT
-		// could clear or reassign the owner and re-open the registration for
-		// claiming by any key holder.
+		// claimRegistration, an ownership-transfer invite redemption
+		// (database.RedeemRegistrationOwnershipInviteLink), or the create
+		// path stamping the session's user ID — never from a request body —
+		// otherwise an owner or admin PUT could clear or reassign the owner
+		// and re-open the registration for claiming by any key holder.
 		ns.AdminMetadata.UserID = existingNsAdmin.UserID
 		ns.AdminMetadata.UpdatedAt = time.Now()
 

@@ -8,7 +8,11 @@ import { fetchApi } from '@/helpers/api';
 // require the caller to be authenticated (we need a user to add to the
 // group), password invites do not (the token IS the credential).
 
-export type InviteKind = 'group' | 'password' | 'collection_ownership';
+export type InviteKind =
+  | 'group'
+  | 'password'
+  | 'collection_ownership'
+  | 'registration_ownership';
 
 export interface InviteInfo {
   kind: InviteKind;
@@ -27,6 +31,13 @@ export interface InviteInfo {
   collectionId?: string;
   collectionName?: string;
   collectionNamespace?: string;
+  /** ID + prefix + site name for registration-ownership invites — drive
+   * the "Accept ownership of <prefix>?" confirmation page. The prefix is
+   * what the recipient is actually claiming authority over, so it MUST
+   * be visible at confirm time. */
+  registrationId?: number;
+  registrationPrefix?: string;
+  registrationSiteName?: string;
 }
 
 export interface InviteLinkBase {
@@ -77,6 +88,23 @@ const InviteService = {
           body: JSON.stringify({ token }),
           headers: { 'Content-Type': 'application/json' },
         })
+    );
+  },
+
+  // Registration-ownership redeem. Caller must be authenticated; the
+  // invite makes the calling user the owner of the linked registry
+  // registration.
+  redeemRegistrationOwnership: async (token: string): Promise<void> => {
+    await fetchApi(
+      async () =>
+        await secureFetch(
+          `${API_V1_BASE_URL}/invites/redeem/registration-ownership`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
     );
   },
 
