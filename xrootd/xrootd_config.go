@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"database/sql"
 	_ "embed"
 	"encoding/base64"
 	builtin_errors "errors"
@@ -39,6 +40,7 @@ import (
 	"text/template"
 	"time"
 
+	_ "github.com/glebarez/sqlite"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -518,6 +520,27 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 	return pssOrigin, nil
 }
 
+// enableSqliteWAL opens dbPath (creating it if missing) and sets journal_mode=WAL.
+// The mode is persisted in the file header, so once this returns nil every
+// subsequent SQLite open on that file -- from scitokens-cpp inside xrootd
+// worker threads -- runs in WAL mode. See comment in CheckXrootdEnv for why.
+func enableSqliteWAL(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open %s", dbPath)
+	}
+	defer db.Close()
+
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
+		return errors.Wrap(err, "PRAGMA journal_mode=WAL failed")
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return errors.Errorf("SQLite refused WAL mode; journal_mode is %q", mode)
+	}
+	return nil
+}
+
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	// Check XRootD version before proceeding with environment setup
 	if err := CheckXrootdVersion(); err != nil {
@@ -571,6 +594,27 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	}
 	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
 		return errors.Wrap(err, "unable to set $XDG_CACHE_HOME for scitokens library")
+	}
+
+	// Pre-flip the scitokens-cpp JWKS SQLite cache into WAL mode before xrootd
+	// touches it. scitokens-cpp uses the default rollback-journal, where a bare
+	// SELECT holds a SHARED lock and a later UPDATE/DELETE upgrade can return
+	// SQLITE_BUSY_SNAPSHOT without honoring the busy handler -- a real race for
+	// the multi-threaded xrootd worker pool. WAL is persisted in the file header,
+	// so once we set it here every subsequent open (from any process/thread) uses
+	// WAL, letting readers and writers proceed concurrently. Best-effort: any
+	// failure logs and continues; scitokens-cpp will still function on the
+	// default journal, just with the race window intact.
+	scitokensCacheDir := filepath.Join(cacheDir, "scitokens")
+	if err := config.MkdirAll(scitokensCacheDir, 0700, uid, gid); err != nil {
+		log.Warnf("Failed to create scitokens SQLite cache directory %s; leaving JWKS cache on default journal: %v", scitokensCacheDir, err)
+	} else {
+		scitokensCacheDB := filepath.Join(scitokensCacheDir, "scitokens_cpp.sqllite")
+		if err := enableSqliteWAL(scitokensCacheDB); err != nil {
+			log.Warnf("Failed to enable WAL on scitokens SQLite cache %s; leaving on default journal: %v", scitokensCacheDB, err)
+		} else if err := os.Chown(scitokensCacheDB, uid, -1); err != nil {
+			log.Warnf("Failed to chown scitokens SQLite cache %s to daemon uid %d: %v", scitokensCacheDB, uid, err)
+		}
 	}
 
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
