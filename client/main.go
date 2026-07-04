@@ -424,26 +424,32 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 
 }
 
-// Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
-func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
+// DoListStream lists remoteObject and hands each FileInfo (in walk order) to
+// emit. Returning a non-nil error from emit aborts the walk and DoListStream
+// propagates that error. This lets callers process very large listings without
+// buffering the whole result set -- see cmd/object_du.go for an example.
+//
+// DoList is a thin wrapper around DoListStream that collects entries into a
+// slice.
+func DoListStream(ctx context.Context, remoteObject string, emit func(FileInfo) error, options ...TransferOption) (err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic captured while attempting to perform transfer (DoListStream):", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoListStream: %v", r)
 			err = errors.New(ret)
 		}
 	}()
 
 	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
+		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
 	}
 
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		if err := te.Shutdown(); err != nil {
@@ -453,7 +459,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Get our token if needed
@@ -489,7 +495,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if dirResp.XPelNsHdr.RequireToken {
 		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
-			return nil, errors.Wrap(err, "failed to get token for transfer")
+			return errors.Wrap(err, "failed to get token for transfer")
 		}
 	} else {
 		token = nil
@@ -497,15 +503,26 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if collectionsOverride != "" {
 		collectionsOverrideUrl, err := url.Parse(collectionsOverride)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to parse collections URL override")
+			return errors.Wrap(err, "unable to parse collections URL override")
 		}
 		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
-	fileInfos, err = listHttp(pUrl, dirResp, token, recursive, depth)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to perform list request")
+	if err := listHttpEmit(pUrl, dirResp, token, recursive, depth, emit); err != nil {
+		return errors.Wrap(err, "failed to perform list request")
 	}
+	return nil
+}
 
+// DoList collects every FileInfo emitted by DoListStream into a slice and
+// returns it. Prefer DoListStream when the result set may be large.
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
+	err = DoListStream(ctx, remoteObject, func(info FileInfo) error {
+		fileInfos = append(fileInfos, info)
+		return nil
+	}, options...)
+	if err != nil {
+		return nil, err
+	}
 	return fileInfos, nil
 }
 

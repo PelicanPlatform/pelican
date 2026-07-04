@@ -3599,6 +3599,33 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 		require.Contains(t, s, "/root/file1.txt")
 		assert.NotContains(t, s, "/root/dirA/file2.txt")
 	})
+
+	t.Run("stream-visits-every-entry-once-and-honors-abort", func(t *testing.T) {
+		// listHttpEmit should hand every FileInfo listHttp would have
+		// buffered to the callback exactly once, and a non-nil error from
+		// the callback aborts the walk immediately.
+		streamed := map[string]int{}
+		require.NoError(t, listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo) error {
+			streamed[fi.Name]++
+			return nil
+		}))
+		buffered, err := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, err)
+		require.Equal(t, len(buffered), len(streamed))
+		for _, fi := range buffered {
+			assert.Equal(t, 1, streamed[fi.Name], "entry %q was not emitted exactly once", fi.Name)
+		}
+
+		// Abort on the first entry: no further entries should arrive.
+		count := 0
+		sentinel := errors.New("stop")
+		err = listHttpEmit(pUrl, dirResp, nil, true, -1, func(FileInfo) error {
+			count++
+			return sentinel
+		})
+		require.ErrorIs(t, err, sentinel)
+		assert.Equal(t, 1, count)
+	})
 }
 
 // TestWrapDownloadError tests the wrapDownloadError function to ensure it correctly wraps
