@@ -65,15 +65,15 @@ func RegisterTransferAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup
 	return registerTransferRoutes(ctx, engine, egrp, db, tm)
 }
 
-// RegisterLocalIssuer stands up the server-level "local" OIDC issuer used to
+// RegisterLocalIssuer stands up the server's "local" OIDC issuer used to
 // authenticate clients to a standalone transfer server (one with no co-located
 // origin or director). It registers a single provider whose tokens carry
 // iss = config.GetLocalIssuerUrl() and the (group-gated) pelican.transfer
 // scope, exposing its OIDC discovery, dynamic-client-registration, device-code,
-// and token endpoints under /api/v1.0/issuer/ns/.transfer. A co-located
-// transfer server instead obtains the local issuer through the origin's
-// embedded-issuer setup, so this must only be called on standalone servers to
-// avoid duplicate route registration.
+// and token endpoints under /api/v1.0/issuer/ns/pelican/local-issuer. A
+// co-located transfer server instead obtains the local issuer through the
+// origin's embedded-issuer setup, so this must only be called on standalone
+// servers to avoid duplicate route registration.
 func RegisterLocalIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, db *gorm.DB) error {
 	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
 	if gracePeriod == 0 {
@@ -82,7 +82,7 @@ func RegisterLocalIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.
 
 	registry := issuer.NewProviderRegistry()
 	if err := issuer.RegisterLocalProvider(ctx, egrp, registry, db, gracePeriod); err != nil {
-		return errors.Wrap(err, "failed to register local transfer issuer provider")
+		return errors.Wrap(err, "failed to register local issuer provider")
 	}
 
 	// Non-aborting middleware so issuer handlers (e.g. device-verify) can see

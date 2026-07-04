@@ -68,8 +68,8 @@ var (
 
 // deviceApproval carries an intercepted device user_code together with the
 // issuer namespace it belongs to, so the test approves it against the correct
-// embedded-issuer provider (e.g. /.transfer for transfer-auth, /data for the
-// storage token-exchange flow).
+// embedded-issuer provider (e.g. /pelican/local-issuer for transfer-auth, /data
+// for the storage token-exchange flow).
 type deviceApproval struct {
 	userCode  string
 	namespace string
