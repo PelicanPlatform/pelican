@@ -164,12 +164,54 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			return
 		}
 
+		// Synchronous mode: when the client asks for an event stream, deliver the
+		// whole transfer over this one connection. The first event carries the
+		// job ID (so the client can persist it and, if the stream drops, resume
+		// by reconnecting to GET /jobs/:id/events), then status until terminal.
+		if wantsEventStream(c) {
+			tm.StreamJobEvents(c, job.ID, job.Status)
+			return
+		}
+
 		c.JSON(http.StatusCreated, TransferJobResponse{
 			JobID:     job.ID,
 			Status:    job.Status,
 			CreatedAt: job.CreatedAt,
 			Transfers: req.Transfers,
 		})
+	}
+}
+
+// wantsEventStream reports whether the client asked for a Server-Sent Events
+// response (Accept: text/event-stream).
+func wantsEventStream(c *gin.Context) bool {
+	return strings.Contains(c.GetHeader("Accept"), "text/event-stream")
+}
+
+// handleTransferJobEvents streams a job's status as Server-Sent Events until it
+// reaches a terminal state, letting a client wait for completion without
+// polling. GET /api/v1.0/transfer/jobs/:job_id/events.
+func handleTransferJobEvents(db *gorm.DB, tm *client_agent.TransferManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		owner, err := getOwner(c)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL", Error: "Failed to determine request owner"})
+			return
+		}
+		jobID := c.Param("job_id")
+		// Authorize + confirm existence via the owner-scoped durable record. The
+		// derived status is the fallback for a job no longer in the manager's
+		// memory (e.g. after a restart, where the reconciler recorded its outcome).
+		var dbJob TransferJob
+		if err := db.Where("id = ? AND user_id = ?", jobID, owner.UserID).First(&dbJob).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Error: "Transfer job not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL", Error: "Failed to load transfer job"})
+			}
+			return
+		}
+		tm.StreamJobEvents(c, jobID, deriveJobStatus(dbJob))
 	}
 }
 

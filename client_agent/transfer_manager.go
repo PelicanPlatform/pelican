@@ -70,15 +70,20 @@ type TransferJob struct {
 
 // TransferManager manages all transfer jobs and their execution
 type TransferManager struct {
-	jobs                   map[string]*TransferJob
-	transfers              map[string]*Transfer
-	store                  StoreInterface
-	mu                     sync.RWMutex
-	maxJobs                int
-	semaphore              chan struct{}
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	eg                     *errgroup.Group
+	jobs      map[string]*TransferJob
+	transfers map[string]*Transfer
+	store     StoreInterface
+	mu        sync.RWMutex
+	maxJobs   int
+	semaphore chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	eg        *errgroup.Group
+	// Job-event pub/sub for push (SSE) status delivery. Guarded by its own
+	// mutex so publishing a status change never contends with job execution.
+	subMu                  sync.Mutex
+	subscribers            map[string]map[int]chan JobEvent
+	nextSubID              int
 	backgroundTasksStarted bool
 	onJobTerminal          func(*TransferJob)
 }
@@ -95,20 +100,21 @@ func (tm *TransferManager) SetJobCompletionCallback(cb func(*TransferJob)) {
 	tm.onJobTerminal = cb
 }
 
-// fireJobTerminal invokes the registered completion callback if the job is in a
-// terminal state. Safe to call unconditionally at job teardown.
+// fireJobTerminal runs the registered completion callback (if any) and then
+// publishes the terminal event to job subscribers. Safe to call unconditionally
+// at job teardown; a no-op unless the job is in a terminal state.
 func (tm *TransferManager) fireJobTerminal(job *TransferJob) {
 	tm.mu.RLock()
 	cb := tm.onJobTerminal
-	status := job.Status
+	ev := jobEvent(job)
 	tm.mu.RUnlock()
-	if cb == nil {
+	if !IsTerminalStatus(ev.Status) {
 		return
 	}
-	switch status {
-	case StatusCompleted, StatusFailed, StatusCancelled:
+	if cb != nil {
 		cb(job)
 	}
+	tm.publishJobEvent(ev)
 }
 
 // NewTransferManager creates a new transfer manager
@@ -135,14 +141,15 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 	}
 
 	tm := &TransferManager{
-		jobs:      make(map[string]*TransferJob),
-		transfers: make(map[string]*Transfer),
-		store:     store,
-		maxJobs:   maxConcurrentJobs,
-		semaphore: make(chan struct{}, maxConcurrentJobs),
-		ctx:       managerCtx,
-		cancel:    cancel,
-		eg:        eg,
+		jobs:        make(map[string]*TransferJob),
+		transfers:   make(map[string]*Transfer),
+		store:       store,
+		maxJobs:     maxConcurrentJobs,
+		semaphore:   make(chan struct{}, maxConcurrentJobs),
+		ctx:         managerCtx,
+		cancel:      cancel,
+		eg:          eg,
+		subscribers: make(map[string]map[int]chan JobEvent),
 	}
 
 	// Attempt to recover incomplete jobs from database
@@ -438,6 +445,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 	job.Status = StatusRunning
 	job.StartedAt = &now
 	tm.mu.Unlock()
+	tm.publishJobEvent(JobEvent{JobID: job.ID, Status: StatusRunning})
 
 	// Persist status update to database
 	if tm.store != nil {

@@ -21,6 +21,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -526,7 +527,82 @@ func submitToTransferServer(ctx context.Context, serverURL, tokenFile string, so
 		fmt.Printf("Transfer job submitted: %s — waiting for completion...\n", jobID)
 	}
 
-	return pollTransferJob(ctx, httpClient, serverURL, jobID, tokenValue)
+	return waitForTransferJob(ctx, httpClient, serverURL, jobID, tokenValue)
+}
+
+// errSSEUnavailable signals that the server-sent-events stream could not be used
+// (server too old, a buffering proxy, or a mid-stream drop) and the caller
+// should fall back to polling.
+var errSSEUnavailable = errors.New("transfer event stream unavailable")
+
+// waitForTransferJob waits for a job to reach a terminal state, preferring the
+// server's push-based event stream (no polling) and falling back to polling when
+// the stream is unavailable.
+func waitForTransferJob(ctx context.Context, httpClient *http.Client, serverURL, jobID, token string) error {
+	if err := watchTransferJobSSE(ctx, httpClient, serverURL, jobID, token); err != errSSEUnavailable {
+		return err // terminal result (nil / failed / cancelled) or ctx error
+	}
+	log.Debug("Transfer event stream unavailable; falling back to polling")
+	return pollTransferJob(ctx, httpClient, serverURL, jobID, token)
+}
+
+// watchTransferJobSSE waits for a job by consuming the server's SSE status
+// stream. It returns nil on success, a descriptive error on failure/cancel, or
+// errSSEUnavailable if the stream can't be established or drops before a
+// terminal event (so the caller can fall back to polling).
+func watchTransferJobSSE(ctx context.Context, httpClient *http.Client, serverURL, jobID, token string) error {
+	url := serverURL + "/api/v1.0/transfer/jobs/" + jobID + "/events"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return errSSEUnavailable
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return errSSEUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return errSSEUnavailable
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		data, ok := strings.CutPrefix(scanner.Text(), "data: ")
+		if !ok {
+			continue // event:/comment/blank lines
+		}
+		var ev struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &ev) != nil {
+			continue
+		}
+		switch ev.Status {
+		case "completed":
+			if outputJSON {
+				fmt.Println(data)
+			} else {
+				fmt.Printf("Transfer job %s completed successfully.\n", jobID)
+			}
+			return nil
+		case "failed", "error":
+			return fmt.Errorf("transfer job %s failed: %s", jobID, ev.Error)
+		case "cancelled":
+			return fmt.Errorf("transfer job %s was cancelled", jobID)
+		}
+	}
+	// Stream ended without a terminal event (dropped, or ctx cancelled). If the
+	// context is done, surface that; otherwise fall back to polling.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errSSEUnavailable
 }
 
 // pollTransferJob polls the transfer server for the status of a job until
@@ -580,7 +656,7 @@ func pollTransferJob(ctx context.Context, httpClient *http.Client, serverURL, jo
 				fmt.Printf("Transfer job %s completed successfully.\n", jobID)
 			}
 			return nil
-		case "error":
+		case "error", "failed":
 			if outputJSON {
 				fmt.Println(string(body))
 			}

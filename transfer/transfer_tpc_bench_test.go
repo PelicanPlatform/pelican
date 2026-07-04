@@ -21,6 +21,7 @@
 package transfer_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -29,6 +30,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -172,28 +174,41 @@ func runCrossOriginTPCBench(b *testing.B, storageType string) {
 		return id, nil
 	}
 
-	// waitJob polls one job to a terminal state (tighter than pollTransferJob's
-	// 1s cadence, since we're timing throughput).
-	statusURL := serverURL + "/api/v1.0/transfer/jobs/"
+	// waitJob waits for one job to reach a terminal state by consuming the
+	// server's SSE event stream — poll-free, so the measured completion latency
+	// isn't inflated by a poll interval.
+	eventsBase := serverURL + "/api/v1.0/transfer/jobs/"
 	waitJob := func(id string, timeout time.Duration) string {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, statusURL+id, nil)
-			req.Header.Set("Authorization", "Bearer "+transferToken)
-			resp, err := hc.Do(req)
-			if err == nil {
-				rb, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				var jr map[string]any
-				_ = json.Unmarshal(rb, &jr)
-				switch st, _ := jr["status"].(string); st {
-				case "completed":
-					return "completed"
-				case "error", "failed", "cancelled":
-					return st
-				}
+		wctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(wctx, http.MethodGet, eventsBase+id+"/events", nil)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+transferToken)
+		resp, err := hc.Do(req)
+		if err != nil {
+			return "error"
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Sprintf("http-%d", resp.StatusCode)
+		}
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			data, ok := strings.CutPrefix(scanner.Text(), "data: ")
+			if !ok {
+				continue
 			}
-			time.Sleep(25 * time.Millisecond)
+			var ev struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal([]byte(data), &ev) != nil {
+				continue
+			}
+			switch ev.Status {
+			case "completed", "failed", "error", "cancelled":
+				return ev.Status
+			}
 		}
 		return "timeout"
 	}

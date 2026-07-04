@@ -203,6 +203,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/jobs", s.CreateJobHandler)
 		api.GET("/jobs", s.ListJobsHandler)
 		api.GET("/jobs/:job_id", s.GetJobStatusHandler)
+		// SSE stream of a job's status for poll-free waiting.
+		api.GET("/jobs/:job_id/events", s.JobEventsHandler)
 		api.DELETE("/jobs/:job_id", s.CancelJobHandler)
 
 		// History management
