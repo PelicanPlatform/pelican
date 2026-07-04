@@ -21,6 +21,7 @@ import { alertOnError } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { getUser } from '@/helpers/login';
+import { userOwnsNamespace } from '@/components/Namespace';
 
 interface FormProps {
   namespace?: RegistryNamespace;
@@ -71,21 +72,31 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     { fallbackData: [] }
   );
 
-  // Auto-fill in the security contact if no security contact and request came from Origin
+  // Auto-fill the security contact when the current user is the operator of
+  // this registration and no contact has been set yet
   const { data: user } = useSWR('getUser', getUser);
   useEffect(() => {
-    // If there is a fromUrl param then it came from the Origin
-    // We can assume this user is likely to be the security contact
-    const fromUrl = new URL(window.location.href).searchParams.get('fromUrl');
-
     if (
-      fromUrl &&
-      user !== undefined &&
-      !namespace?.admin_metadata?.security_contact_user_id
+      user === undefined ||
+      namespace?.admin_metadata?.security_contact_user_id
     ) {
+      return;
+    }
+
+    // The current user is known to be the operator when either:
+    //  - the request came from their Origin/Cache web UI (fromUrl param), or
+    //  - they already own the registration, e.g. right after claiming it via
+    //    the completion link the server logs, which carries no fromUrl
+    const fromUrl = new URL(window.location.href).searchParams.get('fromUrl');
+    const ownsRegistration =
+      namespace !== undefined && userOwnsNamespace(user, namespace);
+
+    if (fromUrl || ownsRegistration) {
+      // Prefer the stable Pelican user ID over the login username so the
+      // contact reference survives identity-provider changes
       onChange(
         'admin_metadata.security_contact_user_id',
-        user?.user,
+        user?.user_id || user?.user,
         setFormNamespace
       );
     }
