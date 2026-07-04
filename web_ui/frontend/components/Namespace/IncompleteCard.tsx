@@ -7,6 +7,7 @@ import Link from 'next/link';
 
 import { Alert, RegistryNamespace, User } from '@/index';
 import InformationDropdown from './InformationDropdown';
+import { userOwnsNamespace } from '@/components/Namespace/index';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { denyNamespace } from '@/helpers/api';
@@ -54,24 +55,23 @@ export const IncompleteCard = ({
         <NamespaceTitle namespace={namespace} />
         <Box display={'flex'}>
           <Box my={'auto'} display={'flex'} flexDirection={'row'}>
-            {authenticated !== undefined &&
-              authenticated.user == namespace.admin_metadata.user_id && (
-                <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
-                  <Tooltip title={'Created By You'}>
-                    <Avatar
-                      sx={{
-                        my: 'auto',
-                        mr: 2,
-                        ...(size === 'small'
-                          ? { width: 30, height: 30 }
-                          : { width: 40, height: 40 }),
-                      }}
-                    >
-                      <Person fontSize={size} />
-                    </Avatar>
-                  </Tooltip>
-                </Box>
-              )}
+            {userOwnsNamespace(authenticated, namespace) && (
+              <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
+                <Tooltip title={'Created By You'}>
+                  <Avatar
+                    sx={{
+                      my: 'auto',
+                      mr: 2,
+                      ...(size === 'small'
+                        ? { width: 30, height: 30 }
+                        : { width: 40, height: 40 }),
+                    }}
+                  >
+                    <Person fontSize={size} />
+                  </Avatar>
+                </Tooltip>
+              </Box>
+            )}
             {authenticated?.role == 'admin' && (
               <Tooltip title={'Deny Registration'}>
                 <IconButton
@@ -93,7 +93,7 @@ export const IncompleteCard = ({
               </Tooltip>
             )}
             {(authenticated?.role == 'admin' ||
-              authenticated?.user == namespace.admin_metadata.user_id) && (
+              userOwnsNamespace(authenticated, namespace)) && (
               <Tooltip title={'Complete Registration'}>
                 <Link
                   href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}

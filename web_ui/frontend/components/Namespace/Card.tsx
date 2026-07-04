@@ -23,6 +23,7 @@ import ConfirmButton from '@chtc/web-components/ConfirmButton';
 
 import InformationDropdown from './InformationDropdown';
 import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
+import { userOwnsNamespace } from '@/components/Namespace/index';
 import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
@@ -66,24 +67,23 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
           <NamespaceTitle namespace={namespace} />
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
-              {authenticated !== undefined &&
-                authenticated.user == namespace.admin_metadata.user_id && (
-                  <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
-                    <Tooltip title={'Created By You'}>
-                      <Avatar
-                        sx={{
-                          my: 'auto',
-                          mr: 2,
-                          ...(size === 'small'
-                            ? { width: 30, height: 30 }
-                            : { width: 40, height: 40 }),
-                        }}
-                      >
-                        <Person fontSize={size} />
-                      </Avatar>
-                    </Tooltip>
-                  </Box>
-                )}
+              {userOwnsNamespace(authenticated, namespace) && (
+                <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
+                  <Tooltip title={'Created By You'}>
+                    <Avatar
+                      sx={{
+                        my: 'auto',
+                        mr: 2,
+                        ...(size === 'small'
+                          ? { width: 30, height: 30 }
+                          : { width: 40, height: 40 }),
+                      }}
+                    >
+                      <Person fontSize={size} />
+                    </Avatar>
+                  </Tooltip>
+                </Box>
+              )}
               <Tooltip title={'Download Public Key'}>
                 <a
                   href={`/api/v1.0/registry_ui/namespaces/${namespace.id}/pubkey`}

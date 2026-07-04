@@ -34,6 +34,7 @@ import { getUser } from '@/helpers/login';
 import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
 import { CardProps } from '@/components/Namespace/Card';
+import { userOwnsNamespace } from '@/components/Namespace';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
 import { IncompleteCardProps } from '@/components/Namespace/IncompleteCard';
 import { AlertDispatchContext } from '@/components/AlertProvider';
@@ -68,16 +69,14 @@ export default function Home() {
     return data?.filter(
       ({ namespace }) =>
         namespace.admin_metadata.status === 'Pending' &&
-        (user?.user == namespace.admin_metadata.user_id ||
-          user?.role == 'admin')
+        (userOwnsNamespace(user, namespace) || user?.role == 'admin')
     );
   }, [data, user]);
   const incompleteData = useMemo(() => {
     return data?.filter(
       ({ namespace }) =>
         namespace.admin_metadata.status === 'Incomplete' &&
-        (user?.user == namespace.admin_metadata.user_id ||
-          user?.role == 'admin')
+        (userOwnsNamespace(user, namespace) || user?.role == 'admin')
     );
   }, [data, user]);
   const approvedOriginData = useMemo(

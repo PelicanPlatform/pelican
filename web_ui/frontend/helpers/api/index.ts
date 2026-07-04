@@ -249,6 +249,26 @@ export const getNamespace = async (
   return await fetchApi(async () => await fetch(url));
 };
 
+/**
+ * Claims an unowned namespace registration for the logged-in user
+ * @param id Namespace ID
+ * @param accessToken Access token minted by the registered server, proving
+ *   the caller operates it
+ */
+export const claimNamespace = async (
+  id: string | number,
+  accessToken: string
+): Promise<Response> => {
+  const url = new URL(
+    `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/claim`,
+    window.location.origin
+  );
+  url.searchParams.append('access_token', accessToken);
+  return await fetchApi(
+    async () => await secureFetch(url.toString(), { method: 'POST' })
+  );
+};
+
 export const postGeneralNamespace = async (
   data: RegistryNamespace
 ): Promise<Response> => {
