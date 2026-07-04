@@ -829,6 +829,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_HealthMonitoringPublic.GetName(), false)
 	// Server.NewUserDefaultScopes
 	v.SetDefault(param.Server_NewUserDefaultScopes.GetName(), []string{"web_ui.access"})
+	// Server.RegistrationCompletionLinkFile
+	{
+		val := "${ConfigBase}/server-registration-completion-link"
+		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+		v.SetDefault(param.Server_RegistrationCompletionLinkFile.GetName(), val)
+	}
 	// Server.RegistrationRetryInterval
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
 	// Server.SSRFProtection.Disabled
@@ -1254,6 +1260,14 @@ func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 				v.SetDefault(param.Server_DbLocation.GetName(), val)
 			}
+		}
+	}
+	// Server.RegistrationCompletionLinkFile
+	if isDefaultSource(param.Server_RegistrationCompletionLinkFile.GetName()) {
+		{
+			val := "${ConfigBase}/server-registration-completion-link"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_RegistrationCompletionLinkFile.GetName(), val)
 		}
 	}
 	// Server.SessionSecretFile

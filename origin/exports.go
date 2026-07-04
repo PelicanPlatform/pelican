@@ -3,7 +3,6 @@ package origin
 import (
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -12,8 +11,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
@@ -116,28 +113,7 @@ func handleExports(ctx *gin.Context) {
 	// Create token for accessing registry edit page. A standalone origin has no
 	// registry, hence no edit URLs to decorate and no audience to mint against.
 	if !standalone {
-		issuerUrl, err := config.GetServerIssuerURL()
-		if err != nil {
-			log.Errorf("Failed to get server issuer url %v", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting server issuer url " + err.Error()})
-			return
-		}
-		fed, err := config.GetFederation(ctx)
-		if err != nil {
-			log.Error("handleExports: failed to get federaion:", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Server error when getting federation information: " + err.Error(),
-			})
-			return
-		}
-		tc := token.NewWLCGToken()
-		tc.Issuer = issuerUrl
-		tc.Lifetime = 15 * time.Minute
-		tc.Subject = issuerUrl
-		tc.AddScopes(token_scopes.Registry_EditRegistration)
-		tc.AddAudiences(fed.RegistryEndpoint)
-		token, err := tc.CreateToken()
+		token, err := MintRegistrationEditToken(ctx)
 		if err != nil {
 			log.Errorf("Failed to create access token for editing registration %v", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when creating token for access registry edit page " + err.Error()})

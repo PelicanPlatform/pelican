@@ -528,6 +528,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
 	"Server.NewUserDefaultScopes": false,
+	"Server.RegistrationCompletionLinkFile": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SSRFProtection.AllowedCIDRs": false,
 	"Server.SSRFProtection.BlockedCIDRs": false,
@@ -815,6 +816,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Server.IssuerHostname": func(c *Config) string { return c.Server.IssuerHostname },
 	"Server.IssuerJwks": func(c *Config) string { return c.Server.IssuerJwks },
 	"Server.IssuerUrl": func(c *Config) string { return c.Server.IssuerUrl },
+	"Server.RegistrationCompletionLinkFile": func(c *Config) string { return c.Server.RegistrationCompletionLinkFile },
 	"Server.SessionSecretFile": func(c *Config) string { return c.Server.SessionSecretFile },
 	"Server.TLSCACertificateDirectory": func(c *Config) string { return c.Server.TLSCACertificateDirectory },
 	"Server.TLSCACertificateFile": func(c *Config) string { return c.Server.TLSCACertificateFile },
@@ -1836,6 +1838,7 @@ var allParameterNames = []string{
 	"Server.IssuerUrl",
 	"Server.Modules",
 	"Server.NewUserDefaultScopes",
+	"Server.RegistrationCompletionLinkFile",
 	"Server.RegistrationRetryInterval",
 	"Server.SSRFProtection.AllowedCIDRs",
 	"Server.SSRFProtection.BlockedCIDRs",
@@ -2096,6 +2099,7 @@ var (
 	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}
 	Server_IssuerJwks = StringParam{"Server.IssuerJwks"}
 	Server_IssuerUrl = StringParam{"Server.IssuerUrl"}
+	Server_RegistrationCompletionLinkFile = StringParam{"Server.RegistrationCompletionLinkFile"}
 	Server_SessionSecretFile = StringParam{"Server.SessionSecretFile"}
 	Server_TLSCACertificateDirectory = StringParam{"Server.TLSCACertificateDirectory"}
 	Server_TLSCACertificateFile = StringParam{"Server.TLSCACertificateFile"}
@@ -2649,6 +2653,7 @@ func init() {
 		"Server.IssuerHostname": Server_IssuerHostname,
 		"Server.IssuerJwks": Server_IssuerJwks,
 		"Server.IssuerUrl": Server_IssuerUrl,
+		"Server.RegistrationCompletionLinkFile": Server_RegistrationCompletionLinkFile,
 		"Server.SessionSecretFile": Server_SessionSecretFile,
 		"Server.TLSCACertificateDirectory": Server_TLSCACertificateDirectory,
 		"Server.TLSCACertificateFile": Server_TLSCACertificateFile,
