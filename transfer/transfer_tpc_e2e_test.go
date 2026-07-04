@@ -234,12 +234,23 @@ func setupFedForTransferTPC(t *testing.T) (ft *fed_test_utils.FedTest, adminPass
 	// The flow performs several web-UI logins (admin setup plus the simulated
 	// device-code approvals); raise the rate limit so they are not throttled (429).
 	require.NoError(t, param.Set(param.Server_UILoginRateLimit, 100))
+	// "admin" and "test-admin" are system administrators. "admin" backs the
+	// issuer-admin API logins; "test-admin" is the subject of the operator token
+	// that registers the shared OAuth client, so that client is admin_configured
+	// and any pelican.transfer holder (e.g. "testuser" in the ViaOrigin flow) may
+	// bootstrap credentials with it. (Setting UIAdminUsers keeps the built-in
+	// "admin" username privileged, which the special case would otherwise grant.)
+	require.NoError(t, param.Set(param.Server_UIAdminUsers, []string{"admin", "test-admin"}))
 
 	groupFileDir := t.TempDir()
 	groupFilePath := filepath.Join(groupFileDir, "groups.json")
-	require.NoError(t, os.WriteFile(groupFilePath, []byte(`{"testuser": [], "admin": []}`), 0600))
+	require.NoError(t, os.WriteFile(groupFilePath, []byte(`{"testuser": ["/transfer-users"], "admin": []}`), 0600))
 	require.NoError(t, param.SetRaw("Issuer.GroupSource", "file"))
 	require.NoError(t, param.SetRaw("Issuer.GroupFile", groupFilePath))
+	// pelican.transfer is default-deny; authorize the "/transfer-users" group so
+	// the local issuer will mint the scope for testuser's device-code login in
+	// the ViaOrigin flow. (DirectCredential mints its transfer token directly.)
+	require.NoError(t, param.Set(param.Transfer_EnabledGroups, []string{"/transfer-users"}))
 
 	tmpDir := t.TempDir()
 	dataDir = filepath.Join(tmpDir, "data-store")

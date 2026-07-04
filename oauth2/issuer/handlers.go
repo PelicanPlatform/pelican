@@ -29,10 +29,12 @@ import (
 	"github.com/ory/fosite"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // WLCGAudienceAny is the WLCG "wildcard" audience value.
@@ -439,7 +441,7 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 			case scope == "pelican.transfer":
 				// Authorization-gated, not a free standard scope: granted only
 				// to users permitted to use the transfer API.
-				if transferAccessAllowed(groups) {
+				if transferAccessAllowed(serverDB, userID, groups) {
 					candidates = []string{scope}
 				}
 			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
@@ -720,7 +722,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			case scope == "pelican.transfer":
 				// Authorization-gated, not a free standard scope: granted only
 				// to users permitted to use the transfer API.
-				if transferAccessAllowed(groups) {
+				if transferAccessAllowed(serverDB, userID, groups) {
 					grantedScopes = append(grantedScopes, scope)
 				}
 			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
@@ -1437,16 +1439,20 @@ func isStandardScope(scope string) bool {
 	return false
 }
 
-// transferAccessAllowed reports whether a user with the given group memberships
-// may be granted the pelican.transfer scope.  When Transfer.EnabledGroups is
-// unset, any authenticated user is allowed; otherwise the user must belong to
-// at least one of the configured groups.  This is the authorization gate for
-// the transfer API, enforced at token-issuance time on the local issuer.
-func transferAccessAllowed(groups []string) bool {
+// transferAccessAllowed reports whether the identity may be granted the
+// pelican.transfer scope.  This is the authorization gate for the transfer API,
+// enforced at token-issuance time on the local issuer.
+//
+// Access is DENIED by default: permission must be granted explicitly, either by
+//   - membership in a Transfer.EnabledGroups group (config), or
+//   - a pelican.transfer grant to the user or one of their groups through the
+//     web-UI user/group scope system (database.HasEffectiveScope).
+//
+// In particular, when no transfer groups are configured and no scope grant
+// exists, no one is authorized — we never auto-grant the scope.
+func transferAccessAllowed(db *gorm.DB, userID string, groups []string) bool {
+	// Config-based grant: membership in a configured transfer group.
 	enabled := param.Transfer_EnabledGroups.GetStringSlice()
-	if len(enabled) == 0 {
-		return true
-	}
 	for _, g := range groups {
 		for _, e := range enabled {
 			if g == e {
@@ -1454,6 +1460,11 @@ func transferAccessAllowed(groups []string) bool {
 			}
 		}
 	}
+	// Explicit grant via the web-UI user/group scope system.
+	if db != nil && database.HasEffectiveScope(db, userID, groups, token_scopes.Pelican_Transfer) {
+		return true
+	}
+	// Default deny.
 	return false
 }
 
