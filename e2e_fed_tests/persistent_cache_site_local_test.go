@@ -249,13 +249,14 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 
 	// The upstream cache's public object endpoint.  We probe it with
 	// only-if-cached to inspect its contents without triggering an origin fetch.
-	// The cache keys its federation off the director/web URL host (which, in
-	// this harness, differs from the separate discovery server's host), so that
-	// is the value used in the /cache/data/<discovery> path segment.
+	// The cache derives its default federation identity from
+	// fedInfo.DiscoveryEndpoint (see persistent_cache.NewPersistentCache), so
+	// the /cache/data/<discovery> path segment must carry the discovery
+	// server's host:port -- which in this harness is a separate httptest.Server
+	// distinct from the director's web URL.
 	discoveryHost := hostnameFromDiscovery(t, discoveryUrl)
 	webUrl := param.Server_ExternalWebUrl.GetString()
-	webHost := hostnameFromDiscovery(t, webUrl)
-	upstreamCacheData := webUrl + "/api/v1.0/cache/data/" + url.PathEscape(webHost)
+	upstreamCacheData := webUrl + "/api/v1.0/cache/data/" + url.PathEscape(discoveryHost)
 	const objectPath = "/test/hello_world.txt"
 
 	// Precondition: the upstream cache must not already hold the object.
