@@ -381,14 +381,22 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	t.Cleanup(discoveryServer.Close)
 
-	// Set the discovery URL in both viper and the global fed info object BEFORE
-	// LaunchModules so the origin's initial scitokens.cfg picks up the correct
-	// federation issuer.
+	// Publish the discovery URL via the viper key that discoverFederationImpl
+	// reads (Federation.DiscoveryUrl) BEFORE LaunchModules -- this is what the
+	// origin's scitokens.cfg generator will see when it calls GetFederation.
+	//
+	// Do NOT populate globalFedInfo here (via GetFederation or SetFederation):
+	// config.InitServer above has already fired the federation-discovery
+	// sync.Once with Server.ExternalWebUrl at its default port, and any
+	// snapshot we take now would carry that stale JwksUri /
+	// DirectorEndpoint into every subsequent GetFederation caller
+	// (including the Director's federation-metadata handler). Instead, reset
+	// the sync.Once so LaunchModules's first GetFederation call reruns
+	// discovery after UpdateConfigFromListener has bound the real port --
+	// at which point all values, including our Federation.DiscoveryUrl,
+	// resolve correctly.
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(discoveryServer.URL))
-	fedInfo, err := config.GetFederation(ctx)
-	require.NoError(t, err, "error getting federation info")
-	fedInfo.DiscoveryEndpoint = discoveryServer.URL
-	config.SetFederation(fedInfo)
+	config.ResetFederationForTest()
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
