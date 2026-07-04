@@ -56,6 +56,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, errors.Wrap(err, "failed to initialize origin exports")
 	}
 
+	// The transfer API authenticates clients with pelican.transfer tokens minted
+	// by the server's local issuer, and that issuer is only stood up in
+	// embedded-issuer mode (RegisterLocalProvider runs inside
+	// configureEmbeddedIssuer). In OA4MP mode no local issuer exists, so a
+	// transfer-enabled OA4MP origin could never issue or bootstrap its own
+	// transfer credentials. Fail fast rather than serve a transfer API that
+	// cannot mint tokens. (OA4MP is being retired in favor of the embedded
+	// issuer, at which point this restriction becomes vacuous.)
+	if param.Origin_EnableTransferAPI.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
+		return nil, errors.Errorf("the transfer API (%s=true) requires the embedded issuer, but %s is set to \"oa4mp\"; "+
+			"set %s to \"embedded\" or disable the transfer API",
+			param.Origin_EnableTransferAPI.GetName(), param.Origin_IssuerMode.GetName(), param.Origin_IssuerMode.GetName())
+	}
+
 	// Determine if we should use XRootD or native HTTP server
 	storageType := param.Origin_StorageType.GetString()
 	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
