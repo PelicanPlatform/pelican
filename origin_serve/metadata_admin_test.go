@@ -38,7 +38,7 @@ func installControllerForAdminTest(t *testing.T) *metadataController {
 
 	db := newTestDB(t)
 	ctl := newMetadataController(metadataControllerOptions{
-		OriginEnabled: true,
+		OriginEnabled:  true,
 		OriginEndpoint: "https://unused.example.com",
 		OriginMode:     ModeEventual,
 		DB:             db,

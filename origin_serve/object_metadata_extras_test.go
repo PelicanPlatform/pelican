@@ -324,8 +324,11 @@ func TestBatcher_OverflowWaitFires(t *testing.T) {
 	b.SetHooks(BatcherHooks{
 		ObserveEnqueueWait: func(durability string, d time.Duration) {
 			waits.Add(1)
-			if d <= 0 {
-				t.Errorf("ObserveEnqueueWait got duration=%v; want > 0", d)
+			// >= 0, not > 0: Windows' monotonic clock ticks at ~15ms,
+			// so a brief wait can measure as 0. The intent — "the
+			// wait path executed" — is asserted by waits.Load below.
+			if d < 0 {
+				t.Errorf("ObserveEnqueueWait got duration=%v; want >= 0", d)
 			}
 			if durability != "best_effort" && durability != "durable" {
 				t.Errorf("ObserveEnqueueWait got durability=%q", durability)

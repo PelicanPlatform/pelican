@@ -274,10 +274,10 @@ func TestDAO_RecordCommit_ReplaceUpdatesInPlace(t *testing.T) {
 }
 
 // TestDAO_RecordDelete_SoftDeletesAndSnapshots —
-//   1. soft-delete clears the live row from LookupLive,
-//   2. the previous live state is preserved in history (size, etag),
-//   3. a subsequent re-upload to the same path succeeds (partial
-//      unique index logic).
+//  1. soft-delete clears the live row from LookupLive,
+//  2. the previous live state is preserved in history (size, etag),
+//  3. a subsequent re-upload to the same path succeeds (partial
+//     unique index logic).
 func TestDAO_RecordDelete_SoftDeletesAndSnapshots(t *testing.T) {
 	d, db, cleanup := newTestDAO(t)
 	defer cleanup()

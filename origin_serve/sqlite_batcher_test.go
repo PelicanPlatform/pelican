@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -288,7 +289,14 @@ func TestBatcher_ConcurrentDurablesCoalesce(t *testing.T) {
 	defer cancel()
 
 	var flushes atomic.Int32
-	b := newSQLiteBatcher(ctx, db, 128, 50*time.Millisecond)
+	// Small buffer (8) forces most goroutines to block on the
+	// channel send, which is exactly what makes the non-blocking
+	// drain step in the flusher pick up multiple ops per tx. A
+	// large buffer would let goroutines race the flusher and the
+	// coalescing ratio would depend entirely on scheduler timing
+	// — flaky on Windows CI runners where goroutine scheduling
+	// can serialize sends.
+	b := newSQLiteBatcher(ctx, db, 8, 50*time.Millisecond)
 	b.SetHooks(BatcherHooks{IncFlush: func(int) { flushes.Add(1) }})
 	defer b.Stop()
 
@@ -401,6 +409,15 @@ func TestBatcher_FlushNowAfterStopReturnsError(t *testing.T) {
 // fail with deadline-exceeded. This proves the wiring, which is the
 // point of the test.
 func TestBatcher_FlushHonorsTxTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The test relies on a 1ns tx-timeout firing before the
+		// underlying BEGIN + INSERT + COMMIT completes. Windows'
+		// monotonic timer has ~15ms resolution, which is more than
+		// enough for the tx to finish before the deadline fires —
+		// the wiring under test still works, it just can't be
+		// observed via a nanosecond-scale timeout on this platform.
+		t.Skip("tx-timeout observability requires sub-15ms timer resolution")
+	}
 	db := newBatcherTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

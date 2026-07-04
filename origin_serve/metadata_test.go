@@ -370,9 +370,9 @@ func TestEventualWorkerSkipsDeletedObject(t *testing.T) {
 
 func TestEventualEventIDStableAcrossRetries(t *testing.T) {
 	var (
-		mu         sync.Mutex
-		seenIDs    = []string{}
-		failFirst  = true
+		mu        sync.Mutex
+		seenIDs   = []string{}
+		failFirst = true
 	)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

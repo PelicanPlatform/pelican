@@ -116,19 +116,19 @@ func (ObjectChecksumRow) TableName() string { return "object_checksums" }
 // ObjectMetadataHistoryRow is the GORM-mapped projection of
 // object_metadata_history.
 type ObjectMetadataHistoryRow struct {
-	ID             int64     `gorm:"primaryKey;autoIncrement"`
-	EventID        string    `gorm:"column:event_id;uniqueIndex;not null"`
-	Namespace      string    `gorm:"column:namespace;not null"`
-	ObjectPath     string    `gorm:"column:object_path;not null"`
-	EventType      string    `gorm:"column:event_type;not null"`
-	EventTS        time.Time `gorm:"column:event_ts;not null"`
-	Size           *int64    `gorm:"column:size"`
-	ETag           *string   `gorm:"column:etag"`
-	EtagSource     *string   `gorm:"column:etag_source"`
-	BackendMtime   *time.Time `gorm:"column:backend_mtime"`
-	ChecksumsJSON  string    `gorm:"column:checksums_json;not null;default:'{}'"`
-	Actor          string    `gorm:"column:actor;not null;default:''"`
-	Extra          string    `gorm:"column:extra;not null;default:'{}'"`
+	ID            int64      `gorm:"primaryKey;autoIncrement"`
+	EventID       string     `gorm:"column:event_id;uniqueIndex;not null"`
+	Namespace     string     `gorm:"column:namespace;not null"`
+	ObjectPath    string     `gorm:"column:object_path;not null"`
+	EventType     string     `gorm:"column:event_type;not null"`
+	EventTS       time.Time  `gorm:"column:event_ts;not null"`
+	Size          *int64     `gorm:"column:size"`
+	ETag          *string    `gorm:"column:etag"`
+	EtagSource    *string    `gorm:"column:etag_source"`
+	BackendMtime  *time.Time `gorm:"column:backend_mtime"`
+	ChecksumsJSON string     `gorm:"column:checksums_json;not null;default:'{}'"`
+	Actor         string     `gorm:"column:actor;not null;default:''"`
+	Extra         string     `gorm:"column:extra;not null;default:'{}'"`
 }
 
 func (ObjectMetadataHistoryRow) TableName() string { return "object_metadata_history" }
@@ -138,14 +138,14 @@ func (ObjectMetadataHistoryRow) TableName() string { return "object_metadata_his
 // the four event types we record.
 type ObjectMetadataEventInput struct {
 	Namespace    string
-	ObjectPath   string             // federation-rooted, eg "/exp/data/run99.dat"
+	ObjectPath   string // federation-rooted, eg "/exp/data/run99.dat"
 	Size         int64
 	ETag         string
 	EtagSource   EtagSource
 	BackendMtime time.Time
-	Actor        string             // token sub at request time; "" if unknown
-	Extra        map[string]any     // X-Pelican-Object-Metadata; ignored if TrackExtra=false for the ns
-	TrackExtra   bool               // resolved at call time from per-export overrides
+	Actor        string         // token sub at request time; "" if unknown
+	Extra        map[string]any // X-Pelican-Object-Metadata; ignored if TrackExtra=false for the ns
+	TrackExtra   bool           // resolved at call time from per-export overrides
 }
 
 // objectMetadataDAO is the storage layer. Stateless beyond its
