@@ -2684,7 +2684,14 @@ func (pc *PersistentCache) RebuildLotIndex() error {
 func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
 	bucketKey := extractNamespacePrefix(objectPath)
 	if pc.lotIndex != nil {
-		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(pc.normalizePath(objectPath), pc.defaultFed))
+		// Qualify the path with the cache's federation (defaultFed) so the
+		// resolution key matches the federation-qualified lot paths. A bare path
+		// falls back to defaultFed; a full pelican:// URL (multi-federation cache)
+		// carries its own host. Deliberately do NOT route through normalizePath:
+		// that stamps the director host, which is a different host:port from the
+		// federation/discovery host the lots are qualified with, so objects would
+		// resolve to the default lot and per-lot usage would never accrue.
+		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(objectPath, pc.defaultFed))
 	}
 
 	pc.namespaceMapMu.RLock()
