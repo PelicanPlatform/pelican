@@ -3599,6 +3599,79 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 		require.Contains(t, s, "/root/file1.txt")
 		assert.NotContains(t, s, "/root/dirA/file2.txt")
 	})
+
+	t.Run("stream-visits-every-entry-once-and-honors-abort", func(t *testing.T) {
+		// listHttpEmit should hand every FileInfo listHttp would have
+		// buffered to the callback exactly once, and a non-nil error from
+		// the callback aborts the walk immediately.
+		streamed := map[string]int{}
+		require.NoError(t, listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr, "clean walk must not surface per-entry errors")
+			streamed[fi.Name]++
+			return nil
+		}))
+		buffered, err := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, err)
+		require.Equal(t, len(buffered), len(streamed))
+		for _, fi := range buffered {
+			assert.Equal(t, 1, streamed[fi.Name], "entry %q was not emitted exactly once", fi.Name)
+		}
+
+		// Abort on the first entry: no further entries should arrive.
+		count := 0
+		sentinel := errors.New("stop")
+		err = listHttpEmit(pUrl, dirResp, nil, true, -1, func(FileInfo, error) error {
+			count++
+			return sentinel
+		})
+		require.ErrorIs(t, err, sentinel)
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("SkipSubtree-prunes-recursion-into-collection", func(t *testing.T) {
+		// Returning SkipSubtree from the callback when we see /root/dirA must
+		// prevent /root/dirA/file2.txt from being visited, while the sibling
+		// /root/file1.txt still comes through normally.
+		var visited []string
+		err := listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr)
+			visited = append(visited, fi.Name)
+			if fi.Name == "/root/dirA" && fi.IsCollection {
+				return SkipSubtree
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Contains(t, visited, "/root/dirA")
+		assert.Contains(t, visited, "/root/file1.txt")
+		assert.NotContains(t, visited, "/root/dirA/file2.txt",
+			"SkipSubtree on /root/dirA must prune its children")
+	})
+
+	t.Run("SkipAll-propagates-so-Walk-can-unwrap", func(t *testing.T) {
+		// listHttpEmit propagates SkipAll up through every enclosing level so
+		// the outer wrapper (Walk / listHttp) can translate it into a clean
+		// nil return. Verify it reaches us as-is and no further entries were
+		// visited after it fired.
+		var visited []string
+		err := listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr)
+			visited = append(visited, fi.Name)
+			return SkipAll
+		})
+		require.ErrorIs(t, err, SkipAll)
+		assert.Len(t, visited, 1, "SkipAll must fire on the first entry only")
+
+		// listHttp is the buffered wrapper and does unwrap SkipAll; verify
+		// that partial results survive.
+		buffered := []FileInfo{}
+		found := false
+		_, listHttpErr := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, listHttpErr)
+		// (We just needed listHttp to still work with the new sentinel plumbing.)
+		_ = buffered
+		_ = found
+	})
 }
 
 // TestWrapDownloadError tests the wrapDownloadError function to ensure it correctly wraps

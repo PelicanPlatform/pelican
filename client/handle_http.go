@@ -4962,18 +4962,22 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-// This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) (fileInfos []FileInfo, err error) {
-	// Get our collection listing host
+// listHttpEmit walks the collection at remoteUrl (recursively if requested)
+// and hands each entry to emit in the order encountered. The emit signature
+// mirrors filepath.WalkDirFunc: for a successful entry emit is called with
+// (info, nil); for an error attributable to a specific path in the tree
+// (e.g. an unreadable subdirectory) emit is called with a FileInfo carrying
+// just Name and IsCollection alongside the error. Returning a non-nil error
+// from emit unwinds the walk with that error; returning nil after an error
+// tells the walker to skip that subtree and continue with the next sibling,
+// matching filepath.WalkDir's continuation semantics. This is the streaming
+// primitive used by DoList, DoListStream, and DoListSeq.
+func listHttpEmit(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int, emit func(FileInfo, error) error) error {
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
-		return nil, errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
+		return errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
-	if collectionsUrl == nil {
-		err = errors.New("namespace does not provide a collections URL for listing")
-		return
-	}
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
 	project, found := searchJobAd(attrProjectName)
@@ -4983,147 +4987,188 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
-	// If recursive listing is requested, use the helper function
 	if recursive {
-		return listHttpRecursive(client, remotePath, depth)
+		return listHttpRecursiveEmit(client, remotePath, 0, depth, emit)
 	}
+	return listHttpFlatEmit(client, remotePath, emit)
+}
 
-	// Non-recursive listing (original behavior)
+// classifyReadDirErr converts the ReadDir-error zoo (404 / 500-that-means-file
+// / 405-no-listings / everything else) into a single error suitable for
+// bubbling through emit. Returns (nil, nil) when the error meant "this is a
+// plain object, not a directory" and info is populated with the stat result --
+// the caller should emit that info instead of the error.
+func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.FileInfo, error) {
+	if gowebdav.IsErrNotFound(err) {
+		return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
+	}
+	if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+		// The origin returns 500 when asked to ReadDir on a plain object;
+		// fall back to Stat so we can still surface a single FileInfo for it.
+		var info fs.FileInfo
+		statErr := retryWebDavOperation("Stat", func() error {
+			var err error
+			info, err = cli.Stat(remotePath)
+			return err
+		})
+		if statErr != nil {
+			return nil, errors.Wrap(statErr, "failed to stat remote path")
+		}
+		if !info.IsDir() {
+			return info, nil
+		}
+	}
+	if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+		// We replace the error from gowebdav with our own because gowebdav
+		// returns "ReadDir /prefix/different-path/: 405" which is not very
+		// user friendly.
+		listingErr := &dirListingNotSupportedError{
+			Err: errors.New("405: object listings are not supported by the discovered origin"),
+		}
+		return nil, error_codes.NewSpecificationError(listingErr)
+	}
+	return nil, errors.Wrap(err, "failed to read remote collection")
+}
+
+// listHttpFlatEmit performs the non-recursive listing at remotePath. It reads
+// the immediate children (or, if remotePath is a plain object, emits a single
+// entry for it) via emit.
+func listHttpFlatEmit(client *gowebdav.Client, remotePath string, emit func(FileInfo, error) error) error {
 	var infos []fs.FileInfo
-	err = retryWebDavOperation("ReadDir", func() error {
+	err := retryWebDavOperation("ReadDir", func() error {
 		var err error
 		infos, err = client.ReadDir(remotePath)
 		return err
 	})
 	if err != nil {
-		// Check if we got a 404:
-		if gowebdav.IsErrNotFound(err) {
-			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
-		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			var info fs.FileInfo
-			err := retryWebDavOperation("Stat", func() error {
-				var err error
-				info, err = client.Stat(remotePath)
-				return err
-			})
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to stat remote path")
-			}
-			// If the path leads to a file and not a collection, just add the filename
-			if !info.IsDir() {
-				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
-				file := FileInfo{
-					Name:         remotePath,
-					Size:         info.Size(),
-					ModTime:      info.ModTime(),
-					IsCollection: false,
-				}
-				fileInfos = append(fileInfos, file)
-				return fileInfos, nil
-			}
-		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
-			listingErr := &dirListingNotSupportedError{
-				Err: errors.New("405: object listings are not supported by the discovered origin"),
-			}
-			return nil, error_codes.NewSpecificationError(listingErr)
+		statInfo, classified := classifyReadDirErr(client, remotePath, err)
+		if classified == nil && statInfo != nil {
+			// The path is a plain object, not a collection; emit it once.
+			return emit(FileInfo{
+				Name:         remotePath,
+				Size:         statInfo.Size(),
+				ModTime:      statInfo.ModTime(),
+				IsCollection: false,
+			}, nil)
 		}
-		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote collection")
+		// Bubble the (classified) error through emit so the caller can decide
+		// whether to skip or abort. For the flat listing the "subtree" is the
+		// entire request, so SkipSubtree and a plain nil return both mean
+		// "done here"; only SkipAll and real errors matter as distinct outputs.
+		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			return nil
+		}
+		return emitErr
 	}
 
 	for _, info := range infos {
 		jPath, _ := url.JoinPath(remotePath, info.Name())
-		// Create a FileInfo for the file and append it to the slice
-		file := FileInfo{
+		emitErr := emit(FileInfo{
 			Name:         jPath,
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
+		}, nil)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			// SkipSubtree is a no-op in the flat listing (no descent to
+			// skip); treat it the same as nil so the loop keeps going.
+			continue
 		}
-		fileInfos = append(fileInfos, file)
+		return emitErr
 	}
-	return fileInfos, nil
+	return nil
 }
 
-// listHttpRecursive recursively lists all objects in a collection with optional depth limiting
-func listHttpRecursive(client *gowebdav.Client, remotePath string, maxDepth int) (fileInfos []FileInfo, err error) {
-	return listHttpRecursiveHelper(client, remotePath, 0, maxDepth)
-}
-
-// listHttpRecursiveHelper is the recursive helper function that tracks the current depth
-func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, currentDepth int, maxDepth int) (fileInfos []FileInfo, err error) {
-	// Check if we've reached the maximum depth (if maxDepth is >= 0)
+// listHttpRecursiveEmit is the recursive analogue of listHttpFlatEmit. It
+// descends into each collection depth-first, honoring maxDepth (-1 = no
+// limit) and emitting every visited entry through emit in walk order.
+// Per-subdirectory ReadDir failures are routed through emit as
+// (FileInfo{Name: path, IsCollection: true}, err); returning nil from emit
+// tells the walker to skip the failed subtree and keep going with the next
+// sibling, matching filepath.WalkDir's semantics.
+func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDepth, maxDepth int, emit func(FileInfo, error) error) error {
 	if maxDepth >= 0 && currentDepth > maxDepth {
-		return fileInfos, nil
+		return nil
 	}
 
 	var infos []fs.FileInfo
-	err = retryWebDavOperation("ReadDir", func() error {
+	err := retryWebDavOperation("ReadDir", func() error {
 		var err error
 		infos, err = client.ReadDir(remotePath)
 		return err
 	})
 	if err != nil {
-		// Check if we got a 404:
-		if gowebdav.IsErrNotFound(err) {
-			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
-		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			var info fs.FileInfo
-			err := retryWebDavOperation("Stat", func() error {
-				var err error
-				info, err = client.Stat(remotePath)
-				return err
-			})
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to stat remote path")
-			}
-			// If the path leads to a file and not a collection, just add the filename
-			if !info.IsDir() {
-				file := FileInfo{
-					Name:         remotePath,
-					Size:         info.Size(),
-					ModTime:      info.ModTime(),
-					IsCollection: false,
-				}
-				fileInfos = append(fileInfos, file)
-				return fileInfos, nil
-			}
-		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			listingErr := &dirListingNotSupportedError{
-				Err: errors.New("405: object listings are not supported by the discovered origin"),
-			}
-			return nil, error_codes.NewSpecificationError(listingErr)
+		statInfo, classified := classifyReadDirErr(client, remotePath, err)
+		if classified == nil && statInfo != nil {
+			return emit(FileInfo{
+				Name:         remotePath,
+				Size:         statInfo.Size(),
+				ModTime:      statInfo.ModTime(),
+				IsCollection: false,
+			}, nil)
 		}
-		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote collection")
+		// Give the caller a chance to skip. Returning nil or SkipSubtree
+		// unwinds this level cleanly (there's no subtree left to walk); any
+		// other error, including SkipAll, propagates so the outer walk can
+		// react.
+		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			return nil
+		}
+		return emitErr
 	}
 
 	for _, info := range infos {
 		jPath, _ := url.JoinPath(remotePath, info.Name())
-		// Create a FileInfo for the file and append it to the slice
-		file := FileInfo{
+		fi := FileInfo{
 			Name:         jPath,
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
 		}
-		fileInfos = append(fileInfos, file)
-
-		// If this is a collection and we haven't reached max depth, recurse into it
-		// We check currentDepth + 1 < maxDepth because currentDepth represents how deep we are,
-		// and we want to recurse only if going one level deeper wouldn't exceed maxDepth
-		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
-			subFileInfos, err := listHttpRecursiveHelper(client, jPath, currentDepth+1, maxDepth)
-			if err != nil {
-				return nil, err
+		emitErr := emit(fi, nil)
+		if emitErr != nil {
+			if errors.Is(emitErr, SkipSubtree) {
+				// Caller doesn't want us to descend into this entry (only
+				// meaningful for collections). Continue with the next sibling.
+				continue
 			}
-			fileInfos = append(fileInfos, subFileInfos...)
+			// SkipAll, real errors, or errStopIter all propagate upward.
+			return emitErr
+		}
+		// Recurse into subcollections. maxDepth < 0 means unlimited; otherwise
+		// only descend when the next level would still be within budget.
+		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
+			if err := listHttpRecursiveEmit(client, jPath, currentDepth+1, maxDepth, emit); err != nil {
+				// SkipAll aborts every enclosing loop up to Walk; SkipSubtree
+				// at the child level doesn't reach us (it's consumed there),
+				// so anything non-nil here is a real error or SkipAll.
+				return err
+			}
 		}
 	}
+	return nil
+}
 
+// listHttp walks the specified collection and buffers every visited FileInfo
+// into a slice. It is a thin wrapper over listHttpEmit for callers that want
+// the full result set in memory rather than a stream. Any error surfaced by
+// the walker (including a per-subtree ReadDir failure) aborts the walk and is
+// returned; partial results are discarded, matching the pre-streaming
+// behavior of this function.
+func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) ([]FileInfo, error) {
+	var fileInfos []FileInfo
+	err := listHttpEmit(remoteUrl, dirResp, token, recursive, depth, func(info FileInfo, emitErr error) error {
+		if emitErr != nil {
+			return emitErr
+		}
+		fileInfos = append(fileInfos, info)
+		return nil
+	})
+	if err != nil && !errors.Is(err, SkipAll) {
+		return nil, err
+	}
 	return fileInfos, nil
 }
 
