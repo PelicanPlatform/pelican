@@ -435,8 +435,10 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 	}
 
-	// Overwrite status to Pending to filter malicious request
-	ns.AdminMetadata.Status = server_structs.RegPending
+	// Registrations coming through the automated flow/CLI carry only the basic info;
+	// the additional fields (institution, etc.) hasn't been filled in yet, so they
+	// start as Incomplete. Submitting the web form promotes them to Pending.
+	ns.AdminMetadata.Status = server_structs.RegIncomplete
 
 	if server_structs.IsServerPrefix(data.Prefix) {
 		if ns.CustomFields == nil {

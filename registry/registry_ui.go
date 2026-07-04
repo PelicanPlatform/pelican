@@ -173,10 +173,11 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 
 		if field.Type == reflect.TypeOf(server_structs.RegistrationStatus("")) {
 			regField.Type = Enum
-			options := make([]registrationFieldOption, 3)
-			options[0] = registrationFieldOption{Name: server_structs.RegPending.String(), ID: server_structs.RegPending.LowerString()}
-			options[1] = registrationFieldOption{Name: server_structs.RegApproved.String(), ID: server_structs.RegApproved.LowerString()}
-			options[2] = registrationFieldOption{Name: server_structs.RegDenied.String(), ID: server_structs.RegDenied.LowerString()}
+			options := make([]registrationFieldOption, 4)
+			options[0] = registrationFieldOption{Name: server_structs.RegIncomplete.String(), ID: server_structs.RegIncomplete.LowerString()}
+			options[1] = registrationFieldOption{Name: server_structs.RegPending.String(), ID: server_structs.RegPending.LowerString()}
+			options[2] = registrationFieldOption{Name: server_structs.RegApproved.String(), ID: server_structs.RegApproved.LowerString()}
+			options[3] = registrationFieldOption{Name: server_structs.RegDenied.String(), ID: server_structs.RegDenied.LowerString()}
 			regField.Options = options
 			fields = append(fields, regField)
 		} else {
@@ -250,7 +251,7 @@ func listNamespaces(ctx *gin.Context) {
 			} else {
 				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
+					Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Incomplete', 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 			}
 		}
 	} else {
@@ -298,7 +299,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		} else {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
+				Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Incomplete', 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 		}
 	}
 
@@ -545,6 +546,16 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			return
 		}
 
+		existingNs, err := getRegistrationById(ns.ID)
+		if err != nil {
+			log.Error("Error checking namespace status: ", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error checking namespace status"})
+			return
+		}
+		existingStatus := existingNs.AdminMetadata.Status
+
 		// Then check if the user has privilege to update
 		belongsTo := false
 
@@ -569,14 +580,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 						Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
 					return
 				}
-			}
-			existingNs, err := getRegistrationById(ns.ID)
-			if err != nil {
-				log.Error("Error loading existing registration: ", err)
-				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Error loading existing registration"})
-				return
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
 				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
@@ -659,6 +662,21 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				Status: server_structs.RespFailed,
 				Msg:    "Fail to update namespace"})
 			return
+		}
+
+		// A fully-valid submission moves an auto-registered (Incomplete)
+		// registration into the admin review queue. Partially-filled updates
+		// (e.g. an admin correcting an unclaimed registration) keep it Incomplete.
+		if existingStatus == server_structs.RegIncomplete {
+			if verr := config.GetValidate().Struct(ns); verr == nil {
+				if serr := updateRegistrationStatusById(ns.ID, server_structs.RegPending, ""); serr != nil {
+					log.Errorf("Failed to promote registration %d from Incomplete to Pending: %v", ns.ID, serr)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Registration was updated but could not be submitted for review"})
+					return
+				}
+			}
 		}
 	}
 }
