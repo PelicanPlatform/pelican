@@ -83,9 +83,11 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       user !== undefined &&
       !namespace?.admin_metadata?.security_contact_user_id
     ) {
+      // Prefer the stable Pelican user ID over the login username so the
+      // contact reference survives identity-provider changes
       onChange(
         'admin_metadata.security_contact_user_id',
-        user?.user,
+        user?.user_id || user?.user,
         setFormNamespace
       );
     }
