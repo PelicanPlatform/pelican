@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -52,18 +53,12 @@ const (
 )
 
 // LocalIssuerNamespace is the reserved registry/route key for the server's
-// "local" OIDC issuer -- the generic embedded issuer that mints tokens under
-// the server's own identity (iss = config.GetLocalIssuerUrl()), independent of
-// any data-export namespace.  The provider registered under this key carries
-// the local issuer identifier the server trusts for its own operations; today
-// that is the pelican.transfer scope the transfer API's LocalIssuer check
-// accepts, but the issuer is not transfer-specific.
-//
-// The key lives under Pelican's reserved /pelican space so it can never collide
-// with a registrable federation prefix: validatePrefix rejects any prefix whose
-// first component is "pelican" (see registry/registry_validation.go), which
-// makes /pelican/local-issuer structurally impossible to register as a namespace.
-const LocalIssuerNamespace = "/pelican/local-issuer"
+// "local" OIDC issuer -- the generic embedded issuer that mints tokens under the
+// server's own identity (iss = config.GetLocalIssuerUrl()), independent of any
+// data-export namespace.  Re-exported from server_structs (the canonical home)
+// so lower-level packages such as server_utils can reference it without
+// importing this package.
+const LocalIssuerNamespace = server_structs.LocalIssuerNamespace
 
 // IssuerURL returns the base issuer URL for this server (without any namespace path).
 // It is simply the server's external web URL.
