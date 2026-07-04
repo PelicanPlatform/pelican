@@ -26,6 +26,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -287,6 +291,122 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 	return nil
 }
 
+// The registration edit token attached to the completion link is valid for
+// origin.RegEditTokenLifetime (15 minutes); re-write the link (with a fresh
+// token) at a shorter interval so the most recent link is always usable.
+const regCompletionLinkInterval = 10 * time.Minute
+
+// Request-link lines for this server's incomplete registrations, one per
+// prefix, mirrored into Server.RegistrationCompletionLinkFile.
+var (
+	regCompletionLinksMutex sync.Mutex
+	regCompletionLinks      = make(map[string]string)
+)
+
+// updateRegCompletionLinkFile records (line != "") or clears (line == "") the
+// request-link line for the given prefix, then re-writes the registration
+// completion link file so it always holds the current set of links. The file
+// is removed once no incomplete registration remains. It returns the file's
+// new contents along with its path ("" when the file is disabled).
+func updateRegCompletionLinkFile(prefix string, line string) (contents string, path string, err error) {
+	regCompletionLinksMutex.Lock()
+	defer regCompletionLinksMutex.Unlock()
+	if line == "" {
+		delete(regCompletionLinks, prefix)
+	} else {
+		regCompletionLinks[prefix] = line
+	}
+	prefixes := make([]string, 0, len(regCompletionLinks))
+	for p := range regCompletionLinks {
+		prefixes = append(prefixes, p)
+	}
+	sort.Strings(prefixes)
+	builder := strings.Builder{}
+	for _, p := range prefixes {
+		builder.WriteString(regCompletionLinks[p])
+		builder.WriteString("\n")
+	}
+	contents = builder.String()
+	path = param.Server_RegistrationCompletionLinkFile.GetString()
+	if path == "" {
+		return
+	}
+	if contents == "" {
+		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+			err = rmErr
+		}
+		return
+	}
+	err = os.WriteFile(path, []byte(contents), 0600)
+	return
+}
+
+// watchRegistrationCompletion polls the registry for the registration
+// completeness of the given prefix. While the registration is incomplete, it
+// funnels the "request link" — the registry edit URL plus a fresh short-lived
+// access token minted with this server's issuer key — into the registration
+// completion link file and re-writes the file on each poll cycle, then prints
+// the file to the server's log (and hence stdout) right away, so the link is
+// always fresh. The loop ends once the registration is complete, the registry
+// doesn't support completeness checks, or the context is done.
+func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, prefix string) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(regCompletionLinkInterval)
+		defer ticker.Stop()
+		for {
+			res, err := origin.FetchRegStatus([]string{prefix})
+			if errors.Is(err, origin.RegistryNotImplErr) {
+				log.Debugf("The registry doesn't support registration completeness checks; no completion link will be logged for %s", prefix)
+				return nil
+			} else if err != nil {
+				log.Warningf("Failed to check registration completeness for %s: %v", prefix, err)
+			} else if result, ok := res.Results[prefix]; !ok {
+				log.Warningf("Registry response does not contain the registration status for %s", prefix)
+			} else if result.Completed {
+				log.Infof("Registration for %s is complete", prefix)
+				if _, path, wErr := updateRegCompletionLinkFile(prefix, ""); wErr != nil {
+					log.Warningf("Failed to update the registration completion link file %s: %v", path, wErr)
+				}
+				return nil
+			} else if result.EditUrl != "" {
+				link := result.EditUrl
+				line := ""
+				if accessToken, tErr := origin.MintRegistrationEditToken(ctx); tErr != nil {
+					log.Warningf("Failed to mint an access token for the registration completion link for %s: %v", prefix, tErr)
+					line = fmt.Sprintf("Complete server registration at %s", link)
+				} else {
+					expiry := time.Now().Add(origin.RegEditTokenLifetime)
+					if parsed, pErr := url.Parse(link); pErr == nil {
+						q := parsed.Query()
+						q.Set("access_token", accessToken)
+						parsed.RawQuery = q.Encode()
+						link = parsed.String()
+					}
+					line = fmt.Sprintf("Complete server registration at %s (expire at %s)", link, expiry.Format(time.RFC1123))
+				}
+				contents, path, wErr := updateRegCompletionLinkFile(prefix, line)
+				if wErr != nil {
+					log.Warningf("Failed to write the registration completion link file %s: %v", path, wErr)
+				}
+				if msg := strings.TrimSpace(result.Msg); msg != "" {
+					log.Warningf("Registration for %s is incomplete: %s", prefix, msg)
+				}
+				dest := "the log"
+				if path != "" {
+					dest = path
+				}
+				log.Errorf("Server registration is incomplete; open the link below in a browser and log in to the registry to complete it (a fresh link is written to %s every %s):\n%s",
+					dest, regCompletionLinkInterval, strings.TrimRight(contents, "\n"))
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
+}
+
 // Register the namespace. If failed, retry every 10s (default)
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
@@ -318,10 +438,12 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 			return errors.Wrapf(err, "failed to fetch registration status for the prefix %s", prefix)
 		}
+		watchRegistrationCompletion(ctx, egrp, prefix)
 		return nil
 	}
 
 	if err = registerNamespaceImpl(key, prefix, siteName, url); err == nil {
+		watchRegistrationCompletion(ctx, egrp, prefix)
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
@@ -338,6 +460,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 					if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 						log.Errorf("failed to fetch registration status for the prefix %s: %v", prefix, err)
 					}
+					watchRegistrationCompletion(ctx, egrp, prefix)
 					return nil
 				}
 				log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)

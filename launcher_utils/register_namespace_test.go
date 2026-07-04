@@ -531,3 +531,77 @@ func TestReconcileKeysWhenAlreadyRegistered(t *testing.T) {
 	sort.Strings(expected)
 	require.Equal(t, expected, fetchRegistryKids(t, svr.URL, prefix))
 }
+
+func TestUpdateRegCompletionLinkFile(t *testing.T) {
+	t.Cleanup(func() {
+		regCompletionLinksMutex.Lock()
+		regCompletionLinks = make(map[string]string)
+		regCompletionLinksMutex.Unlock()
+		server_utils.ResetTestState()
+	})
+	server_utils.ResetTestState()
+	// Earlier tests in this package perform real registrations that stash
+	// their completion link in the package-global map; start from a clean
+	// slate so this test asserts only on its own entries.
+	regCompletionLinksMutex.Lock()
+	regCompletionLinks = make(map[string]string)
+	regCompletionLinksMutex.Unlock()
+
+	linkFile := filepath.Join(t.TempDir(), "completion-link")
+	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(linkFile))
+
+	// Adding a line writes the file and returns its contents
+	lineFoo := "Complete server registration at https://registry.example/view/registry/claim/?id=1 (expire at Mon, 01 Jan 2026 00:00:00 UTC)"
+	contents, path, err := updateRegCompletionLinkFile("/foo", lineFoo)
+	require.NoError(t, err)
+	assert.Equal(t, linkFile, path)
+	assert.Equal(t, lineFoo+"\n", contents)
+	onDisk, err := os.ReadFile(linkFile)
+	require.NoError(t, err)
+	assert.Equal(t, contents, string(onDisk))
+
+	// A second prefix appends a line; lines are ordered by prefix
+	lineBar := "Complete server registration at https://registry.example/view/registry/claim/?id=2 (expire at Mon, 01 Jan 2026 00:00:00 UTC)"
+	contents, _, err = updateRegCompletionLinkFile("/bar", lineBar)
+	require.NoError(t, err)
+	assert.Equal(t, lineBar+"\n"+lineFoo+"\n", contents)
+	onDisk, err = os.ReadFile(linkFile)
+	require.NoError(t, err)
+	assert.Equal(t, contents, string(onDisk))
+
+	// Re-writing a prefix replaces its line rather than appending
+	lineFoo2 := "Complete server registration at https://registry.example/view/registry/claim/?id=1 (expire at Mon, 01 Jan 2026 00:15:00 UTC)"
+	contents, _, err = updateRegCompletionLinkFile("/foo", lineFoo2)
+	require.NoError(t, err)
+	assert.Equal(t, lineBar+"\n"+lineFoo2+"\n", contents)
+
+	// Clearing one prefix leaves the other's line in place
+	contents, _, err = updateRegCompletionLinkFile("/bar", "")
+	require.NoError(t, err)
+	assert.Equal(t, lineFoo2+"\n", contents)
+	onDisk, err = os.ReadFile(linkFile)
+	require.NoError(t, err)
+	assert.Equal(t, contents, string(onDisk))
+
+	// Clearing the last prefix removes the file
+	contents, _, err = updateRegCompletionLinkFile("/foo", "")
+	require.NoError(t, err)
+	assert.Equal(t, "", contents)
+	_, err = os.Stat(linkFile)
+	assert.True(t, os.IsNotExist(err))
+
+	// Clearing when the file is already absent is not an error
+	_, _, err = updateRegCompletionLinkFile("/foo", "")
+	require.NoError(t, err)
+
+	// An empty path disables the file but still returns the contents for logging
+	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
+	contents, path, err = updateRegCompletionLinkFile("/foo", lineFoo)
+	require.NoError(t, err)
+	assert.Equal(t, "", path)
+	assert.Equal(t, lineFoo+"\n", contents)
+	_, err = os.Stat(linkFile)
+	assert.True(t, os.IsNotExist(err))
+	_, _, err = updateRegCompletionLinkFile("/foo", "")
+	require.NoError(t, err)
+}
