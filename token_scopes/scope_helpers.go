@@ -33,17 +33,29 @@ type NamespaceInfo struct {
 	MaxScopeDepth uint   // from XPelTokGenHdr.MaxScopeDepth
 }
 
+// hasPathPrefix reports whether p lies at or under prefix, respecting path
+// segment boundaries so "/foo" matches "/foo" and "/foo/bar" but not "/foobar".
+// prefix is expected to already be trailing-slash trimmed.
+func hasPathPrefix(p, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	return p == prefix || strings.HasPrefix(p, prefix+"/")
+}
+
 // ScopePath computes the path component for a storage scope, stripping
 // the namespace base path and applying MaxScopeDepth trimming.  rawPath
 // is the full object path (e.g. /foo/bar/baz.dat).
 func (n *NamespaceInfo) ScopePath(rawPath string) string {
 	cleaned := path.Clean(rawPath)
 	// Strip the base path (or namespace) to get the path relative to the issuer.
+	// Match on segment boundaries so a base of "/foo" does not match "/foobar"
+	// and mis-strip it into the wrong scope.
 	relative := cleaned
-	if n.BasePath != "" && strings.HasPrefix(cleaned, n.BasePath) {
-		relative = cleaned[len(n.BasePath):]
-	} else if n.Namespace != "" && strings.HasPrefix(cleaned, n.Namespace) {
-		relative = cleaned[len(n.Namespace):]
+	if base := strings.TrimRight(n.BasePath, "/"); base != "" && hasPathPrefix(cleaned, base) {
+		relative = cleaned[len(base):]
+	} else if ns := strings.TrimRight(n.Namespace, "/"); ns != "" && hasPathPrefix(cleaned, ns) {
+		relative = cleaned[len(ns):]
 	}
 	if relative == "" {
 		relative = "/"

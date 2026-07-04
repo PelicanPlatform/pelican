@@ -823,7 +823,16 @@ func refreshTokenEntry(prefixEntry *config.PrefixEntry, tok *config.TokenEntry, 
 		return err
 	}
 	tok.AccessToken = newToken.AccessToken
-	tok.Expiration = newToken.Expiry.Unix()
+	// Some issuers omit expires_in on a refresh grant; golang.org/x/oauth2 then
+	// leaves Expiry as the zero time.Time, whose Unix() is a large negative
+	// number. The refresh loop reads that as "already expired" and would
+	// re-refresh this credential every cycle, hammering the issuer. Fall back to
+	// a conservative default lifetime so we refresh on a sane cadence instead.
+	if newToken.Expiry.IsZero() {
+		tok.Expiration = time.Now().Add(time.Hour).Unix()
+	} else {
+		tok.Expiration = newToken.Expiry.Unix()
+	}
 	if len(newToken.RefreshToken) != 0 {
 		tok.RefreshToken = newToken.RefreshToken
 	}
