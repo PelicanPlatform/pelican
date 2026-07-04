@@ -487,6 +487,16 @@ func TestGetNamespace(t *testing.T) {
 			expectedCode: http.StatusForbidden,
 		},
 		{
+			// Regression for the removed username leg: a caller whose
+			// USERNAME equals the stored owner (a user ID) must not be
+			// treated as the owner — ownership matches the user ID only.
+			description:  "username-equal-to-owner-does-not-grant",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "u-mock-id",
+			expectedCode: http.StatusForbidden,
+		},
+		{
 			description:  "admin-can-see-any-ns",
 			validID:      true,
 			checkAdmin:   true,
@@ -2101,4 +2111,170 @@ func TestDeleteNamespaceKeepsServerWhenMultipleServices(t *testing.T) {
 	// Ensure the remaining registration is the origin one
 	remainingPrefix := returned.Registration[0].Prefix
 	assert.Equal(t, "/origins/both-roles.edu", remainingPrefix)
+}
+
+// TestClaimNamespace covers the login-gated claim endpoint: a valid
+// server-minted token binds an unowned registration to the caller's
+// Pelican user ID; everything else is rejected.
+func TestClaimNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	privKey, _, pubJwksStr, err := test_utils.GenerateJWK()
+	require.NoError(t, err)
+
+	mintClaimToken := func(t *testing.T, key jwk.Key) string {
+		tok := jwt.New()
+		require.NoError(t, tok.Set(jwt.IssuedAtKey, time.Now()))
+		require.NoError(t, tok.Set(jwt.ExpirationKey, time.Now().Add(10*time.Minute)))
+		require.NoError(t, tok.Set("scope", token_scopes.Registry_EditRegistration.String()))
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, key))
+		require.NoError(t, err)
+		return string(signed)
+	}
+
+	newClaimRouter := func(user, userId string) *gin.Engine {
+		router := gin.Default()
+		router.POST("/test/:id/claim", func(ctx *gin.Context) {
+			ctx.Set("User", user)
+			if userId != "" {
+				ctx.Set("UserId", userId)
+			}
+			claimNamespace(ctx)
+		})
+		return router
+	}
+
+	t.Run("valid-token-claims-with-pelican-user-id", func(t *testing.T) {
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{SiteName: "claim-site"}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		router := newClaimRouter("mockUser", "u-mock-id")
+		w := httptest.NewRecorder()
+		reqUrl := fmt.Sprintf("/test/%d/claim?access_token=%s", id, url.QueryEscape(mintClaimToken(t, privKey)))
+		req, _ := http.NewRequest("POST", reqUrl, nil)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		ns, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-mock-id", ns.AdminMetadata.UserID,
+			"the stable Pelican user ID must be recorded as the owner")
+	})
+
+	t.Run("no-user-id-is-rejected", func(t *testing.T) {
+		// The owner is recorded as the Pelican user ID only — a session
+		// without one (e.g. the CLI admin token) must not claim, and in
+		// particular the login username must never be written as owner.
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{SiteName: "claim-site"}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		router := newClaimRouter("mockUser", "")
+		w := httptest.NewRecorder()
+		reqUrl := fmt.Sprintf("/test/%d/claim?access_token=%s", id, url.QueryEscape(mintClaimToken(t, privKey)))
+		req, _ := http.NewRequest("POST", reqUrl, nil)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusForbidden, w.Code)
+		ns, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", ns.AdminMetadata.UserID, "a claim without a user ID must write nothing")
+	})
+
+	t.Run("missing-token-returns-400", func(t *testing.T) {
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		router := newClaimRouter("mockUser", "u-mock-id")
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/test/%d/claim", id), nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("already-claimed-returns-409", func(t *testing.T) {
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{UserID: "someone-else"}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		router := newClaimRouter("mockUser", "u-mock-id")
+		w := httptest.NewRecorder()
+		reqUrl := fmt.Sprintf("/test/%d/claim?access_token=%s", id, url.QueryEscape(mintClaimToken(t, privKey)))
+		req, _ := http.NewRequest("POST", reqUrl, nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+		ns, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "someone-else", ns.AdminMetadata.UserID,
+			"a claim attempt on an owned registration must not change the owner")
+	})
+
+	t.Run("token-from-wrong-key-returns-403", func(t *testing.T) {
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		wrongKey, _, _, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+
+		router := newClaimRouter("mockUser", "u-mock-id")
+		w := httptest.NewRecorder()
+		reqUrl := fmt.Sprintf("/test/%d/claim?access_token=%s", id, url.QueryEscape(mintClaimToken(t, wrongKey)))
+		req, _ := http.NewRequest("POST", reqUrl, nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		ns, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Empty(t, ns.AdminMetadata.UserID)
+	})
+
+	t.Run("unauthenticated-returns-401", func(t *testing.T) {
+		err := insertMockDBData([]server_structs.Registration{
+			mockNamespace("/origins/claim-test.org", pubJwksStr, "", server_structs.AdminMetadata{}),
+		})
+		require.NoError(t, err)
+		defer resetMockRegistryDB(t)
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		router := gin.Default()
+		router.POST("/test/:id/claim", claimNamespace)
+		w := httptest.NewRecorder()
+		reqUrl := fmt.Sprintf("/test/%d/claim?access_token=%s", id, url.QueryEscape(mintClaimToken(t, privKey)))
+		req, _ := http.NewRequest("POST", reqUrl, nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
 }
