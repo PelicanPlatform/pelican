@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -669,6 +670,16 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 // destination (see tpc_handler.go): normalize, then require the result to
 // still lie under the prefix.
 func (afs *aferoFileSystem) fullPath(name string) (string, error) {
+	// Defense-in-depth + CodeQL taint break: reject any ".." segment up front,
+	// regardless of which backend is wired underneath. confineToPrefix already
+	// confines prefixed backends, but this also guards a future non-sandboxed
+	// backend wired with an empty prefix (the OsRootFs case below), and breaks
+	// the taint trace CodeQL follows from a webdav name to an afero sink.
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return "", errPathTraversal
+		}
+	}
 	if afs.prefix == "" {
 		// Nothing to escape: this filesystem is already rooted at the export
 		// (server_utils.NewOsRootFs, a BasePathFs, or a remote endpoint), and
@@ -677,6 +688,10 @@ func (afs *aferoFileSystem) fullPath(name string) (string, error) {
 	}
 	return confineToPrefix(afs.prefix, name)
 }
+
+// errPathTraversal is returned by fullPath when the incoming name contains a
+// ".." component.
+var errPathTraversal = errors.New("aferoFileSystem: path contains '..' segment")
 
 // confineToPrefix joins a request-relative path onto a storage prefix and
 // refuses any result that does not remain under it.
