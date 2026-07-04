@@ -36,16 +36,21 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-// TestDiscoveryEmbeddedIssuerNamespace verifies that the server-level
-// /.well-known/openid-configuration discovery document advertises the
-// correct namespace-scoped URLs when the embedded issuer is enabled.
+// TestDiscoveryEmbeddedIssuerNamespace verifies the server-level
+// /.well-known/openid-configuration discovery document.
+//
+// The server-level document describes the server's *local* issuer, not any data
+// export: its "issuer" is the server issuer URL, and its OAuth endpoints point
+// at the reserved LocalIssuerNamespace. Per-namespace data issuers are
+// advertised to the director and discovered at their own
+// /api/v1.0/issuer/ns/<prefix> endpoints, so the server-level document never
+// leaks a data-export prefix.
 //
 // The key behaviors under test:
-//  1. With a single auth-requiring export, the issuer and all endpoint
-//     URLs must include /api/v1.0/issuer/ns/<prefix>.
-//  2. With multiple exports (some public-read-only, some auth-requiring),
-//     the first auth-requiring export's namespace is used.
-//  3. Without the embedded issuer enabled, no OIDC endpoints are set.
+//  1. Embedded issuer: OAuth endpoints point at /api/v1.0/issuer/ns/pelican/local-issuer
+//     and the issuer is the server URL, regardless of the exports.
+//  2. Without the embedded issuer enabled, no OIDC endpoints are set.
+//  3. OA4MP mode keeps the legacy single-issuer endpoints.
 func TestDiscoveryEmbeddedIssuerNamespace(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -91,7 +96,11 @@ func TestDiscoveryEmbeddedIssuerNamespace(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	t.Run("SingleAuthExport", func(t *testing.T) {
+	// localIssuerBase is where the server-level document must point its OAuth
+	// endpoints: the reserved local-issuer namespace, rooted at ExternalWebUrl.
+	localIssuerBase := "https://origin.example.com:8444/api/v1.0/issuer/ns" + server_structs.LocalIssuerNamespace
+
+	t.Run("EmbeddedUsesLocalIssuer", func(t *testing.T) {
 		ResetTestState()
 		defer ResetTestState()
 		defer ResetOriginExports()
@@ -111,19 +120,19 @@ Server:
 
 		resp := callDiscovery(t)
 
-		expectedBase := "https://origin.example.com:8444/api/v1.0/issuer/ns/data"
-		assert.Equal(t, expectedBase, resp.Issuer,
-			"Issuer should be scoped to the /data namespace")
-		assert.Equal(t, expectedBase+"/token", resp.TokenEndpoint)
-		assert.Equal(t, expectedBase+"/oidc-cm", resp.RegistrationEndpoint)
-		assert.Equal(t, expectedBase+"/device_authorization", resp.DeviceEndpoint)
-		assert.Equal(t, expectedBase+"/authorize", resp.AuthorizationEndpoint)
-		assert.Equal(t, expectedBase+"/userinfo", resp.UserInfoEndpoint)
-		assert.Equal(t, expectedBase+"/revoke", resp.RevocationEndpoint)
+		// The issuer is the server issuer URL, not a data-export namespace.
+		assert.Equal(t, "https://origin.example.com:8444", resp.Issuer,
+			"Issuer should be the server issuer URL, not a data export")
+		assert.Equal(t, localIssuerBase+"/token", resp.TokenEndpoint)
+		assert.Equal(t, localIssuerBase+"/oidc-cm", resp.RegistrationEndpoint)
+		assert.Equal(t, localIssuerBase+"/device_authorization", resp.DeviceEndpoint)
+		assert.Equal(t, localIssuerBase+"/authorize", resp.AuthorizationEndpoint)
+		assert.Equal(t, localIssuerBase+"/userinfo", resp.UserInfoEndpoint)
+		assert.Equal(t, localIssuerBase+"/revoke", resp.RevocationEndpoint)
 		assert.Contains(t, resp.GrantTypesSupported, "urn:ietf:params:oauth:grant-type:device_code")
 	})
 
-	t.Run("MultipleExportsPicksFirstAuthRequiring", func(t *testing.T) {
+	t.Run("MultipleExportsNoDataPrefixLeaks", func(t *testing.T) {
 		ResetTestState()
 		defer ResetTestState()
 		defer ResetOriginExports()
@@ -149,19 +158,16 @@ Server:
 
 		resp := callDiscovery(t)
 
-		// /public is public-read-only, so it should be skipped.
-		// /private is the first auth-requiring export.
-		expectedBase := "https://origin.example.com:8444/api/v1.0/issuer/ns/private"
-		assert.Equal(t, expectedBase, resp.Issuer,
-			"Issuer should use /private (first auth-requiring export), not /public")
-		assert.Equal(t, expectedBase+"/token", resp.TokenEndpoint)
-		assert.Equal(t, expectedBase+"/oidc-cm", resp.RegistrationEndpoint)
-		assert.Equal(t, expectedBase+"/device_authorization", resp.DeviceEndpoint)
-		assert.Equal(t, expectedBase+"/authorize", resp.AuthorizationEndpoint)
-
-		// Ensure it didn't pick /public or /also-private
-		assert.NotContains(t, resp.Issuer, "/public")
-		assert.NotContains(t, resp.Issuer, "/also-private")
+		// No data-export prefix must leak into the server-level document,
+		// regardless of how many exports (public or not) the origin has.
+		assert.Equal(t, "https://origin.example.com:8444", resp.Issuer)
+		assert.Equal(t, localIssuerBase+"/token", resp.TokenEndpoint)
+		assert.Equal(t, localIssuerBase+"/authorize", resp.AuthorizationEndpoint)
+		for _, field := range []string{resp.Issuer, resp.TokenEndpoint, resp.AuthorizationEndpoint} {
+			assert.NotContains(t, field, "/private")
+			assert.NotContains(t, field, "/public")
+			assert.NotContains(t, field, "/ns/data")
+		}
 	})
 
 	t.Run("EmbeddedIssuerDisabledNoEndpoints", func(t *testing.T) {
