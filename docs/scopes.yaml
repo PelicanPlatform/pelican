@@ -128,6 +128,15 @@ description: >-
 issuedBy: ["*"]
 acceptedBy: ["*"]
 ---
+name: pelican.log_read
+description: >-
+  Permits the reading of the server's buffer of recent log lines.
+  Required for the web UI's log viewer and for programmatic log
+  fetches.
+issuedBy: ["web_ui"]
+acceptedBy: ["web_ui"]
+userGrantable: true
+---
 ############################
 #     Registry Scopes      #
 ############################

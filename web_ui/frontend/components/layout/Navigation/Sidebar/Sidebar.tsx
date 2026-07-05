@@ -34,6 +34,7 @@ export const Sidebar = ({
   config,
   exportType,
   role,
+  scopes,
   topOffset = 0,
 }: NavigationProps) => {
   return (
@@ -79,6 +80,7 @@ export const Sidebar = ({
                     key={evaluateOrReturn(navItem.title)}
                     config={navItem}
                     role={role}
+                    scopes={scopes}
                     exportType={exportType}
                   />
                 );

@@ -58,6 +58,7 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
   config,
   exportType,
   role,
+  scopes,
   onClose,
 }) => {
   return (
@@ -133,6 +134,7 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
             key={index}
             config={item}
             role={role}
+            scopes={scopes}
             exportType={exportType}
             onClose={onClose}
           />

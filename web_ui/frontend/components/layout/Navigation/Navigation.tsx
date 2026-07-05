@@ -146,6 +146,7 @@ const Navigation = ({
           <Sidebar
             exportType={exports?.type}
             role={user?.role}
+            scopes={user?.scopes}
             config={config as StaticNavigationItemProps[]}
             topOffset={topOffset}
           />
@@ -158,6 +159,7 @@ const Navigation = ({
           <AppBar
             exportType={exports?.type}
             role={user?.role}
+            scopes={user?.scopes}
             config={config as StaticNavigationItemProps[]}
             topOffset={topOffset}
           />

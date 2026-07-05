@@ -2134,6 +2134,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// be done in sequence because the web UI may change the log location.
 	logging.FlushLogs(true)
 
+	// The in-memory log ring buffer is server-only.
+	StartLogRingBuffer(ctx)
+
 	runtimeDir, cleanupRuntimeDir, err := ensureRuntimeDir(viper.GetViper())
 	if err != nil {
 		return err
@@ -2771,6 +2774,11 @@ func ClearServerAds() {
 
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
+	// Detach the in-memory log ring buffer (hook + compression worker) so a
+	// subsequent InitServer installs a fresh one and tests don't accumulate
+	// hooks or leak the compression goroutine across cases.
+	StopLogRingBuffer()
+
 	// Close any open log files and reset logger output
 	logging.CloseLogger()
 	if err := param.Reset(); err != nil {

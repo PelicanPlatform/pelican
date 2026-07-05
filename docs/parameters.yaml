@@ -415,6 +415,27 @@ hidden: true
 default: 50ms
 components: ["*"]
 ---
+name: Logging.Buffer.MaxSize
+description: |+
+  Upper bound on the size of the memory buffer for recent log lines, e.g.
+  "1MB" or "512K". Older log lines are evicted as newer ones arrive so the
+  buffer stays at or below this size. The larger the value, the more logging
+  history is available via the web interface.
+type: string
+default: 1MB
+components: ["*"]
+---
+name: Logging.Buffer.BatchLines
+description: |+
+  Number of log lines accumulated before the in-memory log buffer finalizes a
+  batch (making it visible to readers and eligible for eviction). Higher
+  values compress better and evict more coarsely; lower values stay uncompressed
+  for longer.
+type: int
+hidden: true
+default: 10000
+components: ["*"]
+---
 name: Logging.Client.DisableProgressBars
 description: |+
   A bool defining whether the client should emit progress bars to track download progress.
