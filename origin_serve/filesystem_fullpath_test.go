@@ -49,12 +49,18 @@ func TestAferoFileSystem_FullPath(t *testing.T) {
 		{"with-prefix-simple", "/exports/x", "/data.bin", false, "/exports/x/data.bin"},
 		{"with-prefix-nested", "/exports/x", "/sub/data.bin", false, "/exports/x/sub/data.bin"},
 
-		{"reject-dotdot-single", "", "/../etc/passwd", true, ""},
-		{"reject-dotdot-nested", "", "/foo/../etc", true, ""},
+		// Rooted ".." folds against "/" per path.Clean rule 4 and
+		// resolves inside the export — safe, so we allow it.
+		{"leading-slash-dotdot-folds", "", "/../etc/passwd", false, "/etc/passwd"},
+		{"interior-dotdot-folds", "", "/foo/../etc", false, "/etc"},
+		{"trailing-dotdot-folds", "", "/foo/..", false, "/"},
+		{"with-prefix-rooted-dotdot", "/exports/x", "/../../etc", false, "/exports/x/etc"},
+
+		// Genuine escape shapes: cleaned result retains a ".." at
+		// the start (relative input trying to walk above the anchor).
 		{"reject-dotdot-leading", "", "../etc", true, ""},
-		{"reject-dotdot-trailing", "", "/foo/..", true, ""},
 		{"reject-dotdot-only", "", "..", true, ""},
-		{"reject-dotdot-with-prefix", "/exports/x", "/../../etc", true, ""},
+		{"reject-relative-double-dotdot", "", "foo/../../etc", true, ""},
 	}
 
 	for _, tc := range cases {
@@ -94,22 +100,26 @@ func TestAferoFileSystem_TraversalRejectedByPublicMethods(t *testing.T) {
 		}
 	}
 
-	if err := afs.Mkdir(ctx, "/foo/../etc", 0o755); true {
+	// Use a purely-relative traversal that path.Clean cannot fold
+	// against the root — the rejection path is what we're testing.
+	const escape = "../../etc/passwd"
+
+	if err := afs.Mkdir(ctx, escape, 0o755); true {
 		assertRejected(t, "Mkdir", err)
 	}
-	if _, err := afs.OpenFile(ctx, "/foo/../etc/passwd", os.O_RDONLY, 0); true {
+	if _, err := afs.OpenFile(ctx, escape, os.O_RDONLY, 0); true {
 		assertRejected(t, "OpenFile", err)
 	}
-	if err := afs.RemoveAll(ctx, "/foo/../etc/passwd"); true {
+	if err := afs.RemoveAll(ctx, escape); true {
 		assertRejected(t, "RemoveAll", err)
 	}
-	if err := afs.Rename(ctx, "/legit", "/foo/../etc/passwd"); true {
+	if err := afs.Rename(ctx, "/legit", escape); true {
 		assertRejected(t, "Rename-new", err)
 	}
-	if err := afs.Rename(ctx, "/foo/../etc/passwd", "/legit"); true {
+	if err := afs.Rename(ctx, escape, "/legit"); true {
 		assertRejected(t, "Rename-old", err)
 	}
-	if _, err := afs.Stat(ctx, "/foo/../etc/passwd"); true {
+	if _, err := afs.Stat(ctx, escape); true {
 		assertRejected(t, "Stat", err)
 	}
 }
