@@ -66,6 +66,13 @@ type TransferJob struct {
 	CancelFunc  context.CancelFunc
 	ctx         context.Context
 	wg          sync.WaitGroup
+	// lastProgressEmit is the Unix-nanos of the last broadcast progress event,
+	// used to throttle per-job progress notifications.
+	lastProgressEmit atomic.Int64
+	// subscriberCount is the number of active event-stream watchers. It gates the
+	// progress hot path: with no watchers, a per-chunk progress callback does no
+	// work beyond a single atomic load (no shared lock, no publish).
+	subscriberCount atomic.Int32
 }
 
 // TransferManager manages all transfer jobs and their execution
@@ -471,7 +478,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 			tm.updateJobStatus(job.ID, StatusCancelled, nil)
 			return
 		default:
-			if err := tm.executeTransfer(transfer, job.Options); err != nil {
+			if err := tm.executeTransfer(job, transfer, job.Options); err != nil {
 				log.Errorf("Transfer %s failed: %v", transfer.ID, err)
 				allSucceeded = false
 				anyFailed = true
@@ -510,7 +517,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 }
 
 // executeTransfer executes a single transfer
-func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.TransferOption) error {
+func (tm *TransferManager) executeTransfer(job *TransferJob, transfer *Transfer, options []client.TransferOption) error {
 	now := time.Now()
 	tm.mu.Lock()
 	transfer.Status = StatusRunning
@@ -537,6 +544,10 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 		log.Debugf("Transfer %s progress: %d/%d bytes (%.1f%%)",
 			transfer.ID, downloaded, totalSize,
 			float64(downloaded)/float64(totalSize)*100)
+
+		// Broadcast the job's aggregate progress to any SSE subscribers. This is
+		// lock-free and returns immediately when nobody is watching the job.
+		tm.publishJobProgress(job)
 	}
 
 	// Prepend callback to options so it's applied first

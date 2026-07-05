@@ -65,6 +65,67 @@ func TestSubscribeJobDeliversEvents(t *testing.T) {
 	assert.Contains(t, got, StatusFailed)
 }
 
+// TestPublishJobProgress verifies the manager broadcasts a job's aggregate
+// transfer progress to subscribers as a "progress" event, and that repeated
+// calls within the throttle window are suppressed.
+func TestPublishJobProgress(t *testing.T) {
+	tm := NewTransferManager(context.Background(), 1, nil)
+	defer func() { _ = tm.Shutdown() }()
+
+	job, err := tm.CreateJobWithID("prog-job", []TransferRequest{
+		{Operation: "benchmark-noop", Source: "x", Destination: "y"},
+	}, nil)
+	require.NoError(t, err)
+	job.wg.Wait() // the job stays in the manager after finishing
+
+	// Simulate mid-flight progress on the job's transfer.
+	require.Len(t, job.Transfers, 1)
+	job.Transfers[0].BytesTransferred.Store(512)
+	job.Transfers[0].TotalBytes.Store(1024)
+
+	// Subscribing bumps the job's subscriber count, arming the progress path.
+	events, unsub := tm.SubscribeJob("prog-job")
+	defer unsub()
+
+	tm.publishJobProgress(job)
+	select {
+	case ev := <-events:
+		assert.Equal(t, jobEventProgress, ev.Kind)
+		assert.Equal(t, "prog-job", ev.JobID)
+		assert.Equal(t, int64(512), ev.BytesTransferred)
+		assert.Equal(t, int64(1024), ev.TotalBytes)
+		assert.Empty(t, ev.Status, "a progress event carries no status")
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a progress event")
+	}
+
+	// A second call within the throttle window is suppressed.
+	tm.publishJobProgress(job)
+	select {
+	case ev := <-events:
+		t.Fatalf("progress should be throttled; got a second event: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestPublishJobProgressDormantWithoutSubscribers verifies the progress hot path
+// does nothing when no one is watching the job (the common case for a server
+// managing many transfers): it neither broadcasts nor advances the throttle.
+func TestPublishJobProgressDormantWithoutSubscribers(t *testing.T) {
+	tm := NewTransferManager(context.Background(), 1, nil)
+	defer func() { _ = tm.Shutdown() }()
+
+	job, err := tm.CreateJobWithID("no-sub", []TransferRequest{
+		{Operation: "benchmark-noop", Source: "x", Destination: "y"},
+	}, nil)
+	require.NoError(t, err)
+	job.wg.Wait()
+
+	require.Zero(t, job.subscriberCount.Load())
+	tm.publishJobProgress(job) // no watchers -> returns after one atomic load
+	assert.Zero(t, job.lastProgressEmit.Load(), "unwatched progress must not advance the throttle or publish")
+}
+
 // TestSubscribeAfterTerminalUsesCurrentStatus documents the other half of the
 // race contract: a subscriber that registers AFTER the job finished receives no
 // event, but the terminal status is visible via GetJob — so an SSE handler that
