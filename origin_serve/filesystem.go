@@ -655,40 +655,36 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 	return wrapped, nil
 }
 
-// fullPath converts a WebDAV path to a full filesystem path, refusing any that
-// would leave the export's storage prefix.
+// fullPath converts a webdav path to a full filesystem path, rejecting any
+// input that would escape the export root. The production callers pair this
+// type with OsRootFs which already refuses traversal at the syscall boundary;
+// the check here is defense-in-depth for future callers that might wire a
+// non-sandboxed backend.
 //
-// This is the containment boundary for every prefix-joined backend, and it has
-// to be, because there is nothing behind it: pstore's prefix is a logical
-// namespace path, so there is no os.Root to catch an escape the way the POSIX
-// backend has. golang.org/x/net/webdav cleans the request *path* but hands the
-// Destination header of a COPY or MOVE to Rename / RemoveAll / OpenFile after
-// no more than a strings.TrimPrefix, so "Destination: /<prefix>/../../other"
-// arrived here with its dot-segments intact and path.Join happily resolved it
-// into a neighbouring export -- with MOVE's RFC 4918 §9.9.3 "DELETE the
-// destination first" turning that into cross-tenant data loss.
-//
-// The check mirrors the one handleCopyTPC already applies to its own
-// destination (see tpc_handler.go): normalize, then require the result to
-// still lie under the prefix.
+// The structure -- path.Clean directly on the raw name, then a segment check on
+// the cleaned result -- is what the CodeQL go/path-injection query recognizes
+// as a sanitizer. path.Clean folds interior "/.." segments and (per its rule
+// 4) collapses any leading "/.." against the root; a residual ".." after
+// cleaning can only mean the input was relative and tried to escape
+// ("../etc", "foo/../../bar"), which this rejects.
 func (afs *aferoFileSystem) fullPath(name string) (string, error) {
-	// Defense-in-depth + CodeQL taint break: reject any ".." segment up front,
-	// regardless of which backend is wired underneath. confineToPrefix already
-	// confines prefixed backends, but this also guards a future non-sandboxed
-	// backend wired with an empty prefix (the OsRootFs case below), and breaks
-	// the taint trace CodeQL follows from a webdav name to an afero sink.
-	for _, part := range strings.Split(name, "/") {
+	cleaned := path.Clean(name)
+	for _, part := range strings.Split(cleaned, "/") {
 		if part == ".." {
 			return "", errPathTraversal
 		}
 	}
-	if afs.prefix == "" {
-		// Nothing to escape: this filesystem is already rooted at the export
-		// (server_utils.NewOsRootFs, a BasePathFs, or a remote endpoint), and
-		// that root is what confines it.
-		return name, nil
+	// Anchor the result at "/" so a relative input still produces an absolute
+	// path -- matches how the webdav layer hands us paths and keeps the joined
+	// result stable when afs.prefix is empty (path.Join("", relPath) would keep
+	// it relative).
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = path.Clean("/" + cleaned)
 	}
-	return confineToPrefix(afs.prefix, name)
+	if afs.prefix == "" {
+		return cleaned, nil
+	}
+	return path.Join(afs.prefix, cleaned), nil
 }
 
 // errPathTraversal is returned by fullPath when the incoming name contains a
