@@ -257,6 +257,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
 	"LocalCache.StorageDirs": false,
+	"Logging.Buffer.BatchLines": false,
+	"Logging.Buffer.MaxSize": false,
 	"Logging.Cache.Http": true,
 	"Logging.Cache.Lotman": true,
 	"Logging.Cache.Ofs": true,
@@ -639,6 +641,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
 	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
 	"LocalCache.Socket": func(c *Config) string { return c.LocalCache.Socket },
+	"Logging.Buffer.MaxSize": func(c *Config) string { return c.Logging.Buffer.MaxSize },
 	"Logging.Cache.Http": func(c *Config) string { return c.Logging.Cache.Http },
 	"Logging.Cache.Lotman": func(c *Config) string { return c.Logging.Cache.Lotman },
 	"Logging.Cache.Ofs": func(c *Config) string { return c.Logging.Cache.Ofs },
@@ -891,6 +894,7 @@ var intAccessors = map[string]func(*Config) int{
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
 	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
 	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
+	"Logging.Buffer.BatchLines": func(c *Config) int { return c.Logging.Buffer.BatchLines },
 	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
 	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
 	"Monitoring.LabelNameLengthLimit": func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
@@ -1436,6 +1440,8 @@ var allParameterNames = []string{
 	"LocalCache.Size",
 	"LocalCache.Socket",
 	"LocalCache.StorageDirs",
+	"Logging.Buffer.BatchLines",
+	"Logging.Buffer.MaxSize",
 	"Logging.Cache.Http",
 	"Logging.Cache.Lotman",
 	"Logging.Cache.Ofs",
@@ -1791,6 +1797,7 @@ var (
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
+	Logging_Buffer_MaxSize = StringParam{"Logging.Buffer.MaxSize"}
 	Logging_Cache_Http = StringParam{"Logging.Cache.Http"}
 	Logging_Cache_Lotman = StringParam{"Logging.Cache.Lotman"}
 	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
@@ -1987,6 +1994,7 @@ var (
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
+	Logging_Buffer_BatchLines = IntParam{"Logging.Buffer.BatchLines"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
 	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
@@ -2279,6 +2287,7 @@ func init() {
 		"LocalCache.RunLocation": LocalCache_RunLocation,
 		"LocalCache.Size": LocalCache_Size,
 		"LocalCache.Socket": LocalCache_Socket,
+		"Logging.Buffer.MaxSize": Logging_Buffer_MaxSize,
 		"Logging.Cache.Http": Logging_Cache_Http,
 		"Logging.Cache.Lotman": Logging_Cache_Lotman,
 		"Logging.Cache.Ofs": Logging_Cache_Ofs,
@@ -2469,6 +2478,7 @@ func init() {
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
 		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
 		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
+		"Logging.Buffer.BatchLines": Logging_Buffer_BatchLines,
 		"MinimumDownloadSpeed": MinimumDownloadSpeed,
 		"Monitoring.LabelLimit": Monitoring_LabelLimit,
 		"Monitoring.LabelNameLengthLimit": Monitoring_LabelNameLengthLimit,

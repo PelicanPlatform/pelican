@@ -1838,6 +1838,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// be done in sequence because the web UI may change the log location.
 	logging.FlushLogs(true)
 
+	// The in-memory log ring buffer is server-only.
+	StartLogRingBuffer(ctx)
+
 	runtimeDir, cleanupRuntimeDir, err := ensureRuntimeDir(viper.GetViper())
 	if err != nil {
 		return err

@@ -201,6 +201,10 @@ type Config struct {
 		StorageDirs any `mapstructure:"storagedirs" yaml:"StorageDirs"`
 	} `mapstructure:"localcache" yaml:"LocalCache"`
 	Logging struct {
+		Buffer struct {
+			BatchLines int `mapstructure:"batchlines" yaml:"BatchLines"`
+			MaxSize string `mapstructure:"maxsize" yaml:"MaxSize"`
+		} `mapstructure:"buffer" yaml:"Buffer"`
 		Cache struct {
 			Http string `mapstructure:"http" yaml:"Http"`
 			Lotman string `mapstructure:"lotman" yaml:"Lotman"`
@@ -713,6 +717,10 @@ type configWithType struct {
 		StorageDirs struct { Type string; Value any }
 	}
 	Logging struct {
+		Buffer struct {
+			BatchLines struct { Type string; Value int }
+			MaxSize struct { Type string; Value string }
+		}
 		Cache struct {
 			Http struct { Type string; Value string }
 			Lotman struct { Type string; Value string }

@@ -684,6 +684,20 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		loggingAPI.DELETE("/level/:changeId", HandleDeleteLogLevel)
 	}
 
+	// In-memory log buffer viewer/download API. Gated by the dedicated
+	// pelican.log_read scope so a triage user can be granted read-only access
+	// without also picking up admin privileges (or vice versa -- an admin
+	// keeps access via CheckAdmin inside LogReadAuthHandler).
+	//
+	// The public surface is intentionally two endpoints: tail (with an
+	// opaque cursor) and download. Internal structure (batches, LZ4
+	// compression, pending buffer) is not part of the API contract.
+	logBufferAPI := routerGroup.Group("/logs", AuthHandler, LogReadAuthHandler)
+	{
+		logBufferAPI.GET("/tail", HandleLogTail)
+		logBufferAPI.GET("/download", HandleLogTailDownload)
+	}
+
 	downtimeAPI := routerGroup.Group("/downtime")
 	{
 		downtimeAPI.POST("", DowntimeAuthHandler, HandleCreateDowntime)

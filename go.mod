@@ -38,6 +38,7 @@ require (
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4
+	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/xattr v0.4.12
 	github.com/pressly/goose/v3 v3.18.0

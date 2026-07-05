@@ -40,6 +40,7 @@ const (
 	Server_UserAdmin TokenScope = "server.user_admin"
 	Server_CollectionAdmin TokenScope = "server.collection_admin"
 	Pelican_LoggingModify TokenScope = "pelican.logging_modify"
+	Pelican_LogRead TokenScope = "pelican.log_read"
 	Registry_EditRegistration TokenScope = "registry.edit_registration"
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
 	Monitoring_Query TokenScope = "monitoring.query"
@@ -98,6 +99,7 @@ var UserGrantableScopes = []TokenScope{
 	Server_Admin,
 	Server_UserAdmin,
 	Server_CollectionAdmin,
+	Pelican_LogRead,
 	Monitoring_Query,
 }
 
@@ -132,6 +134,7 @@ var scopeDescriptions = map[TokenScope]string{
 	Server_UserAdmin: `Manage non-admin users and unprivileged groups. Holders can create users, mint password-set invites, and run the user-onboarding flows, but cannot modify system-admin accounts.`,
 	Server_CollectionAdmin: `Create, modify, and delete collections and manage their ACLs.`,
 	Pelican_LoggingModify: `Permits modification of server log levels at runtime`,
+	Pelican_LogRead: `Permits the reading of the server's buffer of recent log lines. Required for the web UI's log viewer and for programmatic log fetches.`,
 	Registry_EditRegistration: `For origin admin to edit namespace registration at the registry`,
 	Monitoring_Scrape: `For server's Prometheus instance to scrape its Prometheus http data exporter at /metrics`,
 	Monitoring_Query: `View server metrics. Required for the web UI's metrics dashboards and for external monitoring tools (e.g. Grafana) to read this server's metrics through its Prometheus-compatible query endpoint.`,

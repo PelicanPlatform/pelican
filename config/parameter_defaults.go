@@ -354,6 +354,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${LocalCache.RunLocation}", v.GetString(param.LocalCache_RunLocation.GetName()))
 		v.SetDefault(param.LocalCache_Socket.GetName(), val)
 	}
+	// Logging.Buffer.BatchLines
+	v.SetDefault(param.Logging_Buffer_BatchLines.GetName(), 10000)
+	// Logging.Buffer.MaxSize
+	v.SetDefault(param.Logging_Buffer_MaxSize.GetName(), "1MB")
 	// Logging.Cache.Http
 	v.SetDefault(param.Logging_Cache_Http.GetName(), "error")
 	// Logging.Cache.Lotman
