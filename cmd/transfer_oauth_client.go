@@ -58,8 +58,8 @@ var (
 		RunE:  oauthClientDeleteMain,
 	}
 
-	oauthName         string
-	oauthIssuerURL    string
+	oauthName             string
+	oauthIssuerURL        string
 	oauthClientID         string
 	oauthClientSecretFile string
 )
