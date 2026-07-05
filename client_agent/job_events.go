@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,26 @@ func wantsEventStream(c *gin.Context) bool {
 // ping keeps the connection alive through idle proxies during a long transfer.
 const sseKeepAliveInterval = 15 * time.Second
 
-// JobEvent is a single job-status notification delivered to subscribers of a
-// job. It is the push counterpart to polling GET /jobs/:id.
+// progressEmitInterval throttles per-job progress broadcasts: transfer progress
+// callbacks fire per chunk, but subscribers only need a periodic update.
+const progressEmitInterval = 250 * time.Millisecond
+
+// Event kinds, delivered as the SSE `event:` field so clients can dispatch.
+const (
+	jobEventStatus   = "status"
+	jobEventProgress = "progress"
+)
+
+// JobEvent is a single notification delivered to subscribers of a job. Kind
+// selects the SSE event name: a "status" event carries Status (and Error on
+// failure); a "progress" event carries the job's aggregate bytes transferred.
 type JobEvent struct {
-	JobID  string `json:"job_id"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Kind             string `json:"-"`
+	JobID            string `json:"job_id"`
+	Status           string `json:"status,omitempty"`
+	Error            string `json:"error,omitempty"`
+	BytesTransferred int64  `json:"bytes_transferred,omitempty"`
+	TotalBytes       int64  `json:"total_bytes,omitempty"`
 }
 
 // IsTerminalStatus reports whether a status is a final state (the job will emit
@@ -72,9 +87,14 @@ func IsTerminalStatus(status string) bool {
 // it must treat the current status (read after subscribing) and any terminal
 // event as authoritative. (For a fast reader the buffer never fills.)
 func (tm *TransferManager) SubscribeJob(jobID string) (<-chan JobEvent, func()) {
-	tm.subMu.Lock()
-	defer tm.subMu.Unlock()
+	// Look up the job once (if it is in memory) so we can maintain its
+	// lock-free subscriber count, which gates the progress hot path. Done
+	// outside subMu to avoid nesting the two locks.
+	tm.mu.RLock()
+	job := tm.jobs[jobID]
+	tm.mu.RUnlock()
 
+	tm.subMu.Lock()
 	if tm.subscribers == nil {
 		tm.subscribers = make(map[string]map[int]chan JobEvent)
 	}
@@ -85,19 +105,30 @@ func (tm *TransferManager) SubscribeJob(jobID string) (<-chan JobEvent, func()) 
 	tm.nextSubID++
 	ch := make(chan JobEvent, 8)
 	tm.subscribers[jobID][id] = ch
+	tm.subMu.Unlock()
 
+	if job != nil {
+		job.subscriberCount.Add(1)
+	}
+
+	var once sync.Once
 	unsub := func() {
-		tm.subMu.Lock()
-		defer tm.subMu.Unlock()
-		if subs := tm.subscribers[jobID]; subs != nil {
-			if _, ok := subs[id]; ok {
-				delete(subs, id)
-				close(ch)
+		once.Do(func() {
+			tm.subMu.Lock()
+			if subs := tm.subscribers[jobID]; subs != nil {
+				if _, ok := subs[id]; ok {
+					delete(subs, id)
+					close(ch)
+				}
+				if len(subs) == 0 {
+					delete(tm.subscribers, jobID)
+				}
 			}
-			if len(subs) == 0 {
-				delete(tm.subscribers, jobID)
+			tm.subMu.Unlock()
+			if job != nil {
+				job.subscriberCount.Add(-1)
 			}
-		}
+		})
 	}
 	return ch, unsub
 }
@@ -116,14 +147,47 @@ func (tm *TransferManager) publishJobEvent(ev JobEvent) {
 	}
 }
 
-// jobEvent builds a JobEvent snapshot from a job. Caller must hold the read
-// lock, since the execution goroutine concurrently mutates Status/Error.
+// jobEvent builds a status JobEvent snapshot from a job. Caller must hold the
+// read lock, since the execution goroutine concurrently mutates Status/Error.
 func jobEvent(job *TransferJob) JobEvent {
-	ev := JobEvent{JobID: job.ID, Status: job.Status}
+	ev := JobEvent{Kind: jobEventStatus, JobID: job.ID, Status: job.Status}
 	if job.Error != nil {
 		ev.Error = job.Error.Error()
 	}
 	return ev
+}
+
+// publishJobProgress broadcasts a job's aggregate transfer progress (summed
+// across its transfers) to subscribers. It is called from the per-chunk transfer
+// progress callback, so the hot path is deliberately lock-free:
+//
+//   - if the job has no event-stream watchers it returns after a single atomic
+//     load — no shared lock, no aggregation, no publish. A server managing
+//     thousands of transfers nobody is watching pays essentially nothing.
+//   - otherwise it throttles to one broadcast per progressEmitInterval per job
+//     (also lock-free, via CAS), and only then aggregates and publishes.
+//
+// It takes the job directly (no map lookup) and never touches tm.mu; the only
+// lock involved is the events-hub subMu, taken briefly inside publishJobEvent
+// and independent of job execution.
+func (tm *TransferManager) publishJobProgress(job *TransferJob) {
+	if job.subscriberCount.Load() == 0 {
+		return
+	}
+
+	now := time.Now().UnixNano()
+	last := job.lastProgressEmit.Load()
+	if now-last < int64(progressEmitInterval) || !job.lastProgressEmit.CompareAndSwap(last, now) {
+		return
+	}
+
+	// job.Transfers is fixed at creation; the atomics are safe to read here.
+	var bytes, total int64
+	for _, tr := range job.Transfers {
+		bytes += tr.BytesTransferred.Load()
+		total += tr.TotalBytes.Load()
+	}
+	tm.publishJobEvent(JobEvent{Kind: jobEventProgress, JobID: job.ID, BytesTransferred: bytes, TotalBytes: total})
 }
 
 // jobEventSnapshot returns the job's current status as a JobEvent, read under
@@ -159,7 +223,7 @@ func (tm *TransferManager) StreamJobEvents(c *gin.Context, jobID, fallbackStatus
 	events, unsub := tm.SubscribeJob(jobID)
 	defer unsub()
 
-	current := JobEvent{JobID: jobID, Status: fallbackStatus}
+	current := JobEvent{Kind: jobEventStatus, JobID: jobID, Status: fallbackStatus}
 	if ev, ok := tm.jobEventSnapshot(jobID); ok {
 		current = ev
 	}
@@ -172,8 +236,12 @@ func (tm *TransferManager) StreamJobEvents(c *gin.Context, jobID, fallbackStatus
 	flusher, _ := c.Writer.(http.Flusher)
 
 	writeEvent := func(ev JobEvent) {
+		kind := ev.Kind
+		if kind == "" {
+			kind = jobEventStatus
+		}
 		data, _ := json.Marshal(ev)
-		_, _ = fmt.Fprintf(c.Writer, "event: status\ndata: %s\n\n", data)
+		_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", kind, data)
 		if flusher != nil {
 			flusher.Flush()
 		}
