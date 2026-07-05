@@ -36,7 +36,6 @@ package origin_serve
 
 import (
 	"encoding/xml"
-	"errors"
 	"net/http"
 
 	"golang.org/x/net/webdav"
@@ -54,11 +53,6 @@ const PropSourceEtag = "source-etag"
 // sourceEtagXMLName is the composite name used to key the DeadProps
 // map; kept as a var so tests can reuse it.
 var sourceEtagXMLName = xml.Name{Space: PelicanDAVNamespace, Local: PropSourceEtag}
-
-// errReadOnlyProperty is returned by Patch when a caller tries to
-// modify a Pelican-owned property. webdav renders errors from Patch
-// as 409 propstats when they are typed this way.
-var errReadOnlyProperty = errors.New("pelican dead property is read-only")
 
 // DeadProps satisfies webdav.DeadPropsHolder. It looks up the object's
 // live row via the DAO and, when a source_etag is stored, returns

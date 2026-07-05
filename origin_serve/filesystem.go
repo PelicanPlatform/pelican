@@ -411,23 +411,32 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 }
 
 // fullPath converts a webdav path to a full filesystem path, rejecting
-// any input that contains a ".." segment. The production callers pair
-// this type with OsRootFs which already refuses traversal at the syscall
-// boundary; this check is defense-in-depth for future callers that
-// might wire a non-sandboxed backend, and also breaks the taint trace
-// CodeQL follows from webdav name → afero sink.
+// any input that would escape the export root. The production callers
+// pair this type with OsRootFs which already refuses traversal at the
+// syscall boundary; the check here is defense-in-depth for future
+// callers that might wire a non-sandboxed backend.
 //
-// Anchoring the input at "/" before path.Clean is what actually
-// normalizes any residual "." or "//" — path.Join alone doesn't do
-// this when afs.prefix is empty, which is the shape used by the
-// prod handlers.go call site.
+// The structure — path.Clean directly on the raw name, then a segment
+// check on the cleaned result — is what the CodeQL go/path-injection
+// query recognizes as a sanitizer. path.Clean folds interior "/.."
+// segments and (per its rule 4) collapses any leading "/.." against
+// the root; a residual ".." after cleaning can only mean the input
+// was relative and tried to escape ("../etc", "foo/../../bar"), which
+// this rejects.
 func (afs *aferoFileSystem) fullPath(name string) (string, error) {
-	for _, part := range strings.Split(name, "/") {
+	cleaned := path.Clean(name)
+	for _, part := range strings.Split(cleaned, "/") {
 		if part == ".." {
 			return "", errPathTraversal
 		}
 	}
-	cleaned := path.Clean("/" + strings.TrimLeft(name, "/"))
+	// Anchor the result at "/" so a relative input still produces
+	// an absolute path — matches how the webdav layer hands us
+	// paths and keeps the joined result stable when afs.prefix
+	// is empty (path.Join("", relPath) would keep it relative).
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = path.Clean("/" + cleaned)
+	}
 	if afs.prefix == "" {
 		return cleaned, nil
 	}
