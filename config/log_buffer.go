@@ -126,15 +126,18 @@ func (b *LogRingBuffer) InstanceID() string {
 }
 
 // StartLogRingBuffer wires the ring buffer into logrus and starts its
-// background compression worker. It is idempotent for repeat InitServer
-// callers -- the second caller finds a buffer already installed and returns.
+// background compression worker. Idempotent for repeat InitServer callers
+// -- a second call finds the buffer already installed and returns. Not
+// safe against concurrent callers; InitServer is invoked serially so we
+// don't guard for that.
+//
 // ctx is the server-lifetime context; when it fires, the worker shuts down
 // and any pending compression drains.
 //
-// The buffer's memory footprint is bounded by Logging.Buffer.MaxSize (default
-// 1 MB) and the compression worker is a single goroutine that sleeps when idle.
+// The buffer's memory footprint is bounded by Logging.Buffer.MaxSize
+// (default 1 MB) and the compression worker is a single goroutine that
+// sleeps when idle.
 func StartLogRingBuffer(ctx context.Context) {
-	// Idempotence: if two InitServer callers race here, only one buffer wins.
 	if existing := globalLogBuffer.Load(); existing != nil {
 		return
 	}
@@ -199,14 +202,7 @@ func StartLogRingBuffer(ctx context.Context) {
 	buf.workerWG.Add(1)
 	go buf.compressLoop()
 
-	// Winner-take-all against a concurrent StartLogRingBuffer race.
-	if !globalLogBuffer.CompareAndSwap(nil, buf) {
-		buf.workerCancel()
-		close(buf.compressQueue)
-		buf.workerWG.Wait()
-		return
-	}
-
+	globalLogBuffer.Store(buf)
 	log.AddHook(&logRingBufferHook{buf: buf})
 }
 
