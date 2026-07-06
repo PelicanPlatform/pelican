@@ -326,7 +326,8 @@ export default function LogViewer() {
   const levelCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const lvl of LOG_LEVELS) counts[lvl] = 0;
-    for (const line of lines) counts[line.level] = (counts[line.level] || 0) + 1;
+    for (const line of lines)
+      counts[line.level] = (counts[line.level] || 0) + 1;
     return counts;
   }, [lines]);
 
@@ -363,8 +364,8 @@ export default function LogViewer() {
     return (
       <Alert severity='info' sx={{ mt: 1 }}>
         In-memory log capture is not yet available on this server. This is
-        normally a transient condition during startup; if it persists,
-        confirm the server finished initializing.
+        normally a transient condition during startup; if it persists, confirm
+        the server finished initializing.
       </Alert>
     );
   }

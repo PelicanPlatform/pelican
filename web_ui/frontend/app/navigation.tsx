@@ -33,10 +33,7 @@ import { NavigationConfiguration } from '@/components/layout/Navigation';
 // Excluded on purpose: server.admin. Admins are admitted by the role gate
 // (`allowedRoles: ['admin']`), so listing the scope here would be
 // redundant.
-export const SettingsShellScopes = [
-  'server.user_admin',
-  'pelican.log_read',
-];
+export const SettingsShellScopes = ['server.user_admin', 'pelican.log_read'];
 
 const NavigationConfig: NavigationConfiguration = {
   settings: [

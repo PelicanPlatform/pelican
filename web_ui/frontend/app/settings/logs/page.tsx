@@ -41,7 +41,7 @@ export default function Page() {
           title={'Server Logs'}
           description={
             'Live view of the most recent server log lines. Older lines ' +
-              'are dropped as new ones arrive.'
+            'are dropped as new ones arrive.'
           }
         />
         <LogViewer />
