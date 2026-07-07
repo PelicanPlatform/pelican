@@ -1,0 +1,136 @@
+---
+name: Code Coverage [on schedule]
+
+# Runs the Go test suite once a day purely to measure code coverage, and
+# publishes the result as a JSON artifact ("code-coverage-json"). This is a
+# standalone workflow (rather than a hook into test-linux.yml) so that it runs
+# only "go test" with coverage instrumentation -- no GoReleaser build or
+# end-to-end scripts, none of which contribute to the coverage profile.
+#
+# Like the scheduled test workflow, it runs in the most recent published test
+# container image, since there is no per-run image build to depend on.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # at 06:00 every day
+  workflow_dispatch:
+
+jobs:
+  collect:
+    name: Collect coverage (${{ matrix.binary_name }})
+    runs-on: ubuntu-latest
+    container:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binary_name: pelican
+            coverprofile: coverage.out
+            tags: client
+          - binary_name: pelican-server
+            coverprofile: coverage-server.out
+            tags: server
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: "web_ui/frontend/package.json"
+          cache: "npm"
+          cache-dependency-path: "web_ui/frontend/package-lock.json"
+          check-latest: true
+
+      - name: Set Go version
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Mark the checkout as safe
+        # The custom container image runs as a different user than the checkout
+        # owner, which trips Git's "dubious ownership" guard (and thus Go's
+        # build VCS stamping) unless the directory is marked safe.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Run "go test" with coverage
+        run: |
+          echo "::group::Building web UI"
+          make web-build
+          echo "::endgroup::"
+          go test \
+            -p=4 \
+            -timeout=15m \
+            -coverpkg=./... \
+            -covermode=count \
+            -coverprofile=${{ matrix.coverprofile }} \
+            -tags=${{ matrix.tags }} \
+            ./...
+
+      # A failing or flaky test makes "go test" exit non-zero, which would
+      # normally skip the steps below and throw away the day's coverage data.
+      # Go still writes the coverprofile for the tests that did run, so we
+      # generate and upload the report even after a failed test step (via
+      # "!cancelled()"). The job as a whole still ends red, so a genuine test
+      # failure stays visible rather than being silently swallowed.
+      - name: Generate coverage function report
+        if: ${{ !cancelled() }}
+        run: |
+          go tool cover -func=${{ matrix.coverprofile }} > coverage-func-${{ matrix.binary_name }}.txt
+
+      - name: Upload coverage function report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-func-${{ matrix.binary_name }}
+          path: coverage-func-${{ matrix.binary_name }}.txt
+          overwrite: true  # allow the workflow to be re-run
+
+  report:
+    name: Publish coverage JSON
+    if: ${{ !cancelled() }}
+    needs: [collect]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download coverage reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'coverage-func-*' \
+            --dir coverage-artifacts
+
+      - name: Convert coverage to JSON
+        run: |
+          python3 .github/scripts/coverage/coverage_to_json.py \
+            coverage-artifacts \
+            coverage.json
+
+      - name: Upload coverage JSON
+        uses: actions/upload-artifact@v7
+        with:
+          name: code-coverage-json
+          path: coverage.json
+          overwrite: true  # allow the workflow to be re-run
+
+      - name: Add coverage information to action summary
+        run: |
+          {
+            echo '### Code coverage'
+            echo ''
+            echo '| Profile | Total |'
+            echo '| --- | --- |'
+            python3 -c "import json; d = json.load(open('coverage.json')); [print(f\"| {n} | {p['total']}% |\") for n, p in sorted(d['profiles'].items())]"
+          } >> "$GITHUB_STEP_SUMMARY"
