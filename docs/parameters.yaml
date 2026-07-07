@@ -1407,7 +1407,7 @@ name: Origin.IssuerMode
 description: |+
   Select the issuer implementation to use when Origin.EnableIssuer is true.
   "embedded" uses the fosite-based OIDC provider built directly into Pelican,
-  which requires no external processes. This is under canary testing and 
+  which requires no external processes. This is under canary testing and
   is expected to become the default in a future release.
   "oa4mp" uses the external Java-based OA4MP issuer (legacy, will be deprecated in a future release).
   When switching between modes, state is not migrated between the two databases.
