@@ -1,16 +1,22 @@
 ---
-name: Code Coverage [on schedule]
+name: Code Coverage
 
-# Runs the Go test suite once a day purely to measure code coverage, and
-# publishes the result as a JSON artifact ("code-coverage-json"). This is a
-# standalone workflow (rather than a hook into test-linux.yml) so that it runs
-# only "go test" with coverage instrumentation -- no GoReleaser build or
-# end-to-end scripts, none of which contribute to the coverage profile.
+# Runs the Go test suite purely to measure code coverage, and publishes the
+# result as a JSON artifact ("code-coverage-json") plus an action summary. This
+# is a standalone workflow (rather than a hook into test-linux.yml) so that it
+# runs only "go test" with coverage instrumentation -- no GoReleaser build or
+# end-to-end scripts, none of which contribute to the coverage profile. It also
+# does not re-run flaky tests, so (unlike test-linux.yml) the coverage profile
+# always reflects the whole suite in a single pass rather than being clobbered
+# by a partial re-run.
 #
-# Like the scheduled test workflow, it runs in the most recent published test
-# container image, since there is no per-run image build to depend on.
+# It runs on every pull request to report that PR's coverage, on a daily
+# schedule, and on manual dispatch. Like the scheduled test workflow, it runs
+# in the most recent published test container image, since there is no per-run
+# image build to depend on.
 
 on:
+  pull_request:
   schedule:
     - cron: "0 6 * * *"  # at 06:00 every day
   workflow_dispatch:

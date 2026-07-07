@@ -81,6 +81,9 @@ jobs:
             --format pkgname-and-test-fails \
             --hide-summary=output \
             --junitfile "$JUNIT_FILE" \
+            --rerun-fails=3 \
+            --rerun-fails-max-failures=15 \
+            --packages="./..." \
             -- \
             -p=4 \
             -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
@@ -88,8 +91,7 @@ jobs:
             ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
-            -tags=${{ matrix.tags }} \
-            ./...
+            -tags=${{ matrix.tags }}
 
       - name: Upload JUnit report
         if: always()

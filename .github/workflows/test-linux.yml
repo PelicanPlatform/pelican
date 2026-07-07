@@ -96,6 +96,9 @@ jobs:
             --format pkgname-and-test-fails \
             --hide-summary=output \
             --junitfile "$JUNIT_FILE" \
+            --rerun-fails=3 \
+            --rerun-fails-max-failures=15 \
+            --packages="./..." \
             -- \
             -p=4 \
             -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
@@ -103,8 +106,7 @@ jobs:
             ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
-            -tags=${{ matrix.tags }} \
-            ./...
+            -tags=${{ matrix.tags }}
 
       - name: Upload JUnit report
         if: always()
@@ -119,18 +121,6 @@ jobs:
         uses: test-summary/action@v2
         with:
           paths: junit-${{ matrix.binary_name }}.xml
-
-      - name: Get total code coverage
-        if: github.event_name == 'pull_request'
-        id: cc
-        run: |
-          set -x
-          cc_total=`go tool cover -func=${{ matrix.coverprofile }} | grep total | grep -Eo '[0-9]+\.[0-9]+'`
-          echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
-
-      - name: Add coverage information to action summary
-        if: github.event_name == 'pull_request'
-        run: echo 'Code coverage ${{ steps.cc.outputs.cc_total }}%' >> $GITHUB_STEP_SUMMARY
 
       - name: Mark the checkout as safe
         # Because we're using a custom container image to run this workflow,
