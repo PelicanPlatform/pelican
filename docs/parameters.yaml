@@ -1268,13 +1268,17 @@ components: ["origin"]
 name: Origin.IssuerMode
 description: |+
   Select the issuer implementation to use when Origin.EnableIssuer is true.
-  "embedded" uses the built-in fosite-based OIDC provider which requires
-  no external processes (default).
-  "oa4mp" uses the external Java-based OA4MP issuer (legacy).
+  "embedded" uses the fosite-based OIDC provider built directly into Pelican,
+  which requires no external processes. This is under canary testing and
+  is expected to become the default in a future release.
+  "oa4mp" uses the external Java-based OA4MP issuer (legacy, will be deprecated in a future release).
   When switching between modes, state is not migrated between the two databases.
+
+  Note: the Issuer.AccessTokenLifetime, Issuer.AuthorizationCodeLifetime,
+  Issuer.IDTokenLifetime, and Issuer.RefreshTokenLifetime settings only take
+  effect when this is set to "embedded".
 type: string
 default: "oa4mp"
-hidden: true
 components: ["origin"]
 ---
 name: Origin.ScitokensRestrictedPaths
@@ -3573,6 +3577,8 @@ components: ["origin", "registry", "cache", "director"]
 name: Issuer.AccessTokenLifetime
 description: |+
   Lifetime of access tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -3582,6 +3588,8 @@ name: Issuer.AuthorizationCodeLifetime
 description: |+
   Lifetime of authorization codes and device codes issued by the
   embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 10m
 hidden: true
@@ -3590,6 +3598,8 @@ components: ["origin"]
 name: Issuer.IDTokenLifetime
 description: |+
   Lifetime of ID tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -3608,6 +3618,8 @@ components: ["origin"]
 name: Issuer.RefreshTokenLifetime
 description: |+
   Lifetime of refresh tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 168h
 hidden: true
