@@ -4017,6 +4017,8 @@ components: ["origin", "registry", "cache", "director"]
 name: Issuer.AccessTokenLifetime
 description: |+
   Lifetime of access tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -4026,6 +4028,8 @@ name: Issuer.AuthorizationCodeLifetime
 description: |+
   Lifetime of authorization codes and device codes issued by the
   embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 10m
 hidden: true
@@ -4034,6 +4038,8 @@ components: ["origin"]
 name: Issuer.IDTokenLifetime
 description: |+
   Lifetime of ID tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -4052,6 +4058,8 @@ components: ["origin"]
 name: Issuer.RefreshTokenLifetime
 description: |+
   Lifetime of refresh tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 168h
 hidden: true
