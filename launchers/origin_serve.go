@@ -25,6 +25,7 @@ import (
 	_ "embed"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
@@ -137,6 +139,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
 			}
 		case "oa4mp":
+			warnUnusedIssuerLifetimesKnobs()
 			oa4mpRouterGroup := baseAPIGroup.Group("/issuer")
 			if err = oa4mp.RegisterOA4MPProxy(oa4mpRouterGroup); err != nil {
 				return nil, err
@@ -299,6 +302,39 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 	})
 
 	return nil
+}
+
+// warnUnusedIssuerLifetimesKnobs logs a warning when an origin admin
+// explicitly configured one of the embedded-issuer token lifetime knobs
+// while running with Origin.IssuerMode set to "oa4mp". Those knobs only
+// affect the fosite-based "embedded" issuer; they are silently ignored
+// by the external OA4MP issuer.
+func warnUnusedIssuerLifetimesKnobs() {
+	lifetimeParams := []param.DurationParam{
+		param.Issuer_AccessTokenLifetime,
+		param.Issuer_AuthorizationCodeLifetime,
+		param.Issuer_IDTokenLifetime,
+		param.Issuer_RefreshTokenLifetime,
+	}
+
+	var explicitlySet []string
+	for _, p := range lifetimeParams {
+		// SourceTracker (rather than a plain zero-value check) is used to tell a
+		// user-supplied value apart from the parameter's own default, since the
+		// default is also loaded into viper and would otherwise look identical to
+		// an explicit setting.
+		src, hasSrc := config.GetSourceTracker().Get(strings.ToLower(p.GetName()))
+		if hasSrc && src.Type != config.SourceDefault {
+			explicitlySet = append(explicitlySet, p.GetName())
+		}
+	}
+
+	if len(explicitlySet) > 0 {
+		log.Warnf("The following embedded-issuer token lifetime settings are configured but will have "+
+			"no effect because Origin.IssuerMode is \"oa4mp\": %s. These settings only apply when "+
+			"Origin.IssuerMode is set to \"embedded\"; the external OA4MP issuer manages its own token "+
+			"lifetimes independently.", strings.Join(explicitlySet, ", "))
+	}
 }
 
 // configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
