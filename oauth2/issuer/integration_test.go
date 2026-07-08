@@ -453,6 +453,120 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	assert.Equal(t, "ES256", algs[0], "discovery signing algorithm should match actual ECDSA P-256 key")
 }
 
+// TestIntegrationCORSHeaders verifies that browser-based applications can read
+// the issuer endpoints cross-origin: the public discovery document is readable
+// from any origin, while the credentialed endpoints only accept origins that
+// are registered in Issuer.RedirectUris.
+func TestIntegrationCORSHeaders(t *testing.T) {
+	_, ts := setupIntegration(t)
+	httpClient := ts.Client()
+
+	const browserOrigin = "https://app.example.com"
+	require.NoError(t, param.Issuer_RedirectUris.Set([]string{browserOrigin + "/callback"}))
+
+	discoveryURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/openid-configuration"
+	tokenURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/token"
+
+	t.Run("discovery is readable from any origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, discoveryURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://some-unregistered-site.example.org")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("discovery preflight is allowed from any origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodOptions, discoveryURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://some-unregistered-site.example.org")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("preflight from a registered origin is allowed", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodOptions, tokenURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", browserOrigin)
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+		assert.Equal(t, browserOrigin, resp.Header.Get("Access-Control-Allow-Origin"))
+		assert.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "POST")
+		assert.Equal(t, "Origin", resp.Header.Get("Vary"),
+			"allowed responses vary by Origin, so caches must not share them across sites")
+	})
+
+	t.Run("preflight from an unregistered origin gets no allow-origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodOptions, tokenURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://evil.example.org")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+		assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "Origin", resp.Header.Get("Vary"),
+			"denied responses also vary by Origin, so caches must not serve them to allowed sites")
+	})
+
+	t.Run("actual response from a registered origin echoes the origin", func(t *testing.T) {
+		// A failed token request still carries the CORS headers: the
+		// middleware runs before the handler, so the browser can read the
+		// OAuth error body (per RFC 6749 error responses are part of the
+		// protocol) instead of masking it as an opaque network error.
+		req, err := http.NewRequest(http.MethodPost, tokenURL,
+			strings.NewReader("grant_type=authorization_code"))
+		require.NoError(t, err)
+		req.Header.Set("Origin", browserOrigin)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, browserOrigin, resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("origin matching is case-insensitive in scheme and host", func(t *testing.T) {
+		require.NoError(t, param.Issuer_RedirectUris.Set([]string{"HTTPS://Mixed-Case.Example.COM/callback"}))
+		t.Cleanup(func() {
+			require.NoError(t, param.Issuer_RedirectUris.Set([]string{browserOrigin + "/callback"}))
+		})
+		// Browsers normalize the Origin header to lowercase.
+		req, err := http.NewRequest(http.MethodOptions, tokenURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://mixed-case.example.com")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, "https://mixed-case.example.com", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("credentialed path ending in the discovery suffix is not wildcarded", func(t *testing.T) {
+		// GET oidc-cm/<id> is a credentialed RFC 7592 client-configuration
+		// read, and <id> is attacker-controlled -- an id ending in
+		// ".well-known/openid-configuration" must not inherit the discovery
+		// document's allow-any-origin response header.
+		craftedURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/x" + "/.well-known/openid-configuration"
+		req, err := http.NewRequest(http.MethodGet, craftedURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://evil.example.org")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+}
+
 func TestIntegrationTokenIntrospection(t *testing.T) {
 	provider, ts := setupIntegration(t)
 	httpClient := ts.Client()
