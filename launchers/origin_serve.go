@@ -122,10 +122,14 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// When the director is co-located, it registers the root-level OIDC
 	// metadata (/.well-known/).  The origin registers its own copy under
 	// /api/v1.0/origin so its issuer URL is distinct from the
-	// federation's.  The standalone-origin case is handled by the
-	// root-level RegisterOIDCAPI call below.
+	// federation's.  On a standalone origin, nothing else provides the
+	// root-level metadata, so register it here -- notably, the embedded
+	// issuer's discovery document points its jwks_uri at the root-level
+	// /.well-known/issuer.jwks.
 	if modules.IsEnabled(server_structs.DirectorType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/api/v1.0/origin", web_ui.ServerHeaderMiddleware), false)
+	} else {
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
