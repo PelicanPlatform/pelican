@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -167,7 +165,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // renewalSawAdsOnce flips to true the first time runRenewalTick observes
@@ -215,6 +212,10 @@ type renewalConfig struct {
 	MaxLifetimeMs     int64
 	RootDedicatedGB   float64
 	FederationIssuer  string
+	// AutoCreateOnDiscover gates whether prefixes with no existing lot get an
+	// auto-derived lot this tick. When false, only already-covered prefixes are
+	// renewed; brand-new ones are left to the default lot.
+	AutoCreateOnDiscover bool
 }
 
 // renewExpiringLots is the pure planner used by LaunchRenewalRoutine.
@@ -327,6 +328,17 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAdV2,
 		// Existing-lots-only timeline for this path; planned successors
 		// are tracked via cursor advancement, not by re-injection.
 		ownTimeline := lotsForNamespace(p, existing)
+
+		// At strict-reservations sites, do not mint a lot for a prefix that has
+		// never had one. A path with an existing lot is still renewed so active
+		// reservations don't lapse.
+		if !cfg.AutoCreateOnDiscover && len(ownTimeline) == 0 {
+			prop.skips = append(prop.skips, skipReason{
+				NamespacePath: p,
+				Reason:        "Lotman.AutoCreateOnDiscover is false and no existing lot covers this prefix",
+			})
+			continue
+		}
 
 		cursor := cfg.NowMs
 		for cursor < horizonCreate {
@@ -598,7 +610,9 @@ func dedupeNamespacePaths(ads []server_structs.NamespaceAdV2) []string {
 // isMonitoringPath returns true for the cache's monitoring sub-namespace,
 // which Pelican intentionally excludes from lot tracking.
 func isMonitoringPath(p string) bool {
-	mon := normaliseLotPath(server_utils.MonitoringBaseNs)
+	// ad/lot paths may be federation-qualified (V2); compare against the
+	// correspondingly-qualified monitoring base.
+	mon := monitoringBasePath()
 	np := normaliseLotPath(p)
 	return np == mon || pathContains(mon, np)
 }
@@ -620,21 +634,6 @@ func issuerForPath(p string, ads []server_structs.NamespaceAdV2) string {
 	return ""
 }
 
-// ExpirationTimeIsSentinel reports whether the lot uses the "non-expiring"
-// all-zero timestamp sentinel (lotman PR #44). Sentinel lots (root,
-// default) must never be extended by the renewal scheduler.
-func (l Lot) ExpirationTimeIsSentinel() bool {
-	if l.MPA == nil {
-		return true
-	}
-	if l.MPA.CreationTime == nil || l.MPA.ExpirationTime == nil || l.MPA.DeletionTime == nil {
-		return false
-	}
-	return l.MPA.CreationTime.Value == 0 &&
-		l.MPA.ExpirationTime.Value == 0 &&
-		l.MPA.DeletionTime.Value == 0
-}
-
 // LaunchRenewalRoutine starts a background ticker that periodically calls
 // renewExpiringLots and applies the resulting proposal to the lotman DB.
 // It returns immediately; the goroutine exits when ctx is done.
@@ -645,6 +644,13 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 	interval := param.Lotman_RenewalCheckInterval.GetDuration()
 	if interval <= 0 {
 		interval = time.Hour
+	}
+	// Federation-qualify the ads the renewal planner sees (no-op for V1) so
+	// renewal successors share the same path space as the init lots and the
+	// persistent cache's resolution keys.
+	origAds := getNamespaceAds
+	getNamespaceAds = func() []server_structs.NamespaceAdV2 {
+		return federationQualifyAds(origAds())
 	}
 	// SchedulingHorizon validation runs at config load
 	// (config/config.go); the runtime planner additionally clamps
@@ -791,15 +797,16 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAdV2, perio
 	}
 
 	cfg := renewalConfig{
-		NowMs:             nowMs,
-		PeriodMs:          period.Milliseconds(),
-		HorizonMs:         horizonMs,
-		MinFillerWidthMs:  param.Lotman_MinFillerWidth.GetDuration().Milliseconds(),
-		DefaultLifetimeMs: param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds(),
-		DefaultDeletionMs: param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds(),
-		MaxLifetimeMs:     param.Lotman_MaxLotLifetime.GetDuration().Milliseconds(),
-		RootDedicatedGB:   rootDedicatedGB(existing),
-		FederationIssuer:  federationIssuer,
+		NowMs:                nowMs,
+		PeriodMs:             period.Milliseconds(),
+		HorizonMs:            horizonMs,
+		MinFillerWidthMs:     param.Lotman_MinFillerWidth.GetDuration().Milliseconds(),
+		DefaultLifetimeMs:    param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds(),
+		DefaultDeletionMs:    param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds(),
+		MaxLifetimeMs:        param.Lotman_MaxLotLifetime.GetDuration().Milliseconds(),
+		RootDedicatedGB:      rootDedicatedGB(existing),
+		FederationIssuer:     federationIssuer,
+		AutoCreateOnDiscover: param.Lotman_AutoCreateOnDiscover.GetBool(),
 	}
 
 	prop := renewExpiringLots(cfg, ads, existing)

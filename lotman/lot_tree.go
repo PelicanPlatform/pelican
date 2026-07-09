@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -82,7 +80,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // lotTreeNode mirrors the planned parent/child structure of the cache's
@@ -140,7 +137,9 @@ func buildLotTree(rootLot Lot, nsAds []server_structs.NamespaceAdV2, federationI
 	}
 	seen := map[string]nsNode{}
 	for _, ad := range nsAds {
-		if strings.HasPrefix(ad.Path, server_utils.MonitoringBaseNs) {
+		// ad paths may be federation-qualified (V2); compare against the
+		// correspondingly-qualified monitoring base.
+		if strings.HasPrefix(ad.Path, monitoringBasePath()) {
 			continue
 		}
 		path := normaliseLotPath(ad.Path)

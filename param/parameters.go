@@ -77,6 +77,7 @@ func GetDeprecated() map[string][]string {
         "IssuerKey": {"none"},
         "Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
         "Lotman.DbLocation": {"Lotman.LotHome"},
+        "Lotman.LibLocation": {"none"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
@@ -129,6 +130,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.FilesNominalSize": false,
 	"Cache.HighWaterMark": false,
 	"Cache.LocalRoot": false,
+	"Cache.LotUsageReconcileInterval": false,
 	"Cache.LowWaterMark": false,
 	"Cache.MemoryCacheSize": false,
 	"Cache.MetaLocations": false,
@@ -137,6 +139,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.PSSOrigin": false,
 	"Cache.PermittedNamespaces": false,
 	"Cache.Port": false,
+	"Cache.PurgeInterval": false,
 	"Cache.RunLocation": false,
 	"Cache.SelfTest": false,
 	"Cache.SelfTestInterval": false,
@@ -278,9 +281,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Origin.Scitokens": true,
 	"Logging.Origin.Xrd": true,
 	"Logging.Origin.Xrootd": true,
+	"Lotman.AutoCreateOnDiscover": false,
 	"Lotman.DbLocation": false,
 	"Lotman.DefaultLotDeletionLifetime": false,
 	"Lotman.DefaultLotExpirationLifetime": false,
+	"Lotman.DefaultLotOpportunisticGB": false,
 	"Lotman.EnableAPI": false,
 	"Lotman.EnabledPolicy": false,
 	"Lotman.GarbageCollectionInterval": false,
@@ -289,6 +294,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Lotman.LotRecordRetention": false,
 	"Lotman.MaxLotLifetime": false,
 	"Lotman.MinFillerWidth": false,
+	"Lotman.MonitoringLotMaxObjects": false,
 	"Lotman.PolicyDefinitions": false,
 	"Lotman.RenewalCheckInterval": false,
 	"Lotman.SchedulingHorizon": false,
@@ -881,6 +887,8 @@ var intAccessors = map[string]func(*Config) int{
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
 	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
 	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
+	"Lotman.DefaultLotOpportunisticGB": func(c *Config) int { return c.Lotman.DefaultLotOpportunisticGB },
+	"Lotman.MonitoringLotMaxObjects": func(c *Config) int { return c.Lotman.MonitoringLotMaxObjects },
 	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
 	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
 	"Monitoring.LabelNameLengthLimit": func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
@@ -1018,6 +1026,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Lotman.AutoCreateOnDiscover": func(c *Config) bool { return c.Lotman.AutoCreateOnDiscover },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
@@ -1102,7 +1111,9 @@ func (bP BoolParam) Set(value bool) error {
 var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.DefaultCacheTimeout": func(c *Config) time.Duration { return c.Cache.DefaultCacheTimeout },
 	"Cache.EvictionMonitoringInterval": func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
+	"Cache.LotUsageReconcileInterval": func(c *Config) time.Duration { return c.Cache.LotUsageReconcileInterval },
 	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
+	"Cache.PurgeInterval": func(c *Config) time.Duration { return c.Cache.PurgeInterval },
 	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
 	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
@@ -1294,6 +1305,7 @@ var allParameterNames = []string{
 	"Cache.FilesNominalSize",
 	"Cache.HighWaterMark",
 	"Cache.LocalRoot",
+	"Cache.LotUsageReconcileInterval",
 	"Cache.LowWaterMark",
 	"Cache.MemoryCacheSize",
 	"Cache.MetaLocations",
@@ -1302,6 +1314,7 @@ var allParameterNames = []string{
 	"Cache.PSSOrigin",
 	"Cache.PermittedNamespaces",
 	"Cache.Port",
+	"Cache.PurgeInterval",
 	"Cache.RunLocation",
 	"Cache.SelfTest",
 	"Cache.SelfTestInterval",
@@ -1443,9 +1456,11 @@ var allParameterNames = []string{
 	"Logging.Origin.Scitokens",
 	"Logging.Origin.Xrd",
 	"Logging.Origin.Xrootd",
+	"Lotman.AutoCreateOnDiscover",
 	"Lotman.DbLocation",
 	"Lotman.DefaultLotDeletionLifetime",
 	"Lotman.DefaultLotExpirationLifetime",
+	"Lotman.DefaultLotOpportunisticGB",
 	"Lotman.EnableAPI",
 	"Lotman.EnabledPolicy",
 	"Lotman.GarbageCollectionInterval",
@@ -1454,6 +1469,7 @@ var allParameterNames = []string{
 	"Lotman.LotRecordRetention",
 	"Lotman.MaxLotLifetime",
 	"Lotman.MinFillerWidth",
+	"Lotman.MonitoringLotMaxObjects",
 	"Lotman.PolicyDefinitions",
 	"Lotman.RenewalCheckInterval",
 	"Lotman.SchedulingHorizon",
@@ -1963,6 +1979,8 @@ var (
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
+	Lotman_DefaultLotOpportunisticGB = IntParam{"Lotman.DefaultLotOpportunisticGB"}
+	Lotman_MonitoringLotMaxObjects = IntParam{"Lotman.MonitoringLotMaxObjects"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
 	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
@@ -2035,6 +2053,7 @@ var (
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Lotman_AutoCreateOnDiscover = BoolParam{"Lotman.AutoCreateOnDiscover"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
@@ -2091,7 +2110,9 @@ var (
 var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
+	Cache_LotUsageReconcileInterval = DurationParam{"Cache.LotUsageReconcileInterval"}
 	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
+	Cache_PurgeInterval = DurationParam{"Cache.PurgeInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
@@ -2438,6 +2459,8 @@ func init() {
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
 		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
 		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
+		"Lotman.DefaultLotOpportunisticGB": Lotman_DefaultLotOpportunisticGB,
+		"Lotman.MonitoringLotMaxObjects": Lotman_MonitoringLotMaxObjects,
 		"MinimumDownloadSpeed": MinimumDownloadSpeed,
 		"Monitoring.LabelLimit": Monitoring_LabelLimit,
 		"Monitoring.LabelNameLengthLimit": Monitoring_LabelNameLengthLimit,
@@ -2504,6 +2527,7 @@ func init() {
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
+		"Lotman.AutoCreateOnDiscover": Lotman_AutoCreateOnDiscover,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
@@ -2557,7 +2581,9 @@ func init() {
 		"Xrootd.EnableLocalMonitoring": Xrootd_EnableLocalMonitoring,
 		"Cache.DefaultCacheTimeout": Cache_DefaultCacheTimeout,
 		"Cache.EvictionMonitoringInterval": Cache_EvictionMonitoringInterval,
+		"Cache.LotUsageReconcileInterval": Cache_LotUsageReconcileInterval,
 		"Cache.MinDirectorRefreshInterval": Cache_MinDirectorRefreshInterval,
+		"Cache.PurgeInterval": Cache_PurgeInterval,
 		"Cache.SelfTestInterval": Cache_SelfTestInterval,
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
 		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,
