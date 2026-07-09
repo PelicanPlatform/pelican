@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -151,10 +152,20 @@ func StartLogRingBuffer(ctx context.Context) {
 	maxBytes := defaultMaxBytes
 	if raw := param.Logging_Buffer_MaxSize.GetString(); raw != "" {
 		parsed, err := utils.ParseBytes(raw)
-		if err != nil || parsed == 0 {
+		// The upper-bound check keeps the uint64→int conversion safe on
+		// every platform: on 32-bit builds int is 31-bit signed, so
+		// anything above ~2 GB would wrap; on 64-bit builds a value
+		// with the top bit set (an operator setting "16EB") would go
+		// negative. Refuse absurd sizes explicitly rather than
+		// silently misinterpreting them.
+		switch {
+		case err != nil, parsed == 0:
 			log.Warnf("invalid %s value %q; falling back to 1MB: %v",
 				param.Logging_Buffer_MaxSize.GetName(), raw, err)
-		} else {
+		case parsed > math.MaxInt:
+			log.Warnf("%s value %q exceeds addressable range; falling back to 1MB",
+				param.Logging_Buffer_MaxSize.GetName(), raw)
+		default:
 			maxBytes = int(parsed)
 		}
 	}
