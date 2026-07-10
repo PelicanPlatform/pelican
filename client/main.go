@@ -931,11 +931,35 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		// Note that we use the pUrl.Path, as this will have stripped any query params for us
+		// Destination is an existing directory (the "container target"
+		// gesture). Stat the remote source once to decide two things:
+		//   * If source is a collection and !recursive, error out
+		//     (row G4 -- rather than silently writing the origin's
+		//     directory listing to a local file named after the
+		//     collection).
+		//   * If source is a collection and recursive, nest under
+		//     basename(source) (row G5) so `pelican object get -r
+		//     ns/coll /tmp/dir/` creates /tmp/dir/coll/entries...,
+		//     matching `cp -r ns/coll /tmp/dir/`.
+		// We only stat in this branch, so gets that name a specific
+		// filename (or a non-existent path) pay no extra round trip.
+		isSourceCollection := false
+		if stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...); statErr == nil && stat != nil {
+			isSourceCollection = stat.IsCollection
+		}
+		if isSourceCollection && !recursive {
+			return nil, errors.Errorf(
+				"remote object %q is a collection but recursive is not enabled", remoteObject)
+		}
 		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			// Source is a file, dest is a dir -- infer filename (G2).
+			localDestination = path.Join(localDestPath, remoteObjectFilename)
+		} else if isSourceCollection {
+			// Recursive get of a collection into an existing dir --
+			// nest under basename(source) to match cp -r semantics (G5).
+			// A recursive single-file source keeps the direct-drop
+			// behavior; the walker treats it as a trivial subtree.
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}

@@ -117,47 +117,34 @@ func TestObjectTransferSemantics(t *testing.T) {
 		assert.Equal(t, "hello g3", string(got))
 	})
 
-	t.Run("G4_get_collection_nonrecursive_writes_directory_listing_and_does_not_error", func(t *testing.T) {
-		// Observed on plain main: DoGet with recursive=false against a
-		// collection does NOT error. It runs a single GET against the
-		// collection URL, and the local file written under
-		// <dst>/<basename(remote)> is whatever the origin serves for a
-		// GET on that WebDAV collection (typically an HTML/text
-		// listing, not the collection's descendants).
-		//
-		// This is a somewhat surprising corner: users almost certainly
-		// want `--recursive` for collections, and the current no-error
-		// return can be mistaken for a successful download of the
-		// collection's contents. Documenting it here so a future PR
-		// that wants to reject this case has a target regression test
-		// to update.
+	t.Run("G4_get_collection_nonrecursive_errors", func(t *testing.T) {
+		// After this PR: non-recursive get of a collection errors
+		// with a message symmetric to the put-side "directory but
+		// recursive is not enabled" guard. Previously it silently
+		// wrote the origin's WebDAV listing to a local file named
+		// after the collection.
 		subdir := filepath.Join(storage, "g4-dir")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "inside.txt"), []byte("inside"), 0o644))
 
 		localDir := t.TempDir()
 		_, err := client.DoGet(ft.Ctx, remoteBase+"/g4-dir", localDir, false)
-		require.NoError(t, err,
-			"G4 (current main): non-recursive get of a collection does not error; "+
-				"local file is a WebDAV listing of the collection, not its descendants")
-		// The local <dst>/g4-dir file exists but is NOT the object we
-		// seeded inside the collection. The descendants were not walked.
-		if _, err := os.Stat(filepath.Join(localDir, "g4-dir", "inside.txt")); err == nil {
-			t.Fatal("G4: descendants must not be materialized without --recursive")
-		}
+		require.Error(t, err,
+			"G4: non-recursive get of a collection must error rather than silently succeed")
+		assert.Contains(t, err.Error(), "is a collection but recursive is not enabled",
+			"G4: error text is symmetric with the put-side directory guard")
 	})
 
 	// -----------------------------------------------------------------
 	// GET: single source, --recursive=true
 	// -----------------------------------------------------------------
 
-	t.Run("G5_get_collection_recursive_flattens_contents_under_dest", func(t *testing.T) {
-		// Observed on plain main: a recursive get places entries
-		// DIRECTLY under `dest`, NOT under `dest/basename(remote)`.
-		// If a caller wanted the "unpack the collection as a subdir"
-		// shape, they must add the collection name to `dest` themselves.
-		// This is asymmetric with `cp -r remote/ local` (which would
-		// nest) and worth remembering when scripting.
+	t.Run("G5_get_collection_recursive_nests_under_basename", func(t *testing.T) {
+		// A recursive get of `remote/g5-src` into an existing local
+		// directory `LOCAL` places entries under `LOCAL/g5-src/…`,
+		// matching `cp -r remote/ local/` semantics. This is the
+		// symmetric counterpart to P6 (put of a directory into an
+		// existing remote collection).
 		subdir := filepath.Join(storage, "g5-src")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "a.txt"), []byte("A"), 0o644))
@@ -167,19 +154,21 @@ func TestObjectTransferSemantics(t *testing.T) {
 		_, err := client.DoGet(ft.Ctx, remoteBase+"/g5-src", localDir, true)
 		require.NoError(t, err)
 
-		gotA, err := os.ReadFile(filepath.Join(localDir, "a.txt"))
+		gotA, err := os.ReadFile(filepath.Join(localDir, "g5-src", "a.txt"))
 		require.NoError(t, err,
-			"G5: recursive get flattens entries under dest (no basename subdir)")
+			"G5: recursive get nests entries under LOCAL/basename(remote)")
 		assert.Equal(t, "A", string(gotA))
-		gotB, err := os.ReadFile(filepath.Join(localDir, "b.txt"))
+		gotB, err := os.ReadFile(filepath.Join(localDir, "g5-src", "b.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "BB", string(gotB))
 	})
 
-	t.Run("G6_get_collection_recursive_to_nonexistent_path_creates_and_flattens", func(t *testing.T) {
-		// Same flatten behavior as G5, but here the destination has to
-		// be created first. The entries go DIRECTLY under the newly
-		// created destination path.
+	t.Run("G6_get_collection_recursive_to_nonexistent_path_creates_and_nests", func(t *testing.T) {
+		// When the destination doesn't yet exist, we treat that path
+		// itself as the target container (destination string is the
+		// collection name); entries land directly under it. This
+		// matches how `cp -r remote/ new_local_dir/` behaves when
+		// new_local_dir doesn't yet exist.
 		subdir := filepath.Join(storage, "g6-src")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "only.txt"), []byte("only"), 0o644))
@@ -191,7 +180,7 @@ func TestObjectTransferSemantics(t *testing.T) {
 
 		got, err := os.ReadFile(filepath.Join(newDst, "only.txt"))
 		require.NoError(t, err,
-			"G6: recursive get creates the destination and places entries flat")
+			"G6: recursive get creates the destination and places entries directly under it")
 		assert.Equal(t, "only", string(got))
 	})
 

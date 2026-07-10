@@ -83,6 +83,13 @@ var (
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
 
+	// errStatOnCollectionAtCache is an internal sentinel for the case where a
+	// stat host (typically an XRootD cache) returns 409 for a PROPFIND on what
+	// is actually a directory. Caches do not serve directory listings; statHttp
+	// uses this to decide whether to fall back to the collections URL (origin
+	// WebDAV endpoint), which does serve them.
+	errStatOnCollectionAtCache = errors.New("stat host returned 409 (likely a collection at a cache)")
+
 	// maxWebDavRetries is the maximum number of attempts (including the initial attempt)
 	// for WebDAV operations that encounter idle connection errors.
 	maxWebDavRetries = 2
@@ -5470,10 +5477,10 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrCode(err, http.StatusConflict) {
 					// 409 Conflict — XRootD caches return this for PROPFIND
-					// on directories.  Report as an error so the collections
-					// URL fallback can still succeed.
+					// on directories.  Wrap the sentinel so the collector
+					// can decide to fall back to the collections URL.
 					log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
-					err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
+					err = errors.Wrapf(errStatOnCollectionAtCache, "stat of %s at endpoint %s", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
@@ -5509,6 +5516,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	}
 	success := false
 	notFound := false
+	sawConflict := false
 	for ctr := 0; ctr < len(statHosts); ctr++ {
 		result := <-resultsChan
 		if result.err == nil {
@@ -5523,11 +5531,21 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 				notFound = true
 			}
 		}
+		if result.err != nil && errors.Is(result.err, errStatOnCollectionAtCache) {
+			sawConflict = true
+		}
 	}
 	// Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
 	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
 		// Recursively call statHttp without preferCollectionsUrlOnly
 		return statHttp(dest, dirResp, token, fedToken)
+	}
+	// Fallback: if no host succeeded, at least one stat host was a cache
+	// that returned 409 on what is likely a collection, and the director
+	// gave us a collections URL, retry via the collections URL (origin
+	// WebDAV endpoint) which does serve directory listings.
+	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil {
+		return statHttp(dest, dirResp, token, fedToken, true)
 	}
 	if success {
 		err = nil
