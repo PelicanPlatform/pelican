@@ -89,7 +89,7 @@ ARG XROOTD_LOTMAN_VER=0.1.0
 ARG XROOTD_LOTMAN_RELEASE=
 # ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.7
+ARG XROOTD_S3_HTTP_VER=0.6.8
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
@@ -322,8 +322,8 @@ ARG XROOTD_GID
 # We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.6"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="6.1.0"
+ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}up.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
@@ -366,7 +366,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   done
 
   # Install the pinned packages from osg-testing.
-  dnf install -y --enablerepo=osg-testing "${package_names[@]}"
+  dnf install -y --enablerepo=osg-upcoming-testing --enablerepo=osg-testing "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
@@ -413,7 +413,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y \
             cmake3 \
             gcc-c++ \
             git \
@@ -464,7 +464,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' rpm/${REPO}.spec
       )
       # Install the package in case its a dependency of a later package.
-      dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+      dnf install -y --enablerepo=osg-upcoming-testing /xrootd-build/RPMS/*/${REPO}-*.rpm
     fi
   }
 
@@ -864,7 +864,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
 
-  dnf install -y --enablerepo=osg-contrib \
+  dnf install -y \
         cmake3 \
         delve \
         docker \
