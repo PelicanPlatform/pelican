@@ -161,8 +161,11 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   # We use npm to bootstrap the installation of the required Node.js version
   # and an updated version of npm itself. The `dnf remove` in the middle is to
   # avoid there being multiple, incompatible versions of npm.
+  #
+  # libatomic is a runtime dependency of the Node.js >= 24 binaries; the
+  # minimal AlmaLinux base image does not include it, so install it explicitly.
 
-  dnf install -y npm
+  dnf install -y libatomic npm
   npm install -g n
   n $(jq < /context/package.json -r .engines.node)
   dnf remove -y npm
@@ -837,8 +840,11 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   # We use npm to bootstrap the installation of the required Node.js version
   # and an updated version of npm itself. The `dnf remove` in the middle is to
   # avoid there being multiple, incompatible versions of npm.
+  #
+  # libatomic is a runtime dependency of the Node.js >= 24 binaries; the
+  # minimal AlmaLinux base image does not include it, so install it explicitly.
 
-  dnf install -y npm
+  dnf install -y libatomic npm
   npm install -g n
   n $(jq < /context/package.json -r .engines.node)
   dnf remove -y npm
