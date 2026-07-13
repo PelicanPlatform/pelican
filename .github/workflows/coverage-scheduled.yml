@@ -35,6 +35,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # actions/setup-node downloads its own Node.js binary, which (as of
+      # Node 24) dynamically links libatomic.so.1. The AlmaLinux-based container
+      # image may not ship it yet, so install it before setup-node runs Node.
+      # TODO: remove once the pelican-test image includes libatomic.
+      - name: Install libatomic (Node.js >= 24 runtime dependency)
+        run: dnf install -y libatomic
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
