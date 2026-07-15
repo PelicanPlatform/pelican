@@ -1700,6 +1700,14 @@ func (te *TransferEngine) runJobHandler() error {
 		case job, ok := <-te.work:
 			if !ok {
 				log.Debugln("Job handler has been shutdown")
+				// If a scheduler is configured it is a producer on
+				// te.files; stop it first so the close below cannot
+				// race with a scheduler dispatch and panic on a
+				// send-on-closed channel. Stop() is idempotent —
+				// engine.Shutdown() may call it again, harmlessly.
+				if te.scheduler != nil {
+					te.scheduler.Stop()
+				}
 				close(te.files)
 				return nil
 			}
