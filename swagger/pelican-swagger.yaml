@@ -325,7 +325,7 @@ definitions:
         type: array
         items:
           type: string
-  NamespaceAdV2:
+  NamespaceAd:
     type: object
     properties:
       Caps:
@@ -347,9 +347,9 @@ definitions:
       fromTopology:
         type: boolean
         example: false
-  NamespaceAdV2Mapped:
+  NamespaceAdMapped:
     allOf:
-      - $ref: "#/definitions/NamespaceAdV2"
+      - $ref: "#/definitions/NamespaceAd"
       - type: object
         properties:
           origins:
@@ -3754,7 +3754,7 @@ paths:
           schema:
             type: array
             items:
-              $ref: "#/definitions/NamespaceAdV2"
+              $ref: "#/definitions/NamespaceAd"
         "400":
           description: Bad request, invalid server name
           schema:
@@ -3812,7 +3812,7 @@ paths:
           schema:
             type: array
             items:
-              $ref: "#/definitions/NamespaceAdV2Mapped"
+              $ref: "#/definitions/NamespaceAdMapped"
         "400":
           description: Bad request
           schema:

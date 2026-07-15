@@ -384,7 +384,7 @@ func ResetTestState() {
 	}
 }
 
-// Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.
+// Given a slice of NamespaceAd objects, return a slice of unique top-level prefixes.
 //
 // For example, given:
 //   - /foo
@@ -394,8 +394,8 @@ func ResetTestState() {
 //   - /some/path
 //
 // the function should return /foo, /goo, and /some/path.
-func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
-	prefixMap := make(map[string]server_structs.NamespaceAdV2)
+func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAd) []server_structs.NamespaceAd {
+	prefixMap := make(map[string]server_structs.NamespaceAd)
 	for _, nsAd := range nsAds {
 		if !strings.HasSuffix(nsAd.Path, "/") {
 			nsAd.Path = nsAd.Path + "/"
@@ -418,7 +418,7 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 		}
 	}
 
-	var uniquePrefixes []server_structs.NamespaceAdV2
+	var uniquePrefixes []server_structs.NamespaceAd
 	for _, nsAd := range prefixMap {
 		uniquePrefixes = append(uniquePrefixes, nsAd)
 	}
@@ -427,7 +427,7 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 
 // SetBrokerURL sets the broker URL in the advertisement for servers that have broker support enabled.
 // Returns the broker URL string if successful, or an empty string if not applicable.
-func SetBrokerURL(ad *server_structs.OriginAdvertiseV2, serverType server_structs.ServerType, prefixes []string) error {
+func SetBrokerURL(ad *server_structs.OriginAdvertise, serverType server_structs.ServerType, prefixes []string) error {
 	// Only set broker URL if there's exactly one prefix (this rule is inherited from the initial Broker implementation)
 	if len(prefixes) != 1 {
 		if len(prefixes) > 1 {

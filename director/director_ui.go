@@ -88,26 +88,26 @@ type (
 		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
 		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
 		// accessing protected objects and URL for public objects.
-		AuthURL                string                                 `json:"authUrl"`
-		BrokerURL              string                                 `json:"brokerUrl"`
-		URL                    string                                 `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL                 string                                 `json:"webUrl"` // This is server's Web interface and API
-		Type                   string                                 `json:"type"`
-		Coordinate             server_structs.Coordinate              `json:"coordinate"`
-		Latitude               float64                                `json:"latitude"`
-		Longitude              float64                                `json:"longitude"`
-		Caps                   server_structs.Capabilities            `json:"capabilities"`
-		Filtered               bool                                   `json:"filtered"`
-		FilteredType           string                                 `json:"filteredType"`
-		Downtimes              []server_structs.Downtime              `json:"downtimes"`
-		FromTopology           bool                                   `json:"fromTopology"`
-		HealthStatus           HealthTestStatus                       `json:"healthStatus"`
-		ServerStatus           string                                 `json:"serverStatus"` // see comment in listServerResponse
-		IOLoad                 float64                                `json:"ioLoad"`
-		StatusWeight           float64                                `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
-		StatusWeightLastUpdate int64                                  `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
-		Namespaces             []server_structs.NamespaceAdV2Response `json:"namespaces"`
-		Version                string                                 `json:"version"`
+		AuthURL                string                               `json:"authUrl"`
+		BrokerURL              string                               `json:"brokerUrl"`
+		URL                    string                               `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL                 string                               `json:"webUrl"` // This is server's Web interface and API
+		Type                   string                               `json:"type"`
+		Coordinate             server_structs.Coordinate            `json:"coordinate"`
+		Latitude               float64                              `json:"latitude"`
+		Longitude              float64                              `json:"longitude"`
+		Caps                   server_structs.Capabilities          `json:"capabilities"`
+		Filtered               bool                                 `json:"filtered"`
+		FilteredType           string                               `json:"filteredType"`
+		Downtimes              []server_structs.Downtime            `json:"downtimes"`
+		FromTopology           bool                                 `json:"fromTopology"`
+		HealthStatus           HealthTestStatus                     `json:"healthStatus"`
+		ServerStatus           string                               `json:"serverStatus"` // see comment in listServerResponse
+		IOLoad                 float64                              `json:"ioLoad"`
+		StatusWeight           float64                              `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64                                `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Namespaces             []server_structs.NamespaceAdResponse `json:"namespaces"`
+		Version                string                               `json:"version"`
 	}
 
 	statRequest struct {
@@ -164,9 +164,9 @@ func listServers(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, resList)
 }
 
-// Convert NamespaceAdV2 to namespaceResponse
-func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) server_structs.NamespaceAdV2Response {
-	res := server_structs.NamespaceAdV2Response{
+// Convert NamespaceAd to namespaceResponse
+func namespaceAdToResponse(ns *server_structs.NamespaceAd) server_structs.NamespaceAdResponse {
+	res := server_structs.NamespaceAdResponse{
 		Path:         ns.Path,
 		Caps:         ns.Caps,
 		FromTopology: ns.FromTopology,
@@ -189,10 +189,10 @@ func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) server_structs.Na
 	return res
 }
 
-// namespaceAdV2ToMappedResponse converts a NamespaceAdV2 to a NamespaceAdV2MappedResponse
-func namespaceAdV2ToMappedResponse(ns *server_structs.NamespaceAdV2) server_structs.NamespaceAdV2MappedResponse {
-	nsRes := namespaceAdV2ToResponse(ns)
-	return server_structs.NamespaceAdV2MappedResponse{
+// namespaceAdToMappedResponse converts a NamespaceAd to a NamespaceAdMappedResponse
+func namespaceAdToMappedResponse(ns *server_structs.NamespaceAd) server_structs.NamespaceAdMappedResponse {
+	nsRes := namespaceAdToResponse(ns)
+	return server_structs.NamespaceAdMappedResponse{
 		Path:       nsRes.Path,
 		Caps:       nsRes.Caps,
 		Generation: nsRes.Generation,
@@ -242,7 +242,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		Version:             ad.Version,
 	}
 	for _, ns := range ad.NamespaceAds {
-		nsRes := namespaceAdV2ToResponse(&ns)
+		nsRes := namespaceAdToResponse(&ns)
 		res.Namespaces = append(res.Namespaces, nsRes)
 	}
 	return res
@@ -330,17 +330,17 @@ func listServerNamespaces(ctx *gin.Context) {
 		})
 		return
 	}
-	var nsRes []server_structs.NamespaceAdV2Response
+	var nsRes []server_structs.NamespaceAdResponse
 	for _, n := range server.NamespaceAds {
-		nsRes = append(nsRes, namespaceAdV2ToResponse(&n))
+		nsRes = append(nsRes, namespaceAdToResponse(&n))
 	}
 	ctx.JSON(http.StatusOK, nsRes)
 }
 
 // Get list of all namespaces as a response
-func listNamespaceResponses() []server_structs.NamespaceAdV2MappedResponse {
+func listNamespaceResponses() []server_structs.NamespaceAdMappedResponse {
 
-	namespaceMap := make(map[string]server_structs.NamespaceAdV2MappedResponse)
+	namespaceMap := make(map[string]server_structs.NamespaceAdMappedResponse)
 
 	for _, a := range listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
 		s := a.ServerAd
@@ -348,7 +348,7 @@ func listNamespaceResponses() []server_structs.NamespaceAdV2MappedResponse {
 
 			// If the namespace is not in the map, add it
 			if _, ok := namespaceMap[ns.Path]; !ok {
-				namespaceMap[ns.Path] = namespaceAdV2ToMappedResponse(&ns)
+				namespaceMap[ns.Path] = namespaceAdToMappedResponse(&ns)
 			}
 
 			// Add the server name to its type

@@ -141,11 +141,11 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create advertisement with empty namespace list
-	emptyAd := server_structs.OriginAdvertiseV2{
+	emptyAd := server_structs.OriginAdvertise{
 		ServerID:   metadata.ID,
 		DataURL:    param.Origin_Url.GetString(),
 		WebURL:     param.Server_ExternalWebUrl.GetString(),
-		Namespaces: []server_structs.NamespaceAdV2{},
+		Namespaces: []server_structs.NamespaceAd{},
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: *issuerUrl,
 		}},
@@ -186,7 +186,7 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Failed to register empty origin advertisement")
 
 	// Wait for director to process the empty advertisement and remove /test namespace
-	namespacesUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/director/listNamespaces"
+	namespacesUrl := param.Server_ExternalWebUrl.GetString() + "/api/v2.0/director/listNamespaces"
 	require.Eventually(t, func() bool {
 		resp, err := httpClient.Get(namespacesUrl)
 		if err != nil {
@@ -194,7 +194,7 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		var namespaces []server_structs.NamespaceAdV2
+		var namespaces []server_structs.NamespaceAd
 		if err := json.NewDecoder(resp.Body).Decode(&namespaces); err != nil {
 			return false
 		}

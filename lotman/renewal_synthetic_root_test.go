@@ -68,7 +68,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	_ = config.InitServer(context.Background(), server_structs.CacheType)
 
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/my-prefix", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 		{Path: "/my-prefix2", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
@@ -104,7 +104,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	// startup. This is where the production cache reports
 	// "Hierarchy violation: peak concurrent dedicated_GB across children
 	// of parent lot 'root' is 6.0, which exceeds 3.0".
-	getAds := func() []server_structs.NamespaceAdV2 { return ads }
+	getAds := func() []server_structs.NamespaceAd { return ads }
 	runRenewalTick(getAds, time.Hour)
 
 	allAfterTick, err := ListAllLots()

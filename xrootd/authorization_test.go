@@ -533,7 +533,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 
 func TestPopulateAuthLinesMapForCache(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{
 			Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 			Path: "/first/namespace",
@@ -739,8 +739,8 @@ func TestEmitAuthfile(t *testing.T) {
 	testCases := []struct {
 		name                 string
 		serverType           server_structs.ServerType
-		originCfg            string                         // only used if serverType is Origin
-		nsAds                []server_structs.NamespaceAdV2 // only used if serverType is Cache
+		originCfg            string                       // only used if serverType is Origin
+		nsAds                []server_structs.NamespaceAd // only used if serverType is Cache
 		dropPrivileges       bool
 		discoverOSDFAuthfile bool
 		inputAuthfile        string
@@ -808,7 +808,7 @@ u * /second/valid/path lr /second/namespace -lr /first/namespace lr /.well-known
 		{
 			name:       "Cache with discoverOSDFAuthfile true and valid input authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -832,7 +832,7 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 		{
 			name:       "Cache with valid input authfile and without OSDF authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -853,7 +853,7 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 		{
 			name:       "Cache with without input authfile or OSDF authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -1365,17 +1365,17 @@ func TestGenerateCacheIssuers(t *testing.T) {
 
 	testCases := []struct {
 		name            string
-		nsAds           []server_structs.NamespaceAdV2
+		nsAds           []server_structs.NamespaceAd
 		expectedIssuers []Issuer
 	}{
 		{
 			name:            "empty namespace ads",
-			nsAds:           []server_structs.NamespaceAdV2{},
+			nsAds:           []server_structs.NamespaceAd{},
 			expectedIssuers: []Issuer{},
 		},
 		{
 			name: "single namespace ad with public capabilities",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1394,7 +1394,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "single namespace ad with private capabilities",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1418,7 +1418,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with the same issuer",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1454,7 +1454,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with different issuers",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1495,7 +1495,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with multiple issuers",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1689,7 +1689,7 @@ func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
 
 	// Create cache server with initial namespace ads - one public, one private
 	cacheServer := &cache.CacheServer{}
-	initialNamespaceAds := []server_structs.NamespaceAdV2{
+	initialNamespaceAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public/data",
 			Caps: server_structs.Capabilities{
@@ -1749,7 +1749,7 @@ func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
 
 	// Simulate namespace ads changing - make the previously public namespace private
 	// and add a new public namespace
-	updatedNamespaceAds := []server_structs.NamespaceAdV2{
+	updatedNamespaceAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public/data", // This was public, now becomes private
 			Caps: server_structs.Capabilities{

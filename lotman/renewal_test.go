@@ -27,11 +27,11 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-func adsForRenewal(paths ...string) []server_structs.NamespaceAdV2 {
+func adsForRenewal(paths ...string) []server_structs.NamespaceAd {
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	out := make([]server_structs.NamespaceAdV2, 0, len(paths))
+	out := make([]server_structs.NamespaceAd, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, server_structs.NamespaceAdV2{
+		out = append(out, server_structs.NamespaceAd{
 			Path: p,
 			Issuer: []server_structs.TokenIssuer{
 				{IssuerUrl: *issuerURL},

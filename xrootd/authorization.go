@@ -1133,7 +1133,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // authorizes locally-minted tokens the cache uses for self-tests and for evicting director
 // test files via the local xrdhttp-pelican evict API. Centralizing this here ensures both
 // the startup write and the runtime EmitScitokensConfig path produce the same scitokens.cfg.
-func buildCacheNsAdsWithIssuer(cacheServer *cache.CacheServer) ([]server_structs.NamespaceAdV2, error) {
+func buildCacheNsAdsWithIssuer(cacheServer *cache.CacheServer) ([]server_structs.NamespaceAd, error) {
 	directorAds := cacheServer.GetNamespaceAds()
 	if !param.Cache_SelfTest.GetBool() {
 		return directorAds, nil
@@ -1146,7 +1146,7 @@ func buildCacheNsAdsWithIssuer(cacheServer *cache.CacheServer) ([]server_structs
 	if err != nil {
 		return nil, errors.Wrap(err, "could not parse server's issuer URL when generating scitokens config")
 	}
-	cacheIssuer := server_structs.NamespaceAdV2{
+	cacheIssuer := server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
 		Path: server_utils.MonitoringBaseNs,
 		Issuer: []server_structs.TokenIssuer{
@@ -1245,12 +1245,12 @@ func WriteOriginScitokensConfig(isFirstRun bool) error {
 	return writeScitokensConfiguration(server_structs.OriginType, &cfg, isFirstRun)
 }
 
-// GenerateCacheIssuers takes a slice of NamespaceAdV2 and generates a list of Issuer objects
+// GenerateCacheIssuers takes a slice of NamespaceAd and generates a list of Issuer objects
 // for the cache's scitokens configuration. It aggregates base paths for each issuer
 // and removes duplicates, returning a slice of Issuer objects.
 // This could be easily accomplished directly in WriteCacheScitokensConfig, but this split
 // makes it slightly easier to test, as it doesn't require checking file contents for equality.
-func GenerateCacheIssuers(nsAds []server_structs.NamespaceAdV2) []Issuer {
+func GenerateCacheIssuers(nsAds []server_structs.NamespaceAd) []Issuer {
 	// Map to aggregate base paths for each issuer
 	var issuerMap = make(map[string][]string)
 	for _, ad := range nsAds {
@@ -1280,7 +1280,7 @@ func GenerateCacheIssuers(nsAds []server_structs.NamespaceAdV2) []Issuer {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2, isFirstRun bool) error {
+func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAd, isFirstRun bool) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err

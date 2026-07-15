@@ -87,7 +87,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{
 			Path: "/ns1",
 		},
