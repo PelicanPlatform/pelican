@@ -536,11 +536,19 @@ func synthesizeRejectionResult(file *clientTransferFile, err error) *clientTrans
 		JobId: file.jobId,
 		Error: err,
 	}
-	if file.file != nil && file.file.remoteURL != nil {
-		res.Scheme = file.file.remoteURL.Scheme
-	}
-	if file.file != nil && file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
-		res.DirectorDecision = file.file.job.dirResp.RedirectInfo
+	if file.file != nil {
+		// runMux's results-side branch (client/handle_http.go around
+		// the tmpResults[id] processing) unconditionally dereferences
+		// TransferResults.job to decrement activeXfer and check
+		// completion.  Wire the job here so a scheduler-rejected
+		// transfer doesn't panic on shutdown.
+		res.job = file.file.job
+		if file.file.remoteURL != nil {
+			res.Scheme = file.file.remoteURL.Scheme
+		}
+		if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
+			res.DirectorDecision = file.file.job.dirResp.RedirectInfo
+		}
 	}
 	log.Debugf("Scheduler rejected transfer for %v: %v", file.uuid, err)
 	return &clientTransferResults{id: file.uuid, results: res}
