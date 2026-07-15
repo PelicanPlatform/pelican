@@ -19,9 +19,16 @@
 package local_cache
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/client"
 )
 
 func TestIsFederationAllowed(t *testing.T) {
@@ -57,5 +64,50 @@ func TestIsFederationAllowed(t *testing.T) {
 	t.Run("ListEntryCaseInsensitive", func(t *testing.T) {
 		list := []string{"Allowed.Example.COM:443"}
 		assert.True(t, isFederationAllowed("allowed.example.com:443", primary, list))
+	})
+}
+
+// TestHandleErrorTooManyRequests pins the wire contract for the fair
+// scheduler's shedding path: when the upstream fetch returns
+// client.ErrTooManyRequests, the cache's serveObject error path must
+// answer the client with HTTP 429 and a Retry-After header, not the
+// generic 500. If this test breaks, dashboards and clients relying on
+// the 429 backoff signal will silently degrade.
+func TestHandleErrorTooManyRequests(t *testing.T) {
+	reqLog := log.NewEntry(log.New())
+
+	t.Run("BareSentinel", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handleError(rec, client.ErrTooManyRequests, false, reqLog)
+		require.Equal(t, 429, rec.Code)
+		require.Equal(t, "60", rec.Header().Get("Retry-After"),
+			"Retry-After should tell the client to back off for 60 seconds")
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		assert.Equal(t, "too_many_requests", body["error"])
+		assert.NotEmpty(t, body["detail"])
+	})
+
+	t.Run("WrappedSentinel", func(t *testing.T) {
+		// The transfer engine wraps the sentinel with a per-origin
+		// context ("pending queue is full", "origin \"…\" pending
+		// queue is full", …); handleError must still recognise it
+		// via errors.Is.
+		rec := httptest.NewRecorder()
+		wrapped := errors.Wrapf(client.ErrTooManyRequests, "origin %q pending queue is full", "originA")
+		handleError(rec, wrapped, false, reqLog)
+		require.Equal(t, 429, rec.Code)
+		require.Equal(t, "60", rec.Header().Get("Retry-After"))
+	})
+
+	t.Run("UnrelatedErrorStaysNon429", func(t *testing.T) {
+		// A regression guard: any bare error should still take the
+		// existing internal_error / not_found / etc. paths, not fall
+		// through the new 429 branch.
+		rec := httptest.NewRecorder()
+		handleError(rec, errors.New("some other error"), false, reqLog)
+		assert.NotEqual(t, 429, rec.Code, "non-scheduler errors must not accidentally map to 429")
+		assert.Empty(t, rec.Header().Get("Retry-After"))
 	})
 }
