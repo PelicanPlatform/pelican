@@ -1546,6 +1546,19 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableTLSClientAuth
+description: |+
+  Turns client certificate authentication on or off in xrootd for the HTTPS protocol. When false (default) the
+  origin will never request a TLS client certificate. When true, the origin will always request
+  a client certificate from the client.
+
+  Note that X.509/VOMS-based authentication (see Origin.EnableVoms) relies on the client presenting
+  a certificate during the TLS handshake; if the origin should authenticate clients via VOMS,
+  this parameter must be set to true.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.EnableDirListing
 description: |+
   [Deprecated] Origin.EnableDirListing is being deprecated and will be removed in a future release. It is replaced by Origin.EnableListings.
