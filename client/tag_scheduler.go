@@ -36,6 +36,42 @@ import (
 // HTTP 429.
 var ErrTooManyRequests = errors.New("too many requests: origin is over its share of the transfer pool")
 
+// PerTagStats is a per-origin snapshot of scheduler state, intended for
+// monitoring / debugging. Values are consistent (all taken under one
+// lock) but stale as soon as they're read.
+type PerTagStats struct {
+	// Pending, Active, Starving are the current counts at snapshot time.
+	Pending  int
+	Active   int
+	Starving int
+	// EMA is the exponentially-weighted moving average of Active over
+	// the configured EMAWindow. Used as the weight input for the
+	// per-tag round-robin dispatch decision.
+	EMA float64
+	// Admits and Rejects are monotonic totals since scheduler start.
+	Admits  uint64
+	Rejects uint64
+}
+
+// GlobalStats is the pool-wide scheduler snapshot.
+type GlobalStats struct {
+	WorkerCount        int
+	StarvingCap        int
+	ActiveCap          int
+	TotalPending       int
+	TotalTags          int
+	TotalAdmits        uint64
+	TotalRejects       uint64
+	TotalRejectsGlobal uint64 // subset of TotalRejects: rejected because global pending was full
+	TotalRejectsPerTag uint64 // subset of TotalRejects: rejected because per-tag pending was full
+}
+
+// SchedulerSnapshot is a full snapshot of scheduler state.
+type SchedulerSnapshot struct {
+	Global GlobalStats
+	Tags   map[string]PerTagStats
+}
+
 // SchedulerConfig configures a TagScheduler. Zero-values disable the
 // corresponding limit.
 type SchedulerConfig struct {
@@ -74,6 +110,7 @@ type TagScheduler struct {
 	// by the scheduler goroutine and MUST NOT be touched from outside.
 	admit    chan *admitReq
 	events   chan schedulerEvent
+	snapReqs chan chan<- SchedulerSnapshot
 	stop     chan struct{}
 	stopped  chan struct{}
 	out      chan<- *clientTransferFile
@@ -83,8 +120,15 @@ type TagScheduler struct {
 	active   map[string]int        // tag → in-flight (any state)
 	starving map[string]int        // tag → in-flight without first byte
 	ema      map[string]float64    // tag → EMA of active
+	admits   map[string]uint64     // tag → monotonic admit count
+	rejects  map[string]uint64     // tag → monotonic rejection count
 	lastTick time.Time
 	pending  int
+
+	// Global monotonic counters, broken down by why we rejected.
+	// TotalAdmits = sum(admits values); TotalRejects = same for rejects.
+	totalRejectsGlobal uint64 // rejected because global pending was full
+	totalRejectsPerTag uint64 // rejected because per-tag pending was full
 }
 
 // Sentinel event kinds for use over the events channel.
@@ -118,6 +162,7 @@ func NewTagScheduler(workerCount int, cfg SchedulerConfig) *TagScheduler {
 		workerCount: workerCount,
 		admit:       make(chan *admitReq),
 		events:      make(chan schedulerEvent, 256),
+		snapReqs:    make(chan chan<- SchedulerSnapshot),
 		stop:        make(chan struct{}),
 		stopped:     make(chan struct{}),
 		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -125,6 +170,8 @@ func NewTagScheduler(workerCount int, cfg SchedulerConfig) *TagScheduler {
 		active:      make(map[string]int),
 		starving:    make(map[string]int),
 		ema:         make(map[string]float64),
+		admits:      make(map[string]uint64),
+		rejects:     make(map[string]uint64),
 	}
 }
 
@@ -242,6 +289,8 @@ func (s *TagScheduler) run(ctx context.Context) {
 				s.handleAdmit(req)
 			case ev := <-s.events:
 				s.handleEvent(ev)
+			case reply := <-s.snapReqs:
+				reply <- s.buildSnapshot()
 			case <-tick.C:
 				s.tickEMA()
 			case <-s.stop:
@@ -255,6 +304,8 @@ func (s *TagScheduler) run(ctx context.Context) {
 				s.handleAdmit(req)
 			case ev := <-s.events:
 				s.handleEvent(ev)
+			case reply := <-s.snapReqs:
+				reply <- s.buildSnapshot()
 			case <-tick.C:
 				s.tickEMA()
 			case <-s.stop:
@@ -268,6 +319,8 @@ func (s *TagScheduler) run(ctx context.Context) {
 
 func (s *TagScheduler) handleAdmit(req *admitReq) {
 	if s.cfg.PendingBufferSize > 0 && s.pending >= s.cfg.PendingBufferSize {
+		s.rejects[req.tag]++
+		s.totalRejectsGlobal++
 		req.reply <- errors.Wrap(ErrTooManyRequests, "pending queue is full")
 		return
 	}
@@ -277,11 +330,14 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 		s.fifos[req.tag] = q
 	}
 	if s.cfg.PerTagPendingSize > 0 && q.Len() >= s.cfg.PerTagPendingSize {
+		s.rejects[req.tag]++
+		s.totalRejectsPerTag++
 		req.reply <- errors.Wrapf(ErrTooManyRequests, "origin %q pending queue is full", req.tag)
 		return
 	}
 	q.PushBack(req.file)
 	s.pending++
+	s.admits[req.tag]++
 	req.reply <- nil
 }
 
@@ -383,6 +439,93 @@ func (s *TagScheduler) tickEMA() {
 			s.ema[tag] = alpha * float64(s.active[tag])
 		}
 	}
+}
+
+// Snapshot returns a consistent snapshot of scheduler state suitable
+// for driving monitoring metrics. Runs on the scheduler goroutine so
+// counters, gauges, and per-tag maps agree with one another.
+//
+// Returns the zero snapshot if the scheduler has already stopped.
+func (s *TagScheduler) Snapshot(ctx context.Context) SchedulerSnapshot {
+	reply := make(chan SchedulerSnapshot, 1)
+	select {
+	case s.snapReqs <- reply:
+	case <-ctx.Done():
+		return SchedulerSnapshot{}
+	case <-s.stop:
+		return SchedulerSnapshot{}
+	}
+	select {
+	case snap := <-reply:
+		return snap
+	case <-ctx.Done():
+		return SchedulerSnapshot{}
+	}
+}
+
+// buildSnapshot must be called on the scheduler goroutine (all state
+// reads are lock-free because we're the sole writer). Copies every
+// map value; the returned SchedulerSnapshot never aliases scheduler
+// state.
+func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
+	snap := SchedulerSnapshot{
+		Global: GlobalStats{
+			WorkerCount:        s.workerCount,
+			StarvingCap:        s.starvingCap(),
+			ActiveCap:          s.activeCap(),
+			TotalPending:       s.pending,
+			TotalRejectsGlobal: s.totalRejectsGlobal,
+			TotalRejectsPerTag: s.totalRejectsPerTag,
+		},
+	}
+	// Collect the union of every tag we know about — a tag may have
+	// pending entries in `fifos`, active/starving counters even after
+	// its FIFO drained, an EMA that's still decaying, or lifetime
+	// admit/reject totals long after all its in-flight work is done.
+	seen := make(map[string]struct{})
+	add := func(m map[string]struct{}, k string) { m[k] = struct{}{} }
+	for tag := range s.fifos {
+		add(seen, tag)
+	}
+	for tag := range s.active {
+		add(seen, tag)
+	}
+	for tag := range s.starving {
+		add(seen, tag)
+	}
+	for tag := range s.ema {
+		add(seen, tag)
+	}
+	for tag := range s.admits {
+		add(seen, tag)
+	}
+	for tag := range s.rejects {
+		add(seen, tag)
+	}
+
+	snap.Tags = make(map[string]PerTagStats, len(seen))
+	var totalAdmits, totalRejects uint64
+	for tag := range seen {
+		var pending int
+		if q, ok := s.fifos[tag]; ok {
+			pending = q.Len()
+		}
+		p := PerTagStats{
+			Pending:  pending,
+			Active:   s.active[tag],
+			Starving: s.starving[tag],
+			EMA:      s.ema[tag],
+			Admits:   s.admits[tag],
+			Rejects:  s.rejects[tag],
+		}
+		snap.Tags[tag] = p
+		totalAdmits += p.Admits
+		totalRejects += p.Rejects
+	}
+	snap.Global.TotalTags = len(snap.Tags)
+	snap.Global.TotalAdmits = totalAdmits
+	snap.Global.TotalRejects = totalRejects
+	return snap
 }
 
 // synthesizeRejectionResult builds a TransferResults that surfaces a 429

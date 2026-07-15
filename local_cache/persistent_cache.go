@@ -59,6 +59,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -176,6 +177,11 @@ type PersistentCache struct {
 
 	// Transfer engine for creating per-request clients
 	te *client.TransferEngine
+
+	// Optional fair scheduler installed on te. Held here so the
+	// per-origin monitoring publisher can Snapshot() it on a fixed
+	// cadence.  nil when Cache.Throttle.PendingBufferSize == 0.
+	scheduler *client.TagScheduler
 
 	// Federation configuration
 	directorURL *url.URL
@@ -636,6 +642,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// single misbehaving upstream origin cannot monopolise the worker pool
 	// (see Cache.Throttle.* params for the caps).
 	var te *client.TransferEngine
+	var pcScheduler *client.TagScheduler
 	if cfg.Mode == CacheModeServer {
 		workers := param.Cache_WorkerCount.GetInt()
 		if workers <= 0 {
@@ -649,8 +656,8 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 			EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
 		}
 		if schedCfg.PendingBufferSize > 0 {
-			sched := client.NewTagScheduler(workers, schedCfg)
-			te, err = client.NewTransferEngineWithScheduler(ctx, workers, sched)
+			pcScheduler = client.NewTagScheduler(workers, schedCfg)
+			te, err = client.NewTransferEngineWithScheduler(ctx, workers, pcScheduler)
 		} else {
 			te, err = client.NewTransferEngineWithWorkers(ctx, workers)
 		}
@@ -673,6 +680,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		eviction:        eviction,
 		consistency:     consistency,
 		te:              te,
+		scheduler:       pcScheduler,
 		directorURL:     directorURL,
 		defaultFed:      defaultFed,
 		ac:              newAuthConfig(ctx, egrp),
@@ -711,6 +719,13 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil
 	})
 
+	// Publish per-origin fair-scheduler metrics to Prometheus on a fixed
+	// cadence. Snapshot() is a channel round-trip through the scheduler
+	// goroutine, so it costs one context switch every tick.
+	if pcScheduler != nil {
+		egrp.Go(func() error { return pc.runSchedulerMetricsPublisher(ctx) })
+	}
+
 	// Register with config's pre-cleanup hook so that the temp-directory
 	// errgroup goroutine waits for BadgerDB to flush before it calls
 	// os.RemoveAll.  pc.Close() is wait-safe: if the errgroup goroutine
@@ -727,6 +742,55 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	log.Infof("Persistent cache initialized: %s (%d storage dir(s))", cfg.BaseDir, len(storageDirs))
 
 	return pc, nil
+}
+
+// schedulerMetricsPublishInterval is how often the fair-scheduler
+// snapshot gets pushed into Prometheus gauges. Kept short enough
+// that a Prometheus scrape (default 15 s) always sees a fresh value.
+const schedulerMetricsPublishInterval = 5 * time.Second
+
+// runSchedulerMetricsPublisher periodically snapshots pc.scheduler
+// and translates it into the pelican_cache_scheduler_* Prometheus
+// metrics. Exits on ctx cancellation.
+func (pc *PersistentCache) runSchedulerMetricsPublisher(ctx context.Context) error {
+	ticker := time.NewTicker(schedulerMetricsPublishInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			snap := pc.scheduler.Snapshot(ctx)
+			// Snapshot returns zero when the scheduler is stopping;
+			// don't clobber the last-published gauges with zeroes.
+			if snap.Tags == nil && snap.Global.WorkerCount == 0 {
+				continue
+			}
+			global := metrics.SchedulerGlobalStats{
+				WorkerCount:        snap.Global.WorkerCount,
+				StarvingCap:        snap.Global.StarvingCap,
+				ActiveCap:          snap.Global.ActiveCap,
+				TotalPending:       snap.Global.TotalPending,
+				TotalTags:          snap.Global.TotalTags,
+				TotalAdmits:        snap.Global.TotalAdmits,
+				TotalRejects:       snap.Global.TotalRejects,
+				TotalRejectsGlobal: snap.Global.TotalRejectsGlobal,
+				TotalRejectsPerTag: snap.Global.TotalRejectsPerTag,
+			}
+			tags := make(map[string]metrics.SchedulerPerTagStats, len(snap.Tags))
+			for tag, s := range snap.Tags {
+				tags[tag] = metrics.SchedulerPerTagStats{
+					Pending:  s.Pending,
+					Active:   s.Active,
+					Starving: s.Starving,
+					EMA:      s.EMA,
+					Admits:   s.Admits,
+					Rejects:  s.Rejects,
+				}
+			}
+			metrics.PublishCacheSchedulerSnapshot(global, tags)
+		}
+	}
 }
 
 // Config configures the cache and starts periodic updates

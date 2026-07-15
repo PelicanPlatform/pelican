@@ -297,6 +297,79 @@ func TestTagSchedulerFairnessAcrossTags(t *testing.T) {
 	assert.Equal(t, 3, got["originB"], "each tag caps at 3 while starving")
 }
 
+// TestTagSchedulerSnapshot: Snapshot() returns a coherent view whose
+// invariants match what we drove in — admits + rejects add up to the
+// submit attempts, per-tag pending/active/starving are non-negative,
+// and rejects show up in the global reject reason breakdown.
+//
+// Exact per-step counts race with the scheduler goroutine's dispatch
+// loop, so we assert on the sum rather than the split.
+func TestTagSchedulerSnapshot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// Small pool + tight per-tag caps so we're guaranteed to see
+	// per-tag pending-queue rejections after enough submits.
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap = 1
+		PerTagActivePercent:   50, // active cap = 2
+		PendingBufferSize:     100,
+		PerTagPendingSize:     3,
+		EMAWindow:             5 * time.Second,
+	})
+	// No consumer on `out`; buffered so dispatch doesn't block.
+	out := make(chan *clientTransferFile, 100)
+	sched.Start(ctx, out)
+	t.Cleanup(sched.Stop)
+
+	// Submit enough for originA that we're guaranteed to see rejects
+	// once its FIFO fills (starving cap = 1, active cap = 2 ⇒ at
+	// most 2 in-flight; with per-tag FIFO = 3 the extras eventually
+	// 429).
+	const nSubmits = 20
+	accepted, rejected := 0, 0
+	for i := 0; i < nSubmits; i++ {
+		if err := sched.Submit(ctx, "originA", makeFile("originA")); err == nil {
+			accepted++
+		} else {
+			require.ErrorIs(t, err, ErrTooManyRequests)
+			rejected++
+		}
+	}
+	require.Greater(t, rejected, 0, "at least one 429 expected once the per-tag FIFO fills")
+
+	snap := sched.Snapshot(ctx)
+	require.NotNil(t, snap.Tags)
+
+	// Global invariants.
+	assert.Equal(t, 4, snap.Global.WorkerCount)
+	assert.Equal(t, 1, snap.Global.StarvingCap, "starving cap = ceil(25%%×4)")
+	assert.Equal(t, 2, snap.Global.ActiveCap, "active cap = ceil(50%%×4)")
+	assert.Equal(t, uint64(accepted), snap.Global.TotalAdmits,
+		"scheduler-tracked admits should match the Submit-side accepted count")
+	assert.Equal(t, uint64(rejected), snap.Global.TotalRejects,
+		"scheduler-tracked rejects should match the Submit-side rejected count")
+	assert.Equal(t, snap.Global.TotalRejects,
+		snap.Global.TotalRejectsGlobal+snap.Global.TotalRejectsPerTag,
+		"rejects split into global + per_tag adds up to the total")
+
+	// Per-tag: only originA touched.
+	a, ok := snap.Tags["originA"]
+	require.True(t, ok)
+	assert.Equal(t, uint64(accepted), a.Admits)
+	assert.Equal(t, uint64(rejected), a.Rejects)
+	assert.GreaterOrEqual(t, a.Pending, 0)
+	assert.GreaterOrEqual(t, a.Active, 0)
+	assert.GreaterOrEqual(t, a.Starving, 0)
+	assert.LessOrEqual(t, a.Starving, a.Active,
+		"starving is a subset of active — never larger")
+	assert.LessOrEqual(t, a.Active, snap.Global.ActiveCap,
+		"active respects the per-tag active cap")
+
+	// A never-mentioned tag should be absent from the snapshot.
+	_, present := snap.Tags["originB"]
+	assert.False(t, present, "tags with zero activity should not appear in the snapshot")
+}
+
 // TestTagSchedulerConcurrentSubmit: many submissions from parallel
 // goroutines should each get a deterministic accept-or-429 answer
 // without deadlock.
