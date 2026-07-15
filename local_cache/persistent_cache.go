@@ -631,13 +631,29 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// transfer workers than the command-line client's small default
 	// (Client.WorkerCount).  Use Cache.WorkerCount for the server; the
 	// client-side local cache keeps the client default.
+	//
+	// The server-mode engine is also wired with a TagScheduler so that a
+	// single misbehaving upstream origin cannot monopolise the worker pool
+	// (see Cache.Throttle.* params for the caps).
 	var te *client.TransferEngine
 	if cfg.Mode == CacheModeServer {
 		workers := param.Cache_WorkerCount.GetInt()
 		if workers <= 0 {
 			workers = 100
 		}
-		te, err = client.NewTransferEngineWithWorkers(ctx, workers)
+		schedCfg := client.SchedulerConfig{
+			PerTagStarvingPercent: param.Cache_Throttle_PerOriginStarvingPercent.GetInt(),
+			PerTagActivePercent:   param.Cache_Throttle_PerOriginActivePercent.GetInt(),
+			PendingBufferSize:     param.Cache_Throttle_PendingBufferSize.GetInt(),
+			PerTagPendingSize:     param.Cache_Throttle_PerOriginPendingSize.GetInt(),
+			EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
+		}
+		if schedCfg.PendingBufferSize > 0 {
+			sched := client.NewTagScheduler(workers, schedCfg)
+			te, err = client.NewTransferEngineWithScheduler(ctx, workers, sched)
+		} else {
+			te, err = client.NewTransferEngineWithWorkers(ctx, workers)
+		}
 	} else {
 		te, err = client.NewTransferEngine(ctx)
 	}

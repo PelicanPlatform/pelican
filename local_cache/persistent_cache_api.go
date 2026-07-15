@@ -210,6 +210,14 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		reqLog.Warn("Upstream response timeout")
 		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream response timeout")
 		return
+	} else if errors.Is(getErr, client.ErrTooManyRequests) {
+		// The cache's fair scheduler refused to admit this upstream fetch
+		// because the origin (or the global pending buffer) is at its cap.
+		// Ask the client to retry after a moment.
+		reqLog.Warn("Cache scheduler rejected upstream fetch: ", getErr)
+		w.Header().Set("Retry-After", "60")
+		writeJSON(http.StatusTooManyRequests, "too_many_requests", getErr.Error())
+		return
 	}
 
 	reqLog.Errorln("Failed to get file from cache:", getErr)

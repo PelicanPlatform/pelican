@@ -269,6 +269,13 @@ type (
 		reader             io.ReadCloser           // Optional reader for uploads
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
+
+		// TagScheduler hooks: nil unless the engine was constructed with a
+		// scheduler. schedFirstByte fires once, on the first non-empty body
+		// byte written to the local sink (idempotent). schedDone fires
+		// exactly once when the worker is done with this file.
+		schedFirstByte func()
+		schedDone      func()
 	}
 
 	// A representation of a "transfer job".  The job
@@ -357,6 +364,7 @@ type (
 		dirRespCache       *DirRespCache   // Prefix-matching cache for director responses
 		prestageAPISupport map[string]bool // Lookup table for caches that support the Pelican prestage API (key: host)
 		prestageAPIMutex   sync.RWMutex    // Protects the prestageAPISupport map
+		scheduler          *TagScheduler   // Optional fair-scheduler; when set, admits before te.files
 	}
 
 	TransferCallbackFunc = func(path string, downloaded int64, totalSize int64, completed bool)
@@ -440,6 +448,10 @@ type (
 		closed         atomic.Bool
 		bytesPerSecond atomic.Int64
 		lastRateSample time.Time
+		// onFirstByte, if non-nil, fires exactly once when the first
+		// non-empty write lands. Used by TagScheduler to promote a
+		// transfer from the starving bucket to the active bucket.
+		onFirstByte func()
 	}
 )
 
@@ -841,6 +853,81 @@ func NewTransferEngineWithWorkers(ctx context.Context, workerCount int) (te *Tra
 	egrp.Go(te.runMux)
 	egrp.Go(te.runJobHandler)
 	return
+}
+
+// NewTransferEngineWithScheduler creates a transfer engine like
+// NewTransferEngineWithWorkers, but wires it to a TagScheduler that
+// admits transfers into per-tag FIFOs and dispatches them to workers
+// with a weighted random draw. Callers that don't want per-tag fairness
+// (e.g., single-user CLI transfers) should keep using
+// NewTransferEngineWithWorkers.
+//
+// The scheduler must have been created with NewTagScheduler; it will be
+// started by this function and stopped when the engine shuts down.
+func NewTransferEngineWithScheduler(ctx context.Context, workerCount int, scheduler *TagScheduler) (te *TransferEngine, err error) {
+	te, err = NewTransferEngineWithWorkers(ctx, workerCount)
+	if err != nil {
+		return nil, err
+	}
+	if scheduler == nil {
+		return te, nil
+	}
+	te.scheduler = scheduler
+	scheduler.Start(te.ctx, te.files)
+	return te, nil
+}
+
+// submitFile hands a clientTransferFile off to the worker pool. When a
+// scheduler is configured, the file goes through per-tag admission
+// (which may return ErrTooManyRequests); otherwise it goes straight to
+// the workers via te.files.
+//
+// On a scheduler rejection the function pushes a synthetic
+// clientTransferResults to te.results so the job-completion machinery
+// observes the failure exactly as it would for any other transfer
+// error, then returns the rejection error to the caller.
+func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFile) error {
+	if te.scheduler != nil {
+		tag := deriveSchedulerTag(file)
+		err := te.scheduler.Submit(ctx, tag, file)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, ErrTooManyRequests) {
+			select {
+			case te.results <- synthesizeRejectionResult(file, err):
+			case <-te.ctx.Done():
+				return te.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return err
+	}
+	select {
+	case te.files <- file:
+		return nil
+	case <-te.ctx.Done():
+		return te.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// deriveSchedulerTag chooses the tag under which a transfer is admitted.
+// For now we tag by the hostname of the first attempt (the primary
+// upstream origin). We deliberately do not retag on failover: if the
+// transfer moves from origin A to origin B mid-flight, it keeps A's
+// slot for the duration of the transfer. This is a small fairness leak
+// bounded by the transfer's lifetime.
+func deriveSchedulerTag(file *clientTransferFile) string {
+	if file == nil || file.file == nil {
+		return ""
+	}
+	if len(file.file.attempts) > 0 && file.file.attempts[0].Url != nil {
+		return file.file.attempts[0].Url.Host
+	}
+	return ""
 }
 
 // Create an option that provides a callback for a TransferClient
@@ -1326,6 +1413,9 @@ func (te *TransferEngine) Shutdown() error {
 	te.cancel()
 
 	err := te.egrp.Wait()
+	if te.scheduler != nil {
+		te.scheduler.Stop()
+	}
 	if err != nil && err != context.Canceled {
 		return err
 	}
@@ -2519,7 +2609,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			// federation namespace, https://example.com/prefix/ in this case.
 			remotePath := transfers[0].Url.Path
 			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
-			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
+			return te.walkDirUpload(job, transfers, job.job.localPath)
 		} else if job.job.xferType == transferTypeDownload {
 			// For recursive downloads, stat the remote path.
 			var statInfo FileInfo
@@ -2538,7 +2628,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				return errors.Wrap(statErr, "failed to stat remote path for recursive download")
 			}
 			if statInfo.IsCollection {
-				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+				return te.walkDirDownload(job, transfers, remoteUrl)
 			}
 		} else if job.job.xferType == transferTypeCopy {
 			// For copy, stat the SOURCE to see if it's a collection.
@@ -2559,7 +2649,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			}
 
 			if statInfo.IsCollection {
-				return te.walkDirCopy(job, transfers, te.files, srcUrl)
+				return te.walkDirCopy(job, transfers, srcUrl)
 			}
 		}
 		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
@@ -2578,7 +2668,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				return
 			}
 			if statInfo.IsCollection {
-				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+				return te.walkDirDownload(job, transfers, remoteUrl)
 			}
 		}
 	}
@@ -2586,10 +2676,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
 	job.job.totalXfer += 1
 	job.job.activeXfer.Add(1)
-	select {
-	case <-te.ctx.Done():
-		log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
-	case te.files <- &clientTransferFile{
+	submitErr := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
 		jobId: job.job.uuid,
 		file: &transferFile{
@@ -2614,7 +2701,15 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			byteRange:          job.job.byteRange,
 			metadataChan:       job.job.metadataChan,
 		},
-	}:
+	})
+	if submitErr != nil {
+		// ErrTooManyRequests already reported to te.results by submitFile;
+		// other errors (ctx cancellation) are surfaced by the caller.
+		if errors.Is(submitErr, ErrTooManyRequests) {
+			log.Debugln("Scheduler rejected transfer for", remoteUrl.String(), ":", submitErr)
+		} else {
+			log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
+		}
 	}
 
 	return
@@ -2640,63 +2735,81 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 					return nil
 				}
 			}
-			if file.file.ctx.Err() == context.Canceled {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case results <- &clientTransferResults{
-					id: file.uuid,
-					results: TransferResults{
-						JobId: file.jobId,
-						Error: file.file.ctx.Err(),
-					},
-				}:
-				}
-				break
-			}
-			if file.file.err != nil {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-
-				case results <- &clientTransferResults{
-					id: file.uuid,
-					results: TransferResults{
-						JobId: file.jobId,
-						Error: file.file.err,
-					},
-				}:
-				}
-				break
-			}
-			var err error
-			var transferResults TransferResults
-			switch file.file.xferType {
-			case transferTypeUpload:
-				transferResults, err = uploadObject(file.file)
-			case transferTypeCopy:
-				transferResults, err = copyHTTP(file.file)
-			default:
-				transferResults, err = downloadObject(file.file)
-			}
-			transferResults.JobId = file.jobId
-			transferResults.Scheme = file.file.remoteURL.Scheme
-			if err != nil {
-				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
-				transferResults = newTransferResults(file.file.job)
-				transferResults.Scheme = file.file.remoteURL.Scheme
-				transferResults.Error = err
-			}
-			if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
-				transferResults.DirectorDecision = file.file.job.dirResp.RedirectInfo
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case results <- &clientTransferResults{id: file.uuid, results: transferResults}:
+			// Wrap the per-file body in a closure so the scheduler's
+			// schedDone hook (if any) fires exactly once per file via
+			// defer, not once for the worker's entire lifetime.
+			if err := runTransferWorkerFile(ctx, file, results); err != nil {
+				return err
 			}
 		}
 	}
+}
+
+// runTransferWorkerFile processes one file dequeued by a transfer
+// worker. It always fires file.file.schedDone (if set) on exit.
+// Returns a non-nil error only if the worker itself should exit (e.g.
+// ctx cancellation while we were trying to write results).
+func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, results chan<- *clientTransferResults) error {
+	if file.file != nil && file.file.schedDone != nil {
+		schedDone := file.file.schedDone
+		file.file.schedDone = nil
+		defer schedDone()
+	}
+	if file.file.ctx.Err() == context.Canceled {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- &clientTransferResults{
+			id: file.uuid,
+			results: TransferResults{
+				JobId: file.jobId,
+				Error: file.file.ctx.Err(),
+			},
+		}:
+		}
+		return nil
+	}
+	if file.file.err != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- &clientTransferResults{
+			id: file.uuid,
+			results: TransferResults{
+				JobId: file.jobId,
+				Error: file.file.err,
+			},
+		}:
+		}
+		return nil
+	}
+	var err error
+	var transferResults TransferResults
+	switch file.file.xferType {
+	case transferTypeUpload:
+		transferResults, err = uploadObject(file.file)
+	case transferTypeCopy:
+		transferResults, err = copyHTTP(file.file)
+	default:
+		transferResults, err = downloadObject(file.file)
+	}
+	transferResults.JobId = file.jobId
+	transferResults.Scheme = file.file.remoteURL.Scheme
+	if err != nil {
+		log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
+		transferResults = newTransferResults(file.file.job)
+		transferResults.Scheme = file.file.remoteURL.Scheme
+		transferResults.Error = err
+	}
+	if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
+		transferResults.DirectorDecision = file.file.job.dirResp.RedirectInfo
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case results <- &clientTransferResults{id: file.uuid, results: transferResults}:
+	}
+	return nil
 }
 
 // attemptSorter pairs a responsiveness score with a transfer attempt for sorting.
@@ -3145,7 +3258,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			byteRangeEnd = transfer.byteRange.End
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
 		)
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
@@ -3536,7 +3649,7 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - metadataChan: optional channel to receive early transfer metadata (ETag, size, etc.) before data transfer.
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata, onFirstByte func()) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
@@ -3897,7 +4010,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// In a deferred function, we wait on the done channel to get the signal that the download is done
 	done := make(chan error, 1)
 	pw := &progressWriter{
-		writer: writer,
+		writer:      writer,
+		onFirstByte: onFirstByte,
 	}
 
 	go func() {
@@ -4174,6 +4288,9 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	}
 	if pw.firstByteTime.IsZero() && len(p) > 0 {
 		pw.firstByteTime = time.Now()
+		if pw.onFirstByte != nil {
+			pw.onFirstByte()
+		}
 	}
 	now := time.Now()
 	startupTime := now.Sub(pw.firstByteTime)
@@ -4744,7 +4861,7 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 }
 
 // Walk a remote collection in a WebDAV server, emitting the files discovered
-func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
+func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, url *url.URL) error {
 	// Create the client to walk the filesystem
 	collUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
 	if collUrl == nil {
@@ -4753,14 +4870,14 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	log.Debugln("Trying collections URL: ", collUrl.String())
 
 	client := createWebDavClient(collUrl, job.job.token, job.job.project)
-	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
+	return te.walkDirDownloadHelper(job, transfers, url.Path, client)
 }
 
 // Helper function for the `walkDirDownload`.
 //
 // Recursively walks through the remote server collection, emitting transfer files
 // for the engine to process.
-func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
+func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
@@ -4824,10 +4941,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 					}
 					job.job.activeXfer.Add(1)
-					select {
-					case <-job.job.ctx.Done():
-						return job.job.ctx.Err()
-					case files <- &clientTransferFile{
+					if err := te.submitFile(job.job.ctx, &clientTransferFile{
 						uuid:  job.uuid,
 						jobId: job.job.uuid,
 						file: &transferFile{
@@ -4845,7 +4959,13 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							fedToken:           job.job.fedToken,
 							attempts:           transferAttempts,
 						},
-					}:
+					}); err != nil {
+						if !errors.Is(err, ErrTooManyRequests) {
+							return err
+						}
+						// 429 already reported to te.results by submitFile;
+						// continue enumerating the collection.
+					} else {
 						job.job.totalXfer += 1
 					}
 				}
@@ -4859,7 +4979,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	for _, info := range infos {
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
-			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
+			err := te.walkDirDownloadHelper(job, transfers, newPath, client)
 			if err != nil {
 				return err
 			}
@@ -4905,10 +5025,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 			}
 			job.job.activeXfer.Add(1)
-			select {
-			case <-job.job.ctx.Done():
-				return job.job.ctx.Err()
-			case files <- &clientTransferFile{
+			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
 				jobId: job.job.uuid,
 				file: &transferFile{
@@ -4926,7 +5043,11 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					fedToken:           job.job.fedToken,
 					attempts:           transferAttempts,
 				},
-			}:
+			}); err != nil {
+				if !errors.Is(err, ErrTooManyRequests) {
+					return err
+				}
+			} else {
 				job.job.totalXfer += 1
 			}
 		}
@@ -4935,7 +5056,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 }
 
 // Helper function for walkDirUpload; not to be called directly
-func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, localPath string) error {
+func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, localPath string) error {
 	if job.job.ctx.Err() != nil {
 		return job.job.ctx.Err()
 	}
@@ -4958,10 +5079,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 			} else if info.Mode().Type().IsRegular() {
 				job.job.activeXfer.Add(1)
-				select {
-				case <-job.job.ctx.Done():
-					return job.job.ctx.Err()
-				case files <- &clientTransferFile{
+				if err := te.submitFile(job.job.ctx, &clientTransferFile{
 					uuid:  job.uuid,
 					jobId: job.job.uuid,
 					file: &transferFile{
@@ -4976,7 +5094,11 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 						token:      job.job.token,
 						attempts:   transfers,
 					},
-				}:
+				}); err != nil {
+					if !errors.Is(err, ErrTooManyRequests) {
+						return err
+					}
+				} else {
 					job.job.totalXfer += 1
 				}
 			}
@@ -4996,7 +5118,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 
 		if info.IsDir() {
 			// Recursively call this function to create any nested dir's as well as list their files
-			err := te.walkDirUpload(job, transfers, files, newPath)
+			err := te.walkDirUpload(job, transfers, newPath)
 			if err != nil {
 				return err
 			}
@@ -5004,10 +5126,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
 			job.job.activeXfer.Add(1)
-			select {
-			case <-job.job.ctx.Done():
-				return job.job.ctx.Err()
-			case files <- &clientTransferFile{
+			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
 				jobId: job.job.uuid,
 				file: &transferFile{
@@ -5022,7 +5141,11 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					token:      job.job.token,
 					attempts:   transfers,
 				},
-			}:
+			}); err != nil {
+				if !errors.Is(err, ErrTooManyRequests) {
+					return err
+				}
+			} else {
 				job.job.totalXfer += 1
 			}
 		}

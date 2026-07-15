@@ -479,7 +479,7 @@ func skipCopy(syncLevel SyncLevel, sourceInfo fs.FileInfo, destPath string, dest
 
 // walkDirCopy walks the remote source directory and emits individual TPC copy jobs
 // for each file found. This is used for recursive third-party-copy operations.
-func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcUrl *url.URL) error {
+func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, srcUrl *url.URL) error {
 	// Use the source director response to get the collections URL for listing
 	collUrl := job.job.srcDirResp.XPelNsHdr.CollectionsUrl
 	if collUrl == nil {
@@ -501,7 +501,7 @@ func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transf
 		}
 	}
 
-	return te.walkDirCopyHelper(job, transfers, files, srcUrl.Path, srcClient, destClient)
+	return te.walkDirCopyHelper(job, transfers, srcUrl.Path, srcClient, destClient)
 }
 
 // walkDirCopyHelper recursively walks the remote source directory and emits individual
@@ -509,7 +509,7 @@ func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transf
 // server URLs point to the individual file and the destination (via dirResp.ObjectServers)
 // is also adjusted to the corresponding destination path.
 // destWebDavClient may be nil if sync skip is disabled; used to stat destination files.
-func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
+func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
 	// Check for cancellation
 	if err := job.job.ctx.Err(); err != nil {
 		return err
@@ -537,7 +537,7 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 				return errors.Wrap(err, "failed to stat source path for copy")
 			}
 			if !info.IsDir() {
-				return te.emitCopyJob(job, transfers, files, remotePath, info, destWebDavClient)
+				return te.emitCopyJob(job, transfers, remotePath, info, destWebDavClient)
 			}
 			return nil
 		}
@@ -547,12 +547,12 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 	for _, info := range infos {
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
-			err := te.walkDirCopyHelper(job, transfers, files, newPath, webdavClient, destWebDavClient)
+			err := te.walkDirCopyHelper(job, transfers, newPath, webdavClient, destWebDavClient)
 			if err != nil {
 				return err
 			}
 		} else {
-			if err := te.emitCopyJob(job, transfers, files, newPath, info, destWebDavClient); err != nil {
+			if err := te.emitCopyJob(job, transfers, newPath, info, destWebDavClient); err != nil {
 				return err
 			}
 		}
@@ -565,7 +565,7 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 // to point at the individual file, computing the relative path within the source directory.
 // sourceInfo is the fs.FileInfo for the source file, used for sync skip checks.
 // destCollClient may be nil if sync skip is disabled; used to stat the destination file.
-func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
+func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
 	// Compute relative path of this file within the source directory
 	relPath := strings.TrimPrefix(srcFilePath, job.job.srcURL.Path)
 	relPath = strings.TrimPrefix(relPath, "/")
@@ -607,10 +607,7 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 	}
 
 	job.job.activeXfer.Add(1)
-	select {
-	case <-job.job.ctx.Done():
-		return job.job.ctx.Err()
-	case files <- &clientTransferFile{
+	if err := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
 		jobId: job.job.uuid,
 		file: &transferFile{
@@ -629,7 +626,11 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 			srcToken: job.job.srcToken,
 			attempts: srcAttempts,
 		},
-	}:
+	}); err != nil {
+		if !errors.Is(err, ErrTooManyRequests) {
+			return err
+		}
+	} else {
 		job.job.totalXfer += 1
 	}
 	return nil

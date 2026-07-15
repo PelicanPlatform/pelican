@@ -2654,6 +2654,80 @@ type: int
 default: 100
 components: ["cache"]
 ---
+name: Cache.Throttle.PerOriginStarvingPercent
+description: |+
+  Upper bound, as a percentage of ${Cache.WorkerCount}, that any single upstream origin may
+  hold while its fetches are still "starving" (have not yet received a first byte of data).
+
+  A single misbehaving origin that accepts connections but never delivers bytes can, without
+  this limit, hold every worker until each connection times out (minutes), which makes the
+  cache unresponsive to healthy origins. When this percentage is reached for an origin, further
+  requests targeting that origin are subject to per-origin queueing and eventual 429 shedding.
+
+  Expressed as an integer 0-100. Set to 0 or a value >= 100 to disable this cap (any origin
+  may hold the entire pool).
+type: int
+default: 25
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.PerOriginActivePercent
+description: |+
+  Upper bound, as a percentage of ${Cache.WorkerCount}, that any single upstream origin may
+  hold in total (both starving and actively-transferring fetches).
+
+  This is the higher-limit sibling of ${Cache.Throttle.PerOriginStarvingPercent}: once a
+  fetch has produced at least one byte we consider it healthy and give it a larger share, but
+  we still cap the percentage so that a very large single origin cannot fully monopolise the
+  cache pool.
+
+  Expressed as an integer 0-100. Set to 0 or a value >= 100 to disable this cap.
+type: int
+default: 90
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.PendingBufferSize
+description: |+
+  Total number of upstream-fetch requests the cache's fair scheduler may hold in memory
+  waiting for a worker before it starts shedding load with HTTP 429 responses.
+
+  When the total pending count reaches this value, any additional incoming request is
+  failed immediately with a "too many requests" error rather than being enqueued.
+
+  Set to 0 to disable the fair scheduler entirely (the cache falls back to the raw
+  first-come-first-served channel).
+type: int
+default: 200
+components: ["cache"]
+---
+name: Cache.Throttle.PerOriginPendingSize
+description: |+
+  Per-origin upper bound on the number of pending requests the cache's fair scheduler will
+  queue before it starts shedding load with HTTP 429 responses for that origin.
+
+  This is a per-origin sibling of ${Cache.Throttle.PendingBufferSize}: it prevents a single
+  bad origin from consuming the entire global pending buffer with requests that will never
+  be dispatched.
+type: int
+default: 50
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.EMAWindow
+description: |+
+  Time constant used when computing the exponentially-weighted moving average of active
+  workers per upstream origin. The EMA is used to weight the fair scheduler's random draw
+  across ready origins: origins that have consumed less of the pool recently are more
+  likely to be picked next.
+
+  Shorter values react faster to bursts; longer values are more stable but slower to
+  re-balance after a change.
+type: duration
+default: 30s
+hidden: true
+components: ["cache"]
+---
 name: Cache.AllowedFederations
 description: |+
   A list of federation discovery URLs (or host:port values) that this cache is allowed to serve.
