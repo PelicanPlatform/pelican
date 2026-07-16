@@ -106,7 +106,7 @@ func TestCacheMonitoringUDPCapture(t *testing.T) {
 	t.Cleanup(func() { _ = pc.Close() })
 
 	// Inject a public namespace so the tokenless GET authorizes.
-	require.NoError(t, pc.ac.updateConfig([]server_structs.NamespaceAdV2{{
+	require.NoError(t, pc.ac.updateConfig([]server_structs.NamespaceAd{{
 		Path: "/test",
 		Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
 	}}))
