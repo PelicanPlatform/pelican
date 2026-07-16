@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -337,6 +338,26 @@ func warnUnusedIssuerLifetimesKnobs() {
 	}
 }
 
+// webUIClientRedirectURI returns the OIDC redirect URI for the origin's
+// web UI object-browser page (app/origin/client/, served under the /view
+// basePath), derived from Server.ExternalWebUrl. It returns "" when the
+// web UI is disabled or no external web URL is configured.
+//
+// The browser client performs its PKCE login against this exact URI, so
+// the embedded issuer's public client must allow it or the login fails
+// silently — auto-deriving it saves origin admins from having to add it
+// to Issuer.RedirectUris by hand.
+func webUIClientRedirectURI() string {
+	if !param.Server_EnableUI.GetBool() {
+		return ""
+	}
+	extUrl := param.Server_ExternalWebUrl.GetString()
+	if extUrl == "" {
+		return ""
+	}
+	return strings.TrimRight(extUrl, "/") + "/view/origin/client/"
+}
+
 // configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
 // compiles authorization rules, and registers routes on the Gin engine.
 //
@@ -362,6 +383,19 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	}
 
 	registry := issuer.NewProviderRegistry()
+
+	// Redirect URIs allowed for the pre-allocated public client used by
+	// browser-based (PKCE) logins. Start from the admin-configured list
+	// and, when the origin's web UI is enabled, auto-add its
+	// object-browser page so a missing Issuer.RedirectUris entry doesn't
+	// silently break login. Computed once and shared by every per-export
+	// provider below.
+	publicClientID := param.Issuer_PublicClientID.GetString()
+	redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
+	if uiRedirect := webUIClientRedirectURI(); uiRedirect != "" && !slices.Contains(redirectURIs, uiRedirect) {
+		redirectURIs = append(redirectURIs, uiRedirect)
+		log.Debugf("Auto-added origin web UI redirect URI %q to embedded issuer public client", uiRedirect)
+	}
 
 	for _, export := range originExports {
 		// Only create an issuer for exports that need authentication
@@ -391,9 +425,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		}
 
 		// Seed the pre-allocated public client for browser-based flows (PKCE).
-		publicClientID := param.Issuer_PublicClientID.GetString()
 		if publicClientID != "" {
-			redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
 			if err := provider.EnsurePublicClient(ctx, publicClientID, redirectURIs); err != nil {
 				return errors.Wrapf(err, "failed to seed public client %q for namespace %s", publicClientID, namespace)
 			}
