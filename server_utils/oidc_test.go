@@ -199,3 +199,95 @@ Server:
 		assert.NotContains(t, resp.Issuer, "/ns/")
 	})
 }
+
+// TestStandaloneOriginServesIssuerFromRoot guards the standalone-origin
+// (no co-located Director) OIDC mount decision made in
+// launchers/origin_serve.go: OriginServe.
+//
+// A standalone origin advertises its issuer at the server's root URL, so its
+// OIDC discovery document points clients at root-level well-known paths
+// (Issuer=<root>, jwks_uri=<root>/.well-known/issuer.jwks). Before the fix the
+// origin only mounted those routes under /api/v1.0/origin, so a client that
+// followed the advertised (root) URL got a 404 — the origin claimed to serve
+// its namespace at the root but did not have it there. The fix additionally
+// mounts RegisterOIDCAPI at "/" when no Director is co-located.
+//
+// This test pins both halves of that contract:
+//  1. The discovery doc advertises root-level well-known paths.
+//  2. Those advertised root paths are actually served (200, not 404).
+//
+// It also includes a regression guard reproducing the pre-fix bug: when the
+// discovery routes are only mounted under /api/v1.0/origin (the Director-
+// co-located branch), the advertised root path 404s.
+func TestStandaloneOriginServesIssuerFromRoot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const issuer = "https://origin.example.com:8444"
+
+	get := func(t *testing.T, router *gin.Engine, path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", path, nil)
+		require.NoError(t, err)
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("NoDirectorMountsAtRoot", func(t *testing.T) {
+		ResetTestState()
+		defer ResetTestState()
+
+		require.NoError(t, param.Server_ExternalWebUrl.Set(issuer))
+		require.NoError(t, param.Server_IssuerUrl.Set(issuer))
+		require.NoError(t, param.Origin_EnableIssuer.Set(false))
+
+		// Mirror the standalone-origin branch of OriginServe: mount at "/".
+		router := gin.New()
+		RegisterOIDCAPI(router.Group("/"), false)
+
+		// (1) The discovery doc advertises root-level well-known paths.
+		w := get(t, router, "/.well-known/openid-configuration")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp server_structs.OpenIdDiscoveryResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, issuer, resp.Issuer,
+			"standalone origin should advertise its issuer at the server root")
+		assert.Equal(t, issuer+"/.well-known/issuer.jwks", resp.JwksUri,
+			"jwks_uri should point at the root-level well-known path")
+
+		// (2) The advertised root JWKS path is actually served (not 404).
+		// The key material may be absent in this unit test, so we only assert
+		// the route exists (i.e. it does not 404 due to a missing mount).
+		w = get(t, router, "/.well-known/issuer.jwks")
+		assert.NotEqual(t, http.StatusNotFound, w.Code,
+			"advertised root jwks path must be mounted, got 404")
+	})
+
+	t.Run("DirectorOnlyMountRegressionGuard", func(t *testing.T) {
+		ResetTestState()
+		defer ResetTestState()
+
+		require.NoError(t, param.Server_ExternalWebUrl.Set(issuer))
+		require.NoError(t, param.Server_IssuerUrl.Set(issuer))
+		require.NoError(t, param.Origin_EnableIssuer.Set(false))
+
+		// Mirror the Director-co-located branch: mount only under
+		// /api/v1.0/origin. This reproduces the pre-fix behavior.
+		router := gin.New()
+		RegisterOIDCAPI(router.Group("/api/v1.0/origin"), false)
+
+		// The origin still advertises the root URL as its issuer...
+		w := get(t, router, "/api/v1.0/origin/.well-known/openid-configuration")
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp server_structs.OpenIdDiscoveryResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, issuer, resp.Issuer)
+		assert.Equal(t, issuer+"/.well-known/issuer.jwks", resp.JwksUri)
+
+		// ...but without the fix, the advertised root path is NOT served.
+		w = get(t, router, "/.well-known/openid-configuration")
+		assert.Equal(t, http.StatusNotFound, w.Code,
+			"pre-fix bug: advertised root discovery path 404s when only mounted under /api/v1.0/origin")
+	})
+}

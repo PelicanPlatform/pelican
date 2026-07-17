@@ -128,6 +128,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// root-level RegisterOIDCAPI call below.
 	if modules.IsEnabled(server_structs.DirectorType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/api/v1.0/origin", web_ui.ServerHeaderMiddleware), false)
+	} else {
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
