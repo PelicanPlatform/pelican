@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -15,6 +17,11 @@
  * limitations under the License.
  *
  ***************************************************************/
+
+// This full-stack e2e boots the real handler wiring (InitializeHandlers +
+// InitServerDatabase + POSC + auth) and is excluded on Windows, matching the
+// convention used by the other origin server-launching e2e suites
+// (metrics_e2e_test.go, storage_metrics_integration_test.go, tpc_fed_test.go).
 
 package origin_serve
 
@@ -209,34 +216,6 @@ func mintWriteToken(t *testing.T, issuerURL string) string {
 	return tkn
 }
 
-// The typed param setters below restore the previous value on cleanup so
-// package-global config mutations don't leak into sibling tests. They use the
-// typed .Set() (not viper.Set) because param getters read from a decoded
-// config struct that viper.Set alone would not refresh.
-
-func setStringParamForTest(t *testing.T, p param.StringParam, value string) {
-	t.Helper()
-	prev := p.GetString()
-	if err := p.Set(value); err != nil {
-		t.Fatalf("set %s: %v", p.GetName(), err)
-	}
-	t.Cleanup(func() { _ = p.Set(prev) })
-}
-
-func setBoolParamForTest(t *testing.T, p param.BoolParam, value bool) {
-	t.Helper()
-	prev := p.GetBool()
-	if err := p.Set(value); err != nil {
-		t.Fatalf("set %s: %v", p.GetName(), err)
-	}
-	t.Cleanup(func() { _ = p.Set(prev) })
-}
-
-func setDurationParamForTest(t *testing.T, p param.DurationParam, value time.Duration) {
-	t.Helper()
-	prev := p.GetDuration()
-	if err := p.Set(value); err != nil {
-		t.Fatalf("set %s: %v", p.GetName(), err)
-	}
-	t.Cleanup(func() { _ = p.Set(prev) })
-}
+// Typed param setters (setStringParamForTest / setBoolParamForTest /
+// setDurationParamForTest) live in metadata_param_helpers_test.go so they are
+// available to the Windows-enabled admin-auth test too.

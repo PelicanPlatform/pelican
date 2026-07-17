@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -15,6 +17,11 @@
  * limitations under the License.
  *
  ***************************************************************/
+
+// These e2e tests compile and launch the sample_metadata_server binary as a
+// subprocess (go build + port bind + health poll); that pattern is excluded
+// on Windows, matching the other server/binary-launching e2e suites
+// (metrics_e2e_test.go, tpc_fed_test.go).
 
 package origin_serve
 
