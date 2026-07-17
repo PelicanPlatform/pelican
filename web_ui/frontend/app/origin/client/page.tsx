@@ -31,17 +31,37 @@ import { getConfig } from '@/helpers/api';
 import { getObjectValue } from '@/helpers/util';
 import { Config } from '@/components/configuration';
 
-/**
- * The Origin's data (XRootD) endpoint -- where OriginClient sends PROPFIND/GET.
- * This is Origin.Url (a different port than the web UI), so it is cross-origin
- * to the page and relies on CORS being enabled on the data endpoint.
- */
-const getOriginBaseUrl = async (): Promise<string> => {
+interface OriginClientConfig {
+  /**
+   * The Origin's data (XRootD) endpoint -- where OriginClient sends
+   * PROPFIND/GET. This is Origin.Url (a different port than the web UI), so
+   * it is cross-origin to the page and relies on CORS on the data endpoint.
+   */
+  originBaseUrl: string;
+  /**
+   * Whether the origin runs its *embedded* PKCE issuer. The object browser
+   * authenticates via that browser flow, which does not exist in OA4MP mode
+   * (or when the issuer is disabled), so the browser can't log in there.
+   */
+  embeddedIssuer: boolean;
+}
+
+/** Reads the origin client's config from GET /config in a single fetch. */
+const getOriginClientConfig = async (): Promise<OriginClientConfig> => {
   const response = await getConfig();
   const config = (await response.json()) as Config;
-  return (
-    getObjectValue<string>(config, ['Origin', 'Url']) || window.location.origin
-  );
+  const originBaseUrl =
+    getObjectValue<string>(config, ['Origin', 'Url']) || window.location.origin;
+  const enableIssuer = getObjectValue<boolean>(config, [
+    'Origin',
+    'EnableIssuer',
+  ]);
+  // Origin.IssuerMode defaults to "embedded" when unset (see the
+  // "embedded", "" switch in launchers/origin_serve.go); only "oa4mp" opts
+  // out of the embedded issuer.
+  const issuerMode = getObjectValue<string>(config, ['Origin', 'IssuerMode']);
+  const embeddedIssuer = !!enableIssuer && issuerMode !== 'oa4mp';
+  return { originBaseUrl, embeddedIssuer };
 };
 
 export default function Page() {
@@ -71,7 +91,10 @@ export default function Page() {
  */
 const OriginObjectBrowser = () => {
   const { data: exportData } = useSWR('getDataExport', getExportData);
-  const { data: originBaseUrl } = useSWR('getOriginBaseUrl', getOriginBaseUrl);
+  const { data: originClientConfig } = useSWR(
+    'getOriginClientConfig',
+    getOriginClientConfig
+  );
 
   const namespaces: OriginNamespaceConfig[] | undefined = useMemo(() => {
     if (!exportData) {
@@ -102,8 +125,22 @@ const OriginObjectBrowser = () => {
     return result.sort((a, b) => a.prefix.localeCompare(b.prefix));
   }, [exportData]);
 
-  if (namespaces === undefined || originBaseUrl === undefined) {
+  if (namespaces === undefined || originClientConfig === undefined) {
     return <Skeleton variant={'rectangular'} height={400} width={'100%'} />;
+  }
+
+  // The object browser logs in through the origin's embedded PKCE issuer; if
+  // the origin uses OA4MP (or has the issuer disabled) that flow is
+  // unavailable, so surface why the browser isn't shown rather than mounting
+  // a client that can never authenticate.
+  if (!originClientConfig.embeddedIssuer) {
+    return (
+      <Alert severity={'info'}>
+        The object browser requires the origin&apos;s embedded token issuer,
+        which is not enabled on this server (it is configured to use OA4MP, or
+        the issuer is disabled).
+      </Alert>
+    );
   }
 
   if (namespaces.length === 0) {
@@ -112,5 +149,10 @@ const OriginObjectBrowser = () => {
     );
   }
 
-  return <OriginClient originBaseUrl={originBaseUrl} namespaces={namespaces} />;
+  return (
+    <OriginClient
+      originBaseUrl={originClientConfig.originBaseUrl}
+      namespaces={namespaces}
+    />
+  );
 };
