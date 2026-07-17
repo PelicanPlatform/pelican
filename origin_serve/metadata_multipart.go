@@ -175,7 +175,10 @@ func rewriteMultipartPUT(w http.ResponseWriter, req *http.Request, cfg multipart
 	// object part. Closing it must also close the original underlying
 	// body, so the connection's resources release once webdav is done.
 	objReader := &objectPartReadCloser{part: objPart, underlying: req.Body}
-	newReq := req.Clone(withMultipartBlob(req.Context(), blob))
+	// Drop any expected-Content-Length the upload middleware stashed: it was
+	// the size of the whole multipart envelope, not the object part, so the
+	// POSC size check would spuriously reject every multipart commit.
+	newReq := req.Clone(clearExpectedContentLength(withMultipartBlob(req.Context(), blob)))
 	newReq.Body = objReader
 
 	// The original Content-Length was the whole multipart body's

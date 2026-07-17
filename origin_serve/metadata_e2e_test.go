@@ -319,6 +319,117 @@ func TestE2EWebdavHandler_PathIsFederationRooted(t *testing.T) {
 	}
 }
 
+// TestE2EEventual_WebdavHandler_ObjectExistsCheck exercises the same
+// production wiring as TestE2EWebdavHandler_PathIsFederationRooted (a real
+// webdav.Handler that strips its federation Prefix before OpenFile) but in
+// EVENTUAL mode, where the background worker runs the skip-if-deleted
+// existence check via FilesystemForExists.
+//
+// This is the gap the other tests missed: every existing eventual-mode
+// test overrides ctl.objectExists with a closure that Stats the SAME path
+// space the object was written in, so none of them exercise the real
+// FilesystemForExists closure. In production the queue row's ObjectPath is
+// federation-rooted (/exp/data/x) while the per-export FileSystem is
+// export-relative (/data/x). If the existence check doesn't reconcile the
+// two, the worker drops every committed object as "deleted" and NOTHING is
+// ever published — which is exactly the "eventual mode doesn't work"
+// report. The assertion here is simply that the receiver DOES get the
+// webhook.
+func TestE2EEventual_WebdavHandler_ObjectExistsCheck(t *testing.T) {
+	bodies := make(chan []byte, 4)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+
+	mem := afero.NewMemMapFs()
+	autoFs := newAutoCreateDirFs(mem)
+	inner := newAferoFileSystem(autoFs, "", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	posc := newPoscFileSystem(ctx, inner, ".pelican-posc", time.Hour, 19*time.Minute)
+	defer posc.Stop()
+
+	const fedPrefix = "/exp"
+	db := newTestDB(t)
+	ctl := newMetadataController(metadataControllerOptions{
+		OriginEnabled:  true,
+		OriginEndpoint: receiver.URL,
+		OriginMode:     ModeEventual,
+		DB:             db,
+		MinBackoff:     time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+		MaxInflight:    1,
+		RatePerSecond:  1000,
+		// Wire the existence check exactly like production does: return
+		// the export-relative FileSystem for the namespace. We do NOT
+		// override ctl.objectExists, so the real FilesystemForExists +
+		// path-space reconciliation is what runs.
+		FilesystemForExists: func(namespace string) webdav.FileSystem {
+			if namespace == fedPrefix {
+				return posc
+			}
+			return nil
+		},
+	})
+	defer ctl.Stop()
+	ctl.publisher.signToken = func(string, string) (string, error) { return "tok", nil }
+	posc.SetCloseHook(ctl.CommitEventFromCloseHook(fedPrefix))
+	ctl.Start(ctx)
+
+	dav := &webdav.Handler{
+		FileSystem: posc,
+		LockSystem: webdav.NewMemLS(),
+		Prefix:     fedPrefix,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		rctx := setUserInfo(r.Context(), &userInfo{User: "alice"})
+		r = r.WithContext(rctx)
+		r = extractObjectMetadataFromRequest(r)
+		dav.ServeHTTP(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := strings.NewReader("hello-eventual")
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/exp/data/run99.dat", body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.ContentLength = int64(body.Len())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("PUT returned %d", resp.StatusCode)
+	}
+
+	select {
+	case raw := <-bodies:
+		var got struct {
+			Object map[string]any `json:"object"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal body: %v", err)
+		}
+		if got.Object["path"] != "/exp/data/run99.dat" {
+			t.Fatalf("object.path = %v, want /exp/data/run99.dat", got.Object["path"])
+		}
+	case <-time.After(3 * time.Second):
+		// Before the fix, the worker's existence check Stats the
+		// federation-rooted path against the export-relative FS, misses,
+		// and drops the row as "object deleted" — so the webhook never
+		// arrives and we land here.
+		t.Fatal("eventual worker never delivered the webhook (row likely dropped by a mismatched skip-if-deleted check)")
+	}
+}
+
 func TestE2EEventual_BackpressureAndDrain(t *testing.T) {
 	// Receiver is initially down (5xx). Once we flip it on, the worker
 	// drains the queue.

@@ -278,7 +278,13 @@ func newMetadataController(opts metadataControllerOptions) *metadataController {
 			if fs == nil {
 				return true
 			}
-			_, err := fs.Stat(ctx, op)
+			// The queue stores object paths federation-rooted (the wire
+			// contract), but the per-export FileSystem operates in the
+			// export-relative path space the webdav.Handler hands to
+			// OpenFile after stripping its Prefix. Convert back before
+			// Stat'ing, otherwise every existence check misses and the
+			// worker drops every row as "object deleted".
+			_, err := fs.Stat(ctx, exportRelativePath(ns, op))
 			return err == nil
 		}
 	} else {
@@ -707,6 +713,29 @@ func joinFederationPath(namespace, exportRelative string) string {
 	return path.Clean(ns + "/" + rel)
 }
 
+// exportRelativePath is the inverse of joinFederationPath: it converts a
+// federation-rooted object path (as stored in the publish queue and sent
+// on the wire) back into the export-relative path space the origin's
+// per-export FileSystem uses. The webdav.Handler strips its federation
+// Prefix before calling OpenFile, so the FileSystem — and the
+// skip-if-deleted Stat that reuses it — never sees the namespace segment.
+func exportRelativePath(namespace, fedPath string) string {
+	ns := strings.TrimRight(namespace, "/")
+	if ns == "" || ns == "/" {
+		return path.Clean("/" + strings.TrimLeft(fedPath, "/"))
+	}
+	rooted := "/" + strings.TrimLeft(fedPath, "/")
+	if rooted == ns {
+		return "/"
+	}
+	if rel := strings.TrimPrefix(rooted, ns+"/"); rel != rooted {
+		return path.Clean("/" + rel)
+	}
+	// fedPath wasn't actually under the namespace; treat it as already
+	// export-relative rather than silently corrupting it.
+	return path.Clean(rooted)
+}
+
 // http.Header carries the X-Pelican-Object-Metadata header from the
 // original PUT request through to OpenFile via the request context.
 // We use a private context key.
@@ -732,6 +761,17 @@ func expectedContentLengthFromContext(ctx context.Context) int64 {
 		return v
 	}
 	return -1
+}
+
+// clearExpectedContentLength overrides any previously-stashed expected size
+// with a sentinel that disables the POSC size check. The upload middleware
+// stashes the request's Content-Length before it knows the body is
+// multipart/form-data; once the multipart rewrite runs, that length covers
+// the whole multipart envelope, not the object part, so the check must be
+// dropped (per the design: "the per-part length is not known from the request
+// header alone").
+func clearExpectedContentLength(ctx context.Context) context.Context {
+	return context.WithValue(ctx, expectedContentLengthKey{}, int64(-1))
 }
 
 // withObjectMetadata stores parsed custom fields on the context.

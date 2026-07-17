@@ -26,3 +26,9 @@ e2e_fed_tests.test
 
 # Compiled scope generator binary (source is generate/scope_generator.go)
 /generate/generate
+
+# Compiled sample metadata receiver binary (source is
+# cmd/sample_metadata_server/main.go). Built by the integration test and by
+# `go build ./cmd/sample_metadata_server`.
+/sample_metadata_server
+/cmd/sample_metadata_server/sample_metadata_server
