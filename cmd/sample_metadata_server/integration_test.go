@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -15,6 +17,10 @@
  * limitations under the License.
  *
  ***************************************************************/
+
+// This test compiles and launches the server binary as a subprocess (go build
+// + port bind + health poll), which is excluded on Windows. The pure-function
+// unit tests in main_test.go still run on every platform.
 
 package main
 
