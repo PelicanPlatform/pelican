@@ -21,12 +21,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -255,4 +258,66 @@ func handleAdminApiResponse(resp *http.Response) ([]byte, error) {
 	}
 
 	return bodyBytes, errors.New(errMsg)
+}
+
+// inferGetDestination resolves the local destination for a CLI `pelican
+// object get` invocation when the destination looks like a container.
+// It layers `cp`-style semantics on top of client.DoGet's flat library
+// behaviour:
+//
+//   - If the local destination is not an existing directory, or the
+//     source URL has `?pack=...`, the destination string is returned
+//     unchanged (DoGet decides what to do).
+//   - Otherwise the remote source is stat'd once.  If it's a collection
+//     and !recursive, an error is returned (row G4 -- symmetric with
+//     the put-side directory guard).  If it's a collection and
+//     recursive, the destination is rewritten to
+//     `<localDest>/<basename(source)>` so a `cp -r` gesture nests the
+//     tree under its source name (row G5).
+//
+// Stat errors are handled softly: ErrObjectNotFound is a normal
+// signal (the transfer machinery will surface it with a clearer
+// message); any other stat failure returns an error rather than
+// silently building the wrong local layout.
+//
+// Callers other than the get CLI (`object sync`, client_agent, tests
+// that exercise the library directly) do NOT go through this helper
+// and therefore continue to see the pre-existing flat layout.
+func inferGetDestination(ctx context.Context, remoteSource, localDest string, recursive bool, options ...client.TransferOption) (resolved string, err error) {
+	resolved = localDest
+
+	pUrl, err := client.ParseRemoteAsPUrl(ctx, remoteSource)
+	if err != nil {
+		return localDest, err
+	}
+	// Honor the pack override: an auto-pack request may legitimately
+	// name a directory as the local destination.
+	if pUrl.Query().Get("pack") != "" {
+		return localDest, nil
+	}
+
+	absDest, absErr := filepath.Abs(localDest)
+	if absErr != nil {
+		absDest = localDest
+	}
+	destStat, statErr := os.Stat(absDest)
+	if statErr != nil || !destStat.IsDir() {
+		return localDest, nil
+	}
+
+	stat, err := client.DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+	if err != nil && !errors.Is(err, client.ErrObjectNotFound) {
+		return localDest, errors.Wrapf(err,
+			"failed to stat remote source %q while deciding destination layout", remoteSource)
+	}
+	isCollection := stat != nil && stat.IsCollection
+
+	if isCollection && !recursive {
+		return localDest, errors.Errorf(
+			"remote object %q is a collection but recursive is not enabled", remoteSource)
+	}
+	if isCollection && recursive {
+		return path.Join(absDest, path.Base(pUrl.Path)), nil
+	}
+	return localDest, nil
 }

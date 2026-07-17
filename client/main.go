@@ -927,56 +927,19 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// Destination is an existing directory (the "container target"
-		// gesture).  Stat the remote source once to decide two things:
-		//   * If source is a collection and !recursive, error out
-		//     (row G4 -- rather than silently writing the origin's
-		//     directory listing to a local file named after the
-		//     collection).
-		//   * If source is a collection and recursive, nest under
-		//     basename(source) (row G5) so `pelican object get -r
-		//     ns/coll /tmp/dir/` creates /tmp/dir/coll/entries...,
-		//     matching `cp -r ns/coll /tmp/dir/`.
+		// If we have an auto-pack request, it's OK for the destination to be a directory
+		// Otherwise, get the base name of the source and append it to the destination dir.
+		// Note that we use the pUrl.Path, as this will have stripped any query params for us.
 		//
-		// The container-target branch is what makes the download layout
-		// symmetric with `cp -r`.  Callers that go through this DoGet
-		// therefore see the "nested under basename(source)" layout too:
-		// `pelican object sync <remote-coll> <local-dir>` now lands
-		// entries at `<local-dir>/<basename>/…` instead of
-		// `<local-dir>/…`, and any client_agent transfer that reuses
-		// DoGet inherits the same behaviour.  Gets that name a
-		// specific filename (or a non-existent path) pay no extra
-		// round trip.
-		//
-		// Stat error handling: a source that legitimately does not
-		// exist yet (ErrObjectNotFound) is a soft signal that we
-		// leave to the transfer machinery to surface with its own
-		// error.  Any OTHER stat failure (server unreachable, auth
-		// failure, 5xx) is a real signal that we cannot decide G4/G5
-		// correctly, so bail rather than silently falling through
-		// and building the wrong local layout.
-		isSourceCollection := false
-		stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
-		if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
-			return nil, errors.Wrapf(statErr,
-				"failed to stat remote source %q while deciding destination layout", remoteObject)
-		}
-		if stat != nil {
-			isSourceCollection = stat.IsCollection
-		}
-		if isSourceCollection && !recursive {
-			return nil, errors.Errorf(
-				"remote object %q is a collection but recursive is not enabled", remoteObject)
-		}
+		// This library function intentionally does NOT stat the remote source
+		// to decide "container target" nesting for recursive gets: existing
+		// callers (object sync, client_agent) rely on the flat layout, where
+		// a recursive get of a collection into an existing local directory
+		// drops entries directly under it.  The `cp -r`-style nesting for
+		// `pelican object get -r` is layered on top by the CLI (see
+		// cmd/object_get.go's inferGetDestination).
 		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
-			// Source is a file, dest is a dir -- infer filename (G2).
-			localDestination = path.Join(localDestPath, remoteObjectFilename)
-		} else if isSourceCollection {
-			// Recursive get of a collection into an existing dir --
-			// nest under basename(source) to match cp -r semantics (G5).
-			// A recursive single-file source keeps the direct-drop
-			// behavior; the walker treats it as a trivial subtree.
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}

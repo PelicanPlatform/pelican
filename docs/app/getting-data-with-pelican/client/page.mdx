@@ -169,6 +169,8 @@ pelican object put -r ./mydir pelican://<federation-url>/<namespace>
 
 The same layout rule applies symmetrically to `pelican object get`: downloading into an existing local directory places the object at `<local-dir>/<basename(source)>`, and a recursive get nests under `basename(source)`.
 
+> **Note (library callers):** the `cp`-style container-target semantics described here are applied by the CLI. Programs that call `client.DoGet` / `client.DoPut` directly (for example `pelican object sync`, or an embedding via the client library) continue to see the flat layout: a recursive `DoGet` into an existing local directory drops entries directly under it. Callers that want the CLI's nesting should compose `basename(source)` into the destination path themselves.
+
 ## Pelican Object Copy
 
 > **Note**: We are phasing out the `object copy` command and we recommend user  use `object get` and `object put` command instead.

@@ -634,11 +634,8 @@ func TestSyncUpload(t *testing.T) {
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsDownload)
 
-		// Verify we received the original contents, not any modified contents.
-		// A recursive get of a collection nests entries under
-		// LOCAL/basename(remote), so the file lives under
-		// downloadDir/<dirName>/<basename(innerTempDir)>/<basename(innerTempFile)>.
-		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, dirName, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
+		// Verify we received the original contents, not any modified contents
+		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
 		require.NoError(t, err)
 		require.Equal(t, innerTestFileContent, string(contentBytes))
 		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
@@ -866,11 +863,8 @@ func TestSyncDownload(t *testing.T) {
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsUpload)
 
-		// Download the inner directory. A later DoGet(uploadUrl, downloadDir, true)
-		// will land the tree at downloadDir/<dirName>/... (G5 nested-under-basename
-		// semantics), so pre-populate the equivalent inner path here so SyncSize
-		// on the later call can see identical sizes and correctly skip the file.
-		innerDownloadDir := filepath.Join(downloadDir, dirName, filepath.Base(innerTempDir))
+		// Download the inner directory
+		innerDownloadDir := filepath.Join(downloadDir, filepath.Base(innerTempDir))
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadInnerUrl, innerDownloadDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
