@@ -40,7 +40,7 @@ import (
 // transferSemanticsOriginConfig sets up a POSIXv2 origin (no XRootD
 // dependency) with recursive-listable public reads AND writes. This lets
 // one federation power every row of the object-transfer semantics
-// matrix (docs/object-transfer-semantics.md).
+// matrix that TestObjectTransferSemantics locks in.
 const transferSemanticsOriginConfig = `
 Origin:
   StorageType: posixv2
@@ -53,12 +53,11 @@ Director:
 `
 
 // TestObjectTransferSemantics locks in the current get/put source/dest
-// x file/collection x recursive matrix documented in
-// docs/object-transfer-semantics.md. Every subtest is named after a row
-// ID in that document so a failure points directly at a documented
-// expectation. If a subtest fails after a code change, either the
-// change is a regression OR the design changed intentionally -- in
-// which case update the doc alongside the test.
+// x file/collection x recursive matrix.  Subtests are named after row
+// IDs (G1..G7, P1..P7) so a failure points directly at the expectation
+// that regressed.  The PR that introduces or changes any row should
+// also update this table and the "Uploading to a Collection" section
+// of docs/app/getting-data-with-pelican/client/page.mdx.
 func TestObjectTransferSemantics(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()

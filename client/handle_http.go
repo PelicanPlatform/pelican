@@ -5353,10 +5353,21 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // PROPFIND, so we must not attempt to stat against it directly.
 // preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
 func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
+	return statHttpImpl(dest, dirResp, token, fedToken, useCollectionsOnly, false)
+}
+
+// statHttpImpl is the recursion-safe internals of statHttp.  The
+// alreadyFellBack flag stops the two fallback branches at the bottom
+// from ping-ponging: one branch flips useCollectionsOnly false->true,
+// the other flips it true->false, so an initial call that hits both
+// triggers back-to-back would otherwise recurse forever.  After a
+// single fallback we have tried both modes and any remaining failure
+// is reported to the caller.
+func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, useCollectionsOnly bool, alreadyFellBack bool) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
 	if useCollectionsOnly {
 		if collectionsUrl != nil {
 			statHosts = append(statHosts, *collectionsUrl)
@@ -5536,16 +5547,18 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		}
 	}
 	// Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
-	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
-		// Recursively call statHttp without preferCollectionsUrlOnly
-		return statHttp(dest, dirResp, token, fedToken)
+	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 && !alreadyFellBack {
+		// Retry without preferCollectionsUrlOnly; mark the retry as
+		// already-fell-back so the sibling fallback below cannot then
+		// flip us back to collections-only and ping-pong.
+		return statHttpImpl(dest, dirResp, token, fedToken, false, true)
 	}
 	// Fallback: if no host succeeded, at least one stat host was a cache
 	// that returned 409 on what is likely a collection, and the director
 	// gave us a collections URL, retry via the collections URL (origin
 	// WebDAV endpoint) which does serve directory listings.
-	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil {
-		return statHttp(dest, dirResp, token, fedToken, true)
+	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil && !alreadyFellBack {
+		return statHttpImpl(dest, dirResp, token, fedToken, true, true)
 	}
 	if success {
 		err = nil

@@ -378,32 +378,40 @@ func putMain(cmd *cobra.Command, args []string) {
 	isRecursive, _ := cmd.Flags().GetBool("recursive")
 	multipleObjects := len(source) > 1
 
-	// Check once if destination is a directory
-	// This avoids redundant stat calls and handles the multi-upload case
+	// Pre-flight: decide whether the destination is a directory (either
+	// because it's an existing collection, or because the caller supplied
+	// multiple sources and the destination doesn't exist yet so we should
+	// treat it as one).  Done once outside the source loop so multi-source
+	// uploads pay a single director round-trip.
+	//
+	// DoStat failure is intentionally soft here: uploads can legitimately
+	// succeed against a namespace where stat fails (write-only token, no
+	// `listings` capability, transient collections-endpoint outage, etc.).
+	// Treat any stat failure the same as "destination not known" and let
+	// DoPut make the authoritative decision.  Multiple sources still force
+	// directory semantics in that case; single-source falls through with
+	// the destination string used verbatim.
 	destIsDir := false
-	statInfo, err := client.DoStat(ctx, dest, options...)
-	if err != nil {
-		// Only assume destination is a directory for multiple objects if it doesn't exist yet
-		if errors.Is(err, client.ErrObjectNotFound) {
-			if multipleObjects {
-				log.Debugln("Destination does not exist with multiple objects, will create as directory")
-				destIsDir = true
-			} else {
-				// Single object upload - destination may not exist yet, proceed normally
-				log.Debugln("Destination does not exist, will be created on upload")
-			}
-		} else {
-			// Other errors should fail the attempt
-			log.Errorln("Failed to stat destination:", err)
-			result = err
-			os.Exit(1)
+	statInfo, statErr := client.DoStat(ctx, dest, options...)
+	if statErr != nil {
+		if !errors.Is(statErr, client.ErrObjectNotFound) {
+			log.Debugf("Stat of destination %q failed (%v); proceeding without directory inference", dest, statErr)
+		}
+		if multipleObjects {
+			destIsDir = true
 		}
 	} else if statInfo.IsCollection {
 		destIsDir = true
 	}
 
 	for _, src := range source {
-		// If destination is a directory, infer the filename from the source
+		// If destination is a directory, nest each source under
+		// basename(src).  This applies to both plain files and to
+		// recursive uploads: `pelican object put -r ./mydir <coll>`
+		// therefore places contents under `<coll>/mydir/`, matching
+		// `cp -r ./mydir /coll/` and the symmetric recursive-get
+		// layout.  Callers that want the old flat layout can name the
+		// container-inside-container path explicitly.
 		actualDest := dest
 		if destIsDir {
 			sourceFilename := filepath.Base(src)

@@ -171,16 +171,12 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return
 	}
 
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
+	// DoStat only needs the director response, a token, and an HTTP client
+	// (statHttp spins up its own gowebdav client).  Historically this
+	// function built a full TransferEngine — worker pool, mux goroutine,
+	// URL/dir caches — and shut it down again on every call, without ever
+	// touching it.  Skip that setup entirely so a caller (e.g. `pelican
+	// object put` pre-flighting the destination) can DoStat cheaply.
 
 	// Pre-scan options for cacheMode which affects the director query.
 	var cacheMode bool
@@ -932,7 +928,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
 		// Destination is an existing directory (the "container target"
-		// gesture). Stat the remote source once to decide two things:
+		// gesture).  Stat the remote source once to decide two things:
 		//   * If source is a collection and !recursive, error out
 		//     (row G4 -- rather than silently writing the origin's
 		//     directory listing to a local file named after the
@@ -941,10 +937,31 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		//     basename(source) (row G5) so `pelican object get -r
 		//     ns/coll /tmp/dir/` creates /tmp/dir/coll/entries...,
 		//     matching `cp -r ns/coll /tmp/dir/`.
-		// We only stat in this branch, so gets that name a specific
-		// filename (or a non-existent path) pay no extra round trip.
+		//
+		// The container-target branch is what makes the download layout
+		// symmetric with `cp -r`.  Callers that go through this DoGet
+		// therefore see the "nested under basename(source)" layout too:
+		// `pelican object sync <remote-coll> <local-dir>` now lands
+		// entries at `<local-dir>/<basename>/…` instead of
+		// `<local-dir>/…`, and any client_agent transfer that reuses
+		// DoGet inherits the same behaviour.  Gets that name a
+		// specific filename (or a non-existent path) pay no extra
+		// round trip.
+		//
+		// Stat error handling: a source that legitimately does not
+		// exist yet (ErrObjectNotFound) is a soft signal that we
+		// leave to the transfer machinery to surface with its own
+		// error.  Any OTHER stat failure (server unreachable, auth
+		// failure, 5xx) is a real signal that we cannot decide G4/G5
+		// correctly, so bail rather than silently falling through
+		// and building the wrong local layout.
 		isSourceCollection := false
-		if stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...); statErr == nil && stat != nil {
+		stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+		if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
+			return nil, errors.Wrapf(statErr,
+				"failed to stat remote source %q while deciding destination layout", remoteObject)
+		}
+		if stat != nil {
 			isSourceCollection = stat.IsCollection
 		}
 		if isSourceCollection && !recursive {

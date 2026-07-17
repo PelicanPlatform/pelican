@@ -148,6 +148,27 @@ pelican object put <path/to/local/file> pelican://<federation-url></namespace-pr
 
 > **Note:** you can also specify the federation url here with the `-f` flag, just be sure not to include it in the request URL as the host name if you decide to do so.
 
+### Uploading to a Collection (Container Target)
+If the remote destination names an existing collection (or you pass multiple sources), `pelican object put` infers the object name from the source, matching `cp` / `scp` behaviour:
+
+```bash
+# Both of the following put the file at pelican://.../namespace/file.txt
+pelican object put ./file.txt pelican://<federation-url>/<namespace>
+pelican object put ./file.txt pelican://<federation-url>/<namespace>/file.txt
+
+# Multiple sources: each is placed under the destination collection
+pelican object put ./a.txt ./b.txt pelican://<federation-url>/<namespace>
+```
+
+Recursive uploads (`-r`) nest each source under `basename(source)` inside the destination collection:
+
+```bash
+# Contents of ./mydir land at pelican://.../<namespace>/mydir/...
+pelican object put -r ./mydir pelican://<federation-url>/<namespace>
+```
+
+The same layout rule applies symmetrically to `pelican object get`: downloading into an existing local directory places the object at `<local-dir>/<basename(source)>`, and a recursive get nests under `basename(source)`.
+
 ## Pelican Object Copy
 
 > **Note**: We are phasing out the `object copy` command and we recommend user  use `object get` and `object put` command instead.
