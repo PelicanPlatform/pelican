@@ -303,16 +303,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			client.WithDryRun(dryRun),
 		}
 		options = append(options, tokenOpts...)
-		// Apply `cp`-style container-target semantics before invoking
-		// the (deliberately flat) library get.  See inferGetDestination
-		// for the full rules and rationale.
-		resolvedDest, err := inferGetDestination(ctx, src, dest, isRecursive, options...)
-		if err != nil {
-			attemptErr = err
-			lastSrc = src
-			break
-		}
-		transferResults, err := client.DoGet(ctx, src, resolvedDest, isRecursive, options...)
+		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
 		if err != nil {
 			attemptErr = err
 			lastSrc = src

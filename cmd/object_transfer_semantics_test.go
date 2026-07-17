@@ -117,20 +117,17 @@ func TestObjectTransferSemantics(t *testing.T) {
 	})
 
 	t.Run("G4_get_collection_nonrecursive_errors", func(t *testing.T) {
-		// After this PR: a `pelican object get <coll> <existing-dir>`
-		// (i.e. the CLI-level container-target gesture) errors with a
-		// message symmetric to the put-side "directory but recursive
-		// is not enabled" guard. This is layered on top of DoGet by
-		// the CLI's inferGetDestination helper; the library itself
-		// still permits the flat call so sync/client_agent are
-		// unaffected. Previously it silently wrote the origin's
-		// WebDAV listing to a local file named after the collection.
+		// After this PR: non-recursive get of a collection errors
+		// with a message symmetric to the put-side "directory but
+		// recursive is not enabled" guard. Previously it silently
+		// wrote the origin's WebDAV listing to a local file named
+		// after the collection.
 		subdir := filepath.Join(storage, "g4-dir")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "inside.txt"), []byte("inside"), 0o644))
 
 		localDir := t.TempDir()
-		_, err := inferGetDestination(ft.Ctx, remoteBase+"/g4-dir", localDir, false)
+		_, err := client.DoGet(ft.Ctx, remoteBase+"/g4-dir", localDir, false)
 		require.Error(t, err,
 			"G4: non-recursive get of a collection must error rather than silently succeed")
 		assert.Contains(t, err.Error(), "is a collection but recursive is not enabled",
@@ -142,22 +139,18 @@ func TestObjectTransferSemantics(t *testing.T) {
 	// -----------------------------------------------------------------
 
 	t.Run("G5_get_collection_recursive_nests_under_basename", func(t *testing.T) {
-		// A recursive `pelican object get remote/g5-src LOCAL` (with
-		// LOCAL an existing directory) places entries under
-		// `LOCAL/g5-src/…`, matching `cp -r remote/ local/`. The
-		// nesting is applied by the CLI's inferGetDestination helper;
-		// the library DoGet call itself receives the pre-nested path.
-		// This is the symmetric counterpart to P6 (put of a directory
-		// into an existing remote collection).
+		// A recursive get of `remote/g5-src` into an existing local
+		// directory `LOCAL` places entries under `LOCAL/g5-src/…`,
+		// matching `cp -r remote/ local/` semantics. This is the
+		// symmetric counterpart to P6 (put of a directory into an
+		// existing remote collection).
 		subdir := filepath.Join(storage, "g5-src")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "a.txt"), []byte("A"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "b.txt"), []byte("BB"), 0o644))
 
 		localDir := t.TempDir()
-		resolvedDest, err := inferGetDestination(ft.Ctx, remoteBase+"/g5-src", localDir, true)
-		require.NoError(t, err)
-		_, err = client.DoGet(ft.Ctx, remoteBase+"/g5-src", resolvedDest, true)
+		_, err := client.DoGet(ft.Ctx, remoteBase+"/g5-src", localDir, true)
 		require.NoError(t, err)
 
 		gotA, err := os.ReadFile(filepath.Join(localDir, "g5-src", "a.txt"))
@@ -174,19 +167,14 @@ func TestObjectTransferSemantics(t *testing.T) {
 		// itself as the target container (destination string is the
 		// collection name); entries land directly under it. This
 		// matches how `cp -r remote/ new_local_dir/` behaves when
-		// new_local_dir doesn't yet exist. inferGetDestination is a
-		// no-op here (dest is not an existing directory), so this
-		// asserts the library's default recursive behaviour.
+		// new_local_dir doesn't yet exist.
 		subdir := filepath.Join(storage, "g6-src")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "only.txt"), []byte("only"), 0o644))
 
 		localDir := t.TempDir()
 		newDst := filepath.Join(localDir, "does-not-yet-exist")
-		resolvedDest, err := inferGetDestination(ft.Ctx, remoteBase+"/g6-src", newDst, true)
-		require.NoError(t, err)
-		require.Equal(t, newDst, resolvedDest, "G6: no rewrite when dst doesn't yet exist")
-		_, err = client.DoGet(ft.Ctx, remoteBase+"/g6-src", resolvedDest, true)
+		_, err := client.DoGet(ft.Ctx, remoteBase+"/g6-src", newDst, true)
 		require.NoError(t, err)
 
 		got, err := os.ReadFile(filepath.Join(newDst, "only.txt"))

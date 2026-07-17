@@ -695,7 +695,9 @@ Director:
 	// Create a local directory for downloads
 	downloadDir := t.TempDir()
 
-	// Test recursive download - download entire directory structure
+	// Test recursive download - download entire directory structure.
+	// downloadDir is an existing local dir, so entries are nested under
+	// downloadDir/basename(uploadURL) = downloadDir/test/... (G5).
 	_, err = client.DoGet(ft.Ctx, uploadURL, downloadDir, true, client.WithToken(testToken))
 	require.NoError(t, err, "Should be able to recursively download directory")
 
@@ -708,7 +710,7 @@ Director:
 	}
 
 	for _, expectedFile := range expectedFiles {
-		downloadedPath := filepath.Join(downloadDir, expectedFile)
+		downloadedPath := filepath.Join(downloadDir, "test", expectedFile)
 		_, err := os.Stat(downloadedPath)
 		require.NoError(t, err, "File %s should exist after recursive download", expectedFile)
 	}
@@ -725,7 +727,7 @@ Director:
 	}
 
 	for _, tc := range testCases {
-		downloadedPath := filepath.Join(downloadDir, tc.relativePath)
+		downloadedPath := filepath.Join(downloadDir, "test", tc.relativePath)
 		content, err := os.ReadFile(downloadedPath)
 		require.NoError(t, err, "Should be able to read %s", tc.relativePath)
 		assert.Equal(t, tc.expectedContent, string(content), "Content of %s should match", tc.relativePath)
