@@ -165,7 +165,8 @@ For Origins that require token-based authentication (i.e., namespaces with `Read
 This allows you to restrict data access to members of specific GitHub organizations.
 
 <Callout type="info">
-GitHub uses OAuth2, not full OIDC (OpenID Connect). This means you need to explicitly configure the OAuth endpoints and specify which claims to use from GitHub's user info response (see the configuration example below).
+GitHub uses OAuth2, not full OIDC (OpenID Connect), which means its OAuth endpoints and user info claim names differ from standard OIDC defaults.
+When `Issuer.GroupSource: github` is set, Pelican automatically fills in all of these GitHub-specific values — endpoints, scopes, and claim names — so you only need to supply your OAuth App credentials and site-specific settings.
 </Callout>
 
 #### Prerequisites
@@ -180,22 +181,10 @@ GitHub uses OAuth2, not full OIDC (OpenID Connect). This means you need to expli
 Add the following to your Origin's configuration file to enable GitHub OAuth2:
 
 ```yaml filename="pelican.yaml" copy
-# GitHub OAuth2 endpoints (required since GitHub doesn't support OIDC discovery)
 OIDC:
-  Issuer: https://github.com
-  AuthorizationEndpoint: https://github.com/login/oauth/authorize
-  TokenEndpoint: https://github.com/login/oauth/access_token
-  UserInfoEndpoint: https://api.github.com/user
-  DeviceAuthEndpoint: https://github.com/login/device/code
-
   # Your GitHub OAuth App credentials
   ClientID: <your-github-client-id>
   ClientSecretFile: /path/to/client-secret-file
-
-  # GitHub-specific scopes
-  Scopes:
-    - user
-    - read:org  # Required for organization-based access control
 
 Origin:
   EnableIssuer: true
@@ -211,11 +200,8 @@ Origin:
       Capabilities: ["Writes", "DirectReads", "Reads", "Listings"]
 
 Issuer:
-  # GitHub returns "login" for username instead of OIDC standard "sub"
-  OIDCAuthenticationUserClaim: login
-  # GitHub returns "id" (numeric) instead of OIDC standard "sub"
-  OIDCSubjectClaim: id
-  # Use GitHub organization membership as groups
+  # Setting GroupSource to "github" automatically configures all GitHub OAuth2
+  # endpoints and claim names. No other OIDC settings are required.
   GroupSource: github
 
   # Require users to be members of at least one of these GitHub orgs
@@ -232,9 +218,25 @@ Issuer:
 
 Server:
   ExternalWebUrl: https://your-origin.example.com
-  # Grant admin access to specific GitHub users
+  # Grant WebUI admin access to specific GitHub users
   UIAdminUsers: ["<your-github-username>"]
 ```
+
+<Callout type="info">
+The following values are set automatically and do not need to appear in your config file when `GroupSource: github` is set.
+You may still override any of them explicitly if needed.
+
+| Parameter | Auto-filled value |
+|---|---|
+| `OIDC.Issuer` | `https://github.com` |
+| `OIDC.AuthorizationEndpoint` | `https://github.com/login/oauth/authorize` |
+| `OIDC.TokenEndpoint` | `https://github.com/login/oauth/access_token` |
+| `OIDC.UserInfoEndpoint` | `https://api.github.com/user` |
+| `OIDC.DeviceAuthEndpoint` | `https://github.com/login/device/code` |
+| `OIDC.Scopes` | `[user, read:org]` |
+| `Issuer.OIDCAuthenticationUserClaim` | `login` |
+| `Issuer.OIDCSubjectClaim` | `id` |
+</Callout>
 
 #### User Authentication Flow
 
