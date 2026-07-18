@@ -25,13 +25,16 @@ type (
 )
 
 const (
-	OriginStoragePosix   OriginStorageType = "posix"
-	OriginStoragePosixv2 OriginStorageType = "posixv2"
-	OriginStorageSSH     OriginStorageType = "ssh"
-	OriginStorageS3      OriginStorageType = "s3"
-	OriginStorageHTTPS   OriginStorageType = "https"
-	OriginStorageGlobus  OriginStorageType = "globus"
-	OriginStorageXRoot   OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
+	OriginStoragePosix    OriginStorageType = "posix"
+	OriginStoragePosixv2  OriginStorageType = "posixv2"
+	OriginStorageSSH      OriginStorageType = "ssh"
+	OriginStorageS3       OriginStorageType = "s3"
+	OriginStorageHTTPS    OriginStorageType = "https"
+	OriginStorageGlobus   OriginStorageType = "globus"
+	OriginStorageS3v2     OriginStorageType = "s3v2"     // Native S3 backend (no XRootD)
+	OriginStorageHTTPSv2  OriginStorageType = "httpsv2"  // Native HTTPS/WebDAV backend (no XRootD)
+	OriginStorageGlobusv2 OriginStorageType = "globusv2" // Native Globus backend (no XRootD)
+	OriginStorageXRoot    OriginStorageType = "xroot"    // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
 )
 
 var (
@@ -55,6 +58,19 @@ func (t OriginStorageType) IsPosixLike() bool {
 	}
 }
 
+// UsesXRootD reports whether an origin of this storage type is fronted by an
+// XRootD process. The native "v2" backends (and SSH) are served directly by
+// the pelican process and never launch XRootD. New native backends should be
+// added here rather than duplicating the list of storage-type comparisons.
+func (t OriginStorageType) UsesXRootD() bool {
+	switch t {
+	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2:
+		return false
+	default:
+		return true
+	}
+}
+
 // Convert a string to an OriginStorageType
 func ParseOriginStorageType(storageType string) (ost OriginStorageType, err error) {
 	switch storageType {
@@ -72,8 +88,14 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStorageXRoot
 	case string(OriginStorageGlobus):
 		ost = OriginStorageGlobus
+	case string(OriginStorageS3v2):
+		ost = OriginStorageS3v2
+	case string(OriginStorageHTTPSv2):
+		ost = OriginStorageHTTPSv2
+	case string(OriginStorageGlobusv2):
+		ost = OriginStorageGlobusv2
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, https, globus, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, s3v2, https, httpsv2, globus, globusv2, and xroot)", storageType)
 	}
 	return
 }
