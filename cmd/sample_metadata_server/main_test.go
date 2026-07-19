@@ -100,46 +100,12 @@ func TestCheckScope(t *testing.T) {
 		requireNamespace bool
 		wantErr          bool
 	}{
-		{
-			name:    "bare metadata scope, no ns requirement",
-			scopes:  []string{"storage.read", "pelican.metadata"},
-			ns:      "/exp",
-			wantErr: false,
-		},
-		{
-			name:    "no metadata scope at all",
-			scopes:  []string{"storage.read:/exp"},
-			ns:      "/exp",
-			wantErr: true,
-		},
-		{
-			name:             "namespaced scope covers event ns",
-			scopes:           []string{"pelican.metadata:/exp"},
-			ns:               "/exp/data/x.dat",
-			requireNamespace: true,
-			wantErr:          false,
-		},
-		{
-			name:             "namespaced scope does NOT cover event ns",
-			scopes:           []string{"pelican.metadata:/other"},
-			ns:               "/exp",
-			requireNamespace: true,
-			wantErr:          true,
-		},
-		{
-			name:             "bare scope insufficient when ns required",
-			scopes:           []string{"pelican.metadata"},
-			ns:               "/exp",
-			requireNamespace: true,
-			wantErr:          true,
-		},
-		{
-			name:             "sibling namespace is not covered",
-			scopes:           []string{"pelican.metadata:/exp"},
-			ns:               "/experiment",
-			requireNamespace: true,
-			wantErr:          true,
-		},
+		{"bare metadata scope, no ns requirement", []string{"storage.read", "pelican.metadata"}, "/exp", false, false},
+		{"no metadata scope at all", []string{"storage.read:/exp"}, "/exp", false, true},
+		{"namespaced scope covers event ns", []string{"pelican.metadata:/exp"}, "/exp/data/x.dat", true, false},
+		{"namespaced scope does NOT cover event ns", []string{"pelican.metadata:/other"}, "/exp", true, true},
+		{"bare scope insufficient when ns required", []string{"pelican.metadata"}, "/exp", true, true},
+		{"sibling namespace is not covered", []string{"pelican.metadata:/exp"}, "/experiment", true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,11 +123,8 @@ func TestParseBody_JSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseBody: %v", err)
 	}
-	if ev.ID != "e1" || ev.Namespace != "/exp" {
+	if ev.ID != "e1" || ev.Namespace != "/exp" || ev.Object["path"] != "/exp/x.dat" {
 		t.Fatalf("event = %+v", ev)
-	}
-	if ev.Object["path"] != "/exp/x.dat" {
-		t.Fatalf("object.path = %v", ev.Object["path"])
 	}
 	if blob != "" {
 		t.Fatalf("expected no blob info for plain JSON, got %q", blob)
@@ -171,7 +134,6 @@ func TestParseBody_JSON(t *testing.T) {
 func TestParseBody_MultipartRelated(t *testing.T) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-
 	rootHeader := textproto.MIMEHeader{}
 	rootHeader.Set("Content-ID", "<event>")
 	rootHeader.Set("Content-Type", "application/json")
@@ -180,7 +142,6 @@ func TestParseBody_MultipartRelated(t *testing.T) {
 		t.Fatalf("create root part: %v", err)
 	}
 	_, _ = rootPart.Write([]byte(`{"id":"e2","type":"object.committed","namespace":"/exp","object":{"path":"/exp/run.dat"}}`))
-
 	blobHeader := textproto.MIMEHeader{}
 	blobHeader.Set("Content-ID", "<metadata>")
 	blobHeader.Set("Content-Type", "application/xml")
@@ -214,7 +175,6 @@ func TestParseBody_MultipartMissingRoot(t *testing.T) {
 	part, _ := mw.CreatePart(h)
 	_, _ = part.Write([]byte(`<x/>`))
 	_ = mw.Close()
-
 	contentType := "multipart/related; boundary=" + mw.Boundary()
 	if _, _, err := parseBody(contentType, buf.Bytes()); err == nil {
 		t.Fatal("expected error for multipart body with no JSON root part")
