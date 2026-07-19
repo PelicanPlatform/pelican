@@ -18,19 +18,20 @@
  *
  ***************************************************************/
 
-// These e2e tests compile and launch the sample_metadata_server binary as a
-// subprocess (go build + port bind + health poll); that pattern is excluded
-// on Windows, matching the other server/binary-launching e2e suites
-// (metrics_e2e_test.go, tpc_fed_test.go).
+// These e2e tests drive the origin's real WLCG token signer against the real,
+// compiled sample_metadata_server binary launched as a subprocess. The binary
+// binds an OS-assigned port (-addr 127.0.0.1:0) and reports its bound URL on
+// stdout, which these tests parse — no port pre-reservation, no bind race.
+// They are excluded on Windows to match the other subprocess-launching e2e
+// suites (metrics_e2e_test.go, tpc_fed_test.go); the receiver's verification
+// matrix is exercised directly by the cmd/sample_metadata_server tests.
 
 package origin_serve
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
-	"encoding/pem"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,22 +48,16 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// realTokenIssuer bundles the pieces a real-token e2e needs: the origin's
-// issuer URL (also configured as Server.IssuerUrl so the production signer
-// stamps it) and the PEM path of the HTTPS issuer's CA, which the receiver
-// must be told to trust via -ca.
-type realTokenIssuer struct {
-	url    string
-	caPath string
-	server *httptest.Server
-}
+// sampleServerListeningPrefix must match listeningLinePrefix in
+// cmd/sample_metadata_server/main.go — it's the stdout contract the binary uses
+// to report its OS-assigned port.
+const sampleServerListeningPrefix = "SAMPLE_METADATA_SERVER_LISTENING "
 
-// setupRealTokenIssuer generates the origin's issuer keys and stands up an
-// HTTPS server publishing the OIDC discovery doc + JWKS exactly as a Pelican
-// origin does. Because the server is TLS with a self-signed cert, the CA PEM
-// is written to disk and returned so the sample server can trust it with -ca
-// (no "skip verification" anywhere). Viper globals are saved/restored.
-func setupRealTokenIssuer(t *testing.T) *realTokenIssuer {
+// setupRealTokenIssuer generates the origin's issuer keys and stands up a
+// plain-HTTP server publishing the OIDC discovery doc + JWKS exactly as a
+// Pelican origin does, so the sample server can discover and verify the real
+// token. Returns the issuer URL. Viper globals are saved/restored.
+func setupRealTokenIssuer(t *testing.T) string {
 	t.Helper()
 
 	prevKeysDir := param.IssuerKeysDirectory.GetString()
@@ -75,13 +70,13 @@ func setupRealTokenIssuer(t *testing.T) *realTokenIssuer {
 		t.Fatalf("set issuer keys dir: %v", err)
 	}
 
-	ri := &realTokenIssuer{}
+	var issuerURL string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"issuer":   ri.url,
-			"jwks_uri": ri.url + "/.well-known/issuer.jwks",
+			"issuer":   issuerURL,
+			"jwks_uri": issuerURL + "/.well-known/issuer.jwks",
 		})
 	})
 	mux.HandleFunc("/.well-known/issuer.jwks", func(w http.ResponseWriter, r *http.Request) {
@@ -94,23 +89,59 @@ func setupRealTokenIssuer(t *testing.T) *realTokenIssuer {
 		data, _ := json.Marshal(jwks)
 		_, _ = w.Write(data)
 	})
-
-	// HTTPS issuer: this is what exercises the sample server's -ca path.
-	ri.server = httptest.NewTLSServer(mux)
-	t.Cleanup(ri.server.Close)
-	ri.url = ri.server.URL
-	if err := param.Server_IssuerUrl.Set(ri.url); err != nil {
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	issuerURL = srv.URL
+	if err := param.Server_IssuerUrl.Set(issuerURL); err != nil {
 		t.Fatalf("set issuer url: %v", err)
 	}
+	return issuerURL
+}
 
-	// Persist the issuer's self-signed cert so the receiver can trust it.
-	cert := ri.server.Certificate()
-	ri.caPath = filepath.Join(t.TempDir(), "issuer-ca.pem")
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-	if err := os.WriteFile(ri.caPath, pemBytes, 0600); err != nil {
-		t.Fatalf("write issuer CA: %v", err)
+// launchSampleServer builds and launches the real sample_metadata_server binary
+// on an OS-assigned port and returns its base URL (parsed from the stdout
+// readiness line the binary prints). The webhook endpoint is baseURL+"/events".
+func launchSampleServer(t *testing.T, args ...string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
+	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/sample_metadata_server").CombinedOutput(); err != nil {
+		t.Fatalf("build sample server: %v\n%s", err, out)
 	}
-	return ri
+
+	ctx, cancel := context.WithCancel(context.Background())
+	full := append([]string{"-addr", "127.0.0.1:0", "-path", "/events"}, args...)
+	cmd := exec.CommandContext(ctx, bin, full...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatalf("start sample server: %v", err)
+	}
+	t.Cleanup(func() { cancel(); _ = cmd.Wait() })
+
+	urlCh := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		reported := false
+		for sc.Scan() {
+			line := sc.Text()
+			if !reported && strings.HasPrefix(line, sampleServerListeningPrefix) {
+				reported = true
+				urlCh <- strings.TrimSpace(strings.TrimPrefix(line, sampleServerListeningPrefix))
+			}
+		}
+	}()
+	select {
+	case base := <-urlCh:
+		return base
+	case <-time.After(30 * time.Second):
+		t.Fatal("sample server never reported its listening address")
+		return ""
+	}
 }
 
 // TestE2EEventual_RealTokenToSampleServer is the flagship end-to-end for the
@@ -119,27 +150,26 @@ func setupRealTokenIssuer(t *testing.T) *realTokenIssuer {
 //   - The ORIGIN mints a real WLCG token via the production signer
 //     (config.GetIssuerPrivateJWK + token.NewWLCGToken); signToken is NOT
 //     overridden. So the token carries the real issuer, the real
-//     `pelican.metadata:/exp` scope, the endpoint audience, and a real
-//     signature.
-//   - The RECEIVER is the actual compiled sample_metadata_server binary,
-//     which discovers the origin's JWKS over HTTPS (trusting the issuer CA via
-//     -ca) and verifies the token before accepting.
+//     `pelican.metadata:/exp` scope, and a real signature.
+//   - The RECEIVER is the actual compiled sample_metadata_server binary, which
+//     discovers the origin's JWKS via OIDC and verifies the token before
+//     accepting.
 //
 // It also reproduces the eventual-mode bug conditions: POSC on, a NON-root
-// export (/exp), a real webdav.Handler that strips its Prefix, and the
-// worker's FilesystemForExists existence check. A drained queue means the
-// real token verified AND the object published through the standalone path.
+// export (/exp), a real webdav.Handler that strips its Prefix, and the worker's
+// FilesystemForExists existence check. A drained queue means the real token
+// verified AND the object published through the standalone path.
 func TestE2EEventual_RealTokenToSampleServer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: builds and launches a binary, generates real keys")
 	}
 
-	issuer := setupRealTokenIssuer(t)
-	// audience must equal the endpoint the origin posts to; the receiver
-	// derives it from the port it binds, so launch first then reuse.
-	port := reserveFreePortForE2E(t)
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d/events", port)
-	launchReceiverOnPort(t, port, endpoint, issuer.caPath)
+	setupRealTokenIssuer(t)
+	// No -audience: the origin signs aud == its endpoint, which isn't known
+	// until the OS assigns the port; the audience-match path is covered against
+	// the binary in cmd/sample_metadata_server. Here we verify signature+scope
+	// through the full publish path.
+	endpoint := launchSampleServer(t, "-require-namespace-scope") + "/events"
 
 	mem := afero.NewMemMapFs()
 	autoFs := newAutoCreateDirFs(mem)
@@ -186,8 +216,8 @@ func TestE2EEventual_RealTokenToSampleServer(t *testing.T) {
 // close path with a real token: the publish happens inline on the request
 // goroutine and its result gates the PUT's HTTP status. The happy subtest
 // asserts a verified token yields 2xx + a committed object; the rollback
-// subtest points the receiver at a mismatched audience so the real token is
-// rejected (401), the transactional close fails, and POSC rolls the object
+// subtest configures the receiver with a mismatched audience so the real token
+// is rejected (401), the transactional close fails, and POSC rolls the object
 // back — the "publish failed → 5xx → object removed" contract.
 func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 	if testing.Short() {
@@ -195,11 +225,8 @@ func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 	}
 
 	t.Run("happy_path_verified_token", func(t *testing.T) {
-		issuer := setupRealTokenIssuer(t)
-		port := reserveFreePortForE2E(t)
-		endpoint := fmt.Sprintf("http://127.0.0.1:%d/events", port)
-		// Receiver's expected audience == endpoint → real token's aud matches.
-		launchReceiverOnPort(t, port, endpoint, issuer.caPath)
+		setupRealTokenIssuer(t)
+		endpoint := launchSampleServer(t, "-require-namespace-scope") + "/events"
 
 		mem, _, ctl, srv := newTransactionalStack(t, endpoint)
 		defer srv.Close()
@@ -215,13 +242,11 @@ func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 	})
 
 	t.Run("rollback_on_auth_failure", func(t *testing.T) {
-		issuer := setupRealTokenIssuer(t)
-		port := reserveFreePortForE2E(t)
-		endpoint := fmt.Sprintf("http://127.0.0.1:%d/events", port)
+		setupRealTokenIssuer(t)
 		// Receiver expects a DIFFERENT audience than the token carries, so a
 		// perfectly-signed real token is rejected with 401.
-		wrongAudience := fmt.Sprintf("http://127.0.0.1:%d/not-the-endpoint", port)
-		launchReceiverOnPort(t, port, wrongAudience, issuer.caPath)
+		endpoint := launchSampleServer(t, "-require-namespace-scope",
+			"-audience", "https://definitely-not-the-endpoint.example/events") + "/events"
 
 		mem, _, ctl, srv := newTransactionalStack(t, endpoint)
 		defer srv.Close()
@@ -230,8 +255,8 @@ func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 		if status/100 == 2 {
 			t.Fatalf("PUT should have failed when the receiver rejects the token, got %d", status)
 		}
-		// Export-relative path (webdav strips /exp). POSC's rollback should
-		// have removed the just-committed object.
+		// Export-relative path (webdav strips /exp). POSC's rollback should have
+		// removed the just-committed object.
 		if _, err := mem.Stat("/data/bad.dat"); err == nil {
 			t.Fatal("object should have been rolled back after a transactional auth failure")
 		}
@@ -271,32 +296,6 @@ func newTransactionalStack(t *testing.T, endpoint string) (afero.Fs, *poscFileSy
 }
 
 // --- shared helpers ---
-
-// launchReceiverOnPort is launchReceiver with a caller-chosen port (so the
-// audience can be computed before the process starts).
-func launchReceiverOnPort(t *testing.T, port int, audience, caPath string) {
-	t.Helper()
-	bin := buildSampleServerBinary(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	args := []string{
-		"-addr", fmt.Sprintf("127.0.0.1:%d", port),
-		"-path", "/events",
-		"-audience", audience,
-		"-require-namespace-scope",
-	}
-	if caPath != "" {
-		args = append(args, "-ca", caPath)
-	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
-		t.Fatalf("start sample server: %v", err)
-	}
-	t.Cleanup(func() { cancel(); _ = cmd.Wait() })
-	waitForHealthzE2E(t, fmt.Sprintf("http://127.0.0.1:%d", port))
-}
 
 // newOriginPUTServer wraps a POSC filesystem behind a real webdav.Handler
 // (Prefix = fedPrefix, i.e. production-style prefix stripping) and a tiny mux
@@ -364,7 +363,7 @@ func requireQueueDrains(t *testing.T, ctl *metadataController, within time.Durat
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("queue never drained — the receiver likely rejected the token (see its log above) or the row was dropped")
+			t.Fatalf("queue never drained — the sample server likely rejected the token or the row was dropped")
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -377,46 +376,4 @@ func requireQueueEmpty(t *testing.T, ctl *metadataController) {
 	if count != 0 {
 		t.Fatalf("queue should be empty, got %d rows", count)
 	}
-}
-
-// buildSampleServerBinary compiles cmd/sample_metadata_server into a temp
-// binary for use as a subprocess receiver.
-func buildSampleServerBinary(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	if os.PathSeparator == '\\' {
-		bin += ".exe"
-	}
-	out, err := exec.Command("go", "build", "-o", bin, "../cmd/sample_metadata_server").CombinedOutput()
-	if err != nil {
-		t.Fatalf("build sample server: %v\n%s", err, out)
-	}
-	return bin
-}
-
-func reserveFreePortForE2E(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
-
-func waitForHealthzE2E(t *testing.T, base string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(base + "/healthz")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("sample server never became healthy")
 }
