@@ -18,22 +18,24 @@
  *
  ***************************************************************/
 
-// This test compiles and launches the server binary as a subprocess (go build
-// + port bind + health poll), which is excluded on Windows. The pure-function
-// unit tests in main_test.go still run on every platform.
+// This test builds and launches the real sample_metadata_server binary as a
+// subprocess — the point is to exercise the actual standalone binary, not an
+// in-process handler. The server binds an OS-assigned port (:0) and reports the
+// bound URL on stdout, which this test parses (no reserve-then-rebind race). It
+// is excluded on Windows to match the other subprocess-launching e2e suites;
+// the pure-function tests in main_test.go run on every platform.
 
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,34 +51,25 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-// TestIntegration_SampleServerVerifiesToken builds the sample_metadata_server
-// binary, launches it as a real process, and drives it with webhook POSTs
-// that carry real origin-style JWTs. A fake issuer (httptest) publishes the
-// OIDC discovery doc + JWKS the same way a Pelican origin does, so the
-// server's discover→fetch→verify path runs end-to-end.
-//
-// This is the integration test that "wires" the deliverable: it exercises
-// the actual compiled binary and its flag surface, not just the in-package
-// helpers.
+// TestIntegration_SampleServerVerifiesToken builds and launches the real
+// binary and drives it with webhook POSTs carrying real origin-style JWTs. A
+// fake issuer (httptest, HTTPS so the -ca trust path is exercised) publishes
+// the OIDC discovery doc + JWKS, and tokens are minted with jwx. The audience
+// is a fixed configured string (independent of the OS-assigned port), so the
+// binary can be launched with -audience before its port is known.
 func TestIntegration_SampleServerVerifiesToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: builds and launches a binary")
 	}
 
-	// --- Fake origin issuer: publishes discovery + JWKS. ---
 	privKey, pubSet := genES256Keypair(t, "origin-key")
-	// A second key that is NOT published — tokens signed with it must be
-	// rejected.
 	untrustedKey, _ := genES256Keypair(t, "attacker-key")
-
 	pubJSON, err := json.Marshal(pubSet)
 	if err != nil {
 		t.Fatalf("marshal jwks: %v", err)
 	}
 
 	var issuerURL string
-	// HTTPS issuer so the sample server's JWKS fetch runs over TLS and its
-	// -ca trust path is exercised (there is no skip-verification flag).
 	issuer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
@@ -96,40 +89,16 @@ func TestIntegration_SampleServerVerifiesToken(t *testing.T) {
 	issuerURL = issuer.URL
 	caPath := writeIssuerCA(t, issuer)
 
-	// --- Launch the sample server binary. ---
-	bin := buildSampleServer(t)
-	port := reserveFreePort(t)
-	receiverBase := fmt.Sprintf("http://127.0.0.1:%d", port)
-	audience := receiverBase + "/events"
-
-	logs := &syncBuffer{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin,
-		"-addr", fmt.Sprintf("127.0.0.1:%d", port),
-		"-path", "/events",
-		"-audience", audience,
-		"-require-namespace-scope",
-		"-clock-skew", "2m",
-		"-ca", caPath,
-	)
-	cmd.Stdout = logs
-	cmd.Stderr = logs
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start sample server: %v", err)
-	}
-	t.Cleanup(func() {
-		cancel()
-		_ = cmd.Wait()
-		if t.Failed() {
-			t.Logf("sample server output:\n%s", logs.String())
-		}
-	})
-	waitForHealthz(t, receiverBase)
+	// The audience the receiver expects is a fixed string, independent of the
+	// bound port, so it can be passed on the command line before launch.
+	const audience = "https://receiver.test.example/events"
+	baseURL := launchServer(t, "-path", "/events", "-audience", audience,
+		"-require-namespace-scope", "-ca", caPath)
+	endpoint := baseURL + "/events"
 
 	now := time.Now()
-	validToken := func(scopes []string, aud string) string {
-		return mintToken(t, privKey, jwa.ES256, issuerURL, aud, scopes, now)
+	valid := func(scopes []string, aud string) string {
+		return mintToken(t, privKey, issuerURL, aud, scopes, now)
 	}
 
 	tests := []struct {
@@ -138,61 +107,38 @@ func TestIntegration_SampleServerVerifiesToken(t *testing.T) {
 		body       string
 		wantStatus int
 	}{
-		{
-			name:       "valid token, namespaced scope covers event ns",
-			authHeader: "Bearer " + validToken([]string{"storage.read", "pelican.metadata:/exp"}, audience),
-			body:       `{"id":"e1","type":"object.committed","namespace":"/exp","object":{"path":"/exp/data/x.dat","size":3}}`,
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "missing Authorization header",
-			authHeader: "",
-			body:       `{"id":"e2","namespace":"/exp","object":{"path":"/exp/y.dat"}}`,
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name:       "token minted for a different audience",
-			authHeader: "Bearer " + validToken([]string{"pelican.metadata:/exp"}, "https://someone-else.example/hook"),
-			body:       `{"id":"e3","namespace":"/exp","object":{"path":"/exp/z.dat"}}`,
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name:       "token signed by an unpublished (untrusted) key",
-			authHeader: "Bearer " + mintToken(t, untrustedKey, jwa.ES256, issuerURL, audience, []string{"pelican.metadata:/exp"}, now),
-			body:       `{"id":"e4","namespace":"/exp","object":{"path":"/exp/w.dat"}}`,
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name:       "valid signature but scope path covers a different namespace",
-			authHeader: "Bearer " + validToken([]string{"pelican.metadata:/other"}, audience),
-			body:       `{"id":"e5","namespace":"/exp","object":{"path":"/exp/v.dat"}}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "valid signature but no metadata scope at all",
-			authHeader: "Bearer " + validToken([]string{"storage.read:/exp"}, audience),
-			body:       `{"id":"e6","namespace":"/exp","object":{"path":"/exp/u.dat"}}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "expired token",
-			authHeader: "Bearer " + mintToken(t, privKey, jwa.ES256, issuerURL, audience, []string{"pelican.metadata:/exp"}, now.Add(-1*time.Hour)),
-			body:       `{"id":"e7","namespace":"/exp","object":{"path":"/exp/t.dat"}}`,
-			wantStatus: http.StatusUnauthorized,
-		},
+		{"valid token, namespaced scope covers event ns",
+			"Bearer " + valid([]string{"storage.read", "pelican.metadata:/exp"}, audience),
+			`{"id":"e1","type":"object.committed","namespace":"/exp","object":{"path":"/exp/data/x.dat","size":3}}`,
+			http.StatusOK},
+		{"missing Authorization header", "",
+			`{"id":"e2","namespace":"/exp","object":{"path":"/exp/y.dat"}}`, http.StatusUnauthorized},
+		{"token minted for a different audience",
+			"Bearer " + valid([]string{"pelican.metadata:/exp"}, "https://someone-else.example/hook"),
+			`{"id":"e3","namespace":"/exp","object":{"path":"/exp/z.dat"}}`, http.StatusUnauthorized},
+		{"token signed by an unpublished (untrusted) key",
+			"Bearer " + mintToken(t, untrustedKey, issuerURL, audience, []string{"pelican.metadata:/exp"}, now),
+			`{"id":"e4","namespace":"/exp","object":{"path":"/exp/w.dat"}}`, http.StatusUnauthorized},
+		{"valid signature but scope path covers a different namespace",
+			"Bearer " + valid([]string{"pelican.metadata:/other"}, audience),
+			`{"id":"e5","namespace":"/exp","object":{"path":"/exp/v.dat"}}`, http.StatusForbidden},
+		{"valid signature but no metadata scope at all",
+			"Bearer " + valid([]string{"storage.read:/exp"}, audience),
+			`{"id":"e6","namespace":"/exp","object":{"path":"/exp/u.dat"}}`, http.StatusForbidden},
+		{"expired token",
+			"Bearer " + mintToken(t, privKey, issuerURL, audience, []string{"pelican.metadata:/exp"}, now.Add(-1*time.Hour)),
+			`{"id":"e7","namespace":"/exp","object":{"path":"/exp/t.dat"}}`, http.StatusUnauthorized},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			status := postEvent(t, audience, tc.authHeader, "application/json", []byte(tc.body))
-			if status != tc.wantStatus {
+			if status := postEvent(t, endpoint, tc.authHeader, []byte(tc.body)); status != tc.wantStatus {
 				t.Fatalf("POST returned %d, want %d", status, tc.wantStatus)
 			}
 		})
 	}
 }
 
-// syncBuffer is a goroutine-safe io.Writer for capturing subprocess output.
+// syncBuffer is a goroutine-safe buffer for capturing subprocess output.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf strings.Builder
@@ -210,8 +156,70 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// writeIssuerCA persists the httptest TLS server's self-signed certificate to
-// a PEM file so the launched sample server can trust it via -ca.
+// launchServer builds the binary and starts it with -addr 127.0.0.1:0 plus the
+// given args. It parses the OS-assigned bound URL from the server's stdout
+// (the listeningLinePrefix line) — no port pre-reservation, so no bind race.
+func launchServer(t *testing.T, args ...string) (baseURL string) {
+	t.Helper()
+	bin := buildSampleServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	full := append([]string{"-addr", "127.0.0.1:0"}, args...)
+	cmd := exec.CommandContext(ctx, bin, full...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	logs := &syncBuffer{}
+	cmd.Stderr = logs
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatalf("start server: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = cmd.Wait()
+		if t.Failed() {
+			t.Logf("server stderr:\n%s", logs.String())
+		}
+	})
+
+	urlCh := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		reported := false
+		for sc.Scan() {
+			line := sc.Text()
+			if !reported && strings.HasPrefix(line, listeningLinePrefix) {
+				reported = true
+				urlCh <- strings.TrimSpace(strings.TrimPrefix(line, listeningLinePrefix))
+			}
+		}
+	}()
+
+	select {
+	case baseURL = <-urlCh:
+		return baseURL
+	case <-time.After(30 * time.Second):
+		t.Fatalf("server never reported its listening address; stderr:\n%s", logs.String())
+		return ""
+	}
+}
+
+// buildSampleServer compiles the current package into a temp binary.
+func buildSampleServer(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
+	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// writeIssuerCA persists the httptest TLS server's self-signed certificate to a
+// PEM file so the launched server can trust it via -ca.
 func writeIssuerCA(t *testing.T, srv *httptest.Server) string {
 	t.Helper()
 	cert := srv.Certificate()
@@ -223,54 +231,6 @@ func writeIssuerCA(t *testing.T, srv *httptest.Server) string {
 	return path
 }
 
-// buildSampleServer compiles the current package into a temp binary.
-func buildSampleServer(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	if os.PathSeparator == '\\' {
-		bin += ".exe"
-	}
-	cmd := exec.Command("go", "build", "-o", bin, ".")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	return bin
-}
-
-// reserveFreePort grabs an ephemeral port and releases it so the child can
-// bind it. The brief window between release and re-bind is acceptable for a
-// test.
-func reserveFreePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
-
-// waitForHealthz polls the receiver's /healthz until it responds or times out.
-func waitForHealthz(t *testing.T, base string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(base + "/healthz")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("sample server never became healthy")
-}
-
-// genES256Keypair returns a private jwk.Key (for signing) and a JWKS holding
-// only the corresponding public key (for verification).
 func genES256Keypair(t *testing.T, kid string) (jwk.Key, jwk.Set) {
 	t.Helper()
 	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -298,10 +258,7 @@ func genES256Keypair(t *testing.T, kid string) (jwk.Key, jwk.Set) {
 	return priv, set
 }
 
-// mintToken builds and signs a JWT shaped like the one the origin's
-// metadata publisher emits: issuer/subject = origin issuer, aud = receiver,
-// a space-delimited scope claim, and a jti.
-func mintToken(t *testing.T, key jwk.Key, alg jwa.SignatureAlgorithm, issuer, audience string, scopes []string, iat time.Time) string {
+func mintToken(t *testing.T, key jwk.Key, issuer, audience string, scopes []string, iat time.Time) string {
 	t.Helper()
 	tok, err := jwt.NewBuilder().
 		Issuer(issuer).
@@ -316,21 +273,20 @@ func mintToken(t *testing.T, key jwk.Key, alg jwa.SignatureAlgorithm, issuer, au
 	if err != nil {
 		t.Fatalf("build token: %v", err)
 	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(alg, key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}
 	return string(signed)
 }
 
-// postEvent POSTs a webhook body and returns the HTTP status code.
-func postEvent(t *testing.T, url, authHeader, contentType string, body []byte) int {
+func postEvent(t *testing.T, url, authHeader string, body []byte) int {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Content-Type", "application/json")
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
