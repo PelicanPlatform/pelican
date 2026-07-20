@@ -41,6 +41,31 @@ const targets: Record<Service, TestTarget> = {
 };
 
 /**
+ * Build a Playwright storageState that carries the service token as the web-UI
+ * `login` cookie — the JWT session cookie Pelican reads in GetUserGroups
+ * (web_ui/authentication.go). Using the cookie instead of an `Authorization`
+ * header means in-browser flows are authenticated too: notably the Origin
+ * Object Browser's issuer `/authorize` call, which authenticates via this cookie
+ * (not a header). The token only needs to be signed by the server's issuer key
+ * and carry a `user_id` claim (issuer/audience are not checked for the cookie).
+ */
+const loginCookieState = (baseURL: string, token: string) => ({
+  cookies: [
+    {
+      name: 'login',
+      value: token,
+      domain: new URL(baseURL).hostname,
+      path: '/',
+      expires: -1, // session cookie
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax' as const,
+    },
+  ],
+  origins: [],
+});
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -75,9 +100,16 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         baseURL,
-        ...(token
-          ? { extraHTTPHeaders: { Authorization: `Bearer ${token}` } }
-          : {}),
+        // Auth precedence:
+        //  1. E2E_STORAGE_STATE — an explicitly captured session file
+        //     (`npm run playwright:save-auth`), for real interactive logins.
+        //  2. the service token, injected as the `login` cookie so both API
+        //     requests and in-browser login flows are authenticated.
+        ...(process.env.E2E_STORAGE_STATE
+          ? { storageState: process.env.E2E_STORAGE_STATE }
+          : token
+            ? { storageState: loginCookieState(baseURL, token) }
+            : {}),
       },
     })),
   ],
