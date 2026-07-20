@@ -107,6 +107,7 @@ type (
 		DisableCopies       bool
 		EnableTPC           bool
 		EnableAtomicUploads bool
+		EnableTLSClientAuth bool
 		SelfTest            bool
 		MonitoringPrefix    string
 		Concurrency         int
