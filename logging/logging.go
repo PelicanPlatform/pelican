@@ -19,8 +19,10 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,8 +32,10 @@ import (
 	"github.com/go-kit/log/term"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // BufferedLogHook buffers log entries until they are flushed
@@ -45,11 +49,94 @@ var (
 	bufferedHook atomic.Pointer[BufferedLogHook]
 	flushOnce    sync.Once
 	logFHandle   *os.File
+
+	// asyncMu guards asyncW, loggingCtx, and loggingEgrp.
+	asyncMu     sync.Mutex
+	asyncW      *asyncWriter
+	loggingCtx  context.Context = context.Background()
+	loggingEgrp *errgroup.Group
 )
+
+// SetErrgroup registers the process-wide errgroup (and its context) used to run
+// the asynchronous log-writer goroutine: the goroutine runs under the errgroup
+// so a fatal write error propagates, and stops when the context is cancelled at
+// shutdown. Call this once, early (e.g. from cmd.Execute), before file logging
+// is initialized.
+func SetErrgroup(ctx context.Context, egrp *errgroup.Group) {
+	asyncMu.Lock()
+	defer asyncMu.Unlock()
+	loggingCtx = ctx
+	loggingEgrp = egrp
+}
+
+// buildRotateConfig reads the Logging.Rotation.* parameters into the parsed form
+// used by the async writer. It returns an error on a malformed value (e.g. an
+// unparsable size) so the caller can fail loudly at startup rather than
+// silently disabling a misconfigured knob.
+func buildRotateConfig() (rotateConfig, error) {
+	// The admin-facing knobs are phrased as "Disable..." so their zero value is
+	// the desired default (rotation on, compression on); invert them here so the
+	// writer's internal logic stays positive.
+	cfg := rotateConfig{
+		enable:             !param.Logging_Rotation_Disable.GetBool(),
+		frequency:          parseRotationFrequency(param.Logging_Rotation_Frequency.GetString()),
+		maxRetentionPeriod: param.Logging_Rotation_MaxRetentionPeriod.GetDuration(),
+		compress:           !param.Logging_Rotation_DisableCompress.GetBool(),
+	}
+	// Parse the byte-size knobs, failing loudly on a malformed value rather than
+	// silently disabling it: a typo'd value must not be ignored until a disk
+	// fills at 3am.
+	sizeKnobs := []struct {
+		name string
+		val  string
+		dst  *int64
+	}{
+		{param.Logging_Rotation_MaxSize.GetName(), param.Logging_Rotation_MaxSize.GetString(), &cfg.maxSize},
+		{param.Logging_Rotation_MaxRetentionSize.GetName(), param.Logging_Rotation_MaxRetentionSize.GetString(), &cfg.maxRetentionSize},
+	}
+	for _, k := range sizeKnobs {
+		if k.val == "" {
+			continue
+		}
+		size, err := utils.ParseBytes(k.val)
+		if err != nil {
+			return cfg, fmt.Errorf("invalid %s value %q: %w", k.name, k.val, err)
+		}
+		if size > math.MaxInt64 {
+			return cfg, fmt.Errorf("%s value %q is too large", k.name, k.val)
+		}
+		*k.dst = int64(size)
+	}
+	return cfg, nil
+}
+
+// EnterSyncMode is the logging shutdown handler. It drains and flushes the
+// asynchronous log writer, then flips it to synchronous mode so that any
+// late-arriving log line (e.g. emitted during signal handling or a panic) is
+// written directly to the log file by its calling goroutine. Safe to call
+// multiple times; a no-op when file logging is not active.
+func EnterSyncMode() {
+	asyncMu.Lock()
+	w := asyncW
+	asyncMu.Unlock()
+	if w != nil {
+		w.enterSyncMode()
+	}
+}
 
 // Reset function intended for unit tests to be able to
 // reset log flush state.
 func ResetLogFlush() {
+	asyncMu.Lock()
+	if asyncW != nil {
+		asyncW.close()
+		asyncW = nil
+	}
+	// Also drop any registered errgroup/context so a later FlushLogs in a
+	// different test does not reuse a stale (already-finished) errgroup.
+	loggingCtx = context.Background()
+	loggingEgrp = nil
+	asyncMu.Unlock()
 	if logFHandle != nil {
 		_ = logFHandle.Close()
 		logFHandle = nil
@@ -126,20 +213,30 @@ func FlushLogs(pushToFile bool) {
 
 		logLocation := param.Logging_LogLocation.GetString()
 		if pushToFile && logLocation != "" {
-			dir := filepath.Dir(logLocation)
-			if dir != "" {
-				if err := os.MkdirAll(dir, 0750); err != nil {
-					cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
-				}
+			// The asynchronous writer opens (creating/appending) the log file,
+			// decouples logging call sites from disk I/O, and -- for regular
+			// files -- manages rotation/compression/retention.
+			rotCfg, err := buildRotateConfig()
+			if err != nil {
+				cobra.CheckErr(err)
+			}
+			w, err := newAsyncWriter(logLocation, rotCfg, param.Logging_Rotation_FlushInterval.GetDuration())
+			if err != nil {
+				cobra.CheckErr(err)
 			}
 
-			f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
-			if err != nil {
-				cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
+			asyncMu.Lock()
+			asyncW = w
+			ctx, egrp := loggingCtx, loggingEgrp
+			asyncMu.Unlock()
+			if egrp != nil {
+				w.start(ctx, egrp)
+			} else {
+				w.start(ctx, nil)
 			}
-			logFHandle = f
+
 			fmt.Fprintf(os.Stderr, "%s is set to %s. All logs are redirected to the log file.\n", param.Logging_LogLocation.GetName(), logLocation)
-			log.SetOutput(f)
+			log.SetOutput(w)
 
 			// Disable colors for log files
 			log.SetFormatter(&log.TextFormatter{
@@ -187,6 +284,20 @@ func FlushLogs(pushToFile bool) {
 // should clean up the file handle when the process exits. Invoking this outside
 // a test will prevent the log file from being written to!!
 func CloseLogger() {
+	asyncMu.Lock()
+	w := asyncW
+	asyncW = nil
+	asyncMu.Unlock()
+	if w != nil {
+		// Stop the writer goroutine, flush, and close the file handle.
+		w.close()
+		// Reset log output to prevent writing to the closed writer.
+		if isTestProcess() {
+			log.SetOutput(io.Discard)
+		} else {
+			log.SetOutput(os.Stderr)
+		}
+	}
 	if logFHandle != nil {
 		_ = logFHandle.Close()
 		logFHandle = nil

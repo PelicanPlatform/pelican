@@ -40,8 +40,8 @@ func TestLogLevelManager_AddChange(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {
@@ -51,7 +51,7 @@ func TestLogLevelManager_AddChange(t *testing.T) {
 	}()
 
 	// Set base level to Info
-	log.SetLevel(log.InfoLevel)
+	config.SetLogging(log.InfoLevel)
 	manager.SetBaseLevel(log.InfoLevel)
 	require.Eventually(t,
 		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
@@ -84,8 +84,8 @@ func TestLogLevelManager_RemoveChange(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {
@@ -95,7 +95,7 @@ func TestLogLevelManager_RemoveChange(t *testing.T) {
 	}()
 
 	// Set base level to Info
-	log.SetLevel(log.InfoLevel)
+	config.SetLogging(log.InfoLevel)
 	manager.SetBaseLevel(log.InfoLevel)
 	require.Eventually(t,
 		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
@@ -137,8 +137,8 @@ func TestLogLevelManager_MultipleChanges(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {
@@ -148,7 +148,7 @@ func TestLogLevelManager_MultipleChanges(t *testing.T) {
 	}()
 
 	// Set base level to Info
-	log.SetLevel(log.InfoLevel)
+	config.SetLogging(log.InfoLevel)
 	manager.SetBaseLevel(log.InfoLevel)
 	require.Eventually(t,
 		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
@@ -218,8 +218,8 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {
@@ -229,7 +229,7 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	}()
 
 	// Set base level to Info
-	log.SetLevel(log.InfoLevel)
+	config.SetLogging(log.InfoLevel)
 	manager.SetBaseLevel(log.InfoLevel)
 	require.Eventually(t,
 		func() bool { return log.InfoLevel == config.GetEffectiveLogLevel() },
@@ -241,7 +241,7 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	require.NoError(t, manager.AddChange("test-1", "Logging.Level", log.DebugLevel, 100*time.Millisecond))
 
 	require.Eventually(t,
-		func() bool { return log.DebugLevel == log.GetLevel() },
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
 		1*time.Second,
 		10*time.Millisecond,
 	)
@@ -269,8 +269,8 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {
@@ -291,7 +291,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	require.NoError(t, manager.AddChange("test-1", "Logging.Level", log.DebugLevel, 1*time.Hour))
 
 	require.Eventually(t,
-		func() bool { return log.DebugLevel == log.GetLevel() },
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
 		1*time.Second,
 		10*time.Millisecond,
 	)
@@ -323,8 +323,8 @@ func TestLogLevelManager_BackgroundExpiry(t *testing.T) {
 	require.NoError(t, param.Reset())
 	config.RegisterLoggingCallback()
 
-	origLevel := log.GetLevel()
-	defer log.SetLevel(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	defer config.SetLogging(origLevel)
 
 	manager := logging.GetLogLevelManager()
 	defer func() {

@@ -77,6 +77,16 @@ var (
 
 	// Track whether we've already configured the formatter to avoid resetting it
 	formatterConfigured bool
+
+	// effectiveLogLevel is the fast-path cache for GetEffectiveLogLevel.
+	// Read on the hot log-buffer path (shouldBuffer runs on every incoming
+	// log line), so the original mutex+atomic-load+slice-walk implementation
+	// was expensive under trace/debug loads. Every level-changing site --
+	// SetLogging (called by the param-callback registered via
+	// RegisterLoggingCallback), initFilterLogging, and
+	// ResetGlobalLoggingHooks -- writes the new level here, so a plain
+	// atomic load is enough to answer the query.
+	effectiveLogLevel atomic.Uint32
 )
 
 func (sw *syncWriter) Write(p []byte) (n int, err error) {
@@ -124,6 +134,10 @@ func init() {
 	globalTransform.hook.Store(initialHook)
 	initialRegex := regexp.MustCompile(bearerTokenRegexStr)
 	globalTransform.regex.Store(initialRegex)
+	// Seed the effective-level cache with logrus's boot default (info)
+	// so GetEffectiveLogLevel returns something sane between package
+	// init and the first SetLogging call.
+	effectiveLogLevel.Store(uint32(log.GetLevel()))
 }
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
@@ -190,6 +204,14 @@ func initFilterLogging() {
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
 
+	// On the FIRST init pass, log.GetLevel() reflects the operator's
+	// configured level. On subsequent passes (unit-test reinit, config
+	// reload paths that re-enter this function) it reflects the pinned
+	// TraceLevel we set below -- reading it then would clobber the
+	// effective-level cache with Trace and cause the log buffer to
+	// silently capture trace lines the operator never asked for.
+	// Guard the cache update behind the same first-time-only gate that
+	// installs the hooks.
 	configLevel := log.GetLevel()
 	log.SetLevel(log.TraceLevel)
 	hookLevel := make([]log.Level, 0)
@@ -204,6 +226,7 @@ func initFilterLogging() {
 	globalTransformMu.Lock()
 	if !addedGlobalFilters {
 		addedGlobalFilters = true
+		effectiveLogLevel.Store(uint32(configLevel))
 		globalTransformMu.Unlock()
 		// Set the writer to what logrus has
 		newHook := &writer.Hook{
@@ -237,6 +260,11 @@ func ResetGlobalLoggingHooks() {
 		}
 		globalTransform.hook.Store(newHook)
 	}
+	// The hook was just widened back to AllLevels, so anything through
+	// TraceLevel is now nominally "effective". Match that in the cache
+	// so GetEffectiveLogLevel doesn't return a stale narrower level from
+	// the previous test.
+	effectiveLogLevel.Store(uint32(log.TraceLevel))
 }
 
 func AddFilter(newFilter *RegexpFilter) {
@@ -263,6 +291,11 @@ func RemoveFilter(name string) {
 }
 
 func SetLogging(logLevel log.Level) {
+	// Update the fast-path cache first so any log-buffer Fire that fires
+	// mid-reconfiguration reads at worst a slightly-early-but-still-valid
+	// value rather than a stale one from before this call.
+	effectiveLogLevel.Store(uint32(logLevel))
+
 	// Only configure the formatter once to preserve formatting across log level changes
 	if !formatterConfigured {
 		textFormatter := log.TextFormatter{}
@@ -332,31 +365,16 @@ func SetLogging(logLevel log.Level) {
 	}
 }
 
-// GetEffectiveLogLevel returns the effective log level based on the transform hook.
-// When global filters are active, logrus's log.GetLevel() is set to TraceLevel to allow
-// filters to see all messages, while the actual filtering happens via hooks. This function
-// returns the true effective level by examining what levels the hook is configured to output.
+// GetEffectiveLogLevel returns the effective log level -- the level the
+// operator asked for, as opposed to logrus's internal log.GetLevel()
+// which is pinned to TraceLevel whenever the hook-based filter tree is
+// active (so hooks see every entry). The value is served from an atomic
+// cache updated by SetLogging, initFilterLogging, and
+// ResetGlobalLoggingHooks; the hot path (LogRingBuffer.shouldBuffer,
+// invoked on every entry) is therefore a single atomic load with no
+// mutex contention or slice walk.
 func GetEffectiveLogLevel() log.Level {
-	globalTransformMu.Lock()
-	defer globalTransformMu.Unlock()
-	if addedGlobalFilters && globalTransform != nil {
-		hook := globalTransform.hook.Load()
-		if hook == nil {
-			return log.GetLevel()
-		}
-		// Find the highest (most verbose) level in the hook's configured levels.
-		// In logrus, higher numeric values = more verbose (Trace=6 > Debug=5 > ... > Panic=0).
-		// The hook's LogLevels contains all levels that should be output, so the max
-		// value represents the effective log level.
-		var maxLevel log.Level
-		for _, hookLvl := range hook.LogLevels {
-			if hookLvl > maxLevel {
-				maxLevel = hookLvl
-			}
-		}
-		return maxLevel
-	}
-	return log.GetLevel()
+	return log.Level(effectiveLogLevel.Load())
 }
 
 // Disable the logging censor functionality

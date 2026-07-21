@@ -9,6 +9,7 @@ import {
   Cached,
   CalendarMonth,
   Dashboard,
+  Description,
   Equalizer,
   FolderOpen,
   Lock,
@@ -21,6 +22,18 @@ import {
   Person,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
+
+// SettingsShellScopes is the union of scopes admitted into the /settings/
+// shell by app/settings/layout.tsx. Anyone the shell would let in needs a
+// visible path there from every subsystem sidebar, otherwise a scope-only
+// holder can reach Settings only by typing the URL. Keep this list and the
+// layout's `anyScopes` in sync; both surfaces import from here so a future
+// scope addition lands in one place.
+//
+// Excluded on purpose: server.admin. Admins are admitted by the role gate
+// (`allowedRoles: ['admin']`), so listing the scope here would be
+// redundant.
+export const SettingsShellScopes = ['server.user_admin', 'pelican.log_read'];
 
 const NavigationConfig: NavigationConfiguration = {
   settings: [
@@ -66,6 +79,17 @@ const NavigationConfig: NavigationConfiguration = {
       href: '/settings/aup/',
       icon: <Article />,
       allowedRoles: ['admin'],
+    },
+    {
+      // Log viewer: live in-memory tail of server logs. Reachable by
+      // admins AND holders of the dedicated pelican.log_read scope
+      // (typically granted via a group), so a user can watch logs
+      // without also inheriting admin privileges.
+      title: 'Logs',
+      href: '/settings/logs/',
+      icon: <Description />,
+      allowedRoles: ['admin'],
+      anyScopes: ['pelican.log_read'],
     },
   ],
   registry: [
@@ -115,6 +139,7 @@ const NavigationConfig: NavigationConfiguration = {
       href: '/settings/',
       icon: <Settings />,
       allowedRoles: ['admin'],
+      anyScopes: SettingsShellScopes,
     },
   ],
   origin: [
@@ -163,6 +188,7 @@ const NavigationConfig: NavigationConfiguration = {
       href: '/settings/',
       icon: <Settings />,
       allowedRoles: ['admin'],
+      anyScopes: SettingsShellScopes,
     },
   ],
   director: [
@@ -186,6 +212,7 @@ const NavigationConfig: NavigationConfiguration = {
       href: '/settings/',
       icon: <Settings />,
       allowedRoles: ['admin'],
+      anyScopes: SettingsShellScopes,
     },
   ],
   cache: [
@@ -208,6 +235,7 @@ const NavigationConfig: NavigationConfiguration = {
       href: '/settings/',
       icon: <Settings />,
       allowedRoles: ['admin'],
+      anyScopes: SettingsShellScopes,
     },
   ],
   shared: [
@@ -215,6 +243,18 @@ const NavigationConfig: NavigationConfiguration = {
     { title: 'Director', href: '/director/', icon: <AssistantDirection /> },
     { title: 'Registry', href: '/registry/', icon: <AppRegistration /> },
     { title: 'Cache', href: '/cache/', icon: <Cached /> },
+    // The shared nav is what /settings/ (and every other server-level
+    // page) sees when the process runs multiple server modules. Without
+    // a Settings entry here, once a caller lands on a server-level page
+    // there's no primary-nav path back into /settings/. Same admittance
+    // as the per-subsystem sidebars: admin OR any settings-shell scope.
+    {
+      title: 'Settings',
+      href: '/settings/',
+      icon: <Settings />,
+      allowedRoles: ['admin'],
+      anyScopes: SettingsShellScopes,
+    },
   ],
 };
 

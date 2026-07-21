@@ -98,6 +98,56 @@ definitions:
         type: string
         default: ""
         description: The response message
+  LogTailResponse:
+    type: object
+    description: >-
+      Page of buffered log lines returned by `GET /api/v1.0/logs/tail`.
+      `content` is raw text (newline-terminated log lines concatenated in
+      order); `firstCursor` and `lastCursor` bracket the range covered.
+      Pass `lastCursor` back as the next request's `since` to continue
+      live tailing, or `firstCursor` back as the next request's `before`
+      to scroll further into older history. `reached` is true when
+      scroll-up has hit the wall — no content older than `firstCursor` is
+      currently held. Cursors are opaque URL-safe base64 tokens; clients
+      MUST NOT interpret them beyond echoing them back verbatim.
+    properties:
+      enabled:
+        type: boolean
+        description: >-
+          False when the in-memory log buffer has not been initialized on
+          this server (transient during startup); when false the other
+          fields are absent or empty.
+      content:
+        type: string
+        description: Newline-terminated log lines concatenated in order.
+      firstCursor:
+        type: string
+        description: >-
+          Opaque cursor for the oldest line in `content`. Pass back as
+          the next request's `before` to page further into history. Empty
+          when `content` is empty.
+      lastCursor:
+        type: string
+        description: >-
+          Opaque cursor for the newest line in `content`. Pass back as
+          the next request's `since` for live tail. Empty when the
+          buffer has no lines at all.
+      reached:
+        type: boolean
+        description: >-
+          True when `firstCursor` refers to the oldest line the buffer
+          currently holds — a further `before` request with the same
+          cursor will return nothing. Callers use this to disable a
+          scroll-up affordance.
+      instanceId:
+        type: string
+        description: >-
+          Identifier for the buffer instance that produced this
+          response. Regenerated when the server restarts (or the buffer
+          is otherwise re-initialized). Clients should treat a change
+          as a signal to drop all locally-cached cursors and start
+          fresh — cursors from the previous instance are meaningless
+          against the new one.
   SimpleApiResp:
     type: object
     description: >-
@@ -2445,6 +2495,12 @@ tags:
     description: Acceptable Use Policy — public reads (current and versioned), admin edit, and persisted version history
   - name: issuer-admin
     description: Admin APIs for managing the embedded OIDC issuer clients and token exchange
+  - name: logs
+    description: >-
+      Read the server's in-memory log buffer. Gated by the
+      `pelican.log_read` scope; the buffer is bounded by
+      `Logging.Buffer.MaxSize` and older lines are evicted as new ones
+      arrive.
 paths:
   /health:
     get:
@@ -8306,3 +8362,112 @@ paths:
             $ref: "#/definitions/ReclaimLotResponse"
         "401": { description: Unauthorized }
         "404": { description: Not Found }
+  /api/v1.0/logs/tail:
+    get:
+      tags: ["logs"]
+      summary: Read a page of buffered log lines
+      description: |
+        Returns log lines from the server's in-memory buffer relative to an
+        opaque cursor. The caller supplies exactly one of `since` or `before`:
+
+        - `?since=<cursor>` returns lines newer than the cursor (live tail
+          / forward polling); pass the response's `lastCursor` back as the
+          next request's `since`. An empty (or omitted) `since` yields
+          every line the buffer currently holds.
+        - `?before=<cursor>&count=<n>` returns lines older than the
+          cursor, walking older content. `count` is a lower-bound hint;
+          the server rounds up to whole internal storage units so the
+          same content is not reprocessed if the client scrolls further
+          backwards later. Pass the response's `firstCursor` back as the
+          next request's `before`.
+
+        Cursors are opaque URL-safe base64 tokens; callers MUST NOT
+        interpret them beyond echoing them back to the server. Internal
+        structure (batching, LZ4 compression, pending buffer) is not part
+        of the API contract.
+
+        Access requires either the `server.admin` role or a session/token
+        carrying the `pelican.log_read` scope.
+      produces: [application/json]
+      parameters:
+        - in: query
+          name: since
+          required: false
+          type: string
+          description: >-
+            Opaque cursor. Return lines strictly newer than this cursor.
+            Mutually exclusive with `before`. Omit or pass an empty string
+            for a fresh read.
+        - in: query
+          name: before
+          required: false
+          type: string
+          description: >-
+            Opaque cursor. Return lines strictly older than this cursor.
+            Mutually exclusive with `since`. Typically the previous
+            response's `firstCursor` when paging backwards.
+        - in: query
+          name: count
+          required: false
+          type: integer
+          description: >-
+            Lower bound on how many lines to return when using `before`.
+            The server rounds up to whole internal storage units. Ignored
+            when `since` is used. Defaults to one storage unit's worth.
+        - in: query
+          name: limit
+          required: false
+          type: integer
+          description: >-
+            Upper bound on how many lines to return when using `since`.
+            When the delta exceeds `limit`, only the newest `limit` lines
+            are returned; older lines that fall outside the window can
+            still be reached via `before=<firstCursor>`. Ignored when
+            `before` is used. Zero or absent means unbounded.
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/LogTailResponse"
+        "400":
+          description: Bad Request (invalid or mutually exclusive cursors)
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+        "401":
+          description: Unauthorized (no active session)
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+        "403":
+          description: >-
+            Forbidden — caller lacks the `server.admin` role or the
+            `pelican.log_read` scope
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+  /api/v1.0/logs/download:
+    get:
+      tags: ["logs"]
+      summary: Download the current buffered logs as a gzip archive
+      description: |
+        Streams every log line the buffer currently holds as a gzip file.
+        The `Content-Disposition` filename embeds the server hostname and
+        a UTC timestamp so downloads saved into the same directory from
+        different servers or times don't collide.
+
+        Access requires either the `server.admin` role or a session/token
+        carrying the `pelican.log_read` scope.
+      produces: [application/gzip]
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized (no active session)
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+        "403":
+          description: >-
+            Forbidden — caller lacks the `server.admin` role or the
+            `pelican.log_read` scope
+          schema:
+            $ref: "#/definitions/SimpleApiResp"

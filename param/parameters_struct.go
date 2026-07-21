@@ -201,6 +201,10 @@ type Config struct {
 		StorageDirs any `mapstructure:"storagedirs" yaml:"StorageDirs"`
 	} `mapstructure:"localcache" yaml:"LocalCache"`
 	Logging struct {
+		Buffer struct {
+			BatchLines int `mapstructure:"batchlines" yaml:"BatchLines"`
+			MaxSize string `mapstructure:"maxsize" yaml:"MaxSize"`
+		} `mapstructure:"buffer" yaml:"Buffer"`
 		Cache struct {
 			Http string `mapstructure:"http" yaml:"Http"`
 			Lotman string `mapstructure:"lotman" yaml:"Lotman"`
@@ -228,6 +232,15 @@ type Config struct {
 			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"origin" yaml:"Origin"`
+		Rotation struct {
+			Disable bool `mapstructure:"disable" yaml:"Disable"`
+			DisableCompress bool `mapstructure:"disablecompress" yaml:"DisableCompress"`
+			FlushInterval time.Duration `mapstructure:"flushinterval" yaml:"FlushInterval"`
+			Frequency string `mapstructure:"frequency" yaml:"Frequency"`
+			MaxRetentionPeriod time.Duration `mapstructure:"maxretentionperiod" yaml:"MaxRetentionPeriod"`
+			MaxRetentionSize string `mapstructure:"maxretentionsize" yaml:"MaxRetentionSize"`
+			MaxSize string `mapstructure:"maxsize" yaml:"MaxSize"`
+		} `mapstructure:"rotation" yaml:"Rotation"`
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -704,6 +717,10 @@ type configWithType struct {
 		StorageDirs struct { Type string; Value any }
 	}
 	Logging struct {
+		Buffer struct {
+			BatchLines struct { Type string; Value int }
+			MaxSize struct { Type string; Value string }
+		}
 		Cache struct {
 			Http struct { Type string; Value string }
 			Lotman struct { Type string; Value string }
@@ -730,6 +747,15 @@ type configWithType struct {
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
+		}
+		Rotation struct {
+			Disable struct { Type string; Value bool }
+			DisableCompress struct { Type string; Value bool }
+			FlushInterval struct { Type string; Value time.Duration }
+			Frequency struct { Type string; Value string }
+			MaxRetentionPeriod struct { Type string; Value time.Duration }
+			MaxRetentionSize struct { Type string; Value string }
+			MaxSize struct { Type string; Value string }
 		}
 	}
 	Lotman struct {

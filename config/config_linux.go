@@ -28,6 +28,21 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// ApplyOSDefaultsOverride is a no-op on Linux. The generated defaults in
+// parameter_defaults.go -- /run/pelican/... when root, $XDG_RUNTIME_DIR/...
+// when unprivileged -- expand correctly under systemd (which always
+// populates XDG_RUNTIME_DIR for logged-in users) and under root. The
+// non-Linux implementation rebases sub-paths whose $XDG_RUNTIME_DIR
+// expansion collapsed to "/pelican/..." when the env var is empty; see
+// config_default.go for the details.
+func ApplyOSDefaultsOverride(v *viper.Viper, runtimeDir string) {}
+
+// osShortRuntimeTempBase returns the empty string on Linux. Linux's
+// os.TempDir() is /tmp, which is already short enough for AF_UNIX socket
+// paths to fit under the 108-byte limit even with XRootD's admin-path
+// suffix. See config_default.go for the darwin override.
+func osShortRuntimeTempBase() string { return "" }
+
 func InitServerOSDefaults(v *viper.Viper) error {
 	// For Linux, even if we have well-known system CAs, we don't want to
 	// use them, because we want to always generate our own CA if Server_TLSCertificateChain (host certificate chain)
