@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -223,31 +224,46 @@ func handleDispatchDelete(ctx *gin.Context) {
 	}
 }
 
-// handleNamespaceJWKS serves the public-key JWKS
-// for a per-namespace issuer endpoint.
+// handleNamespaceJWKS serves the public-key JWKS for a per-namespace
+// issuer endpoint. The response merges the server's exported public key
+// set with any extra public keys configured for this namespace via
+// OIDCProvider.ExtraJwksPath.
 func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		key, err := config.GetIssuerPublicJWKS()
+		// The extra file is optional; if it cannot be published, degrade to
+		// the server's base keys and log rather than failing the whole
+		// endpoint. Only a failure to load the base keys, which leaves no
+		// correct subset to serve, reaches the 500 below.
+		key, err := config.GetIssuerPublicJWKSForNamespace(provider.ExtraJwksPath,
+			func(e error) error {
+				log.Errorf("Namespace %s: serving base keys only; per-namespace "+
+					"IssuerJwks is currently unpublishable: %v", provider.Namespace, e)
+				return nil
+			})
 		if err != nil {
-			log.Errorf("Failed to load server's public key for namespace %s: %v",
+			log.Errorf("Failed to load base JWKS for namespace %s: %v",
 				provider.Namespace, err)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to load public key",
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to load public key",
 			})
 			return
 		}
-		jsonData, err := json.MarshalIndent(key, "", "  ")
-		if err != nil {
-			log.Errorf("Failed to marshal public key for namespace %s: %v",
-				provider.Namespace, err)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to marshal public key",
-			})
-			return
-		}
-		jsonData = append(jsonData, '\n')
-		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
-		ctx.Data(http.StatusOK, "application/json", jsonData)
+		// This endpoint is what the per-namespace discovery document advertises
+		// as its jwks_uri, so a browser-based OIDC client fetches it right
+		// after reading discovery. The key material is public, so any origin
+		// may read it, matching the discovery action above and the server-level
+		// JWKS endpoint in server_utils/oidc.go. Without this, those clients
+		// fail on the fetch that follows discovery. Set here rather than in
+		// corsMiddleware so only the genuinely-dispatched JWKS action gets the
+		// wildcard: a credentialed endpoint can be reached via a URL that also
+		// ends in this suffix (e.g. a client-configuration read for an id
+		// ending in ".well-known/issuer.jwks").
+		ctx.Header("Access-Control-Allow-Origin", "*")
+
+		// GetIssuerPublicJWKSForNamespace already returns public keys, and this
+		// is a machine-facing endpoint, so serve the body inline.
+		server_utils.WriteJWKS(ctx, key)
 	}
 }
 
