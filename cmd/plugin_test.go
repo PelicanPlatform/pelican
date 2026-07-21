@@ -1318,6 +1318,46 @@ func TestAddDataToClassAdResultLevelError(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, errorDataList, 1)
 	})
+
+	// Failover then post-transfer failure: an early attempt fails (e.g. a stale cache
+	// connection), a later attempt succeeds, and only then does the checksum fail. The
+	// download-level error must not stand in for the fatal result-level error; both are
+	// recorded, in the order they occurred (attempt errors first, result-level error last).
+	t.Run("FailoverThenChecksumMismatch", func(t *testing.T) {
+		connErr := error_codes.NewContact_ConnectionSetupError(errors.New("connection refused"))
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			// On a successful download the client clears the aggregate error and sets
+			// result.Error only from post-transfer verification (the checksum failure).
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", Error: connErr},
+				{Number: 1, Endpoint: "origin.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 2)
+
+		// Entry 0: the recovered per-attempt connection error.
+		firstType, ok := classad.GetAs[string](errorDataList[0], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Contact", firstType)
+
+		// Entry 1: the fatal result-level checksum error, carrying its ErrorType/code.
+		secondType, ok := classad.GetAs[string](errorDataList[1], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", secondType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[1], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+	})
 }
 
 // Test recursive downloads from the plugin

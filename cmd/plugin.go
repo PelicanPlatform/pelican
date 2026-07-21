@@ -1027,12 +1027,24 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 	}
 
 	// Handle result-level (post-transfer) errors that aren't attached to any individual
-	// attempt, e.g. a checksum mismatch: the download attempts all succeeded, so the
-	// error lives only on result.Error and neither the per-attempt loop nor the early-
-	// failure block above captured it. Without this, such a result would be reported as
-	// TransferSuccess=false with no ErrorType/PelicanErrorCode. Only add it when nothing
-	// was already recorded so a normal per-attempt failure still yields a single entry.
-	if result != nil && result.Error != nil && len(transferErrorData) == 0 {
+	// attempt, e.g. a checksum mismatch: the download itself succeeded, so the error lives
+	// only on result.Error and neither the per-attempt loop nor the early-failure block
+	// above captured it. Without this, such a result would be reported as
+	// TransferSuccess=false with no ErrorType/PelicanErrorCode.
+	//
+	// The discriminator is whether the download succeeded, not whether transferErrorData is
+	// empty. On a failed download the client sets result.Error to the aggregate of the
+	// per-attempt errors we already recorded above, so re-adding it would double-count. On a
+	// successful download the client clears result.Error and only re-sets it from
+	// post-transfer verification, so it's a genuinely uncaptured result-level error. A
+	// successful download always ends on a passing attempt (the loop breaks on success),
+	// hence a nil Error on the last attempt. This also covers the failover case (an early
+	// attempt fails, a later one succeeds, then the checksum fails) that a len==0 guard
+	// would miss, leaving the fatal error unclassified while a recovered attempt's error
+	// stood in for it.
+	lastAttemptSucceeded := result != nil && len(result.Attempts) > 0 &&
+		result.Attempts[len(result.Attempts)-1].Error == nil
+	if result != nil && result.Error != nil && lastAttemptSucceeded {
 		adErr = developerData.Set("TransferError1", result.Error.Error())
 		if adErr != nil {
 			log.Errorf("Failed to set TransferError1: %s", adErr)
