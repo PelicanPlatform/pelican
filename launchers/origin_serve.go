@@ -377,6 +377,36 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 			return errors.Wrapf(err, "failed to create embedded OIDC provider for namespace %s", namespace)
 		}
 
+		// Attach any extra public keys this export wants merged into its
+		// per-namespace JWKS endpoint. The zero value (empty string)
+		// means "no extra keys" and is handled by the JWKS endpoint.
+		provider.ExtraJwksPath = export.IssuerJwks
+
+		// Probe the extra file once now so an unpublishable IssuerJwks
+		// (kid collision, unreadable/corrupt file, or symmetric key) shows
+		// up in the logs at startup rather than only on the first request.
+		// This is never fatal: the namespace still serves its base keys,
+		// and the JWKS endpoint degrades the same way at request time. The
+		// strict policy here (return the error) is used only to detect it.
+		if export.IssuerJwks != "" {
+			// The callback fires only for an extra-file merge failure; a
+			// base-key-set load failure returns before it is ever called.
+			// Tracking whether it fired lets us attribute the error to the
+			// right key set instead of always blaming the operator's file.
+			extraFailed := false
+			if _, err := config.GetIssuerPublicJWKSForNamespace(export.IssuerJwks,
+				func(e error) error { extraFailed = true; return e }); err != nil {
+				if extraFailed {
+					log.Errorf("Namespace %s: IssuerJwks %q is unpublishable; the namespace "+
+						"will serve base keys only until fixed: %v", namespace, export.IssuerJwks, err)
+				} else {
+					log.Errorf("Namespace %s: failed to load the server's base issuer key set; "+
+						"the per-namespace JWKS endpoint will be unavailable until fixed: %v",
+						namespace, err)
+				}
+			}
+		}
+
 		registry.Register(namespace, provider)
 
 		// If the export defines its own AuthorizationTemplates, compile

@@ -19,6 +19,7 @@
 package config
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -973,29 +974,34 @@ func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 // Helper function to load the issuer/server's public key for other servers
 // to verify the token signed by this server. Only intended to be called internally
 //
+// As a side effect, when no issuer private key is available (neither in memory
+// nor on disk) and neither existingJWKS nor keyPathOverridePEM is supplied, this
+// generates and persists a new private key under issuerKeysDir before returning
+// its public projection.
+//
 // The `keyPathOverridePEM` parameter is used to override the default locations by
 // providing a PEM file path.
 func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOverridePEM ...string) (jwk.Set, error) {
 	jwks := jwk.NewSet()
 	if existingJWKS != "" {
-		var err error
-		jwks, err = jwk.ReadFile(existingJWKS)
+		raw, err := jwk.ReadFile(existingJWKS)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to read issuer JWKS file")
+		}
+		jwks, err = stripPrivateKeys(raw)
+		if err != nil {
+			return nil, errors.Wrap(err, "issuer JWKS file contains invalid keys")
 		}
 	} else if len(keyPathOverridePEM) > 0 && keyPathOverridePEM[0] != "" {
 		key, err := LoadSinglePEM(keyPathOverridePEM[0])
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to load signing key from %s", keyPathOverridePEM[0])
 		}
-		pkey, err := jwk.PublicKeyOf(key)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to generate public key from key %s", key.KeyID())
+		src := jwk.NewSet()
+		if err := src.AddKey(key); err != nil {
+			return nil, errors.Wrapf(err, "failed to add signing key %s to set", key.KeyID())
 		}
-		if err = jwks.AddKey(pkey); err != nil {
-			return nil, errors.Wrapf(err, "failed to add public key %s to new JWKS", key.KeyID())
-		}
-		return jwks, nil
+		return stripPrivateKeys(src)
 	}
 
 	keys := GetIssuerPrivateKeys()
@@ -1010,16 +1016,21 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOver
 		keys = GetIssuerPrivateKeys()
 	}
 
-	// Traverse all private keys and add their public keys to the JWKS
+	// Project all private keys' public halves and merge them into the JWKS.
+	src := jwk.NewSet()
 	for _, key := range keys {
-		pkey, err := jwk.PublicKeyOf(key)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to generate public key from key %s", key.KeyID())
+		if err := src.AddKey(key); err != nil {
+			return nil, errors.Wrapf(err, "failed to add private key %s to set", key.KeyID())
 		}
-
-		if err = jwks.AddKey(pkey); err != nil {
-			return nil, errors.Wrapf(err, "failed to add public key %s to new JWKS", key.KeyID())
-		}
+	}
+	projected, err := stripPrivateKeys(src)
+	if err != nil {
+		return nil, err
+	}
+	if err := ForEachKey(projected, func(k jwk.Key) error {
+		return errors.Wrap(jwks.AddKey(k), "failed to add public key to JWKS")
+	}); err != nil {
+		return nil, err
 	}
 	return jwks, nil
 }
@@ -1059,14 +1070,87 @@ func GetIssuerPrivateJWK(keyPathOverridePEM ...string) (jwk.Key, error) {
 	return (*keysPtr).CurrentKey, nil
 }
 
-// Check if a valid JWKS file exists at Server_IssuerJwks, return that file if so;
-// otherwise, generate and store a private key at IssuerKey and return a public key of
-// that private key, encapsulated in the JWKS format
+// ForEachKey invokes fn once per key in set, in iteration order. If fn
+// returns a non-nil error, iteration stops and that error is returned to
+// the caller. It centralizes the jwk.Set iteration idiom (including the
+// key type assertion and context handling) so callers need not repeat it.
+func ForEachKey(set jwk.Set, fn func(jwk.Key) error) error {
+	ctx := context.Background()
+	for it := set.Keys(ctx); it.Next(ctx); {
+		if err := fn(it.Pair().Value.(jwk.Key)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ProjectPublicJWKS returns a new set containing the public projection of
+// every key in set, with all private key material removed via jwk.PublicKeyOf.
+// A key is unpublishable when it is symmetric (kty=oct, a shared secret with
+// no public projection) or when projection otherwise fails. For each such key,
+// onKeyError is invoked with the offending key and the reason: returning a
+// non-nil error aborts and is propagated to the caller; returning nil skips
+// the key and continues. The returned set contains only the keys that were
+// successfully projected.
 //
-// The private key generated is loaded to issuerPrivateJWK variable which is used for
-// this server to sign JWTs it issues. The public key returned will be exposed publicly
-// for other servers to verify JWTs signed by this server, typically via a well-known URL
-// i.e. "/.well-known/issuer.jwks"
+// This is the single source of truth for public-JWKS projection; callers
+// supply the abort-vs-skip policy via onKeyError.
+func ProjectPublicJWKS(set jwk.Set, onKeyError func(key jwk.Key, err error) error) (jwk.Set, error) {
+	out := jwk.NewSet()
+	if err := ForEachKey(set, func(k jwk.Key) error {
+		var perr error
+		if k.KeyType() == jwa.OctetSeq {
+			perr = errors.New(
+				"symmetric key (kty=oct) is a secret and cannot be published")
+		} else if pub, err := jwk.PublicKeyOf(k); err != nil {
+			perr = errors.Wrap(err, "failed to extract public key")
+		} else if err := out.AddKey(pub); err != nil {
+			perr = errors.Wrap(err, "failed to add public key to set")
+		}
+		if perr != nil {
+			return onKeyError(k, perr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// stripPrivateKeys returns a sanitized copy of set suitable for serving on a
+// public JWKS endpoint. Every asymmetric key is replaced by its public
+// projection via jwk.PublicKeyOf, stripping any private key material.
+// Symmetric (kty=oct) keys are a shared secret with no public projection, so
+// publishing one would leak it; any such key is rejected as an error.
+//
+// It delegates to ProjectPublicJWKS with a hard-error policy: these are the
+// server's own trusted keys, so any unpublishable key is a fatal error rather
+// than something to skip past.
+func stripPrivateKeys(set jwk.Set) (jwk.Set, error) {
+	return ProjectPublicJWKS(set, func(_ jwk.Key, err error) error {
+		return err
+	})
+}
+
+// ReadPublicJWKSFile reads the JWKS file at path and returns a new set
+// containing only the public projection of each key. Symmetric (kty=oct)
+// keys are rejected. Private key material is stripped via jwk.PublicKeyOf.
+// This is the canonical way to load an operator-supplied key file for use
+// in a public JWKS endpoint.
+func ReadPublicJWKSFile(path string) (jwk.Set, error) {
+	raw, err := jwk.ReadFile(path)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read JWKS file %s", path)
+	}
+	out, err := stripPrivateKeys(raw)
+	if err != nil {
+		return nil, errors.Wrapf(err, "JWKS file %s is invalid", path)
+	}
+	return out, nil
+}
+
+// GetIssuerPublicJWKS returns the full server-level public JWKS.
+// See loadIssuerPublicJWKS for details on what keys are included.
 //
 // The `keyPathOverridePEM` parameter is used to override the default locations by
 // providing a PEM file path.
@@ -1074,6 +1158,107 @@ func GetIssuerPublicJWKS(keyPathOverridePEM ...string) (jwk.Set, error) {
 	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
 	return loadIssuerPublicJWKS(existingJWKS, issuerKeysDir, keyPathOverridePEM...)
+}
+
+// GetIssuerPublicJWKSForNamespace returns the public JWKS for a per-namespace
+// issuer endpoint. It starts with the server's exported public key set (see
+// GetIssuerPublicJWKS) and appends any additional public keys read from
+// extraJwksPath. When extraJwksPath is empty the result is identical to
+// GetIssuerPublicJWKS.
+//
+// The base key set and the optional extra file fail independently. A failure
+// to load the base set is always returned as an error: there is no correct
+// subset left to serve. A failure to read or merge the extra file (unreadable
+// or corrupt file, a symmetric key, or a kid that collides with an already-
+// published key) is instead routed through onExtraError, which owns the
+// abort-vs-degrade policy: returning nil degrades to the base-only set;
+// returning a non-nil error propagates it. The extra file is optional and
+// operator-supplied, so a serve-time caller passes a policy that logs and
+// degrades rather than dropping the server's own valid keys.
+//
+// The extra file is merged all-or-nothing: it is fully validated before any
+// of its keys are added, so a degrade yields exactly the base set, never a
+// partially-merged set.
+func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(error) error) (jwk.Set, error) {
+	base, err := GetIssuerPublicJWKS()
+	if err != nil {
+		return nil, err
+	}
+	// GetIssuerPublicJWKS builds a fresh set on every call, so with no extra
+	// keys to merge we can return it directly without a per-request copy.
+	if extraJwksPath == "" {
+		return base, nil
+	}
+	extraKeys, mergeErr := collectMergeableExtraKeys(base, extraJwksPath)
+	if mergeErr != nil {
+		if err := onExtraError(mergeErr); err != nil {
+			return nil, err
+		}
+		// Degrade: serve the base keys without the extra file's keys.
+		return base, nil
+	}
+	// Build a fresh set so that the merged keys cannot alias the base set and
+	// affect other callers (e.g., if GetIssuerPublicJWKS is ever changed to
+	// cache its result). collectMergeableExtraKeys never mutates base.
+	result := jwk.NewSet()
+	if err := ForEachKey(base, func(k jwk.Key) error {
+		return errors.Wrap(result.AddKey(k),
+			"failed to copy base key into namespace JWKS")
+	}); err != nil {
+		return nil, err
+	}
+	for _, k := range extraKeys {
+		if err := result.AddKey(k); err != nil {
+			return nil, errors.Wrap(err,
+				"failed to merge per-namespace key into JWKS")
+		}
+	}
+	return result, nil
+}
+
+// collectMergeableExtraKeys reads the JWKS file at extraJwksPath, strips any
+// private key material, and returns its keys after verifying that every key
+// carrying a kid has a kid unique against base and against the other extra
+// keys. It never mutates base; the caller merges the returned keys only once
+// the whole file has validated, which keeps the merge all-or-nothing.
+func collectMergeableExtraKeys(base jwk.Set, extraJwksPath string) ([]jwk.Key, error) {
+	extra, err := ReadPublicJWKSFile(extraJwksPath)
+	if err != nil {
+		return nil, err
+	}
+	// Seed the seen-kid set with the base keys so a collision against either
+	// the server's public key set or an earlier key in the extra file itself
+	// is caught the same way.
+	seen := make(map[string]bool)
+	_ = ForEachKey(base, func(k jwk.Key) error {
+		if kid := k.KeyID(); kid != "" {
+			seen[kid] = true
+		}
+		return nil
+	})
+	keys := make([]jwk.Key, 0, extra.Len())
+	if err := ForEachKey(extra, func(k jwk.Key) error {
+		// Only keys carrying a kid are checked for uniqueness. Keyless
+		// entries are still merged into and published in the namespace
+		// JWKS, and verifiers may try them for tokens with no matching kid,
+		// so they are not inert. The check is skipped for them only because
+		// there is no kid to compare, not because they are unusable.
+		if kid := k.KeyID(); kid != "" {
+			if seen[kid] {
+				return errors.Errorf(
+					"per-namespace JWKS file %s: key kid %q conflicts with"+
+						" another published key; each published key that"+
+						" carries a kid must have a unique kid",
+					extraJwksPath, kid)
+			}
+			seen[kid] = true
+		}
+		keys = append(keys, k)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 // Check if there is a session secret exists at param.Server_SessionSecretFile and is not empty if there is one.

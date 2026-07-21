@@ -67,6 +67,11 @@ type OIDCProvider struct {
 	// oa4mp.InitAuthzRules().
 	AuthzRules []*oa4mp.CompiledAuthz
 
+	// ExtraJwksPath is an optional filesystem path to a JWKS file whose
+	// public keys are merged into the per-namespace JWKS endpoint alongside
+	// the server's exported public key set (see config.GetIssuerPublicJWKS).
+	ExtraJwksPath string
+
 	// DeviceCodeHandler handles RFC 8628 device authorization grant.
 	DeviceCodeHandler *DeviceCodeHandler
 

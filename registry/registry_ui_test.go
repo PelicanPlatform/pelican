@@ -21,7 +21,9 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -627,10 +630,110 @@ func TestGetNamespaceJWKS(t *testing.T) {
 			require.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				assert.Equal(t, tc.expectedData, w.Body.String())
+				// The response is sanitized through publicJWKSForServing and
+				// re-serialized through server_utils.WriteJWKS (public
+				// projection + indent), so compare parsed contents and confirm
+				// no private material leaks rather than matching bytes.
+				want, err := jwk.Parse([]byte(tc.expectedData))
+				require.NoError(t, err)
+				got, err := jwk.Parse(w.Body.Bytes())
+				require.NoError(t, err)
+				assert.Equal(t, want.Len(), got.Len())
+				assert.NotContains(t, w.Body.String(), `"d":`,
+					"private key material must not be served")
 			}
 		})
 	}
+}
+
+// TestGetNamespaceJWKSStripsPrivateKey confirms that even if the registry
+// database holds private key material (registrants submit their own pubkey
+// field, which is never validated to be public-only), the per-id pubkey
+// endpoint serves only the public projection.
+func TestGetNamespaceJWKSStripsPrivateKey(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	privJWKS := privateJWKSString(t, "registry-priv-key")
+	require.NoError(t, insertMockDBData([]server_structs.Registration{
+		{ID: 1, Prefix: "/origin1", Pubkey: privJWKS},
+	}))
+	defer resetMockRegistryDB(t)
+
+	router := gin.New()
+	router.GET("/test/:id/pubkey", getNamespaceJWKS)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test/1/pubkey", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), `"d":`,
+		"private key material must not be served by the registry")
+	// The download filename is scoped to the namespace id so multiple
+	// downloads are distinctly named.
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "public-key-server-1.jwks",
+		"per-id endpoint should use an id-scoped download filename")
+	got, err := jwk.Parse(w.Body.Bytes())
+	require.NoError(t, err)
+	_, found := got.LookupKeyID("registry-priv-key")
+	assert.True(t, found, "the key's public projection should still be served")
+}
+
+// TestGetNamespaceJWKSAllKeysUnpublishable confirms that when every stored key
+// for a namespace is unpublishable (here, a lone symmetric key with no public
+// projection), the per-id download fails loudly with HTTP 500 rather than
+// handing back an empty key file that looks like a successful download.
+func TestGetNamespaceJWKSAllKeysUnpublishable(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	symKey, err := jwk.FromRaw(make([]byte, 32))
+	require.NoError(t, err)
+	require.NoError(t, symKey.Set(jwk.KeyIDKey, "registry-sym-key"))
+	symSet := jwk.NewSet()
+	require.NoError(t, symSet.AddKey(symKey))
+	symBytes, err := json.Marshal(symSet)
+	require.NoError(t, err)
+	require.NoError(t, insertMockDBData([]server_structs.Registration{
+		{ID: 1, Prefix: "/origin1", Pubkey: string(symBytes)},
+	}))
+	defer resetMockRegistryDB(t)
+
+	router := gin.New()
+	router.GET("/test/:id/pubkey", getNamespaceJWKS)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test/1/pubkey", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// privateJWKSString returns a JWKS document (as a string) containing the full
+// private form of a freshly generated EC key with the given kid.
+func privateJWKSString(t *testing.T, kid string) string {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	privJWK, err := jwk.FromRaw(priv)
+	require.NoError(t, err)
+	require.NoError(t, privJWK.Set(jwk.KeyIDKey, kid))
+	set := jwk.NewSet()
+	require.NoError(t, set.AddKey(privJWK))
+	data, err := json.Marshal(set)
+	require.NoError(t, err)
+	return string(data)
 }
 
 func TestUpdateNamespaceStatus(t *testing.T) {
