@@ -19,7 +19,6 @@
 package server_utils
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -172,24 +171,16 @@ func exportIssuerJWKS(ctx *gin.Context) {
 			Msg:    "Failed to load server's public key",
 		})
 	} else {
-		jsonData, err := json.MarshalIndent(key, "", "  ")
-		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to marshal server's public key",
-			})
-			return
-		}
-		// Append a new line to the JSON data
-		jsonData = append(jsonData, '\n')
-		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
 		// The public JWKS must be readable cross-origin: browser-based OIDC
 		// clients follow the discovery document's jwks_uri here to validate
 		// token signatures. The discovery endpoint above already allows any
 		// origin; without the same header on the JWKS, those clients fail on
 		// the very next fetch.
 		ctx.Header("Access-Control-Allow-Origin", "*")
-		ctx.Data(200, "application/json", jsonData)
+		// This shipped as a downloadable attachment before the JWKS response
+		// writers were consolidated; preserve that header so the server-level
+		// endpoint's response is unchanged.
+		WriteJWKS(ctx, key, "public-signing-key.jwks")
 	}
 }
 
