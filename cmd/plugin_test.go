@@ -1358,6 +1358,50 @@ func TestAddDataToClassAdResultLevelError(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, int64(checksumErr.Code()), errorCode)
 	})
+
+	// Same as above but with multiple failed attempts before the successful one
+	// (cacheA fails, cacheB fails, originC succeeds, then the checksum fails). Every
+	// per-attempt error is recorded, followed by the fatal result-level error, all in
+	// the order they occurred.
+	t.Run("MultipleFailoversThenChecksumMismatch", func(t *testing.T) {
+		cacheAErr := error_codes.NewContact_ConnectionSetupError(errors.New("cacheA: connection refused"))
+		cacheBErr := error_codes.NewContact_ConnectionSetupError(errors.New("cacheB: connection reset"))
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			// The download ultimately succeeded on originC, so result.Error carries only
+			// the post-transfer checksum failure, not the earlier attempt errors.
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cacheA.example.com", Error: cacheAErr},
+				{Number: 1, Endpoint: "cacheB.example.com", Error: cacheBErr},
+				{Number: 2, Endpoint: "originC.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 3)
+
+		// Entries 0 and 1: the two recovered per-attempt connection errors.
+		for i := 0; i < 2; i++ {
+			attemptType, ok := classad.GetAs[string](errorDataList[i], "ErrorType")
+			require.True(t, ok)
+			assert.Equal(t, "Contact", attemptType)
+		}
+
+		// Entry 2: the fatal result-level checksum error, carrying its ErrorType/code.
+		lastType, ok := classad.GetAs[string](errorDataList[2], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", lastType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[2], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+	})
 }
 
 // Test recursive downloads from the plugin
