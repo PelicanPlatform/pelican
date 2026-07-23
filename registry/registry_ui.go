@@ -19,7 +19,6 @@
 package registry
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -38,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -831,18 +831,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 			Msg:    fmt.Sprint("Error getting jwks by id:", err)})
 		return
 	}
-	jsonData, err := json.MarshalIndent(jwks, "", "  ")
+	// This is a human-facing UI download, so name the attachment; sanitize
+	// best-effort so one malformed stored key does not fail the download. If
+	// every stored key is unpublishable, fail loudly rather than hand back an
+	// empty key file that looks like a successful download.
+	pub, err := publicJWKSForServing(jwks)
 	if err != nil {
-		log.Errorf("Failed to marshall jwks. %v", err)
+		log.Errorf("Refusing to serve JWKS for namespace id %d: %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Failed to marshal JWKS"})
+			Msg:    "server has no publishable keys for this namespace"})
 		return
 	}
-	// Append a new line to the JSON data
-	jsonData = append(jsonData, '\n')
-	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=public-key-server-%v.jwks", id))
-	ctx.Data(200, "application/json", jsonData)
+	server_utils.WriteJWKS(ctx, pub, fmt.Sprintf("public-key-server-%v.jwks", id))
 }
 
 func deleteNamespace(ctx *gin.Context) {

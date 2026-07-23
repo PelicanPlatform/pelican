@@ -109,7 +109,92 @@ func TestHandleWildcard(t *testing.T) {
 
 		// Return 200 as by default Registry.RequireOriginApproval == false
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, string(mockJWKSBytes), w.Body.String())
+		// The response is re-serialized through server_utils.WriteJWKS, so
+		// compare by parsed contents rather than raw bytes.
+		gotSet, err := jwk.Parse(w.Body.Bytes())
+		require.NoError(t, err)
+		assert.Equal(t, 0, gotSet.Len())
+	})
+
+	t.Run("jwks-strips-private-key", func(t *testing.T) {
+		server_utils.ResetTestState()
+		mockPrefix := "/testnamespace/priv"
+
+		setupMockRegistryDB(t)
+		defer teardownMockRegistryDB(t)
+
+		// Store a JWKS that contains full private key material; registrants
+		// supply this field and it is never validated to be public-only.
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(priv)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "wildcard-priv-key"))
+		privSet := jwk.NewSet()
+		require.NoError(t, privSet.AddKey(privJWK))
+		privBytes, err := json.Marshal(privSet)
+		require.NoError(t, err)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{
+			{Prefix: mockPrefix, Pubkey: string(privBytes)},
+		}))
+
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/registry%s/.well-known/issuer.jwks", mockPrefix), nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), `"d":`,
+			"private key material must not be served by the registry")
+		got, err := jwk.Parse(w.Body.Bytes())
+		require.NoError(t, err)
+		_, found := got.LookupKeyID("wildcard-priv-key")
+		assert.True(t, found, "the key's public projection should still be served")
+	})
+
+	t.Run("jwks-all-keys-unpublishable-fails", func(t *testing.T) {
+		server_utils.ResetTestState()
+		mockPrefix := "/testnamespace/unpublishable"
+
+		setupMockRegistryDB(t)
+		defer teardownMockRegistryDB(t)
+
+		// Store a set whose only key is symmetric (kty=oct). Such a key has no
+		// public projection, so the projected set is empty. Serving HTTP 200
+		// with no keys would silently break token verification, so the endpoint
+		// must fail loudly instead.
+		symKey, err := jwk.FromRaw(make([]byte, 32))
+		require.NoError(t, err)
+		require.NoError(t, symKey.Set(jwk.KeyIDKey, "wildcard-sym-key"))
+		symSet := jwk.NewSet()
+		require.NoError(t, symSet.AddKey(symKey))
+		symBytes, err := json.Marshal(symSet)
+		require.NoError(t, err)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{
+			{Prefix: mockPrefix, Pubkey: string(symBytes)},
+		}))
+
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/registry%s/.well-known/issuer.jwks", mockPrefix), nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("openid-configuration-404-for-prefix-dne", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setupMockRegistryDB(t)
+		defer teardownMockRegistryDB(t)
+
+		req, _ := http.NewRequest("GET", "/registry/no-such-prefix/.well-known/openid-configuration", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		// A nonexistent prefix must yield a single 404 response. The handler
+		// must not fall through and append an openid-configuration document
+		// (which would leak a jwks_uri for a prefix that does not exist).
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.NotContains(t, w.Body.String(), "jwks_uri",
+			"a 404 for a nonexistent prefix must not include a jwks_uri")
 	})
 
 	mockApprovalTcs := []struct {
@@ -190,7 +275,10 @@ func TestHandleWildcard(t *testing.T) {
 
 			assert.Equal(t, tc.ExpectedCode, w.Code)
 			if tc.ExpectedCode == 200 {
-				assert.Equal(t, string(mockJWKSBytes), w.Body.String())
+				// Re-serialized via server_utils.WriteJWKS; compare contents.
+				gotSet, err := jwk.Parse(w.Body.Bytes())
+				require.NoError(t, err)
+				assert.Equal(t, 0, gotSet.Len())
 			}
 		})
 	}

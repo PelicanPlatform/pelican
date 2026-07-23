@@ -20,6 +20,9 @@ package issuer
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -45,6 +48,7 @@ import (
 	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 const (
@@ -438,11 +442,13 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	var discovery map[string]interface{}
 	require.NoError(t, json.Unmarshal(body, &discovery))
 
+	serviceURI := ServiceURIForNamespace(IssuerURL(), testNamespace)
+
 	assert.Equal(t, IssuerURLForNamespace(testNamespace), discovery["issuer"])
-	assert.NotEmpty(t, discovery["token_endpoint"])
-	assert.NotEmpty(t, discovery["authorization_endpoint"])
-	assert.NotEmpty(t, discovery["device_authorization_endpoint"])
-	assert.NotEmpty(t, discovery["jwks_uri"])
+	assert.Equal(t, serviceURI+"/token", discovery["token_endpoint"])
+	assert.Equal(t, serviceURI+"/authorize", discovery["authorization_endpoint"])
+	assert.Equal(t, serviceURI+"/device_authorization", discovery["device_authorization_endpoint"])
+	assert.Equal(t, serviceURI+"/.well-known/issuer.jwks", discovery["jwks_uri"])
 
 	// Verify that the advertised signing algorithm matches the actual key type.
 	// This is critical: if the discovery document says RS256 but we sign with ES256,
@@ -451,6 +457,42 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	require.True(t, ok, "id_token_signing_alg_values_supported should be present")
 	require.Len(t, algs, 1)
 	assert.Equal(t, "ES256", algs[0], "discovery signing algorithm should match actual ECDSA P-256 key")
+}
+
+// TestIntegrationNamespaceJWKS verifies that each namespace issuer
+// serves its own JWKS endpoint at .well-known/issuer.jwks.
+func TestIntegrationNamespaceJWKS(t *testing.T) {
+	_, ts := setupIntegration(t)
+	httpClient := ts.Client()
+
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+	resp, err := httpClient.Get(url)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	nsKIDs := extractWellFormedJWKSKIDs(t, body)
+	require.NotEmpty(t, nsKIDs, "JWKS should contain at least one key")
+
+	// The test setup registers no per-namespace IssuerJwks,
+	// so the namespace JWKS must contain exactly the server-level keys.
+	serverSet, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	serverKIDs := make([]string, 0, serverSet.Len())
+	for it := serverSet.Keys(t.Context()); it.Next(t.Context()); {
+		serverKIDs = append(serverKIDs, it.Pair().Value.(jwk.Key).KeyID())
+	}
+	assert.ElementsMatch(t, serverKIDs, nsKIDs)
+
+	// POST to the same URL should fail (JWKS is read-only).
+	resp2, err := httpClient.Post(url, "application/json", nil)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.GreaterOrEqual(t, resp2.StatusCode, http.StatusBadRequest,
+		"POST to the JWKS endpoint should return an HTTP error")
 }
 
 func TestIntegrationTokenIntrospection(t *testing.T) {
@@ -1127,7 +1169,6 @@ func TestDiscoveryEndpointsReachable(t *testing.T) {
 
 	// Map of endpoint keys to their expected HTTP method.
 	// POST-only endpoints return 404 for GET in Gin, so we must use POST.
-	// jwks_uri is served by a different component, so we skip it.
 	endpointMethods := map[string]string{
 		"authorization_endpoint":        "GET",
 		"token_endpoint":                "POST",
@@ -1136,6 +1177,7 @@ func TestDiscoveryEndpointsReachable(t *testing.T) {
 		"registration_endpoint":         "POST",
 		"revocation_endpoint":           "POST",
 		"introspection_endpoint":        "POST",
+		"jwks_uri":                      "GET",
 	}
 
 	for key, method := range endpointMethods {
@@ -1581,4 +1623,191 @@ func TestPerNamespaceAuthzRules(t *testing.T) {
 		assert.NotEqual(t, IssuerURLForNamespace(nsAlpha), iss,
 			"beta token iss must differ from alpha namespace")
 	})
+}
+
+// TestIntegrationNamespaceJWKSWithExtraKey verifies that setting ExtraJwksPath
+// on an OIDCProvider causes the per-namespace JWKS endpoint to include the
+// additional public keys alongside the server's own key set.
+func TestIntegrationNamespaceJWKSWithExtraKey(t *testing.T) {
+	provider, ts := setupIntegration(t)
+
+	// Generate an extra EC key and write it as a public-only JWKS file.
+	extraPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	extraPub, err := jwk.FromRaw(extraPriv.PublicKey)
+	require.NoError(t, err)
+	const extraKID = "extra-ns-test-key"
+	require.NoError(t, extraPub.Set(jwk.KeyIDKey, extraKID))
+	extraPath := test_utils.WriteJWKSFile(t, t.TempDir(), "extra.jwks", extraPub)
+
+	// The registry stores a pointer to the provider, so mutating
+	// ExtraJwksPath after setup still affects what handleNamespaceJWKS
+	// reads at request time.
+	provider.ExtraJwksPath = extraPath
+
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+	responseKIDs := fetchNamespaceJWKSKIDs(t, ts, url)
+
+	// The extra key must appear in the response.
+	assert.Contains(t, responseKIDs, extraKID,
+		"per-namespace JWKS should include the extra key from ExtraJwksPath")
+
+	// The server's own key(s) must also be present.
+	serverSet, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	for it := serverSet.Keys(t.Context()); it.Next(t.Context()); {
+		kid := it.Pair().Value.(jwk.Key).KeyID()
+		assert.Contains(t, responseKIDs, kid,
+			"per-namespace JWKS should still include server key %s", kid)
+	}
+}
+
+// TestIntegrationNamespaceJWKSBadExtraPathDegrades verifies that when
+// ExtraJwksPath points to a missing or unreadable file (e.g. it was deleted
+// after startup), the endpoint degrades to the server's base keys rather
+// than failing: the extra file is optional, so one broken supplemental file
+// must not take down verification for the server's own valid keys.
+func TestIntegrationNamespaceJWKSBadExtraPathDegrades(t *testing.T) {
+	provider, ts := setupIntegration(t)
+	provider.ExtraJwksPath = "/nonexistent/path/to/extra.jwks"
+
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+	responseKIDs := fetchNamespaceJWKSKIDs(t, ts, url)
+
+	// The server's base keys must still be served in full.
+	serverSet, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	for it := serverSet.Keys(t.Context()); it.Next(t.Context()); {
+		kid := it.Pair().Value.(jwk.Key).KeyID()
+		assert.Contains(t, responseKIDs, kid,
+			"degraded JWKS should still include server key %s", kid)
+	}
+}
+
+// TestIntegrationNamespaceJWKSIsolation verifies the central feature claim:
+// when two namespaces are served by the same origin, each one's
+// ExtraJwksPath is isolated to its own JWKS endpoint. A key configured for
+// namespace alpha must not appear in namespace beta's response, and vice
+// versa, while both responses still include the server's own public keys.
+func TestIntegrationNamespaceJWKSIsolation(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(func() { config.ResetConfig() })
+
+	tmpDir := t.TempDir()
+	require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.example.com"))
+
+	dbPath := filepath.Join(tmpDir, "test-isolation.sqlite")
+	db, err := dbutils.InitSQLiteDB(dbPath)
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
+	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
+
+	const nsAlpha = "/ns/alpha"
+	const nsBeta = "/ns/beta"
+	gracePeriod := 5 * time.Minute
+
+	providerAlpha, err := NewOIDCProvider(db, IssuerURLForNamespace(nsAlpha), gracePeriod, nsAlpha)
+	require.NoError(t, err)
+	providerBeta, err := NewOIDCProvider(db, IssuerURLForNamespace(nsBeta), gracePeriod, nsBeta)
+	require.NoError(t, err)
+
+	makeExtraKey := func(kid string) string {
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub, err := jwk.FromRaw(priv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, pub.Set(jwk.KeyIDKey, kid))
+		return test_utils.WriteJWKSFile(t, t.TempDir(), kid+".jwks", pub)
+	}
+	const kidAlpha = "alpha-only-key"
+	const kidBeta = "beta-only-key"
+	providerAlpha.ExtraJwksPath = makeExtraKey(kidAlpha)
+	providerBeta.ExtraJwksPath = makeExtraKey(kidBeta)
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	registry := NewProviderRegistry()
+	registry.Register(nsAlpha, providerAlpha)
+	registry.Register(nsBeta, providerBeta)
+	RegisterRoutesWithMiddleware(engine, registry)
+
+	ts := httptest.NewTLSServer(engine)
+	t.Cleanup(ts.Close)
+
+	serverSet, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	var serverKIDs []string
+	for it := serverSet.Keys(t.Context()); it.Next(t.Context()); {
+		serverKIDs = append(serverKIDs, it.Pair().Value.(jwk.Key).KeyID())
+	}
+	require.NotEmpty(t, serverKIDs, "server should publish at least one key")
+
+	alphaKIDs := fetchNamespaceJWKSKIDs(t, ts,
+		ts.URL+"/api/v1.0/issuer/ns/ns/alpha/.well-known/issuer.jwks")
+	betaKIDs := fetchNamespaceJWKSKIDs(t, ts,
+		ts.URL+"/api/v1.0/issuer/ns/ns/beta/.well-known/issuer.jwks")
+
+	// Each namespace's own extra key is present.
+	assert.Contains(t, alphaKIDs, kidAlpha,
+		"alpha JWKS should include its own extra key")
+	assert.Contains(t, betaKIDs, kidBeta,
+		"beta JWKS should include its own extra key")
+
+	// Cross-namespace isolation: neither extra key leaks to the other.
+	assert.NotContains(t, alphaKIDs, kidBeta,
+		"alpha JWKS must not include beta's extra key")
+	assert.NotContains(t, betaKIDs, kidAlpha,
+		"beta JWKS must not include alpha's extra key")
+
+	// Server keys are still present in both responses.
+	for _, kid := range serverKIDs {
+		assert.Contains(t, alphaKIDs, kid,
+			"alpha JWKS should still include server key %s", kid)
+		assert.Contains(t, betaKIDs, kid,
+			"beta JWKS should still include server key %s", kid)
+	}
+}
+
+// fetchNamespaceJWKSKIDs GETs a namespace JWKS endpoint, asserts the
+// response is well-formed (HTTP 200, valid JWKS with a 'keys' array of
+// objects each having 'kid' and 'kty'), and returns the list of kids.
+func fetchNamespaceJWKSKIDs(t *testing.T, ts *httptest.Server, url string) []string {
+	t.Helper()
+	resp, err := ts.Client().Get(url)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "GET %s", url)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return extractWellFormedJWKSKIDs(t, body)
+}
+
+// extractWellFormedJWKSKIDs parses body as a JWKS document, asserts that
+// every key has string 'kid' and 'kty' fields, and returns the list of kids.
+// Used by tests that fetch the JWKS themselves but want to share the
+// well-formedness checks.
+func extractWellFormedJWKSKIDs(t *testing.T, body []byte) []string {
+	t.Helper()
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(body, &raw),
+		"JWKS response should be valid JSON")
+	keys, ok := raw["keys"].([]interface{})
+	require.True(t, ok, "JWKS response should have a 'keys' array")
+
+	kids := make([]string, 0, len(keys))
+	for i, k := range keys {
+		km, ok := k.(map[string]interface{})
+		require.True(t, ok, "key %d should be a JSON object", i)
+		kid, ok := km["kid"].(string)
+		require.True(t, ok, "key %d should have a string 'kid'", i)
+		_, ok = km["kty"].(string)
+		require.True(t, ok, "key %d should have a string 'kty'", i)
+		kids = append(kids, kid)
+	}
+	return kids
 }

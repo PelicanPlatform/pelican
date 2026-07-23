@@ -49,6 +49,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/config/configtest"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -644,4 +645,11 @@ func ChownToDaemon(t *testing.T, paths ...string) {
 	for _, p := range paths {
 		require.NoError(t, os.Chown(p, uinfo.Uid, uinfo.Gid))
 	}
+}
+
+// WriteJWKSFile serializes keys into a JWKS JSON file at dir/name
+// and returns the full path. Fails the test on any error.
+// This is a thin shim over configtest.WriteJWKSFile.
+func WriteJWKSFile(t testing.TB, dir, name string, keys ...jwk.Key) string {
+	return configtest.WriteJWKSFile(t, dir, name, keys...)
 }

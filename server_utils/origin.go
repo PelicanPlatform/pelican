@@ -67,6 +67,11 @@ type (
 		// When set, these override the global Issuer.AuthorizationTemplates
 		// for this export's namespace.
 		AuthorizationTemplates []interface{} `json:"authorizationTemplates,omitempty" mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+
+		// IssuerJwks is an optional path to a JWKS file whose public keys
+		// are merged into the per-namespace JWKS endpoint alongside the
+		// server's exported public key set.
+		IssuerJwks string `json:"issuerJwks,omitempty" mapstructure:"issuerjwks" yaml:"IssuerJwks"`
 	}
 )
 
