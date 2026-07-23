@@ -91,6 +91,60 @@ func TestRecordCommit_PersistsAndClearsSourceEtag(t *testing.T) {
 	}
 }
 
+// TestRecordExternalChange_ClearsSourceEtag confirms that an out-of-band
+// modification clears the stored TPC source ETag, matching the documented
+// contract on the column. Otherwise a stale upstream ETag would be served on
+// PROPFIND and a sync client could wrongly skip re-fetching a changed object.
+func TestRecordExternalChange_ClearsSourceEtag(t *testing.T) {
+	d, _, cleanup := newTestDAO(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	base := ObjectMetadataEventInput{
+		Namespace:    "/exp",
+		ObjectPath:   "/exp/data/x.bin",
+		Size:         42,
+		ETag:         `"local"`,
+		EtagSource:   EtagSourceBackend,
+		BackendMtime: time.Now().UTC().Round(time.Millisecond),
+		Actor:        "carol",
+	}
+
+	// TPC commit stores an upstream source ETag on the live row.
+	tpc := base
+	tpc.SourceEtag = `"remote-abc"`
+	if err := d.RecordCommit(ctx, tpc); err != nil {
+		t.Fatalf("RecordCommit tpc: %v", err)
+	}
+	live, err := d.LookupLive(ctx, "/exp", "/exp/data/x.bin")
+	if err != nil || live == nil {
+		t.Fatalf("live lookup after tpc: row=%v err=%v", live, err)
+	}
+	if live.SourceEtag == nil || *live.SourceEtag != `"remote-abc"` {
+		t.Fatalf("source_etag after tpc = %v, want %q", live.SourceEtag, `"remote-abc"`)
+	}
+
+	// Out-of-band modification observed via Stat: a different ETag, no source
+	// ETag. The stale upstream value must be cleared.
+	ext := base
+	ext.ETag = `"changed-out-of-band"`
+	if err := d.RecordExternalChange(ctx, ext); err != nil {
+		t.Fatalf("RecordExternalChange: %v", err)
+	}
+	// RecordExternalChange is best-effort (async); force the write behind it.
+	_ = d.batcher.FlushNow(ctx)
+	live, err = d.LookupLive(ctx, "/exp", "/exp/data/x.bin")
+	if err != nil || live == nil {
+		t.Fatalf("live lookup after external change: row=%v err=%v", live, err)
+	}
+	if live.SourceEtag != nil {
+		t.Fatalf("source_etag after external change = %q, want NULL", *live.SourceEtag)
+	}
+	if live.ETag != `"changed-out-of-band"` {
+		t.Fatalf("etag after external change = %q, want %q", live.ETag, `"changed-out-of-band"`)
+	}
+}
+
 // TestSourceEtagContextRoundtrip locks the withSourceEtag /
 // sourceEtagFromContext helpers so the TPC handler can rely on them.
 func TestSourceEtagContextRoundtrip(t *testing.T) {

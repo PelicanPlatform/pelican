@@ -696,19 +696,23 @@ func (c *metadataController) CommitEventFromCloseHook(namespace string) func(ctx
 // (eg "/exp") and an export-relative path (eg "/data/x.bin") yielded by
 // the webdav.Handler after Prefix-stripping. It's an exposed helper so
 // tests can lock down the contract.
+//
+// The close-hook contract guarantees an *export-relative* input (the webdav
+// handler always strips its Prefix before OpenFile), so we unconditionally
+// join namespace + exportRelative. We deliberately do NOT try to detect an
+// "already federation-rooted" input: a legitimate object whose first path
+// component happens to match the namespace's trailing segment (e.g. a
+// client-created subdir named "exp" under namespace "/exp", giving
+// export-relative "/exp/data/x.bin") must map to "/exp/exp/data/x.bin", not
+// be misclassified and collapsed to "/exp/data/x.bin".
 func joinFederationPath(namespace, exportRelative string) string {
 	ns := strings.TrimRight(namespace, "/")
-	if ns == "" || ns == "/" {
-		return path.Clean("/" + strings.TrimLeft(exportRelative, "/"))
-	}
 	rel := strings.TrimLeft(exportRelative, "/")
-	// If the close hook somehow received an already-rooted path,
-	// don't double-prefix.
+	if ns == "" || ns == "/" {
+		return path.Clean("/" + rel)
+	}
 	if rel == "" {
 		return ns
-	}
-	if strings.HasPrefix("/"+rel, ns+"/") || "/"+rel == ns {
-		return path.Clean("/" + rel)
 	}
 	return path.Clean(ns + "/" + rel)
 }
