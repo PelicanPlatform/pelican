@@ -85,6 +85,11 @@ jobs:
     name: E2E (${{ matrix.service }})
     needs: build
     runs-on: ubuntu-latest
+    # Without an explicit cap this job inherits GitHub's 6-hour default, so a
+    # hung Playwright run (e.g. a reporter that never exits, or a test that
+    # stalls in startup) burns 6 hours of silence before it is cancelled. Cap it
+    # so such a hang fails fast and surfaces its log instead.
+    timeout-minutes: 30
     container:
       image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     strategy:
