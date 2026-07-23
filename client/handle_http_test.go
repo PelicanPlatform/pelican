@@ -1089,14 +1089,14 @@ func TestProjInUserAgent(t *testing.T) {
 	assert.Equal(t, "pelican-client/"+config.GetVersion()+" project/test", *server_test.user_agent)
 }
 
-// The test should prove that the function getObjectServersToTry returns the correct number of servers,
-// and that any duplicates are removed
+// The test should prove that the function getObjectServersToTry returns the correct number of servers.
+// Deduplication is handled upstream in generateSortedObjServers (by host:port); this function preserves
+// the list it is given, including intentional duplicates among the user's preferred caches.
 func TestGetObjectServersToTry(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	sortedServers := []string{
 		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
 		"https://cache-2.com",
-		"https://cache-2.com", // make sure duplicates are removed
 		"https://cache-3.com",
 		"https://cache-4.com",
 		"https://cache-5.com",
@@ -1113,14 +1113,6 @@ func TestGetObjectServersToTry(t *testing.T) {
 		}
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
-		// Check that there are no duplicates in the result
-		cacheSet := make(map[string]bool)
-		for _, transfer := range transfers {
-			if cacheSet[transfer.Url.String()] {
-				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
-			}
-			cacheSet[transfer.Url.String()] = true
-		}
 		// Verify we got the correct caches in our transfer attempt details
 		require.Len(t, transfers, 3)
 		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
@@ -1139,18 +1131,33 @@ func TestGetObjectServersToTry(t *testing.T) {
 		}
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
-		cacheSet := make(map[string]bool)
-		for _, transfer := range transfers {
-			if cacheSet[transfer.Url.String()] {
-				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
-			}
-			cacheSet[transfer.Url.String()] = true
-		}
-
 		require.Len(t, transfers, 3)
 		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
 		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
 		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
+
+	// williamnswanson's concern: intentional duplicates in the preferred list must be honored
+	// here rather than collapsed, so the client retries that cache as many times as requested.
+	t.Run("IntentionalDuplicatesPreserved", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// Both preferred entries point at cache-1; both must be tried, in order.
+		dupServers := []string{"https://cache-1.com", "https://cache-1.com", "https://cache-2.com"}
+		transfers := getObjectServersToTry(dupServers, job, 3, "", 2)
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-1.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[2].Url.String())
+		assert.True(t, transfers[0].Preferred)
+		assert.True(t, transfers[1].Preferred)
+		assert.False(t, transfers[2].Preferred)
 	})
 
 	// Test that the Preferred flag is set correctly based on nPreferred.
@@ -1165,12 +1172,65 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3 is director.
+		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3/4/5 are director.
+		// The cap of 3 applies only to the director servers, so all 5 are returned.
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 2)
-		require.Len(t, transfers, 3)
+		require.Len(t, transfers, 5)
 		assert.True(t, transfers[0].Preferred, "cache-1 (idx 0) should be marked preferred")
 		assert.True(t, transfers[1].Preferred, "cache-2 (idx 1) should be marked preferred")
 		assert.False(t, transfers[2].Preferred, "cache-3 (idx 2) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[3].Preferred, "cache-4 (idx 3) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[4].Preferred, "cache-5 (idx 4) should not be marked preferred (director-provided)")
+	})
+
+	// The attempt cap restricts only director-provided servers. If the user supplies more
+	// preferred caches than the cap, every one of them must still be tried, in order.
+	t.Run("AllPreferredTriedRegardlessOfCap", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 6 preferred caches, no director servers, director cap of 3: all 6 are tried.
+		preferredServers := []string{
+			"https://cache-1.com",
+			"https://cache-2.com",
+			"https://cache-3.com",
+			"https://cache-4.com",
+			"https://cache-5.com",
+			"https://cache-6.com",
+		}
+		transfers := getObjectServersToTry(preferredServers, job, 3, "", len(preferredServers))
+		require.Len(t, transfers, 6)
+		for i, transfer := range transfers {
+			assert.True(t, transfer.Preferred, "preferred cache at idx %d should be marked preferred", i)
+		}
+		assert.Equal(t, "https://cache-6.com", transfers[5].Url.String())
+	})
+
+	// With preferred caches exceeding the cap AND director fallbacks present, all preferred
+	// caches are tried plus up to the cap's worth of director servers.
+	t.Run("AllPreferredPlusCappedDirector", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 4 preferred + 4 director, director cap of 3 => 4 preferred + 3 director = 7.
+		servers := []string{
+			"https://pref-1.com", "https://pref-2.com", "https://pref-3.com", "https://pref-4.com",
+			"https://dir-1.com", "https://dir-2.com", "https://dir-3.com", "https://dir-4.com",
+		}
+		transfers := getObjectServersToTry(servers, job, 3, "", 4)
+		require.Len(t, transfers, 7)
+		assert.Equal(t, "https://dir-3.com", transfers[6].Url.String())
+		assert.False(t, transfers[6].Preferred)
 	})
 }
 
