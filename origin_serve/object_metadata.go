@@ -373,8 +373,12 @@ func (d *objectMetadataDAO) RecordExternalChange(ctx context.Context, in ObjectM
 			},
 		},
 		{
+			// source_etag is cleared (set NULL): an out-of-band modification
+			// invalidates the object, so the upstream TPC source ETag no
+			// longer applies. This matches the documented contract on the
+			// column and mirrors RecordCommit, which also resets it.
 			SQL: `UPDATE object_metadata
-				SET size = ?, etag = ?, etag_source = ?, backend_mtime = ?, last_modified = ?
+				SET size = ?, etag = ?, etag_source = ?, backend_mtime = ?, last_modified = ?, source_etag = NULL
 				WHERE namespace = ? AND object_path = ? AND deleted_at IS NULL`,
 			Args: []any{in.Size, in.ETag, string(in.EtagSource), in.BackendMtime, now, in.Namespace, in.ObjectPath},
 		},

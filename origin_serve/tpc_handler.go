@@ -360,31 +360,47 @@ Loop:
 
 	totalCopied := pw.BytesComplete()
 
-	// Close the destination file; surface any deferred write/sync errors
-	if closeErr := destFile.Close(); closeErr != nil && copyErr == nil {
-		copyErr = fmt.Errorf("close destination file failed: %w", closeErr)
+	// Decide success BEFORE committing. A transfer that errored, stalled, was
+	// cancelled, or fell short of the advertised size must not commit — and in
+	// particular must not fire the POSC / close-notify close hook, which
+	// publishes the object.committed webhook and records a `commit` in the
+	// tracking DB. Fold the size check into copyErr so the commit decision has
+	// a single source of truth.
+	if copyErr == nil && totalSize >= 0 && totalCopied != totalSize {
+		copyErr = fmt.Errorf("size mismatch: expected %d bytes from source but wrote %d", totalSize, totalCopied)
 	}
 
 	if copyErr != nil {
+		// Discard the staged upload WITHOUT renaming it into place or firing
+		// the close hook, then best-effort remove any partial object. Abort is
+		// implemented by the POSC / close-notify file wrappers; a plain backend
+		// file has no hook to suppress, so falling back to Close is safe.
+		if ab, ok := destFile.(interface{ Abort() error }); ok {
+			if abErr := ab.Abort(); abErr != nil {
+				log.WithFields(fields).Warningf("Failed to abort staged destination file after copy failure: %v", abErr)
+			}
+		} else if closeErr := destFile.Close(); closeErr != nil {
+			log.WithFields(fields).Warningf("Failed to close destination file after copy failure: %v", closeErr)
+		}
 		log.WithFields(fields).Errorf("Third-party copy failed: %v", copyErr)
 		fmt.Fprintf(c.Writer, "failure: %s\n", copyErr.Error())
 		c.Writer.Flush()
-		// Clean up the partial destination file on failure
 		if removeErr := fs.RemoveAll(c.Request.Context(), destPath); removeErr != nil {
 			log.WithFields(fields).Warningf("Failed to clean up partial destination file after copy failure: %v", removeErr)
 		}
 		return
 	}
 
-	// Sanity-check: if the source told us the size, make sure we got it all
-	if totalSize >= 0 && totalCopied != totalSize {
-		msg := fmt.Sprintf("size mismatch: expected %d bytes from source but wrote %d", totalSize, totalCopied)
-		log.WithFields(fields).Error(msg)
-		fmt.Fprintf(c.Writer, "failure: %s\n", msg)
+	// Success: commit the object and fire the close hook (publish + tracking).
+	// Close surfaces any deferred write/sync errors from the underlying handle;
+	// POSC's own Close rolls back (removes the object) if the commit or the
+	// close hook fails, so we best-effort remove and report failure here too.
+	if closeErr := destFile.Close(); closeErr != nil {
+		log.WithFields(fields).Errorf("Third-party copy commit failed: %v", closeErr)
+		fmt.Fprintf(c.Writer, "failure: %s\n", closeErr.Error())
 		c.Writer.Flush()
-		// Clean up the incomplete destination file
 		if removeErr := fs.RemoveAll(c.Request.Context(), destPath); removeErr != nil {
-			log.WithFields(fields).Warningf("Failed to clean up incomplete destination file: %v", removeErr)
+			log.WithFields(fields).Warningf("Failed to clean up destination file after commit failure: %v", removeErr)
 		}
 		return
 	}

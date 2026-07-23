@@ -240,6 +240,52 @@ func TestObjectCommitEventJSONShape(t *testing.T) {
 	}
 }
 
+// TestObjectCommitEventJSON_ReservedKeysWin ensures the marshal step is
+// authoritative: a custom field whose key collides with a reserved key
+// (path/size/etag/created_at) can NEVER overwrite the origin-computed value in
+// the webhook body. This defends the receiver's identity/provenance fields
+// independently of the parse-time reserved-key strip.
+func TestObjectCommitEventJSON_ReservedKeysWin(t *testing.T) {
+	created := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	// A hostile/buggy CustomFields carrying every reserved key.
+	e := NewObjectCommitEvent("/foo", "/foo/real.dat", 4321, `"real-etag"`, created, CustomFields{
+		"path":       "/spoofed/evil.dat",
+		"size":       int64(1),
+		"etag":       `"spoofed"`,
+		"created_at": "1999-01-01T00:00:00Z",
+		"experiment": "atlas",
+	})
+	e.Timestamp = created
+
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		Object map[string]any `json:"object"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	obj := got.Object
+	if obj["path"] != "/foo/real.dat" {
+		t.Fatalf("object.path = %v, want /foo/real.dat (custom field spoofed it)", obj["path"])
+	}
+	if v, _ := obj["size"].(float64); v != 4321 {
+		t.Fatalf("object.size = %v, want 4321", obj["size"])
+	}
+	if obj["etag"] != `"real-etag"` {
+		t.Fatalf("object.etag = %v, want \"real-etag\"", obj["etag"])
+	}
+	if obj["created_at"] != created.Format(time.RFC3339Nano) {
+		t.Fatalf("object.created_at = %v, want %v", obj["created_at"], created.Format(time.RFC3339Nano))
+	}
+	// A genuinely-custom (non-reserved) field still comes through.
+	if obj["experiment"] != "atlas" {
+		t.Fatalf("custom field experiment = %v, want atlas", obj["experiment"])
+	}
+}
+
 // ---------- transactional publishing ----------
 
 func TestTransactionalSuccess(t *testing.T) {
@@ -808,8 +854,11 @@ func TestJoinFederationPath(t *testing.T) {
 		{"/exp/", "/data/x.bin", "/exp/data/x.bin"},
 		// leading-slash variations
 		{"/exp", "data/x.bin", "/exp/data/x.bin"},
-		// already-rooted (defensive)
-		{"/exp", "/exp/data/x.bin", "/exp/data/x.bin"},
+		// Input is ALWAYS export-relative (webdav strips the Prefix), so an
+		// export-relative path whose first component happens to equal the
+		// namespace's trailing segment — e.g. a client-created subdir named
+		// "exp" under namespace "/exp" — must be joined, not collapsed.
+		{"/exp", "/exp/data/x.bin", "/exp/exp/data/x.bin"},
 		// root namespace
 		{"/", "/data/x.bin", "/data/x.bin"},
 		{"", "/data/x.bin", "/data/x.bin"},

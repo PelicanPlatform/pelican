@@ -101,3 +101,19 @@ func (cf *closeNotifyFile) Close() error {
 	}
 	return nil
 }
+
+// Abort closes the underlying handle WITHOUT firing the close hook. Without
+// POSC there is no staging file to discard — the bytes were written in place —
+// so the caller is responsible for removing the (partial) object; the point of
+// Abort is only to ensure a failed transfer does not publish a webhook or
+// record a commit. Idempotent with Close.
+func (cf *closeNotifyFile) Abort() error {
+	cf.mu.Lock()
+	if cf.closed {
+		cf.mu.Unlock()
+		return nil
+	}
+	cf.closed = true
+	cf.mu.Unlock()
+	return cf.File.Close()
+}

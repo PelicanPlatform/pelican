@@ -313,6 +313,53 @@ func TestPoscCloseHookFires(t *testing.T) {
 	_ = mem
 }
 
+// TestPoscAbortDiscardsWithoutHook verifies that Abort() discards the staged
+// upload WITHOUT renaming it into place or firing the close hook — the
+// behavior a failed third-party copy relies on so it never publishes an
+// object.committed webhook or records a commit for a transfer that failed.
+func TestPoscAbortDiscardsWithoutHook(t *testing.T) {
+	ctx, p, mem, cleanup := newTestPosc(t)
+	defer cleanup()
+	ctx = setUserInfo(ctx, &userInfo{User: "alice"})
+
+	var hookFired int32
+	p.SetCloseHook(func(context.Context, string, os.FileInfo) error {
+		atomic.AddInt32(&hookFired, 1)
+		return nil
+	})
+
+	f, err := p.OpenFile(ctx, "/data/aborted.bin", os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	if _, err := f.Write([]byte("partial")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ab, ok := f.(interface{ Abort() error })
+	if !ok {
+		t.Fatalf("poscFile does not implement Abort()")
+	}
+	if err := ab.Abort(); err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+
+	if n := atomic.LoadInt32(&hookFired); n != 0 {
+		t.Fatalf("close hook fired %d times on Abort; want 0", n)
+	}
+	// The object must NOT be visible at its final path.
+	if _, err := mem.Stat("/data/aborted.bin"); err == nil {
+		t.Fatal("aborted object should not exist at its final path")
+	}
+	// Abort is idempotent and a subsequent Close is a no-op (no hook, no commit).
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close after Abort: %v", err)
+	}
+	if n := atomic.LoadInt32(&hookFired); n != 0 {
+		t.Fatalf("close hook fired after Abort+Close; want 0")
+	}
+}
+
 func TestPoscCloseHookFailureReturnsError(t *testing.T) {
 	ctx, p, _, cleanup := newTestPosc(t)
 	defer cleanup()
