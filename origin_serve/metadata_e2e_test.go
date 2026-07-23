@@ -76,8 +76,10 @@ func newE2EHarness(t *testing.T, mode PublishMode) *e2eHarness {
 		RatePerSecond:  1000,
 	})
 	ctl.publisher.signToken = func(string, string) (string, error) { return "tok", nil }
-	ctl.objectExists = func(_ context.Context, _, p string) bool {
-		_, err := mem.Stat(p)
+	ctl.objectExists = func(_ context.Context, ns, p string) bool {
+		// p is federation-rooted (the queued ObjectPath); the backing memfs is
+		// export-relative, so convert as production's FilesystemForExists does.
+		_, err := mem.Stat(exportRelativePath(ns, p))
 		return err == nil
 	}
 
@@ -108,7 +110,11 @@ func TestE2ETransactional_HappyPath(t *testing.T) {
 	ctx := setUserInfo(context.Background(), &userInfo{User: "alice"})
 	ctx = withObjectMetadata(ctx, CustomFields{"experiment": "atlas", "run": int64(99)})
 
-	f, err := h.fs.OpenFile(ctx, "/exp/data/run99.dat", os.O_CREATE|os.O_WRONLY, 0644)
+	// The close hook receives EXPORT-relative paths (the webdav handler strips
+	// its Prefix before OpenFile); this synthetic test drives OpenFile
+	// directly, so it must pass the export-relative path itself. The published
+	// object.path is then federation-rooted (/exp + /data/run99.dat).
+	f, err := h.fs.OpenFile(ctx, "/data/run99.dat", os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatalf("OpenFile: %v", err)
 	}
@@ -180,7 +186,8 @@ func TestE2ETransactional_RollbackOn5xx(t *testing.T) {
 	posc.SetCloseHook(ctl.CommitEventFromCloseHook("/exp"))
 
 	uctx := setUserInfo(ctx, &userInfo{User: "alice"})
-	f, err := posc.OpenFile(uctx, "/exp/x.bin", os.O_CREATE|os.O_WRONLY, 0644)
+	// Export-relative path (the close-hook contract); see happy-path note.
+	f, err := posc.OpenFile(uctx, "/x.bin", os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatalf("OpenFile: %v", err)
 	}
@@ -202,8 +209,8 @@ func TestE2ETransactional_RollbackOn5xx(t *testing.T) {
 	// In transactional mode, the close-hook failure triggers POSC's
 	// rollback path: the just-renamed final object is best-effort
 	// removed so the object doesn't exist without metadata.
-	if _, err := mem.Stat("/exp/x.bin"); err == nil {
-		t.Fatal("expected POSC rollback to have removed /exp/x.bin")
+	if _, err := mem.Stat("/x.bin"); err == nil {
+		t.Fatal("expected POSC rollback to have removed the object")
 	}
 
 	// The queue row was cleaned up too.
@@ -470,8 +477,9 @@ func TestE2EEventual_BackpressureAndDrain(t *testing.T) {
 		RatePerSecond:  1000,
 	})
 	ctl.publisher.signToken = func(string, string) (string, error) { return "tok", nil }
-	ctl.objectExists = func(_ context.Context, _, p string) bool {
-		_, err := mem.Stat(p)
+	ctl.objectExists = func(_ context.Context, ns, p string) bool {
+		// p is federation-rooted; the memfs is export-relative (see harness note).
+		_, err := mem.Stat(exportRelativePath(ns, p))
 		return err == nil
 	}
 	posc.SetCloseHook(ctl.CommitEventFromCloseHook("/exp"))
@@ -480,7 +488,7 @@ func TestE2EEventual_BackpressureAndDrain(t *testing.T) {
 
 	uctx := setUserInfo(ctx, &userInfo{User: "alice"})
 	for i := 0; i < 3; i++ {
-		f, err := posc.OpenFile(uctx, "/exp/x.bin", os.O_CREATE|os.O_WRONLY, 0644)
+		f, err := posc.OpenFile(uctx, "/x.bin", os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			t.Fatalf("OpenFile: %v", err)
 		}

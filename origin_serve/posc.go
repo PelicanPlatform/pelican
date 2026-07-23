@@ -675,6 +675,47 @@ func (f *poscFile) Close() error {
 	return nil
 }
 
+// Abort discards the staging file without renaming it into place or firing
+// the close hook. Callers that know the upload failed (e.g. a third-party copy
+// whose source transfer errored, stalled, or fell short of the advertised
+// size) must Abort instead of Close, so a partial/never-completed object is
+// never committed to storage and — critically — no object.committed webhook is
+// published and no `commit` is recorded in the tracking DB for a transfer that
+// didn't succeed.
+//
+// It closes the underlying handle and removes the temp file. Idempotent with
+// Close: whichever is called first wins; the other is a no-op.
+func (f *poscFile) Abort() error {
+	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return nil
+	}
+	f.closed = true
+	temp := f.tempPath
+	f.mu.Unlock()
+
+	defer func() {
+		f.fs.unregisterOpen(f)
+		if f.fs.hooks != nil && f.fs.hooks.DecActive != nil {
+			f.fs.hooks.DecActive()
+		}
+		f.fs.activeCount.Add(-1)
+	}()
+
+	if f.streamingHasher != nil {
+		sha256HasherPool.Put(f.streamingHasher)
+		f.streamingHasher = nil
+	}
+
+	closeErr := f.File.Close()
+	rmErr := f.fs.inner.RemoveAll(f.ctx, temp)
+	if closeErr != nil {
+		return closeErr
+	}
+	return rmErr
+}
+
 // activePoscFiles is a Prometheus-friendly accessor used by tests / metrics.
 func (p *poscFileSystem) activePoscFiles() int64 { return p.activeCount.Load() }
 

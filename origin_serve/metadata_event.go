@@ -152,15 +152,21 @@ func (e *ObjectCommitEvent) MarshalJSON() ([]byte, error) {
 		return nil, errors.New("nil ObjectCommitEvent")
 	}
 	obj := make(map[string]any, len(e.CustomFields)+4)
+	// Inline client-supplied custom fields FIRST, then write the trusted,
+	// origin-computed reserved keys, so the authoritative values always win
+	// regardless of what CustomFields contains. The parse-time reserved-key
+	// strip (ParseObjectMetadataHeader) is a first line of defense; making the
+	// marshal authoritative means a client can never spoof path/size/etag/
+	// created_at even if a future code path populates CustomFields from a
+	// source other than the header parser, or a new reserved key is added here
+	// but not to ReservedCustomFieldKeys.
+	for k, v := range e.CustomFields {
+		obj[k] = v
+	}
 	obj["path"] = e.ObjectPath
 	obj["size"] = e.ObjectSize
 	obj["etag"] = e.ETag
 	obj["created_at"] = e.ObjectCreated.UTC().Format(time.RFC3339Nano)
-	for k, v := range e.CustomFields {
-		// Inline custom fields. Reserved keys cannot collide because
-		// they are stripped at parse time.
-		obj[k] = v
-	}
 	wire := struct {
 		ID        string         `json:"id"`
 		Type      string         `json:"type"`
