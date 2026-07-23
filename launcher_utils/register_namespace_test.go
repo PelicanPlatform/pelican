@@ -352,7 +352,7 @@ func TestRegistrationOldKeyStillInKeyset(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
 
 	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
 	// function overrides the IssuerKeysDirectory value if not already set.
@@ -466,7 +466,7 @@ func TestReconcileKeysWhenAlreadyRegistered(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
 
 	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
 	// function overrides the IssuerKeysDirectory value if not already set.
