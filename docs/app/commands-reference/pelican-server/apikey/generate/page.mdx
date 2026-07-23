@@ -10,6 +10,31 @@ Generate a new API key for the server
 
 Generate a new API key with specified scopes.
 
+Common scopes for API keys:
+  monitoring.query    Query the server's Prometheus endpoints
+  monitoring.scrape   Scrape the server's /metrics endpoint
+
+The --expiration flag accepts the following formats:
+  - 'never'                       Token does not expire
+  - RFC3339 in UTC                e.g. 2025-12-31T23:59:59Z
+  - RFC3339 with timezone offset  e.g. 2025-12-31T18:59:59-05:00
+  - Date only (ISO 8601)          e.g. 2025-12-31 (interpreted as midnight UTC)
+
+Note: Use either 'Z' for UTC or a timezone offset like '-05:00', not both.
+
+Examples:
+  # Generate an API key that never expires
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration never
+
+  # Generate an API key expiring on a specific date
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query,monitoring.scrape" --expiration 2025-12-31
+
+  # Generate an API key with a precise expiration in UTC
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T23:59:59Z
+
+  # Generate an API key with a timezone offset
+  pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T18:59:59-05:00
+
 ```
 pelican-server apikey generate [flags]
 ```
@@ -17,7 +42,7 @@ pelican-server apikey generate [flags]
 ### Options
 
 ```
-      --expiration string   Expiration time in RFC3339 format
+      --expiration string   Expiration: 'never', a date (2025-12-31), or RFC3339 (2025-12-31T23:59:59Z) (required)
   -h, --help                help for generate
       --name string         Name for the API key (defaults to cli-generated-{timestamp})
       --scopes string       Comma-separated list of scopes (e.g., monitoring.query,monitoring.scrape) (required)
