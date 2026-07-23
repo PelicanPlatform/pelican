@@ -350,6 +350,87 @@ func TestDeviceFlowClientScopeEnforcement(t *testing.T) {
 		"device-code token must not contain storage.modify when client scopes exclude it")
 }
 
+// TestDeviceFlowDeniesUngrantedControlPlaneScopes pins the "no over-grant"
+// guarantee for the scopes the dynamic-client-registration default list now
+// carries (pelican.transfer and the collection.* management scopes). A client
+// may be *registered* for those scopes -- dynamically-registered CLIs now are by
+// default -- but a user who is not authorized for them must NOT receive them in
+// a device-code token. The only thing that grants them is the authorization gate
+// at issuance (transferAccessAllowed / GetUserCollectionScopes), not the client
+// scope list. Without this, the DCR scope-list additions could silently leak a
+// control-plane capability into an ordinary user's token.
+func TestDeviceFlowDeniesUngrantedControlPlaneScopes(t *testing.T) {
+	provider, ts := setupIntegration(t)
+	httpClient := newTestClientWithJar(t, ts)
+
+	// A client registered for pelican.transfer and collection.* -- exactly the
+	// scope set the DCR default now grants dynamically-registered clients.
+	secret := "over-grant-secret"
+	clientID := "over-grant-client"
+	hashedSecret, err := secBcryptHash(secret)
+	require.NoError(t, err)
+	require.NoError(t, provider.Storage().CreateClient(context.Background(), &fosite.DefaultClient{
+		ID:            clientID,
+		Secret:        hashedSecret,
+		RedirectURIs:  []string{},
+		GrantTypes:    fosite.Arguments{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
+		ResponseTypes: fosite.Arguments{},
+		Scopes: fosite.Arguments{"openid", "wlcg", "storage.read:/",
+			"pelican.transfer", "collection.read:/", "collection.modify:/"},
+		Audience: fosite.Arguments{WLCGAudienceAny},
+	}))
+
+	// testGroups grants read+write on /data/production via the authorization
+	// templates. The user is in NO Transfer.EnabledGroups (none configured) and
+	// holds no collection ACL, so pelican.transfer and collection.modify:<id>
+	// are both unauthorized for them.
+	form := url.Values{
+		"client_id":     {clientID},
+		"client_secret": {secret},
+		"scope":         {"openid wlcg storage.read:/data/production pelican.transfer collection.modify:/acme"},
+	}
+	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var daResp map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&daResp))
+	userCode := daResp["user_code"].(string)
+	deviceCode := daResp["device_code"].(string)
+
+	approveDeviceCode(t, httpClient, ts.URL, userCode).Body.Close()
+
+	tokenForm := url.Values{
+		"grant_type":    {"urn:ietf:params:oauth:grant-type:device_code"},
+		"device_code":   {deviceCode},
+		"client_id":     {clientID},
+		"client_secret": {secret},
+	}
+	tokenResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", tokenForm)
+	require.NoError(t, err)
+	defer tokenResp.Body.Close()
+	require.Equal(t, http.StatusOK, tokenResp.StatusCode)
+
+	var tokenResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(tokenResp.Body).Decode(&tokenResult))
+	claims := secParseJWT(t, provider, tokenResult["access_token"].(string))
+	scopeAny, _ := claims.Get("scope")
+	scopeStr, _ := scopeAny.(string)
+
+	// Positive control: the user IS authorized for their own data, so a real,
+	// non-empty token was issued -- this guards against the negative assertions
+	// passing vacuously (e.g. if the flow had produced an empty scope set).
+	assert.Contains(t, scopeStr, "storage.read:/data/production",
+		"user authorized by the authorization templates should still receive their storage scope")
+	// The guarantee: ungranted control-plane scopes are dropped even though the
+	// client is registered for them.
+	assert.NotContains(t, scopeStr, "pelican.transfer",
+		"pelican.transfer must be denied to a user with no transfer-group membership or scope grant (default-deny)")
+	assert.NotContains(t, scopeStr, "collection.modify",
+		"collection.modify must be denied to a user with no ACL on the requested collection")
+}
+
 // --- Finding #4: Storage namespace isolation ---
 
 // TestStorageNamespaceIsolation verifies that storage lookups are scoped to

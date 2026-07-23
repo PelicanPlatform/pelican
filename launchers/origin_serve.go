@@ -46,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
@@ -54,6 +55,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to initialize origin exports")
+	}
+
+	// The transfer API authenticates clients with pelican.transfer tokens minted
+	// by the server's local issuer, and that issuer is only stood up in
+	// embedded-issuer mode (RegisterLocalProvider runs inside
+	// configureEmbeddedIssuer). In OA4MP mode no local issuer exists, so a
+	// transfer-enabled OA4MP origin could never issue or bootstrap its own
+	// transfer credentials. Fail fast rather than serve a transfer API that
+	// cannot mint tokens. (OA4MP is being retired in favor of the embedded
+	// issuer, at which point this restriction becomes vacuous.)
+	if param.Origin_EnableTransferAPI.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
+		return nil, errors.Errorf("the transfer API (%s=true) requires the embedded issuer, but %s is set to \"oa4mp\"; "+
+			"set %s to \"embedded\" or disable the transfer API",
+			param.Origin_EnableTransferAPI.GetName(), param.Origin_IssuerMode.GetName(), param.Origin_IssuerMode.GetName())
 	}
 
 	// Determine if we should use XRootD or native HTTP server
@@ -121,13 +136,21 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	// When the director is co-located, it registers the root-level OIDC
-	// metadata (/.well-known/).  The origin registers its own copy under
-	// /api/v1.0/origin so its issuer URL is distinct from the
-	// federation's.  The standalone-origin case is handled by the
-	// root-level RegisterOIDCAPI call below.
+	// Publish this origin's OIDC discovery document and JWKS so other
+	// servers (e.g. a peer origin or a transfer server verifying a
+	// storage token this origin's embedded issuer minted) can resolve its
+	// signing keys via OIDC auto-discovery.  The served path must match
+	// GetServerIssuerURL(): when the director is co-located the origin's
+	// issuer URL is a sub-path (/api/v1.0/origin) so the federation's
+	// root-level metadata (registered by the director) stays distinct; a
+	// standalone origin's issuer URL is the bare web URL, so its metadata
+	// lives at the root.  Without the standalone branch the embedded
+	// issuer advertises a jwks_uri that nothing serves and cross-server
+	// token verification fails with a 404.
 	if modules.IsEnabled(server_structs.DirectorType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/api/v1.0/origin", web_ui.ServerHeaderMiddleware), false)
+	} else {
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
@@ -281,6 +304,11 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
+	// Register the transfer API on the origin if enabled
+	if err := transfer.RegisterTransferAPIForOrigin(ctx, engine, egrp); err != nil {
+		return errors.Wrap(err, "failed to register transfer API on origin")
+	}
+
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
 	log.Debug("Register Origin")
 	extUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -413,9 +441,21 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
 	}
 
-	if registry.First() == nil {
-		log.Info("Embedded OIDC issuer: no exports require authentication; no issuers registered")
-		return nil
+	// Register the server's "local" issuer into the shared registry. It is the
+	// generic local-identity issuer (iss = config.GetLocalIssuerUrl()) behind
+	// every local-identity OAuth flow, independent of any data-export namespace:
+	//   - the (group-gated) pelican.transfer scope the transfer middleware's
+	//     LocalIssuer check accepts, and
+	//   - the namespace-agnostic collection.* management scopes the collections
+	//     API accepts (verified by web_ui.AuthHandler, which also pins the issuer
+	//     to GetLocalIssuerUrl()).
+	// It is registered whenever the embedded issuer is enabled — not gated on any
+	// one feature — so those flows always have a discovery endpoint, and so a
+	// transfer-enabled origin can authenticate the CLI even with only public
+	// exports. (A standalone transfer server does the equivalent in its own
+	// launch path via transfer.RegisterLocalIssuer.)
+	if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
+		return errors.Wrap(err, "failed to register local issuer")
 	}
 
 	// Apply a non-aborting middleware to the issuer route group so that

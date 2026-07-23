@@ -94,10 +94,11 @@ func TestClientDeviceCodeE2E(t *testing.T) {
 	t.Logf("Federation started.  Server URL: %s", serverURL)
 
 	// ---- Step 2: OIDC Discovery (config.GetIssuerMetadata) ----
-	// This is what the client's registerClient/AcquireToken calls internally
-	// when it receives the issuer URL from the director's response headers.
-	issuerMeta, err := config.GetIssuerMetadata(serverURL)
-	require.NoError(t, err, "GetIssuerMetadata should succeed against the origin's root /.well-known/openid-configuration")
+	// This is what the client's registerClient/AcquireToken calls internally:
+	// it discovers the per-namespace issuer URL the director advertises in its
+	// token-generation response header, not the origin's bare web URL.
+	issuerMeta, err := config.GetIssuerMetadata(serverURL + "/api/v1.0/issuer/ns/data")
+	require.NoError(t, err, "GetIssuerMetadata should succeed against the /data namespace issuer")
 	require.NotEmpty(t, issuerMeta.RegistrationURL, "Discovery must expose registration_endpoint")
 	require.NotEmpty(t, issuerMeta.DeviceAuthURL, "Discovery must expose device_authorization_endpoint")
 	require.NotEmpty(t, issuerMeta.TokenURL, "Discovery must expose token_endpoint")
@@ -524,7 +525,9 @@ func TestClientAcquireTokenScopeE2E(t *testing.T) {
 	ft, testUserPassword, _ := setupFedAndUsers(t)
 	serverURL := param.Server_ExternalWebUrl.GetString()
 
-	issuerMeta, err := config.GetIssuerMetadata(serverURL)
+	// Discover the /data namespace issuer the director advertises, not the
+	// origin's bare web URL.
+	issuerMeta, err := config.GetIssuerMetadata(serverURL + "/api/v1.0/issuer/ns/data")
 	require.NoError(t, err)
 
 	// Register a client (same as registerClient)

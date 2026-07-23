@@ -58,6 +58,16 @@ const (
 	OriginPrefix ServerPrefix = "/origins/"
 )
 
+// LocalIssuerNamespace is the reserved registry/route key for a server's
+// "local" OIDC issuer -- the generic embedded issuer that mints tokens under
+// the server's own identity (iss = config.GetLocalIssuerUrl()), independent of
+// any data-export namespace. It lives under Pelican's reserved /pelican space
+// so it can never collide with a registrable federation prefix: validatePrefix
+// rejects any prefix whose first component is "pelican" (see
+// registry/registry_validation.go), which makes /pelican/local-issuer
+// structurally impossible to register as a namespace.
+const LocalIssuerNamespace = "/pelican/local-issuer"
+
 func (s ServerPrefix) String() string {
 	return string(s)
 }

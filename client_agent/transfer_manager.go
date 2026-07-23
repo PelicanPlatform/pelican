@@ -66,20 +66,62 @@ type TransferJob struct {
 	CancelFunc  context.CancelFunc
 	ctx         context.Context
 	wg          sync.WaitGroup
+	// lastProgressEmit is the Unix-nanos of the last broadcast progress event,
+	// used to throttle per-job progress notifications.
+	lastProgressEmit atomic.Int64
+	// subscriberCount is the number of active event-stream watchers. It gates the
+	// progress hot path: with no watchers, a per-chunk progress callback does no
+	// work beyond a single atomic load (no shared lock, no publish).
+	subscriberCount atomic.Int32
 }
 
 // TransferManager manages all transfer jobs and their execution
 type TransferManager struct {
-	jobs                   map[string]*TransferJob
-	transfers              map[string]*Transfer
-	store                  StoreInterface
-	mu                     sync.RWMutex
-	maxJobs                int
-	semaphore              chan struct{}
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	eg                     *errgroup.Group
+	jobs      map[string]*TransferJob
+	transfers map[string]*Transfer
+	store     StoreInterface
+	mu        sync.RWMutex
+	maxJobs   int
+	semaphore chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	eg        *errgroup.Group
+	// Job-event pub/sub for push (SSE) status delivery. Guarded by its own
+	// mutex so publishing a status change never contends with job execution.
+	subMu                  sync.Mutex
+	subscribers            map[string]map[int]chan JobEvent
+	nextSubID              int
 	backgroundTasksStarted bool
+	onJobTerminal          func(*TransferJob)
+}
+
+// SetJobCompletionCallback registers a function invoked exactly once per job
+// when it reaches a terminal state (completed, failed, or cancelled). The
+// callback runs on the job's own execution goroutine, after the terminal status
+// is recorded and before the job's WaitGroup is released, and it is not holding
+// the manager lock. The transfer server uses it to eagerly persist the terminal
+// outcome to its database rather than waiting for a client status poll.
+func (tm *TransferManager) SetJobCompletionCallback(cb func(*TransferJob)) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.onJobTerminal = cb
+}
+
+// fireJobTerminal runs the registered completion callback (if any) and then
+// publishes the terminal event to job subscribers. Safe to call unconditionally
+// at job teardown; a no-op unless the job is in a terminal state.
+func (tm *TransferManager) fireJobTerminal(job *TransferJob) {
+	tm.mu.RLock()
+	cb := tm.onJobTerminal
+	ev := jobEvent(job)
+	tm.mu.RUnlock()
+	if !IsTerminalStatus(ev.Status) {
+		return
+	}
+	if cb != nil {
+		cb(job)
+	}
+	tm.publishJobEvent(ev)
 }
 
 // NewTransferManager creates a new transfer manager
@@ -106,14 +148,15 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 	}
 
 	tm := &TransferManager{
-		jobs:      make(map[string]*TransferJob),
-		transfers: make(map[string]*Transfer),
-		store:     store,
-		maxJobs:   maxConcurrentJobs,
-		semaphore: make(chan struct{}, maxConcurrentJobs),
-		ctx:       managerCtx,
-		cancel:    cancel,
-		eg:        eg,
+		jobs:        make(map[string]*TransferJob),
+		transfers:   make(map[string]*Transfer),
+		store:       store,
+		maxJobs:     maxConcurrentJobs,
+		semaphore:   make(chan struct{}, maxConcurrentJobs),
+		ctx:         managerCtx,
+		cancel:      cancel,
+		eg:          eg,
+		subscribers: make(map[string]map[int]chan JobEvent),
 	}
 
 	// Attempt to recover incomplete jobs from database
@@ -271,10 +314,18 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 
 // CreateJob creates a new transfer job
 func (tm *TransferManager) CreateJob(requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
+	return tm.CreateJobWithID(uuid.New().String(), requests, options)
+}
+
+// CreateJobWithID submits a job under a caller-supplied ID instead of a
+// manager-generated one. This lets a caller durably record the job (e.g. in its
+// own database) under that ID BEFORE execution begins, so a completion callback
+// or a crash-recovery scan can rely on the record already existing. Behaves
+// identically to CreateJob otherwise.
+func (tm *TransferManager) CreateJobWithID(jobID string, requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	jobID := uuid.New().String()
 	jobCtx, jobCancel := context.WithCancel(tm.ctx)
 
 	job := &TransferJob{
@@ -349,9 +400,42 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 	return job, nil
 }
 
+// SnapshotJobResponse builds the API response for a job, reading the mutable
+// status fields under the read lock. Callers (e.g. CreateJobHandler) may invoke
+// this immediately after CreateJob, while the asynchronous executeJob goroutine
+// is concurrently updating job/transfer status, so the read must be
+// synchronized with those writes.
+func (tm *TransferManager) SnapshotJobResponse(job *TransferJob) JobResponse {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	transfers := make([]TransferResponse, len(job.Transfers))
+	for i, transfer := range job.Transfers {
+		transfers[i] = TransferResponse{
+			TransferID:  transfer.ID,
+			Operation:   transfer.Operation,
+			Source:      transfer.Source,
+			Destination: transfer.Destination,
+			Status:      transfer.Status,
+		}
+	}
+
+	return JobResponse{
+		JobID:     job.ID,
+		Status:    job.Status,
+		CreatedAt: job.CreatedAt,
+		Transfers: transfers,
+	}
+}
+
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
 	defer job.wg.Done() // Signal job completion
+	// Fire the terminal callback (if any) on every exit path — normal
+	// completion/failure and both cancellation paths all leave the job in a
+	// terminal state. Registered after wg.Done so (LIFO) it runs first, i.e. the
+	// terminal outcome is persisted before waiters observe completion.
+	defer tm.fireJobTerminal(job)
 
 	// Acquire semaphore slot
 	select {
@@ -368,6 +452,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 	job.Status = StatusRunning
 	job.StartedAt = &now
 	tm.mu.Unlock()
+	tm.publishJobEvent(JobEvent{JobID: job.ID, Status: StatusRunning})
 
 	// Persist status update to database
 	if tm.store != nil {
@@ -393,7 +478,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 			tm.updateJobStatus(job.ID, StatusCancelled, nil)
 			return
 		default:
-			if err := tm.executeTransfer(transfer, job.Options); err != nil {
+			if err := tm.executeTransfer(job, transfer, job.Options); err != nil {
 				log.Errorf("Transfer %s failed: %v", transfer.ID, err)
 				allSucceeded = false
 				anyFailed = true
@@ -432,7 +517,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 }
 
 // executeTransfer executes a single transfer
-func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.TransferOption) error {
+func (tm *TransferManager) executeTransfer(job *TransferJob, transfer *Transfer, options []client.TransferOption) error {
 	now := time.Now()
 	tm.mu.Lock()
 	transfer.Status = StatusRunning
@@ -459,6 +544,10 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 		log.Debugf("Transfer %s progress: %d/%d bytes (%.1f%%)",
 			transfer.ID, downloaded, totalSize,
 			float64(downloaded)/float64(totalSize)*100)
+
+		// Broadcast the job's aggregate progress to any SSE subscribers. This is
+		// lock-free and returns immediately when nobody is watching the job.
+		tm.publishJobProgress(job)
 	}
 
 	// Prepend callback to options so it's applied first

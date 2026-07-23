@@ -65,7 +65,7 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 	}
 
 	// Build transfer options
-	options := buildTransferOptions(req.Options)
+	options := buildTransferOptions(req.Options, s.wallet.IsOpen())
 
 	// Create job
 	job, err := s.transferManager.CreateJob(req.Transfers, options)
@@ -78,26 +78,32 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 		return
 	}
 
-	// Build response
-	transfers := make([]TransferResponse, len(job.Transfers))
-	for i, transfer := range job.Transfers {
-		transfers[i] = TransferResponse{
-			TransferID:  transfer.ID,
-			Operation:   transfer.Operation,
-			Source:      transfer.Source,
-			Destination: transfer.Destination,
-			Status:      transfer.Status,
-		}
+	// Synchronous mode: when the client asks for an event stream, deliver the
+	// whole transfer over this one connection — the first event carries the job
+	// ID (so the client can persist it and reconnect to /jobs/:id/events if the
+	// stream drops), then status until terminal.
+	if wantsEventStream(c) {
+		s.transferManager.StreamJobEvents(c, job.ID, "")
+		return
 	}
 
-	resp := JobResponse{
-		JobID:     job.ID,
-		Status:    job.Status,
-		CreatedAt: job.CreatedAt,
-		Transfers: transfers,
-	}
+	// Build response. Read the job's mutable status fields under the transfer
+	// manager's lock, since the job's asynchronous execution goroutine may
+	// already be updating them.
+	resp := s.transferManager.SnapshotJobResponse(job)
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// JobEventsHandler streams a job's status as Server-Sent Events until it reaches
+// a terminal state. GET /api/v1.0/transfer-agent/jobs/:job_id/events.
+func (s *Server) JobEventsHandler(c *gin.Context) {
+	jobID := c.Param("job_id")
+	if _, err := s.transferManager.GetJob(jobID); err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Code: ErrCodeNotFound, Error: "Job not found"})
+		return
+	}
+	s.transferManager.StreamJobEvents(c, jobID, "")
 }
 
 // GetJobStatusHandler handles GET /api/v1.0/transfer-agent/jobs/:job_id
@@ -228,7 +234,7 @@ func (s *Server) StatHandler(c *gin.Context) {
 	}
 
 	// Build transfer options
-	options := buildTransferOptions(req.Options)
+	options := buildTransferOptions(req.Options, s.wallet.IsOpen())
 
 	// Perform stat
 	info, err := client.DoStat(c.Request.Context(), req.URL, options...)
@@ -262,7 +268,7 @@ func (s *Server) ListHandler(c *gin.Context) {
 	}
 
 	// Build transfer options
-	options := buildTransferOptions(req.Options)
+	options := buildTransferOptions(req.Options, s.wallet.IsOpen())
 
 	// Perform list
 	items, err := client.DoList(c.Request.Context(), req.URL, options...)
@@ -303,7 +309,7 @@ func (s *Server) DeleteHandler(c *gin.Context) {
 	}
 
 	// Build transfer options
-	options := buildTransferOptions(req.Options)
+	options := buildTransferOptions(req.Options, s.wallet.IsOpen())
 
 	// Perform delete
 	err := client.DoDelete(c.Request.Context(), req.URL, req.Recursive, options...)
@@ -502,14 +508,26 @@ func (s *Server) ShutdownHandler(c *gin.Context) {
 	}()
 }
 
-// buildTransferOptions converts TransferOptions to client.TransferOption slice
-func buildTransferOptions(opts TransferOptions) []client.TransferOption {
+// buildTransferOptions converts TransferOptions to client.TransferOption slice.
+// walletOpen indicates whether the agent's credential wallet is unlocked; when
+// it is, OAuth token acquisition from the wallet is enabled (non-interactively).
+func buildTransferOptions(opts TransferOptions, walletOpen bool) []client.TransferOption {
 	var options []client.TransferOption
 
-	// Add token if provided
+	// The agent is a daemon with no controlling terminal, so token acquisition
+	// must never fall back to the interactive device-code flow.
+	options = append(options, client.WithNonInteractive(true))
+
+	// Add an explicit token file if one was provided for this job.
 	if opts.Token != "" {
 		options = append(options, client.WithTokenLocation(opts.Token))
 	}
+
+	// Enable OAuth token acquisition from the user's wallet only when the
+	// wallet is open (its password is cached). When the wallet is locked we
+	// leave acquisition off so the daemon never blocks trying to decrypt the
+	// credential file; explicit tokens and environment/discovery still work.
+	options = append(options, client.WithAcquireToken(walletOpen))
 
 	// Add cache URLs if provided
 	if len(opts.Caches) > 0 {

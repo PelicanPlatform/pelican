@@ -43,17 +43,13 @@ func TestChecksumStaleDetection(t *testing.T) {
 	content1 := []byte("Original content")
 	content2 := []byte("Modified content is longer")
 
-	// Check xattr support
-	err := xattr.Set(testFile, "user.test", []byte("test"))
-	if err != nil {
+	// Write the initial file, then probe xattr support on the real file (probing
+	// a not-yet-created path fails with ENOENT regardless of xattr support).
+	require.NoError(t, os.WriteFile(testFile, content1, 0644))
+	if err := xattr.Set(testFile, "user.test", []byte("test")); err != nil {
 		t.Skipf("Xattrs not supported: %v", err)
 	}
 	_ = xattr.Remove(testFile, "user.test")
-
-	// Write initial file and compute checksum
-	require.NoError(t, os.WriteFile(testFile, content1, 0644))
-	time.Sleep(10 * time.Millisecond) // Ensure mtime differences
-	modTime1, _ := os.Stat(testFile)
 
 	// Open root for secure access
 	root, err := os.OpenRoot(tmpDir)
@@ -63,19 +59,26 @@ func TestChecksumStaleDetection(t *testing.T) {
 	xc := &XattrChecksummer{}
 	hash1, err := xc.GetChecksum(root, "test.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
+	modTime1, err := os.Stat(testFile)
+	require.NoError(t, err)
 
 	// Verify xattr was written
 	xattrData, err := xattr.Get(testFile, "user.XrdCks.crc32c")
 	require.NoError(t, err)
 	require.NotEmpty(t, xattrData)
 
-	// Modify file and wait for mtime change
-	time.Sleep(10 * time.Millisecond)
+	// Modify the file, then advance its mtime past the one-second xattr resolution
+	// deterministically, so staleness detection is guaranteed to recompute. (A
+	// genuine sub-second overwrite defeats mtime detection and is instead handled
+	// by invalidation on write; see TestInvalidateChecksumsRecomputesAfterOverwrite.)
 	require.NoError(t, os.WriteFile(testFile, content2, 0644))
-	modTime2, _ := os.Stat(testFile)
+	newMTime := modTime1.ModTime().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(testFile, newMTime, newMTime))
+	modTime2, err := os.Stat(testFile)
+	require.NoError(t, err)
 
-	// Verify mtime changed
-	assert.NotEqual(t, modTime1.ModTime().Unix(), modTime2.ModTime().Unix(), "mtime should have changed")
+	// Verify mtime changed at second resolution
+	require.NotEqual(t, modTime1.ModTime().Unix(), modTime2.ModTime().Unix(), "mtime should have advanced by >= 1s")
 
 	// Get checksum again - should detect stale and recompute
 	hash2, err := xc.GetChecksum(root, "test.txt", ChecksumTypeCRC32C)
@@ -83,6 +86,85 @@ func TestChecksumStaleDetection(t *testing.T) {
 
 	// Hashes should differ because content changed
 	assert.NotEqual(t, hash1, hash2, "Checksum should change when file is modified")
+}
+
+// TestInvalidateChecksumsRecomputesAfterOverwrite reproduces the same-wall-clock-
+// second overwrite race and verifies InvalidateChecksums fixes it. Cached-checksum
+// freshness is validated by mtime at one-second resolution, so a file overwritten
+// within the same second as the prior checksum computation keeps its stale cached
+// checksum — the origin would then report a digest that does not match the bytes
+// it serves. InvalidateChecksums (called on the write path) drops the cached value
+// so a subsequent read recomputes from the new content.
+func TestInvalidateChecksumsRecomputesAfterOverwrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "writable.bin")
+
+	content1 := []byte("original content")
+	content2 := []byte("DIFFERENT content of a different length entirely")
+
+	require.NoError(t, os.WriteFile(testFile, content1, 0644))
+
+	// Probe xattr support on the real (now-existing) file.
+	if err := xattr.Set(testFile, "user.test", []byte("1")); err != nil {
+		t.Skipf("Xattrs not supported: %v", err)
+	}
+	_ = xattr.Remove(testFile, "user.test")
+
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	xc := &XattrChecksummer{}
+
+	// Cache content1's checksum, then capture the mtime it was stored against.
+	hash1, err := xc.GetChecksum(root, "writable.bin", ChecksumTypeCRC32C)
+	require.NoError(t, err)
+	fi1, err := os.Stat(testFile)
+	require.NoError(t, err)
+
+	// Overwrite with new content, then force the mtime back to the original so
+	// the second-resolution staleness check cannot tell the file changed — exactly
+	// what an overwrite within the same wall-clock second looks like.
+	require.NoError(t, os.WriteFile(testFile, content2, 0644))
+	require.NoError(t, os.Chtimes(testFile, fi1.ModTime(), fi1.ModTime()))
+
+	// Precondition (the bug): without invalidation the cached checksum is stale.
+	stale, err := xc.GetChecksum(root, "writable.bin", ChecksumTypeCRC32C)
+	require.NoError(t, err)
+	require.Equal(t, hash1, stale, "same-second overwrite must expose a stale cached checksum for the fix to matter")
+
+	// The fix: invalidate on write, then a read recomputes from the new bytes.
+	require.NoError(t, InvalidateChecksums(root, "writable.bin"))
+	fresh, err := xc.GetChecksum(root, "writable.bin", ChecksumTypeCRC32C)
+	require.NoError(t, err)
+	assert.NotEqual(t, hash1, fresh, "after invalidation the checksum must reflect the new content")
+
+	// It must equal a from-scratch checksum of content2 (computed via a sibling
+	// file so we do not re-implement the formatting here).
+	sibling := filepath.Join(tmpDir, "expected.bin")
+	require.NoError(t, os.WriteFile(sibling, content2, 0644))
+	expected, err := xc.GetChecksum(root, "expected.bin", ChecksumTypeCRC32C)
+	require.NoError(t, err)
+	assert.Equal(t, expected, fresh, "recomputed checksum must match content2")
+}
+
+// TestInvalidateChecksumsMissingIsNoError verifies invalidating a file that has no
+// cached checksum xattrs succeeds (the common case: first write of a new file).
+func TestInvalidateChecksumsMissingIsNoError(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "fresh.bin")
+	require.NoError(t, os.WriteFile(testFile, []byte("no checksum cached yet"), 0644))
+
+	if err := xattr.Set(testFile, "user.test", []byte("1")); err != nil {
+		t.Skipf("Xattrs not supported: %v", err)
+	}
+	_ = xattr.Remove(testFile, "user.test")
+
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	assert.NoError(t, InvalidateChecksums(root, "fresh.bin"))
 }
 
 // TestDefaultChecksumTypes verifies that multiple default checksums are computed together

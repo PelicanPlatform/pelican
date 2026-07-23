@@ -52,6 +52,7 @@ const (
 	Collection_Modify TokenScope = "collection.modify"
 	Collection_Delete TokenScope = "collection.delete"
 	Share_Access TokenScope = "share.access"
+	Pelican_Transfer TokenScope = "pelican.transfer"
 
 	// WLCG Scopes
 	Wlcg_Storage_Read TokenScope = "storage.read"
@@ -99,6 +100,7 @@ var UserGrantableScopes = []TokenScope{
 	Server_UserAdmin,
 	Server_CollectionAdmin,
 	Monitoring_Query,
+	Pelican_Transfer,
 }
 
 // IsUserGrantable reports whether the supplied scope can be granted to
@@ -144,6 +146,7 @@ var scopeDescriptions = map[TokenScope]string{
 	Collection_Modify: `For modifying the contents of a collection`,
 	Collection_Delete: `For deleting a collection`,
 	Share_Access: `Path-bearing scope minted onto access tokens issued for a "share" (a child collection that delegates a subset of its parent's access). The path component is the share's collection ID — e.g. share.access:/abcdef12 — and the data plane reads it to impersonate the share's owner, not the token bearer, when serving objects under the share's prefix. See docs/collections-design.md for the full design. Not user-grantable: the issuer mints it directly on access tokens, intersecting against the share owner's current parent-collection ACLs at mint and refresh time.`,
+	Pelican_Transfer: `Permits the bearer to submit, view, and cancel transfer jobs through the transfer API. On an origin-based transfer service, only get/put operations are allowed. On a standalone transfer server, copy operations between arbitrary origins are permitted. Not granted by default: an administrator must grant it to a user or group (or configure Transfer.EnabledGroups) before the local issuer will mint it.`,
 }
 
 // Describe returns the human-readable description of the supplied

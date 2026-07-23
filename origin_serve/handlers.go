@@ -847,6 +847,13 @@ func handlePutWithETag(c *gin.Context, handler *webdav.Handler, req *http.Reques
 			if normalizedPath == "" {
 				normalizedPath = "."
 			}
+			// Drop any cached checksum xattrs: this write may have overwritten
+			// the file within the same wall-clock second as a prior write, in
+			// which case the (mtime-second-validated) cached checksum would look
+			// fresh but describe the old content. See InvalidateChecksums.
+			if invErr := InvalidateChecksums(root, normalizedPath); invErr != nil {
+				log.Debugf("Failed to invalidate cached checksums for %s after PUT: %v", normalizedPath, invErr)
+			}
 			if info, statErr := root.Stat(normalizedPath); statErr == nil {
 				etag := computeETag(info)
 				dw.Header().Set("ETag", etag)

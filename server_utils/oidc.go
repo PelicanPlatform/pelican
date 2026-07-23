@@ -113,34 +113,33 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 			Issuer:  issuerStr,
 			JwksUri: jwskUrl,
 		}
-		// If we have the built-in issuer enabled, fill in the URLs.
-		// For the embedded issuer, endpoints are scoped per-namespace.
-		// The server-level discovery uses the first auth-requiring export's
-		// namespace for backward compatibility; clients should use the
-		// per-namespace discovery endpoints at /api/v1.0/issuer/ns/<prefix>/.well-known/openid-configuration.
+		// If the built-in issuer is enabled, advertise its OAuth endpoints.
 		if param.Origin_EnableIssuer.GetBool() {
 			issuerMode := param.Origin_IssuerMode.GetString()
 			if issuerMode == "embedded" || issuerMode == "" {
-				originExports, exErr := GetOriginExports()
-				if exErr == nil {
-					for _, oe := range originExports {
-						if (oe.Capabilities.Reads && !oe.Capabilities.PublicReads) || oe.Capabilities.Writes {
-							serviceUri := issuerStr + "/api/v1.0/issuer/ns" + oe.FederationPrefix
-							cfg.Issuer = serviceUri
-							cfg.TokenEndpoint = serviceUri + "/token"
-							cfg.UserInfoEndpoint = serviceUri + "/userinfo"
-							cfg.RevocationEndpoint = serviceUri + "/revoke"
-							cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
-							cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
-								"storage.modify:/", "storage.create:/"}
-							cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
-							cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
-							cfg.DeviceEndpoint = serviceUri + "/device_authorization"
-							cfg.AuthorizationEndpoint = serviceUri + "/authorize"
-							break
-						}
-					}
-				}
+				// The server-level discovery document describes the server's
+				// local issuer (LocalIssuerNamespace), which is always registered
+				// when the embedded issuer is enabled and whose tokens carry
+				// iss = GetLocalIssuerUrl() == issuerStr -- consistent with the
+				// "issuer" field above. Per-namespace *data* issuers are
+				// advertised to the director and discovered at their own
+				// /api/v1.0/issuer/ns/<prefix> endpoints, so the server-level
+				// document no longer points at an arbitrary data export.
+				//
+				// Issuer routes are always rooted at the bare external web URL,
+				// not GetServerIssuerURL() (a sub-path when a director is
+				// co-located), so we build the service URI from ExternalWebUrl.
+				serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/ns" + server_structs.LocalIssuerNamespace
+				cfg.TokenEndpoint = serviceUri + "/token"
+				cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+				cfg.RevocationEndpoint = serviceUri + "/revoke"
+				cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+				cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+					"storage.modify:/", "storage.create:/"}
+				cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+				cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+				cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+				cfg.AuthorizationEndpoint = serviceUri + "/authorize"
 			} else {
 				// OA4MP mode — legacy single-issuer endpoints
 				serviceUri := issuerStr + "/api/v1.0/issuer"

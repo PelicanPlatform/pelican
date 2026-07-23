@@ -42,9 +42,17 @@ type OauthIssuer struct {
 // Get OIDC issuer metadata from an OIDC issuer URL.
 // The URL should not contain the path to /.well-known/openid-configuration
 func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
+	return GetIssuerMetadataWithClient(issuer_url, &http.Client{Transport: GetTransport()})
+}
+
+// GetIssuerMetadataWithClient is like GetIssuerMetadata but uses the provided
+// HTTP client.  Server-side callers that fetch a metadata document from a
+// user-supplied issuer URL should pass a client backed by the SSRF-resistant
+// transport (config.GetSSRFHttpTransport) so the fetch cannot be used to reach
+// non-publicly-routable addresses.
+func GetIssuerMetadataWithClient(issuer_url string, client *http.Client) (*OauthIssuer, error) {
 	wellKnownUrl := strings.TrimSuffix(issuer_url, "/") + "/.well-known/openid-configuration"
 
-	client := http.Client{Transport: GetTransport()}
 	req, err := http.NewRequest(http.MethodGet, wellKnownUrl, nil)
 	if err != nil {
 		return nil, err
