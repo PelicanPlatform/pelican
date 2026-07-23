@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -126,6 +127,49 @@ func TestHandleCopyTPC(t *testing.T) {
 		data, err := io.ReadAll(f)
 		require.NoError(t, err)
 		assert.Equal(t, fileContent, data)
+	})
+
+	t.Run("FailedTPCDoesNotCommitOrFireHook", func(t *testing.T) {
+		// A source that advertises more bytes than it delivers makes the copy
+		// fail (short read / size mismatch). The destination FS carries a
+		// metadata close hook; a failed copy must neither commit the object nor
+		// fire the hook (which would publish a webhook / record a commit).
+		var hookFired int32
+		tmpDir := t.TempDir()
+		fsWithHook := newCloseNotifyFs(webdav.Dir(tmpDir), func(context.Context, string, os.FileInfo) error {
+			atomic.AddInt32(&hookFired, 1)
+			return nil
+		})
+		backend := &mockBackend{fs: fsWithHook}
+		router := setupTPCRouter(backend)
+
+		shortServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileContent)+100))
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(fileContent) // fewer bytes than advertised
+			case http.MethodHead:
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileContent)+100))
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
+		}))
+		defer shortServer.Close()
+
+		req := httptest.NewRequest("COPY", "/failed.txt", nil)
+		req.Header.Set("Source", toLocalhostURL(shortServer.URL)+"/failed.txt")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Contains(t, w.Body.String(), "failure:")
+		assert.Zero(t, atomic.LoadInt32(&hookFired), "close hook must NOT fire on a failed TPC")
+		// The failed object must not be left behind at its final path.
+		if f, err := backend.fs.OpenFile(context.Background(), "/failed.txt", os.O_RDONLY, 0); err == nil {
+			_ = f.Close()
+			t.Fatal("failed TPC left an object behind at the destination path")
+		}
 	})
 
 	t.Run("MissingSourceHeader", func(t *testing.T) {

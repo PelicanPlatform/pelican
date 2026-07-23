@@ -2002,6 +2002,272 @@ default: false
 components: ["origin"]
 ---
 ############################
+#  Origin POSC settings    #
+############################
+name: Origin.Posc.Enabled
+description: |+
+  When true, the V2 (POSIXv2) origin uses Persist On Successful Close (POSC) semantics: an
+  uploaded object is staged at a hidden in-progress filename until its handle is successfully
+  closed, at which point it is renamed atomically into place. Failed/abandoned uploads are
+  collected by a background expiry thread. POSC is independent of the metadata-publish feature.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Posc.Prefix
+description: |+
+  Path (relative to the export's StoragePrefix) under which POSC stages in-progress uploads.
+  Must be on the same filesystem as the export so the final rename is atomic. Default
+  ".pelican-posc" creates a hidden directory inside the export root that is invisible to clients.
+type: string
+default: ".pelican-posc"
+components: ["origin"]
+---
+name: Origin.Posc.FileTimeout
+description: |+
+  How long an in-progress POSC file may go without being touched before the background expiry
+  thread removes it. Active uploads keep their temp file alive via Origin.Posc.KeepaliveInterval.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Posc.KeepaliveInterval
+description: |+
+  How often the keepaliver thread updates the mtime of an active in-progress POSC file. Should be
+  smaller than Origin.Posc.FileTimeout.
+type: duration
+default: 19m
+components: ["origin"]
+---
+############################
+# Origin Metadata settings #
+############################
+name: Origin.Metadata.Enabled
+description: |+
+  Master switch for the V2 origin's object-commit metadata publisher. When true, the origin
+  posts a JSON event to Origin.Metadata.Endpoint after each successful upload close. The publish
+  is authenticated with a JWT signed by the origin's issuer key carrying the pelican.metadata
+  scope. Per-export overrides may further restrict or redirect the publishing.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.Endpoint
+description: |+
+  URL the origin POSTs object-commit events to when Origin.Metadata.Enabled is true. May be
+  overridden per-export via Origin.Exports[].Metadata.Endpoint.
+type: url
+default: ""
+components: ["origin"]
+---
+name: Origin.Metadata.Mode
+description: |+
+  Either "transactional" or "eventual". In transactional mode, the close blocks on the first
+  publish attempt; if it fails, the upload returns 5xx and the object is best-effort removed.
+  In eventual mode (the default), the close returns 2xx as soon as the publish row is durably
+  enqueued and a background worker drains the queue with retries and jitter. Per-export
+  overridable via Origin.Exports[].Metadata.Mode.
+type: string
+default: "eventual"
+components: ["origin"]
+---
+name: Origin.Metadata.RequestTimeout
+description: |+
+  Per-attempt HTTP timeout when posting to the metadata endpoint.
+type: duration
+default: 10s
+components: ["origin"]
+---
+name: Origin.Metadata.TokenLifetime
+description: |+
+  Lifetime of the JWT minted by the origin to authenticate to the metadata endpoint.
+type: duration
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.MinBackoff
+description: |+
+  Initial retry backoff in eventually-consistent mode. The actual sleep is uniformly jittered
+  in the range [0, computed].
+type: duration
+default: 30s
+components: ["origin"]
+---
+name: Origin.Metadata.MaxBackoff
+description: |+
+  Maximum retry backoff in eventually-consistent mode.
+type: duration
+default: 30m
+components: ["origin"]
+---
+name: Origin.Metadata.MaxInflight
+description: |+
+  Number of concurrent worker goroutines draining the metadata publish queue. Origin-wide.
+type: int
+default: 4
+components: ["origin"]
+---
+name: Origin.Metadata.RatePerSecond
+description: |+
+  Token-bucket rate limit (events per second) shared across all worker goroutines.
+type: int
+default: 10
+components: ["origin"]
+---
+name: Origin.Metadata.WarnAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "warning".
+type: duration
+default: 4h
+components: ["origin"]
+---
+name: Origin.Metadata.ErrorAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "error". An origin in error state continues to
+  accept uploads.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.Metadata.AllowMultipart
+description: |+
+  When true, the V2 origin accepts uploads whose request body is multipart/form-data with
+  a reserved "metadata" part carrying an opaque per-object metadata blob (e.g. an XML
+  manifest). The blob is stored alongside the queue row and forwarded to the metadata
+  endpoint as a multipart/related body. When false, multipart-form PUTs are rejected with
+  415 Unsupported Media Type. Plain PUTs are unaffected either way.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.Metadata.MaxMetadataBytes
+description: |+
+  Hard cap on the size of the metadata part of a multipart upload. Larger metadata parts
+  cause the upload to be rejected with 413 Payload Too Large before any object bytes are
+  staged. The whole blob is held in memory during the request and stored inline in the
+  publish queue table, so this also bounds per-row size in SQLite.
+type: int
+default: 4194304
+components: ["origin"]
+---
+name: Origin.Metadata.MetadataPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the metadata part of a multipart
+  upload. Configurable so a downstream consumer with a different convention can be
+  accommodated without forking the origin.
+type: string
+default: "metadata"
+components: ["origin"]
+---
+name: Origin.Metadata.ObjectPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the object body part of a
+  multipart upload. See Origin.Metadata.MetadataPartName for the metadata-side
+  configurability rationale.
+type: string
+default: "object"
+components: ["origin"]
+---
+############################
+#  Origin object-metadata  #
+############################
+name: Origin.Metadata.TrackAccess
+description: |+
+  Master per-origin switch for the local object-metadata tracking subsystem. When enabled,
+  the origin records per-object lifecycle data (commits, deletes, renames, observed external
+  changes, optional access timestamps) in its local SQLite database. This is independent of
+  Origin.Metadata.Enabled (the webhook publisher): you can enable tracking without webhooks
+  or webhooks without tracking. May be overridden per-export via
+  Origin.Exports[].Metadata.TrackAccess.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.TrackExtra
+description: |+
+  When true (and TrackAccess is enabled for the same namespace), the contents of the inbound
+  X-Pelican-Object-Metadata header are snapshotted into the object-metadata history table
+  for each event. When false, only the auto-collected fields (path, size, etag, mtime,
+  actor) are recorded. Useful for privacy-sensitive deployments where uploader-supplied
+  fields should not be persisted. Per-export overridable via
+  Origin.Exports[].Metadata.TrackExtra.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.EtagPolicy
+description: |+
+  Strategy the origin uses to populate the ETag field when the underlying storage backend
+  does not supply one. Either "uuid" (mint a UUIDv4 at commit time, opaque, no I/O cost) or
+  "sha256" (stream a SHA-256 of the content during the POSC write; the resulting hex digest
+  becomes the ETag). The backend ETag is always preferred when present; this policy only
+  applies to backends that decline to supply one.
+type: string
+default: "uuid"
+components: ["origin"]
+---
+name: Origin.Metadata.AccessFlushInterval
+description: |+
+  How often the in-memory atime debouncer flushes accumulated last_accessed timestamps to
+  the database. Only meaningful when TrackAccess is enabled. A worst-case crash loses up to
+  this much access-time history; commit / delete / rename records are flushed durably and
+  are not affected.
+type: duration
+hidden: true
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.BatchFlushInterval
+description: |+
+  Maximum age of best-effort writes in the SQLite write-behind batcher before a flush is
+  forced. Smaller values reduce best-effort loss on crash at the cost of slightly more
+  frequent transactions. Durable writes (RecordCommit, RecordDelete, RecordRename, publish-
+  queue enqueue) always force an immediate flush regardless of this value.
+type: duration
+default: 50ms
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.BatchBufferSize
+description: |+
+  Capacity of the in-memory batcher channel. When full, best-effort writes block their
+  caller until a flush makes room (Stat-path back-pressure). The blocking behavior is
+  intentional: dropping observations silently was rejected at design time. Increase this
+  if you see batcher back-pressure in metrics.
+type: int
+default: 256
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.History.RetentionDays
+description: |+
+  How long (in days) object_metadata_history rows are kept before the background pruner
+  deletes them. 0 disables pruning (keep history forever). May be overridden per-export
+  via Origin.Exports[].Metadata.HistoryRetentionDays.
+type: int
+default: 90
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneInterval
+description: |+
+  How often the object-metadata-history pruner runs. The pruner deletes rows older than
+  the configured retention in bounded batches per pass.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneBatchSize
+description: |+
+  Maximum number of object_metadata_history rows the pruner deletes per pass per
+  namespace. Bounded to keep WAL pressure proportional.
+type: int
+default: 1000
+hidden: true
+components: ["origin"]
+---
+############################
 #   Local cache configs    #
 ############################
 name: LocalCache.RunLocation

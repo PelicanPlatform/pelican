@@ -362,6 +362,30 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.HttpAuthTokenFile": false,
 	"Origin.HttpServiceUrl": false,
 	"Origin.IssuerMode": false,
+	"Origin.Metadata.AccessFlushInterval": false,
+	"Origin.Metadata.AllowMultipart": false,
+	"Origin.Metadata.BatchBufferSize": false,
+	"Origin.Metadata.BatchFlushInterval": false,
+	"Origin.Metadata.Enabled": false,
+	"Origin.Metadata.Endpoint": false,
+	"Origin.Metadata.ErrorAfter": false,
+	"Origin.Metadata.EtagPolicy": false,
+	"Origin.Metadata.History.PruneBatchSize": false,
+	"Origin.Metadata.History.PruneInterval": false,
+	"Origin.Metadata.History.RetentionDays": false,
+	"Origin.Metadata.MaxBackoff": false,
+	"Origin.Metadata.MaxInflight": false,
+	"Origin.Metadata.MaxMetadataBytes": false,
+	"Origin.Metadata.MetadataPartName": false,
+	"Origin.Metadata.MinBackoff": false,
+	"Origin.Metadata.Mode": false,
+	"Origin.Metadata.ObjectPartName": false,
+	"Origin.Metadata.RatePerSecond": false,
+	"Origin.Metadata.RequestTimeout": false,
+	"Origin.Metadata.TokenLifetime": false,
+	"Origin.Metadata.TrackAccess": false,
+	"Origin.Metadata.TrackExtra": false,
+	"Origin.Metadata.WarnAfter": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
 	"Origin.MultiuserMinID": false,
@@ -369,6 +393,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.MultiuserVarlinkSocketPath": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
+	"Origin.Posc.Enabled": false,
+	"Origin.Posc.FileTimeout": false,
+	"Origin.Posc.KeepaliveInterval": false,
+	"Origin.Posc.Prefix": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
 	"Origin.S3Bucket": false,
@@ -679,9 +707,15 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.HttpAuthTokenFile": func(c *Config) string { return c.Origin.HttpAuthTokenFile },
 	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
 	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
+	"Origin.Metadata.Endpoint": func(c *Config) string { return c.Origin.Metadata.Endpoint },
+	"Origin.Metadata.EtagPolicy": func(c *Config) string { return c.Origin.Metadata.EtagPolicy },
+	"Origin.Metadata.MetadataPartName": func(c *Config) string { return c.Origin.Metadata.MetadataPartName },
+	"Origin.Metadata.Mode": func(c *Config) string { return c.Origin.Metadata.Mode },
+	"Origin.Metadata.ObjectPartName": func(c *Config) string { return c.Origin.Metadata.ObjectPartName },
 	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
 	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
+	"Origin.Posc.Prefix": func(c *Config) string { return c.Origin.Posc.Prefix },
 	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
 	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
 	"Origin.S3Bucket": func(c *Config) string { return c.Origin.S3Bucket },
@@ -893,6 +927,12 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Concurrency": func(c *Config) int { return c.Origin.Concurrency },
 	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
 	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
+	"Origin.Metadata.BatchBufferSize": func(c *Config) int { return c.Origin.Metadata.BatchBufferSize },
+	"Origin.Metadata.History.PruneBatchSize": func(c *Config) int { return c.Origin.Metadata.History.PruneBatchSize },
+	"Origin.Metadata.History.RetentionDays": func(c *Config) int { return c.Origin.Metadata.History.RetentionDays },
+	"Origin.Metadata.MaxInflight": func(c *Config) int { return c.Origin.Metadata.MaxInflight },
+	"Origin.Metadata.MaxMetadataBytes": func(c *Config) int { return c.Origin.Metadata.MaxMetadataBytes },
+	"Origin.Metadata.RatePerSecond": func(c *Config) int { return c.Origin.Metadata.RatePerSecond },
 	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
 	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
@@ -1041,7 +1081,12 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
 	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
 	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
+	"Origin.Metadata.AllowMultipart": func(c *Config) bool { return c.Origin.Metadata.AllowMultipart },
+	"Origin.Metadata.Enabled": func(c *Config) bool { return c.Origin.Metadata.Enabled },
+	"Origin.Metadata.TrackAccess": func(c *Config) bool { return c.Origin.Metadata.TrackAccess },
+	"Origin.Metadata.TrackExtra": func(c *Config) bool { return c.Origin.Metadata.TrackExtra },
 	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
+	"Origin.Posc.Enabled": func(c *Config) bool { return c.Origin.Posc.Enabled },
 	"Origin.SSH.AutoAddHostKey": func(c *Config) bool { return c.Origin.SSH.AutoAddHostKey },
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
@@ -1143,6 +1188,17 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Monitoring.TokenRefreshInterval": func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
 	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
 	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
+	"Origin.Metadata.AccessFlushInterval": func(c *Config) time.Duration { return c.Origin.Metadata.AccessFlushInterval },
+	"Origin.Metadata.BatchFlushInterval": func(c *Config) time.Duration { return c.Origin.Metadata.BatchFlushInterval },
+	"Origin.Metadata.ErrorAfter": func(c *Config) time.Duration { return c.Origin.Metadata.ErrorAfter },
+	"Origin.Metadata.History.PruneInterval": func(c *Config) time.Duration { return c.Origin.Metadata.History.PruneInterval },
+	"Origin.Metadata.MaxBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MaxBackoff },
+	"Origin.Metadata.MinBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MinBackoff },
+	"Origin.Metadata.RequestTimeout": func(c *Config) time.Duration { return c.Origin.Metadata.RequestTimeout },
+	"Origin.Metadata.TokenLifetime": func(c *Config) time.Duration { return c.Origin.Metadata.TokenLifetime },
+	"Origin.Metadata.WarnAfter": func(c *Config) time.Duration { return c.Origin.Metadata.WarnAfter },
+	"Origin.Posc.FileTimeout": func(c *Config) time.Duration { return c.Origin.Posc.FileTimeout },
+	"Origin.Posc.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.Posc.KeepaliveInterval },
 	"Origin.SSH.ChallengeTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
 	"Origin.SSH.ConnectTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
 	"Origin.SSH.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
@@ -1527,6 +1583,30 @@ var allParameterNames = []string{
 	"Origin.HttpAuthTokenFile",
 	"Origin.HttpServiceUrl",
 	"Origin.IssuerMode",
+	"Origin.Metadata.AccessFlushInterval",
+	"Origin.Metadata.AllowMultipart",
+	"Origin.Metadata.BatchBufferSize",
+	"Origin.Metadata.BatchFlushInterval",
+	"Origin.Metadata.Enabled",
+	"Origin.Metadata.Endpoint",
+	"Origin.Metadata.ErrorAfter",
+	"Origin.Metadata.EtagPolicy",
+	"Origin.Metadata.History.PruneBatchSize",
+	"Origin.Metadata.History.PruneInterval",
+	"Origin.Metadata.History.RetentionDays",
+	"Origin.Metadata.MaxBackoff",
+	"Origin.Metadata.MaxInflight",
+	"Origin.Metadata.MaxMetadataBytes",
+	"Origin.Metadata.MetadataPartName",
+	"Origin.Metadata.MinBackoff",
+	"Origin.Metadata.Mode",
+	"Origin.Metadata.ObjectPartName",
+	"Origin.Metadata.RatePerSecond",
+	"Origin.Metadata.RequestTimeout",
+	"Origin.Metadata.TokenLifetime",
+	"Origin.Metadata.TrackAccess",
+	"Origin.Metadata.TrackExtra",
+	"Origin.Metadata.WarnAfter",
 	"Origin.Mode",
 	"Origin.Multiuser",
 	"Origin.MultiuserMinID",
@@ -1534,6 +1614,10 @@ var allParameterNames = []string{
 	"Origin.MultiuserVarlinkSocketPath",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
+	"Origin.Posc.Enabled",
+	"Origin.Posc.FileTimeout",
+	"Origin.Posc.KeepaliveInterval",
+	"Origin.Posc.Prefix",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
 	"Origin.S3Bucket",
@@ -1817,9 +1901,15 @@ var (
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
+	Origin_Metadata_Endpoint = StringParam{"Origin.Metadata.Endpoint"}
+	Origin_Metadata_EtagPolicy = StringParam{"Origin.Metadata.EtagPolicy"}
+	Origin_Metadata_MetadataPartName = StringParam{"Origin.Metadata.MetadataPartName"}
+	Origin_Metadata_Mode = StringParam{"Origin.Metadata.Mode"}
+	Origin_Metadata_ObjectPartName = StringParam{"Origin.Metadata.ObjectPartName"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
+	Origin_Posc_Prefix = StringParam{"Origin.Posc.Prefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
 	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
@@ -1975,6 +2065,12 @@ var (
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
+	Origin_Metadata_BatchBufferSize = IntParam{"Origin.Metadata.BatchBufferSize"}
+	Origin_Metadata_History_PruneBatchSize = IntParam{"Origin.Metadata.History.PruneBatchSize"}
+	Origin_Metadata_History_RetentionDays = IntParam{"Origin.Metadata.History.RetentionDays"}
+	Origin_Metadata_MaxInflight = IntParam{"Origin.Metadata.MaxInflight"}
+	Origin_Metadata_MaxMetadataBytes = IntParam{"Origin.Metadata.MaxMetadataBytes"}
+	Origin_Metadata_RatePerSecond = IntParam{"Origin.Metadata.RatePerSecond"}
 	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
 	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
 	Origin_Port = IntParam{"Origin.Port"}
@@ -2058,7 +2154,12 @@ var (
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
+	Origin_Metadata_AllowMultipart = BoolParam{"Origin.Metadata.AllowMultipart"}
+	Origin_Metadata_Enabled = BoolParam{"Origin.Metadata.Enabled"}
+	Origin_Metadata_TrackAccess = BoolParam{"Origin.Metadata.TrackAccess"}
+	Origin_Metadata_TrackExtra = BoolParam{"Origin.Metadata.TrackExtra"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
+	Origin_Posc_Enabled = BoolParam{"Origin.Posc.Enabled"}
 	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
@@ -2132,6 +2233,17 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_Metadata_AccessFlushInterval = DurationParam{"Origin.Metadata.AccessFlushInterval"}
+	Origin_Metadata_BatchFlushInterval = DurationParam{"Origin.Metadata.BatchFlushInterval"}
+	Origin_Metadata_ErrorAfter = DurationParam{"Origin.Metadata.ErrorAfter"}
+	Origin_Metadata_History_PruneInterval = DurationParam{"Origin.Metadata.History.PruneInterval"}
+	Origin_Metadata_MaxBackoff = DurationParam{"Origin.Metadata.MaxBackoff"}
+	Origin_Metadata_MinBackoff = DurationParam{"Origin.Metadata.MinBackoff"}
+	Origin_Metadata_RequestTimeout = DurationParam{"Origin.Metadata.RequestTimeout"}
+	Origin_Metadata_TokenLifetime = DurationParam{"Origin.Metadata.TokenLifetime"}
+	Origin_Metadata_WarnAfter = DurationParam{"Origin.Metadata.WarnAfter"}
+	Origin_Posc_FileTimeout = DurationParam{"Origin.Posc.FileTimeout"}
+	Origin_Posc_KeepaliveInterval = DurationParam{"Origin.Posc.KeepaliveInterval"}
 	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
@@ -2298,9 +2410,15 @@ func init() {
 		"Origin.HttpAuthTokenFile": Origin_HttpAuthTokenFile,
 		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
 		"Origin.IssuerMode": Origin_IssuerMode,
+		"Origin.Metadata.Endpoint": Origin_Metadata_Endpoint,
+		"Origin.Metadata.EtagPolicy": Origin_Metadata_EtagPolicy,
+		"Origin.Metadata.MetadataPartName": Origin_Metadata_MetadataPartName,
+		"Origin.Metadata.Mode": Origin_Metadata_Mode,
+		"Origin.Metadata.ObjectPartName": Origin_Metadata_ObjectPartName,
 		"Origin.Mode": Origin_Mode,
 		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
+		"Origin.Posc.Prefix": Origin_Posc_Prefix,
 		"Origin.RunLocation": Origin_RunLocation,
 		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
 		"Origin.S3Bucket": Origin_S3Bucket,
@@ -2450,6 +2568,12 @@ func init() {
 		"Origin.Concurrency": Origin_Concurrency,
 		"Origin.ConcurrencyDegradedThreshold": Origin_ConcurrencyDegradedThreshold,
 		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
+		"Origin.Metadata.BatchBufferSize": Origin_Metadata_BatchBufferSize,
+		"Origin.Metadata.History.PruneBatchSize": Origin_Metadata_History_PruneBatchSize,
+		"Origin.Metadata.History.RetentionDays": Origin_Metadata_History_RetentionDays,
+		"Origin.Metadata.MaxInflight": Origin_Metadata_MaxInflight,
+		"Origin.Metadata.MaxMetadataBytes": Origin_Metadata_MaxMetadataBytes,
+		"Origin.Metadata.RatePerSecond": Origin_Metadata_RatePerSecond,
 		"Origin.MultiuserMinID": Origin_MultiuserMinID,
 		"Origin.MultiuserUmask": Origin_MultiuserUmask,
 		"Origin.Port": Origin_Port,
@@ -2527,7 +2651,12 @@ func init() {
 		"Origin.EnableVoms": Origin_EnableVoms,
 		"Origin.EnableWrite": Origin_EnableWrite,
 		"Origin.EnableWrites": Origin_EnableWrites,
+		"Origin.Metadata.AllowMultipart": Origin_Metadata_AllowMultipart,
+		"Origin.Metadata.Enabled": Origin_Metadata_Enabled,
+		"Origin.Metadata.TrackAccess": Origin_Metadata_TrackAccess,
+		"Origin.Metadata.TrackExtra": Origin_Metadata_TrackExtra,
 		"Origin.Multiuser": Origin_Multiuser,
+		"Origin.Posc.Enabled": Origin_Posc_Enabled,
 		"Origin.SSH.AutoAddHostKey": Origin_SSH_AutoAddHostKey,
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
@@ -2598,6 +2727,17 @@ func init() {
 		"Monitoring.TokenRefreshInterval": Monitoring_TokenRefreshInterval,
 		"Origin.DiskUsageCalculationDelay": Origin_DiskUsageCalculationDelay,
 		"Origin.DiskUsageCalculationInterval": Origin_DiskUsageCalculationInterval,
+		"Origin.Metadata.AccessFlushInterval": Origin_Metadata_AccessFlushInterval,
+		"Origin.Metadata.BatchFlushInterval": Origin_Metadata_BatchFlushInterval,
+		"Origin.Metadata.ErrorAfter": Origin_Metadata_ErrorAfter,
+		"Origin.Metadata.History.PruneInterval": Origin_Metadata_History_PruneInterval,
+		"Origin.Metadata.MaxBackoff": Origin_Metadata_MaxBackoff,
+		"Origin.Metadata.MinBackoff": Origin_Metadata_MinBackoff,
+		"Origin.Metadata.RequestTimeout": Origin_Metadata_RequestTimeout,
+		"Origin.Metadata.TokenLifetime": Origin_Metadata_TokenLifetime,
+		"Origin.Metadata.WarnAfter": Origin_Metadata_WarnAfter,
+		"Origin.Posc.FileTimeout": Origin_Posc_FileTimeout,
+		"Origin.Posc.KeepaliveInterval": Origin_Posc_KeepaliveInterval,
 		"Origin.SSH.ChallengeTimeout": Origin_SSH_ChallengeTimeout,
 		"Origin.SSH.ConnectTimeout": Origin_SSH_ConnectTimeout,
 		"Origin.SSH.KeepaliveInterval": Origin_SSH_KeepaliveInterval,

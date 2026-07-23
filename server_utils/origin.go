@@ -67,6 +67,27 @@ type (
 		// When set, these override the global Issuer.AuthorizationTemplates
 		// for this export's namespace.
 		AuthorizationTemplates []interface{} `json:"authorizationTemplates,omitempty" mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+
+		// Metadata holds per-export overrides for the object-commit publisher.
+		// When unset, the origin-wide Origin.Metadata.* settings apply.
+		Metadata *OriginExportMetadata `json:"metadata,omitempty" mapstructure:"metadata" yaml:"Metadata"`
+	}
+
+	// OriginExportMetadata is the per-export override block for Origin.Metadata.*
+	// settings that are namespace-scoped. Concurrency / rate-limit / batcher
+	// knobs remain origin-wide because they describe shared resources
+	// (worker pool, token bucket, write-behind goroutine).
+	OriginExportMetadata struct {
+		// Webhook publisher overrides.
+		Enabled  *bool  `json:"enabled,omitempty" mapstructure:"enabled" yaml:"Enabled"`
+		Endpoint string `json:"endpoint,omitempty" mapstructure:"endpoint" yaml:"Endpoint"`
+		Mode     string `json:"mode,omitempty" mapstructure:"mode" yaml:"Mode"`
+
+		// Local object-metadata tracking overrides. nil = inherit
+		// the corresponding origin-wide default.
+		TrackAccess          *bool `json:"trackAccess,omitempty" mapstructure:"trackaccess" yaml:"TrackAccess"`
+		TrackExtra           *bool `json:"trackExtra,omitempty" mapstructure:"trackextra" yaml:"TrackExtra"`
+		HistoryRetentionDays *int  `json:"historyRetentionDays,omitempty" mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
 	}
 )
 
