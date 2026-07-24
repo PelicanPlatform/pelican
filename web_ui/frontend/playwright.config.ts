@@ -57,9 +57,7 @@ export default defineConfig({
    * On CI, force the HTML reporter not to auto-open/serve the report (which
    * keeps the process alive and can hang the job), and add a streaming `list`
    * reporter so progress is visible in the log as tests run. */
-  reporter: process.env.CI
-    ? [['list'], ['html', { open: 'never' }]]
-    : 'html',
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Capture screenshots only when tests fail so CI artifacts stay small. */
