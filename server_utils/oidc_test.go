@@ -180,6 +180,30 @@ Server:
 		assert.Empty(t, resp.DeviceEndpoint, "No device endpoint when issuer disabled")
 	})
 
+	t.Run("JWKSReadableCrossOrigin", func(t *testing.T) {
+		ResetTestState()
+		defer ResetTestState()
+
+		// Point key generation at a temp dir so GetIssuerPublicJWKS succeeds.
+		require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
+
+		router := gin.New()
+		group := router.Group("")
+		RegisterOIDCAPI(group, false)
+
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/.well-known/issuer.jwks", nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://app.example.com")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		// Browser-based OIDC clients follow the discovery document's jwks_uri
+		// here to validate token signatures, so the public JWKS must be
+		// readable from any origin like the discovery document itself.
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
 	t.Run("OA4MPModeLegacyPaths", func(t *testing.T) {
 		ResetTestState()
 		defer ResetTestState()

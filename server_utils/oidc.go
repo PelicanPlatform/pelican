@@ -184,6 +184,12 @@ func exportIssuerJWKS(ctx *gin.Context) {
 		// Append a new line to the JSON data
 		jsonData = append(jsonData, '\n')
 		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
+		// The public JWKS must be readable cross-origin: browser-based OIDC
+		// clients follow the discovery document's jwks_uri here to validate
+		// token signatures. The discovery endpoint above already allows any
+		// origin; without the same header on the JWKS, those clients fail on
+		// the very next fetch.
+		ctx.Header("Access-Control-Allow-Origin", "*")
 		ctx.Data(200, "application/json", jsonData)
 	}
 }

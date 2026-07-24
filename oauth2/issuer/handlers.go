@@ -80,8 +80,12 @@ func ServiceURIForNamespace(issuerURL, namespace string) string {
 // Routes are registered under /api/v1.0/issuer/ns/*namespace so that each
 // federation namespace gets its own OIDC issuer with isolated clients and tokens.
 func RegisterRoutesWithMiddleware(engine *gin.Engine, registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
-	// Combine the caller's middleware with the namespace-resolution middleware.
-	allMiddleware := append(middleware, NamespaceMiddleware(registry))
+	// corsMiddleware runs first so that CORS headers (and preflight responses)
+	// are produced even when a later middleware or handler aborts. It is
+	// followed by the caller's middleware and the namespace-resolution
+	// middleware.
+	allMiddleware := append([]gin.HandlerFunc{corsMiddleware}, middleware...)
+	allMiddleware = append(allMiddleware, NamespaceMiddleware(registry))
 	issuerGroup := engine.Group("/api/v1.0/issuer/ns", allMiddleware...)
 	{
 		// Gin's wildcard parameter captures everything after /ns, e.g.
@@ -92,6 +96,10 @@ func RegisterRoutesWithMiddleware(engine *gin.Engine, registry *ProviderRegistry
 		issuerGroup.GET("/*namespace", handleDispatch)
 		issuerGroup.PUT("/*namespace", handleDispatchPut)
 		issuerGroup.DELETE("/*namespace", handleDispatchDelete)
+		// Register OPTIONS so browser CORS preflights are routed through the
+		// group middleware; corsMiddleware answers them and aborts before this
+		// handler runs.
+		issuerGroup.OPTIONS("/*namespace", func(ctx *gin.Context) {})
 	}
 }
 
@@ -200,6 +208,15 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		serviceURI := ServiceURIForNamespace(IssuerURL(), provider.Namespace)
+
+		// The discovery document is public, non-sensitive metadata, so any
+		// browser origin may read it (matching the server-level discovery
+		// endpoint in server_utils/oidc.go). This is set here rather than in
+		// corsMiddleware so that only the genuinely-dispatched discovery
+		// action gets the wildcard -- other credentialed endpoints can be
+		// reached via URLs that also end in the discovery suffix (e.g. a
+		// client-configuration read for an id ending in ".well-known/...").
+		ctx.Header("Access-Control-Allow-Origin", "*")
 
 		ctx.JSON(http.StatusOK, gin.H{
 			"issuer":                        issuerURL,
