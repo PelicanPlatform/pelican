@@ -104,7 +104,11 @@ func setupRealTokenIssuer(t *testing.T) string {
 func launchSampleServer(t *testing.T, args ...string) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/sample_metadata_server").CombinedOutput(); err != nil {
+	// -buildvcs=false: the CI test container checks out the repo as a
+	// different owner than the build user, so git refuses to run ("dubious
+	// ownership", exit 128) and VCS stamping fails. We don't need a version
+	// stamp on a throwaway test binary. Matches getPelicanBinary in main_test.go.
+	if out, err := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "../cmd/sample_metadata_server").CombinedOutput(); err != nil {
 		t.Fatalf("build sample server: %v\n%s", err, out)
 	}
 

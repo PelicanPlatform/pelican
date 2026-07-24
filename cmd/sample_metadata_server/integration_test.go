@@ -211,7 +211,11 @@ func launchServer(t *testing.T, args ...string) (baseURL string) {
 func buildSampleServer(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
+	// -buildvcs=false: the CI test container checks out the repo as a
+	// different owner than the build user, so git refuses to run ("dubious
+	// ownership", exit 128) and VCS stamping fails. No version stamp is needed
+	// on a throwaway test binary.
+	out, err := exec.Command("go", "build", "-buildvcs=false", "-o", bin, ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

@@ -31,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/webdav"
@@ -135,8 +136,12 @@ func TestHandleCopyTPC(t *testing.T) {
 		// metadata close hook; a failed copy must neither commit the object nor
 		// fire the hook (which would publish a webhook / record a commit).
 		var hookFired int32
-		tmpDir := t.TempDir()
-		fsWithHook := newCloseNotifyFs(webdav.Dir(tmpDir), func(context.Context, string, os.FileInfo) error {
+		// Back the hook-carrying FS with an in-memory afero filesystem rather
+		// than real disk: the point of this test is the handler's commit/hook
+		// gating, not filesystem cleanup semantics, and an in-memory FS keeps
+		// the test deterministic across platforms (real-disk RemoveAll timing
+		// after Close is finicky on Windows).
+		fsWithHook := newCloseNotifyFs(newAferoFileSystem(afero.NewMemMapFs(), "", nil), func(context.Context, string, os.FileInfo) error {
 			atomic.AddInt32(&hookFired, 1)
 			return nil
 		})
