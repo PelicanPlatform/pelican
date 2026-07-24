@@ -92,24 +92,8 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	publicKey, err := config.GetIssuerPublicJWKS()
-	if err != nil {
-		log.Error("Error: Failed to retrieve public key: ", err)
-		os.Exit(1)
-	}
-
-	/*
-	 * TODO: For now, we only allow namespace registration to occur with a single key, but
-	 *       at some point we should expose an API for adding additional pubkeys to each
-	 *       namespace. There is a similar TODO listed in registry.go, as the choices made
-	 *       there mirror the choices made here.
-	 * To enforce that we're only trying to register one key, we check the length here
-	 */
-	if publicKey.Len() > 1 {
-		log.Errorf("Only one public key can be registered in this step, but %d were provided\n", publicKey.Len())
-		os.Exit(1)
-	}
-
+	// NamespaceRegister advertises every issuer key this server holds (with the
+	// signing key at index 0), and the registry records the full keyset
 	privateKey, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Error("Failed to load private key", err)
