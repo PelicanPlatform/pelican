@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -109,6 +110,14 @@ type publisher struct {
 	userAgent string
 
 	clock func() time.Time
+
+	// federation is the origin's federation discovery URL, stamped into
+	// every outbound event so receivers can locate the registry and
+	// verify the JWT against the namespace's registered public keys.
+	// The federation is static for the process lifetime, so it is
+	// resolved once on the first Attempt.
+	federationOnce sync.Once
+	federation     string
 }
 
 // newPublisher builds a publisher with sensible defaults. Wire-up of
@@ -177,6 +186,20 @@ func (p *publisher) Attempt(ctx context.Context, endpoint string, event *ObjectC
 	if endpoint == "" {
 		return publishResult{outcome: outcomeNetwork, err: errors.New("metadata publisher: endpoint is empty")}
 	}
+
+	// Stamp the federation discovery URL so the event is self-describing:
+	// the receiver uses it to find the registry and fetch this namespace's
+	// public keys for JWT verification. Resolved once; a discovery failure
+	// leaves it empty rather than failing the publish (the receiver can
+	// still fall back to the token's iss).
+	p.federationOnce.Do(func() {
+		if fedInfo, ferr := config.GetFederation(ctx); ferr == nil {
+			p.federation = fedInfo.DiscoveryEndpoint
+		} else {
+			log.Warnf("metadata publisher: could not resolve federation discovery URL for event self-description: %v", ferr)
+		}
+	})
+	event.Federation = p.federation
 
 	jsonBody, err := event.MarshalJSON()
 	if err != nil {

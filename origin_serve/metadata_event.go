@@ -71,6 +71,14 @@ type ObjectCommitEvent struct {
 	// belongs to.
 	Namespace string
 
+	// Federation is the federation discovery URL the origin belongs to.
+	// It makes the event self-describing: a receiver uses it to locate
+	// the registry (federation discovery -> registry endpoint) and fetch
+	// this namespace's registered public keys to verify the webhook JWT,
+	// without needing to reach the origin directly. Stamped by the
+	// publisher at send time.
+	Federation string
+
 	// ObjectPath is the federation-relative path of the object.
 	ObjectPath string
 
@@ -193,18 +201,20 @@ func (e *ObjectCommitEvent) MarshalJSON() ([]byte, error) {
 	obj["etag"] = e.ETag
 	obj["created_at"] = e.ObjectCreated.UTC().Format(time.RFC3339Nano)
 	wire := struct {
-		ID        string         `json:"id"`
-		Type      string         `json:"type"`
-		Timestamp string         `json:"timestamp"`
-		Namespace string         `json:"namespace"`
-		Object    map[string]any `json:"object"`
-		Metadata  *metaWire      `json:"metadata,omitempty"`
+		ID         string         `json:"id"`
+		Type       string         `json:"type"`
+		Timestamp  string         `json:"timestamp"`
+		Namespace  string         `json:"namespace"`
+		Federation string         `json:"federation,omitempty"`
+		Object     map[string]any `json:"object"`
+		Metadata   *metaWire      `json:"metadata,omitempty"`
 	}{
-		ID:        e.ID,
-		Type:      e.Type,
-		Timestamp: e.Timestamp.UTC().Format(time.RFC3339Nano),
-		Namespace: e.Namespace,
-		Object:    obj,
+		ID:         e.ID,
+		Type:       e.Type,
+		Timestamp:  e.Timestamp.UTC().Format(time.RFC3339Nano),
+		Namespace:  e.Namespace,
+		Federation: e.Federation,
+		Object:     obj,
 	}
 	if e.HasMetadataBlob() {
 		wire.Metadata = &metaWire{
