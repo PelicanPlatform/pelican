@@ -36,9 +36,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// ObjectCommitEventType is the discriminator written into the wire
-// `type` field. Constant today; may be joined by `object.deleted` etc.
-const ObjectCommitEventType = "object.committed"
+// Event-type discriminators written into the wire `type` field.
+const (
+	// ObjectCommitEventType — a new object was committed (created).
+	ObjectCommitEventType = "object.committed"
+	// ObjectUpdatedEventType — an existing object was overwritten (a re-PUT
+	// of a path the tracking DB already knew) or changed out-of-band.
+	ObjectUpdatedEventType = "object.updated"
+	// ObjectDeletedEventType — an object was removed (client DELETE or an
+	// out-of-band deletion the origin observed).
+	ObjectDeletedEventType = "object.deleted"
+)
 
 // CustomFields is the fully-translated, JSON-ready custom field map
 // that came in via X-Pelican-Object-Metadata. We keep it as a typed
@@ -115,6 +123,23 @@ func NewObjectCommitEvent(namespace, objectPath string, size int64, etag string,
 		ObjectCreated: created.UTC(),
 		CustomFields:  custom,
 	}
+}
+
+// NewObjectUpdatedEvent builds an object.updated event (overwrite or
+// out-of-band modification). `modified` is the object's current mtime.
+func NewObjectUpdatedEvent(namespace, objectPath string, size int64, etag string, modified time.Time, custom CustomFields) *ObjectCommitEvent {
+	e := NewObjectCommitEvent(namespace, objectPath, size, etag, modified, custom)
+	e.Type = ObjectUpdatedEventType
+	return e
+}
+
+// NewObjectDeletedEvent builds an object.deleted event. The object is gone, so
+// size/etag are zero/empty; created_at carries the deletion time so the wire
+// field is never a zero timestamp. The catalog keys off `type` + `path`.
+func NewObjectDeletedEvent(namespace, objectPath string) *ObjectCommitEvent {
+	e := NewObjectCommitEvent(namespace, objectPath, 0, "", time.Now().UTC(), nil)
+	e.Type = ObjectDeletedEventType
+	return e
 }
 
 // WithMetadataBlob attaches an opaque metadata blob to the event in

@@ -66,7 +66,7 @@ func TestAdminQueueListAndGet(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		ev := NewObjectCommitEvent("/foo", "/foo/x.bin", int64(i), "", time.Now().UTC(), nil)
-		if _, err := ctl.queue.EnqueueEvent(context.Background(), ev); err != nil {
+		if _, err := ctl.queue.EnqueueEvent(context.Background(), ev, managementTokens{}, 0); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestAdminQueueDelete(t *testing.T) {
 	srv := newAdminTestServer(t)
 
 	ev := NewObjectCommitEvent("/foo", "/foo/x.bin", 1, "", time.Now().UTC(), nil)
-	if _, err := ctl.queue.EnqueueEvent(context.Background(), ev); err != nil {
+	if _, err := ctl.queue.EnqueueEvent(context.Background(), ev, managementTokens{}, 0); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestAdminQueueRetryRow(t *testing.T) {
 	srv := newAdminTestServer(t)
 
 	ev := NewObjectCommitEvent("/foo", "/foo/x.bin", 1, "", time.Now().UTC(), nil)
-	row, err := ctl.queue.EnqueueEvent(context.Background(), ev)
+	row, err := ctl.queue.EnqueueEvent(context.Background(), ev, managementTokens{}, 0)
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}

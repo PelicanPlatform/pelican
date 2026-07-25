@@ -183,6 +183,14 @@ type metadataController struct {
 	// small value so an empty-queue sleep doesn't dominate the
 	// test runtime.
 	idleMaxSleep time.Duration
+
+	// firstAttemptGrace is how far into the future a freshly-committed row's
+	// next_attempt_at is set, so the background worker does not claim it while
+	// the request goroutine is still performing its synchronous first attempt
+	// (which would double-publish). It must exceed a single attempt's wall time
+	// (RequestTimeout); it only bounds how long the worker waits to recover a
+	// row whose committing process crashed mid-attempt.
+	firstAttemptGrace time.Duration
 }
 
 // metadataControllerOptions is constructor input.
@@ -270,6 +278,9 @@ func newMetadataController(opts metadataControllerOptions) *metadataController {
 		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
 		clock:        time.Now,
 		idleMaxSleep: time.Hour,
+		// Grace comfortably exceeds one attempt's wall time so the worker never
+		// races the synchronous first attempt.
+		firstAttemptGrace: opts.RequestTimeout + 15*time.Second,
 	}
 
 	if opts.FilesystemForExists != nil {
@@ -329,7 +340,24 @@ func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommi
 		return fmt.Errorf("metadata: namespace %q has metadata enabled but no endpoint resolved", event.Namespace)
 	}
 
-	row, err := c.queue.EnqueueEvent(ctx, event)
+	// Eventual-mode rows carry per-row capability tokens so the uploading
+	// client can query / cancel its own publish via unguessable URLs (no
+	// separate token needed). Transactional rows never outlive the request, so
+	// they get none.
+	var tok managementTokens
+	if mode == ModeEventual {
+		q, m, err := newManagementTokens()
+		if err != nil {
+			return fmt.Errorf("metadata: generate capability tokens: %w", err)
+		}
+		tok = managementTokens{Query: q, Manage: m}
+	}
+
+	// Enqueue with next_attempt_at pushed out by the grace so the background
+	// worker won't claim the row while we perform the synchronous first attempt
+	// below (both modes attempt synchronously). On success/reject/transient the
+	// synchronous path itself deletes / marks / reschedules the row.
+	row, err := c.queue.EnqueueEvent(ctx, event, tok, c.firstAttemptGrace)
 	if err != nil {
 		return fmt.Errorf("metadata: enqueue: %w", err)
 	}
@@ -338,11 +366,58 @@ func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommi
 	if mode == ModeTransactional {
 		return c.transactionalAttempt(ctx, row, event, endpoint)
 	}
-	// Eventually-consistent: row stays in the queue. The close
-	// returns success now and a worker will pick the row up.
-	// Tickle the worker pool so an idle worker wakes immediately
-	// rather than waiting for its next polling tick.
-	c.notifyTickle()
+	return c.eventualFirstAttempt(ctx, row, event, endpoint, tok)
+}
+
+// attemptPublish acquires a rate token then performs (and records) one publish
+// attempt. A rate-token failure only happens on shutdown; it is surfaced as a
+// network-class result so callers treat it as a transient failure.
+func (c *metadataController) attemptPublish(ctx context.Context, event *ObjectCommitEvent, endpoint string, mode PublishMode) publishResult {
+	if err := c.acquireRateToken(ctx); err != nil {
+		return publishResult{outcome: outcomeNetwork, err: fmt.Errorf("metadata publish cancelled: %w", err)}
+	}
+	startWall := c.clock()
+	res := c.publisher.Attempt(ctx, endpoint, event)
+	c.recordAttempt(event.Namespace, mode, res, c.clock().Sub(startWall))
+	return res
+}
+
+// eventualFirstAttempt makes the initial publish attempt synchronously on the
+// request goroutine so the uploading client learns the outcome on the PUT
+// response — but it never fails the upload. Success deletes the row; a
+// permanent 422 reject marks it terminal; any transient failure leaves the row
+// pending for the background worker. Whenever the row persists (queued or
+// rejected) the client is handed capability URLs to query / cancel it.
+func (c *metadataController) eventualFirstAttempt(ctx context.Context, row *MetadataPublishRow, event *ObjectCommitEvent, endpoint string, tok managementTokens) error {
+	// Skip-if-deleted, same as the worker: if the object vanished between the
+	// POSC commit and now, don't publish it — drop the row silently.
+	if !c.objectExists(ctx, event.Namespace, event.ObjectPath) {
+		if err := c.queue.deleteByID(row.ID); err != nil {
+			log.Errorf("metadata: delete row %d for vanished object: %v", row.ID, err)
+		}
+		metadataSkippedObjectDeleted.WithLabelValues(event.Namespace).Inc()
+		return nil
+	}
+	res := c.attemptPublish(ctx, event, endpoint, ModeEventual)
+	switch {
+	case res.IsSuccess():
+		if err := c.queue.deleteByID(row.ID); err != nil {
+			log.Errorf("metadata: delete row %d after eventual first-attempt success: %v", row.ID, err)
+		}
+		c.reportClientResult(ctx, metadataClientResult{Status: metadataClientPublished})
+	case res.IsPermanentReject():
+		if err := c.queue.markRejected(row.ID, errString(res.err)); err != nil {
+			log.Errorf("metadata: mark row %d rejected: %v", row.ID, err)
+		}
+		metadataRejectedTotal.WithLabelValues(event.Namespace, string(ModeEventual)).Inc()
+		c.reportClientResult(ctx, c.clientResultWithURLs(metadataClientRejected, tok))
+	default:
+		// Transient failure: keep the row, push out next_attempt_at, and wake a
+		// worker to retry. The upload still succeeds.
+		c.scheduleRetryFromError(row, res.err)
+		c.notifyTickle()
+		c.reportClientResult(ctx, c.clientResultWithURLs(metadataClientQueued, tok))
+	}
 	return nil
 }
 
@@ -371,32 +446,25 @@ func (c *metadataController) acquireRateToken(ctx context.Context) error {
 	return c.limiter.Wait(ctx)
 }
 
-// transactionalAttempt makes one publish attempt synchronously. On
-// failure the row is removed (no retries in transactional mode) and
-// the error is returned to the caller so the caller can roll back the
-// storage commit. On success the row is removed and nil is returned.
+// transactionalAttempt makes one publish attempt synchronously. There are no
+// retries: the row is removed either way. On success nil is returned (and the
+// client is told "published"); on any failure — including a permanent 422
+// reject — the error is returned so the caller rolls back the storage commit
+// and the client sees a 5xx.
 func (c *metadataController) transactionalAttempt(ctx context.Context, row *MetadataPublishRow, event *ObjectCommitEvent, endpoint string) error {
-	if err := c.acquireRateToken(ctx); err != nil {
-		// Token acquisition only fails on ctx cancellation; treat as
-		// a publish failure and roll back the row.
-		_ = c.queue.deleteByID(row.ID)
-		return fmt.Errorf("metadata publish cancelled: %w", err)
+	res := c.attemptPublish(ctx, event, endpoint, ModeTransactional)
+	if err := c.queue.deleteByID(row.ID); err != nil {
+		log.Errorf("metadata: failed to delete queue row %d after transactional attempt: %v", row.ID, err)
 	}
-	startWall := c.clock()
-	res := c.publisher.Attempt(ctx, endpoint, event)
-	c.recordAttempt(event.Namespace, ModeTransactional, res, c.clock().Sub(startWall))
 	if res.IsSuccess() {
-		if err := c.queue.deleteByID(row.ID); err != nil {
-			log.Errorf("metadata: failed to delete queue row %d after transactional success: %v", row.ID, err)
-		}
+		c.reportClientResult(ctx, metadataClientResult{Status: metadataClientPublished})
 		return nil
 	}
-	// Transactional failure: drop the row; the caller is expected
-	// to roll back the storage commit (so the next overwrite re-
-	// publishes if/when the metadata service comes back).
-	if err := c.queue.deleteByID(row.ID); err != nil {
-		log.Errorf("metadata: failed to delete queue row %d after transactional failure: %v", row.ID, err)
+	if res.IsPermanentReject() {
+		metadataRejectedTotal.WithLabelValues(event.Namespace, string(ModeTransactional)).Inc()
 	}
+	// Failure (transient or permanent): the caller rolls back the storage
+	// commit so the object isn't left committed without metadata.
 	if res.err != nil {
 		return fmt.Errorf("metadata publish failed: %w", res.err)
 	}
@@ -507,8 +575,9 @@ func (c *metadataController) processOneRow(ctx context.Context, r *MetadataPubli
 		return
 	}
 
-	// Skip-if-deleted: avoid chasing ghosts.
-	if !c.objectExists(ctx, r.Namespace, r.ObjectPath) {
+	// Skip-if-deleted: avoid chasing ghosts. NOT for object.deleted events —
+	// there the object being gone is exactly what we're reporting.
+	if r.EventType != ObjectDeletedEventType && !c.objectExists(ctx, r.Namespace, r.ObjectPath) {
 		_ = c.queue.deleteByID(r.ID)
 		metadataSkippedObjectDeleted.WithLabelValues(r.Namespace).Inc()
 		log.Debugf("metadata: row %d dropped (object %s gone)", r.ID, r.ObjectPath)
@@ -530,13 +599,22 @@ func (c *metadataController) processOneRow(ctx context.Context, r *MetadataPubli
 	startWall := c.clock()
 	res := c.publisher.Attempt(ctx, endpoint, event)
 	c.recordAttempt(r.Namespace, mode, res, c.clock().Sub(startWall))
-	if res.IsSuccess() {
+	switch {
+	case res.IsSuccess():
 		if err := c.queue.deleteByID(r.ID); err != nil {
 			log.Errorf("metadata: failed to delete row %d after success: %v", r.ID, err)
 		}
-		return
+	case res.IsPermanentReject():
+		// Catalog says this event is permanently bad: stop retrying. Mark the
+		// row terminal (it lingers for status queries / operator deletion).
+		if err := c.queue.markRejected(r.ID, errString(res.err)); err != nil {
+			log.Errorf("metadata: failed to mark row %d rejected: %v", r.ID, err)
+		}
+		metadataRejectedTotal.WithLabelValues(r.Namespace, string(mode)).Inc()
+		log.Warnf("metadata: row %d (%s) permanently rejected by catalog; no further retries", r.ID, r.ObjectPath)
+	default:
+		c.scheduleRetryFromError(r, res.err)
 	}
-	c.scheduleRetryFromError(r, res.err)
 }
 
 // scheduleRetryFromError computes the next attempt time using
@@ -669,26 +747,98 @@ func computeHealthState(oldest *time.Time, now time.Time, warn, errAfter time.Du
 // about how an ETag is computed.
 func (c *metadataController) CommitEventFromCloseHook(namespace string) func(ctx context.Context, finalPath string, info os.FileInfo) error {
 	return func(ctx context.Context, finalPath string, info os.FileInfo) error {
-		var size int64
-		var mtime time.Time
-		if info != nil {
-			size = info.Size()
-			mtime = info.ModTime()
+		// Publish-only path (no local tracking DB to consult), so we can't
+		// tell a create from an overwrite: always object.committed.
+		return c.CommitEvent(ctx, c.buildCommitEvent(ctx, namespace, finalPath, info, ObjectCommitEventType))
+	}
+}
+
+// CommitEventFromCloseHookTracked is the close hook to use when the local
+// object-metadata tracking DB is also enabled. It probes that DB *before* the
+// track hook records the commit to decide create vs overwrite (object.committed
+// vs object.updated), runs the track hook (best-effort), then publishes. The
+// publish error is what gates the close (transactional rollback), so it runs
+// last.
+func (c *metadataController) CommitEventFromCloseHookTracked(namespace string, dao *objectMetadataDAO, trackHook closeHookFn) func(ctx context.Context, finalPath string, info os.FileInfo) error {
+	return func(ctx context.Context, finalPath string, info os.FileInfo) error {
+		fedPath := joinFederationPath(namespace, finalPath)
+		// Overwrite iff the tracking DB already has a live row for this path.
+		// Per design we consult only the DB, not the object store.
+		eventType := ObjectCommitEventType
+		if dao != nil {
+			if live, err := dao.LookupLive(ctx, namespace, fedPath); err == nil && live != nil {
+				eventType = ObjectUpdatedEventType
+			}
 		}
-		etag := BackendETag(info)
-		custom := objectMetadataFromContext(ctx)
-		if custom == nil {
-			custom = CustomFields{}
-		}
-		fullPath := joinFederationPath(namespace, finalPath)
-		event := NewObjectCommitEvent(namespace, fullPath, size, etag, mtime, custom)
-		// If the upload was multipart-shaped, the inbound splitter
-		// stashed the blob on ctx; pull it through to the event
-		// so the publisher knows to switch to multipart/related.
-		if blob := multipartBlobFromContext(ctx); blob != nil {
-			event.WithMetadataBlob(blob.ContentType, blob.Body)
+		event := c.buildCommitEvent(ctx, namespace, finalPath, info, eventType)
+		// Record the commit (best-effort) AFTER the overwrite probe so the
+		// probe saw pre-commit state; its error is intentionally ignored.
+		if trackHook != nil {
+			_ = trackHook(ctx, finalPath, info)
 		}
 		return c.CommitEvent(ctx, event)
+	}
+}
+
+// buildCommitEvent assembles an ObjectCommitEvent of the given type from the
+// close-hook inputs (federation-rooted path, size/mtime/etag from FileInfo,
+// custom fields + optional multipart blob from the request context).
+func (c *metadataController) buildCommitEvent(ctx context.Context, namespace, finalPath string, info os.FileInfo, eventType string) *ObjectCommitEvent {
+	var size int64
+	var mtime time.Time
+	if info != nil {
+		size = info.Size()
+		mtime = info.ModTime()
+	}
+	etag := BackendETag(info)
+	custom := objectMetadataFromContext(ctx)
+	if custom == nil {
+		custom = CustomFields{}
+	}
+	fullPath := joinFederationPath(namespace, finalPath)
+	event := NewObjectCommitEvent(namespace, fullPath, size, etag, mtime, custom)
+	event.Type = eventType
+	// If the upload was multipart-shaped, the inbound splitter stashed the
+	// blob on ctx; pull it through so the publisher switches to
+	// multipart/related.
+	if blob := multipartBlobFromContext(ctx); blob != nil {
+		event.WithMetadataBlob(blob.ContentType, blob.Body)
+	}
+	return event
+}
+
+// PublishStandalone queues an event for asynchronous, best-effort delivery
+// (used for object.deleted and out-of-band object.updated). Unlike the commit
+// path it never blocks the triggering operation or gates it on the catalog:
+// the data change already happened and cannot be rolled back. A background
+// worker performs the attempt(s), honoring 422 permanent-reject. No-op when
+// publishing is disabled for the namespace.
+func (c *metadataController) PublishStandalone(ctx context.Context, event *ObjectCommitEvent) {
+	enabled, endpoint, mode := c.resolver.Resolve(event.Namespace)
+	if !enabled || endpoint == "" {
+		return
+	}
+	if _, err := c.queue.EnqueueEvent(ctx, event, managementTokens{}, 0); err != nil {
+		log.Errorf("metadata: enqueue %s for %s: %v", event.Type, event.ObjectPath, err)
+		return
+	}
+	metadataEventsEnqueuedTotal.WithLabelValues(event.Namespace, string(mode)).Inc()
+	c.notifyTickle()
+}
+
+// PublishDeleteHook returns a callback the filesystem / observation layer fires
+// after an object is removed, to publish an object.deleted event.
+func (c *metadataController) PublishDeleteHook(namespace string) func(ctx context.Context, fedPath string) {
+	return func(ctx context.Context, fedPath string) {
+		c.PublishStandalone(ctx, NewObjectDeletedEvent(namespace, fedPath))
+	}
+}
+
+// PublishUpdateHook returns a callback the observation layer fires when it
+// detects an out-of-band modification, to publish an object.updated event.
+func (c *metadataController) PublishUpdateHook(namespace string) func(ctx context.Context, fedPath string, size int64, etag string, mtime time.Time) {
+	return func(ctx context.Context, fedPath string, size int64, etag string, mtime time.Time) {
+		c.PublishStandalone(ctx, NewObjectUpdatedEvent(namespace, fedPath, size, etag, mtime, nil))
 	}
 }
 
@@ -811,6 +961,86 @@ func sourceEtagFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// --- client result reporting (eventual mode) ---
+
+// Response headers the origin sets on a PUT so the uploading client learns the
+// initial publish outcome and (when the row persists) its capability URLs.
+const (
+	MetadataStatusHeader    = "X-Pelican-Metadata-Status"
+	MetadataQueryURLHeader  = "X-Pelican-Metadata-Query-Url"
+	MetadataManageURLHeader = "X-Pelican-Metadata-Manage-Url"
+)
+
+// Values for the X-Pelican-Metadata-Status header.
+const (
+	metadataClientPublished = "published" // delivered and accepted on the first attempt
+	metadataClientQueued    = "queued"    // first attempt failed transiently; a worker will retry
+	metadataClientRejected  = "rejected"  // catalog permanently refused (422); no retries
+)
+
+// metadataClientResult is what the origin reports back to the uploading client.
+type metadataClientResult struct {
+	Status    string
+	QueryURL  string
+	ManageURL string
+}
+
+// responseHeaderKey carries the PUT response's header map so the close hook can
+// stamp the X-Pelican-Metadata-* result headers on it (the deferred-header
+// writer flushes them after the webdav handler returns).
+type responseHeaderKey struct{}
+
+// withResponseHeader stashes the response header map on the context.
+func withResponseHeader(ctx context.Context, h http.Header) context.Context {
+	if h == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, responseHeaderKey{}, h)
+}
+
+// responseHeaderFromContext returns the stashed response header map, or nil
+// (e.g. TPC / non-PUT paths that never plumbed one through).
+func responseHeaderFromContext(ctx context.Context) http.Header {
+	if v, ok := ctx.Value(responseHeaderKey{}).(http.Header); ok {
+		return v
+	}
+	return nil
+}
+
+// reportClientResult writes the result headers onto the request's response
+// header map, if one was plumbed through. No-op otherwise.
+func (c *metadataController) reportClientResult(ctx context.Context, r metadataClientResult) {
+	h := responseHeaderFromContext(ctx)
+	if h == nil {
+		return
+	}
+	h.Set(MetadataStatusHeader, r.Status)
+	if r.QueryURL != "" {
+		h.Set(MetadataQueryURLHeader, r.QueryURL)
+	}
+	if r.ManageURL != "" {
+		h.Set(MetadataManageURLHeader, r.ManageURL)
+	}
+}
+
+// clientResultWithURLs builds a result carrying the capability URLs derived
+// from the row's tokens.
+func (c *metadataController) clientResultWithURLs(status string, tok managementTokens) metadataClientResult {
+	return metadataClientResult{
+		Status:    status,
+		QueryURL:  metadataStatusURL(tok.Query),
+		ManageURL: metadataStatusURL(tok.Manage),
+	}
+}
+
+// errString is err.Error() or "" for a nil error.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // extractObjectMetadataFromRequest parses the X-Pelican-Object-Metadata

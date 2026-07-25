@@ -153,6 +153,142 @@ func TestE2E_InitializeHandlers_EventualPublish(t *testing.T) {
 	}
 }
 
+// TestE2E_InitializeHandlers_LifecycleEvents boots the real handler wiring with
+// BOTH metadata publishing and TrackAccess enabled and drives a real
+// PUT → overwrite → DELETE, asserting object.committed / object.updated /
+// object.deleted arrive through the actual chain (handlers.go hook selection,
+// the tracking-DB overwrite probe, RemoveAll → onDelete, and the eventual
+// worker). It also checks the PUT response carries the real result header.
+// This is the wiring the direct-method unit tests don't exercise.
+func TestE2E_InitializeHandlers_LifecycleEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping: boots real handler wiring + DB")
+	}
+
+	type ev struct{ typ, path string }
+	events := make(chan ev, 16)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var got struct {
+			Type   string         `json:"type"`
+			Object map[string]any `json:"object"`
+		}
+		_ = json.Unmarshal(b, &got)
+		p, _ := got.Object["path"].(string)
+		events <- ev{got.Type, p}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+
+	issuerURL := setupHTTPIssuer(t)
+	setBoolParamForTest(t, param.Origin_Metadata_Enabled, true)
+	setStringParamForTest(t, param.Origin_Metadata_Endpoint, receiver.URL)
+	setStringParamForTest(t, param.Origin_Metadata_Mode, "eventual")
+	setBoolParamForTest(t, param.Origin_Posc_Enabled, true)
+	// TrackAccess is the prerequisite that enables object.deleted / object.updated.
+	setBoolParamForTest(t, param.Origin_Metadata_TrackAccess, true)
+	setDurationParamForTest(t, param.Origin_Metadata_MinBackoff, 10*time.Millisecond)
+	setDurationParamForTest(t, param.Origin_Metadata_MaxBackoff, 200*time.Millisecond)
+
+	setStringParamForTest(t, param.Server_DbLocation, filepath.Join(t.TempDir(), "pelican.sqlite"))
+	prevDB := database.ServerDatabase
+	t.Cleanup(func() { database.ServerDatabase = prevDB })
+	if err := database.InitServerDatabase(server_structs.OriginType); err != nil {
+		t.Fatalf("init server database: %v", err)
+	}
+
+	exports := []server_utils.OriginExport{{
+		FederationPrefix: "/exp",
+		StoragePrefix:    t.TempDir(),
+		IssuerUrls:       []string{issuerURL},
+		Capabilities:     server_structs.Capabilities{Reads: true, Writes: true},
+	}}
+
+	ResetHandlers()
+	t.Cleanup(ResetHandlers)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := InitializeHandlers(ctx, exports); err != nil {
+		t.Fatalf("InitializeHandlers: %v", err)
+	}
+	egrp := &errgroup.Group{}
+	if err := InitAuthConfig(ctx, egrp, exports); err != nil {
+		t.Fatalf("InitAuthConfig: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	if err := RegisterHandlers(router, false); err != nil {
+		t.Fatalf("RegisterHandlers: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	tkn := mintWriteToken(t, issuerURL)
+	doReq := func(method, body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, srv.URL+"/exp/data/run.dat", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("new %s: %v", method, err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tkn)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		if resp.StatusCode/100 != 2 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("%s returned %d: %s", method, resp.StatusCode, string(b))
+		}
+		return resp
+	}
+	nextEvent := func() ev {
+		t.Helper()
+		select {
+		case e := <-events:
+			return e
+		case <-time.After(10 * time.Second):
+			t.Fatal("no webhook event delivered")
+			return ev{}
+		}
+	}
+
+	// 1. First write → object.committed, and (eventual mode) the
+	//    first-attempt result header on the PUT response itself.
+	resp := doReq(http.MethodPut, "payload-v1")
+	gotStatus := resp.Header.Get(MetadataStatusHeader)
+	_ = resp.Body.Close()
+	if gotStatus != metadataClientPublished {
+		t.Fatalf("PUT %s header = %q, want %q", MetadataStatusHeader, gotStatus, metadataClientPublished)
+	}
+	if e := nextEvent(); e.typ != ObjectCommitEventType || e.path != "/exp/data/run.dat" {
+		t.Fatalf("first event = %+v, want object.committed /exp/data/run.dat", e)
+	}
+
+	// 2. Overwrite → EXACTLY one object.updated (from the commit hook,
+	//    which consulted the tracking DB and saw the pre-existing row).
+	//    The observation layer must NOT also fire an object.updated for
+	//    Pelican's own write — that duplicate was the bug this test caught.
+	_ = doReq(http.MethodPut, "payload-v2-longer").Body.Close()
+	if e := nextEvent(); e.typ != ObjectUpdatedEventType || e.path != "/exp/data/run.dat" {
+		t.Fatalf("overwrite event = %+v, want object.updated /exp/data/run.dat", e)
+	}
+
+	// 3. DELETE → object.deleted (async via the worker, from RemoveAll's
+	//    onDelete hook). Not skipped even though the object is now gone.
+	_ = doReq(http.MethodDelete, "").Body.Close()
+	if e := nextEvent(); e.typ != ObjectDeletedEventType || e.path != "/exp/data/run.dat" {
+		t.Fatalf("delete event = %+v, want object.deleted /exp/data/run.dat", e)
+	}
+
+	// No spurious extra events must trail the three lifecycle events.
+	select {
+	case e := <-events:
+		t.Fatalf("unexpected extra event delivered: %+v", e)
+	case <-time.After(750 * time.Millisecond):
+	}
+}
+
 // setupHTTPIssuer stands up a plain-HTTP issuer that publishes the origin's
 // OIDC discovery doc + JWKS. Plain HTTP (not TLS) so the origin's own auth
 // config can fetch the JWKS without needing to trust a self-signed cert. It

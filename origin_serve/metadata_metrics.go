@@ -103,6 +103,15 @@ var (
 		[]string{"namespace"},
 	)
 
+	metadataRejectedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pelican_origin_metadata",
+			Name:      "rejected_total",
+			Help:      "Events the catalog permanently rejected (HTTP 422); no further retries.",
+		},
+		[]string{"namespace", "mode"},
+	)
+
 	metadataAdminDeletes = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pelican_origin_metadata",
