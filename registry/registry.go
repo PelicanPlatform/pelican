@@ -865,6 +865,14 @@ func wildcardHandler(ctx *gin.Context) {
 	// new / here!
 	path := ctx.Param("wildcard")
 
+	// Public federation root certificate (WS3): GET /api/v1.0/registry/ca.pem.
+	// Served here (rather than as its own GET route) because registryAPI's
+	// GET("/*wildcard") would otherwise conflict with any sibling GET route.
+	if path == "/ca.pem" {
+		serveCABundle(ctx)
+		return
+	}
+
 	// Get the prefix's JWKS
 	// Avoid using filepath.Base for path matching, as filepath format depends on OS
 	// while HTTP path is always slash (/)
@@ -1303,6 +1311,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
 		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
 		registryAPI.POST("/updateNamespacesPubKey", updateNamespacesPubKey)
+		registryAPI.POST("/issueHostCertificate", issueHostCertificate)
 
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}

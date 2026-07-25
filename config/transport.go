@@ -20,12 +20,17 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -205,4 +210,117 @@ func setupTransport() {
 	transportNoProxy = transport.Clone()
 	transportNoProxy.Proxy = nil
 	clientNoProxy = &http.Client{Transport: transportNoProxy}
+}
+
+var (
+	// Guards mutation of the transports' RootCAs pools by AddFederationCA.
+	federationCAMu sync.Mutex
+
+	// SHA-256 fingerprints of certificates already merged into the transport
+	// trust store, so repeated calls with the same root are cheap no-ops and
+	// the reported "added" result is accurate.
+	federationCASeen = map[[32]byte]struct{}{}
+)
+
+// AddFederationCA merges the PEM-encoded federation root certificate(s) into the
+// RootCAs pool used by every Pelican HTTP transport (the ones returned by
+// GetTransport/GetClient and their variants). This lets a client validate a TLS
+// peer -- e.g. an origin reached directly by IP -- whose certificate was issued
+// by the federation CA (the registry acting as a CA) rather than a public CA.
+//
+// It is idempotent and safe to call more than once: certificates already present
+// are not re-added, and the returned bool reports whether any new certificate
+// was actually merged. The federation roots are added on top of the existing
+// trust (system roots plus any Server.TLSCACertificateFile), never replacing it.
+//
+// A fresh pool is built and swapped into the transports rather than mutating the
+// live pool in place, so in-flight TLS handshakes keep reading a stable pool.
+// Callers are expected to invoke this early (before heavy concurrent transfer
+// activity); it is not intended to be raced against a large volume of
+// simultaneous handshakes.
+func AddFederationCA(rootPEM string) (added bool, err error) {
+	// Ensure the transports exist before we touch their TLS config.
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+
+	if strings.TrimSpace(rootPEM) == "" {
+		return false, nil
+	}
+
+	// Parse every certificate block out of the supplied PEM.
+	var certs []*x509.Certificate
+	rest := []byte(rootPEM)
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, parseErr := x509.ParseCertificate(block.Bytes)
+		if parseErr != nil {
+			return false, errors.Wrap(parseErr, "failed to parse federation CA certificate")
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) == 0 {
+		return false, errors.New("no certificates found in federation CA bundle")
+	}
+
+	federationCAMu.Lock()
+	defer federationCAMu.Unlock()
+
+	// Figure out which certs are new (not already merged).
+	var newCerts []*x509.Certificate
+	for _, cert := range certs {
+		fp := sha256.Sum256(cert.Raw)
+		if _, ok := federationCASeen[fp]; ok {
+			continue
+		}
+		newCerts = append(newCerts, cert)
+	}
+	if len(newCerts) == 0 {
+		return false, nil
+	}
+
+	// Build a fresh pool starting from whatever the transport already trusts
+	// (system roots, or system+Server CA file). Cloning avoids mutating a pool
+	// that in-flight handshakes may be reading.
+	var pool *x509.CertPool
+	if transport != nil && transport.TLSClientConfig != nil && transport.TLSClientConfig.RootCAs != nil {
+		pool = transport.TLSClientConfig.RootCAs.Clone()
+	} else if sysPool, sysErr := x509.SystemCertPool(); sysErr == nil {
+		pool = sysPool
+	} else {
+		pool = x509.NewCertPool()
+	}
+
+	for _, cert := range newCerts {
+		pool.AddCert(cert)
+	}
+
+	applyRootCAPool(pool)
+
+	for _, cert := range newCerts {
+		federationCASeen[sha256.Sum256(cert.Raw)] = struct{}{}
+	}
+	return true, nil
+}
+
+// applyRootCAPool points every transport's TLS RootCAs at the supplied pool.
+// The InsecureSkipVerify setting (if any) is preserved. Must be called with
+// federationCAMu held.
+func applyRootCAPool(pool *x509.CertPool) {
+	for _, t := range []*http.Transport{transport, basicTransport, transportNoProxy} {
+		if t == nil {
+			continue
+		}
+		if t.TLSClientConfig == nil {
+			t.TLSClientConfig = &tls.Config{}
+		}
+		t.TLSClientConfig.RootCAs = pool
+	}
 }

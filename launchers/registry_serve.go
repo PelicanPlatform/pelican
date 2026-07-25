@@ -43,6 +43,16 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return errors.Wrap(err, "unable to initialize the server database")
 	}
 
+	// The registry acts as a federation CA by default; bootstrap the root +
+	// intermediate now so the issuance endpoints have signing material
+	// available. Idempotent. Operators can turn it off via Registry.DisableCA.
+	if !param.Registry_DisableCA.GetBool() {
+		log.Info("Registry certificate authority is enabled; ensuring federation CA material exists")
+		if err := registry.EnsureFederationCA(database.ServerDatabase); err != nil {
+			return errors.Wrap(err, "unable to initialize the registry certificate authority")
+		}
+	}
+
 	registry.InitOptionsCache(ctx, egrp)
 
 	if err = registry.InitCustomRegistrationFields(); err != nil {

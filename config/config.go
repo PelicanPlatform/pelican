@@ -720,6 +720,12 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(server_structs.BrokerType) {
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
+		// The federation CA is the registry acting as a CA. Default the CA
+		// endpoint to the registry when this registry has the CA enabled.
+		// Optional: unset otherwise, and never part of the discovery invariant.
+		if fedInfo.CAEndpoint == "" && enabledServers.IsEnabled(server_structs.RegistryType) && !param.Registry_DisableCA.GetBool() {
+			fedInfo.CAEndpoint = fedInfo.RegistryEndpoint
+		}
 		if fedInfo.DirectorAdvertiseEndpoints == nil && enabledServers.IsEnabled(server_structs.DirectorType) {
 			fedInfo.DirectorAdvertiseEndpoints = []string{externalUrlStr}
 		}
@@ -737,6 +743,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		fedInfo.RegistryEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint))
 		fedInfo.JwksUri = stripPort443(wrapWithHttpsIfNeeded(fedInfo.JwksUri))
 		fedInfo.BrokerEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint))
+		if fedInfo.CAEndpoint != "" {
+			fedInfo.CAEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.CAEndpoint))
+		}
 		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
 			fedInfo.DirectorAdvertiseEndpoints[i] = stripPort443(wrapWithHttpsIfNeeded(advUrl))
 		}
@@ -759,6 +768,7 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	fedInfo.RegistryEndpoint = viper.GetString("Federation.RegistryUrl")
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
+	fedInfo.CAEndpoint = viper.GetString("Federation.CaUrl")
 
 	// The only time we'll ever skip discovery is if we already have all the values.
 	// Note that the discovery endpoint itself is required because it acts as the
@@ -844,6 +854,10 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	if fedInfo.BrokerEndpoint == "" && metadata.BrokerEndpoint != "" {
 		log.Debugln("Setting global broker url to", metadata.BrokerEndpoint)
 		fedInfo.BrokerEndpoint = metadata.BrokerEndpoint
+	}
+	if fedInfo.CAEndpoint == "" && metadata.CAEndpoint != "" {
+		log.Debugln("Setting global CA url to", metadata.CAEndpoint)
+		fedInfo.CAEndpoint = metadata.CAEndpoint
 	}
 	if fedInfo.DirectorAdvertiseEndpoints == nil && metadata.DirectorAdvertiseEndpoints != nil {
 		fedInfo.DirectorAdvertiseEndpoints = metadata.DirectorAdvertiseEndpoints

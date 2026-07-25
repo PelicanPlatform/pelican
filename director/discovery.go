@@ -198,6 +198,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		RegistryEndpoint:           registryUrl.String(),
 		JwksUri:                    jwksUri,
 		BrokerEndpoint:             brokerUrl,
+		CAEndpoint:                 fedInfo.CAEndpoint,
 		DirectorAdvertiseEndpoints: param.Server_DirectorUrls.GetStringSlice(),
 	}
 

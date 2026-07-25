@@ -150,6 +150,12 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 		return nil, err
 	}
 
+	// If the federation advertises a certificate authority, make sure its root is
+	// trusted by the client's TLS transport. This enables validating origins that
+	// present federation-issued certificates (e.g. reached directly by IP). It is
+	// best-effort and never fails the parse.
+	ensureFederationCATrust(ctx, pUrl.FedInfo.CAEndpoint)
+
 	return pUrl, nil
 }
 

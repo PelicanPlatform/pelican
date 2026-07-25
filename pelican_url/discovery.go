@@ -52,6 +52,11 @@ type (
 		RegistryEndpoint           string   `json:"namespace_registration_endpoint"`
 		JwksUri                    string   `json:"jwks_uri"`
 		BrokerEndpoint             string   `json:"broker_endpoint"`
+		// CAEndpoint is the base URL of the federation certificate authority
+		// (the registry acting as a CA, WS3). Optional: empty when no federation
+		// CA is configured. Clients derive the concrete paths
+		// (/api/v1.0/registry/ca.pem, .../issueHostCertificate) from it.
+		CAEndpoint string `json:"ca_endpoint,omitempty"`
 	}
 
 	discoveryOptions struct {
