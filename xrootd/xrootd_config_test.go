@@ -31,6 +31,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -49,6 +50,51 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+func TestGlobusMultiExportTemplateRendering(t *testing.T) {
+	xrdConfig := XrootdConfig{
+		Origin: OriginConfig{
+			StorageType: "globus",
+			RunLocation: "/run/pelican",
+			Exports: []server_utils.OriginExport{
+				{FederationPrefix: "/first/ns", StoragePrefix: "/foo"},
+				{FederationPrefix: "/second/ns", StoragePrefix: "/bar"},
+			},
+			GlobusBackend: &origin.GlobusBackendConfig{
+				CollectionID:      "abc123",
+				HttpsServer:       "https://globus.example",
+				TokenFile:         "/tokens/abc123.tok",
+				TransferTokenFile: "/tokens/abc123.transfer.tok",
+				Exports: []origin.GlobusExportPathConfig{
+					{FederationPrefix: "/first/ns", StoragePrefix: "/foo"},
+					{FederationPrefix: "/second/ns", StoragePrefix: "/bar"},
+				},
+			},
+		},
+	}
+
+	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdOriginCfg))
+	var buffer bytes.Buffer
+	require.NoError(t, templ.Execute(&buffer, xrdConfig))
+
+	content := buffer.String()
+	assert.Equal(t, 1, strings.Count(content, "ofs.osslib libXrdHTTPServer.so"))
+	assert.Equal(t, 1, strings.Count(content, "ofs.osslib ++ libXrdOssGlobus.so"))
+	assert.Equal(t, 2, strings.Count(content, "httpserver.begin"))
+	assert.Equal(t, 2, strings.Count(content, "globus.begin"))
+	assert.Equal(t, 2, strings.Count(content, "httpserver.trace"))
+	assert.Equal(t, 2, strings.Count(content, "httpserver.token_file /tokens/abc123.tok"))
+	assert.Equal(t, 2, strings.Count(content, "globus.trace"))
+	assert.Equal(t, 2, strings.Count(content, "globus.transfer_url_base https://transfer.api.globusonline.org/v0.10/operation/endpoint/abc123"))
+	assert.Equal(t, 2, strings.Count(content, "globus.transfer_token_file /tokens/abc123.transfer.tok"))
+	assert.Contains(t, content, "httpserver.url_base https://globus.example/foo")
+	assert.Contains(t, content, "httpserver.storage_prefix /first/ns")
+	assert.Contains(t, content, "globus.transfer_url_base https://transfer.api.globusonline.org/v0.10/operation/endpoint/abc123")
+	assert.Contains(t, content, "httpserver.url_base https://globus.example/bar")
+	assert.Contains(t, content, "httpserver.storage_prefix /second/ns")
+	assert.Contains(t, content, "all.export /first/ns")
+	assert.Contains(t, content, "all.export /second/ns")
+}
 
 func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType, egrp *errgroup.Group) {
 	tmpDir := t.TempDir()
