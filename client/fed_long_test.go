@@ -634,7 +634,10 @@ func TestSyncUpload(t *testing.T) {
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsDownload)
 
-		// Verify we received the original contents, not any modified contents
+		// Verify we received the original contents, not any modified contents.
+		// Recursive get of a collection into an existing local dir lays
+		// entries flat under downloadDir (see discussion #1638), so the
+		// inner file lives under downloadDir/<basename(innerTempDir)>/<basename(innerTempFile)>.
 		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
 		require.NoError(t, err)
 		require.Equal(t, innerTestFileContent, string(contentBytes))

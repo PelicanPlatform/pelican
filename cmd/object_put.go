@@ -30,7 +30,10 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -382,9 +385,64 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	finalResults := make([][]client.TransferResults, 0)
 
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	multipleObjects := len(source) > 1
+
+	// Pre-flight: decide whether the destination is a directory (either
+	// because it's an existing collection, or because the caller supplied
+	// multiple sources and the destination doesn't exist yet so we should
+	// treat it as one).  Done once outside the source loop so multi-source
+	// uploads pay a single director round-trip.
+	//
+	// DoStat failure is intentionally soft here: uploads can legitimately
+	// succeed against a namespace where stat fails (write-only token, no
+	// `listings` capability, transient collections-endpoint outage, etc.).
+	// Treat any stat failure the same as "destination not known" and let
+	// DoPut make the authoritative decision.  Multiple sources still force
+	// directory semantics in that case; single-source falls through with
+	// the destination string used verbatim.
+	destIsDir := false
+	statInfo, statErr := client.DoStat(ctx, dest, options...)
+	if statErr != nil {
+		if !errors.Is(statErr, client.ErrObjectNotFound) {
+			log.Debugf("Stat of destination %q failed (%v); proceeding without directory inference", dest, statErr)
+		}
+		if multipleObjects {
+			destIsDir = true
+		}
+	} else if statInfo.IsCollection {
+		destIsDir = true
+	}
+
 	for _, src := range source {
-		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, options...)
+		// Filename inference for the non-recursive case only:
+		//   * Single file → existing collection (P3): rewrite dest to
+		//     REMOTE/basename(src).
+		//   * Multi-source (P8/P9): treat dest as a container and rewrite
+		//     each per-source dest to REMOTE/basename(src_i).
+		// Recursive uploads (P6) are FLAT by design -- entries of the
+		// source directory land directly under the destination
+		// collection, matching `rsync -a src/ dst/` and the design
+		// decision in discussion #1638 for `pelican object sync`.  Do
+		// not append basename(src) for recursive puts; callers rely on
+		// the flat layout.
+		actualDest := dest
+		if destIsDir && !isRecursive {
+			sourceFilename := filepath.Base(src)
+			destURL, err := url.Parse(dest)
+			if err != nil {
+				log.Errorln("Failed to parse destination URL:", err)
+				result = errors.Wrap(err, "failed to parse destination URL for filename inference")
+				lastSrc = src
+				break
+			}
+			newPath := path.Join(destURL.Path, sourceFilename)
+			destURL.Path = newPath
+			actualDest = destURL.String()
+			log.Debugln("Inferred destination:", actualDest)
+		}
+
+		transferResults, err := client.DoPut(ctx, src, actualDest, isRecursive, options...)
 		result = err
 		if result != nil {
 			lastSrc = src

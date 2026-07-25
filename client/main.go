@@ -171,16 +171,12 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return
 	}
 
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
+	// DoStat only needs the director response, a token, and an HTTP client
+	// (statHttp spins up its own gowebdav client).  Historically this
+	// function built a full TransferEngine — worker pool, mux goroutine,
+	// URL/dir caches — and shut it down again on every call, without ever
+	// touching it.  Skip that setup entirely so a caller (e.g. `pelican
+	// object put` pre-flighting the destination) can DoStat cheaply.
 
 	// Pre-scan options for cacheMode which affects the director query.
 	var cacheMode bool
@@ -962,11 +958,48 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		// Note that we use the pUrl.Path, as this will have stripped any query params for us
+		// Destination is an existing directory (the "container target"
+		// gesture).  Two rules apply here:
+		//
+		//   * G2: source is a file, destination is an existing dir --
+		//     infer the filename from the source basename.
+		//   * G4: source is a collection and !recursive -- error out
+		//     rather than silently writing the origin's directory
+		//     listing to a local file named after the collection.
+		//     Symmetric with the put-side P4 guard.
+		//
+		// Recursive collection into an existing dir (G5) is deliberately
+		// FLAT: entries land directly under LOCAL/, matching
+		// `rsync -a src/ dst/` and the design decision recorded in
+		// discussion #1638 for `pelican object sync`.  Do NOT append
+		// basename(source) here -- callers (object sync,
+		// client_agent/transfer_manager) rely on the flat layout.
+		//
+		// To decide whether to error on G4 we do need to know if the
+		// remote source is a collection, so stat it once for the
+		// non-recursive branch.  Skipping the stat when recursive is
+		// requested keeps the extra round-trip out of the recursive
+		// hot path (object sync in particular).
+		//
+		// Stat error handling: a source that legitimately does not
+		// exist yet (ErrObjectNotFound) is a soft signal we leave to
+		// the transfer machinery to surface with its own error.  Any
+		// other stat failure (server unreachable, auth failure, 5xx)
+		// is a real signal that we cannot decide G2 vs. G4 correctly,
+		// so bail rather than silently falling through and building
+		// the wrong local layout.
 		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
+				return nil, errors.Wrapf(statErr,
+					"failed to stat remote source %q while deciding destination layout", remoteObject)
+			}
+			if stat != nil && stat.IsCollection {
+				return nil, errors.Errorf(
+					"remote object %q is a collection but recursive is not enabled", remoteObject)
+			}
+			// G2: infer filename from source basename.
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}
