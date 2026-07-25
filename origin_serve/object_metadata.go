@@ -196,9 +196,9 @@ func (d *objectMetadataDAO) RecordCommit(ctx context.Context, in ObjectMetadataE
 }
 
 // commitStatements builds the two fate-shared statements a commit records:
-//   1. INSERT into history (event_type='commit', snapshot of the new commit).
-//   2. UPSERT into object_metadata (created_at preserved on conflict;
-//      last_modified, size, etag, etc. overwritten).
+//  1. INSERT into history (event_type='commit', snapshot of the new commit).
+//  2. UPSERT into object_metadata (created_at preserved on conflict;
+//     last_modified, size, etag, etc. overwritten).
 //
 // Exposed separately so the publish path can fold these into the SAME durable
 // transaction as the publish-queue INSERT (see enqueueEventAtomic), making the
