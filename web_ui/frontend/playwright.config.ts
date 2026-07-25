@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname + '/e2e', '.env') });
 
-type Service = 'origin' | 'cache' | 'director' | 'registry';
+type Service = 'origin' | 'cache' | 'director' | 'registry' | 'transfer';
 interface TestTarget {
   baseURL: string;
   token?: string;
@@ -37,6 +37,10 @@ const targets: Record<Service, TestTarget> = {
   registry: {
     baseURL: process.env.TARGET_REGISTRY_URL || defaultBaseUrl,
     token: process.env.TARGET_REGISTRY_TOKEN || defaultToken,
+  },
+  transfer: {
+    baseURL: process.env.TARGET_TRANSFER_URL || defaultBaseUrl,
+    token: process.env.TARGET_TRANSFER_TOKEN || defaultToken,
   },
 };
 

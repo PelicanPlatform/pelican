@@ -107,6 +107,12 @@ jobs:
             module: origin,director,registry
           - service: cache
             module: origin,cache,director,registry
+          # transfer exercises the standalone transfer server's web UI (Jobs /
+          # Credentials pages). The transfer web view is gated on the transfer
+          # server type being enabled, so it runs the `transfer` module (plus a
+          # director + registry to form a federation and the local issuer).
+          - service: transfer
+            module: transfer,director,registry
 
     steps:
       - name: Checkout repository
@@ -154,6 +160,10 @@ jobs:
           Server:
             HostName: localhost
             WebPort: 8444
+            # Disable the Acceptable Use Policy gate: it would redirect every
+            # authenticated page to an "I agree" screen, which these UI tests are
+            # not exercising.
+            AUPFile: none
           Logging:
             Level: info
           Origin:
@@ -201,14 +211,26 @@ jobs:
         run: |
           # No --private-key needed: PELICAN_CONFIGDIR is set in the job env so
           # the binary discovers the key from issuer-keys/ automatically.
+          #
+          # The standalone transfer server authenticates against its server-level
+          # local issuer (Server.ExternalWebUrl) and needs the pelican.transfer
+          # scope for the transfer API; the origin/cache legs use the origin
+          # issuer and monitoring scopes.
+          if [ "${{ matrix.service }}" = "transfer" ]; then
+            ISSUER="https://localhost:8444"
+            SCOPE="web_ui.access pelican.transfer"
+          else
+            ISSUER="https://localhost:8444/api/v1.0/origin"
+            SCOPE="web_ui.access monitoring.query monitoring.scrape"
+          fi
           TOKEN=$(./pelican-server origin token create \
             --profile wlcg \
-            --scope "web_ui.access monitoring.query monitoring.scrape" \
-            --issuer https://localhost:8444/api/v1.0/origin \
+            --scope "${SCOPE}" \
+            --issuer "${ISSUER}" \
             --lifetime 7200 \
             --subject admin \
             --audience https://localhost:8444 \
-            --claim "oidc_iss=https://localhost:8444/api/v1.0/origin" \
+            --claim "oidc_iss=${ISSUER}" \
             --claim "oidc_sub=admin")
           echo "PELICAN_E2E_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
       - name: Install npm dependencies and Playwright browsers
@@ -245,10 +267,12 @@ jobs:
           TARGET_CACHE_URL: https://localhost:8444
           TARGET_DIRECTOR_URL: https://localhost:8444
           TARGET_REGISTRY_URL: https://localhost:8444
+          TARGET_TRANSFER_URL: https://localhost:8444
           TARGET_ORIGIN_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
           TARGET_CACHE_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
           TARGET_DIRECTOR_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
           TARGET_REGISTRY_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+          TARGET_TRANSFER_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
         run: |
           # Verify the server is still alive after the npm/dnf install steps.
           if ! kill -0 "$(cat /tmp/pelican-server.pid)" 2>/dev/null; then
