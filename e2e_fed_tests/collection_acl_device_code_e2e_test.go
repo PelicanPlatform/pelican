@@ -106,7 +106,9 @@ func runDeviceCodeFlowForTestUser(t *testing.T, ft *fed_test_utils.FedTest, pass
 	t.Helper()
 	serverURL := param.Server_ExternalWebUrl.GetString()
 
-	issuerMeta, err := config.GetIssuerMetadata(serverURL)
+	// Discover the /data namespace issuer the director advertises, not the
+	// origin's bare web URL.
+	issuerMeta, err := config.GetIssuerMetadata(serverURL + "/api/v1.0/issuer/ns/data")
 	require.NoError(t, err)
 
 	drcp := oauth2.DCRPConfig{

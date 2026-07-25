@@ -23,10 +23,17 @@ import (
 func SQLiteDSN(dbPath string) string {
 	// Use repeated _pragma entries, as glebarez/sqlite (modernc.org/sqlite) requires.
 	// The mattn-style `_name=value` shorthand is silently ignored.
+	//
+	// `_txlock=immediate` makes every non-readonly Begin() / gorm Transaction()
+	// issue `BEGIN IMMEDIATE`, acquiring the write lock at BEGIN. Without this,
+	// SQLite defaults to BEGIN DEFERRED and a read-then-write tx can hit
+	// SQLITE_BUSY_SNAPSHOT when a concurrent writer commits between its first
+	// SELECT and its UPDATE — busy_timeout does not retry that error.
 	return dbPath + "?" +
 		"_pragma=busy_timeout(5000)&" +
 		"_pragma=journal_mode(WAL)&" +
-		"_pragma=foreign_keys(1)"
+		"_pragma=foreign_keys(1)&" +
+		"_txlock=immediate"
 }
 
 func InitSQLiteDB(dbPath string) (*gorm.DB, error) {

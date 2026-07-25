@@ -199,6 +199,7 @@ const (
 	ErrCodeCancelled      = "CANCELLED"
 	ErrCodeTransferFailed = "TRANSFER_FAILED"
 	ErrCodeConflict       = "CONFLICT"
+	ErrCodeTooManyJobs    = "TOO_MANY_JOBS"
 )
 
 // Job and transfer status constants

@@ -38,7 +38,12 @@ export interface User {
 export const hasScope = (user: User | undefined, scope: string): boolean =>
   !!user?.scopes?.includes(scope);
 
-export type ServerType = 'registry' | 'director' | 'origin' | 'cache';
+export type ServerType =
+  | 'registry'
+  | 'director'
+  | 'origin'
+  | 'cache'
+  | 'transfer';
 
 export interface Server {
   name: string;

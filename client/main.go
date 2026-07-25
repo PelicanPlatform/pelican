@@ -208,6 +208,10 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token.SetToken(option.Value().(string))
+		case identTransferOptionTokenProvider{}:
+			if p, ok := option.Value().(TokenProvider); ok && p != nil {
+				token.SetExternalProvider(p)
+			}
 		case identTransferOptionFedToken{}:
 			fedToken = option.Value().(TokenProvider)
 		case identTransferOptionChecksums{}:

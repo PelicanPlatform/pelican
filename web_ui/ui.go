@@ -65,7 +65,7 @@ var (
 
 	//go:embed frontend/out/*
 	webAssets         embed.FS
-	serverPages       = []string{"director", "registry", "origin", "cache"}
+	serverPages       = []string{"director", "registry", "origin", "cache", "transfer"}
 	publicAccessPages = []string{"director", "registry"} // UI pages that allow unauthenticated users to access.
 	// adminAccessPages lists UI roots that REQUIRE system-admin privilege
 	// (the middleware redirects logged-in non-admins to /view/403/ and
@@ -78,7 +78,7 @@ var (
 	// before that role-aware switch could even run, which broke
 	// post-login flows whose returnURL pointed at the origin home for a
 	// non-admin user (e.g. a freshly-AUP-reset user redirecting back).
-	adminAccessPages = []string{"config", "cache"}
+	adminAccessPages = []string{"config", "cache", "transfer"}
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
@@ -313,7 +313,8 @@ func handleWebUIRedirect(ctx *gin.Context) {
 		if (serverName == "director" && !config.IsServerEnabled(server_structs.DirectorType)) ||
 			(serverName == "registry" && !config.IsServerEnabled(server_structs.RegistryType)) ||
 			(serverName == "origin" && !config.IsServerEnabled(server_structs.OriginType)) ||
-			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) {
+			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) ||
+			(serverName == "transfer" && !config.IsServerEnabled(server_structs.TransferType)) {
 			file, _ := webAssets.ReadFile(notFoundFilePath)
 			ctx.Data(
 				http.StatusNotFound,

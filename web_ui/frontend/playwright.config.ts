@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname + '/e2e', '.env') });
 
-type Service = 'origin' | 'cache' | 'director' | 'registry';
+type Service = 'origin' | 'cache' | 'director' | 'registry' | 'transfer';
 interface TestTarget {
   baseURL: string;
   token?: string;
@@ -38,6 +38,10 @@ const targets: Record<Service, TestTarget> = {
     baseURL: process.env.TARGET_REGISTRY_URL || defaultBaseUrl,
     token: process.env.TARGET_REGISTRY_TOKEN || defaultToken,
   },
+  transfer: {
+    baseURL: process.env.TARGET_TRANSFER_URL || defaultBaseUrl,
+    token: process.env.TARGET_TRANSFER_TOKEN || defaultToken,
+  },
 };
 
 /**
@@ -53,8 +57,11 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  /* Reporter to use. See https://playwright.dev/docs/test-reporters
+   * On CI, force the HTML reporter not to auto-open/serve the report (which
+   * keeps the process alive and can hang the job), and add a streaming `list`
+   * reporter so progress is visible in the log as tests run. */
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Capture screenshots only when tests fail so CI artifacts stay small. */

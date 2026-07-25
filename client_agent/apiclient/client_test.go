@@ -70,10 +70,10 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	// Create temporary directory for test files
 	tempDir = t.TempDir()
 
-	// Create token for authenticated operations
+	// Create token for authenticated operations. Sign with the federation's
+	// existing issuer key rather than rotating IssuerKeysDirectory after startup,
+	// which would re-sign with a key the cached JWKS sets don't yet trust.
 	t.Log("setupTestEnvironment: Creating token")
-	err := param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 

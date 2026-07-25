@@ -637,7 +637,7 @@ func GetTmpStoragePrefixDir(t *testing.T) string {
 
 // ChownToDaemon changes ownership of the given paths to the XRootD daemon user.
 // When not running as root this is a no-op (the daemon user is the current user).
-func ChownToDaemon(t *testing.T, paths ...string) {
+func ChownToDaemon(t testing.TB, paths ...string) {
 	t.Helper()
 	uinfo, err := config.GetDaemonUserInfo()
 	require.NoError(t, err)

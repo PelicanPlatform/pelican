@@ -29,10 +29,13 @@ import (
 	"github.com/ory/fosite"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // WLCGAudienceAny is the WLCG "wildcard" audience value.
@@ -48,6 +51,14 @@ const (
 	// maxClientNameLen is the maximum length (in bytes) of a client_name.
 	maxClientNameLen = 128
 )
+
+// LocalIssuerNamespace is the reserved registry/route key for the server's
+// "local" OIDC issuer -- the generic embedded issuer that mints tokens under the
+// server's own identity (iss = config.GetLocalIssuerUrl()), independent of any
+// data-export namespace.  Re-exported from server_structs (the canonical home)
+// so lower-level packages such as server_utils can reference it without
+// importing this package.
+const LocalIssuerNamespace = server_structs.LocalIssuerNamespace
 
 // IssuerURL returns the base issuer URL for this server (without any namespace path).
 // It is simply the server's external web URL.
@@ -70,6 +81,14 @@ func IssuerURLForNamespace(namespace string) string {
 // ServiceURIForNamespace returns the base path for OIDC endpoints scoped to a namespace.
 func ServiceURIForNamespace(issuerURL, namespace string) string {
 	return issuerURL + "/api/v1.0/issuer/ns" + namespace
+}
+
+// LocalIssuerServiceURL returns the OIDC discovery base URL for the server's
+// local issuer.  Clients fetch <url>/.well-known/openid-configuration here to
+// discover its device-code, token, and registration endpoints; the tokens it
+// mints carry iss = config.GetLocalIssuerUrl().
+func LocalIssuerServiceURL() string {
+	return ServiceURIForNamespace(IssuerURL(), LocalIssuerNamespace)
 }
 
 // RegisterRoutesWithMiddleware registers all embedded OIDC issuer routes on the
@@ -206,7 +225,7 @@ func handleDispatchDelete(ctx *gin.Context) {
 // OA4MP and the embedded issuer.
 func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		issuerURL := provider.Issuer()
 		serviceURI := ServiceURIForNamespace(IssuerURL(), provider.Namespace)
 
 		// The discovery document is public, non-sensitive metadata, so any
@@ -280,7 +299,7 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		session := DefaultOIDCSession("", IssuerURLForNamespace(provider.Namespace), nil, nil)
+		session := DefaultOIDCSession("", provider.Issuer(), nil, nil)
 
 		ar, err := provider.Provider().NewAccessRequest(rCtx, r, session)
 		if err != nil {
@@ -434,9 +453,16 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		for _, scope := range ar.GetRequestedScopes() {
 			scope = cleanScopePath(scope)
 			var candidates []string
-			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
+			switch {
+			case scope == "pelican.transfer":
+				// Authorization-gated, not a free standard scope: granted only
+				// to users permitted to use the transfer API.
+				if transferAccessAllowed(serverDB, userID, groups) {
+					candidates = []string{scope}
+				}
+			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
 				candidates = []string{scope}
-			} else {
+			default:
 				candidates = collectNarrowerScopes(scope, allowedScopes)
 			}
 			for _, s := range candidates {
@@ -450,7 +476,7 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		// other WLCG service) accept the resulting token.
 		ar.GrantAudience(WLCGAudienceAny)
 
-		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		issuerURL := provider.Issuer()
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, ar.GetGrantedScopes())
 
 		response, err := provider.Provider().NewAuthorizeResponse(rCtx, ar, session)
@@ -708,9 +734,16 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		grantedScopes := make([]string, 0)
 		for _, scope := range requestedScopes {
 			scope = cleanScopePath(scope)
-			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
+			switch {
+			case scope == "pelican.transfer":
+				// Authorization-gated, not a free standard scope: granted only
+				// to users permitted to use the transfer API.
+				if transferAccessAllowed(serverDB, userID, groups) {
+					grantedScopes = append(grantedScopes, scope)
+				}
+			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
 				grantedScopes = append(grantedScopes, scope)
-			} else {
+			default:
 				grantedScopes = append(grantedScopes, collectNarrowerScopes(scope, allowedScopes)...)
 			}
 		}
@@ -733,7 +766,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		}
 		grantedScopes = filteredScopes
 
-		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		issuerURL := provider.Issuer()
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, grantedScopes)
 		sessionData, _ := json.Marshal(session)
 
@@ -800,7 +833,7 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 		return
 	}
 
-	issuerURL := IssuerURLForNamespace(provider.Namespace)
+	issuerURL := provider.Issuer()
 	session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 	request, err := provider.DeviceCodeHandler.HandleDeviceAccessRequest(ctx, deviceCode, session)
@@ -938,7 +971,7 @@ func handleUserInfo(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		token := parts[1]
-		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		issuerURL := provider.Issuer()
 		session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 		_, ar, err := provider.Provider().IntrospectToken(rCtx, token, fosite.AccessToken, session)
@@ -979,7 +1012,7 @@ func handleIntrospect(provider *OIDCProvider) gin.HandlerFunc {
 		w := ctx.Writer
 		rCtx := r.Context()
 
-		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		issuerURL := provider.Issuer()
 		session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 		ir, err := provider.Provider().NewIntrospectionRequest(rCtx, r, session)
@@ -1141,7 +1174,18 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 		}
 		responseTypes := []string{} // no interactive response types
 
-		scopes := []string{"openid", "offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"}
+		// pelican.transfer and the collection.* management scopes are
+		// authorization-gated (transferAccessAllowed / GetUserCollectionScopes
+		// decide at issuance whether the user actually gets them), but they must
+		// appear in the client's scope list so dynamically-registered CLIs — the
+		// transfer CLI and the collections CLI — can carry them: the device-code
+		// grant's client-scope filter strips any scope the client isn't
+		// registered for, even when the user's authorization would grant it.
+		// The collection.* scopes are namespace-agnostic control-plane scopes
+		// (the collections API is gated by the local issuer, not per data export).
+		scopes := []string{"openid", "offline_access", "wlcg", "pelican.transfer",
+			"storage.read:/", "storage.modify:/", "storage.create:/",
+			"collection.read:/", "collection.create:/", "collection.modify:/", "collection.delete:/"}
 
 		client := &fosite.DefaultClient{
 			ID:            clientID,
@@ -1414,6 +1458,35 @@ func isStandardScope(scope string) bool {
 	case "openid", "offline_access", "wlcg", "profile", "email":
 		return true
 	}
+	return false
+}
+
+// transferAccessAllowed reports whether the identity may be granted the
+// pelican.transfer scope.  This is the authorization gate for the transfer API,
+// enforced at token-issuance time on the local issuer.
+//
+// Access is DENIED by default: permission must be granted explicitly, either by
+//   - membership in a Transfer.EnabledGroups group (config), or
+//   - a pelican.transfer grant to the user or one of their groups through the
+//     web-UI user/group scope system (database.HasEffectiveScope).
+//
+// In particular, when no transfer groups are configured and no scope grant
+// exists, no one is authorized — we never auto-grant the scope.
+func transferAccessAllowed(db *gorm.DB, userID string, groups []string) bool {
+	// Config-based grant: membership in a configured transfer group.
+	enabled := param.Transfer_EnabledGroups.GetStringSlice()
+	for _, g := range groups {
+		for _, e := range enabled {
+			if g == e {
+				return true
+			}
+		}
+	}
+	// Explicit grant via the web-UI user/group scope system.
+	if db != nil && database.HasEffectiveScope(db, userID, groups, token_scopes.Pelican_Transfer) {
+		return true
+	}
+	// Default deny.
 	return false
 }
 

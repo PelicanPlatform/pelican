@@ -408,6 +408,39 @@ func computeAndStoreChecksums(root *os.Root, filename string, types []ChecksumTy
 	return nil
 }
 
+// allChecksumXattrNames lists every xattr used to cache a checksum, so a single
+// overwrite can drop all of them at once.
+var allChecksumXattrNames = []string{xattrMD5, xattrSHA1, xattrCRC32, xattrCRC32C}
+
+// InvalidateChecksums removes every cached checksum xattr for a file. It must be
+// called after a file is (over)written so a subsequent read recomputes the
+// checksum from the new bytes instead of trusting a stale cached value.
+//
+// Cached-checksum freshness is otherwise validated only by the file's mtime at
+// one-second resolution (the XRootD XrdCks on-disk format stores mtime as a Unix
+// second — see serializeXRootDChecksum). An overwrite within the same wall-clock
+// second therefore leaves the old checksum looking valid, and the origin would
+// report a digest that does not match the bytes it now serves — which a cache
+// verifying the download rejects. Dropping the xattrs on write closes that race
+// deterministically.
+//
+// A missing xattr is not an error (nothing was cached yet). Uses the provided
+// os.Root so all file access stays within the storage directory.
+func InvalidateChecksums(root *os.Root, filename string) error {
+	f, err := root.OpenFile(filename, os.O_RDWR, 0)
+	if err != nil {
+		return errors.Wrap(err, "failed to open file to invalidate checksums")
+	}
+	defer f.Close()
+
+	for _, name := range allChecksumXattrNames {
+		if err := xattr.FRemove(f, name); err != nil && !errors.Is(err, xattr.ENOATTR) {
+			return errors.Wrapf(err, "failed to remove checksum xattr %s", name)
+		}
+	}
+	return nil
+}
+
 // mergeWithDefault merges requested types with default list, de-duplicated.
 func mergeWithDefault(types []ChecksumType) []ChecksumType {
 	def := defaultChecksumTypes()

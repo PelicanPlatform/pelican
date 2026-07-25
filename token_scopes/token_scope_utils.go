@@ -102,29 +102,36 @@ func GetScopeString[Scopes ~[]Sc, Sc Scope](scopes Scopes) (scopeString string) 
 	return
 }
 
+// ParseResourceScopes converts a slice of scope strings (e.g.
+// "storage.read:/foo") into ResourceScope values.  Scopes without a
+// ":" separator are treated as having a resource of "/".
+func ParseResourceScopes(scopes []string) []ResourceScope {
+	result := make([]ResourceScope, 0, len(scopes))
+	for _, s := range scopes {
+		if s == "" {
+			continue
+		}
+		parts := strings.SplitN(s, ":", 2)
+		if len(parts) == 2 {
+			result = append(result, NewResourceScope(TokenScope(parts[0]), parts[1]))
+		} else {
+			result = append(result, NewResourceScope(TokenScope(parts[0]), "/"))
+		}
+	}
+	return result
+}
+
 // Get a list of resource-style scopes from the token
-func ParseResourceScopeString(tok jwt.Token) (scopes []ResourceScope) {
-	scopes = make([]ResourceScope, 0)
+func ParseResourceScopeString(tok jwt.Token) []ResourceScope {
 	scopeAny, ok := tok.Get("scope")
 	if !ok {
-		return
+		return []ResourceScope{}
 	}
 	scopeString, ok := scopeAny.(string)
 	if !ok {
-		return
+		return []ResourceScope{}
 	}
-	for _, scope := range strings.Split(scopeString, " ") {
-		if scope == "" {
-			continue
-		}
-		info := strings.SplitN(scope, ":", 2)
-		if len(info) == 1 {
-			scopes = append(scopes, NewResourceScope(TokenScope(info[0]), "/"))
-		} else {
-			scopes = append(scopes, NewResourceScope(TokenScope(info[0]), info[1]))
-		}
-	}
-	return
+	return ParseResourceScopes(strings.Split(scopeString, " "))
 }
 
 // Return if expectedScopes contains the tokenScope and it's case-insensitive.

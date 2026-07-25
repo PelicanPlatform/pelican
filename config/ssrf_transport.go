@@ -200,6 +200,37 @@ func (t *SSRFTransport) ssrfDialContext(ctx context.Context, network, addr strin
 	return t.dialContext(ctx, network, net.JoinHostPort(host, port))
 }
 
+// ValidateHost resolves host and returns an error if any resolved address is
+// blocked by the SSRF policy, using the same resolution and block checks as the
+// SSRF dialer. It is for callers that must vet a user-supplied host before
+// handing it to a transport that is not itself SSRF-protected (e.g. admission
+// control on transfer endpoints).
+//
+// This is a point-in-time check: a hostname can resolve differently when the
+// connection is actually made (DNS rebinding), so it is defense-in-depth and not
+// a substitute for an SSRF-safe dialer on the data path.
+func (t *SSRFTransport) ValidateHost(ctx context.Context, host string) error {
+	if t.disabled || host == "" {
+		return nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("SSRF check: DNS resolution failed for %q: %w", host, err)
+	}
+	for _, ipAddr := range ips {
+		if t.isBlocked(ipAddr.IP) {
+			return fmt.Errorf("SSRF check: %s (%s) is not publicly routable", host, ipAddr.IP.String())
+		}
+	}
+	return nil
+}
+
+// CheckSSRFHost validates host against the process-wide SSRF policy. See
+// SSRFTransport.ValidateHost for semantics and caveats.
+func CheckSSRFHost(ctx context.Context, host string) error {
+	return GetSSRFTransport().ValidateHost(ctx, host)
+}
+
 // GetSSRFTransport returns a singleton *SSRFTransport configured from the
 // Server.SSRF* parameters.  The returned transport shares TLS configuration
 // and connection pooling settings with the default Pelican transport but uses

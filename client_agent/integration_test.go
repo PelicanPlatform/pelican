@@ -263,9 +263,9 @@ func TestClientAPIIntegration(t *testing.T) {
 	originalHash, err := computeFileSHA256(originalFile)
 	require.NoError(t, err)
 
-	// Create token for authenticated operations
-	err = param.IssuerKeysDirectory.Set(t.TempDir())
-	require.NoError(t, err)
+	// Create token for authenticated operations. Sign with the federation's
+	// existing issuer key rather than rotating IssuerKeysDirectory after startup,
+	// which would re-sign with a key the cached JWKS sets don't yet trust.
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
