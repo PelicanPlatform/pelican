@@ -443,16 +443,10 @@ func (v *verifier) verify(ctx context.Context, authHeader string, req verifyRequ
 // a forged event from redirecting verification at an attacker-controlled host
 // (SSRF / request forgery).
 func (v *verifier) discoverKeys(ctx context.Context, req verifyRequest, tokenIssuer string) (jwk.Set, error) {
-	// Registry-based: the event names a federation. Accept it only if it is
-	// the one this receiver is configured to trust, and then discover from the
-	// *configured* value.
-	if req.eventFederation != "" {
-		if req.trustedFederation == "" {
-			return nil, fmt.Errorf("event names federation %q but this receiver has no trusted -federation configured", req.eventFederation)
-		}
-		if canonicalFederation(req.eventFederation) != req.trustedFederation {
-			return nil, fmt.Errorf("event federation %q is not the trusted federation %q", req.eventFederation, req.trustedFederation)
-		}
+	// Registry-based: use it when this receiver trusts the federation the event
+	// names, discovering from the *configured* value.
+	if req.trustedFederation != "" && req.eventFederation != "" &&
+		canonicalFederation(req.eventFederation) == req.trustedFederation {
 		namespace, err := validateNamespace(req.namespace)
 		if err != nil {
 			return nil, err
@@ -460,14 +454,19 @@ func (v *verifier) discoverKeys(ctx context.Context, req verifyRequest, tokenIss
 		return v.keySetForNamespace(ctx, req.trustedFederation, namespace)
 	}
 
-	// Issuer-pinned fallback: the event carries no federation, so fall back to
-	// OIDC discovery — but only when the token's issuer matches the configured
-	// -issuer, and discover from the *configured* value.
-	if req.trustedIssuer != "" && tokenIssuer != "" && canonicalFederation(tokenIssuer) == req.trustedIssuer {
+	// Issuer-pinned: use it when this receiver trusts the issuer the token
+	// names (OIDC on the *configured* value). Covers events that carry no
+	// federation, and is tried when the registry path above did not apply.
+	if req.trustedIssuer != "" && tokenIssuer != "" &&
+		canonicalFederation(tokenIssuer) == req.trustedIssuer {
 		return v.keySetForIssuer(ctx, req.trustedIssuer)
 	}
 
-	return nil, fmt.Errorf("no trusted key source: event carries no federation matching -federation, and token issuer %q does not match -issuer", tokenIssuer)
+	// Neither anchor applied.
+	if req.eventFederation != "" && req.trustedFederation != "" {
+		return nil, fmt.Errorf("event federation %q is not the trusted federation %q, and token issuer %q does not match -issuer", req.eventFederation, req.trustedFederation, tokenIssuer)
+	}
+	return nil, fmt.Errorf("no trusted key source: no -federation matches the event's federation %q, and no -issuer matches the token issuer %q", req.eventFederation, tokenIssuer)
 }
 
 // validateNamespace rejects a namespace that could escape the registry path or
