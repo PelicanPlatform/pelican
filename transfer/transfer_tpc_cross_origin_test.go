@@ -208,6 +208,32 @@ Xrootd:
 			t.Log("Timed out waiting for origin2 process to exit during cleanup")
 		}
 	})
+	// origin2 redirects its logs to a file (Logging.LogLocation), so its xrootd
+	// scitokens/authz trace is otherwise invisible in CI. On failure, surface the
+	// lines that explain a token rejection.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		data, rerr := os.ReadFile(logPath)
+		if rerr != nil {
+			t.Logf("origin2 log unavailable (%s): %v", logPath, rerr)
+			return
+		}
+		var b strings.Builder
+		for _, line := range strings.Split(string(data), "\n") {
+			ll := strings.ToLower(line)
+			if strings.Contains(ll, "scitoken") || strings.Contains(ll, "authz") ||
+				strings.Contains(ll, "authoriz") || strings.Contains(ll, "issuer") ||
+				strings.Contains(ll, "jwks") || strings.Contains(ll, "denied") ||
+				strings.Contains(ll, "forbidden") || strings.Contains(ll, " aud") ||
+				strings.Contains(ll, "token") {
+				b.WriteString(line)
+				b.WriteByte('\n')
+			}
+		}
+		t.Logf("=== origin2 scitokens/authz log lines (%s) ===\n%s", logPath, b.String())
+	})
 	for _, pipe := range []struct {
 		r    *bufio.Scanner
 		name string
