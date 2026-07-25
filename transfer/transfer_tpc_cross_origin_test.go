@@ -100,6 +100,7 @@ func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password,
 	require.NoError(t, err)
 	origin2Port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
+	origin2URL := fmt.Sprintf("https://%s:%d", host, origin2Port)
 
 	// Grab federation values from the running federation.
 	discoveryURL := param.Federation_DiscoveryUrl.GetString()
@@ -164,6 +165,11 @@ Origin:
   EnableCmsd: false
   EnableVoms: false
   Port: 0
+  # Origin.Port is 0 (auto-assign), so the default TokenAudience (${Origin.Url})
+  # would be the malformed "https://<host>:0". XRootD's scitokens plugin writes
+  # that into audience_json and then fails every token's 'aud' check. Pin a
+  # well-formed audience (the origin's web URL) so token verification works.
+  TokenAudience: %s
   DbLocation: %s
   Exports:
     - StoragePrefix: %s
@@ -183,6 +189,7 @@ Xrootd:
 		htpasswdFile,
 		filepath.Join(origin2Dir, "server.sqlite"),
 		filepath.Join(origin2Dir, "backups"),
+		origin2URL, // Origin.TokenAudience
 		filepath.Join(origin2Dir, "origin.sqlite"),
 		storageDir, fedPrefix,
 		logPath, runtimeDir,
@@ -247,7 +254,6 @@ Xrootd:
 	}
 
 	// Wait for origin #2 to become healthy, then to be resolvable in the director.
-	origin2URL := fmt.Sprintf("https://%s:%d", host, origin2Port)
 	waitForStatus(t, ctx, origin2URL+"/api/v1.0/health", http.StatusOK, exitCh, logPath, "origin2 health")
 
 	directorURL := param.Server_ExternalWebUrl.GetString()
