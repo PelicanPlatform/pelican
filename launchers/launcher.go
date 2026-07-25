@@ -516,6 +516,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	log.Debug("Launching storage health monitor")
 	metrics.LaunchStorageHealthMonitor(ctx, egrp, modules)
 
+	// Automatically obtain a federation-issued host certificate when the
+	// federation runs a CA (origin/cache only). Non-blocking: the service keeps
+	// running on its temporary self-signed certificate until a CA cert arrives.
+	launcher_utils.LaunchHostCertificateManager(ctx, egrp, modules)
+
 	if param.Server_EnableUI.GetBool() {
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
