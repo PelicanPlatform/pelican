@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -501,6 +502,34 @@ func generateXBrokerHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd) 
 	}
 }
 
+// Populate the X-Pelican-Direct-Endpoints header (WS2) with the top-ranked
+// server's ordered direct-reach addresses, so a Pelican client can dial the
+// server by IP without DNS (authenticating the TLS peer against the server's
+// slug). Emitted only to real Pelican clients: it is a harmless, additive hint
+// (the Location still points at the server's normal host), and a non-Pelican
+// tool has no way to authenticate a slug-named certificate, so there is no
+// reason to hand it the addresses.
+func generateXDirectEndpointsHeader(ginCtx *gin.Context, chosenAds []server_structs.ServerAd) {
+	if len(chosenAds) == 0 || len(chosenAds[0].DirectEndpoints) == 0 {
+		return
+	}
+	if _, service, err := extractVersionAndService(ginCtx); err != nil || service != "client" {
+		return
+	}
+	ad := chosenAds[0]
+	// The client dials one of the endpoints but must authenticate the TLS peer
+	// against the server's slug (its ServerID, which is the certificate SAN), so
+	// the slug travels in the header as a leading "sni=<slug>" field followed by
+	// the ordered endpoints. Omit the sni field if the slug is unknown.
+	parts := make([]string, 0, len(ad.DirectEndpoints)+1)
+	if ad.ServerID != "" {
+		parts = append(parts, "sni="+ad.ServerID)
+	}
+	parts = append(parts, ad.DirectEndpoints...)
+	ginCtx.Writer.Header()[string(server_structs.XPelicanDirectEndpointsHeaderName)] =
+		[]string{strings.Join(parts, ", ")}
+}
+
 // Populate the X-Pelican-JobId header with the request ID. This is used for tracking
 // requests through the system.
 func generateXJobIdHeader(ginCtx *gin.Context, requestId uuid.UUID) {
@@ -693,6 +722,7 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 	generateXTokenGenHeader(ctx, nsAd)
 	generateXNamespaceHeader(ctx, oAds, nsAd)
 	generateXBrokerHeader(ctx, chosenAds)
+	generateXDirectEndpointsHeader(ctx, chosenAds)
 	generateXJobIdHeader(ctx, requestId)
 
 	redirectURL := getRedirectURL(reqPath, chosenAds[0], !nsAd.Caps.PublicReads)
@@ -1430,6 +1460,36 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
+// isPublicIP reports whether ip is a globally-routable unicast address (not
+// loopback, private, link-local, or unspecified).
+func isPublicIP(ip net.IP) bool {
+	return ip != nil && !ip.IsLoopback() && !ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
+}
+
+// autoCaptureDirectEndpoint returns a "host:port" direct-reach endpoint derived
+// from the source address of the registration, but ONLY when the server's
+// advertised data host is a private/loopback IP literal — i.e. it clearly has
+// no publicly reachable address or DNS name. In that case the routable source
+// IP of the registration (honoring trusted-proxy X-Forwarded-For) is the address
+// through which clients can reach the server. Returns "" (no capture) for public
+// hosts and DNS names, which use the normal path or the Server.AdvertisedIPs
+// override — so this never alters behavior for a normally-reachable server.
+func autoCaptureDirectEndpoint(ctx *gin.Context, adUrl *url.URL) string {
+	dataIP := net.ParseIP(adUrl.Hostname())
+	if dataIP == nil || isPublicIP(dataIP) {
+		return ""
+	}
+	peer := ctx.ClientIP()
+	if !isPublicIP(net.ParseIP(peer)) {
+		return ""
+	}
+	if port := adUrl.Port(); port != "" {
+		return net.JoinHostPort(peer, port)
+	}
+	return peer
+}
+
 func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType) {
 	log.Debugf("finishRegisterServeAd received %+v", ad)
 	st := ad.StorageType
@@ -1488,6 +1548,16 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *serv
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 		Downtimes:           ad.Downtimes,
 		Status:              ad.Status,
+		DirectEndpoints:     ad.DirectEndpoints, // WS2: DNS-less direct reach endpoints (may be empty)
+	}
+	// WS2 auto-detect: when the server advertised no explicit direct endpoints
+	// but its data host is a private/loopback IP literal (a clear "not publicly
+	// reachable, no DNS" signal), funnel clients through the source address of
+	// the registration — the routable IP on the other side of the connection.
+	if len(sAd.DirectEndpoints) == 0 {
+		if ep := autoCaptureDirectEndpoint(ctx, adUrl); ep != "" {
+			sAd.DirectEndpoints = []string{ep}
+		}
 	}
 	// If the server declared its own geolocation via GeoLocation config, honor it.
 	if ad.Coordinate != nil {

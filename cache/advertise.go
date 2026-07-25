@@ -62,6 +62,7 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 		DataURL:             originUrl,
 		DisableDirectorTest: !param.Cache_DirectorTest.GetBool(),
 		WebURL:              originWebUrl,
+		DirectEndpoints:     param.Server_AdvertisedIPs.GetStringSlice(), // WS2: DNS-less direct reach override
 		Namespaces:          server.GetNamespaceAds(),
 		Status:              status,
 		Downtimes:           downtimes,

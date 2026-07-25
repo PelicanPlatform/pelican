@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -237,6 +238,12 @@ type (
 		// the server must not be sorted after any non-preferred (director-provided)
 		// server, even if the origin/cache service responds more quickly.
 		Preferred bool
+
+		// SNI, when set, is the TLS ServerName to use for this attempt instead of
+		// the URL host (WS2). Used for a direct-by-IP connection to a server whose
+		// certificate is issued for its slug: the Url.Host is the IP endpoint and
+		// SNI is the slug. Empty for normal (DNS) attempts.
+		SNI string
 	}
 
 	// A structure representing a single file to transfer.
@@ -2391,6 +2398,21 @@ func buildUploadTransfers(job *clientTransferJob, packOption string) ([]transfer
 	if len(job.job.dirResp.ObjectServers) == 0 {
 		return nil, errors.New("No origins found for upload")
 	}
+	// WS2: uploads are single-attempt (the request body cannot be replayed for a
+	// fallback), so when the director advertised a direct-reach endpoint — i.e.
+	// the server is DNS-less and best/only reached by IP — target that endpoint
+	// directly, authenticated against the server slug (ServerName). For a
+	// normally-reachable server no direct endpoint is advertised and this is a
+	// no-op.
+	if d := job.job.dirResp.XPelDirectHdr; d.Slug != "" && len(d.Endpoints) > 0 {
+		u := *job.job.dirResp.ObjectServers[0]
+		u.Host = d.Endpoints[0]
+		return []transferAttemptDetails{{
+			Url:        &u,
+			PackOption: packOption,
+			SNI:        d.Slug,
+		}}, nil
+	}
 	return []transferAttemptDetails{{
 		Url:        job.job.dirResp.ObjectServers[0],
 		PackOption: packOption,
@@ -2434,12 +2456,41 @@ func buildDownloadTransfers(job *clientTransferJob, packOption string) ([]transf
 	log.Debugf("Trying all %d preferred object servers plus up to %d director-provided servers", nPreferred, ObjectServersToTry)
 	transfers := getObjectServersToTry(sortedServerStrings, job.job, ObjectServersToTry, packOption, nPreferred)
 
+	// WS2: if the director advertised direct-reach endpoints (a DNS-less server
+	// reachable by IP), try them first, authenticated by slug. These are a fast
+	// best-effort path; on failure the normal attempts below are still tried.
+	transfers = prependDirectEndpoints(transfers, job.job.dirResp, packOption)
+
 	if len(transfers) > 0 {
 		log.Traceln("First transfer in list:", transfers[0].Url)
 	} else {
 		return nil, errors.New("No transfers possible as no object servers were found")
 	}
 	return transfers, nil
+}
+
+// prependDirectEndpoints puts direct-by-IP attempts (dialed at the advertised
+// IP endpoint, TLS-authenticated against the server slug) ahead of the normal
+// attempts. It is a no-op unless the director advertised both a slug and at
+// least one endpoint. The endpoints are templated on the director's top object
+// server (ObjectServers[0]) — the server the header describes — so path, scheme,
+// and query are preserved while only the host becomes the IP endpoint.
+func prependDirectEndpoints(transfers []transferAttemptDetails, dirResp server_structs.DirectorResponse, packOption string) []transferAttemptDetails {
+	d := dirResp.XPelDirectHdr
+	if d.Slug == "" || len(d.Endpoints) == 0 || len(dirResp.ObjectServers) == 0 {
+		return transfers
+	}
+	direct := make([]transferAttemptDetails, 0, len(d.Endpoints))
+	for _, ep := range d.Endpoints {
+		u := *dirResp.ObjectServers[0]
+		u.Host = ep
+		direct = append(direct, transferAttemptDetails{
+			Url:        &u,
+			PackOption: packOption,
+			SNI:        d.Slug,
+		})
+	}
+	return append(direct, transfers...)
 }
 
 func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error) {
@@ -3570,6 +3621,22 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// Note we aren't reusing a common client from the config module; this is because
 		// the transport is actually reading from a Unix socket and is rather unique.
 		client = &http.Client{Transport: transport}
+	} else if transfer.SNI != "" {
+		// WS2: this attempt dials a direct IP endpoint (transfer.Url.Host) but
+		// must authenticate the TLS peer against the server's slug, so a
+		// federation-issued certificate (SAN = slug) validates. Use a per-request
+		// transport clone — it inherits the (federation-augmented) trust pool but
+		// overrides ServerName without affecting the shared clients. On any
+		// failure the caller falls back to the next attempt (the normal DNS host).
+		transport := config.GetTransport().Clone()
+		if !transfer.Proxy {
+			transport.Proxy = nil
+		}
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.ServerName = transfer.SNI
+		client = &http.Client{Transport: transport}
 	}
 	headerTimeout := config.GetTransport().ResponseHeaderTimeout
 	if headerTimeout > time.Second {
@@ -4395,7 +4462,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 
 	useProxy := transfer.attempts[0].Proxy
 
-	go runPut(request, responseChan, errorChan, useProxy)
+	go runPut(request, responseChan, errorChan, useProxy, transfer.attempts[0].SNI)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -4603,8 +4670,22 @@ Loop:
 //
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
-func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
+func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool, sni string) {
 	client := config.GetClientNoProxy()
+	if sni != "" {
+		// WS2: uploading directly to a DNS-less server by IP — authenticate the
+		// TLS peer against its slug via a per-request transport clone (inherits
+		// the federation-augmented trust pool without mutating the shared client).
+		transport := config.GetTransport().Clone()
+		if !proxy {
+			transport.Proxy = nil
+		}
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.ServerName = sni
+		client = &http.Client{Transport: transport}
+	}
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)

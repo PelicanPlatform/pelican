@@ -390,6 +390,14 @@ func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse,
 		return server_structs.DirectorResponse{}, errors.Wrapf(err, "failed to parse %s header", xPelTokGen.GetName())
 	}
 
+	// WS2: the direct-endpoints header is optional and advisory — missing is
+	// normal (non-fatal). It carries the slug + IP endpoints for a DNS-less
+	// direct connection.
+	var xPelDirect server_structs.XPelDirectEndpoints
+	if err := (&xPelDirect).ParseRawHeader(&dirResp.Header); err != nil {
+		log.Debugf("Director response has no %s header (non-fatal): %v", xPelDirect.GetName(), err)
+	}
+
 	sortedObjectServers, err := parseServersFromDirectorResponse(dirResp)
 	if err != nil {
 		return server_structs.DirectorResponse{}, errors.Wrap(err, "failed to determine object servers from Director's response")
@@ -413,5 +421,6 @@ func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse,
 		XPelAuthHdr:   xPelAuth,
 		XPelNsHdr:     xPelNs,
 		XPelTokGenHdr: xPelTokGen,
+		XPelDirectHdr: xPelDirect,
 	}, nil
 }

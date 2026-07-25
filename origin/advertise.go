@@ -196,11 +196,12 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	}
 
 	ad := server_structs.OriginAdvertise{
-		ServerID:       id,
-		RegistryPrefix: registryPrefix,
-		DataURL:        dataUrlToAdvertise,
-		WebURL:         originWebUrl,
-		Namespaces:     nsAds,
+		ServerID:        id,
+		RegistryPrefix:  registryPrefix,
+		DataURL:         dataUrlToAdvertise,
+		WebURL:          originWebUrl,
+		DirectEndpoints: param.Server_AdvertisedIPs.GetStringSlice(), // WS2: DNS-less direct reach override
+		Namespaces:      nsAds,
 		Caps: server_structs.Capabilities{
 			PublicReads: param.Origin_EnablePublicReads.GetBool(),
 			Reads:       reads,

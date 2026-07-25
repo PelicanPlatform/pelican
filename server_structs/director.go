@@ -123,26 +123,34 @@ type (
 	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
-		ServerID               string            `json:"serverId"`       // The server's ID
-		RegistryPrefix         string            `json:"registryPrefix"` // The server's prefix recorded in the registry
-		StorageType            OriginStorageType `json:"storageType"`    // Always POSIX for caches
-		DisableDirectorTest    bool              `json:"directorTest"`
-		AuthURL                url.URL           `json:"auth_url"`
-		BrokerURL              url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL                    url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL                 url.URL           `json:"web_url"`    // This is server's Web interface and API
-		Type                   string            `json:"type"`
-		Latitude               float64           `json:"latitude"`  // Should be replaced by Coordinate
-		Longitude              float64           `json:"longitude"` // Should be replaced by Coordinate
-		Coordinate             Coordinate        `json:"coordinate"`
-		Caps                   Capabilities      `json:"capabilities"`
-		FromTopology           bool              `json:"from_topology"`
-		IOLoad                 float64           `json:"io_load"`
-		StatusWeight           float64           `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
-		StatusWeightLastUpdate int64             `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
-		Downtimes              []Downtime        `json:"downtimes"`              // Would be an empty slice if no downtime
-		RequiredFeatures       []string          `json:"requiredFeatures"`       // A list of feature names required by this server
-		Status                 string            `json:"status"`
+		ServerID            string            `json:"serverId"`       // The server's ID
+		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
+		StorageType         OriginStorageType `json:"storageType"`    // Always POSIX for caches
+		DisableDirectorTest bool              `json:"directorTest"`
+		AuthURL             url.URL           `json:"auth_url"`
+		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL                 url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL              url.URL           `json:"web_url"`    // This is server's Web interface and API
+		// DirectEndpoints is an ordered list of "host:port" (typically IP:port)
+		// addresses at which this server is reachable directly, used to funnel
+		// clients to the server without a DNS name (WS2, "reduce origin
+		// requirements"). Populated from the server's advertised list or, when
+		// absent, the source address of its registration. Peers authenticate the
+		// TLS connection against the server's slug (ServerName), not these
+		// addresses, so no IP-SAN certificate is required.
+		DirectEndpoints        []string     `json:"direct_endpoints,omitempty"`
+		Type                   string       `json:"type"`
+		Latitude               float64      `json:"latitude"`  // Should be replaced by Coordinate
+		Longitude              float64      `json:"longitude"` // Should be replaced by Coordinate
+		Coordinate             Coordinate   `json:"coordinate"`
+		Caps                   Capabilities `json:"capabilities"`
+		FromTopology           bool         `json:"from_topology"`
+		IOLoad                 float64      `json:"io_load"`
+		StatusWeight           float64      `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64        `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Downtimes              []Downtime   `json:"downtimes"`              // Would be an empty slice if no downtime
+		RequiredFeatures       []string     `json:"requiredFeatures"`       // A list of feature names required by this server
+		Status                 string       `json:"status"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -165,6 +173,12 @@ type (
 		BrokerURL      string `json:"broker-url,omitempty"`
 		DataURL        string `json:"data-url" binding:"required"`
 		WebURL         string `json:"web-url,omitempty"`
+		// DirectEndpoints is an optional ordered list of "host:port" (typically
+		// IP:port) addresses at which this server is directly reachable without a
+		// DNS name (WS2). When empty, the director falls back to the source
+		// address of this registration. Peers authenticate via the server slug,
+		// not these addresses.
+		DirectEndpoints []string `json:"direct-endpoints,omitempty"`
 		// Coordinate allows a server to declare its own geolocation, which takes
 		// highest priority over GeoIP overrides and MaxMind lookups on the director.
 		// Set this via the GeoLocation config parameter ("lat,lon" string).
@@ -237,6 +251,14 @@ type (
 		VaultServer   *url.URL
 	}
 
+	// XPelDirectEndpoints is the parsed X-Pelican-Direct-Endpoints header (WS2):
+	// the server's slug (used as the TLS ServerName) and the ordered "host:port"
+	// addresses to try dialing directly.
+	XPelDirectEndpoints struct {
+		Slug      string
+		Endpoints []string
+	}
+
 	CoordinateSource string // For indicating where we got a coordinate from, e.g. maxmind, override, random assignment, etc.
 
 	Coordinate struct {
@@ -276,7 +298,8 @@ type (
 		XPelAuthHdr   XPelAuth
 		XPelNsHdr     XPelNs
 		XPelTokGenHdr XPelTokGen
-		RedirectInfo  *RedirectInfo // Director's decision information (populated when X-Pelican-Debug is set)
+		XPelDirectHdr XPelDirectEndpoints // WS2: direct-reach endpoints + slug (may be empty)
+		RedirectInfo  *RedirectInfo       // Director's decision information (populated when X-Pelican-Debug is set)
 	}
 
 	AdAfter int // Ternary logic for the `Ad.After` function
@@ -359,6 +382,16 @@ const (
 	XPelicanNamespaceHeaderName       XPelHeaderName = "X-Pelican-Namespace"
 	XPelicanAuthHeaderName            XPelHeaderName = "X-Pelican-Authorization"
 	XPelicanTokenGenerationHeaderName XPelHeaderName = "X-Pelican-Token-Generation"
+	// XPelicanDirectEndpointsHeaderName carries the server's slug and an ordered
+	// list of direct-reach addresses for connecting without DNS (WS2). The value
+	// is a comma-separated list: a leading "sni=<slug>" field followed by the
+	// ordered "host:port" (typically IP:port) endpoints, e.g.
+	//   sni=18f1jk5, 192.0.2.10:8443, [2001:db8::1]:8443
+	// Emitted only to Pelican clients, which dial the endpoints in order and set
+	// the TLS ServerName to <slug> — the certificate SAN — rather than the
+	// address. Backward-safe: additive only, the Location still points at the
+	// server's normal host.
+	XPelicanDirectEndpointsHeaderName XPelHeaderName = "X-Pelican-Direct-Endpoints"
 )
 
 func (x XPelCoordinate) GetName() string {
@@ -419,6 +452,32 @@ func (x *XPelNs) ParseRawHeader(header *http.Header) error {
 	x.RequireToken, _ = strconv.ParseBool(keyDict["require-token"])
 	if keyDict["collections-url"] != "" {
 		x.CollectionsUrl, _ = url.Parse(keyDict["collections-url"])
+	}
+	return nil
+}
+
+func (x XPelDirectEndpoints) GetName() string {
+	return string(XPelicanDirectEndpointsHeaderName)
+}
+
+// ParseRawHeader parses "sni=<slug>, host:port, host:port": the leading
+// "sni=<slug>" field yields the slug (TLS ServerName), and every other field is
+// an ordered endpoint.
+func (x *XPelDirectEndpoints) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
+	if len(raw) == 0 {
+		return errors.Errorf("no %s header found.", x.GetName())
+	}
+	for _, field := range strings.Split(raw[0], ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if slug, ok := strings.CutPrefix(field, "sni="); ok {
+			x.Slug = slug
+			continue
+		}
+		x.Endpoints = append(x.Endpoints, field)
 	}
 	return nil
 }
