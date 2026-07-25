@@ -76,11 +76,11 @@ Field notes:
 
 The `Authorization: Bearer <JWT>` is the **only** authentication. The body is untrusted until the token verifies. Verification steps:
 
-1. Read the event body's `federation` and `namespace` (and, for cross-checking, the JWT's `iss`) **without trusting the token yet**.
-1. Discover the namespace's keys **via the registry** — the origin publishes the public half of its signing key in the federation registry under the namespace, so a receiver never needs to reach the origin directly:
-   - Federation discovery: `GET https://<federation>/.well-known/pelican-configuration`, read `namespace_registration_endpoint` (the registry).
-   - Fetch the namespace JWKS: `GET <registry>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks`. Cache and refresh it.
-   - (If `federation` is absent — e.g. an origin that could not resolve its federation — fall back to OIDC discovery on the token's `iss`: `GET <iss>/.well-known/openid-configuration` → `jwks_uri`. This requires reachability to the origin and is the legacy path.)
+1. Read the event body's `federation` and `namespace` (and the JWT's `iss`) **without trusting them yet**.
+1. Discover the namespace's keys **via the registry of a federation you are configured to trust** — the origin publishes the public half of its signing key in the federation registry under the namespace, so a receiver never needs to reach the origin directly. Compare `event.federation` to your configured/trusted federation and, if it matches, discover from that **configured** value (never fetch the event's URL — see the trust-anchor note):
+   - Federation discovery: `GET https://<trusted-federation>/.well-known/pelican-configuration`, read `namespace_registration_endpoint` (the registry).
+   - Fetch the namespace JWKS: `GET <registry>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks` (validate `namespace` as a plain path first). Cache and refresh it.
+   - (Fallback for events that carry no `federation`: OIDC discovery on the token's `iss` — but only when `iss` equals a **configured, trusted issuer**, and fetching from that configured value. This requires reachability to the origin and is the legacy path.)
 1. Verify the signature against that JWKS, and check:
    - `exp` (unexpired; a small clock-skew allowance is reasonable).
    - `aud` contains **your catalog's URL** (the endpoint the origin POSTs to). This stops a token minted for catalog A from being replayed against catalog B.
@@ -277,14 +277,15 @@ Minimal shape of a compliant receiver (pseudocode; see `cmd/sample_metadata_serv
 
 ```
 on POST:
-    tok   = bearer_token(request)                   # 401 if missing
-    event = json(body)                              # federation + namespace (still untrusted)
-    reg   = discover(event.federation).namespace_registration_endpoint
-    jwks  = fetch(reg + "/api/v1.0/registry/" + event.namespace + "/.well-known/issuer.jwks")
-    claims = verify(tok, jwks, audience=MY_URL)     # 401 if bad sig / aud / exp
-    require "pelican.metadata" in claims.scope      # 403 otherwise
-    if already_seen(event.id): return 200           # dedup (idempotency)
-    if not acceptable(event): return 422            # permanent reject — origin stops
+    tok   = bearer_token(request)                        # 401 if missing
+    event = json(body)                                   # federation + namespace (still untrusted)
+    assert event.federation == MY_TRUSTED_FEDERATION     # 401; never fetch an event-supplied URL
+    reg   = discover(MY_TRUSTED_FEDERATION).namespace_registration_endpoint
+    jwks  = fetch(reg + "/api/v1.0/registry/" + validate(event.namespace) + "/.well-known/issuer.jwks")
+    claims = verify(tok, jwks, audience=MY_URL)          # 401 if bad sig / aud / exp
+    require "pelican.metadata" in claims.scope           # 403 otherwise
+    if already_seen(event.id): return 200                # dedup (idempotency)
+    if not acceptable(event): return 422                 # permanent reject — origin stops
     store(event); return 202
 ```
 

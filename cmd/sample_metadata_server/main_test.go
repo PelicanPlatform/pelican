@@ -282,11 +282,11 @@ func TestVerify_RegistryDiscovery(t *testing.T) {
 
 	t.Run("verifies against registry keys (pinned)", func(t *testing.T) {
 		claims, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
-			pinnedFederation: canonicalFederation(federation),
-			eventFederation:  federation,
-			namespace:        "/foo",
-			audience:         audience,
-			skew:             time.Minute,
+			trustedFederation: canonicalFederation(federation),
+			eventFederation:   federation,
+			namespace:         "/foo",
+			audience:          audience,
+			skew:              time.Minute,
 		})
 		if err != nil {
 			t.Fatalf("verify: %v", err)
@@ -298,11 +298,11 @@ func TestVerify_RegistryDiscovery(t *testing.T) {
 
 	t.Run("rejects event that claims a different federation than the pin", func(t *testing.T) {
 		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
-			pinnedFederation: canonicalFederation(federation),
-			eventFederation:  "https://evil.example",
-			namespace:        "/foo",
-			audience:         audience,
-			skew:             time.Minute,
+			trustedFederation: canonicalFederation(federation),
+			eventFederation:   "https://evil.example",
+			namespace:         "/foo",
+			audience:          audience,
+			skew:              time.Minute,
 		})
 		if err == nil {
 			t.Fatal("expected rejection for federation mismatch, got nil")
@@ -311,11 +311,11 @@ func TestVerify_RegistryDiscovery(t *testing.T) {
 
 	t.Run("rejects wrong audience", func(t *testing.T) {
 		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", "https://someone-else/", 5*time.Minute), verifyRequest{
-			pinnedFederation: canonicalFederation(federation),
-			eventFederation:  federation,
-			namespace:        "/foo",
-			audience:         audience,
-			skew:             time.Minute,
+			trustedFederation: canonicalFederation(federation),
+			eventFederation:   federation,
+			namespace:         "/foo",
+			audience:          audience,
+			skew:              time.Minute,
 		})
 		if err == nil {
 			t.Fatal("expected rejection for wrong audience, got nil")
@@ -324,14 +324,55 @@ func TestVerify_RegistryDiscovery(t *testing.T) {
 
 	t.Run("rejects expired token", func(t *testing.T) {
 		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, -1*time.Minute), verifyRequest{
-			pinnedFederation: canonicalFederation(federation),
-			eventFederation:  federation,
-			namespace:        "/foo",
-			audience:         audience,
-			skew:             time.Second,
+			trustedFederation: canonicalFederation(federation),
+			eventFederation:   federation,
+			namespace:         "/foo",
+			audience:          audience,
+			skew:              time.Second,
 		})
 		if err == nil {
 			t.Fatal("expected rejection for expired token, got nil")
 		}
 	})
+
+	t.Run("rejects namespace path traversal", func(t *testing.T) {
+		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
+			trustedFederation: canonicalFederation(federation),
+			eventFederation:   federation,
+			namespace:         "/foo/../secrets",
+			audience:          audience,
+			skew:              time.Minute,
+		})
+		if err == nil {
+			t.Fatal("expected rejection for namespace traversal, got nil")
+		}
+	})
+
+	t.Run("rejects when event has no federation and no -issuer is configured", func(t *testing.T) {
+		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
+			trustedFederation: canonicalFederation(federation),
+			// eventFederation empty and trustedIssuer empty => no trusted source.
+			namespace: "/foo",
+			audience:  audience,
+			skew:      time.Minute,
+		})
+		if err == nil {
+			t.Fatal("expected rejection when no trusted key source applies, got nil")
+		}
+	})
+}
+
+func TestValidateNamespace(t *testing.T) {
+	ok := []string{"/foo", "/foo/bar", "/a/b/c.dat"}
+	for _, ns := range ok {
+		if got, err := validateNamespace(ns); err != nil || got != ns {
+			t.Fatalf("validateNamespace(%q) = (%q,%v), want (%q,nil)", ns, got, err, ns)
+		}
+	}
+	bad := []string{"", "foo", "/foo/../bar", "https://evil/foo", "/foo bar", "/foo\nbar"}
+	for _, ns := range bad {
+		if _, err := validateNamespace(ns); err == nil {
+			t.Fatalf("validateNamespace(%q) = nil error, want rejection", ns)
+		}
+	}
 }
