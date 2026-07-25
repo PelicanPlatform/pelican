@@ -71,6 +71,15 @@ func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password,
 	pelicanBinary := getPelicanBinary(t)
 
 	origin2Dir := t.TempDir()
+	// When the tests run as root (as in CI), pelican launches xrootd as the
+	// unprivileged xrootd daemon user (xrootd refuses to run as root). That user
+	// must be able to traverse into the runtime/storage dirs to exec and serve,
+	// so the parent temp dirs — created 0700 by t.TempDir()/MkdirTemp — need the
+	// search bit for "other". fed_test_utils does the same to its temp root; the
+	// per-file/dir ownership below (ChownToDaemon) and pelican's own rundir chown
+	// handle write access. Without this the second origin fails to start with
+	// "fork/exec /usr/bin/xrootd: permission denied".
+	require.NoError(t, os.Chmod(origin2Dir, 0o755))
 	storageDir := filepath.Join(origin2Dir, "storage")
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	configDir := filepath.Join(origin2Dir, "config")
@@ -81,6 +90,7 @@ func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password,
 	// anchor the runtime dir in a short /tmp path.
 	runtimeBase, err := os.MkdirTemp("/tmp", "xt")
 	require.NoError(t, err)
+	require.NoError(t, os.Chmod(runtimeBase, 0o755)) // traversable by the xrootd daemon user (see above)
 	t.Cleanup(func() { _ = os.RemoveAll(runtimeBase) })
 	runtimeDir := filepath.Join(runtimeBase, "run")
 	require.NoError(t, os.MkdirAll(runtimeDir, 0755))
@@ -413,18 +423,9 @@ func TestTransferTPCCrossOriginE2E(t *testing.T) {
 
 // TestTransferTPCCrossOriginE2EXRootD runs the same cross-origin third-party copy
 // against the XRootD (posix) origin backend. Real deployments run XRootD origins,
-// and this path is otherwise exercised only by the (CI-skipped) benchmark.
-//
-// It is opt-in via PELICAN_XROOTD_CROSS_ORIGIN_E2E because the standalone second
-// origin launches a real xrootd daemon as a subprocess, which the standard
-// "Test / Linux" CI environment cannot do — there the subprocess fails with
-// "fork/exec /usr/bin/xrootd: permission denied" (it cannot drop privilege to
-// the xrootd service user). Set the env var in an environment that can launch a
-// second xrootd origin (and has the xrootd binary) to run it.
+// and this path is otherwise exercised only by the (CI-skipped) benchmark. It is
+// skipped where the xrootd server binary is unavailable (e.g. dev laptops).
 func TestTransferTPCCrossOriginE2EXRootD(t *testing.T) {
-	if os.Getenv("PELICAN_XROOTD_CROSS_ORIGIN_E2E") == "" {
-		t.Skip("set PELICAN_XROOTD_CROSS_ORIGIN_E2E=1 to run the XRootD-backend cross-origin TPC test (needs an environment that can launch a second xrootd origin subprocess)")
-	}
 	if _, err := exec.LookPath("xrootd"); err != nil {
 		t.Skip("xrootd binary not found; skipping the XRootD-backend cross-origin TPC test")
 	}
