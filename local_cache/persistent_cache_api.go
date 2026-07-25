@@ -813,6 +813,9 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 				q.Set("access_token", fedToken)
 				req.URL.RawQuery = q.Encode()
 			}
+			// WS1: if the director says this origin is broker-only, make its
+			// address broker-dialable before we connect to it.
+			registerOriginBrokerFromRedirect(req.URL.Host, req.Response)
 			return nil
 		},
 	}
@@ -964,6 +967,9 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 				q.Set("access_token", fedToken)
 				req.URL.RawQuery = q.Encode()
 			}
+			// WS1: if the director says this origin is broker-only, make its
+			// address broker-dialable before we connect to it.
+			registerOriginBrokerFromRedirect(req.URL.Host, req.Response)
 			return nil
 		},
 	}

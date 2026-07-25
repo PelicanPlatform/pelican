@@ -428,14 +428,20 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	// If we are a director, we will potentially contact other
-	// services with the broker, so we need to set up the broker dialer
+	// A director contacts other services through the broker; a cache must also
+	// reach a broker-only (firewalled) origin to mediate client data operations
+	// (WS1). Either one needs the broker-aware transport dialer.
 	var brokerDialer *broker.BrokerDialer
-	if modules.IsEnabled(server_structs.DirectorType) {
-		log.Debug("Setting up broker dialer for director")
+	if modules.IsEnabled(server_structs.DirectorType) || modules.IsEnabled(server_structs.CacheType) {
+		log.Debug("Setting up broker dialer")
 		brokerDialer = broker.NewBrokerDialer(ctx, egrp)
 		config.SetTransportDialer(brokerDialer.DialContext)
-		director.SetBrokerDialer(brokerDialer)
+		if modules.IsEnabled(server_structs.DirectorType) {
+			director.SetBrokerDialer(brokerDialer)
+		}
+		if modules.IsEnabled(server_structs.CacheType) {
+			local_cache.SetBrokerDialer(brokerDialer)
+		}
 	}
 
 	// Write the address file now that all services are running and health checks have passed
