@@ -21,7 +21,6 @@
 package lotman
 
 import (
-	"context"
 	"net/url"
 	"sort"
 	"testing"
@@ -32,7 +31,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -56,10 +54,12 @@ import (
 // completes in well under a second.
 func TestRenewalEndToEnd(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
-	success, cleanup := setupLotmanFromConf(t, false, "LotmanRenewalE2E", param.Federation_DiscoveryUrl.GetString(), nil)
+	server := getMockDiscoveryHost()
+	defer server.Close()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanRenewalE2E", server.URL, nil)
 	defer cleanup()
 	require.True(t, success, "InitLotman must succeed")
 

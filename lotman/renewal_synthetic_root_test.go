@@ -35,12 +35,13 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(server_utils.ResetTestState)
 
-	// Set up server config like a real cache. WithLazyFederationMock below
-	// stands up the CA-signed discovery endpoint and points
-	// Federation.DiscoveryUrl at it, so no manual discovery host is needed.
+	server := getMockDiscoveryHost()
+	defer server.Close()
+
+	// Set up server config like a real cache.
 	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 	require.NoError(t, param.Logging_Level.Set("debug"))
-	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
 	// Use a real directory so totalDiskSpaceB > 0 and the HWM/FilesMaxSize
 	// clamping branches in computeRootDedicatedGB actually execute. The

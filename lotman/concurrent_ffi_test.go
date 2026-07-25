@@ -21,7 +21,6 @@
 package lotman
 
 import (
-	"context"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -32,7 +31,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -59,10 +57,12 @@ import (
 // it must complete cleanly.
 func TestConcurrentReadAndWriteFFI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
 
-	success, cleanup := setupLotmanFromConf(t, false, "LotmanConcurrentFFI", param.Federation_DiscoveryUrl.GetString(), nil)
+	server := getMockDiscoveryHost()
+	defer server.Close()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanConcurrentFFI", server.URL, nil)
 	defer cleanup()
 	require.True(t, success, "InitLotman must succeed")
 

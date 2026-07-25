@@ -22,7 +22,6 @@ package lotman
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -63,7 +62,9 @@ func setupLotsAPI(t *testing.T) (*gin.Engine, *http.Cookie, func()) {
 	// reset it.
 	t.Cleanup(server_utils.ResetTestState)
 	gin.SetMode(gin.TestMode)
-	test_utils.InitServerForTest(t, context.Background(), server_structs.CacheType, test_utils.WithLazyFederationMock(nil, nil))
+
+	disc := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(disc.URL))
 
 	tmp := t.TempDir()
 	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tmp, "issuer-keys")))
@@ -71,7 +72,7 @@ func setupLotsAPI(t *testing.T) (*gin.Engine, *http.Cookie, func()) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set(extURL))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"lots-admin"}))
 
-	success, lotCleanup := setupLotmanFromConf(t, true, "LotsAPI", param.Federation_DiscoveryUrl.GetString(), nil)
+	success, lotCleanup := setupLotmanFromConf(t, true, "LotsAPI", disc.URL, nil)
 	require.True(t, success, "InitLotman must succeed")
 
 	// IssuerKeysDirectory was reset by setupLotmanFromConf.
@@ -103,6 +104,7 @@ func setupLotsAPI(t *testing.T) (*gin.Engine, *http.Cookie, func()) {
 
 	teardown := func() {
 		lotCleanup()
+		disc.Close()
 	}
 	return engine, cookie, teardown
 }
