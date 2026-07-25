@@ -563,7 +563,7 @@ type BlobFileSysInfo struct {
 
 func (fi *blobFileInfo) Name() string      { return fi.name }
 func (fi *blobFileInfo) Size() int64       { return fi.size }
-func (fi *blobFileInfo) Mode() os.FileMode { return 0444 }
+func (fi *blobFileInfo) Mode() os.FileMode { return 0644 }
 func (fi *blobFileInfo) ModTime() time.Time {
 	if fi.mod.IsZero() {
 		return time.Now()
