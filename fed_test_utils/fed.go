@@ -173,6 +173,11 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "origin")))
+	// Point the Globus config/token directory at the temp tree too. Its default
+	// (${XDG_RUNTIME_DIR}/pelican/xrootd/origin/globus) collapses to /pelican/...
+	// on platforms where XDG_RUNTIME_DIR is unset (notably macOS), where the root
+	// filesystem is read-only and InitGlobusBackend's mkdir fails.
+	require.NoError(t, param.Origin_GlobusConfigLocation.Set(filepath.Join(tmpPath, "origin", "globus")))
 	require.NoError(t, param.Origin_DbLocation.Set(filepath.Join(t.TempDir(), "origin.sqlite")))
 	require.NoError(t, param.Origin_TokenAudience.Set(""))
 	require.NoError(t, param.Cache_Port.Set(0))
