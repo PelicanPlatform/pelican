@@ -653,6 +653,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_XRootDPrefix.GetName(), "origin")
 	// Plugin.DirectorDecisionPercentage
 	v.SetDefault(param.Plugin_DirectorDecisionPercentage.GetName(), 20)
+	// Registry.DisableCA
+	v.SetDefault(param.Registry_DisableCA.GetName(), false)
 	// Registry.EnableOIDC
 	v.SetDefault(param.Registry_EnableOIDC.GetName(), false)
 	// Registry.InactiveRegistrationCleanupInterval

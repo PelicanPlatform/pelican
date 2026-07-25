@@ -634,6 +634,18 @@ default: none
 direct_access: false
 components: ["origin"]
 ---
+name: Federation.CaUrl
+description: |+
+  The base URL of the federation certificate authority (the registry acting as a CA).
+  Services that request a host certificate from the federation derive the concrete
+  endpoints (/api/v1.0/registry/ca.pem and /api/v1.0/registry/issueHostCertificate) from it.
+
+  If left unset, it defaults to the registry endpoint via federation metadata discovery.
+type: url
+default: none
+direct_access: false
+components: ["origin", "cache"]
+---
 ############################
 #   Client-Level Configs   #
 ############################
@@ -3421,6 +3433,18 @@ default: false
 osdf_default: true
 components: ["registry"]
 ---
+name: Registry.DisableCA
+description: |+
+  Disable the registry's federation certificate authority. By default the registry acts as a CA:
+  on first start it generates a self-signed federation root and a registry intermediate, and serves
+  the /api/v1.0/registry/issueHostCertificate and /api/v1.0/registry/ca.pem endpoints so that
+  registered, approved services can obtain a host TLS certificate signed by the federation without
+  provisioning one externally. The certificate is issued for the service's unique registry slug.
+  Set this to true to turn the CA off.
+type: bool
+default: false
+components: ["registry"]
+---
 name: Registry.InactiveRegistrationTimeout
 description: |+
   How long a pending server registration can linger in the registry if it stops running after
@@ -3466,6 +3490,19 @@ description: |+
 type: filename
 default: "${ConfigBase}/certificates/tls.crt"
 components: ["cache", "director", "origin", "registry"]
+---
+name: Server.AdvertisedIPs
+description: |+
+  An optional ordered list of "host:port" (typically IP:port) addresses at which this server is
+  directly reachable without a DNS name. When set, the director may funnel sufficiently-new Pelican
+  clients directly to these addresses (WS2, reducing the origin's DNS requirement); the client
+  authenticates the TLS connection against the server's registry slug, not these addresses, so no
+  IP-SAN certificate is required. When unset, the director falls back to auto-detected reachability.
+  This is an override for operators behind NAT/traefik or with multiple interfaces; most deployments
+  need not set it.
+type: stringSlice
+default: []
+components: ["origin", "cache"]
 ---
 name: Server.TLSCACertificateFile
 description: |+

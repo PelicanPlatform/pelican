@@ -206,6 +206,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"DisableHttpProxy": false,
 	"DisableProxyFallback": false,
 	"Federation.BrokerUrl": false,
+	"Federation.CaUrl": false,
 	"Federation.DirectorUrl": false,
 	"Federation.DiscoveryUrl": false,
 	"Federation.JwkUrl": false,
@@ -431,6 +432,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.DisableCA": false,
 	"Registry.EnableOIDC": false,
 	"Registry.InactiveRegistrationCleanupInterval": false,
 	"Registry.InactiveRegistrationTimeout": false,
@@ -446,6 +448,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.AUPLastUpdated": false,
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
+	"Server.AdvertisedIPs": false,
 	"Server.AdvertisementInterval": false,
 	"Server.AutoEnrollUsernameClaims": false,
 	"Server.CollectionAdminGroups": false,
@@ -833,6 +836,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Origin.SupportedChecksumTypes": func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
 	"Registry.AdminUsers": func(c *Config) []string { return c.Registry.AdminUsers },
 	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
+	"Server.AdvertisedIPs": func(c *Config) []string { return c.Server.AdvertisedIPs },
 	"Server.AutoEnrollUsernameClaims": func(c *Config) []string { return c.Server.AutoEnrollUsernameClaims },
 	"Server.CollectionAdminGroups": func(c *Config) []string { return c.Server.CollectionAdminGroups },
 	"Server.CollectionAdminUsers": func(c *Config) []string { return c.Server.CollectionAdminUsers },
@@ -1069,6 +1073,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.SSH.TunnelCallback": func(c *Config) bool { return c.Origin.SSH.TunnelCallback },
 	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
 	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.DisableCA": func(c *Config) bool { return c.Registry.DisableCA },
 	"Registry.EnableOIDC": func(c *Config) bool { return c.Registry.EnableOIDC },
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
@@ -1397,6 +1402,7 @@ var allParameterNames = []string{
 	"DisableHttpProxy",
 	"DisableProxyFallback",
 	"Federation.BrokerUrl",
+	"Federation.CaUrl",
 	"Federation.DirectorUrl",
 	"Federation.DiscoveryUrl",
 	"Federation.JwkUrl",
@@ -1622,6 +1628,7 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.DisableCA",
 	"Registry.EnableOIDC",
 	"Registry.InactiveRegistrationCleanupInterval",
 	"Registry.InactiveRegistrationTimeout",
@@ -1637,6 +1644,7 @@ var allParameterNames = []string{
 	"Server.AUPLastUpdated",
 	"Server.AdLifetime",
 	"Server.AdminGroups",
+	"Server.AdvertisedIPs",
 	"Server.AdvertisementInterval",
 	"Server.AutoEnrollUsernameClaims",
 	"Server.CollectionAdminGroups",
@@ -1969,6 +1977,7 @@ var (
 	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
+	Server_AdvertisedIPs = StringSliceParam{"Server.AdvertisedIPs"}
 	Server_AutoEnrollUsernameClaims = StringSliceParam{"Server.AutoEnrollUsernameClaims"}
 	Server_CollectionAdminGroups = StringSliceParam{"Server.CollectionAdminGroups"}
 	Server_CollectionAdminUsers = StringSliceParam{"Server.CollectionAdminUsers"}
@@ -2112,6 +2121,7 @@ var (
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_DisableCA = BoolParam{"Registry.DisableCA"}
 	Registry_EnableOIDC = BoolParam{"Registry.EnableOIDC"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
@@ -2229,6 +2239,7 @@ var (
 
 var (
 	Federation_BrokerUrl = OpaqueParam{"Federation.BrokerUrl"}
+	Federation_CaUrl = OpaqueParam{"Federation.CaUrl"}
 	Federation_DirectorUrl = OpaqueParam{"Federation.DirectorUrl"}
 	Federation_JwkUrl = OpaqueParam{"Federation.JwkUrl"}
 	Federation_RegistryUrl = OpaqueParam{"Federation.RegistryUrl"}
@@ -2460,6 +2471,7 @@ func init() {
 		"Origin.SupportedChecksumTypes": Origin_SupportedChecksumTypes,
 		"Registry.AdminUsers": Registry_AdminUsers,
 		"Server.AdminGroups": Server_AdminGroups,
+		"Server.AdvertisedIPs": Server_AdvertisedIPs,
 		"Server.AutoEnrollUsernameClaims": Server_AutoEnrollUsernameClaims,
 		"Server.CollectionAdminGroups": Server_CollectionAdminGroups,
 		"Server.CollectionAdminUsers": Server_CollectionAdminUsers,
@@ -2594,6 +2606,7 @@ func init() {
 		"Origin.SSH.TunnelCallback": Origin_SSH_TunnelCallback,
 		"Origin.ScitokensMapSubject": Origin_ScitokensMapSubject,
 		"Origin.SelfTest": Origin_SelfTest,
+		"Registry.DisableCA": Registry_DisableCA,
 		"Registry.EnableOIDC": Registry_EnableOIDC,
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
@@ -2702,6 +2715,7 @@ func init() {
 		"Registry.Institutions": Registry_Institutions,
 		"Shoveler.IPMapping": Shoveler_IPMapping,
 		"Federation.BrokerUrl": Federation_BrokerUrl,
+		"Federation.CaUrl": Federation_CaUrl,
 		"Federation.DirectorUrl": Federation_DirectorUrl,
 		"Federation.JwkUrl": Federation_JwkUrl,
 		"Federation.RegistryUrl": Federation_RegistryUrl,

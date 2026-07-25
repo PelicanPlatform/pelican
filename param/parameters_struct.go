@@ -144,6 +144,7 @@ type Config struct {
 	DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
 	Federation struct {
 		BrokerUrl string `mapstructure:"brokerurl" yaml:"BrokerUrl"`
+		CaUrl string `mapstructure:"caurl" yaml:"CaUrl"`
 		DirectorUrl string `mapstructure:"directorurl" yaml:"DirectorUrl"`
 		DiscoveryUrl string `mapstructure:"discoveryurl" yaml:"DiscoveryUrl"`
 		JwkUrl string `mapstructure:"jwkurl" yaml:"JwkUrl"`
@@ -395,6 +396,7 @@ type Config struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
 		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		DisableCA bool `mapstructure:"disableca" yaml:"DisableCA"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		InactiveRegistrationCleanupInterval time.Duration `mapstructure:"inactiveregistrationcleanupinterval" yaml:"InactiveRegistrationCleanupInterval"`
 		InactiveRegistrationTimeout time.Duration `mapstructure:"inactiveregistrationtimeout" yaml:"InactiveRegistrationTimeout"`
@@ -412,6 +414,7 @@ type Config struct {
 		AUPLastUpdated string `mapstructure:"auplastupdated" yaml:"AUPLastUpdated"`
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
+		AdvertisedIPs []string `mapstructure:"advertisedips" yaml:"AdvertisedIPs"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
 		AutoEnrollUsernameClaims []string `mapstructure:"autoenrollusernameclaims" yaml:"AutoEnrollUsernameClaims"`
 		CollectionAdminGroups []string `mapstructure:"collectionadmingroups" yaml:"CollectionAdminGroups"`
@@ -662,6 +665,7 @@ type configWithType struct {
 	DisableProxyFallback struct { Type string; Value bool }
 	Federation struct {
 		BrokerUrl struct { Type string; Value string }
+		CaUrl struct { Type string; Value string }
 		DirectorUrl struct { Type string; Value string }
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
@@ -913,6 +917,7 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
+		DisableCA struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		InactiveRegistrationCleanupInterval struct { Type string; Value time.Duration }
 		InactiveRegistrationTimeout struct { Type string; Value time.Duration }
@@ -930,6 +935,7 @@ type configWithType struct {
 		AUPLastUpdated struct { Type string; Value string }
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
+		AdvertisedIPs struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
 		AutoEnrollUsernameClaims struct { Type string; Value []string }
 		CollectionAdminGroups struct { Type string; Value []string }

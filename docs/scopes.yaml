@@ -137,6 +137,14 @@ description: >-
 issuedBy: ["origin"]
 acceptedBy: ["registry"]
 ---
+name: registry.request_host_cert
+description: >-
+  For a registered, approved service to request a host TLS certificate from the
+  registry's certificate authority. The token is signed by the service's
+  registered key and bound to a specific CSR.
+issuedBy: ["origin", "cache"]
+acceptedBy: ["registry"]
+---
 ############################
 #    Monitoring Scopes     #
 ############################
