@@ -3833,6 +3833,19 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			}
 			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(pde)
 		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// The serving cache's fair scheduler shed this request. Parse the
+			// structured reason from the body and the Retry-After hint so the
+			// error is classified as the specific retryable throttle type and
+			// the advertised backoff is carried to the caller / external
+			// retrier.
+			reason := parseThrottleReason(bodyStr)
+			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+			throttleErr := newCacheThrottleError(reason, strings.TrimSpace(bodyStr), transfer.Url.Host, retryAfter)
+			log.WithFields(fields).Warnf("Cache %s throttled the request (reason=%s, retry-after=%s)",
+				transfer.Url.Host, reason, retryAfter)
+			return 0, 0, -1, serverVersion, "", throttleErr
+		}
 		sce := StatusCodeError(resp.StatusCode)
 		// Wrap StatusCodeError with appropriate PelicanError based on status code
 		wrappedErr := wrapStatusCodeError(&sce)

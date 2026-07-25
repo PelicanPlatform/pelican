@@ -21,11 +21,13 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,6 +42,13 @@ func wrapErrorByStatusCode(code int, err error) error {
 		return error_codes.NewSpecification_FileNotFoundError(err)
 	case code == http.StatusGatewayTimeout:
 		return error_codes.NewTransfer_TimedOutError(err)
+	case code == http.StatusTooManyRequests:
+		// 429 means the serving cache's fair scheduler shed the request. It is
+		// retryable. This is the generic fallback used when the response body
+		// carries no structured reason; the download path parses the body and
+		// substitutes a more specific origin_unresponsive / origin_slow
+		// classification via throttleErrorForReason.
+		return error_codes.NewTransfer_CacheOverloadedError(err)
 	case code == http.StatusUnauthorized || code == http.StatusForbidden:
 		// 401/403 are authorization errors
 		return error_codes.NewAuthorizationError(err)
@@ -53,6 +62,63 @@ func wrapErrorByStatusCode(code int, err error) error {
 		// For other status codes, wrap as Transfer error
 		return error_codes.NewTransferError(err)
 	}
+}
+
+// throttleErrorForReason maps the machine-parseable reason string carried in a
+// cache's 429 response body (the "error" field written by the cache's
+// handleError) to the specific retryable Pelican error type. Unknown or empty
+// reasons fall back to the generic cache-overloaded classification.
+func throttleErrorForReason(reason string, err error) error {
+	switch reason {
+	case "origin_unresponsive":
+		return error_codes.NewTransfer_OriginUnresponsiveError(err)
+	case "origin_slow":
+		return error_codes.NewTransfer_OriginSlowError(err)
+	case "cache_overloaded":
+		return error_codes.NewTransfer_CacheOverloadedError(err)
+	default:
+		return error_codes.NewTransfer_CacheOverloadedError(err)
+	}
+}
+
+// parseThrottleReason extracts the machine-parseable reason from a cache's 429
+// JSON body of the form {"error": "<reason>", "detail": "..."}. Returns "" if
+// the body is not JSON or has no "error" field, in which case callers fall back
+// to the generic throttle classification.
+func parseThrottleReason(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	var parsed struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return ""
+	}
+	return parsed.Error
+}
+
+// parseRetryAfter parses an HTTP Retry-After header value. Per RFC 7231 it may
+// be a number of seconds or an HTTP date; the cache emits seconds. Returns 0 if
+// absent or unparsable.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
@@ -345,6 +411,62 @@ func (e *HttpErrResp) Error() string {
 
 func (e *HttpErrResp) Unwrap() error {
 	return e.Err
+}
+
+// CacheThrottleError is returned when a cache responds with HTTP 429 because
+// its fair scheduler shed the request. It carries the machine-parseable Reason
+// (from the response body) and the RetryAfter hint (from the Retry-After
+// header) so callers and external retriers can distinguish an unresponsive
+// origin from a merely-slow one and honor the advertised backoff. It wraps the
+// specific retryable Pelican error type, so errors.As(err, &error_codes.PelicanError{})
+// and IsRetryable both work through the chain.
+type CacheThrottleError struct {
+	Reason     string
+	RetryAfter time.Duration
+	// Endpoint is the cache host that shed the request.
+	Endpoint string
+	// Err is the wrapped, specific retryable PelicanError.
+	Err error
+	// detail is the server-provided human-readable message.
+	detail string
+}
+
+func (e *CacheThrottleError) Error() string {
+	msg := "request throttled by cache"
+	if e.Endpoint != "" {
+		msg += " " + e.Endpoint
+	}
+	if e.Reason != "" {
+		msg += " (" + e.Reason + ")"
+	}
+	if e.RetryAfter > 0 {
+		msg += fmt.Sprintf("; retry after %s", e.RetryAfter)
+	}
+	if e.detail != "" {
+		msg += ": " + e.detail
+	}
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *CacheThrottleError) Unwrap() error {
+	return e.Err
+}
+
+// newCacheThrottleError builds a CacheThrottleError from a cache's 429
+// response: the reason parsed from the JSON body's "error" field, the
+// Retry-After header, the endpoint host, and the raw body detail.
+func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Duration) *CacheThrottleError {
+	base := fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
+	return &CacheThrottleError{
+		Reason:     reason,
+		RetryAfter: retryAfter,
+		Endpoint:   endpoint,
+		Err:        throttleErrorForReason(reason, base),
+		detail:     detail,
+	}
 }
 
 // SlowTransferError methods

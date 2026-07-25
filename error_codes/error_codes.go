@@ -318,6 +318,39 @@ func NewTransfer_ChecksumMissingError(err error) *PelicanError {
 	}
 }
 
+func NewTransfer_OriginUnresponsiveError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.OriginUnresponsive",
+		exitCode:    9,
+		code:        6008,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The client should back off (honoring Retry-After) before trying again.",
+		err:         err,
+	}
+}
+
+func NewTransfer_OriginSlowError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.OriginSlow",
+		exitCode:    9,
+		code:        6009,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The client should back off (honoring Retry-After) before trying again.",
+		err:         err,
+	}
+}
+
+func NewTransfer_CacheOverloadedError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.CacheOverloaded",
+		exitCode:    9,
+		code:        6010,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because its global pending buffer is full; the cache is saturated across all origins it is serving. The client should back off (honoring Retry-After) before trying again.",
+		err:         err,
+	}
+}
+
 // function that maps the error to the exit code
 func (e *PelicanError) ExitCode() int {
 	return e.exitCode

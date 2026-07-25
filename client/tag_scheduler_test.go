@@ -407,3 +407,98 @@ func TestTagSchedulerConcurrentSubmit(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, int64(200), accepted+rejected, "every submission should resolve")
 }
+
+// TestTagSchedulerRejectClassifiesCacheOverloaded: a rejection due to the
+// global pending buffer being full is classified as ShedCacheOverloaded.
+func TestTagSchedulerRejectClassifiesCacheOverloaded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 50,
+		PerTagActivePercent:   50,
+		PendingBufferSize:     3,
+		PerTagPendingSize:     100, // large; hit the global cap first
+		EMAWindow:             5 * time.Second,
+	})
+	// No worker draining out, so submissions enqueue and fill the buffer.
+	sched.out = make(chan *clientTransferFile)
+	sched.stopped = make(chan struct{})
+	go sched.run(ctx)
+	t.Cleanup(sched.Stop)
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	}
+	err := sched.Submit(ctx, "originA", makeFile("originA"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+	var rej *SchedulerRejection
+	require.ErrorAs(t, err, &rej)
+	assert.Equal(t, ShedCacheOverloaded, rej.Reason)
+}
+
+// TestTagSchedulerRejectClassifiesOriginUnresponsive: when a per-tag FIFO fills
+// while the origin is holding its starving cap (dispatched fetches that never
+// produced a first byte), the rejection is classified as ShedOriginUnresponsive.
+func TestTagSchedulerRejectClassifiesOriginUnresponsive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap = 1 (the limiter)
+		PerTagActivePercent:   90, // active cap high, not the limiter
+		PendingBufferSize:     100,
+		PerTagPendingSize:     2,
+		EMAWindow:             5 * time.Second,
+	})
+	out := make(chan *clientTransferFile, 100)
+	sched.Start(ctx, out)
+	t.Cleanup(sched.Stop)
+
+	// First submit dispatches and becomes starving (no first-byte fired).
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	// Two more fill the per-tag FIFO (dispatch blocked by the starving cap).
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	// Fourth overflows the FIFO -> reject. starving == starvingCap -> unresponsive.
+	err := sched.Submit(ctx, "originA", makeFile("originA"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+	var rej *SchedulerRejection
+	require.ErrorAs(t, err, &rej)
+	assert.Equal(t, ShedOriginUnresponsive, rej.Reason)
+	assert.Equal(t, "originA", rej.Tag)
+}
+
+// TestTagSchedulerRejectClassifiesOriginSlow: when a per-tag FIFO fills while
+// the origin is at its active cap (delivering data, but holding its share of
+// the pool) rather than its starving cap, the rejection is classified as
+// ShedOriginSlow.
+func TestTagSchedulerRejectClassifiesOriginSlow(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 90, // starving cap high, not the limiter
+		PerTagActivePercent:   25, // active cap = 1 (the limiter)
+		PendingBufferSize:     100,
+		PerTagPendingSize:     2,
+		EMAWindow:             5 * time.Second,
+	})
+	out := make(chan *clientTransferFile, 100)
+	sched.Start(ctx, out)
+	t.Cleanup(sched.Stop)
+
+	// One dispatches (active == 1 == activeCap). starving (1) stays below the
+	// high starving cap, so the FIFO-full reject classifies as slow, not
+	// unresponsive.
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	err := sched.Submit(ctx, "originA", makeFile("originA"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+	var rej *SchedulerRejection
+	require.ErrorAs(t, err, &rej)
+	assert.Equal(t, ShedOriginSlow, rej.Reason)
+}

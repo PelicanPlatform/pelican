@@ -101,6 +101,27 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		require.Equal(t, "60", rec.Header().Get("Retry-After"))
 	})
 
+	t.Run("StructuredReasonSurfaced", func(t *testing.T) {
+		// A classified SchedulerRejection surfaces its specific reason in
+		// the JSON body's "error" field so the client can distinguish an
+		// unresponsive origin from a merely-slow one.
+		for _, reason := range []client.ShedReason{
+			client.ShedOriginUnresponsive,
+			client.ShedOriginSlow,
+			client.ShedCacheOverloaded,
+		} {
+			rec := httptest.NewRecorder()
+			rej := &client.SchedulerRejection{Reason: reason, Tag: "originA"}
+			handleError(rec, rej, false, reqLog)
+			require.Equal(t, 429, rec.Code)
+			require.Equal(t, "60", rec.Header().Get("Retry-After"))
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, string(reason), body["error"],
+				"the structured shed reason must be the machine-parseable error field")
+		}
+	})
+
 	t.Run("UnrelatedErrorStaysNon429", func(t *testing.T) {
 		// A regression guard: any bare error should still take the
 		// existing internal_error / not_found / etc. paths, not fall

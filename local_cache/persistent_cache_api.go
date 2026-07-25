@@ -213,10 +213,18 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	} else if errors.Is(getErr, client.ErrTooManyRequests) {
 		// The cache's fair scheduler refused to admit this upstream fetch
 		// because the origin (or the global pending buffer) is at its cap.
-		// Ask the client to retry after a moment.
-		reqLog.Warn("Cache scheduler rejected upstream fetch: ", getErr)
+		// Ask the client to retry after a moment, and surface the specific
+		// reason so the client can distinguish an unresponsive origin from a
+		// merely-slow one or a cache-wide overload.  The "error" field is the
+		// machine-parseable reason; the client maps it to a Pelican error code.
+		errCode := "too_many_requests"
+		var rej *client.SchedulerRejection
+		if errors.As(getErr, &rej) {
+			errCode = string(rej.Reason)
+		}
+		reqLog.Warnf("Cache scheduler rejected upstream fetch (%s): %v", errCode, getErr)
 		w.Header().Set("Retry-After", "60")
-		writeJSON(http.StatusTooManyRequests, "too_many_requests", getErr.Error())
+		writeJSON(http.StatusTooManyRequests, errCode, getErr.Error())
 		return
 	}
 

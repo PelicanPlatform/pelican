@@ -21,6 +21,7 @@ package client
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync/atomic"
@@ -34,7 +35,47 @@ import (
 // refuses admission because the tag (typically an upstream origin) is
 // already at its share of the transfer engine's worker pool. It mirrors
 // HTTP 429.
+//
+// Every rejection wraps this sentinel (see SchedulerRejection), so callers can
+// continue to use errors.Is(err, ErrTooManyRequests) to detect a shed while
+// errors.As(err, &SchedulerRejection{}) recovers the specific reason.
 var ErrTooManyRequests = errors.New("too many requests: origin is over its share of the transfer pool")
+
+// ShedReason categorizes why the scheduler refused admission. The reason is
+// derived at the moment of shedding from the tag's in-flight composition and
+// the global pending buffer state, and is carried out to the cache's HTTP
+// layer so the client can be told whether the upstream origin is unresponsive,
+// merely slow, or the cache as a whole is saturated.
+type ShedReason string
+
+const (
+	// ShedOriginUnresponsive: the tag's held worker slots are dominated by
+	// "starving" fetches (accepted the connection but produced no first byte).
+	// The origin looks unresponsive.
+	ShedOriginUnresponsive ShedReason = "origin_unresponsive"
+	// ShedOriginSlow: the tag is at its active-transfer cap — the origin is
+	// delivering data but already holds its fair share of the pool.
+	ShedOriginSlow ShedReason = "origin_slow"
+	// ShedCacheOverloaded: the global pending buffer is full — the cache is
+	// saturated across all origins, not just this one.
+	ShedCacheOverloaded ShedReason = "cache_overloaded"
+)
+
+// SchedulerRejection is the error returned when the scheduler sheds a
+// submission. It wraps ErrTooManyRequests (so errors.Is still matches) and
+// carries the categorized reason plus the tag (upstream origin host) so the
+// downstream HTTP layer can build a structured 429.
+type SchedulerRejection struct {
+	Reason ShedReason
+	Tag    string
+	msg    string
+}
+
+func (e *SchedulerRejection) Error() string { return e.msg }
+
+// Unwrap returns ErrTooManyRequests so errors.Is(err, ErrTooManyRequests)
+// continues to hold for every rejection.
+func (e *SchedulerRejection) Unwrap() error { return ErrTooManyRequests }
 
 // PerTagStats is a per-origin snapshot of scheduler state, intended for
 // monitoring / debugging. Values are consistent (all taken under one
@@ -321,7 +362,13 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 	if s.cfg.PendingBufferSize > 0 && s.pending >= s.cfg.PendingBufferSize {
 		s.rejects[req.tag]++
 		s.totalRejectsGlobal++
-		req.reply <- errors.Wrap(ErrTooManyRequests, "pending queue is full")
+		// Global buffer full: the cache is saturated across all origins,
+		// not just this one.
+		req.reply <- &SchedulerRejection{
+			Reason: ShedCacheOverloaded,
+			Tag:    req.tag,
+			msg:    fmt.Sprintf("%s: cache pending queue is full", ErrTooManyRequests.Error()),
+		}
 		return
 	}
 	q, ok := s.fifos[req.tag]
@@ -332,7 +379,20 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 	if s.cfg.PerTagPendingSize > 0 && q.Len() >= s.cfg.PerTagPendingSize {
 		s.rejects[req.tag]++
 		s.totalRejectsPerTag++
-		req.reply <- errors.Wrapf(ErrTooManyRequests, "origin %q pending queue is full", req.tag)
+		// Per-tag FIFO full: dispatch for this origin is blocked because it
+		// is at one of its caps.  Classify by which: if the origin is holding
+		// its starving-cap worth of first-byte-less fetches it looks
+		// unresponsive; otherwise it is delivering data but at its active
+		// share, i.e. merely slow.
+		reason := ShedOriginSlow
+		if s.starving[req.tag] >= s.starvingCap() {
+			reason = ShedOriginUnresponsive
+		}
+		req.reply <- &SchedulerRejection{
+			Reason: reason,
+			Tag:    req.tag,
+			msg:    fmt.Sprintf("%s: origin %q pending queue is full (%s)", ErrTooManyRequests.Error(), req.tag, reason),
+		}
 		return
 	}
 	q.PushBack(req.file)
