@@ -13,7 +13,26 @@ The XRootD-backed S3/HTTP plug-in already implements a "Persist On Successful Cl
 
 ## Requirements
 
-| ID | Requirement | |-----|-----------------------------------------------------------------------------------------------------| | R1 | POSC and metadata upload are independent and independently configurable. | | R2 | POSC: an upload is visible to readers only after a successful close. | | R3 | POSC: a partial / failed / abandoned upload eventually disappears (background expiry). | | R4 | POSC: the temporary directory is invisible to clients (`Stat`, `ReadDir`, `Open`, `Rename`). | | R5 | Metadata publish must run *after* the data is durably committed. | | R6 | Transactional metadata mode: a publish failure surfaces as a transfer failure (non-2xx on the PUT). | | R7 | Eventually-consistent mode: the publish is durably enqueued before the client sees `2xx`. | | R8 | Eventually-consistent mode: retries with exponential backoff + jitter, bounded concurrency. | | R9 | The metadata service has health states: healthy / warning / error tied to publish age (configurable, default 4h / 24h). | | R10 | The callback receives a JWT signed with the origin's signing key, scope `pelican.metadata` plus the namespace. | | R11 | Each published event carries a stable UUID so the receiver can dedupe redelivered events. | | R12 | The outgoing webhook is JSON. Custom uploader-supplied metadata is conveyed *into* the origin via HTTP **Structured Field Values** (RFC 9651) on the upload request; on the way out, those fields are inlined into the webhook JSON alongside the auto-collected fields. | | R13 | Per-export overrides are honored for the metadata endpoint, mode, and any optional auth knobs. | | R14 | Worker checks the object still exists before retrying a publish; if the object was deleted out from under us, the row is dropped. | | R15 | Pelican's existing Prometheus pipeline exposes counters and gauges for queue depth, retries, failures, and oldest-pending age. | | R16 | An admin HTTP endpoint exposes the queue and supports operator deletion of stuck rows. | | R17 | The ETag for an object is taken from the storage backend (e.g. the WebDAV / OSS-computed ETag); the origin does not introduce its own hash algorithm choice. | | R18 | All new behavior is covered by tests with non-trivial coverage (unit + integration). |
+| ID  | Requirement                                                                                                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1  | POSC and metadata upload are independent and independently configurable.                                                                                                                                                                                                 |
+| R2  | POSC: an upload is visible to readers only after a successful close.                                                                                                                                                                                                     |
+| R3  | POSC: a partial / failed / abandoned upload eventually disappears (background expiry).                                                                                                                                                                                   |
+| R4  | POSC: the temporary directory is invisible to clients (`Stat`, `ReadDir`, `Open`, `Rename`).                                                                                                                                                                             |
+| R5  | Metadata publish must run *after* the data is durably committed.                                                                                                                                                                                                         |
+| R6  | Transactional metadata mode: a publish failure surfaces as a transfer failure (non-2xx on the PUT).                                                                                                                                                                      |
+| R7  | Eventually-consistent mode: the publish is durably enqueued before the client sees `2xx`.                                                                                                                                                                                |
+| R8  | Eventually-consistent mode: retries with exponential backoff + jitter, bounded concurrency.                                                                                                                                                                              |
+| R9  | The metadata service has health states: healthy / warning / error tied to publish age (configurable, default 4h / 24h).                                                                                                                                                  |
+| R10 | The callback receives a JWT signed with the origin's signing key, scope `pelican.metadata` plus the namespace.                                                                                                                                                           |
+| R11 | Each published event carries a stable UUID so the receiver can dedupe redelivered events.                                                                                                                                                                                |
+| R12 | The outgoing webhook is JSON. Custom uploader-supplied metadata is conveyed *into* the origin via HTTP **Structured Field Values** (RFC 9651) on the upload request; on the way out, those fields are inlined into the webhook JSON alongside the auto-collected fields. |
+| R13 | Per-export overrides are honored for the metadata endpoint, mode, and any optional auth knobs.                                                                                                                                                                           |
+| R14 | Worker checks the object still exists before retrying a publish; if the object was deleted out from under us, the row is dropped.                                                                                                                                        |
+| R15 | Pelican's existing Prometheus pipeline exposes counters and gauges for queue depth, retries, failures, and oldest-pending age.                                                                                                                                           |
+| R16 | An admin HTTP endpoint exposes the queue and supports operator deletion of stuck rows.                                                                                                                                                                                   |
+| R17 | The ETag for an object is taken from the storage backend (e.g. the WebDAV / OSS-computed ETag); the origin does not introduce its own hash algorithm choice.                                                                                                             |
+| R18 | All new behavior is covered by tests with non-trivial coverage (unit + integration).                                                                                                                                                                                     |
 
 ## Non-goals
 
@@ -162,7 +181,16 @@ X-Pelican-Object-Metadata: experiment="atlas", run_number=4172, is_test=?0
 
 The header value is a single Structured-Fields *dictionary*. The origin parses it on `OpenFile`, retains the parsed value for the life of the upload, and inlines the keys into the `object` JSON field above. Type mapping:
 
-| SFV type | JSON type | |---------------------|----------------------------------------------| | String | string | | Integer | number (integer) | | Decimal | number | | Boolean | boolean | | Token | string (the token) | | Byte sequence | string (base64-url, prefixed `:`) | | Date (RFC 9651) | string (RFC 3339) | | Inner list / parameters | dropped with a warning (v1) |
+| SFV type                | JSON type                         |
+| ----------------------- | --------------------------------- |
+| String                  | string                            |
+| Integer                 | number (integer)                  |
+| Decimal                 | number                            |
+| Boolean                 | boolean                           |
+| Token                   | string (the token)                |
+| Byte sequence           | string (base64-url, prefixed `:`) |
+| Date (RFC 9651)         | string (RFC 3339)                 |
+| Inner list / parameters | dropped with a warning (v1)       |
 
 Reserved keys (`path`, `size`, `etag`, `created_at`) cannot be overridden by the client; if present they are silently ignored and a counter is incremented.
 
@@ -262,7 +290,11 @@ forever:
 
 A row's "age" is `now - created_at` (the original event time, not the latest retry).
 
-| Age range | Service health | |-------------------------------|---------------------| | < `WarnAfter` | healthy | | ≥ `WarnAfter` (default 4h) | warning | | ≥ `ErrorAfter` (default 24h) | error |
+| Age range                    | Service health |
+| ---------------------------- | -------------- |
+| < `WarnAfter`                | healthy        |
+| ≥ `WarnAfter` (default 4h)   | warning        |
+| ≥ `ErrorAfter` (default 24h) | error          |
 
 Health is computed across **all namespaces served by this origin** (the queue is shared across exports). Per-namespace age can be inspected via the admin endpoint and via labeled Prometheus metrics. An origin in `error` state does **not** refuse uploads — the metadata service health is decoupled from the data path.
 
@@ -274,7 +306,23 @@ Health is computed across **all namespaces served by this origin** (the queue is
 
 All new parameters are added under `Origin.Posc.*` and `Origin.Metadata.*`.
 
-| Parameter | Type | Default | Notes | |-----------------------------------|----------|--------------------|-------| | `Origin.Posc.Enabled` | bool | `false` | Master switch for V2 POSC. | | `Origin.Posc.Prefix` | filename | `<export>/.pelican-posc` | Per-export. Must be on same filesystem as the export. | | `Origin.Posc.FileTimeout` | duration | `1h` | Idle in-progress files older than this are GC'd. | | `Origin.Posc.KeepaliveInterval` | duration | `19m` | How often a still-active in-progress file is touched. | | `Origin.Metadata.Enabled` | bool | `false` | Master switch for object-commit publish. | | `Origin.Metadata.Endpoint` | url | (none) | URL we POST to. Required if Enabled. | | `Origin.Metadata.Mode` | string | `eventual` | `transactional` | `eventual`. | | `Origin.Metadata.RequestTimeout` | duration | `10s` | Per-attempt HTTP timeout. | | `Origin.Metadata.TokenLifetime` | duration | `5m` | JWT lifetime. | | `Origin.Metadata.MinBackoff` | duration | `30s` | Eventual mode only. | | `Origin.Metadata.MaxBackoff` | duration | `30m` | Eventual mode only. | | `Origin.Metadata.MaxInflight` | int | `4` | Worker concurrency. | | `Origin.Metadata.RatePerSecond` | float64 | `10` | Token-bucket rate. | | `Origin.Metadata.WarnAfter` | duration | `4h` | Health threshold (origin-wide). | | `Origin.Metadata.ErrorAfter` | duration | `24h` | Health threshold (origin-wide). |
+| Parameter                        | Type     | Default                  | Notes                                                 |
+| -------------------------------- | -------- | ------------------------ | ----------------------------------------------------- |
+| `Origin.Posc.Enabled`            | bool     | `false`                  | Master switch for V2 POSC.                            |
+| `Origin.Posc.Prefix`             | filename | `<export>/.pelican-posc` | Per-export. Must be on same filesystem as the export. |
+| `Origin.Posc.FileTimeout`        | duration | `1h`                     | Idle in-progress files older than this are GC'd.      |
+| `Origin.Posc.KeepaliveInterval`  | duration | `19m`                    | How often a still-active in-progress file is touched. |
+| `Origin.Metadata.Enabled`        | bool     | `false`                  | Master switch for object-commit publish.              |
+| `Origin.Metadata.Endpoint`       | url      | (none)                   | URL we POST to. Required if Enabled.                  |
+| `Origin.Metadata.Mode`           | string   | `eventual`               | `transactional` \| `eventual`.                        |
+| `Origin.Metadata.RequestTimeout` | duration | `10s`                    | Per-attempt HTTP timeout.                             |
+| `Origin.Metadata.TokenLifetime`  | duration | `5m`                     | JWT lifetime.                                         |
+| `Origin.Metadata.MinBackoff`     | duration | `30s`                    | Eventual mode only.                                   |
+| `Origin.Metadata.MaxBackoff`     | duration | `30m`                    | Eventual mode only.                                   |
+| `Origin.Metadata.MaxInflight`    | int      | `4`                      | Worker concurrency.                                   |
+| `Origin.Metadata.RatePerSecond`  | float64  | `10`                     | Token-bucket rate.                                    |
+| `Origin.Metadata.WarnAfter`      | duration | `4h`                     | Health threshold (origin-wide).                       |
+| `Origin.Metadata.ErrorAfter`     | duration | `24h`                    | Health threshold (origin-wide).                       |
 
 The ETag is supplied by the storage backend (e.g. the WebDAV-computed ETag from the underlying afero/Os filesystem); the origin does not introduce its own hash-algorithm choice. There is no `HashAlgorithm` parameter.
 
@@ -284,7 +332,11 @@ The origin process serves multiple namespaces (one per `Origin.Exports[]` entry)
 
 In `Origin.Exports[].Metadata.*` the following are honored:
 
-| Field | Notes | |------------|--------------------------------------------------------------------| | `Endpoint` | Per-export endpoint URL. Falls back to origin-wide `Origin.Metadata.Endpoint`. | | `Mode` | Per-export `transactional` or `eventual`. Falls back to origin-wide. | | `Enabled` | Per-export off-switch (default: inherits origin-wide). |
+| Field      | Notes                                                                          |
+| ---------- | ------------------------------------------------------------------------------ |
+| `Endpoint` | Per-export endpoint URL. Falls back to origin-wide `Origin.Metadata.Endpoint`. |
+| `Mode`     | Per-export `transactional` or `eventual`. Falls back to origin-wide.           |
+| `Enabled`  | Per-export off-switch (default: inherits origin-wide).                         |
 
 `MaxInflight`, `RatePerSecond`, `MinBackoff`, `MaxBackoff`, `WarnAfter`, `ErrorAfter`, `RequestTimeout`, and `TokenLifetime` are **origin-wide only** — they describe shared resources (the worker pool, the rate-limit bucket, the queue health gauge).
 
@@ -349,7 +401,19 @@ var ReservedCustomFieldKeys = []string{"path", "size", "etag", "created_at"}
 
 All metrics are prefixed `pelican_origin_metadata_`. Where labeled, the labels are: `namespace` (federation prefix) and `mode` (`transactional` | `eventual`).
 
-| Metric | Type | Labels | Meaning | |-------------------------------------------------|-----------|-----------------------|------------------------------------------------------------------------| | `pelican_origin_metadata_events_enqueued_total` | counter | namespace, mode | Rows successfully inserted into the queue. | | `pelican_origin_metadata_publish_attempts_total`| counter | namespace, mode, outcome (`success`,`http_4xx`,`http_5xx`,`network`,`timeout`) | Per-attempt outcome count. | | `pelican_origin_metadata_publish_latency_seconds`| histogram| namespace, mode | End-to-end attempt latency. | | `pelican_origin_metadata_queue_depth` | gauge | namespace | Current pending rows. | | `pelican_origin_metadata_oldest_pending_seconds`| gauge | namespace | Age of the oldest pending row. | | `pelican_origin_metadata_health` | gauge | state (`healthy`,`warning`,`error`) | 0/1, exactly one state is 1 origin-wide. | | `pelican_origin_metadata_skipped_object_deleted_total`| counter | namespace | Rows dropped because the object was gone before publish succeeded. | | `pelican_origin_metadata_rollback_failed_total` | counter | namespace | Transactional rollback (object delete) failures. | | `pelican_origin_metadata_admin_deletes_total` | counter | namespace | Rows removed by an operator via the admin endpoint. | | `pelican_origin_posc_active_uploads` | gauge | (none) | In-progress POSC files currently open. | | `pelican_origin_posc_expired_total` | counter | (none) | Stale POSC temp files removed by the expiry thread. |
+| Metric                                                 | Type      | Labels                                                                         | Meaning                                                            |
+| ------------------------------------------------------ | --------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `pelican_origin_metadata_events_enqueued_total`        | counter   | namespace, mode                                                                | Rows successfully inserted into the queue.                         |
+| `pelican_origin_metadata_publish_attempts_total`       | counter   | namespace, mode, outcome (`success`,`http_4xx`,`http_5xx`,`network`,`timeout`) | Per-attempt outcome count.                                         |
+| `pelican_origin_metadata_publish_latency_seconds`      | histogram | namespace, mode                                                                | End-to-end attempt latency.                                        |
+| `pelican_origin_metadata_queue_depth`                  | gauge     | namespace                                                                      | Current pending rows.                                              |
+| `pelican_origin_metadata_oldest_pending_seconds`       | gauge     | namespace                                                                      | Age of the oldest pending row.                                     |
+| `pelican_origin_metadata_health`                       | gauge     | state (`healthy`,`warning`,`error`)                                            | 0/1, exactly one state is 1 origin-wide.                           |
+| `pelican_origin_metadata_skipped_object_deleted_total` | counter   | namespace                                                                      | Rows dropped because the object was gone before publish succeeded. |
+| `pelican_origin_metadata_rollback_failed_total`        | counter   | namespace                                                                      | Transactional rollback (object delete) failures.                   |
+| `pelican_origin_metadata_admin_deletes_total`          | counter   | namespace                                                                      | Rows removed by an operator via the admin endpoint.                |
+| `pelican_origin_posc_active_uploads`                   | gauge     | (none)                                                                         | In-progress POSC files currently open.                             |
+| `pelican_origin_posc_expired_total`                    | counter   | (none)                                                                         | Stale POSC temp files removed by the expiry thread.                |
 
 Latency, attempt count, and queue-depth gauges are updated under the publisher's lock. The age gauge is recomputed once per scrape from `SELECT MIN(created_at)`.
 
@@ -357,7 +421,13 @@ Latency, attempt count, and queue-depth gauges are updated under the publisher's
 
 A new authenticated admin API surface is added under `/api/v1.0/origin_ui/metadata_queue` (gated by an existing Pelican admin scope; same gating as other origin admin APIs). This is a thin SQL-on-HTTP wrapper, not a CRUD UI.
 
-| Method & path | Behavior | |--------------------------------------------------------|---------------------------------------------------------------------------------------| | `GET /api/v1.0/origin_ui/metadata_queue` | List pending rows (paginated, filterable by `namespace`, sorted by `created_at`). | | `GET /api/v1.0/origin_ui/metadata_queue/{event_id}` | Show a single row including `last_error` and `attempts`. | | `DELETE /api/v1.0/origin_ui/metadata_queue/{event_id}` | Drop a single row (e.g. an operator has decided not to publish). | | `POST /api/v1.0/origin_ui/metadata_queue/{event_id}/retry`| Force `next_attempt_at = now`, leaving `attempts` unchanged. Useful after fixing the receiver. | | `GET /api/v1.0/origin_ui/metadata_queue/_health` | JSON view of the origin-wide health state and per-namespace age summary. |
+| Method & path                                              | Behavior                                                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /api/v1.0/origin_ui/metadata_queue`                   | List pending rows (paginated, filterable by `namespace`, sorted by `created_at`).              |
+| `GET /api/v1.0/origin_ui/metadata_queue/{event_id}`        | Show a single row including `last_error` and `attempts`.                                       |
+| `DELETE /api/v1.0/origin_ui/metadata_queue/{event_id}`     | Drop a single row (e.g. an operator has decided not to publish).                               |
+| `POST /api/v1.0/origin_ui/metadata_queue/{event_id}/retry` | Force `next_attempt_at = now`, leaving `attempts` unchanged. Useful after fixing the receiver. |
+| `GET /api/v1.0/origin_ui/metadata_queue/_health`           | JSON view of the origin-wide health state and per-namespace age summary.                       |
 
 The web UI status page consumes these endpoints to render a queue view; that view is a follow-up and not in scope for the initial PR.
 
@@ -365,7 +435,18 @@ The web UI status page consumes these endpoints to render a queue view; that vie
 
 ## Failure modes & operator guidance
 
-| Scenario | Behavior | |------------------------------------------------|---------------------------------------------------------------------------------------------------| | Origin crashes between rename and DB insert | Object exists in storage but no metadata. Caught only by external recon. Window is one fsync. | | Origin crashes after DB insert, before publish | Row in queue is durable; worker retries on next start. No data loss. | | Origin crashes mid-PUT (POSC enabled) | Temp file remains; expiry thread cleans it up after `FileTimeout`. | | Metadata endpoint 5xx, eventual mode | Row stays in queue, retried with backoff. Health gauge ages. | | Metadata endpoint 5xx, transactional mode | Origin returns 500 to client. Origin best-effort removes the object and the queue row. | | Metadata endpoint persistently 4xx (e.g. 401) | Same as 5xx — we do not distinguish. Operator must fix and `POST /retry` or `DELETE` manually. | | DB unavailable | Origin returns 500 to client (cannot durably enqueue). Object best-effort removed. | | Object deleted between commit and publish | On the next worker pass, `Stat` fails → row dropped, `skipped_object_deleted_total` incremented. | | Two origins sharing a DB | **Not supported.** The queue is single-writer; concurrent claims would race on `next_attempt_at`. The single origin may serve many namespaces / exports concurrently. | | Receiver receives the same `event_id` twice | Expected behavior under retry. Receivers must dedupe on `event_id` / `X-Pelican-Idempotency-Key`. |
+| Scenario                                       | Behavior                                                                                                                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Origin crashes between rename and DB insert    | Object exists in storage but no metadata. Caught only by external recon. Window is one fsync.                                                                         |
+| Origin crashes after DB insert, before publish | Row in queue is durable; worker retries on next start. No data loss.                                                                                                  |
+| Origin crashes mid-PUT (POSC enabled)          | Temp file remains; expiry thread cleans it up after `FileTimeout`.                                                                                                    |
+| Metadata endpoint 5xx, eventual mode           | Row stays in queue, retried with backoff. Health gauge ages.                                                                                                          |
+| Metadata endpoint 5xx, transactional mode      | Origin returns 500 to client. Origin best-effort removes the object and the queue row.                                                                                |
+| Metadata endpoint persistently 4xx (e.g. 401)  | Same as 5xx — we do not distinguish. Operator must fix and `POST /retry` or `DELETE` manually.                                                                        |
+| DB unavailable                                 | Origin returns 500 to client (cannot durably enqueue). Object best-effort removed.                                                                                    |
+| Object deleted between commit and publish      | On the next worker pass, `Stat` fails → row dropped, `skipped_object_deleted_total` incremented.                                                                      |
+| Two origins sharing a DB                       | **Not supported.** The queue is single-writer; concurrent claims would race on `next_attempt_at`. The single origin may serve many namespaces / exports concurrently. |
+| Receiver receives the same `event_id` twice    | Expected behavior under retry. Receivers must dedupe on `event_id` / `X-Pelican-Idempotency-Key`.                                                                     |
 
 ## Test plan
 
@@ -451,7 +532,10 @@ Order is non-negotiable because a multipart reader is one-pass forward: receivin
 
 The PUT entry point checks `Content-Type`:
 
-| Incoming Content-Type | Path taken | |----------------------------|-------------------------------------------------------------| | `multipart/form-data; …` | Multipart parser (this addendum). | | anything else | Existing path: stdlib `webdav.Handler` reads `r.Body` raw. |
+| Incoming Content-Type    | Path taken                                                 |
+| ------------------------ | ---------------------------------------------------------- |
+| `multipart/form-data; …` | Multipart parser (this addendum).                          |
+| anything else            | Existing path: stdlib `webdav.Handler` reads `r.Body` raw. |
 
 Header-based custom fields (`X-Pelican-Object-Metadata`) are honored on **either** path. They occupy a different slot in the webhook (see below), so there is no ambiguity if both are present on a multipart upload — the SFV fields inline into the `object` sub-object exactly as today, while the multipart blob lands in the new `metadata` sub-object.
 
@@ -509,7 +593,12 @@ Notes:
 
 ### New configuration
 
-| Parameter | Type | Default | Purpose | |------------------------------------------|----------|---------------|------------------------------------------------------------------------------------------------------| | `Origin.Metadata.AllowMultipart` | bool | `true` | When false, the origin rejects multipart-form PUTs with a 415 so an operator can keep raw-PUT only. | | `Origin.Metadata.MaxMetadataBytes` | bytecount| `4MB` | Hard cap on the size of the `metadata` part. Larger requests get a 413. | | `Origin.Metadata.MetadataPartName` | string | `metadata` | Reserved field name for the metadata part. Configurable in case a downstream consumer needs a different convention. | | `Origin.Metadata.ObjectPartName` | string | `object` | Same, for the object body part. |
+| Parameter                          | Type      | Default    | Purpose                                                                                                             |
+| ---------------------------------- | --------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `Origin.Metadata.AllowMultipart`   | bool      | `true`     | When false, the origin rejects multipart-form PUTs with a 415 so an operator can keep raw-PUT only.                 |
+| `Origin.Metadata.MaxMetadataBytes` | bytecount | `4MB`      | Hard cap on the size of the `metadata` part. Larger requests get a 413.                                             |
+| `Origin.Metadata.MetadataPartName` | string    | `metadata` | Reserved field name for the metadata part. Configurable in case a downstream consumer needs a different convention. |
+| `Origin.Metadata.ObjectPartName`   | string    | `object`   | Same, for the object body part.                                                                                     |
 
 ### Client-side API delta
 
@@ -546,7 +635,12 @@ If `--metadata-body` and `--metadata-file` (header-form) are both supplied, the 
 
 Both can be present on a single upload:
 
-| `X-Pelican-Object-Metadata` | multipart `metadata` part | Webhook shape | |-----------------------------|---------------------------|----------------------------------------------------------------------------| | absent | absent | plain JSON, no `metadata` field | | present | absent | plain JSON, custom fields inline into `object` | | absent | present | `multipart/related` outbound; JSON event + opaque blob | | present | present | `multipart/related` outbound; JSON event has both inline custom fields AND a `metadata` sub-object pointing at the blob |
+| `X-Pelican-Object-Metadata` | multipart `metadata` part | Webhook shape                                                                                                           |
+| --------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| absent                      | absent                    | plain JSON, no `metadata` field                                                                                         |
+| present                     | absent                    | plain JSON, custom fields inline into `object`                                                                          |
+| absent                      | present                   | `multipart/related` outbound; JSON event + opaque blob                                                                  |
+| present                     | present                   | `multipart/related` outbound; JSON event has both inline custom fields AND a `metadata` sub-object pointing at the blob |
 
 ### Streaming bounds
 
