@@ -75,15 +75,24 @@ func setupTestEnvironment(t *testing.T) (*gin.Engine, *gorm.DB) {
 	t.Cleanup(config.ResetConfig)
 	gin.SetMode(gin.TestMode)
 
+	// Allocate the temp dir before registering the context/errgroup cleanup.
+	// t.Cleanup runs LIFO, so the auto-registered TempDir removal (registered
+	// here) executes AFTER the cancel()+egrp.Wait()+ShutdownDB cleanup below --
+	// i.e. only once the background goroutines writing under tmpDir (the SQLite
+	// WAL, issuer keys) have drained and the DB is closed. Otherwise RemoveAll
+	// races those writers and flakily fails with "directory not empty".
+	tmpDir := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled {
 			t.Log("Error waiting for errgroup:", err)
 		}
+		_ = database.ShutdownDB()
+		database.ServerDatabase = nil
 	})
 
-	tmpDir := t.TempDir()
 	require.NoError(t, param.Set(param.ConfigBase, tmpDir))
 	require.NoError(t, param.Set(param.IssuerKeysDirectory, filepath.Join(tmpDir, "issuer-keys")))
 	require.NoError(t, param.Set(param.Server_UILoginRateLimit, 100))
@@ -109,10 +118,6 @@ func setupTestEnvironment(t *testing.T) (*gin.Engine, *gorm.DB) {
 	// is present, rather than hand-migrating a subset that drifts as upstream
 	// evolves the user/credential schema.
 	require.NoError(t, database.InitServerDatabase(server_structs.OriginType))
-	t.Cleanup(func() {
-		_ = database.ShutdownDB()
-		database.ServerDatabase = nil
-	})
 	require.NoError(t, InitTransferDatabase())
 	mockDB := database.ServerDatabase
 

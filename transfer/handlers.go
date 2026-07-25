@@ -164,19 +164,24 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			return
 		}
 
+		// Read the job's mutable status under the manager's lock: the
+		// asynchronous executeJob goroutine started by CreateJobWithID may
+		// already be updating job.Status concurrently with this handler.
+		snapshot := tm.SnapshotJobResponse(job)
+
 		// Synchronous mode: when the client asks for an event stream, deliver the
 		// whole transfer over this one connection. The first event carries the
 		// job ID (so the client can persist it and, if the stream drops, resume
 		// by reconnecting to GET /jobs/:id/events), then status until terminal.
 		if wantsEventStream(c) {
-			tm.StreamJobEvents(c, job.ID, job.Status)
+			tm.StreamJobEvents(c, snapshot.JobID, snapshot.Status)
 			return
 		}
 
 		c.JSON(http.StatusCreated, TransferJobResponse{
-			JobID:     job.ID,
-			Status:    job.Status,
-			CreatedAt: job.CreatedAt,
+			JobID:     snapshot.JobID,
+			Status:    snapshot.Status,
+			CreatedAt: snapshot.CreatedAt,
 			Transfers: req.Transfers,
 		})
 	}
