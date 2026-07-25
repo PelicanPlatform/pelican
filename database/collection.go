@@ -1688,8 +1688,21 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, cr
 		return nil, err
 	}
 
-	// User not found, create one
-	return CreateUser(db, username, sub, issuer, creator)
+	// User not found, create one.
+	created, createErr := CreateUser(db, username, sub, issuer, creator)
+	if createErr == nil {
+		return created, nil
+	}
+	// A concurrent request may have created the same (sub, issuer) user between
+	// our SELECT above and this INSERT, tripping a UNIQUE constraint. For a
+	// get-or-create that is not a failure: if the row now exists, return it so
+	// concurrent first-time authentications don't spuriously fail (a 500 on the
+	// losing request). Re-fetch by the exact (sub, issuer) we were asked for, so
+	// an unrelated username/issuer collision still surfaces the original error.
+	if getErr := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error; getErr == nil {
+		return user, nil
+	}
+	return nil, createErr
 }
 
 func GetUserByID(db *gorm.DB, id string) (*User, error) {
