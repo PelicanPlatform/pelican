@@ -294,7 +294,11 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
 
-		populateEWMAStatusWeight(&sAd, &(existing.Value().ServerAd))
+		// Snapshot the existing ad under its lock; populateEWMAStatusWeight only
+		// reads the previous status weight, so a copy is equivalent and avoids
+		// racing a concurrent SetIOLoad on the cached advertisement.
+		existingAd := existing.Value().GetServerAd()
+		populateEWMAStatusWeight(&sAd, &existingAd)
 	} else {
 		// If there is no existing ad, the status weight will be set to the current raw weight
 		populateEWMAStatusWeight(&sAd, nil)

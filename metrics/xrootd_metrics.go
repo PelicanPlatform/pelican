@@ -990,12 +990,13 @@ var (
 		Help: "Statistics about connection calls.",
 	}, []string{"type"})
 
-	lastStatsMu      sync.Mutex
-	lastStats        SummaryStat
-	lastOssStatsMu   sync.Mutex
-	lastOssStats     OSSStatsGs
-	lastS3CacheStats OssS3CacheGs
-	lastXrdCurlStats struct {
+	lastStatsMu        sync.Mutex
+	lastStats          SummaryStat
+	lastOssStatsMu     sync.Mutex
+	lastOssStats       OSSStatsGs
+	lastS3CacheStatsMu sync.Mutex
+	lastS3CacheStats   OssS3CacheGs
+	lastXrdCurlStats   struct {
 		File    XrdCurlFileStats
 		Queues  XrdCurlQueueStats
 		Workers map[string]float64
@@ -2086,6 +2087,10 @@ func handleS3CacheStats(blobs [][]byte) error {
 
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
+	// lastS3CacheStats has the same concurrent exposure as lastOssStats (both are
+	// reached through handleOSSPacket), so guard it the same way.
+	lastS3CacheStatsMu.Lock()
+	defer lastS3CacheStatsMu.Unlock()
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		s3fileStats := OssS3CacheGs{}

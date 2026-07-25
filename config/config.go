@@ -164,13 +164,13 @@ var (
 	preCleanupFuncs map[string]func()
 
 	// Global discovery info.  Using the "once" allows us to delay discovery
-	// until it's first needed, avoiding a web lookup for invoking configuration
-	// Note the 'once' object is a pointer so we can reset the client multiple
-	// times during unit tests
-	fedDiscoveryMu   sync.Mutex
-	fedDiscoveryOnce *sync.Once
-	globalFedInfo    atomic.Pointer[pelican_url.FederationDiscovery]
-	globalFedErr     error
+	// until it's first needed, avoiding a web lookup for invoking configuration.
+	// Both the once and the discovery result are held in atomic pointers so
+	// they can be published, read, and reset without a mutex: swapping in a
+	// fresh sync.Once (during unit tests, or after SetFederation) is a single
+	// atomic store, and readers snapshot the result via a single atomic load.
+	fedDiscoveryOnce atomic.Pointer[sync.Once]
+	globalFedInfo    atomic.Pointer[fedDiscoveryResult]
 
 	// Global struct validator
 	validate *validator.Validate
@@ -215,20 +215,37 @@ var (
 	sysConfigLocation string = filepath.Join("/etc", "pelican")
 )
 
-func resetFederationDiscoveryState() {
-	fedDiscoveryMu.Lock()
-	defer fedDiscoveryMu.Unlock()
+// fedDiscoveryResult bundles the outcome of a federation discovery so that the
+// info and its error are published as a single atomic value.  Readers get a
+// consistent (info, err) pair from one atomic load rather than reading two
+// separate fields that could tear across a concurrent writer.
+type fedDiscoveryResult struct {
+	info pelican_url.FederationDiscovery
+	err  error
+}
 
-	fedDiscoveryOnce = &sync.Once{}
+// loadOrInitFedDiscoveryOnce returns the current discovery sync.Once, creating
+// and publishing a fresh one if none has been set yet.  It is lock-free: the
+// CompareAndSwap guarantees exactly one Once wins even under concurrent first
+// callers.
+func loadOrInitFedDiscoveryOnce() *sync.Once {
+	if once := fedDiscoveryOnce.Load(); once != nil {
+		return once
+	}
+	once := &sync.Once{}
+	if fedDiscoveryOnce.CompareAndSwap(nil, once) {
+		return once
+	}
+	return fedDiscoveryOnce.Load()
+}
+
+func resetFederationDiscoveryState() {
+	fedDiscoveryOnce.Store(&sync.Once{})
 }
 
 func clearGlobalFederationState() {
-	fedDiscoveryMu.Lock()
-	defer fedDiscoveryMu.Unlock()
-
-	fedDiscoveryOnce = &sync.Once{}
-	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
-	globalFedErr = nil
+	fedDiscoveryOnce.Store(&sync.Once{})
+	globalFedInfo.Store(&fedDiscoveryResult{})
 }
 
 func init() {
@@ -634,22 +651,15 @@ func ResetFederationForTest() {
 // If invoked before things are configured, it must be done from a single-threaded
 // context.
 func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error) {
-	fedDiscoveryMu.Lock()
-	defer fedDiscoveryMu.Unlock()
-
-	if fedDiscoveryOnce == nil {
-		fedDiscoveryOnce = &sync.Once{}
-	}
-	fedDiscoveryOnce.Do(func() {
-		var fedInfo pelican_url.FederationDiscovery
-		fedInfo, globalFedErr = discoverFederationImpl(ctx)
-		globalFedInfo.Store(&fedInfo)
+	loadOrInitFedDiscoveryOnce().Do(func() {
+		info, err := discoverFederationImpl(ctx)
+		globalFedInfo.Store(&fedDiscoveryResult{info: info, err: err})
 	})
-	loadedInfo := globalFedInfo.Load()
-	if loadedInfo == nil {
-		return pelican_url.FederationDiscovery{}, globalFedErr
+	loaded := globalFedInfo.Load()
+	if loaded == nil {
+		return pelican_url.FederationDiscovery{}, nil
 	}
-	return *loadedInfo, globalFedErr
+	return loaded.info, loaded.err
 }
 
 // Set the current global federation metadata.
@@ -670,18 +680,13 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 		log.WithError(err).Warn("Failed to update federation configuration")
 	}
 
-	fedDiscoveryMu.Lock()
-	defer fedDiscoveryMu.Unlock()
+	globalFedInfo.Store(&fedDiscoveryResult{info: fd})
 
-	globalFedInfo.Store(&fd)
-	globalFedErr = nil
-
-	// Consume the sync.Once so that subsequent GetFederation calls return the
-	// stored value directly instead of re-running discovery.
-	if fedDiscoveryOnce == nil {
-		fedDiscoveryOnce = &sync.Once{}
-	}
-	fedDiscoveryOnce.Do(func() {})
+	// Publish an already-consumed sync.Once so that subsequent GetFederation
+	// calls return the stored value directly instead of re-running discovery.
+	once := &sync.Once{}
+	once.Do(func() {})
+	fedDiscoveryOnce.Store(once)
 }
 
 // RegisterPreCleanup adds a named callback that will be invoked before
@@ -2445,7 +2450,14 @@ func InitClient() error {
 		log.Debugln("Failed to compute Server.ExternalWebUrl:", err)
 	}
 
-	setupTransport()
+	// Invalidate any cached transports now that the client configuration is
+	// loaded, so the next getter lazily rebuilds them (under transportMu) with
+	// the final config -- including a CA certificate that may still be
+	// configured after InitClient.  resetTransport() takes transportMu, so this
+	// no longer races concurrent transport getters the way the previous direct
+	// setupTransport() call did, and it must not eagerly rebuild here (that
+	// would freeze the transport before late CA configuration is applied).
+	resetTransport()
 
 	// Unmarshal Viper config into a Go struct
 	unmarshalledConfig, err := param.UnmarshalConfig()
