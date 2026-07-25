@@ -41,6 +41,15 @@ func TestGetOrCreateUserConcurrent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "u.sqlite")
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	require.NoError(t, err)
+	// Close the DB before the test returns so t.TempDir()'s RemoveAll can delete
+	// the file. On Windows an open file cannot be unlinked, so leaving the pooled
+	// connections open makes cleanup fail with "being used by another process".
+	// This cleanup is registered after t.TempDir()'s, so LIFO runs it first.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	require.NoError(t, db.AutoMigrate(&User{}, &Group{}, &GroupMember{}, &UserIdentity{}, &UserScope{}, &GroupScope{}))
 	require.NoError(t, db.AutoMigrate(&userCredential{}))
 
