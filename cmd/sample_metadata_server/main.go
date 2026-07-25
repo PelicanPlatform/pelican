@@ -22,27 +22,42 @@
 // standalone origin can publish to, and — crucially — it validates the bearer
 // JWT the origin mints rather than blindly trusting the request body.
 //
-// What it verifies, in order:
+// How key discovery works (the important part for Pelican newcomers):
 //
-//  1. There is an `Authorization: Bearer <jwt>` header.
-//  2. The JWT is signed by the issuer named in its own `iss` claim. The
-//     issuer's public keys are discovered via
-//     `<iss>/.well-known/openid-configuration` → `jwks_uri`, then fetched and
-//     cached (auto-refreshed). This is the same JWKS the origin publishes at
-//     `/.well-known/issuer.jwks`.
-//  3. The token is unexpired (with a small clock skew allowance).
-//  4. The `aud` claim contains this receiver's audience (the URL the origin was
-//     configured to POST to). Defends against token replay against a different
-//     endpoint.
-//  5. The `scope` claim carries `pelican.metadata`, and — when
-//     -require-namespace-scope is set — a `pelican.metadata:/<ns>` scope whose
-//     path covers the event's `namespace`. This is what stops an origin with a
-//     token for namespace /A from publishing events it claims are for /B.
+// The origin does NOT need to be reachable from this receiver. Each Pelican
+// namespace registers the *public* half of its signing key with the
+// federation's registry; the origin holds the private half and signs the
+// webhook JWT with it. So to verify the token, the receiver:
 //
-// Only after all of that does it parse the body (plain JSON, or the
-// multipart/related shape used when an opaque metadata blob is attached) and
-// print the event. A 2xx is returned on success; 401 for missing/bad tokens,
-// 403 for a valid token that lacks the required scope.
+//  1. reads the event body's `federation` and `namespace` (untrusted so far);
+//  2. does federation discovery: GET
+//     `<federation>/.well-known/pelican-configuration` and reads
+//     `namespace_registration_endpoint` (the registry);
+//  3. fetches that namespace's public keys from the registry:
+//     `<registry>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks`
+//     (cached, auto-refreshed);
+//  4. verifies the JWT signature against those keys.
+//
+// TRUST ANCHOR: `federation` comes from the unverified request, so pin it.
+// Pass -federation <discovery-url> in production: the receiver then verifies
+// against THAT federation's registry and rejects any event claiming a
+// different federation. Without -federation the receiver follows the event's
+// self-described federation (logged as insecure). If an event carries no
+// `federation` (e.g. an origin that couldn't resolve its own), it falls back
+// to legacy OIDC discovery on the token's `iss` — which does require reaching
+// the origin.
+//
+// After key discovery it also checks, in order:
+//
+//   - the token is unexpired (small clock-skew allowance);
+//   - `aud` contains this receiver's audience (defends against replay against a
+//     different endpoint);
+//   - `scope` carries `pelican.metadata`, and — when -require-namespace-scope
+//     is set — a `pelican.metadata:/<ns>` scope whose path covers the event's
+//     `namespace` (stops a token for /A from publishing events claiming /B).
+//
+// Only then does it parse the body fully and print the event. 2xx on success;
+// 401 for missing/bad tokens, 403 for a valid token lacking the required scope.
 //
 // This is a REFERENCE implementation: it favors clarity over throughput and
 // logs generously. It is not meant to be the production metadata sink.
@@ -52,6 +67,7 @@
 //	go run ./cmd/sample_metadata_server \
 //	    -addr :9999 \
 //	    -audience https://receiver.example.org:9999/events \
+//	    -federation osg-htc.org \
 //	    -require-namespace-scope
 //
 // then point an origin at it:
@@ -59,9 +75,9 @@
 //	Origin.Metadata.Enabled: true
 //	Origin.Metadata.Endpoint: https://receiver.example.org:9999/events
 //
-// In a dev federation the origin's issuer usually presents a certificate signed
-// by Pelican's per-federation CA. Pass -ca /path/to/ca.pem so the JWKS fetch
-// trusts it.
+// In a dev federation the registry usually presents a certificate signed by
+// Pelican's per-federation CA. Pass -ca /path/to/ca.pem so the discovery /
+// JWKS fetches trust it.
 //
 // When -addr uses port 0 (e.g. "127.0.0.1:0"), the OS picks a free port; the
 // actual bound URL is printed to stdout on a line prefixed with
@@ -81,6 +97,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -104,6 +121,7 @@ const listeningLinePrefix = "SAMPLE_METADATA_SERVER_LISTENING "
 type config struct {
 	path             string
 	audience         string
+	federation       string // trusted federation discovery URL (pinned); empty = follow the event's federation
 	requireNamespace bool
 	skew             time.Duration
 	httpClient       *http.Client
@@ -114,9 +132,10 @@ func main() {
 		addr             = flag.String("addr", ":9999", "address:port to listen on (use :0 to let the OS pick a free port)")
 		path             = flag.String("path", "/", "request path that accepts the webhook POST")
 		audience         = flag.String("audience", "", "expected token audience (this receiver's public URL). If empty, the audience check is skipped and a warning is logged.")
+		federation       = flag.String("federation", "", "federation discovery URL to TRUST for key discovery (e.g. osg-htc.org). When set, JWTs are verified against this federation's registry and events claiming a different federation are rejected. When empty, the event's self-described federation is followed (logged as insecure).")
 		requireNamespace = flag.Bool("require-namespace-scope", false, "require the token's pelican.metadata scope to carry a path covering the event's namespace")
 		skew             = flag.Duration("clock-skew", 2*time.Minute, "acceptable clock skew when validating exp/nbf")
-		caFile           = flag.String("ca", "", "PEM file of extra CA(s) to trust when fetching the issuer JWKS (e.g. a dev federation CA). In a dev federation, point this at the federation CA rather than disabling verification.")
+		caFile           = flag.String("ca", "", "PEM file of extra CA(s) to trust when fetching federation discovery / registry JWKS (e.g. a dev federation CA). In a dev federation, point this at the federation CA rather than disabling verification.")
 		tlsCert          = flag.String("tls-cert", "", "optional TLS certificate to serve HTTPS")
 		tlsKey           = flag.String("tls-key", "", "optional TLS key to serve HTTPS")
 	)
@@ -130,12 +149,16 @@ func main() {
 	cfg := &config{
 		path:             *path,
 		audience:         strings.TrimSpace(*audience),
+		federation:       canonicalFederation(*federation),
 		requireNamespace: *requireNamespace,
 		skew:             *skew,
 		httpClient:       client,
 	}
 	if cfg.audience == "" {
 		log.Printf("WARNING: -audience is empty; the token audience will NOT be checked. Set it to this receiver's public URL in production.")
+	}
+	if cfg.federation == "" {
+		log.Printf("WARNING: -federation is empty; key discovery will FOLLOW the federation named in each (unverified) event. Pin it with -federation <discovery-url> in production so a forged event cannot point verification at an attacker's registry.")
 	}
 	if !cfg.requireNamespace {
 		log.Printf("WARNING: -require-namespace-scope is off; any token bearing the bare 'pelican.metadata' scope is accepted for ANY namespace. Enable it in production.")
@@ -209,11 +232,12 @@ func buildHTTPClient(caFile string) (*http.Client, error) {
 // inlined into the object map alongside the reserved keys, so object stays a
 // free-form map.
 type objectCommitEvent struct {
-	ID        string                 `json:"id"`
-	Type      string                 `json:"type"`
-	Timestamp string                 `json:"timestamp"`
-	Namespace string                 `json:"namespace"`
-	Object    map[string]interface{} `json:"object"`
+	ID         string                 `json:"id"`
+	Type       string                 `json:"type"`
+	Timestamp  string                 `json:"timestamp"`
+	Federation string                 `json:"federation"`
+	Namespace  string                 `json:"namespace"`
+	Object     map[string]interface{} `json:"object"`
 }
 
 // makeHandler returns the HTTP handler for the webhook path.
@@ -240,7 +264,13 @@ func (c *config) makeHandler(v *verifier) http.HandlerFunc {
 		}
 
 		// --- Token verification. This is the point of the sample. ---
-		claims, err := v.verify(r.Context(), r.Header.Get("Authorization"), c.audience, c.skew)
+		claims, err := v.verify(r.Context(), r.Header.Get("Authorization"), verifyRequest{
+			pinnedFederation: c.federation,
+			eventFederation:  event.Federation,
+			namespace:        event.Namespace,
+			audience:         c.audience,
+			skew:             c.skew,
+		})
 		if err != nil {
 			log.Printf("reject: token: %v", err)
 			http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
@@ -315,17 +345,35 @@ func parseBody(contentType string, body []byte) (objectCommitEvent, string, erro
 	return event, "", nil
 }
 
-// verifier caches issuer JWKS sets so repeated requests from the same origin
-// don't re-fetch on every publish.
+// verifier caches JWKS sets (keyed by JWKS URL) and resolved registry
+// endpoints (keyed by federation) so repeated publishes don't re-discover on
+// every request.
 type verifier struct {
 	client *http.Client
 
-	mu     sync.Mutex
-	caches map[string]*jwk.Cache // keyed by jwks_uri
+	mu       sync.Mutex
+	caches   map[string]*jwk.Cache // keyed by jwks url
+	registry map[string]string     // federation discovery url -> registry endpoint
 }
 
 func newVerifier(client *http.Client) *verifier {
-	return &verifier{client: client, caches: map[string]*jwk.Cache{}}
+	return &verifier{
+		client:   client,
+		caches:   map[string]*jwk.Cache{},
+		registry: map[string]string{},
+	}
+}
+
+// verifyRequest carries everything verify() needs. The federation/namespace
+// come from the (still-untrusted) event body; the token's signature is what
+// ultimately establishes trust, against keys discovered from the *pinned*
+// federation when one is configured.
+type verifyRequest struct {
+	pinnedFederation string // configured trust anchor; empty = follow eventFederation
+	eventFederation  string // federation the event claims (untrusted)
+	namespace        string // namespace the event claims (untrusted until the sig verifies)
+	audience         string
+	skew             time.Duration
 }
 
 // verifiedClaims is the subset of claims the handler needs after a token checks
@@ -336,37 +384,63 @@ type verifiedClaims struct {
 	scopes []string
 }
 
-// verify parses and validates the bearer token from the Authorization header.
-func (v *verifier) verify(ctx context.Context, authHeader, audience string, skew time.Duration) (*verifiedClaims, error) {
+// verify validates the bearer token. Keys are discovered from the federation
+// registry (namespace-scoped), which is why the origin need not be reachable;
+// it falls back to OIDC-on-iss only when no federation is available.
+func (v *verifier) verify(ctx context.Context, authHeader string, req verifyRequest) (*verifiedClaims, error) {
 	raw, err := bearerToken(authHeader)
 	if err != nil {
 		return nil, err
 	}
 
-	// First pass: parse WITHOUT verification just to learn the issuer, so we
-	// know whose JWKS to fetch. Nothing from this pass is trusted beyond the
-	// issuer URL used for discovery.
+	// First pass: parse WITHOUT verification, only to learn `iss` (for the
+	// legacy fallback and for logging). Nothing here is trusted.
 	unverified, err := jwt.Parse([]byte(raw), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		return nil, fmt.Errorf("malformed token: %w", err)
 	}
 	issuer := unverified.Issuer()
-	if issuer == "" {
-		return nil, fmt.Errorf("token has no issuer claim")
+
+	// Decide which federation to trust for key discovery.
+	federation := req.pinnedFederation
+	if federation != "" {
+		// Pinned: refuse an event that claims some *other* federation, so a
+		// forged event can't redirect verification at an attacker's registry.
+		if ef := canonicalFederation(req.eventFederation); ef != "" && ef != federation {
+			return nil, fmt.Errorf("event federation %q is not the trusted federation %q", req.eventFederation, federation)
+		}
+	} else {
+		federation = canonicalFederation(req.eventFederation)
 	}
 
-	keySet, err := v.keySetFor(ctx, issuer)
-	if err != nil {
-		return nil, fmt.Errorf("resolve issuer keys: %w", err)
+	var keySet jwk.Set
+	switch {
+	case federation != "":
+		if req.namespace == "" {
+			return nil, fmt.Errorf("event has no namespace; cannot locate registry keys")
+		}
+		keySet, err = v.keySetForNamespace(ctx, federation, req.namespace)
+		if err != nil {
+			return nil, fmt.Errorf("resolve registry keys for %s in %s: %w", req.namespace, federation, err)
+		}
+	case issuer != "":
+		// Legacy fallback: OIDC discovery on the origin's issuer. Requires
+		// reachability to the origin.
+		keySet, err = v.keySetForIssuer(ctx, issuer)
+		if err != nil {
+			return nil, fmt.Errorf("resolve issuer keys (no federation in event): %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("event carries no federation and token no issuer; cannot locate verification keys")
 	}
 
 	opts := []jwt.ParseOption{
 		jwt.WithKeySet(keySet),
 		jwt.WithValidate(true),
-		jwt.WithAcceptableSkew(skew),
+		jwt.WithAcceptableSkew(req.skew),
 	}
-	if audience != "" {
-		opts = append(opts, jwt.WithAudience(audience))
+	if req.audience != "" {
+		opts = append(opts, jwt.WithAudience(req.audience))
 	}
 	tok, err := jwt.Parse([]byte(raw), opts...)
 	if err != nil {
@@ -392,57 +466,145 @@ func bearerToken(header string) (string, error) {
 	return tok, nil
 }
 
-// keySetFor returns a (cached, auto-refreshing) jwk.Set for the issuer.
-func (v *verifier) keySetFor(ctx context.Context, issuer string) (jwk.Set, error) {
-	jwksURI, err := v.discoverJWKS(ctx, issuer)
+// keySetForNamespace discovers a namespace's public keys via the federation
+// registry: federation discovery -> registry endpoint -> namespace JWKS.
+func (v *verifier) keySetForNamespace(ctx context.Context, federation, namespace string) (jwk.Set, error) {
+	registry, err := v.registryEndpoint(ctx, federation)
 	if err != nil {
 		return nil, err
 	}
+	jwksURL, err := namespaceJWKSURL(registry, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return v.keySetForURL(ctx, jwksURL)
+}
 
+// keySetForIssuer is the legacy path: resolve the issuer's jwks_uri via OIDC
+// discovery on the token's `iss`. Requires reachability to the origin.
+func (v *verifier) keySetForIssuer(ctx context.Context, issuer string) (jwk.Set, error) {
+	discoveryURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
+	var doc struct {
+		JwksURI string `json:"jwks_uri"`
+	}
+	if err := v.getJSON(ctx, discoveryURL, &doc); err != nil {
+		return nil, err
+	}
+	if doc.JwksURI == "" {
+		return nil, fmt.Errorf("openid-configuration for %s has no jwks_uri", issuer)
+	}
+	return v.keySetForURL(ctx, doc.JwksURI)
+}
+
+// registryEndpoint resolves (and caches) a federation's registry endpoint via
+// federation discovery. `federation` must already be canonical (see
+// canonicalFederation).
+func (v *verifier) registryEndpoint(ctx context.Context, federation string) (string, error) {
 	v.mu.Lock()
-	cache, ok := v.caches[jwksURI]
-	if !ok {
-		cache = jwk.NewCache(context.Background())
-		if regErr := cache.Register(jwksURI, jwk.WithHTTPClient(v.client), jwk.WithMinRefreshInterval(15*time.Minute)); regErr != nil {
-			v.mu.Unlock()
-			return nil, fmt.Errorf("register jwks cache: %w", regErr)
-		}
-		v.caches[jwksURI] = cache
+	if reg, ok := v.registry[federation]; ok {
+		v.mu.Unlock()
+		return reg, nil
 	}
 	v.mu.Unlock()
 
-	set, err := cache.Get(ctx, jwksURI)
+	discoveryURL := federation + "/.well-known/pelican-configuration"
+	var doc struct {
+		RegistryEndpoint string `json:"namespace_registration_endpoint"`
+	}
+	if err := v.getJSON(ctx, discoveryURL, &doc); err != nil {
+		return "", fmt.Errorf("federation discovery: %w", err)
+	}
+	if doc.RegistryEndpoint == "" {
+		return "", fmt.Errorf("federation discovery doc %s has no namespace_registration_endpoint", discoveryURL)
+	}
+
+	v.mu.Lock()
+	v.registry[federation] = doc.RegistryEndpoint
+	v.mu.Unlock()
+	return doc.RegistryEndpoint, nil
+}
+
+// namespaceJWKSURL builds the registry URL that serves a namespace's public
+// keys: <registry>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks.
+func namespaceJWKSURL(registry, namespace string) (string, error) {
+	u, err := url.Parse(registry)
 	if err != nil {
-		return nil, fmt.Errorf("fetch jwks %s: %w", jwksURI, err)
+		return "", fmt.Errorf("parse registry endpoint %q: %w", registry, err)
+	}
+	// JoinPath cleans duplicate slashes, so a namespace like "/foo/bar" is
+	// safely appended as path segments.
+	u = u.JoinPath("api", "v1.0", "registry", namespace, ".well-known", "issuer.jwks")
+	return u.String(), nil
+}
+
+// keySetForURL returns a cached, auto-refreshing jwk.Set for a JWKS URL.
+func (v *verifier) keySetForURL(ctx context.Context, jwksURL string) (jwk.Set, error) {
+	v.mu.Lock()
+	cache, ok := v.caches[jwksURL]
+	if !ok {
+		cache = jwk.NewCache(context.Background())
+		if regErr := cache.Register(jwksURL, jwk.WithHTTPClient(v.client), jwk.WithMinRefreshInterval(15*time.Minute)); regErr != nil {
+			v.mu.Unlock()
+			return nil, fmt.Errorf("register jwks cache: %w", regErr)
+		}
+		v.caches[jwksURL] = cache
+	}
+	v.mu.Unlock()
+
+	set, err := cache.Get(ctx, jwksURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch jwks %s: %w", jwksURL, err)
 	}
 	return set, nil
 }
 
-// discoverJWKS resolves the issuer's jwks_uri via OIDC discovery.
-func (v *verifier) discoverJWKS(ctx context.Context, issuer string) (string, error) {
-	discoveryURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
+// getJSON GETs reqURL and decodes a 200 JSON body into out.
+func (v *verifier) getJSON(ctx context.Context, reqURL string, out interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
 	resp, err := v.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("GET %s: %w", discoveryURL, err)
+		return fmt.Errorf("GET %s: %w", reqURL, err)
 	}
 	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("discovery %s returned %d", discoveryURL, resp.StatusCode)
+		return fmt.Errorf("GET %s returned %d", reqURL, resp.StatusCode)
 	}
-	var doc struct {
-		JwksURI string `json:"jwks_uri"`
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode %s: %w", reqURL, err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return "", fmt.Errorf("decode discovery doc: %w", err)
+	return nil
+}
+
+// canonicalFederation normalizes a federation discovery URL to a stable form
+// so the pinned value and an event's value compare equal despite scheme /
+// case / default-port / trailing-slash differences. A bare host is assumed
+// https. Returns "" for empty input.
+func canonicalFederation(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
 	}
-	if doc.JwksURI == "" {
-		return "", fmt.Errorf("discovery doc for %s has no jwks_uri", issuer)
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
 	}
-	return doc.JwksURI, nil
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(strings.TrimRight(s, "/"))
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	if u.Scheme == "https" {
+		u.Host = strings.TrimSuffix(u.Host, ":443")
+	} else if u.Scheme == "http" {
+		u.Host = strings.TrimSuffix(u.Host, ":80")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // extractScopes reads the space-delimited `scope` claim into a slice. Tolerates

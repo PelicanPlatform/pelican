@@ -20,9 +20,20 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"testing"
+	"time"
+
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 func TestBearerToken(t *testing.T) {
@@ -179,4 +190,148 @@ func TestParseBody_MultipartMissingRoot(t *testing.T) {
 	if _, _, err := parseBody(contentType, buf.Bytes()); err == nil {
 		t.Fatal("expected error for multipart body with no JSON root part")
 	}
+}
+
+func TestCanonicalFederation(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"osg-htc.org", "https://osg-htc.org"},
+		{"https://osg-htc.org", "https://osg-htc.org"},
+		{"https://OSG-HTC.org/", "https://osg-htc.org"},
+		{"https://osg-htc.org:443", "https://osg-htc.org"},
+		{"http://localhost:80", "http://localhost"},
+		{"http://127.0.0.1:9999", "http://127.0.0.1:9999"},
+	}
+	for _, tc := range tests {
+		if got := canonicalFederation(tc.in); got != tc.want {
+			t.Fatalf("canonicalFederation(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNamespaceJWKSURL(t *testing.T) {
+	got, err := namespaceJWKSURL("https://reg.example.org", "/foo/bar")
+	if err != nil {
+		t.Fatalf("namespaceJWKSURL: %v", err)
+	}
+	want := "https://reg.example.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks"
+	if got != want {
+		t.Fatalf("namespaceJWKSURL = %q, want %q", got, want)
+	}
+}
+
+// TestVerify_RegistryDiscovery exercises the full registry-based verification
+// path: a mock federation-discovery + registry serves the namespace's public
+// JWKS, and a token signed with the matching private key verifies. It also
+// pins the federation and asserts a mismatched-federation event is rejected.
+func TestVerify_RegistryDiscovery(t *testing.T) {
+	// Signing key (private) + its public JWKS, as the registry would serve it.
+	rawKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("gen key: %v", err)
+	}
+	priv, err := jwk.FromRaw(rawKey)
+	if err != nil {
+		t.Fatalf("jwk from raw: %v", err)
+	}
+	_ = priv.Set(jwk.KeyIDKey, "test-key-1")
+	_ = priv.Set(jwk.AlgorithmKey, jwa.RS256)
+	pub, err := priv.PublicKey()
+	if err != nil {
+		t.Fatalf("public key: %v", err)
+	}
+	pubSet := jwk.NewSet()
+	_ = pubSet.AddKey(pub)
+
+	// Mock federation discovery + registry (same server plays both roles).
+	var registryURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/pelican-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"namespace_registration_endpoint": registryURL})
+	})
+	mux.HandleFunc("/api/v1.0/registry/foo/.well-known/issuer.jwks", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(pubSet)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	registryURL = srv.URL
+	federation := srv.URL
+	const audience = "https://receiver.example/events"
+
+	signToken := func(scope string, aud string, lifetime time.Duration) string {
+		tok, err := jwt.NewBuilder().
+			Issuer("https://origin.example").
+			Subject("https://origin.example").
+			Audience([]string{aud}).
+			IssuedAt(time.Now()).
+			Expiration(time.Now().Add(lifetime)).
+			Claim("scope", scope).
+			Build()
+		if err != nil {
+			t.Fatalf("build token: %v", err)
+		}
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, priv))
+		if err != nil {
+			t.Fatalf("sign token: %v", err)
+		}
+		return "Bearer " + string(signed)
+	}
+
+	v := newVerifier(srv.Client())
+	ctx := context.Background()
+
+	t.Run("verifies against registry keys (pinned)", func(t *testing.T) {
+		claims, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
+			pinnedFederation: canonicalFederation(federation),
+			eventFederation:  federation,
+			namespace:        "/foo",
+			audience:         audience,
+			skew:             time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		if err := checkScope(claims.scopes, "/foo/data/x.dat", true); err != nil {
+			t.Fatalf("scope check: %v", err)
+		}
+	})
+
+	t.Run("rejects event that claims a different federation than the pin", func(t *testing.T) {
+		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, 5*time.Minute), verifyRequest{
+			pinnedFederation: canonicalFederation(federation),
+			eventFederation:  "https://evil.example",
+			namespace:        "/foo",
+			audience:         audience,
+			skew:             time.Minute,
+		})
+		if err == nil {
+			t.Fatal("expected rejection for federation mismatch, got nil")
+		}
+	})
+
+	t.Run("rejects wrong audience", func(t *testing.T) {
+		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", "https://someone-else/", 5*time.Minute), verifyRequest{
+			pinnedFederation: canonicalFederation(federation),
+			eventFederation:  federation,
+			namespace:        "/foo",
+			audience:         audience,
+			skew:             time.Minute,
+		})
+		if err == nil {
+			t.Fatal("expected rejection for wrong audience, got nil")
+		}
+	})
+
+	t.Run("rejects expired token", func(t *testing.T) {
+		_, err := v.verify(ctx, signToken("pelican.metadata:/foo", audience, -1*time.Minute), verifyRequest{
+			pinnedFederation: canonicalFederation(federation),
+			eventFederation:  federation,
+			namespace:        "/foo",
+			audience:         audience,
+			skew:             time.Second,
+		})
+		if err == nil {
+			t.Fatal("expected rejection for expired token, got nil")
+		}
+	})
 }
