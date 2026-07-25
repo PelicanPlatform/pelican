@@ -321,12 +321,9 @@ func TestObjectDeleted_PublishedAndNotSkipped(t *testing.T) {
 // subsequent overwrite of the same path — decided purely from the local
 // tracking DB (a live row already exists).
 func TestObjectUpdated_OverwriteDetectedViaTrackingDB(t *testing.T) {
-	ctl, _, requests, _ := newTestController(t, ModeEventual, nil)
-	dao, _, cleanup := newTestDAO(t)
-	defer cleanup()
+	ctl, dao, requests := newTrackedTestController(t, ModeEventual)
 
-	hook := ctl.CommitEventFromCloseHookTracked("/exp", dao,
-		RecordCommitCloseHook(dao, "/exp", false))
+	hook := ctl.CommitEventFromCloseHookTracked("/exp", dao, false)
 	info := fakeFileInfo{name: "x.dat", size: 5, mod: time.Now().UTC()}
 	ctx := context.Background()
 

@@ -424,9 +424,44 @@ func (b *sqliteBatcher) Stop() {
 	}
 	b.closed = true
 	b.closeMu.Unlock()
-	b.enqueueWG.Wait()
+	// Normally wait for in-flight enqueuers to finish their send before
+	// cancelling the flusher, so no started op is stranded. But if the
+	// flusher is wedged (e.g. a hung DB with the per-tx timeout disabled via
+	// SetTxTimeout(<=0)), an enqueuer can block on a full channel and
+	// enqueueWG would never reach zero — hanging Stop() forever. Bound the
+	// wait: on expiry, cancel the flusher anyway. Cancelling its context
+	// unblocks the wedged transaction, after which the flusher's drain pass
+	// receives the stranded op and the enqueuer completes.
+	if !waitWGWithTimeout(&b.enqueueWG, batcherStopGrace) {
+		log.Warn("sqlite batcher: enqueuers still in-flight after grace at Stop; cancelling flusher to avoid a hang")
+	}
 	b.cancel()
 	b.wg.Wait()
+}
+
+// batcherStopGrace bounds how long Stop() waits for in-flight enqueuers
+// before force-cancelling the flusher. In the normal case enqueueWG reaches
+// zero in microseconds and this is never approached; it only matters when the
+// flusher is wedged on a hung DB with the tx-timeout disabled.
+const batcherStopGrace = 30 * time.Second
+
+// waitWGWithTimeout waits for wg to reach zero, returning true if it did so
+// before the timeout elapsed and false otherwise. The helper goroutine
+// outlives a false return only until the group finally drains.
+func waitWGWithTimeout(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // run is the flusher goroutine. It pulls ops off the channel and
@@ -541,36 +576,34 @@ func (b *sqliteBatcher) flush(batch []*batchOp) {
 	// every op afterwards.
 	execErrs := make([]error, len(batch))
 
-	// Per-flush context with a timeout. If the underlying DB
-	// hangs (lock storm, full disk, NFS stall), the Transaction
-	// call would otherwise wedge forever and every caller
-	// behind us would block on op.done. A non-zero txTimeout
-	// turns that into "the batch fails with ctx.DeadlineExceeded
-	// and every op sees the timeout error" — the flusher moves on
-	// and subsequent batches get a fresh attempt.
-	txCtx := context.Background()
-	var cancelTx context.CancelFunc
-	if b.txTimeout > 0 {
-		txCtx, cancelTx = context.WithTimeout(context.Background(), b.txTimeout)
-		defer cancelTx()
-	}
-	commitErr := b.db.WithContext(txCtx).Transaction(func(tx *gorm.DB) error {
-		for i, op := range batch {
-			for _, s := range op.stmts {
-				if err := tx.Exec(s.sql, s.args...).Error; err != nil {
-					// Capture and fate-share with the rest of
-					// the batch: returning here rolls back the
-					// transaction. The per-op done channels all
-					// receive the surviving error below.
-					execErrs[i] = err
-					return err
-				}
-			}
-		}
-		return nil
-	})
+	// Fast path: run the whole batch in one coalesced transaction. On any
+	// statement error the transaction rolls back, so commitErr is non-nil and
+	// NONE of the ops were applied.
+	commitErr := b.runBatchTx(batch, execErrs)
 
-	if commitErr != nil && b.hooks.IncError != nil {
+	// Slow path: the coalesced transaction failed, which in the fast path
+	// would fail every op in the batch — even though typically only one
+	// statement was poison. Re-run each op in its own transaction so a single
+	// bad op can't roll back its batch-mates' valid writes. Batch failures are
+	// expected to be rare (a well-formed publish/observation shouldn't error),
+	// so the extra round-trips here are acceptable.
+	hadError := commitErr != nil
+	if commitErr != nil {
+		log.Warnf("sqlite batcher: coalesced flush of %d ops failed (%v); retrying each op individually", len(batch), commitErr)
+		for i := range execErrs {
+			execErrs[i] = nil
+		}
+		for i, op := range batch {
+			// The 1-element scratch absorbs runBatchTx's index-aligned
+			// write; the returned error is this op's isolated result.
+			execErrs[i] = b.runBatchTx([]*batchOp{op}, make([]error, 1))
+		}
+		// commitErr is no longer a shared fate; each op now carries only its
+		// own isolated error (execErrs[i]).
+		commitErr = nil
+	}
+
+	if hadError && b.hooks.IncError != nil {
 		b.hooks.IncError()
 	}
 	if b.hooks.IncFlush != nil {
@@ -592,6 +625,36 @@ func (b *sqliteBatcher) flush(batch []*batchOp) {
 		op.done <- opErr(execErrs[i], commitErr)
 		close(op.done)
 	}
+}
+
+// runBatchTx executes every statement of every op in `batch` inside a single
+// transaction, bounded by the per-flush tx timeout. On the first statement
+// error it records that op's index into execErrs and rolls back, returning the
+// error. execErrs must be the same length as batch (index-aligned).
+func (b *sqliteBatcher) runBatchTx(batch []*batchOp, execErrs []error) error {
+	// Per-flush context with a timeout. If the underlying DB hangs (lock
+	// storm, full disk, NFS stall), the Transaction call would otherwise
+	// wedge forever and every caller behind us would block on op.done. A
+	// non-zero txTimeout turns that into "the batch fails with
+	// ctx.DeadlineExceeded" — the flusher moves on and subsequent batches
+	// get a fresh attempt.
+	txCtx := context.Background()
+	var cancelTx context.CancelFunc
+	if b.txTimeout > 0 {
+		txCtx, cancelTx = context.WithTimeout(context.Background(), b.txTimeout)
+		defer cancelTx()
+	}
+	return b.db.WithContext(txCtx).Transaction(func(tx *gorm.DB) error {
+		for i, op := range batch {
+			for _, s := range op.stmts {
+				if err := tx.Exec(s.sql, s.args...).Error; err != nil {
+					execErrs[i] = err
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // opErr picks the most specific error for an op: its own exec error

@@ -477,54 +477,53 @@ func RecordCommitCloseHook(dao *objectMetadataDAO, namespace string, trackExtra 
 		return func(context.Context, string, os.FileInfo) error { return nil }
 	}
 	return func(ctx context.Context, finalPath string, info os.FileInfo) error {
-		var size int64
-		var mtime time.Time
-		if info != nil {
-			size = info.Size()
-			mtime = info.ModTime()
-		}
-		etag := BackendETag(info)
-		// Source attribution:
-		//   - empty etag → origin (we'd fill in nothing the
-		//     backend didn't give us anyway)
-		//   - POSC's poscDigestFileInfo wrapper → origin (the
-		//     digest was computed by POSC's EtagPolicy, not the
-		//     backend; visible to callers in this discriminator)
-		//   - otherwise → backend (the storage layer's own ETag,
-		//     whether real or synthesised)
-		src := EtagSourceBackend
-		if etag == "" {
-			src = EtagSourceOrigin
-		}
-		if _, ok := info.(poscDigestFileInfo); ok {
-			src = EtagSourceOrigin
-		}
-		fedPath := joinFederationPath(namespace, finalPath)
-		// Invalidate the observation cache: a subsequent Stat
-		// should re-warm against the freshly-committed etag, not
-		// the previous value.
-		// (Cache lives on the observationConfig the aferoFS
-		// holds; we don't have it here. The Stat path itself will
-		// notice the etag has changed and update on next access —
-		// which is functionally equivalent.)
-		var custom map[string]any
-		if cm := objectMetadataFromContext(ctx); cm != nil {
-			custom = map[string]any(cm)
-		}
-		return dao.RecordCommit(ctx, ObjectMetadataEventInput{
-			Namespace:    namespace,
-			ObjectPath:   fedPath,
-			Size:         size,
-			ETag:         etag,
-			EtagSource:   src,
-			BackendMtime: mtime,
-			Actor:        usernameFromContext(ctx),
-			Extra:        custom,
-			TrackExtra:   trackExtra,
-			// Populated by the TPC handler before it OpenFiles the
-			// destination; "" for direct PUTs (which will store
-			// NULL, clearing any stale value from a prior TPC).
-			SourceEtag: sourceEtagFromContext(ctx),
-		})
+		return dao.RecordCommit(ctx, commitInputFromCloseHook(ctx, namespace, finalPath, info, trackExtra))
+	}
+}
+
+// commitInputFromCloseHook assembles the tracking-DB commit input from the
+// close-hook arguments. Extracted so the publish path can obtain the same
+// input (and thus commitStatements) to fold the tracking-commit into the same
+// durable transaction as the publish-queue INSERT.
+func commitInputFromCloseHook(ctx context.Context, namespace, finalPath string, info os.FileInfo, trackExtra bool) ObjectMetadataEventInput {
+	var size int64
+	var mtime time.Time
+	if info != nil {
+		size = info.Size()
+		mtime = info.ModTime()
+	}
+	etag := BackendETag(info)
+	// Source attribution:
+	//   - empty etag → origin (we'd fill in nothing the backend didn't
+	//     give us anyway)
+	//   - POSC's poscDigestFileInfo wrapper → origin (the digest was
+	//     computed by POSC's EtagPolicy, not the backend)
+	//   - otherwise → backend (the storage layer's own ETag, whether real
+	//     or synthesised)
+	src := EtagSourceBackend
+	if etag == "" {
+		src = EtagSourceOrigin
+	}
+	if _, ok := info.(poscDigestFileInfo); ok {
+		src = EtagSourceOrigin
+	}
+	var custom map[string]any
+	if cm := objectMetadataFromContext(ctx); cm != nil {
+		custom = map[string]any(cm)
+	}
+	return ObjectMetadataEventInput{
+		Namespace:    namespace,
+		ObjectPath:   joinFederationPath(namespace, finalPath),
+		Size:         size,
+		ETag:         etag,
+		EtagSource:   src,
+		BackendMtime: mtime,
+		Actor:        usernameFromContext(ctx),
+		Extra:        custom,
+		TrackExtra:   trackExtra,
+		// Populated by the TPC handler before it OpenFiles the
+		// destination; "" for direct PUTs (which will store NULL,
+		// clearing any stale value from a prior TPC).
+		SourceEtag: sourceEtagFromContext(ctx),
 	}
 }

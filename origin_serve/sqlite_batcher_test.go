@@ -455,3 +455,72 @@ func TestBatcher_TxTimeoutDisabledByZeroOrNegative(t *testing.T) {
 		t.Fatalf("op should succeed when timeout is disabled: %v", err)
 	}
 }
+
+// TestWaitWGWithTimeout locks the bounded-wait helper that keeps
+// sqliteBatcher.Stop() from hanging when the flusher is wedged: it returns
+// promptly-true for a drained group and false after the deadline for one that
+// never drains.
+func TestWaitWGWithTimeout(t *testing.T) {
+	var wg sync.WaitGroup
+
+	// An already-zero group returns true right away.
+	if !waitWGWithTimeout(&wg, 100*time.Millisecond) {
+		t.Fatal("empty WaitGroup should return true")
+	}
+
+	// A group that never reaches zero returns false after the timeout.
+	wg.Add(1)
+	start := time.Now()
+	if waitWGWithTimeout(&wg, 30*time.Millisecond) {
+		t.Fatal("non-draining WaitGroup should time out to false")
+	}
+	if el := time.Since(start); el < 25*time.Millisecond {
+		t.Fatalf("returned before the timeout elapsed: %v", el)
+	}
+
+	// Once it drains, it returns true again.
+	wg.Done()
+	if !waitWGWithTimeout(&wg, 100*time.Millisecond) {
+		t.Fatal("drained WaitGroup should return true")
+	}
+}
+
+// TestBatcher_FailedBatchIsolatesBadOp verifies that when a coalesced flush
+// contains one poison op, the batcher falls back to per-op transactions so the
+// valid ops still commit — a bad upload no longer fails its batch-mates.
+func TestBatcher_FailedBatchIsolatesBadOp(t *testing.T) {
+	db := newBatcherTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := newSQLiteBatcher(ctx, db, 16, 50*time.Millisecond)
+	defer b.Stop()
+
+	good := &batchOp{
+		stmts: []batchStmt{{sql: "INSERT INTO kv(key,value) VALUES(?,?)", args: []any{"good", "v"}}},
+		done:  make(chan error, 1),
+	}
+	bad := &batchOp{
+		stmts: []batchStmt{{sql: "INSERT INTO no_such_table(key) VALUES(?)", args: []any{"x"}}},
+		done:  make(chan error, 1),
+	}
+
+	// One coalesced batch containing a poison op. The fast-path transaction
+	// rolls back; the slow path re-runs each op individually.
+	b.flush([]*batchOp{good, bad})
+
+	if err := <-good.done; err != nil {
+		t.Fatalf("good op should have committed via isolated retry, got %v", err)
+	}
+	if err := <-bad.done; err == nil {
+		t.Fatal("bad op should have surfaced its own error")
+	}
+
+	// The good op's write must have persisted despite the sibling's failure.
+	var n int64
+	if err := db.Table("kv").Where("key = ?", "good").Count(&n).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("good row count = %d, want 1 (fault isolation failed)", n)
+	}
+}

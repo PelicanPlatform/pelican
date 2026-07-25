@@ -2500,6 +2500,62 @@ type: duration
 default: 24h
 components: ["origin"]
 ---
+name: Origin.Metadata.MaxQueuedPerNamespace
+description: |+
+  Backpressure cap on the number of pending rows the eventual-mode metadata publish queue
+  will hold for a single namespace. Once a namespace reaches this many rows waiting to
+  publish, further eventual-mode uploads to that namespace are refused (the object is not
+  committed) until the backlog drains, so a stuck catalog cannot grow the queue without
+  bound. 0 disables the limit. Transactional-mode uploads are unaffected, since their rows
+  never outlive the request.
+type: int
+default: 0
+components: ["origin"]
+---
+name: Origin.Metadata.MaxQueuedBytesPerNamespace
+description: |+
+  Backpressure cap on the total size, in bytes, of the inline metadata blobs held by pending
+  eventual-mode publish rows for a single namespace. Once a namespace's pending blobs reach
+  this size, further eventual-mode uploads to that namespace are refused (the object is not
+  committed) until the backlog drains. This bounds at-rest queue growth in SQLite
+  independently of the row count. 0 disables the limit.
+type: int
+default: 0
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileEnabled
+description: |+
+  When true, the origin periodically sweeps its local object-metadata tracking database for
+  committed objects whose publish webhook was never delivered — for example because the
+  process crashed between the storage rename and the durable publish-queue write — and
+  re-enqueues them. Requires Origin.Metadata.TrackAccess (the sweep is driven by the local
+  commit record, so it never touches objects this origin did not write, which is essential
+  on a backend shared by multiple origins). No-op when metadata publishing is disabled.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileInterval
+description: |+
+  How often the crash-recovery reconcile sweep runs (it also runs once at startup). Lower
+  values shorten the worst-case delay before a publish lost to a crash is recovered, at the
+  cost of more frequent scans of the tracking database.
+type: duration
+default: 2h
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileSettleWindow
+description: |+
+  Minimum age (since last modification) an object must reach before the reconcile sweep will
+  consider re-publishing it. This must comfortably exceed the longest expected upload/write
+  cycle so the sweep never races an object another origin is still writing to the shared
+  backend, and so an in-flight first publish attempt is given time to land on its own. The
+  sweep additionally re-Stats each candidate and only republishes when the on-disk ETag
+  still matches the recorded commit, so a peer's overwrite is never misattributed.
+type: duration
+default: 6h
+components: ["origin"]
+---
 name: Origin.Metadata.AllowMultipart
 description: |+
   When true, the V2 origin accepts uploads whose request body is multipart/form-data with

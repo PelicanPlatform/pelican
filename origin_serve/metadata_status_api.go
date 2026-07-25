@@ -27,6 +27,14 @@
 // unguessable URL IS the authorization — the query token can only read, the
 // manage token can also cancel. This lets the uploader manage its own publish
 // without being issued a separate bearer token.
+//
+// SECURITY: because the token is a capability, it rides in the request URL
+// path (/metadata_publish/<token>). Anything that records full request URLs —
+// HTTP access logs, proxy logs, browser history — captures the token, and a
+// reader of those logs could cancel a client's publish. Operators fronting the
+// origin should scrub these paths from access logs (or the tokens from them).
+// A future revision could move the token to an Authorization header or request
+// body to keep it out of URLs entirely.
 
 package origin_serve
 

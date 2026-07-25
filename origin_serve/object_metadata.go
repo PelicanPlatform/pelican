@@ -103,6 +103,15 @@ type ObjectMetadataRow struct {
 	// invalidates the object (RecordCommit, RecordExternalChange)
 	// because the stored ETag would no longer describe the source.
 	SourceEtag *string `gorm:"column:source_etag"`
+
+	// PublishedAt / PublishedEtag record whether this origin has
+	// successfully published a commit webhook for the live object, and at
+	// what content version. NULL PublishedAt (or PublishedEtag != ETag after
+	// an overwrite) marks the row as owing a publish; the reconcile sweep
+	// uses this to recover objects whose publish was lost to a crash between
+	// the storage rename and the durable queue write.
+	PublishedAt   *time.Time `gorm:"column:published_at"`
+	PublishedEtag *string    `gorm:"column:published_etag"`
 }
 
 func (ObjectMetadataRow) TableName() string { return "object_metadata" }
@@ -183,15 +192,23 @@ func newObjectMetadataDAO(db *gorm.DB, batcher *sqliteBatcher) *objectMetadataDA
 // request hot path (called from the POSC close hook) so the batcher's
 // coalescing across concurrent commits is what keeps it cheap.
 func (d *objectMetadataDAO) RecordCommit(ctx context.Context, in ObjectMetadataEventInput) error {
+	return d.batcher.EnqueueDurableBatch(ctx, commitStatements(in))
+}
+
+// commitStatements builds the two fate-shared statements a commit records:
+//   1. INSERT into history (event_type='commit', snapshot of the new commit).
+//   2. UPSERT into object_metadata (created_at preserved on conflict;
+//      last_modified, size, etag, etc. overwritten).
+//
+// Exposed separately so the publish path can fold these into the SAME durable
+// transaction as the publish-queue INSERT (see enqueueEventAtomic), making the
+// tracking-commit and the queue row crash-atomic.
+func commitStatements(in ObjectMetadataEventInput) []BatchedStmt {
 	now := time.Now().UTC()
 	extraJSON := encodeExtra(in.TrackExtra, in.Extra)
 	eventID := uuid.NewString()
 
-	// Two statements, fate-shared in one tx:
-	//   1. INSERT into history (event_type='commit', snapshot of the new commit).
-	//   2. UPSERT into object_metadata (created_at preserved on conflict;
-	//      last_modified, size, etag, etc. overwritten).
-	stmts := []BatchedStmt{
+	return []BatchedStmt{
 		{
 			SQL: `INSERT INTO object_metadata_history
 				(event_id, namespace, object_path, event_type, event_ts,
@@ -228,7 +245,45 @@ func (d *objectMetadataDAO) RecordCommit(ctx context.Context, in ObjectMetadataE
 			},
 		},
 	}
-	return d.batcher.EnqueueDurableBatch(ctx, stmts)
+}
+
+// MarkPublished stamps the live row's publish watermark after a commit webhook
+// is accepted by the catalog, so the reconcile sweep won't re-enqueue it.
+// Best-effort: a lost stamp only costs one idempotent re-publish later (the
+// reconcile sweep's etag-match guard keeps that safe).
+func (d *objectMetadataDAO) MarkPublished(ctx context.Context, namespace, objectPath, etag string) error {
+	return d.batcher.EnqueueBestEffortBatch(ctx, []BatchedStmt{{
+		SQL: `UPDATE object_metadata
+				 SET published_at = ?, published_etag = ?
+			   WHERE namespace = ? AND object_path = ? AND deleted_at IS NULL`,
+		Args: []any{time.Now().UTC(), etag, namespace, objectPath},
+	}})
+}
+
+// ReconcileCandidates returns live rows for a namespace that owe a publish —
+// never published, or published at a stale etag (overwrite) — and have been at
+// rest since before settledBefore. Ordered oldest-first and capped by limit.
+// The caller must still re-Stat each object and confirm its on-disk etag
+// matches the row before republishing (guards against a peer overwrite).
+func (d *objectMetadataDAO) ReconcileCandidates(ctx context.Context, namespace string, settledBefore time.Time, limit int) ([]*ObjectMetadataRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []*ObjectMetadataRow
+	err := d.db.WithContext(ctx).
+		Where(`namespace = ? AND deleted_at IS NULL AND last_modified < ? AND
+			(published_at IS NULL OR published_etag IS NULL OR published_etag <> etag) AND
+			NOT EXISTS (
+				SELECT 1 FROM metadata_publish_queue q
+				 WHERE q.namespace = object_metadata.namespace
+				   AND q.object_path = object_metadata.object_path
+				   AND q.state = 'pending'
+			)`,
+			namespace, settledBefore).
+		Order("last_modified ASC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
 }
 
 // RecordDelete soft-deletes the live row and snapshots its prior

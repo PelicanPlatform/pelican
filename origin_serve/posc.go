@@ -702,6 +702,14 @@ func (f *poscFile) Close() error {
 			// effort delete; if even that fails, count it. Removed on
 			// ictx so the observation layer does not publish
 			// object.deleted for a commit that was never published.
+			//
+			// DATA-LOSS CAVEAT: on an *overwrite*, the rename above has
+			// already replaced any prior object at `final`, so this
+			// rollback removes the new bytes AND leaves no old object —
+			// a refused overwrite loses the previous good copy. This is
+			// inherent to rename-based POSC (the C++ layer behaves the
+			// same); transactional publishing trades that risk for the
+			// guarantee that a committed object is always catalog-visible.
 			if rmErr := f.fs.inner.RemoveAll(ictx, final); rmErr != nil {
 				log.Warnf("POSC: rollback delete of %q after close-hook error failed: %v", final, rmErr)
 				if f.fs.hooks != nil && f.fs.hooks.IncRollbackFailed != nil {

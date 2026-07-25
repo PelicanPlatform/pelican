@@ -39,6 +39,11 @@ import (
 
 // ObjectMetadataHeader is the request header clients use to attach custom
 // fields to an upload. Its value is parsed as an RFC 9651 dictionary.
+//
+// The client side declares the same header name as
+// client.ObjectMetadataHeaderName; the two are deliberately duplicated
+// rather than shared because the client and origin_serve packages do not
+// import each other. Keep the two values identical.
 const ObjectMetadataHeader = "X-Pelican-Object-Metadata"
 
 // ReservedCustomFieldKeys lists keys that the client cannot set in the

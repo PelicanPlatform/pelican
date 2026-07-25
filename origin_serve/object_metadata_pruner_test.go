@@ -27,19 +27,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-// plantHistoryRows seeds the object_metadata_history table directly
-// (no DAO) so the pruner has predictable rows of predictable age.
-func plantHistoryRows(t *testing.T, db interface{}, namespace string, ts time.Time, n int, idPrefix string) {
-	t.Helper()
-	// db is *gorm.DB but typed as interface{} so this helper can be
-	// called from packages that don't import gorm directly.
-	d := db.(interface {
-		Create(any) interface{ Error() string }
-		Exec(string, ...any) interface{ Error() string }
-	})
-	_ = d
-}
-
 // TestPruner_DeletesOnlyAgedRows seeds 5 old + 5 fresh history rows
 // and asserts onePass removes only the old ones; one-pass is
 // idempotent (second invocation deletes 0).
@@ -227,6 +214,3 @@ func TestPruner_HooksFire(t *testing.T) {
 		t.Fatalf("total deleted = %d, want 12", total)
 	}
 }
-
-// silence unused warning if the helper above gets pared back later.
-var _ = plantHistoryRows

@@ -50,7 +50,9 @@ func applyObjectMetadataSchemaForTest(t *testing.T, db *gorm.DB) {
 		    last_accessed   DATETIME,
 		    actor           TEXT     NOT NULL DEFAULT '',
 		    deleted_at      DATETIME,
-		    source_etag     TEXT
+		    source_etag     TEXT,
+		    published_at    DATETIME,
+		    published_etag  TEXT
 		);
 		CREATE UNIQUE INDEX idx_object_metadata_live ON object_metadata(namespace, object_path)
 		    WHERE deleted_at IS NULL;

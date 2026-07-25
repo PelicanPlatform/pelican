@@ -134,6 +134,11 @@ func (d *accessDebouncer) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Final best-effort flush so accesses noted since the last
+			// tick aren't lost when shutdown happens via context
+			// cancellation rather than Stop(). ctx is already done, so
+			// flush on a fresh background context.
+			d.Flush(context.Background())
 			return
 		case <-t.C:
 			d.Flush(ctx)
