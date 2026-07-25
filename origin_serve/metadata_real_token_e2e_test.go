@@ -168,12 +168,13 @@ func TestE2EEventual_RealTokenToSampleServer(t *testing.T) {
 		t.Skip("skipping: builds and launches a binary, generates real keys")
 	}
 
-	setupRealTokenIssuer(t)
+	issuerURL := setupRealTokenIssuer(t)
 	// No -audience: the origin signs aud == its endpoint, which isn't known
 	// until the OS assigns the port; the audience-match path is covered against
 	// the binary in cmd/sample_metadata_server. Here we verify signature+scope
-	// through the full publish path.
-	endpoint := launchSampleServer(t, "-require-namespace-scope") + "/events"
+	// through the full publish path. -issuer pins the receiver to the origin's
+	// issuer so it discovers the JWKS via OIDC (no federation registry here).
+	endpoint := launchSampleServer(t, "-require-namespace-scope", "-issuer", issuerURL) + "/events"
 
 	mem := afero.NewMemMapFs()
 	autoFs := newAutoCreateDirFs(mem)
@@ -229,8 +230,8 @@ func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 	}
 
 	t.Run("happy_path_verified_token", func(t *testing.T) {
-		setupRealTokenIssuer(t)
-		endpoint := launchSampleServer(t, "-require-namespace-scope") + "/events"
+		issuerURL := setupRealTokenIssuer(t)
+		endpoint := launchSampleServer(t, "-require-namespace-scope", "-issuer", issuerURL) + "/events"
 
 		mem, _, ctl, srv := newTransactionalStack(t, endpoint)
 		defer srv.Close()
@@ -246,10 +247,11 @@ func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
 	})
 
 	t.Run("rollback_on_auth_failure", func(t *testing.T) {
-		setupRealTokenIssuer(t)
+		issuerURL := setupRealTokenIssuer(t)
 		// Receiver expects a DIFFERENT audience than the token carries, so a
-		// perfectly-signed real token is rejected with 401.
-		endpoint := launchSampleServer(t, "-require-namespace-scope",
+		// perfectly-signed real token is rejected with 401 (it reaches the
+		// audience check because -issuer lets it discover the signing key).
+		endpoint := launchSampleServer(t, "-require-namespace-scope", "-issuer", issuerURL,
 			"-audience", "https://definitely-not-the-endpoint.example/events") + "/events"
 
 		mem, _, ctl, srv := newTransactionalStack(t, endpoint)
