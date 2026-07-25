@@ -615,7 +615,7 @@ type httpsFileInfo struct {
 
 func (fi *httpsFileInfo) Name() string      { return fi.name }
 func (fi *httpsFileInfo) Size() int64       { return fi.size }
-func (fi *httpsFileInfo) Mode() os.FileMode { return 0444 }
+func (fi *httpsFileInfo) Mode() os.FileMode { return 0644 }
 func (fi *httpsFileInfo) ModTime() time.Time {
 	if fi.modTime.IsZero() {
 		return time.Now()
