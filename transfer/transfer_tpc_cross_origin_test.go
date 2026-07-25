@@ -413,10 +413,18 @@ func TestTransferTPCCrossOriginE2E(t *testing.T) {
 
 // TestTransferTPCCrossOriginE2EXRootD runs the same cross-origin third-party copy
 // against the XRootD (posix) origin backend. Real deployments run XRootD origins,
-// and this path was previously exercised only by the (CI-skipped) benchmark. It
-// is skipped where the xrootd server binary is unavailable (e.g. dev laptops);
-// CI's test image ships it.
+// and this path is otherwise exercised only by the (CI-skipped) benchmark.
+//
+// It is opt-in via PELICAN_XROOTD_CROSS_ORIGIN_E2E because the standalone second
+// origin launches a real xrootd daemon as a subprocess, which the standard
+// "Test / Linux" CI environment cannot do — there the subprocess fails with
+// "fork/exec /usr/bin/xrootd: permission denied" (it cannot drop privilege to
+// the xrootd service user). Set the env var in an environment that can launch a
+// second xrootd origin (and has the xrootd binary) to run it.
 func TestTransferTPCCrossOriginE2EXRootD(t *testing.T) {
+	if os.Getenv("PELICAN_XROOTD_CROSS_ORIGIN_E2E") == "" {
+		t.Skip("set PELICAN_XROOTD_CROSS_ORIGIN_E2E=1 to run the XRootD-backend cross-origin TPC test (needs an environment that can launch a second xrootd origin subprocess)")
+	}
 	if _, err := exec.LookPath("xrootd"); err != nil {
 		t.Skip("xrootd binary not found; skipping the XRootD-backend cross-origin TPC test")
 	}
