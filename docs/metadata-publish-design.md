@@ -7,14 +7,14 @@ When a client uploads (or third-party-copies) an object to a Pelican V2 origin, 
 Two guarantees frame the whole design:
 
 - **An event is only ever published for an object that actually committed to storage.** The publish hook fires *after* the object is durably renamed into place, never for a partial or failed upload.
-- **The publish is authenticated.** Every webhook carries a short-lived JWT the catalog verifies against the origin's published keys. The catalog trusts the body only after the token checks out.
+- **The publish is authenticated.** Every webhook carries a short-lived JWT the catalog verifies against the **namespace's public keys published by the federation's registry**. The event is self-describing — it carries the `federation` and `namespace` — so the catalog discovers the registry from the federation and fetches that namespace's JWKS; it never needs to reach the origin directly (which it may not be able to route to). The catalog trusts the body only after the token checks out.
 
 ```mermaid
 flowchart LR
     C[Client] -- "PUT object (+ optional metadata)" --> O[Pelican Origin]
     O -- "commit to storage (POSC)" --> S[(Storage)]
-    O -- "POST object.committed (JWT-signed webhook)" --> K[External Catalog]
-    K -- "fetch JWKS to verify JWT" --> O
+    O -- "POST object.committed<br/>(JWT-signed webhook; carries federation + namespace)" --> K[External Catalog]
+    K -- "discover registry from event.federation,<br/>fetch the namespace's JWKS to verify the JWT" --> R[Federation Registry]
     K -- "2xx / 422 / 5xx" --> O
     O -- "result headers + capability URLs" --> C
 ```
@@ -33,10 +33,11 @@ X-Pelican-Idempotency-Key: 8d9d5f3e-4f5b-4f1e-9c1f-2a8a7b1d6c43
 User-Agent: pelican-origin-metadata/1
 
 {
-  "id":        "8d9d5f3e-4f5b-4f1e-9c1f-2a8a7b1d6c43",
-  "type":      "object.committed",
-  "timestamp": "2026-04-29T13:14:15Z",
-  "namespace": "/foo",
+  "id":         "8d9d5f3e-4f5b-4f1e-9c1f-2a8a7b1d6c43",
+  "type":       "object.committed",
+  "timestamp":  "2026-04-29T13:14:15Z",
+  "federation": "osg-htc.org",
+  "namespace":  "/foo",
   "object": {
     "path":       "/foo/bar.dat",
     "size":       12345,
@@ -52,17 +53,18 @@ User-Agent: pelican-origin-metadata/1
 
 Field notes:
 
-| Field                   | Meaning                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                    | Stable UUIDv4 for this event. **Identical across redeliveries** — dedup on this. Also in `X-Pelican-Idempotency-Key`.                                                           |
-| `type`                  | One of `object.committed` (new object), `object.updated` (overwrite or out-of-band change), `object.deleted` (removed). See [Lifecycle event types](#5a-lifecycle-event-types). |
-| `timestamp`             | RFC 3339 time the event was generated.                                                                                                                                          |
-| `namespace`             | The federation prefix (export) the object belongs to.                                                                                                                           |
-| `object.path`           | **Federation-rooted** path of the committed object.                                                                                                                             |
-| `object.size`           | Size in bytes.                                                                                                                                                                  |
-| `object.etag`           | Backend-supplied ETag (quoted). Pelican does not invent its own hash.                                                                                                           |
-| `object.created_at`     | Commit time.                                                                                                                                                                    |
-| *other `object.*` keys* | Uploader-supplied custom fields (see below). Origin-computed keys always win over any client value.                                                                             |
+| Field                   | Meaning                                                                                                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | Stable UUIDv4 for this event. **Identical across redeliveries** — dedup on this. Also in `X-Pelican-Idempotency-Key`.                                                                                                                     |
+| `type`                  | One of `object.committed` (new object), `object.updated` (overwrite or out-of-band change), `object.deleted` (removed). See [Lifecycle event types](#5a-lifecycle-event-types).                                                           |
+| `timestamp`             | RFC 3339 time the event was generated.                                                                                                                                                                                                    |
+| `federation`            | The origin's federation discovery URL. Makes the event self-describing: the receiver discovers the registry from it and fetches `namespace`'s public keys to verify the JWT (see [Verifying the token](#3-verifying-the-token-required)). |
+| `namespace`             | The federation prefix (export) the object belongs to. Also the registry key under which the signing key's public half is published.                                                                                                       |
+| `object.path`           | **Federation-rooted** path of the committed object.                                                                                                                                                                                       |
+| `object.size`           | Size in bytes.                                                                                                                                                                                                                            |
+| `object.etag`           | Backend-supplied ETag (quoted). Pelican does not invent its own hash.                                                                                                                                                                     |
+| `object.created_at`     | Commit time.                                                                                                                                                                                                                              |
+| *other `object.*` keys* | Uploader-supplied custom fields (see below). Origin-computed keys always win over any client value.                                                                                                                                       |
 
 **Custom fields.** The uploader may attach typed key/value pairs via the `X-Pelican-Object-Metadata` request header (an RFC 9651 Structured-Fields dictionary); the origin inlines them into `object`. The reserved keys `path`, `size`, `etag`, `created_at` are authoritative and cannot be spoofed by a client.
 
@@ -74,12 +76,17 @@ Field notes:
 
 The `Authorization: Bearer <JWT>` is the **only** authentication. The body is untrusted until the token verifies. Verification steps:
 
-1. Parse the JWT (without trusting it yet) to read its `iss` (issuer) claim.
-1. Discover the issuer's keys: `GET <iss>/.well-known/openid-configuration`, read `jwks_uri`, then `GET` that JWKS. (Pelican serves it at `<iss>/.well-known/issuer.jwks`.) Cache and refresh it.
-1. Verify the signature against the JWKS, and check:
+1. Read the event body's `federation` and `namespace` (and, for cross-checking, the JWT's `iss`) **without trusting the token yet**.
+1. Discover the namespace's keys **via the registry** — the origin publishes the public half of its signing key in the federation registry under the namespace, so a receiver never needs to reach the origin directly:
+   - Federation discovery: `GET https://<federation>/.well-known/pelican-configuration`, read `registry_endpoint`.
+   - Fetch the namespace JWKS: `GET <registry_endpoint>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks`. Cache and refresh it.
+   - (If `federation` is absent — e.g. an origin that could not resolve its federation — fall back to OIDC discovery on the token's `iss`: `GET <iss>/.well-known/openid-configuration` → `jwks_uri`. This requires reachability to the origin and is the legacy path.)
+1. Verify the signature against that JWKS, and check:
    - `exp` (unexpired; a small clock-skew allowance is reasonable).
    - `aud` contains **your catalog's URL** (the endpoint the origin POSTs to). This stops a token minted for catalog A from being replayed against catalog B.
    - `scope` contains `pelican.metadata`, and — if you want to enforce it — a `pelican.metadata:/<namespace>` entry whose path covers the event's `namespace`. This stops an origin authorized for `/A` from publishing events claiming to be for `/B`.
+
+> **Trust anchor (important).** `federation` (and `iss`) come from the *unverified* request, so treat them as key-**discovery hints**, not trust. Pin the federation(s) you accept: only follow `federation` if it is one you are configured to trust (equivalently, pin the registry URL). Otherwise an attacker could point `federation` at a registry they control, serve their own key, and pass verification. Registry discovery removes the need to reach the origin; it does **not** remove the need to anchor trust in a known federation/registry.
 
 Token claims summary:
 
@@ -91,7 +98,7 @@ Token claims summary:
 | `jti`         | The event UUID (equals `id`)                                |
 | `exp`         | Short-lived (default 5 minutes)                             |
 
-> **Reference implementation:** Pelican ships a runnable, commented reference receiver at `cmd/sample_metadata_server` that performs exactly this verification. Use it to test your origin wiring and as a template.
+> **Reference implementation:** Pelican ships a runnable, commented reference receiver at `cmd/sample_metadata_server` that demonstrates receiver-side JWT verification and event handling. Use it to test your origin wiring and as a template. (Its key-discovery path is being aligned with the registry-based model described here; the JWT/scope/audience checks are already representative.)
 
 ---
 
@@ -270,12 +277,12 @@ Minimal shape of a compliant receiver (pseudocode; see `cmd/sample_metadata_serv
 
 ```
 on POST:
-    tok = bearer_token(request)                     # 401 if missing
-    iss = unverified_claims(tok).iss
-    jwks = fetch(iss + "/.well-known/openid-configuration" -> jwks_uri)
+    tok   = bearer_token(request)                   # 401 if missing
+    event = json(body)                              # federation + namespace (still untrusted)
+    reg   = discover(event.federation).registry_endpoint
+    jwks  = fetch(reg + "/api/v1.0/registry/" + event.namespace + "/.well-known/issuer.jwks")
     claims = verify(tok, jwks, audience=MY_URL)     # 401 if bad sig / aud / exp
     require "pelican.metadata" in claims.scope      # 403 otherwise
-    event = json(body)
     if already_seen(event.id): return 200           # dedup (idempotency)
     if not acceptable(event): return 422            # permanent reject — origin stops
     store(event); return 202
@@ -328,3 +335,19 @@ Key invariants worth preserving:
 - Freshly-enqueued rows are given a future `next_attempt_at` (the "first-attempt grace") so the background worker never races the synchronous first attempt and double-publishes.
 - Origin-computed reserved fields (`path`/`size`/`etag`/`created_at`) are written *after* client custom fields when marshaling, so a client can never override them.
 - Delivery is at-least-once; receivers dedupe on the event `id`.
+
+---
+
+## 10. Crash recovery (developer notes)
+
+Audience: Pelican origin developers. This section explains why a crash does not silently drop metadata, and names the one residual window.
+
+The write ordering on the commit path is: **(1)** POSC renames the staged file into place (the object is now durable and visible), then **(2)** a single durable SQLite transaction records the local object-metadata tracking row **and** inserts the publish-queue row (`enqueueEventAtomic` / `CommitEventFromCloseHookTracked` fold both into one tx), then **(3)** the synchronous first publish attempt runs. In eventual mode the client sees `2xx` as soon as (2) commits; in transactional mode (3) gates the response.
+
+Two recovery mechanisms cover crashes:
+
+1. **Queue resume (worker).** Any row left `pending` in `metadata_publish_queue` is durable. On restart the background worker claims due rows and publishes them, exactly as it does for a live transient failure. So a crash any time **after** the step-(2) transaction commits loses nothing — the event is already durably enqueued and will be retried.
+
+1. **Reconcile sweep.** A periodic sweep (`reconcileOnce`, gated by `Origin.Metadata.Reconcile{Enabled,Interval,SettleWindow}`, requires object-metadata tracking) catches objects that are committed and **tracked** but never got published — e.g. the queue row was deleted, or a bug/rare window left a tracked object with no pending row. It selects from the tracking table where `last_modified < now − SettleWindow`, the publish watermark is unset or stale (`published_at IS NULL OR published_etag <> etag`), and no `pending` queue row exists, then re-`Stat`s and ETag-compares the object before re-enqueuing so a peer's overwrite is never clobbered. On success the worker stamps the `published_at`/`published_etag` watermark so the object is not reconsidered.
+
+**Residual window (documented, accepted).** A crash **between step (1) (rename) and step (2) (the tracking+queue transaction)** leaves the object on disk with *no* tracking row and *no* queue row. The reconcile sweep reads the tracking table, so it cannot see such an object either — this is the "object exists in storage but no metadata" case called out in `v2-origin-posc-and-metadata.md`'s crash-consistency table. It is bounded to a single fsync and is the only case that requires **external** reconciliation (comparing the storage backend against the catalog); closing it in-process would require a pre-rename intent record, which is deliberately out of scope (it would add a write to every upload's hot path).
