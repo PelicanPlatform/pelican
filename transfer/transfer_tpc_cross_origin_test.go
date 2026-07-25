@@ -78,7 +78,12 @@ func launchSecondOrigin(t testing.TB, ctx context.Context, host, user, password,
 	// search bit for "other". fed_test_utils does the same to its temp root; the
 	// per-file/dir ownership below (ChownToDaemon) and pelican's own rundir chown
 	// handle write access. Without this the second origin fails to start with
-	// "fork/exec /usr/bin/xrootd: permission denied".
+	// "fork/exec /usr/bin/xrootd: permission denied", and — more subtly — the
+	// daemon user cannot stat the exported source file, so the transfer's source
+	// HEAD gets a 403 ("Unable to locate ...; permission denied") even though the
+	// token is accepted. t.TempDir() also creates the per-test root 0700, so that
+	// grandparent must get the search bit too, not just origin2Dir itself.
+	require.NoError(t, os.Chmod(filepath.Dir(origin2Dir), 0o755))
 	require.NoError(t, os.Chmod(origin2Dir, 0o755))
 	storageDir := filepath.Join(origin2Dir, "storage")
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
@@ -166,9 +171,9 @@ Origin:
   EnableVoms: false
   Port: 0
   # Origin.Port is 0 (auto-assign), so the default TokenAudience (${Origin.Url})
-  # would be the malformed "https://<host>:0". XRootD's scitokens plugin writes
-  # that into audience_json and then fails every token's 'aud' check. Pin a
-  # well-formed audience (the origin's web URL) so token verification works.
+  # would be the malformed "https://<host>:0" and reject every token's 'aud'.
+  # Pin a well-formed audience (the origin's web URL); XRootD's scitokens plugin
+  # still honors the WLCG "any" marker the federation's storage tokens carry.
   TokenAudience: %s
   DbLocation: %s
   Exports:
@@ -349,6 +354,9 @@ func dumpFileToLog(t testing.TB, path string) {
 
 // storageTokenForIssuer mints a WLCG storage token with the given issuer,
 // subject, and resource scopes, signed by the server's (shared) issuer key.
+// The token carries the WLCG "any" audience, which both origins' scitokens
+// plugins honor (the WLCG Common JWT Profile wildcard) regardless of their
+// configured Origin.TokenAudience.
 func storageTokenForIssuer(t testing.TB, issuer, subject string, scopes ...token_scopes.ResourceScope) string {
 	t.Helper()
 	tc := token.NewWLCGToken()
