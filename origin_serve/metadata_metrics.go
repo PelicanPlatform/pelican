@@ -121,6 +121,30 @@ var (
 		[]string{"namespace"},
 	)
 
+	// metadataBackpressureTotal counts eventual-mode uploads refused because
+	// the namespace's pending queue was at its configured cap. The "limit"
+	// label is "rows" or "bytes" depending on which cap tripped.
+	metadataBackpressureTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pelican_origin_metadata",
+			Name:      "backpressure_refusals_total",
+			Help:      "Eventual-mode uploads refused because the namespace publish-queue backlog was at its cap.",
+		},
+		[]string{"namespace", "limit"},
+	)
+
+	// metadataReconcileEnqueued counts commit publishes re-enqueued by the
+	// crash-recovery reconcile sweep (objects committed to storage whose
+	// publish was lost to a crash before the durable queue write).
+	metadataReconcileEnqueued = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pelican_origin_metadata",
+			Name:      "reconcile_reenqueued_total",
+			Help:      "Committed-but-unpublished objects re-enqueued by the reconcile sweep.",
+		},
+		[]string{"namespace"},
+	)
+
 	poscActiveUploads = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pelican_origin_posc",

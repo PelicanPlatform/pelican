@@ -191,6 +191,27 @@ type metadataController struct {
 	// (RequestTimeout); it only bounds how long the worker waits to recover a
 	// row whose committing process crashed mid-attempt.
 	firstAttemptGrace time.Duration
+
+	// maxQueuedPerNS / maxQueuedBytesPerNS are the eventual-mode backpressure
+	// caps (0 = disabled). See metadataControllerOptions and enforceBacklog.
+	maxQueuedPerNS      int
+	maxQueuedBytesPerNS int64
+
+	// trackingDAO is the local object-metadata DAO, set only when TrackAccess
+	// is on. Used to stamp the publish watermark on success and to drive the
+	// crash-recovery reconcile sweep. nil disables both.
+	trackingDAO *objectMetadataDAO
+
+	// Reconcile-sweep configuration (see reconcileLoop).
+	reconcileEnabled      bool
+	reconcileInterval     time.Duration
+	reconcileSettleWindow time.Duration
+
+	// fsForExists resolves a namespace to the filesystem the reconcile sweep
+	// (and the retry existence check) Stats through. namespaces is the set of
+	// export federation prefixes the sweep iterates.
+	fsForExists func(namespace string) webdav.FileSystem
+	namespaces  []string
 }
 
 // metadataControllerOptions is constructor input.
@@ -209,6 +230,13 @@ type metadataControllerOptions struct {
 	WarnAfter      time.Duration
 	ErrorAfter     time.Duration
 
+	// MaxQueuedPerNamespace / MaxQueuedBytesPerNamespace are the eventual-mode
+	// backpressure caps: once a namespace's pending queue reaches either, new
+	// eventual-mode commits for it are refused until the backlog drains. 0
+	// disables the respective cap.
+	MaxQueuedPerNamespace      int
+	MaxQueuedBytesPerNamespace int
+
 	// FilesystemForExists, when set, lets the controller check for a
 	// committed object's existence before retrying. Optional — when
 	// nil, retries unconditionally re-attempt the publish.
@@ -216,6 +244,16 @@ type metadataControllerOptions struct {
 
 	// DB lets tests inject a sqlite handle.
 	DB *gorm.DB
+
+	// TrackingDAO is the local object-metadata DAO (set only when TrackAccess
+	// is on). Enables publish-watermark stamping and the reconcile sweep.
+	TrackingDAO *objectMetadataDAO
+
+	// ReconcileEnabled / ReconcileInterval / ReconcileSettleWindow configure
+	// the crash-recovery sweep. Inert unless TrackingDAO is also set.
+	ReconcileEnabled       bool
+	ReconcileInterval      time.Duration
+	ReconcileSettleWindow  time.Duration
 
 	// Batcher, when non-nil, routes publish-queue inserts through
 	// the shared write-behind batcher so concurrent commits coalesce
@@ -280,7 +318,15 @@ func newMetadataController(opts metadataControllerOptions) *metadataController {
 		idleMaxSleep: time.Hour,
 		// Grace comfortably exceeds one attempt's wall time so the worker never
 		// races the synchronous first attempt.
-		firstAttemptGrace: opts.RequestTimeout + 15*time.Second,
+		firstAttemptGrace:     opts.RequestTimeout + 15*time.Second,
+		maxQueuedPerNS:        opts.MaxQueuedPerNamespace,
+		maxQueuedBytesPerNS:   int64(opts.MaxQueuedBytesPerNamespace),
+		trackingDAO:           opts.TrackingDAO,
+		reconcileEnabled:      opts.ReconcileEnabled,
+		reconcileInterval:     opts.ReconcileInterval,
+		reconcileSettleWindow: opts.ReconcileSettleWindow,
+		fsForExists:           opts.FilesystemForExists,
+		namespaces:            exportNamespaces(opts.Exports),
 	}
 
 	if opts.FilesystemForExists != nil {
@@ -324,6 +370,13 @@ func (c *metadataController) Start(ctx context.Context) {
 	}
 	c.wg.Add(1)
 	go c.metricsLoop(childCtx)
+
+	// Crash-recovery reconcile sweep. Requires the local tracking DB (its
+	// commit record is what tells us which objects are ours to republish).
+	if c.reconcileEnabled && c.trackingDAO != nil {
+		c.wg.Add(1)
+		go c.reconcileLoop(childCtx)
+	}
 }
 
 // Stop signals workers to exit and waits for them.
@@ -334,11 +387,170 @@ func (c *metadataController) Stop() {
 	c.wg.Wait()
 }
 
+// markPublished stamps the tracking-DB publish watermark after a commit/update
+// webhook is accepted, so the reconcile sweep won't re-enqueue the object.
+// No-op when TrackAccess is off (no tracking DAO) or for object.deleted events
+// (which have no live row to stamp). Best-effort: a lost stamp only costs one
+// safe re-publish later.
+func (c *metadataController) markPublished(ctx context.Context, event *ObjectCommitEvent) {
+	if c.trackingDAO == nil || event == nil || event.Type == ObjectDeletedEventType {
+		return
+	}
+	if err := c.trackingDAO.MarkPublished(ctx, event.Namespace, event.ObjectPath, event.ETag); err != nil {
+		log.Debugf("metadata: mark published %s/%s: %v", event.Namespace, event.ObjectPath, err)
+	}
+}
+
+// ErrMetadataBacklogFull is returned by CommitEvent (eventual mode) when the
+// namespace's pending publish queue is at its configured cap. It fails the
+// close hook, so POSC rolls back the object: the origin refuses to accept an
+// upload whose metadata it cannot durably queue.
+var ErrMetadataBacklogFull = errors.New("metadata publish queue backlog full")
+
+// enforceBacklog applies the per-namespace eventual-mode backpressure caps.
+// Returns ErrMetadataBacklogFull when either the pending-row or pending-blob-
+// bytes cap is met. A stats-read error fails open (better to briefly exceed
+// the cap than to refuse uploads because we couldn't read the queue).
+func (c *metadataController) enforceBacklog(namespace string) error {
+	if c.maxQueuedPerNS <= 0 && c.maxQueuedBytesPerNS <= 0 {
+		return nil
+	}
+	count, blobBytes, err := c.queue.NamespaceBacklog(namespace)
+	if err != nil {
+		log.Warnf("metadata: backlog check for %q failed, allowing commit: %v", namespace, err)
+		return nil
+	}
+	if c.maxQueuedPerNS > 0 && count >= int64(c.maxQueuedPerNS) {
+		metadataBackpressureTotal.WithLabelValues(namespace, "rows").Inc()
+		return fmt.Errorf("%w: %d pending rows for %q reached cap %d", ErrMetadataBacklogFull, count, namespace, c.maxQueuedPerNS)
+	}
+	if c.maxQueuedBytesPerNS > 0 && blobBytes >= c.maxQueuedBytesPerNS {
+		metadataBackpressureTotal.WithLabelValues(namespace, "bytes").Inc()
+		return fmt.Errorf("%w: %d pending blob bytes for %q reached cap %d", ErrMetadataBacklogFull, blobBytes, namespace, c.maxQueuedBytesPerNS)
+	}
+	return nil
+}
+
+// reconcileBatchLimit caps how many candidate rows a single sweep pass pulls
+// per namespace, so a large backlog is drained across passes rather than in
+// one giant query.
+const reconcileBatchLimit = 500
+
+// exportNamespaces returns the federation prefixes of the given exports, used
+// as the set the reconcile sweep iterates.
+func exportNamespaces(exports []server_utils.OriginExport) []string {
+	ns := make([]string, 0, len(exports))
+	for _, e := range exports {
+		ns = append(ns, e.FederationPrefix)
+	}
+	return ns
+}
+
+// reconcileLoop runs the crash-recovery sweep once at startup and then on the
+// configured interval, until the context is cancelled.
+func (c *metadataController) reconcileLoop(ctx context.Context) {
+	defer c.wg.Done()
+	c.reconcileOnce(ctx)
+	interval := c.reconcileInterval
+	if interval <= 0 {
+		interval = 2 * time.Hour
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			c.reconcileOnce(ctx)
+		}
+	}
+}
+
+// reconcileOnce re-enqueues committed-but-unpublished objects. For each
+// publishing-enabled namespace it asks the tracking DB for settled candidates
+// (unpublished, at rest past the settle window, no pending queue row), then
+// re-Stats each and republishes ONLY when the on-disk ETag still matches the
+// recorded commit — so a peer origin's overwrite on the shared backend is
+// never misattributed to us. Deleted / changed / unverifiable objects are
+// skipped; the normal worker delivers the re-enqueued events and stamps the
+// watermark on success so they are not reconsidered.
+func (c *metadataController) reconcileOnce(ctx context.Context) {
+	if c.trackingDAO == nil {
+		return
+	}
+	// last_modified is stored UTC-normalized (time.Now().UTC()) and compared
+	// as SQLite TEXT, so this bound must be UTC too; a local-offset timestamp
+	// would compare lexically wrong against the "Z"-suffixed stored values and
+	// mis-select reconcile candidates on non-UTC hosts.
+	settledBefore := c.clock().Add(-c.reconcileSettleWindow).UTC()
+	for _, ns := range c.namespaces {
+		if ctx.Err() != nil {
+			return
+		}
+		if enabled, _, _ := c.resolver.Resolve(ns); !enabled {
+			continue
+		}
+		rows, err := c.trackingDAO.ReconcileCandidates(ctx, ns, settledBefore, reconcileBatchLimit)
+		if err != nil {
+			log.Warnf("metadata: reconcile candidates for %q failed: %v", ns, err)
+			continue
+		}
+		for _, row := range rows {
+			if ctx.Err() != nil {
+				return
+			}
+			etag, ok := c.currentETag(ctx, ns, row.ObjectPath)
+			if !ok {
+				// Object gone or unverifiable (no filesystem handle): don't
+				// republish blind.
+				continue
+			}
+			if etag != row.ETag {
+				// A peer/out-of-band write changed it since we committed; that
+				// change owns its own publish path.
+				continue
+			}
+			event := NewObjectCommitEvent(ns, row.ObjectPath, row.Size, row.ETag, row.CreatedAt.UTC(), nil)
+			c.PublishStandalone(ctx, event)
+			metadataReconcileEnqueued.WithLabelValues(ns).Inc()
+			log.Infof("metadata: reconcile re-enqueued unpublished commit for %s (etag %s)", row.ObjectPath, row.ETag)
+		}
+	}
+}
+
+// currentETag Stats an object through the per-namespace filesystem and returns
+// its backend ETag. ok is false when there is no filesystem handle or the
+// Stat fails (object gone, permission, transient error) — in every such case
+// the caller must NOT republish.
+func (c *metadataController) currentETag(ctx context.Context, namespace, objectPath string) (etag string, ok bool) {
+	if c.fsForExists == nil {
+		return "", false
+	}
+	fs := c.fsForExists(namespace)
+	if fs == nil {
+		return "", false
+	}
+	info, err := fs.Stat(ctx, exportRelativePath(namespace, objectPath))
+	if err != nil {
+		return "", false
+	}
+	return BackendETag(info), true
+}
+
 // CommitEvent is the close-hook entry point. It is called from the
 // POSC layer after a successful rename. Returns nil → the close (and
 // the client's HTTP request) succeeds; non-nil → the close fails and
 // the caller should best-effort roll back the storage commit.
 func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommitEvent) error {
+	return c.commitEvent(ctx, event, nil)
+}
+
+// commitEvent is CommitEvent with an optional set of `extra` statements folded
+// into the same durable transaction as the publish-queue INSERT. The tracked
+// close hook passes the tracking-commit statements so the commit record and
+// the queue row are crash-atomic.
+func (c *metadataController) commitEvent(ctx context.Context, event *ObjectCommitEvent, extra []BatchedStmt) error {
 	enabled, endpoint, mode := c.resolver.Resolve(event.Namespace)
 	if !enabled {
 		return nil
@@ -354,6 +566,12 @@ func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommi
 	// they get none.
 	var tok managementTokens
 	if mode == ModeEventual {
+		// Backpressure: refuse the upload if this namespace's pending queue is
+		// already at its cap, so a stuck catalog can't grow the queue without
+		// bound. Transactional rows never accumulate, so they're exempt.
+		if err := c.enforceBacklog(event.Namespace); err != nil {
+			return err
+		}
 		q, m, err := newManagementTokens()
 		if err != nil {
 			return fmt.Errorf("metadata: generate capability tokens: %w", err)
@@ -364,8 +582,10 @@ func (c *metadataController) CommitEvent(ctx context.Context, event *ObjectCommi
 	// Enqueue with next_attempt_at pushed out by the grace so the background
 	// worker won't claim the row while we perform the synchronous first attempt
 	// below (both modes attempt synchronously). On success/reject/transient the
-	// synchronous path itself deletes / marks / reschedules the row.
-	row, err := c.queue.EnqueueEvent(ctx, event, tok, c.firstAttemptGrace)
+	// synchronous path itself deletes / marks / reschedules the row. `extra`
+	// (the tracking-commit statements, when tracked) rides the same durable
+	// transaction so the commit record and the queue row are crash-atomic.
+	row, err := c.queue.enqueueEventAtomic(ctx, event, tok, c.firstAttemptGrace, extra)
 	if err != nil {
 		return fmt.Errorf("metadata: enqueue: %w", err)
 	}
@@ -412,6 +632,7 @@ func (c *metadataController) eventualFirstAttempt(ctx context.Context, row *Meta
 		if err := c.queue.deleteByID(row.ID); err != nil {
 			log.Errorf("metadata: delete row %d after eventual first-attempt success: %v", row.ID, err)
 		}
+		c.markPublished(ctx, event)
 		c.reportClientResult(ctx, metadataClientResult{Status: metadataClientPublished})
 	case res.IsPermanentReject():
 		if err := c.queue.markRejected(row.ID, errString(res.err)); err != nil {
@@ -465,6 +686,7 @@ func (c *metadataController) transactionalAttempt(ctx context.Context, row *Meta
 		log.Errorf("metadata: failed to delete queue row %d after transactional attempt: %v", row.ID, err)
 	}
 	if res.IsSuccess() {
+		c.markPublished(ctx, event)
 		c.reportClientResult(ctx, metadataClientResult{Status: metadataClientPublished})
 		return nil
 	}
@@ -609,6 +831,7 @@ func (c *metadataController) processOneRow(ctx context.Context, r *MetadataPubli
 	c.recordAttempt(r.Namespace, mode, res, c.clock().Sub(startWall))
 	switch {
 	case res.IsSuccess():
+		c.markPublished(ctx, event)
 		if err := c.queue.deleteByID(r.ID); err != nil {
 			log.Errorf("metadata: failed to delete row %d after success: %v", r.ID, err)
 		}
@@ -762,29 +985,39 @@ func (c *metadataController) CommitEventFromCloseHook(namespace string) func(ctx
 }
 
 // CommitEventFromCloseHookTracked is the close hook to use when the local
-// object-metadata tracking DB is also enabled. It probes that DB *before* the
-// track hook records the commit to decide create vs overwrite (object.committed
-// vs object.updated), runs the track hook (best-effort), then publishes. The
-// publish error is what gates the close (transactional rollback), so it runs
-// last.
-func (c *metadataController) CommitEventFromCloseHookTracked(namespace string, dao *objectMetadataDAO, trackHook closeHookFn) func(ctx context.Context, finalPath string, info os.FileInfo) error {
+// object-metadata tracking DB is also enabled. It probes that DB *before*
+// recording the commit to decide create vs overwrite (object.committed vs
+// object.updated), then — when publishing is enabled for the namespace —
+// folds the tracking-commit statements into the SAME durable transaction as
+// the publish-queue INSERT, so a crash cannot leave a committed object with no
+// queue row. When publishing is disabled for the namespace, it just records
+// the commit standalone.
+func (c *metadataController) CommitEventFromCloseHookTracked(namespace string, dao *objectMetadataDAO, trackExtra bool) func(ctx context.Context, finalPath string, info os.FileInfo) error {
 	return func(ctx context.Context, finalPath string, info os.FileInfo) error {
-		fedPath := joinFederationPath(namespace, finalPath)
+		input := commitInputFromCloseHook(ctx, namespace, finalPath, info, trackExtra)
 		// Overwrite iff the tracking DB already has a live row for this path.
-		// Per design we consult only the DB, not the object store.
+		// Per design we consult only the DB, not the object store. The probe
+		// must run before the commit is recorded so it sees pre-commit state.
 		eventType := ObjectCommitEventType
 		if dao != nil {
-			if live, err := dao.LookupLive(ctx, namespace, fedPath); err == nil && live != nil {
+			if live, err := dao.LookupLive(ctx, namespace, input.ObjectPath); err == nil && live != nil {
 				eventType = ObjectUpdatedEventType
 			}
 		}
-		event := c.buildCommitEvent(ctx, namespace, finalPath, info, eventType)
-		// Record the commit (best-effort) AFTER the overwrite probe so the
-		// probe saw pre-commit state; its error is intentionally ignored.
-		if trackHook != nil {
-			_ = trackHook(ctx, finalPath, info)
+
+		if enabled, _, _ := c.resolver.Resolve(namespace); !enabled {
+			// Publishing is off for this namespace: nothing to enqueue, so
+			// just record the commit in the tracking DB.
+			if dao != nil {
+				return dao.RecordCommit(ctx, input)
+			}
+			return nil
 		}
-		return c.CommitEvent(ctx, event)
+
+		event := c.buildCommitEvent(ctx, namespace, finalPath, info, eventType)
+		// Publishing on: the tracking-commit statements ride the same durable
+		// transaction as the queue INSERT (crash-atomic).
+		return c.commitEvent(ctx, event, commitStatements(input))
 	}
 }
 

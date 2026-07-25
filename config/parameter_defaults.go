@@ -596,6 +596,10 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_Metadata_MaxInflight.GetName(), 4)
 	// Origin.Metadata.MaxMetadataBytes
 	v.SetDefault(param.Origin_Metadata_MaxMetadataBytes.GetName(), 4194304)
+	// Origin.Metadata.MaxQueuedBytesPerNamespace
+	v.SetDefault(param.Origin_Metadata_MaxQueuedBytesPerNamespace.GetName(), 0)
+	// Origin.Metadata.MaxQueuedPerNamespace
+	v.SetDefault(param.Origin_Metadata_MaxQueuedPerNamespace.GetName(), 0)
 	// Origin.Metadata.MetadataPartName
 	v.SetDefault(param.Origin_Metadata_MetadataPartName.GetName(), "metadata")
 	// Origin.Metadata.MinBackoff
@@ -606,6 +610,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_Metadata_ObjectPartName.GetName(), "object")
 	// Origin.Metadata.RatePerSecond
 	v.SetDefault(param.Origin_Metadata_RatePerSecond.GetName(), 10)
+	// Origin.Metadata.ReconcileEnabled
+	v.SetDefault(param.Origin_Metadata_ReconcileEnabled.GetName(), true)
+	// Origin.Metadata.ReconcileInterval
+	v.SetDefault(param.Origin_Metadata_ReconcileInterval.GetName(), "2h")
+	// Origin.Metadata.ReconcileSettleWindow
+	v.SetDefault(param.Origin_Metadata_ReconcileSettleWindow.GetName(), "6h")
 	// Origin.Metadata.RequestTimeout
 	v.SetDefault(param.Origin_Metadata_RequestTimeout.GetName(), "10s")
 	// Origin.Metadata.TokenLifetime

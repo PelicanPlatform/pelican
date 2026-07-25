@@ -728,6 +728,9 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			RatePerSecond:  param.Origin_Metadata_RatePerSecond.GetInt(),
 			WarnAfter:      param.Origin_Metadata_WarnAfter.GetDuration(),
 			ErrorAfter:     param.Origin_Metadata_ErrorAfter.GetDuration(),
+
+			MaxQueuedPerNamespace:      param.Origin_Metadata_MaxQueuedPerNamespace.GetInt(),
+			MaxQueuedBytesPerNamespace: param.Origin_Metadata_MaxQueuedBytesPerNamespace.GetInt(),
 			// preMultiuserFs is populated below in the per-export
 			// loop; the closure captures the map by reference so
 			// late-arriving entries are visible at call time.
@@ -740,6 +743,13 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			// Share the same write-behind batcher object-metadata
 			// tracking uses; concurrent commits coalesce into one tx.
 			Batcher: objectMetaBatcher,
+
+			// TrackingDAO (nil unless TrackAccess is on somewhere) enables the
+			// publish watermark + the crash-recovery reconcile sweep.
+			TrackingDAO:           objectMetaDAO,
+			ReconcileEnabled:      param.Origin_Metadata_ReconcileEnabled.GetBool(),
+			ReconcileInterval:     param.Origin_Metadata_ReconcileInterval.GetDuration(),
+			ReconcileSettleWindow: param.Origin_Metadata_ReconcileSettleWindow.GetDuration(),
 		}
 		// Construct the controller now (the per-export loop below needs it
 		// to wire close hooks), but do NOT Start its worker pool yet: the
@@ -950,26 +960,23 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			// Either, both, or neither may be active. closeHook is
 			// nil iff no one wants to be told.
 			trackEnabled := objectMetaDAO != nil && resolveTrackAccess(export)
-			var trackHook closeHookFn
-			if trackEnabled {
-				trackHook = RecordCommitCloseHook(objectMetaDAO, export.FederationPrefix, resolveTrackExtra(export))
-			}
 			// Choose the commit close hook:
 			//   - publish + track: overwrite-aware hook — probes the tracking
 			//     DB (create vs overwrite → object.committed / object.updated),
-			//     runs the track hook, then publishes (publish error gates the
-			//     close for transactional rollback).
+			//     then folds the tracking-commit into the same durable tx as
+			//     the queue INSERT (crash-atomic) and publishes (publish error
+			//     gates the close for transactional rollback).
 			//   - publish only: always object.committed (no DB to tell create
 			//     from overwrite).
 			//   - track only: just record the commit.
 			var closeHook closeHookFn
 			switch {
 			case metadataCtl != nil && trackEnabled:
-				closeHook = metadataCtl.CommitEventFromCloseHookTracked(export.FederationPrefix, objectMetaDAO, trackHook)
+				closeHook = metadataCtl.CommitEventFromCloseHookTracked(export.FederationPrefix, objectMetaDAO, resolveTrackExtra(export))
 			case metadataCtl != nil:
 				closeHook = metadataCtl.CommitEventFromCloseHook(export.FederationPrefix)
 			case trackEnabled:
-				closeHook = trackHook
+				closeHook = RecordCommitCloseHook(objectMetaDAO, export.FederationPrefix, resolveTrackExtra(export))
 			}
 
 			poscEnabled := param.Origin_Posc_Enabled.GetBool()

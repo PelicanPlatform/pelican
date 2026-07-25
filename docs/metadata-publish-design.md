@@ -210,6 +210,8 @@ On the `PUT` response the origin sets:
 
 These URLs embed long random tokens: **possessing the URL is the authorization** — no separate token is needed. The query URL is read-only; only the manage URL can cancel. (Operators can additionally manage the whole queue through the admin API, which is gated by the origin admin scope.)
 
+> **Operator note:** because the token lives in the URL path, anything that logs full request URLs (HTTP access logs, reverse proxies) will capture it, and a log reader could cancel a client's publish. Scrub `/metadata_publish/<token>` paths from access logs, or restrict who can read them.
+
 A `GET` returning `404` means the token is unknown *or* the publish already completed successfully (successful rows are deleted).
 
 ---

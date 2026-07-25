@@ -151,6 +151,16 @@ func (q *publishQueue) handle() *gorm.DB {
 // would recover the row if the caller's process crashed mid-attempt. Pass 0
 // for immediate claimability (queue-level tests).
 func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent, tok managementTokens, firstAttemptDelay time.Duration) (*MetadataPublishRow, error) {
+	return q.enqueueEventAtomic(ctx, e, tok, firstAttemptDelay, nil)
+}
+
+// enqueueEventAtomic inserts the publish-queue row, optionally folding
+// `extra` statements into the SAME durable transaction. The publish path
+// passes the tracking-commit statements as `extra` so the tracking-commit and
+// the queue row land atomically — a crash can no longer leave a committed
+// object with no queue row (see commitStatements / the reconcile sweep, which
+// backstops the residual pre-record window).
+func (q *publishQueue) enqueueEventAtomic(ctx context.Context, e *ObjectCommitEvent, tok managementTokens, firstAttemptDelay time.Duration, extra []BatchedStmt) (*MetadataPublishRow, error) {
 	customJSON := []byte("{}")
 	if len(e.CustomFields) > 0 {
 		var err error
@@ -161,59 +171,55 @@ func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent, t
 	}
 	now := time.Now().UTC()
 	firstAttempt := now.Add(firstAttemptDelay)
-	if q.batcher == nil {
-		// Direct path (tests + early-init).
-		row := &MetadataPublishRow{
-			EventID:             e.ID,
-			Namespace:           e.Namespace,
-			ObjectPath:          e.ObjectPath,
-			ObjectSize:          e.ObjectSize,
-			ETag:                e.ETag,
-			ObjectCreated:       e.ObjectCreated.UTC(),
-			CustomFields:        string(customJSON),
-			MetadataContentType: e.MetadataContentType,
-			MetadataBody:        e.MetadataBody,
-			CreatedAt:           now,
-			NextAttemptAt:       firstAttempt,
-			State:               metadataStatePending,
-			QueryToken:          tok.Query,
-			ManageToken:         tok.Manage,
-			EventType:           e.Type,
-		}
-		if err := q.handle().Create(row).Error; err != nil {
-			return nil, err
-		}
-		return row, nil
-	}
-
-	// Batched path: durable insert coalesces with other concurrent
-	// commits and any in-flight best-effort tracking writes.
-	// Apply column defaults explicitly here — when we name a NOT
-	// NULL column in the INSERT list, SQLite expects a value
-	// regardless of any DEFAULT clause on the schema. GORM's
-	// `.Create()` path handles this implicitly; the raw INSERT
-	// does not.
 	metadataBody := e.MetadataBody
 	if metadataBody == nil {
 		metadataBody = []byte{}
 	}
-	if err := q.batcher.EnqueueDurable(ctx,
-		`INSERT INTO metadata_publish_queue
+	// The queue INSERT. Column defaults are applied explicitly — when we
+	// name a NOT NULL column in the INSERT list SQLite expects a value
+	// regardless of any schema DEFAULT (GORM's .Create handles this
+	// implicitly; a raw INSERT does not).
+	insert := BatchedStmt{
+		SQL: `INSERT INTO metadata_publish_queue
 			(event_id, namespace, object_path, object_size, etag, object_created,
 			 custom_fields, metadata_content_type, metadata_body,
 			 created_at, next_attempt_at, attempts, last_error,
 			 state, query_token, manage_token, event_type)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,0,'',?,?,?,?)`,
-		e.ID, e.Namespace, e.ObjectPath, e.ObjectSize, e.ETag, e.ObjectCreated.UTC(),
-		string(customJSON), e.MetadataContentType, metadataBody,
-		now, firstAttempt,
-		metadataStatePending, tok.Query, tok.Manage, e.Type,
-	); err != nil {
+		Args: []any{
+			e.ID, e.Namespace, e.ObjectPath, e.ObjectSize, e.ETag, e.ObjectCreated.UTC(),
+			string(customJSON), e.MetadataContentType, metadataBody,
+			now, firstAttempt,
+			metadataStatePending, tok.Query, tok.Manage, e.Type,
+		},
+	}
+
+	if q.batcher == nil {
+		// Direct path (tests + early-init). Run any extra statements and the
+		// INSERT in one transaction so the direct path preserves the same
+		// atomicity as the batched path.
+		if err := q.handle().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, s := range extra {
+				if err := tx.Exec(s.SQL, s.Args...).Error; err != nil {
+					return err
+				}
+			}
+			return tx.Exec(insert.SQL, insert.Args...).Error
+		}); err != nil {
+			return nil, err
+		}
+		return q.FindByEventID(e.ID)
+	}
+
+	// Batched path: durable insert coalesces with other concurrent commits.
+	// `extra` (the tracking-commit statements) runs first in the same tx.
+	stmts := append(append([]BatchedStmt{}, extra...), insert)
+	if err := q.batcher.EnqueueDurableBatch(ctx, stmts); err != nil {
 		return nil, err
 	}
-	// Read back to recover the autoincrement ID. This SELECT is
-	// indexed (event_id is UNIQUE) and the row was just written
-	// inside the batched tx, so it's in cache.
+	// Read back to recover the autoincrement ID. This SELECT is indexed
+	// (event_id is UNIQUE) and the row was just written inside the batched
+	// tx, so it's in cache.
 	return q.FindByEventID(e.ID)
 }
 
@@ -469,4 +475,20 @@ func (q *publishQueue) QueueStats() (*queueStats, error) {
 		}
 	}
 	return stats, nil
+}
+
+// NamespaceBacklog returns the number of pending rows and the total size in
+// bytes of their inline metadata blobs for a single namespace. It powers the
+// eventual-mode backpressure caps, which are checked once per commit; the
+// aggregate SELECT is indexed on namespace and cheap at the expected scale.
+func (q *publishQueue) NamespaceBacklog(namespace string) (count int64, blobBytes int64, err error) {
+	var agg struct {
+		Cnt   int64
+		Bytes int64
+	}
+	err = q.handle().Model(&MetadataPublishRow{}).
+		Where("namespace = ? AND state = ?", namespace, metadataStatePending).
+		Select("COUNT(*) AS cnt, COALESCE(SUM(LENGTH(metadata_body)), 0) AS bytes").
+		Scan(&agg).Error
+	return agg.Cnt, agg.Bytes, err
 }

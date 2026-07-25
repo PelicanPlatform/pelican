@@ -345,11 +345,16 @@ type Config struct {
 			MaxBackoff time.Duration `mapstructure:"maxbackoff" yaml:"MaxBackoff"`
 			MaxInflight int `mapstructure:"maxinflight" yaml:"MaxInflight"`
 			MaxMetadataBytes int `mapstructure:"maxmetadatabytes" yaml:"MaxMetadataBytes"`
+			MaxQueuedBytesPerNamespace int `mapstructure:"maxqueuedbytespernamespace" yaml:"MaxQueuedBytesPerNamespace"`
+			MaxQueuedPerNamespace int `mapstructure:"maxqueuedpernamespace" yaml:"MaxQueuedPerNamespace"`
 			MetadataPartName string `mapstructure:"metadatapartname" yaml:"MetadataPartName"`
 			MinBackoff time.Duration `mapstructure:"minbackoff" yaml:"MinBackoff"`
 			Mode string `mapstructure:"mode" yaml:"Mode"`
 			ObjectPartName string `mapstructure:"objectpartname" yaml:"ObjectPartName"`
 			RatePerSecond int `mapstructure:"ratepersecond" yaml:"RatePerSecond"`
+			ReconcileEnabled bool `mapstructure:"reconcileenabled" yaml:"ReconcileEnabled"`
+			ReconcileInterval time.Duration `mapstructure:"reconcileinterval" yaml:"ReconcileInterval"`
+			ReconcileSettleWindow time.Duration `mapstructure:"reconcilesettlewindow" yaml:"ReconcileSettleWindow"`
 			RequestTimeout time.Duration `mapstructure:"requesttimeout" yaml:"RequestTimeout"`
 			TokenLifetime time.Duration `mapstructure:"tokenlifetime" yaml:"TokenLifetime"`
 			TrackAccess bool `mapstructure:"trackaccess" yaml:"TrackAccess"`
@@ -897,11 +902,16 @@ type configWithType struct {
 			MaxBackoff struct { Type string; Value time.Duration }
 			MaxInflight struct { Type string; Value int }
 			MaxMetadataBytes struct { Type string; Value int }
+			MaxQueuedBytesPerNamespace struct { Type string; Value int }
+			MaxQueuedPerNamespace struct { Type string; Value int }
 			MetadataPartName struct { Type string; Value string }
 			MinBackoff struct { Type string; Value time.Duration }
 			Mode struct { Type string; Value string }
 			ObjectPartName struct { Type string; Value string }
 			RatePerSecond struct { Type string; Value int }
+			ReconcileEnabled struct { Type string; Value bool }
+			ReconcileInterval struct { Type string; Value time.Duration }
+			ReconcileSettleWindow struct { Type string; Value time.Duration }
 			RequestTimeout struct { Type string; Value time.Duration }
 			TokenLifetime struct { Type string; Value time.Duration }
 			TrackAccess struct { Type string; Value bool }

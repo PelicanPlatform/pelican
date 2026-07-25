@@ -107,6 +107,53 @@ func newTestController(t *testing.T, mode PublishMode, exports []server_utils.Or
 	return ctl, receiver.URL, requests, receiver
 }
 
+// newTrackedTestController builds a controller wired to a SINGLE database that
+// holds BOTH the publish queue and the object-metadata tracking tables — the
+// production topology, and the one the crash-atomic commit+enqueue and the
+// reconcile sweep require. TrackAccess is on (TrackingDAO set). Returns the
+// controller, the shared DAO, and the channel of webhook bodies the receiver
+// captured. Optional functional options tweak the controller options (e.g. to
+// set FilesystemForExists / reconcile knobs).
+func newTrackedTestController(t *testing.T, mode PublishMode, tweaks ...func(*metadataControllerOptions)) (*metadataController, *objectMetadataDAO, chan []byte) {
+	t.Helper()
+	db := newObjectMetadataTestDB(t)
+	if err := db.AutoMigrate(&MetadataPublishRow{}); err != nil {
+		t.Fatalf("automigrate publish queue: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	batcher := newSQLiteBatcher(ctx, db, 64, 20*time.Millisecond)
+	t.Cleanup(batcher.Stop)
+	dao := newObjectMetadataDAO(db, batcher)
+
+	requests := make(chan []byte, 64)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(receiver.Close)
+
+	o := metadataControllerOptions{
+		OriginEnabled:  true,
+		OriginEndpoint: receiver.URL,
+		OriginMode:     mode,
+		DB:             db,
+		Batcher:        batcher,
+		TrackingDAO:    dao,
+		MinBackoff:     20 * time.Millisecond,
+		MaxBackoff:     100 * time.Millisecond,
+		MaxInflight:    1,
+		RatePerSecond:  100,
+	}
+	for _, fn := range tweaks {
+		fn(&o)
+	}
+	ctl := newMetadataController(o)
+	ctl.publisher.signToken = func(audience, namespace string) (string, error) { return "t", nil }
+	return ctl, dao, requests
+}
+
 // ---------- queue / DAO ----------
 
 func TestQueueEnqueueAndFetch(t *testing.T) {

@@ -125,6 +125,11 @@ func buildMultipartUploadBody(tee io.Reader, blob *objectMetadataBlob) (io.Reade
 // ObjectMetadataHeaderName is the HTTP header that carries the
 // rendered Structured Fields dictionary on the upload PUT request.
 // Kept as a public constant so other clients can reuse it.
+//
+// The origin declares the same header name as
+// origin_serve.ObjectMetadataHeader; the two are deliberately duplicated
+// rather than shared because the client and origin_serve packages do not
+// import each other. Keep the two values identical.
 const ObjectMetadataHeaderName = "X-Pelican-Object-Metadata"
 
 // objectMetadataBlob is the in-memory value the

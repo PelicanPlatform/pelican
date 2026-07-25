@@ -384,11 +384,16 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.Metadata.MaxBackoff": false,
 	"Origin.Metadata.MaxInflight": false,
 	"Origin.Metadata.MaxMetadataBytes": false,
+	"Origin.Metadata.MaxQueuedBytesPerNamespace": false,
+	"Origin.Metadata.MaxQueuedPerNamespace": false,
 	"Origin.Metadata.MetadataPartName": false,
 	"Origin.Metadata.MinBackoff": false,
 	"Origin.Metadata.Mode": false,
 	"Origin.Metadata.ObjectPartName": false,
 	"Origin.Metadata.RatePerSecond": false,
+	"Origin.Metadata.ReconcileEnabled": false,
+	"Origin.Metadata.ReconcileInterval": false,
+	"Origin.Metadata.ReconcileSettleWindow": false,
 	"Origin.Metadata.RequestTimeout": false,
 	"Origin.Metadata.TokenLifetime": false,
 	"Origin.Metadata.TrackAccess": false,
@@ -952,6 +957,8 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Metadata.History.RetentionDays": func(c *Config) int { return c.Origin.Metadata.History.RetentionDays },
 	"Origin.Metadata.MaxInflight": func(c *Config) int { return c.Origin.Metadata.MaxInflight },
 	"Origin.Metadata.MaxMetadataBytes": func(c *Config) int { return c.Origin.Metadata.MaxMetadataBytes },
+	"Origin.Metadata.MaxQueuedBytesPerNamespace": func(c *Config) int { return c.Origin.Metadata.MaxQueuedBytesPerNamespace },
+	"Origin.Metadata.MaxQueuedPerNamespace": func(c *Config) int { return c.Origin.Metadata.MaxQueuedPerNamespace },
 	"Origin.Metadata.RatePerSecond": func(c *Config) int { return c.Origin.Metadata.RatePerSecond },
 	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
 	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
@@ -1106,6 +1113,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.HttpAuthTokenPassthrough": func(c *Config) bool { return c.Origin.HttpAuthTokenPassthrough },
 	"Origin.Metadata.AllowMultipart": func(c *Config) bool { return c.Origin.Metadata.AllowMultipart },
 	"Origin.Metadata.Enabled": func(c *Config) bool { return c.Origin.Metadata.Enabled },
+	"Origin.Metadata.ReconcileEnabled": func(c *Config) bool { return c.Origin.Metadata.ReconcileEnabled },
 	"Origin.Metadata.TrackAccess": func(c *Config) bool { return c.Origin.Metadata.TrackAccess },
 	"Origin.Metadata.TrackExtra": func(c *Config) bool { return c.Origin.Metadata.TrackExtra },
 	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
@@ -1219,6 +1227,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Origin.Metadata.History.PruneInterval": func(c *Config) time.Duration { return c.Origin.Metadata.History.PruneInterval },
 	"Origin.Metadata.MaxBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MaxBackoff },
 	"Origin.Metadata.MinBackoff": func(c *Config) time.Duration { return c.Origin.Metadata.MinBackoff },
+	"Origin.Metadata.ReconcileInterval": func(c *Config) time.Duration { return c.Origin.Metadata.ReconcileInterval },
+	"Origin.Metadata.ReconcileSettleWindow": func(c *Config) time.Duration { return c.Origin.Metadata.ReconcileSettleWindow },
 	"Origin.Metadata.RequestTimeout": func(c *Config) time.Duration { return c.Origin.Metadata.RequestTimeout },
 	"Origin.Metadata.TokenLifetime": func(c *Config) time.Duration { return c.Origin.Metadata.TokenLifetime },
 	"Origin.Metadata.WarnAfter": func(c *Config) time.Duration { return c.Origin.Metadata.WarnAfter },
@@ -1631,11 +1641,16 @@ var allParameterNames = []string{
 	"Origin.Metadata.MaxBackoff",
 	"Origin.Metadata.MaxInflight",
 	"Origin.Metadata.MaxMetadataBytes",
+	"Origin.Metadata.MaxQueuedBytesPerNamespace",
+	"Origin.Metadata.MaxQueuedPerNamespace",
 	"Origin.Metadata.MetadataPartName",
 	"Origin.Metadata.MinBackoff",
 	"Origin.Metadata.Mode",
 	"Origin.Metadata.ObjectPartName",
 	"Origin.Metadata.RatePerSecond",
+	"Origin.Metadata.ReconcileEnabled",
+	"Origin.Metadata.ReconcileInterval",
+	"Origin.Metadata.ReconcileSettleWindow",
 	"Origin.Metadata.RequestTimeout",
 	"Origin.Metadata.TokenLifetime",
 	"Origin.Metadata.TrackAccess",
@@ -2116,6 +2131,8 @@ var (
 	Origin_Metadata_History_RetentionDays = IntParam{"Origin.Metadata.History.RetentionDays"}
 	Origin_Metadata_MaxInflight = IntParam{"Origin.Metadata.MaxInflight"}
 	Origin_Metadata_MaxMetadataBytes = IntParam{"Origin.Metadata.MaxMetadataBytes"}
+	Origin_Metadata_MaxQueuedBytesPerNamespace = IntParam{"Origin.Metadata.MaxQueuedBytesPerNamespace"}
+	Origin_Metadata_MaxQueuedPerNamespace = IntParam{"Origin.Metadata.MaxQueuedPerNamespace"}
 	Origin_Metadata_RatePerSecond = IntParam{"Origin.Metadata.RatePerSecond"}
 	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
 	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
@@ -2205,6 +2222,7 @@ var (
 	Origin_HttpAuthTokenPassthrough = BoolParam{"Origin.HttpAuthTokenPassthrough"}
 	Origin_Metadata_AllowMultipart = BoolParam{"Origin.Metadata.AllowMultipart"}
 	Origin_Metadata_Enabled = BoolParam{"Origin.Metadata.Enabled"}
+	Origin_Metadata_ReconcileEnabled = BoolParam{"Origin.Metadata.ReconcileEnabled"}
 	Origin_Metadata_TrackAccess = BoolParam{"Origin.Metadata.TrackAccess"}
 	Origin_Metadata_TrackExtra = BoolParam{"Origin.Metadata.TrackExtra"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
@@ -2290,6 +2308,8 @@ var (
 	Origin_Metadata_History_PruneInterval = DurationParam{"Origin.Metadata.History.PruneInterval"}
 	Origin_Metadata_MaxBackoff = DurationParam{"Origin.Metadata.MaxBackoff"}
 	Origin_Metadata_MinBackoff = DurationParam{"Origin.Metadata.MinBackoff"}
+	Origin_Metadata_ReconcileInterval = DurationParam{"Origin.Metadata.ReconcileInterval"}
+	Origin_Metadata_ReconcileSettleWindow = DurationParam{"Origin.Metadata.ReconcileSettleWindow"}
 	Origin_Metadata_RequestTimeout = DurationParam{"Origin.Metadata.RequestTimeout"}
 	Origin_Metadata_TokenLifetime = DurationParam{"Origin.Metadata.TokenLifetime"}
 	Origin_Metadata_WarnAfter = DurationParam{"Origin.Metadata.WarnAfter"}
@@ -2632,6 +2652,8 @@ func init() {
 		"Origin.Metadata.History.RetentionDays": Origin_Metadata_History_RetentionDays,
 		"Origin.Metadata.MaxInflight": Origin_Metadata_MaxInflight,
 		"Origin.Metadata.MaxMetadataBytes": Origin_Metadata_MaxMetadataBytes,
+		"Origin.Metadata.MaxQueuedBytesPerNamespace": Origin_Metadata_MaxQueuedBytesPerNamespace,
+		"Origin.Metadata.MaxQueuedPerNamespace": Origin_Metadata_MaxQueuedPerNamespace,
 		"Origin.Metadata.RatePerSecond": Origin_Metadata_RatePerSecond,
 		"Origin.MultiuserMinID": Origin_MultiuserMinID,
 		"Origin.MultiuserUmask": Origin_MultiuserUmask,
@@ -2715,6 +2737,7 @@ func init() {
 		"Origin.HttpAuthTokenPassthrough": Origin_HttpAuthTokenPassthrough,
 		"Origin.Metadata.AllowMultipart": Origin_Metadata_AllowMultipart,
 		"Origin.Metadata.Enabled": Origin_Metadata_Enabled,
+		"Origin.Metadata.ReconcileEnabled": Origin_Metadata_ReconcileEnabled,
 		"Origin.Metadata.TrackAccess": Origin_Metadata_TrackAccess,
 		"Origin.Metadata.TrackExtra": Origin_Metadata_TrackExtra,
 		"Origin.Multiuser": Origin_Multiuser,
@@ -2797,6 +2820,8 @@ func init() {
 		"Origin.Metadata.History.PruneInterval": Origin_Metadata_History_PruneInterval,
 		"Origin.Metadata.MaxBackoff": Origin_Metadata_MaxBackoff,
 		"Origin.Metadata.MinBackoff": Origin_Metadata_MinBackoff,
+		"Origin.Metadata.ReconcileInterval": Origin_Metadata_ReconcileInterval,
+		"Origin.Metadata.ReconcileSettleWindow": Origin_Metadata_ReconcileSettleWindow,
 		"Origin.Metadata.RequestTimeout": Origin_Metadata_RequestTimeout,
 		"Origin.Metadata.TokenLifetime": Origin_Metadata_TokenLifetime,
 		"Origin.Metadata.WarnAfter": Origin_Metadata_WarnAfter,
