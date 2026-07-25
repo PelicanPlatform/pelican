@@ -78,8 +78,8 @@ The `Authorization: Bearer <JWT>` is the **only** authentication. The body is un
 
 1. Read the event body's `federation` and `namespace` (and, for cross-checking, the JWT's `iss`) **without trusting the token yet**.
 1. Discover the namespace's keys **via the registry** — the origin publishes the public half of its signing key in the federation registry under the namespace, so a receiver never needs to reach the origin directly:
-   - Federation discovery: `GET https://<federation>/.well-known/pelican-configuration`, read `registry_endpoint`.
-   - Fetch the namespace JWKS: `GET <registry_endpoint>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks`. Cache and refresh it.
+   - Federation discovery: `GET https://<federation>/.well-known/pelican-configuration`, read `namespace_registration_endpoint` (the registry).
+   - Fetch the namespace JWKS: `GET <registry>/api/v1.0/registry/<namespace>/.well-known/issuer.jwks`. Cache and refresh it.
    - (If `federation` is absent — e.g. an origin that could not resolve its federation — fall back to OIDC discovery on the token's `iss`: `GET <iss>/.well-known/openid-configuration` → `jwks_uri`. This requires reachability to the origin and is the legacy path.)
 1. Verify the signature against that JWKS, and check:
    - `exp` (unexpired; a small clock-skew allowance is reasonable).
@@ -98,7 +98,7 @@ Token claims summary:
 | `jti`         | The event UUID (equals `id`)                                |
 | `exp`         | Short-lived (default 5 minutes)                             |
 
-> **Reference implementation:** Pelican ships a runnable, commented reference receiver at `cmd/sample_metadata_server` that demonstrates receiver-side JWT verification and event handling. Use it to test your origin wiring and as a template. (Its key-discovery path is being aligned with the registry-based model described here; the JWT/scope/audience checks are already representative.)
+> **Reference implementation:** Pelican ships a runnable, commented reference receiver at `cmd/sample_metadata_server` that performs exactly this verification — registry-based key discovery (with `-federation` pinning), the `iss` fallback, and the audience/scope checks. Use it to test your origin wiring and as a template.
 
 ---
 
@@ -279,7 +279,7 @@ Minimal shape of a compliant receiver (pseudocode; see `cmd/sample_metadata_serv
 on POST:
     tok   = bearer_token(request)                   # 401 if missing
     event = json(body)                              # federation + namespace (still untrusted)
-    reg   = discover(event.federation).registry_endpoint
+    reg   = discover(event.federation).namespace_registration_endpoint
     jwks  = fetch(reg + "/api/v1.0/registry/" + event.namespace + "/.well-known/issuer.jwks")
     claims = verify(tok, jwks, audience=MY_URL)     # 401 if bad sig / aud / exp
     require "pelican.metadata" in claims.scope      # 403 otherwise
