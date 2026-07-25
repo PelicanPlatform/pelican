@@ -251,9 +251,9 @@ type metadataControllerOptions struct {
 
 	// ReconcileEnabled / ReconcileInterval / ReconcileSettleWindow configure
 	// the crash-recovery sweep. Inert unless TrackingDAO is also set.
-	ReconcileEnabled       bool
-	ReconcileInterval      time.Duration
-	ReconcileSettleWindow  time.Duration
+	ReconcileEnabled      bool
+	ReconcileInterval     time.Duration
+	ReconcileSettleWindow time.Duration
 
 	// Batcher, when non-nil, routes publish-queue inserts through
 	// the shared write-behind batcher so concurrent commits coalesce
