@@ -92,8 +92,10 @@ func TestIntegration_SampleServerVerifiesToken(t *testing.T) {
 	// The audience the receiver expects is a fixed string, independent of the
 	// bound port, so it can be passed on the command line before launch.
 	const audience = "https://receiver.test.example/events"
+	// These events carry no `federation`, so the receiver uses the issuer-pinned
+	// OIDC fallback: -issuer must match the token's iss (the mock issuer).
 	baseURL := launchServer(t, "-path", "/events", "-audience", audience,
-		"-require-namespace-scope", "-ca", caPath)
+		"-issuer", issuerURL, "-require-namespace-scope", "-ca", caPath)
 	endpoint := baseURL + "/events"
 
 	now := time.Now()

@@ -38,14 +38,20 @@
 //     (cached, auto-refreshed);
 //  4. verifies the JWT signature against those keys.
 //
-// TRUST ANCHOR: `federation` comes from the unverified request, so pin it.
-// Pass -federation <discovery-url> in production: the receiver then verifies
-// against THAT federation's registry and rejects any event claiming a
-// different federation. Without -federation the receiver follows the event's
-// self-described federation (logged as insecure). If an event carries no
-// `federation` (e.g. an origin that couldn't resolve its own), it falls back
-// to legacy OIDC discovery on the token's `iss` — which does require reaching
-// the origin.
+// TRUST ANCHOR: `federation` and `iss` come from the unverified request, so
+// the receiver NEVER fetches a URL taken from them. It is configured with the
+// federation(s)/issuer(s) it trusts and only ever discovers keys from those
+// configured values; the event's federation / token's issuer are merely
+// compared against them to authorize the source. This is what prevents a
+// forged event from pointing verification at an attacker-controlled host
+// (SSRF). Configure at least one of:
+//
+//   - -federation <discovery-url>: registry-based. An event's `federation`
+//     must equal this; keys come from this federation's registry.
+//   - -issuer <url>: OIDC fallback for events that carry no `federation`. The
+//     token's `iss` must equal this; keys come from this issuer's JWKS.
+//
+// With neither set, every event is rejected.
 //
 // After key discovery it also checks, in order:
 //
@@ -121,7 +127,8 @@ const listeningLinePrefix = "SAMPLE_METADATA_SERVER_LISTENING "
 type config struct {
 	path             string
 	audience         string
-	federation       string // trusted federation discovery URL (pinned); empty = follow the event's federation
+	federation       string // trusted federation discovery URL (canonical); registry-based verification
+	issuer           string // trusted issuer URL (canonical); OIDC fallback for events without a federation
 	requireNamespace bool
 	skew             time.Duration
 	httpClient       *http.Client
@@ -132,7 +139,8 @@ func main() {
 		addr             = flag.String("addr", ":9999", "address:port to listen on (use :0 to let the OS pick a free port)")
 		path             = flag.String("path", "/", "request path that accepts the webhook POST")
 		audience         = flag.String("audience", "", "expected token audience (this receiver's public URL). If empty, the audience check is skipped and a warning is logged.")
-		federation       = flag.String("federation", "", "federation discovery URL to TRUST for key discovery (e.g. osg-htc.org). When set, JWTs are verified against this federation's registry and events claiming a different federation are rejected. When empty, the event's self-described federation is followed (logged as insecure).")
+		federation       = flag.String("federation", "", "federation discovery URL to TRUST for registry-based key discovery (e.g. osg-htc.org). An event's JWT is verified against THIS federation's registry; events claiming a different federation are rejected. Key discovery never fetches a URL taken from the (untrusted) event.")
+		issuer           = flag.String("issuer", "", "issuer URL to TRUST for the OIDC fallback used by events that carry no federation. The token's iss must match this exactly; keys are fetched from this configured value, never the token's iss.")
 		requireNamespace = flag.Bool("require-namespace-scope", false, "require the token's pelican.metadata scope to carry a path covering the event's namespace")
 		skew             = flag.Duration("clock-skew", 2*time.Minute, "acceptable clock skew when validating exp/nbf")
 		caFile           = flag.String("ca", "", "PEM file of extra CA(s) to trust when fetching federation discovery / registry JWKS (e.g. a dev federation CA). In a dev federation, point this at the federation CA rather than disabling verification.")
@@ -150,6 +158,7 @@ func main() {
 		path:             *path,
 		audience:         strings.TrimSpace(*audience),
 		federation:       canonicalFederation(*federation),
+		issuer:           canonicalFederation(*issuer),
 		requireNamespace: *requireNamespace,
 		skew:             *skew,
 		httpClient:       client,
@@ -157,8 +166,8 @@ func main() {
 	if cfg.audience == "" {
 		log.Printf("WARNING: -audience is empty; the token audience will NOT be checked. Set it to this receiver's public URL in production.")
 	}
-	if cfg.federation == "" {
-		log.Printf("WARNING: -federation is empty; key discovery will FOLLOW the federation named in each (unverified) event. Pin it with -federation <discovery-url> in production so a forged event cannot point verification at an attacker's registry.")
+	if cfg.federation == "" && cfg.issuer == "" {
+		log.Printf("WARNING: neither -federation nor -issuer is set; this receiver has no trusted key source and will REJECT every event. Set -federation <discovery-url> (registry-based) and/or -issuer <url> (OIDC fallback).")
 	}
 	if !cfg.requireNamespace {
 		log.Printf("WARNING: -require-namespace-scope is off; any token bearing the bare 'pelican.metadata' scope is accepted for ANY namespace. Enable it in production.")
@@ -265,11 +274,12 @@ func (c *config) makeHandler(v *verifier) http.HandlerFunc {
 
 		// --- Token verification. This is the point of the sample. ---
 		claims, err := v.verify(r.Context(), r.Header.Get("Authorization"), verifyRequest{
-			pinnedFederation: c.federation,
-			eventFederation:  event.Federation,
-			namespace:        event.Namespace,
-			audience:         c.audience,
-			skew:             c.skew,
+			trustedFederation: c.federation,
+			trustedIssuer:     c.issuer,
+			eventFederation:   event.Federation,
+			namespace:         event.Namespace,
+			audience:          c.audience,
+			skew:              c.skew,
 		})
 		if err != nil {
 			log.Printf("reject: token: %v", err)
@@ -364,16 +374,19 @@ func newVerifier(client *http.Client) *verifier {
 	}
 }
 
-// verifyRequest carries everything verify() needs. The federation/namespace
-// come from the (still-untrusted) event body; the token's signature is what
-// ultimately establishes trust, against keys discovered from the *pinned*
-// federation when one is configured.
+// verifyRequest carries everything verify() needs. The trusted* fields come
+// from this receiver's configuration (command line); the event*/namespace
+// fields come from the still-untrusted request body. Key discovery only ever
+// fetches from a trusted* value — the event's are compared against them, never
+// fetched — so a forged event cannot point verification at a host the
+// attacker controls (SSRF).
 type verifyRequest struct {
-	pinnedFederation string // configured trust anchor; empty = follow eventFederation
-	eventFederation  string // federation the event claims (untrusted)
-	namespace        string // namespace the event claims (untrusted until the sig verifies)
-	audience         string
-	skew             time.Duration
+	trustedFederation string // -federation (canonical); "" if not configured
+	trustedIssuer     string // -issuer (canonical); "" if not configured
+	eventFederation   string // federation the event claims (untrusted)
+	namespace         string // namespace the event claims (untrusted)
+	audience          string
+	skew              time.Duration
 }
 
 // verifiedClaims is the subset of claims the handler needs after a token checks
@@ -384,54 +397,26 @@ type verifiedClaims struct {
 	scopes []string
 }
 
-// verify validates the bearer token. Keys are discovered from the federation
-// registry (namespace-scoped), which is why the origin need not be reachable;
-// it falls back to OIDC-on-iss only when no federation is available.
+// verify validates the bearer token, discovering keys from a configured trust
+// anchor (see discoverKeys). Registry-based discovery (via the event's
+// federation) means the origin need not be reachable; the issuer-pinned path
+// is the fallback for events that carry no federation.
 func (v *verifier) verify(ctx context.Context, authHeader string, req verifyRequest) (*verifiedClaims, error) {
 	raw, err := bearerToken(authHeader)
 	if err != nil {
 		return nil, err
 	}
 
-	// First pass: parse WITHOUT verification, only to learn `iss` (for the
-	// legacy fallback and for logging). Nothing here is trusted.
+	// Parse WITHOUT verification, only to read the (untrusted) `iss` used to
+	// select and match the configured issuer anchor. Nothing here is trusted.
 	unverified, err := jwt.Parse([]byte(raw), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		return nil, fmt.Errorf("malformed token: %w", err)
 	}
-	issuer := unverified.Issuer()
 
-	// Decide which federation to trust for key discovery.
-	federation := req.pinnedFederation
-	if federation != "" {
-		// Pinned: refuse an event that claims some *other* federation, so a
-		// forged event can't redirect verification at an attacker's registry.
-		if ef := canonicalFederation(req.eventFederation); ef != "" && ef != federation {
-			return nil, fmt.Errorf("event federation %q is not the trusted federation %q", req.eventFederation, federation)
-		}
-	} else {
-		federation = canonicalFederation(req.eventFederation)
-	}
-
-	var keySet jwk.Set
-	switch {
-	case federation != "":
-		if req.namespace == "" {
-			return nil, fmt.Errorf("event has no namespace; cannot locate registry keys")
-		}
-		keySet, err = v.keySetForNamespace(ctx, federation, req.namespace)
-		if err != nil {
-			return nil, fmt.Errorf("resolve registry keys for %s in %s: %w", req.namespace, federation, err)
-		}
-	case issuer != "":
-		// Legacy fallback: OIDC discovery on the origin's issuer. Requires
-		// reachability to the origin.
-		keySet, err = v.keySetForIssuer(ctx, issuer)
-		if err != nil {
-			return nil, fmt.Errorf("resolve issuer keys (no federation in event): %w", err)
-		}
-	default:
-		return nil, fmt.Errorf("event carries no federation and token no issuer; cannot locate verification keys")
+	keySet, err := v.discoverKeys(ctx, req, unverified.Issuer())
+	if err != nil {
+		return nil, err
 	}
 
 	opts := []jwt.ParseOption{
@@ -448,6 +433,57 @@ func (v *verifier) verify(ctx context.Context, authHeader string, req verifyRequ
 	}
 
 	return &verifiedClaims{issuer: tok.Issuer(), jti: tok.JwtID(), scopes: extractScopes(tok)}, nil
+}
+
+// discoverKeys returns the verification key set, fetching ONLY from this
+// receiver's configured trust anchors (req.trustedFederation / req.trustedIssuer)
+// — never from a URL taken out of the event body or the token. The event's
+// federation and the token's issuer are compared against those anchors to
+// authorize the source; they are never themselves fetched. This is what keeps
+// a forged event from redirecting verification at an attacker-controlled host
+// (SSRF / request forgery).
+func (v *verifier) discoverKeys(ctx context.Context, req verifyRequest, tokenIssuer string) (jwk.Set, error) {
+	// Registry-based: the event names a federation. Accept it only if it is
+	// the one this receiver is configured to trust, and then discover from the
+	// *configured* value.
+	if req.eventFederation != "" {
+		if req.trustedFederation == "" {
+			return nil, fmt.Errorf("event names federation %q but this receiver has no trusted -federation configured", req.eventFederation)
+		}
+		if canonicalFederation(req.eventFederation) != req.trustedFederation {
+			return nil, fmt.Errorf("event federation %q is not the trusted federation %q", req.eventFederation, req.trustedFederation)
+		}
+		namespace, err := validateNamespace(req.namespace)
+		if err != nil {
+			return nil, err
+		}
+		return v.keySetForNamespace(ctx, req.trustedFederation, namespace)
+	}
+
+	// Issuer-pinned fallback: the event carries no federation, so fall back to
+	// OIDC discovery — but only when the token's issuer matches the configured
+	// -issuer, and discover from the *configured* value.
+	if req.trustedIssuer != "" && tokenIssuer != "" && canonicalFederation(tokenIssuer) == req.trustedIssuer {
+		return v.keySetForIssuer(ctx, req.trustedIssuer)
+	}
+
+	return nil, fmt.Errorf("no trusted key source: event carries no federation matching -federation, and token issuer %q does not match -issuer", tokenIssuer)
+}
+
+// validateNamespace rejects a namespace that could escape the registry path or
+// inject a host before it is used to build the registry JWKS URL.
+func validateNamespace(ns string) (string, error) {
+	ns = strings.TrimSpace(ns)
+	if ns == "" {
+		return "", fmt.Errorf("event has no namespace; cannot locate registry keys")
+	}
+	if !strings.HasPrefix(ns, "/") {
+		return "", fmt.Errorf("namespace %q must start with '/'", ns)
+	}
+	if strings.Contains(ns, "..") || strings.Contains(ns, "://") || strings.ContainsAny(ns, " \t\r\n?#\\") {
+		return "", fmt.Errorf("namespace %q contains disallowed characters", ns)
+	}
+	return ns, nil
 }
 
 // bearerToken pulls the raw JWT out of an Authorization header.
