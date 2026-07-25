@@ -98,6 +98,14 @@ type sqliteBatcher struct {
 	// metrics hooks (nil-tolerant)
 	hooks BatcherHooks
 
+	// onFirstOpReceived, when non-nil, is invoked by the flusher right
+	// after it receives the first op of a wake-up and before the
+	// opportunistic non-blocking drain. Test-only seam (nil in
+	// production) so a coalescing test can fill the channel before the
+	// drain and observe cross-goroutine coalescing deterministically,
+	// rather than depending on scheduler timing.
+	onFirstOpReceived func()
+
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 
@@ -526,6 +534,9 @@ func (b *sqliteBatcher) run(ctx context.Context) {
 
 		case op := <-b.ch:
 			batch = append(batch, op)
+			if b.onFirstOpReceived != nil {
+				b.onFirstOpReceived()
+			}
 			// Opportunistic drain: pull any other ops already in
 			// the channel into this batch *without blocking*. This
 			// is what gives us cross-goroutine durable coalescing —
