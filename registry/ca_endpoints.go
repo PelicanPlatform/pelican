@@ -122,9 +122,11 @@ func issueHostCertificateImpl(req *server_structs.IssueHostCertRequest) (string,
 	}
 
 	// 5. Issue.
+	dnsNames, ips := authorizedNamesForPrefix(req.Prefix, slug)
 	chainPEM, err := SignHostCertificate(nil, HostCertRequest{
 		CSR:             csr,
-		AuthorizedNames: authorizedNamesForPrefix(req.Prefix, slug),
+		AuthorizedNames: dnsNames,
+		AuthorizedIPs:   ips,
 	})
 	if err != nil {
 		return "", badRequestError{Message: err.Error()}
@@ -215,16 +217,19 @@ func requireApprovedService(prefix string) (*server_structs.Registration, error)
 // binds to the service. The hostname is derived from the registration prefix
 // (/origins/<host> or /caches/<host>) — the registry's own record, not
 // something the requester supplies — so a service can only ever be granted a
-// name it is registered under. A prefix host that is an IP literal (or empty)
-// contributes no DNS SAN; such a service is reached by IP with ServerName=slug.
+// name it is registered under. When the registered host is a DNS name it becomes
+// an additional DNS SAN; when it is an IP literal it becomes an IP SAN so direct
+// connections to the service's configured address still validate (this is the
+// service's OWN address, distinct from the WS2 funneled endpoints which are
+// authenticated by slug and never appear in the certificate).
 //
 // Note: this covers the common case where a service's web/registration host is
 // also its data host. A service whose data endpoint uses a different hostname
 // than its registration prefix is reached over that endpoint via ServerName=slug.
-func authorizedNamesForPrefix(prefix, slug string) []string {
-	names := []string{slug}
+func authorizedNamesForPrefix(prefix, slug string) (dnsNames []string, ips []net.IP) {
+	dnsNames = []string{slug}
 
-	// The hostname is only meaningful for origin/cache service prefixes.
+	// The registered host is only meaningful for origin/cache service prefixes.
 	host := ""
 	for _, p := range []string{server_structs.OriginPrefix.String(), server_structs.CachePrefix.String()} {
 		if strings.HasPrefix(prefix, p) {
@@ -233,18 +238,21 @@ func authorizedNamesForPrefix(prefix, slug string) []string {
 		}
 	}
 	if host == "" {
-		return names
+		return
 	}
 	// Drop a port if present (prefix host may be "example.org:8444").
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	// Only a real DNS hostname becomes an additional SAN — never an IP literal
-	// (IP SANs are not issued) and never a duplicate of the slug.
-	if host != "" && host != slug && net.ParseIP(host) == nil {
-		names = append(names, host)
+	if host == "" || host == slug {
+		return
 	}
-	return names
+	if ip := net.ParseIP(host); ip != nil {
+		ips = append(ips, ip)
+	} else {
+		dnsNames = append(dnsNames, host)
+	}
+	return
 }
 
 // serviceSlugForPrefix returns the unique service-ID slug bound to a prefix.

@@ -69,11 +69,11 @@ func TestOriginObtainsFederationCertificate(t *testing.T) {
 	assert.NotContains(t, strings.Join(leaf.Issuer.Organization, ","), "Pelican CA",
 		"the temporary self-signed certificate should have been replaced")
 	// The cert carries the service slug (SignHostCertificate stamps it first),
-	// possibly followed by the origin's registration hostname.
+	// plus the origin's registered host — which in this loopback fed is the IP
+	// literal 127.0.0.1, issued as an IP SAN so direct connections still validate.
 	require.NotEmpty(t, leaf.DNSNames)
 	slug := leaf.DNSNames[0]
 	assert.NotEmpty(t, slug)
-	assert.Empty(t, leaf.IPAddresses, "no IP SANs should be issued")
 	require.Len(t, intermediates, 1, "installed chain should include the intermediate")
 
 	// The leaf must verify against the federation root the registry publishes,

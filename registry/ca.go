@@ -45,6 +45,7 @@ import (
 	"encoding/pem"
 	"io"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/pkg/errors"
@@ -409,19 +410,23 @@ func EnsureFederationCA(db *gorm.DB) error {
 
 // HostCertRequest describes a request to mint a host certificate.
 //
-// AuthorizedNames is the exact SAN set the registry will stamp into the
-// certificate — NOT a filter over the CSR. For a Pelican service this is its
-// unique service-ID slug (a short, randomly-generated identifier the registry
-// assigns). Peers authenticate the TLS connection against that slug — set as
-// the client's expected ServerName — rather than against the origin's IP
-// address, so reaching a service by IP (WS2) and authenticating it by slug
-// (WS3) are orthogonal and **IP SANs are never issued**. The CSR supplies only
-// the host public key (and proves possession of the host key via its
-// self-signature); any SANs it requests are ignored, so a requester can never
-// obtain a name it is not entitled to.
+// AuthorizedNames and AuthorizedIPs together are the exact SAN set the registry
+// will stamp into the certificate — NOT a filter over the CSR. AuthorizedNames
+// always includes the service's unique slug (a short, randomly-generated
+// identifier the registry assigns); a Pelican client reaching the service by a
+// funneled IP (WS2) authenticates against that slug via ServerName, so those
+// funneled IPs are NOT put in the certificate. AuthorizedIPs is the service's
+// OWN registered address when that address is an IP literal (e.g. a DNS-less
+// origin, or a co-located test deployment on 127.0.0.1): it must be a SAN so
+// direct connections to the service's configured host still validate, exactly
+// as the self-signed certificate it replaces did. The CSR supplies only the
+// host public key (and proves possession via its self-signature); any SANs it
+// requests are ignored, so a requester can never obtain an identity it is not
+// entitled to.
 type HostCertRequest struct {
 	CSR             *x509.CertificateRequest
 	AuthorizedNames []string
+	AuthorizedIPs   []net.IP
 	// TTL is the certificate lifetime; zero uses defaultHostCertValidity.
 	TTL time.Duration
 }
@@ -460,7 +465,7 @@ func SignHostCertificate(db *gorm.DB, req HostCertRequest) (chainPEM string, err
 		seen[name] = struct{}{}
 		dnsNames = append(dnsNames, name)
 	}
-	if len(dnsNames) == 0 {
+	if len(dnsNames) == 0 && len(req.AuthorizedIPs) == 0 {
 		return "", errors.New("host certificate request has no authorized SANs")
 	}
 
@@ -481,10 +486,16 @@ func SignHostCertificate(db *gorm.DB, req HostCertRequest) (chainPEM string, err
 		return "", err
 	}
 
+	commonName := ""
+	if len(dnsNames) > 0 {
+		commonName = dnsNames[0]
+	} else if len(req.AuthorizedIPs) > 0 {
+		commonName = req.AuthorizedIPs[0].String()
+	}
 	now := time.Now()
 	template := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: dnsNames[0]},
+		Subject:               pkix.Name{CommonName: commonName},
 		NotBefore:             now.Add(-1 * time.Minute),
 		NotAfter:              now.Add(ttl),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -492,6 +503,7 @@ func SignHostCertificate(db *gorm.DB, req HostCertRequest) (chainPEM string, err
 		BasicConstraintsValid: true,
 		IsCA:                  false,
 		DNSNames:              dnsNames,
+		IPAddresses:           req.AuthorizedIPs,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &template, intermediate.cert, req.CSR.PublicKey, intermediate.key)
 	if err != nil {

@@ -114,20 +114,27 @@ func mintHostCertToken(t *testing.T, o tokenOpts) string {
 func TestAuthorizedNamesForPrefix(t *testing.T) {
 	slug := "18f1jk5"
 	tests := []struct {
-		name   string
-		prefix string
-		want   []string
+		name    string
+		prefix  string
+		wantDNS []string
+		wantIP  []string // string form for readability
 	}{
-		{"origin hostname", "/origins/example.org", []string{slug, "example.org"}},
-		{"cache hostname", "/caches/cache.example.org", []string{slug, "cache.example.org"}},
-		{"hostname with port is stripped", "/origins/example.org:8444", []string{slug, "example.org"}},
-		{"IP-literal prefix contributes no DNS SAN", "/origins/192.0.2.10", []string{slug}},
-		{"IPv6-literal prefix contributes no DNS SAN", "/origins/[2001:db8::1]:8444", []string{slug}},
-		{"non-service prefix yields only the slug", "/foo/bar", []string{slug}},
+		{"origin hostname", "/origins/example.org", []string{slug, "example.org"}, nil},
+		{"cache hostname", "/caches/cache.example.org", []string{slug, "cache.example.org"}, nil},
+		{"hostname with port is stripped", "/origins/example.org:8444", []string{slug, "example.org"}, nil},
+		{"IPv4-literal registered host becomes an IP SAN", "/origins/192.0.2.10", []string{slug}, []string{"192.0.2.10"}},
+		{"IPv6-literal registered host becomes an IP SAN", "/origins/[2001:db8::1]:8444", []string{slug}, []string{"2001:db8::1"}},
+		{"non-service prefix yields only the slug", "/foo/bar", []string{slug}, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, authorizedNamesForPrefix(tc.prefix, slug))
+			dns, ips := authorizedNamesForPrefix(tc.prefix, slug)
+			assert.Equal(t, tc.wantDNS, dns)
+			var ipStrs []string
+			for _, ip := range ips {
+				ipStrs = append(ipStrs, ip.String())
+			}
+			assert.Equal(t, tc.wantIP, ipStrs)
 		})
 	}
 }

@@ -75,6 +75,16 @@ func LaunchHostCertificateManager(ctx context.Context, egrp *errgroup.Group, mod
 	if !modules.IsEnabled(server_structs.OriginType) && !modules.IsEnabled(server_structs.CacheType) {
 		return
 	}
+	// Never swap the certificate when this process also serves the director or
+	// registry. Those are the federation's trust anchors: a client bootstraps
+	// federation discovery and fetches the CA root *through* them, so they must
+	// present a certificate the client already trusts (operator-provided or a
+	// public CA) — not one issued by the federation CA, which the client cannot
+	// yet trust. Only a standalone origin/cache is free to use a federation cert.
+	if modules.IsEnabled(server_structs.DirectorType) || modules.IsEnabled(server_structs.RegistryType) {
+		log.Debug("Host certificate manager: disabled (co-located with the director/registry, which anchor federation trust)")
+		return
+	}
 
 	egrp.Go(func() error {
 		// Attempt once shortly after startup, then on a steady cadence.
