@@ -573,7 +573,7 @@ func TestBlobFileInfo(t *testing.T) {
 	fi := &blobFileInfo{name: "test.txt", size: 42, isDir: false}
 	assert.Equal(t, "test.txt", fi.Name())
 	assert.Equal(t, int64(42), fi.Size())
-	assert.Equal(t, os.FileMode(0444), fi.Mode())
+	assert.Equal(t, os.FileMode(0644), fi.Mode())
 	assert.False(t, fi.IsDir())
 	assert.Nil(t, fi.Sys())
 
