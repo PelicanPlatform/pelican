@@ -72,32 +72,68 @@ const statusColor = (
   }
 };
 
+// How often the jobs list refreshes itself while the tab is visible.
+const JOBS_POLL_INTERVAL_MS = 10_000;
+
 export default function TransferJobsPage() {
   const [jobs, setJobs] = useState<TransferJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchJobs = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // fetchJobs refreshes the list. A background refresh (the interval poll) skips
+  // the loading spinner and does not surface a transient error, so the table
+  // doesn't flicker or flash red on a blip; a successful poll clears any prior
+  // error. Foreground fetches (initial load, Refresh button, post-cancel) keep
+  // the usual loading/error behavior.
+  const fetchJobs = useCallback(async (background = false) => {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const response = await fetch('/api/v1.0/transfer/jobs?limit=50');
       if (!response.ok) {
-        const errMsg = await getErrorMessage(response);
-        setError(errMsg);
+        if (!background) {
+          const errMsg = await getErrorMessage(response);
+          setError(errMsg);
+        }
         return;
       }
       const data: TransferJobListResponse = await response.json();
       setJobs(data.jobs || []);
+      if (background) setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to fetch jobs');
+      if (!background) {
+        setError(e instanceof Error ? e.message : 'Failed to fetch jobs');
+      }
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchJobs();
+
+    // Keep the list fresh without a manual refresh, but only while the tab is
+    // visible — a backgrounded tab neither polls nor holds an open request. On
+    // regaining focus we refresh immediately to catch anything missed while
+    // hidden.
+    const poll = () => {
+      if (document.visibilityState === 'visible') {
+        fetchJobs(true);
+      }
+    };
+    const interval = setInterval(poll, JOBS_POLL_INTERVAL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchJobs(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [fetchJobs]);
 
   const handleCancel = async (jobId: string) => {
@@ -128,7 +164,7 @@ export default function TransferJobsPage() {
           <Typography variant='h4'>Transfer Jobs</Typography>
           <Button
             startIcon={<Refresh />}
-            onClick={fetchJobs}
+            onClick={() => fetchJobs()}
             variant='outlined'
           >
             Refresh
