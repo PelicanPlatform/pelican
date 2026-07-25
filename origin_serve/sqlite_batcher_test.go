@@ -289,18 +289,29 @@ func TestBatcher_ConcurrentDurablesCoalesce(t *testing.T) {
 	defer cancel()
 
 	var flushes atomic.Int32
-	// Small buffer (8) forces most goroutines to block on the
-	// channel send, which is exactly what makes the non-blocking
-	// drain step in the flusher pick up multiple ops per tx. A
-	// large buffer would let goroutines race the flusher and the
-	// coalescing ratio would depend entirely on scheduler timing
-	// — flaky on Windows CI runners where goroutine scheduling
-	// can serialize sends.
-	b := newSQLiteBatcher(ctx, db, 8, 50*time.Millisecond)
+	const N = 50
+	// Buffer sized to hold all N ops so every EnqueueDurable send lands
+	// without blocking. The flusher is then held (onFirstOpReceived,
+	// below) after it takes the first op until the remaining N-1 are
+	// buffered, so its opportunistic non-blocking drain provably folds
+	// them all into one batch. This makes coalescing deterministic
+	// rather than dependent on goroutine scheduling — the timing-based
+	// version flaked on busy / few-core CI runners, where the flusher
+	// drained each op before the next sender was scheduled and every op
+	// got its own flush (N flushes).
+	b := newSQLiteBatcher(ctx, db, N, 50*time.Millisecond)
 	b.SetHooks(BatcherHooks{IncFlush: func(int) { flushes.Add(1) }})
+
+	// Hold the flusher after its first op until the rest are queued.
+	// once ensures only the first wake-up blocks, so Stop()'s final
+	// drain isn't held up. Set before any op is enqueued, so the
+	// flusher's read (only after receiving an op) is ordered after
+	// this write via the channel send/receive.
+	allBuffered := make(chan struct{})
+	var once sync.Once
+	b.onFirstOpReceived = func() { once.Do(func() { <-allBuffered }) }
 	defer b.Stop()
 
-	const N = 50
 	var wg sync.WaitGroup
 	for i := 0; i < N; i++ {
 		wg.Add(1)
@@ -312,6 +323,18 @@ func TestBatcher_ConcurrentDurablesCoalesce(t *testing.T) {
 			}
 		}(i)
 	}
+
+	// Wait until the flusher holds one op and the other N-1 are buffered,
+	// then release it to drain them all in a single wake-up.
+	deadline := time.After(5 * time.Second)
+	for len(b.ch) < N-1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for ops to buffer (have %d, want %d)", len(b.ch), N-1)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	close(allBuffered)
 	wg.Wait()
 
 	var n int64
@@ -321,8 +344,9 @@ func TestBatcher_ConcurrentDurablesCoalesce(t *testing.T) {
 	if n != N {
 		t.Fatalf("count = %d, want %d", n, N)
 	}
-	// We don't assert an exact flush count (timing-dependent),
-	// only that it's strictly less than N — proving coalescing.
+	// All N ops were buffered before the drain, so they coalesce; with
+	// maxBatchSize >= N this is a single flush, and never depends on
+	// timing. Strictly-less-than-N proves coalescing.
 	if got := flushes.Load(); got >= N {
 		t.Fatalf("flushes = %d for %d ops; expected coalescing", got, N)
 	}
