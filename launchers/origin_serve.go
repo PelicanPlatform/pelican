@@ -50,6 +50,12 @@ import (
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
+// originUsesXRootD reports whether the configured Origin.StorageType is served
+// by an XRootD process (as opposed to a native, in-process backend).
+func originUsesXRootD() bool {
+	return server_structs.OriginStorageType(param.Origin_StorageType.GetString()).UsesXRootD()
+}
+
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
@@ -57,8 +63,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	// Determine if we should use XRootD or native HTTP server
-	storageType := param.Origin_StorageType.GetString()
-	useXRootD := server_structs.OriginStorageType(storageType).UsesXRootD()
+	useXRootD := originUsesXRootD()
 
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
@@ -239,7 +244,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 	// Handle POSIXv2 and SSH-specific initialization now that the web server is running
 	storageType := param.Origin_StorageType.GetString()
-	useXRootD := server_structs.OriginStorageType(storageType).UsesXRootD()
+	useXRootD := originUsesXRootD()
 	if !useXRootD {
 		// For SSH backend, initialize the SSH connection before setting up handlers
 		if storageType == string(server_structs.OriginStorageSSH) {
