@@ -21,6 +21,7 @@ package transfer
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"net/url"
@@ -111,6 +112,23 @@ type bootstrapSession struct {
 	status string // "pending", "complete", "error"
 	credID string
 	errMsg string
+	// browserToken binds the OAuth callback to the browser that began the
+	// redirect at /start: a random value set as an HttpOnly cookie there and
+	// required back at the callback. It stops a third party who only phishes the
+	// state/code from completing the flow in a different browser.
+	browserToken string
+}
+
+func (s *bootstrapSession) setBrowserToken(tok string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.browserToken = tok
+}
+
+func (s *bootstrapSession) getBrowserToken() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.browserToken
 }
 
 // setResult atomically records the terminal outcome of a bootstrap session.
@@ -169,6 +187,13 @@ const callbackStatePrefix = "xfer:"
 // director's ShortcutMiddleware (which treats non-/api/v1.0 paths as object
 // requests) routes it to the handler instead of object resolution.
 const SharedCallbackPath = "/api/v1.0/callback"
+
+// bootstrapFlowCookie is the HttpOnly cookie that binds an auth-code bootstrap
+// flow to the browser that started it (see handleStartRedirect). Its lifetime
+// matches the bootstrap session (10 minutes).
+const bootstrapFlowCookie = "xfer_bootstrap_flow"
+
+const bootstrapFlowCookieMaxAge = 600 // seconds; matches the 10-minute session TTL
 
 func (c *issuerMetadataCache) get(issuerURL string) (*config.OauthIssuer, error) {
 	c.mu.RLock()
@@ -477,7 +502,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// Decrypt the client credentials
-		clientID, err := decryptSecret(oauthClient.EncryptedClientID)
+		clientID, err := decryptSecret(oauthClient.EncryptedClientID, oauthClient.UserID, fieldClientID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
@@ -485,7 +510,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 			})
 			return
 		}
-		clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret)
+		clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret, oauthClient.UserID, fieldClientSecret)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
@@ -527,7 +552,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		cred, err := createCredentialFromToken(db, owner, req.Name, req.IssuerURL,
-			exchangedToken.AccessToken, exchangedToken.RefreshToken, credScopes)
+			exchangedToken.AccessToken, exchangedToken.RefreshToken, credScopes, exchangedToken.Expiry)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
@@ -583,7 +608,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		clientID, err := decryptSecret(oauthClient.EncryptedClientID)
+		clientID, err := decryptSecret(oauthClient.EncryptedClientID, oauthClient.UserID, fieldClientID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
@@ -705,6 +730,19 @@ func handleStartRedirect() gin.HandlerFunc {
 			redirectToBootstrapResult(c, "error", "Unknown or expired bootstrap session")
 			return
 		}
+		// Bind this flow to the browser: set a random HttpOnly cookie and record
+		// it on the session so the callback can require the same browser.
+		tok, err := generateState()
+		if err != nil {
+			redirectToBootstrapResult(c, "error", "Internal error starting the bootstrap flow")
+			return
+		}
+		sess.setBrowserToken(tok)
+		// SameSite=Lax so the cookie rides the issuer's top-level GET redirect
+		// back to the callback; Secure + HttpOnly so it is not script-readable or
+		// sent in the clear. Scoped to the callback path and short-lived.
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie(bootstrapFlowCookie, tok, bootstrapFlowCookieMaxAge, SharedCallbackPath, "", true, true)
 		c.Redirect(http.StatusFound, sess.AuthURL)
 	}
 }
@@ -757,6 +795,25 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 		return
 	}
 
+	// Require the browser-binding cookie set at /start, so the flow can only be
+	// completed by the same browser that began it (not a third party who merely
+	// obtained the state/code). Constant-time compare against the session value.
+	//
+	// SECURITY NOTE: this does not by itself prevent a consent-phishing variant
+	// where an attacker starts a session and lures the *victim* to complete the
+	// whole flow (both /start and the issuer consent) in the victim's browser —
+	// the victim's delegated tokens would then be stored under the attacker's
+	// account. Fully closing that requires authenticating the completing browser
+	// as the session owner (e.g. a web-UI login check on /start); that is a UX
+	// decision left to operators of untrusted transfer-user populations.
+	cookieTok, cookieErr := c.Cookie(bootstrapFlowCookie)
+	if cookieErr != nil || sess.getBrowserToken() == "" ||
+		subtle.ConstantTimeCompare([]byte(cookieTok), []byte(sess.getBrowserToken())) != 1 {
+		sess.setResult("error", "", "Browser session mismatch; restart the bootstrap flow")
+		redirectToBootstrapResult(c, "error", "Browser session mismatch; please restart the bootstrap flow in the same browser")
+		return
+	}
+
 	// Find an OAuth client for this issuer that supports authorization_code.
 	// Use scope-aware matching with the session's requested scopes.
 	requestedScopes := strings.Fields(sess.Scopes)
@@ -767,13 +824,13 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 		return
 	}
 
-	clientID, err := decryptSecret(oauthClient.EncryptedClientID)
+	clientID, err := decryptSecret(oauthClient.EncryptedClientID, oauthClient.UserID, fieldClientID)
 	if err != nil {
 		sess.setResult("error", "", "Failed to decrypt credentials")
 		redirectToBootstrapResult(c, "error", "Internal error")
 		return
 	}
-	clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret)
+	clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret, oauthClient.UserID, fieldClientSecret)
 	if err != nil {
 		sess.setResult("error", "", "Failed to decrypt credentials")
 		redirectToBootstrapResult(c, "error", "Internal error")
@@ -811,7 +868,7 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	}
 
 	cred, err := createCredentialFromToken(db, sess.Owner, sess.Name, sess.IssuerURL,
-		token.AccessToken, token.RefreshToken, credScopes)
+		token.AccessToken, token.RefreshToken, credScopes, token.Expiry)
 	if err != nil {
 		sess.setResult("error", "", "Failed to store credential")
 		log.Errorf("Failed to create credential from auth code: %v", err)
@@ -900,12 +957,15 @@ func performTokenExchange(ctx context.Context, tokenURL, clientID, clientSecret,
 	return &tokenExchangeResult{
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
+		Expiry:       token.Expiry,
 	}, nil
 }
 
 type tokenExchangeResult struct {
 	AccessToken  string
 	RefreshToken string
+	// Expiry is the access token's expiry (zero if the issuer omitted expires_in).
+	Expiry time.Time
 }
 
 // exchangeCodeForToken exchanges an authorization code for tokens.
@@ -924,6 +984,7 @@ func exchangeCodeForToken(ctx context.Context, tokenURL, clientID, clientSecret,
 	return &tokenExchangeResult{
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
+		Expiry:       token.Expiry,
 	}, nil
 }
 
@@ -931,19 +992,26 @@ func exchangeCodeForToken(ctx context.Context, tokenURL, clientID, clientSecret,
 // token information, encrypting the tokens before storage via the
 // encryptSecret helper (see transfer/encryption.go), which derives its key
 // from the server master key.
-func createCredentialFromToken(db *gorm.DB, owner ownerIdentity, name, issuerURL, accessToken, refreshToken, scopes string) (*TransferCredential, error) {
-	encAccessToken, err := encryptSecret(accessToken)
+func createCredentialFromToken(db *gorm.DB, owner ownerIdentity, name, issuerURL, accessToken, refreshToken, scopes string, expiry time.Time) (*TransferCredential, error) {
+	encAccessToken, err := encryptSecret(accessToken, owner.UserID, fieldCredAccessToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to encrypt access token")
 	}
 
 	var encRefreshToken *string
 	if refreshToken != "" {
-		enc, err := encryptSecret(refreshToken)
+		enc, err := encryptSecret(refreshToken, owner.UserID, fieldCredRefreshToken)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to encrypt refresh token")
 		}
 		encRefreshToken = &enc
+	}
+
+	// Record the expiry (when the issuer provided one) so the server can
+	// proactively refresh the token before a queued job runs.
+	var tokenExpiry *time.Time
+	if !expiry.IsZero() {
+		tokenExpiry = &expiry
 	}
 
 	// Generate a unique name if the provided one conflicts
@@ -964,6 +1032,7 @@ func createCredentialFromToken(db *gorm.DB, owner ownerIdentity, name, issuerURL
 		EncryptedRefreshToken: encRefreshToken,
 		Scopes:                scopes,
 		TokenIssuer:           issuerURL,
+		TokenExpiry:           tokenExpiry,
 		CreatedAt:             time.Now(),
 		UpdatedAt:             time.Now(),
 	}

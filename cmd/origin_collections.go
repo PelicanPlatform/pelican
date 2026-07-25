@@ -210,8 +210,14 @@ func acquireOAuthToken(ctx context.Context, issuerUrl string, scopes []string) (
 			prefixEntry = &newEntry
 		}
 
-		// Save credentials
-		if err := config.SaveConfigContents(&osdfConfig); err != nil {
+		// Persist under the credential-file lock, re-reading and merging just
+		// this delta so a concurrent writer (e.g. the client-agent background
+		// refresh) is not clobbered.
+		if err := config.MutatePrefixEntry(param.Federation_DiscoveryUrl.GetString(), issuerUrl, func(e *config.PrefixEntry) {
+			e.ClientID = resp.ClientID
+			e.ClientSecret = resp.ClientSecret
+			e.ClientScopes = scopes
+		}); err != nil {
 			return "", errors.Wrap(err, "failed to save OAuth client credentials")
 		}
 	}

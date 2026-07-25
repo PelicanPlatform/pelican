@@ -31,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
@@ -46,15 +47,20 @@ import (
 
 // If we prompted the user for a new password while setting up the file,
 // this global flag will be set to true.  This prevents us from asking for
-// the password again later.
-var setEmptyPassword = false
+// the password again later.  It is atomic because credential reads/writes now
+// happen concurrently (e.g. a transfer resolving a token while a background
+// refresh runs).
+var setEmptyPassword atomic.Bool
 
 func init() {
 	// Allow callers (such as test subprocesses) to opt into passwordless
 	// credential storage via the environment.  This avoids interactive
 	// password prompts when the process has no controlling terminal.
 	if v := os.Getenv("PELICAN_CLIENT_NOPASSWORD"); v == "1" || v == "true" {
-		setEmptyPassword = true
+		log.Warning("PELICAN_CLIENT_NOPASSWORD is set: the credential wallet " +
+			"(including refresh tokens and OAuth client secrets) will be stored " +
+			"UNENCRYPTED on disk. Use only in non-interactive/test environments.")
+		setEmptyPassword.Store(true)
 	}
 }
 
@@ -63,7 +69,7 @@ func init() {
 // operation that would trigger a credential save (e.g. AcquireToken) when
 // the user has opted for passwordless storage via --no-password.
 func SetEmptyPassword() {
-	setEmptyPassword = true
+	setEmptyPassword.Store(true)
 }
 
 var ErrIncorrectPassword = errors.New("incorrect password")
@@ -126,7 +132,7 @@ func GetEncryptedContents() (string, error) {
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
 
-			if !setEmptyPassword {
+			if !setEmptyPassword.Load() {
 				password, err := GetPassword(true)
 				if err != nil {
 					return "", err
@@ -136,7 +142,7 @@ func GetEncryptedContents() (string, error) {
 						log.Debugln("Failed to save password:", err)
 					}
 				} else {
-					setEmptyPassword = true
+					setEmptyPassword.Store(true)
 				}
 			}
 
@@ -270,7 +276,7 @@ func GetCredentialConfigContents() (CredentialConfig, error) {
 			foundKey = true
 			// If the private key exists and is unprotected, assume this is
 			// the same as the user explicitly setting an empty password.
-			setEmptyPassword = true
+			setEmptyPassword.Store(true)
 		} else if block.Type == "ENCRYPTED PRIVATE KEY" {
 			password, _ := TryGetPassword()
 			typedPassword := false
@@ -407,7 +413,7 @@ func marshalEncryptedConfig(config *CredentialConfig, password []byte) ([]byte, 
 
 func saveConfigContents(config *CredentialConfig, forcePassword bool) error {
 	password, err := TryGetPassword()
-	if setEmptyPassword {
+	if setEmptyPassword.Load() {
 		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
 	} else if forcePassword || len(password) == 0 || err != nil {
 		var exists bool

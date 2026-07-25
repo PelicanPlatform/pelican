@@ -29,6 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // RefreshExpiringCredentials proactively refreshes stored OAuth2 tokens in the
@@ -53,14 +54,15 @@ func RefreshExpiringCredentials(ctx context.Context, within time.Duration) (int,
 
 	cutoff := time.Now().Add(within)
 	refreshed := 0
+	attempted := 0
 
-	// Credentials are stored per-federation, keyed by discovery URL.
-	for discovery, fc := range osdfConfig.Federation {
+	refreshSection := func(discovery string, fc *config.FederationCredentials) {
 		for pi := range fc.OauthClient {
 			entry := &fc.OauthClient[pi]
 			if !entryHasExpiringToken(entry, cutoff) {
 				continue
 			}
+			attempted++
 			issuer, err := resolveIssuerForPrefix(ctx, discovery, entry.Prefix)
 			if err != nil {
 				log.Debugf("Skipping credential refresh for prefix %q: %v", entry.Prefix, err)
@@ -90,6 +92,26 @@ func RefreshExpiringCredentials(ctx context.Context, within time.Duration) (int,
 			}
 			refreshed += n
 		}
+	}
+
+	// The legacy top-level OSDF section still holds credentials for any install
+	// that predates the per-federation layout; refresh it too, or those tokens
+	// silently expire. Namespace-prefix issuers there resolve against the active
+	// federation's discovery URL (URL-keyed prefixes resolve without it), and
+	// UpsertPrefixEntry updates the OSDF entry in place.
+	refreshSection(param.Federation_DiscoveryUrl.GetString(), &osdfConfig.OSDF)
+
+	// Per-federation sections keyed by discovery URL.
+	for discovery, fc := range osdfConfig.Federation {
+		refreshSection(discovery, fc)
+	}
+
+	// Surface a silent-failure cycle: expiring tokens were found but none could
+	// be refreshed. A long-running daemon that only logged per-credential
+	// failures at Debug would otherwise show no sign that credentials are
+	// steadily expiring.
+	if attempted > 0 && refreshed == 0 {
+		log.Warnf("Credential refresh: %d expiring credential(s) found but none could be refreshed", attempted)
 	}
 
 	return refreshed, nil

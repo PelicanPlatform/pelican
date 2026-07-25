@@ -48,9 +48,15 @@ func persistTerminalJob(db *gorm.DB) func(*client_agent.TransferJob) {
 			"completed_at": completedAt,
 			"updated_at":   time.Now(),
 		}
-		// Only failures carry an error; cancellation-without-error is left to the
-		// cancel handler, and a successful job must not overwrite it. This mirrors
-		// what the previous lazy on-GET sync wrote.
+		// Record the agent job's terminal status ("completed" / "failed" /
+		// "cancelled") so a cancelled job is never later mistaken for a completed
+		// one by the (completed_at, error) heuristic. The cancel handler may still
+		// overwrite this with "cancelled" once CancelJob has run to completion.
+		if job.Status != "" {
+			updates["status"] = job.Status
+		}
+		// Only failures carry an error; a successful or cancelled job must not
+		// overwrite it.
 		if job.Error != nil {
 			updates["error"] = job.Error.Error()
 		}
@@ -72,6 +78,7 @@ func reconcileInterruptedJobs(db *gorm.DB) error {
 		Where("completed_at IS NULL").
 		Updates(map[string]any{
 			"completed_at": now,
+			"status":       client_agent.StatusFailed,
 			"error":        "interrupted by transfer server restart",
 			"updated_at":   now,
 		})

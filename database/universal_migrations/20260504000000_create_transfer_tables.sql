@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
 CREATE TABLE IF NOT EXISTS transfers (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL,
-    operation TEXT NOT NULL CHECK (operation IN ('get', 'put', 'copy', 'delete')),
+    operation TEXT NOT NULL CHECK (operation IN ('get', 'put', 'copy', 'prestage')),
     source TEXT NOT NULL,
     destination TEXT NOT NULL,
     recursive INTEGER NOT NULL DEFAULT 0,
@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_job_history_created_at ON job_history(created_at 
 CREATE TABLE IF NOT EXISTS transfer_history (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL,
-    operation TEXT NOT NULL CHECK (operation IN ('get', 'put', 'copy', 'delete')),
+    operation TEXT NOT NULL CHECK (operation IN ('get', 'put', 'copy', 'prestage')),
     source TEXT NOT NULL,
     destination TEXT NOT NULL,
     recursive INTEGER NOT NULL DEFAULT 0,
@@ -139,6 +139,12 @@ CREATE TABLE IF NOT EXISTS transfer_jobs (
     source_credential_id TEXT,
     dest_credential_id TEXT,
     request_body TEXT NOT NULL DEFAULT '',
+    -- Terminal status of the job ('completed' / 'failed' / 'cancelled'), written
+    -- when the job finishes. Empty while the job is still in flight; a durable
+    -- record with an empty status and a NULL completed_at is an interrupted job.
+    -- This is authoritative over the (completed_at, error) heuristic so that a
+    -- cancelled job is never reported as completed.
+    status TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -150,6 +156,10 @@ CREATE TABLE IF NOT EXISTS transfer_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_transfer_jobs_user
     ON transfer_jobs(user_id);
+
+-- Supports the job list/poll query (WHERE user_id ORDER BY created_at DESC).
+CREATE INDEX IF NOT EXISTS idx_transfer_jobs_user_created
+    ON transfer_jobs(user_id, created_at DESC);
 -- +goose StatementEnd
 
 -- +goose Down

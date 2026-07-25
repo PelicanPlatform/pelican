@@ -126,3 +126,92 @@ func TestUpsertPrefixEntry(t *testing.T) {
 		assert.Equal(t, 1, fedBar, "a new prefix must be appended to the per-federation section")
 	})
 }
+
+// writeInitialCredentialFile writes cfg to a fresh credential file and points the
+// config at it, for the merge-helper tests below.
+func writeInitialCredentialFile(t *testing.T, cfg *CredentialConfig) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "credentials.yaml")
+	require.NoError(t, SaveConfigContentsToFile(cfg, filePath, false))
+	require.NoError(t, param.Client_CredentialFile.Set(filePath))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
+}
+
+// TestMutatePrefixEntryPreservesConcurrentWrites verifies that MutatePrefixEntry
+// re-reads the wallet under the lock and applies only its delta, so updating one
+// prefix does not clobber a concurrent writer's change to another prefix. This
+// is the property that the credential-file lock exists to guarantee: the old
+// read-modify-write-the-whole-file pattern would silently revert /b here.
+func TestMutatePrefixEntryPreservesConcurrentWrites(t *testing.T) {
+	const discoveryURL = "https://fed.example.com"
+	ResetConfig()
+	t.Cleanup(ResetConfig)
+
+	writeInitialCredentialFile(t, &CredentialConfig{
+		OSDF: FederationCredentials{
+			OauthClient: []PrefixEntry{
+				{Prefix: "/a", ClientRegistration: ClientRegistration{ClientID: "a-old"}},
+				{Prefix: "/b", ClientRegistration: ClientRegistration{ClientID: "b-old"}},
+			},
+		},
+	})
+
+	// A concurrent writer (e.g. background refresh) updates /b on disk.
+	require.NoError(t, MutatePrefixEntry(discoveryURL, "/b", func(e *PrefixEntry) {
+		e.ClientID = "b-new"
+	}))
+
+	// Our update to /a must preserve /b's concurrent change.
+	require.NoError(t, MutatePrefixEntry(discoveryURL, "/a", func(e *PrefixEntry) {
+		e.ClientID = "a-new"
+	}))
+
+	got, err := GetCredentialConfigContents()
+	require.NoError(t, err)
+	_, aIdx := got.FindOauthClient(discoveryURL, "/a")
+	_, bIdx := got.FindOauthClient(discoveryURL, "/b")
+	require.GreaterOrEqual(t, aIdx, 0)
+	require.GreaterOrEqual(t, bIdx, 0)
+	assert.Equal(t, "a-new", got.OSDF.OauthClient[aIdx].ClientID, "our /a update must be applied")
+	assert.Equal(t, "b-new", got.OSDF.OauthClient[bIdx].ClientID, "the concurrent /b update must not be clobbered")
+	totalA, _, _ := countPrefix(&got, discoveryURL, "/a")
+	totalB, _, _ := countPrefix(&got, discoveryURL, "/b")
+	assert.Equal(t, 1, totalA, "no duplicate /a entry")
+	assert.Equal(t, 1, totalB, "no duplicate /b entry")
+}
+
+// TestUpsertTransferServerEntryPreservesConcurrentWrites verifies the same
+// re-read-and-merge property for transfer-server entries: updating one server's
+// cached token must not revert a concurrent update to another server.
+func TestUpsertTransferServerEntryPreservesConcurrentWrites(t *testing.T) {
+	const discoveryURL = "https://fed.example.com"
+	ResetConfig()
+	t.Cleanup(ResetConfig)
+
+	writeInitialCredentialFile(t, &CredentialConfig{
+		OSDF: FederationCredentials{
+			TransferServers: []TransferServerEntry{
+				{ServerURL: "https://xfer-a.example.com", ClientRegistration: ClientRegistration{ClientID: "a-old"}},
+				{ServerURL: "https://xfer-b.example.com", ClientRegistration: ClientRegistration{ClientID: "b-old"}},
+			},
+		},
+	})
+
+	require.NoError(t, UpsertTransferServerEntry(discoveryURL, "https://xfer-b.example.com", func(e *TransferServerEntry) {
+		e.ClientID = "b-new"
+	}))
+	require.NoError(t, UpsertTransferServerEntry(discoveryURL, "https://xfer-a.example.com", func(e *TransferServerEntry) {
+		e.ClientID = "a-new"
+	}))
+
+	got, err := GetCredentialConfigContents()
+	require.NoError(t, err)
+	_, aIdx := got.FindTransferServer(discoveryURL, "https://xfer-a.example.com")
+	_, bIdx := got.FindTransferServer(discoveryURL, "https://xfer-b.example.com")
+	require.GreaterOrEqual(t, aIdx, 0)
+	require.GreaterOrEqual(t, bIdx, 0)
+	assert.Equal(t, "a-new", got.OSDF.TransferServers[aIdx].ClientID, "our server-a update must be applied")
+	assert.Equal(t, "b-new", got.OSDF.TransferServers[bIdx].ClientID, "the concurrent server-b update must not be clobbered")
+	assert.Len(t, got.OSDF.TransferServers, 2, "no duplicate transfer-server entries")
+}

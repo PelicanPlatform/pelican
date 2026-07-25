@@ -76,6 +76,7 @@ type TransferJob struct {
 	SourceCredentialID *string    `gorm:"column:source_credential_id" json:"source_credential_id,omitempty"`
 	DestCredentialID   *string    `gorm:"column:dest_credential_id" json:"dest_credential_id,omitempty"`
 	RequestBody        string     `gorm:"column:request_body;not null;default:''" json:"-"`
+	Status             string     `gorm:"column:status;not null;default:''" json:"-"`
 	Error              string     `gorm:"column:error;not null;default:''" json:"error,omitempty"`
 	CreatedAt          time.Time  `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt          time.Time  `gorm:"column:updated_at" json:"updated_at"`

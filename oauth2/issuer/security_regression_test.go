@@ -18,10 +18,10 @@
 
 package issuer
 
-// Security regression tests for the embedded OAuth2/OIDC issuer.
-//
-// Each test corresponds to a finding from an internal security review of the
-// new issuer codebase.
+// Security-focused tests for the embedded OAuth2/OIDC issuer, covering
+// admin-route gating, scope enforcement (including default-deny of control-plane
+// scopes), namespace isolation, PKCE, refresh-token rotation, cross-namespace
+// revocation, and rate limiting.
 
 import (
 	"context"
@@ -52,7 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// --- Finding #1: Admin routes middleware bypass ---
+// --- Admin routes middleware bypass ---
 
 // TestAdminMiddlewareEnforced verifies that admin endpoints reject requests
 // when no admin middleware is configured, and allow them when middleware is
@@ -119,7 +119,7 @@ func TestAdminMiddlewareEnforced(t *testing.T) {
 	})
 }
 
-// --- Finding #2: Token exchange scope bypass (standard scopes) ---
+// --- Token exchange scope bypass (standard scopes) ---
 
 // TestTokenExchangeScopeEnforcement verifies that token exchange does not
 // auto-allow standard scopes that are missing from the subject token or the
@@ -181,13 +181,13 @@ func TestTokenExchangeScopeEnforcement(t *testing.T) {
 		"no refresh token should be issued when offline_access is not granted")
 }
 
-// --- Finding #2b: Auth code flow client scope enforcement ---
+// --- Auth code flow client scope enforcement ---
 
 // TestAuthCodeClientScopeEnforcement verifies that the authorization code
 // flow enforces the client's configured scope allow-list. A client that does
 // not include offline_access in its scopes must not receive it in the
 // resulting token even when the user's auth rules permit it. This is the
-// auth code path analog of TestTokenExchangeScopeEnforcement (Finding #2).
+// auth code path analog of TestTokenExchangeScopeEnforcement.
 func TestAuthCodeClientScopeEnforcement(t *testing.T) {
 	provider, ts := setupIntegration(t)
 
@@ -282,7 +282,7 @@ func TestAuthCodeClientScopeEnforcement(t *testing.T) {
 		"no refresh token should be issued when offline_access is not in client scopes")
 }
 
-// --- Finding #3: Device flow client scope enforcement ---
+// --- Device flow client scope enforcement ---
 
 // TestDeviceFlowClientScopeEnforcement verifies that a device client limited
 // to read scopes cannot obtain broader scopes like storage.modify:/ even if
@@ -351,13 +351,13 @@ func TestDeviceFlowClientScopeEnforcement(t *testing.T) {
 }
 
 // TestDeviceFlowDeniesUngrantedControlPlaneScopes pins the "no over-grant"
-// guarantee for the scopes the dynamic-client-registration default list now
-// carries (pelican.transfer and the collection.* management scopes). A client
-// may be *registered* for those scopes -- dynamically-registered CLIs now are by
+// guarantee for control-plane scopes that a dynamically-registered client may
+// carry (pelican.transfer and the collection.* management scopes). A client may
+// be *registered* for those scopes -- dynamically-registered CLIs are by
 // default -- but a user who is not authorized for them must NOT receive them in
 // a device-code token. The only thing that grants them is the authorization gate
 // at issuance (transferAccessAllowed / GetUserCollectionScopes), not the client
-// scope list. Without this, the DCR scope-list additions could silently leak a
+// scope list; otherwise a client's scope registration could silently leak a
 // control-plane capability into an ordinary user's token.
 func TestDeviceFlowDeniesUngrantedControlPlaneScopes(t *testing.T) {
 	provider, ts := setupIntegration(t)
@@ -431,7 +431,7 @@ func TestDeviceFlowDeniesUngrantedControlPlaneScopes(t *testing.T) {
 		"collection.modify must be denied to a user with no ACL on the requested collection")
 }
 
-// --- Finding #4: Storage namespace isolation ---
+// --- Storage namespace isolation ---
 
 // TestStorageNamespaceIsolation verifies that storage lookups are scoped to
 // their namespace and cannot resolve sessions from other namespaces.
@@ -487,7 +487,7 @@ func TestStorageNamespaceIsolation(t *testing.T) {
 	assert.NoError(t, err, "alpha namespace must resolve its own access token session")
 }
 
-// --- Finding #5: Device flow grant type enforcement ---
+// --- Device flow grant type enforcement ---
 
 // TestDeviceFlowGrantTypeEnforced verifies that device authorization rejects
 // clients that don't have the device_code grant type.
@@ -527,7 +527,7 @@ func TestDeviceFlowGrantTypeEnforced(t *testing.T) {
 	assert.Contains(t, string(body), "unauthorized_client")
 }
 
-// --- Finding #6: Device code client binding ---
+// --- Device code client binding ---
 
 // TestDeviceCodeClientBinding verifies that a device code can only be redeemed
 // by the client that initiated the flow.
@@ -597,7 +597,7 @@ func TestDeviceCodeClientBinding(t *testing.T) {
 	assert.Contains(t, string(body), "different client")
 }
 
-// --- Finding #7: Namespace prefix boundary ---
+// --- Namespace prefix boundary ---
 
 // TestNamespacePrefixBoundary verifies that a namespace like "/test/ns" does
 // not match paths like "/test/nsoidc-cm" (bare prefix match).
@@ -627,7 +627,7 @@ func TestNamespacePrefixBoundary(t *testing.T) {
 		"different namespace with same prefix must not match")
 }
 
-// --- Finding #8: Client ID namespace collision ---
+// --- Client ID namespace collision ---
 
 // TestClientIDNamespaceIsolation verifies that creating a client with the same
 // ID in two different namespaces does NOT overwrite the first.
@@ -676,7 +676,7 @@ func TestClientIDNamespaceIsolation(t *testing.T) {
 		"beta must have its own client record")
 }
 
-// --- Finding #9: CreateClient must not silently overwrite ---
+// --- CreateClient must not silently overwrite ---
 
 // TestCreateClientFailsOnDuplicate verifies that creating a client with the
 // same (ID, namespace) pair fails instead of silently overwriting the existing
@@ -723,7 +723,7 @@ func TestCreateClientFailsOnDuplicate(t *testing.T) {
 		"original client must not be overwritten")
 }
 
-// --- Finding #10: PKCE enforcement for public clients ---
+// --- PKCE enforcement for public clients ---
 
 // TestPKCEEnforcedForPublicClients verifies that the fosite config requires
 // PKCE for public clients.
@@ -733,7 +733,7 @@ func TestPKCEEnforcedForPublicClients(t *testing.T) {
 		"EnforcePKCEForPublicClients must be true")
 }
 
-// --- Finding #11: Token exchange correct issuer ---
+// --- Token exchange correct issuer ---
 
 // TestTokenExchangeCorrectIssuer verifies that exchanged tokens carry the
 // namespace-scoped issuer URL, not the global server URL.
@@ -782,7 +782,7 @@ func TestTokenExchangeCorrectIssuer(t *testing.T) {
 		"exchanged token's iss must NOT be the global server URL")
 }
 
-// --- Finding #12: Token exchange audience validation ---
+// --- Token exchange audience validation ---
 
 // TestTokenExchangeAudienceValidation verifies that the token exchange
 // endpoint rejects an audience that is not in the subject token's grants.
@@ -824,7 +824,7 @@ func TestTokenExchangeAudienceValidation(t *testing.T) {
 	assert.Contains(t, string(body), "invalid_target")
 }
 
-// --- Finding #13: Refresh token rotation sets active=false ---
+// --- Refresh token rotation sets active=false ---
 
 // TestRefreshTokenRotationSetsInactive verifies that RotateRefreshToken marks
 // the old token as inactive and sets first_used_at.
@@ -876,7 +876,7 @@ func TestRefreshTokenRotationSetsInactive(t *testing.T) {
 	assert.NotNil(t, record.FirstUsedAt, "rotated token must have first_used_at set")
 }
 
-// --- Finding #14: Refresh token rotation matches by signature ---
+// --- Refresh token rotation matches by signature ---
 
 // TestRefreshTokenRotationBySignature verifies that RotateRefreshToken targets
 // the specific token by signature rather than all tokens by request_id, which
@@ -936,7 +936,7 @@ func TestRefreshTokenRotationBySignature(t *testing.T) {
 	assert.Nil(t, rt2.FirstUsedAt, "rt2's first_used_at must not be set by rotating rt1")
 }
 
-// --- Finding #15: Shared rate limiter across namespaces ---
+// --- Shared rate limiter across namespaces ---
 
 // TestSharedRateLimiterAcrossNamespaces verifies that the per-IP rate limit
 // for DCR is shared across namespaces, not per-namespace.
@@ -1011,7 +1011,7 @@ func TestSharedRateLimiterAcrossNamespaces(t *testing.T) {
 	resp.Body.Close()
 }
 
-// --- Finding #16: Refresh token grant type bypass ---
+// --- Refresh token grant type bypass ---
 
 // TestRefreshTokenGrantTypeRequired verifies that device flow and token
 // exchange refuse to issue refresh tokens when the client lacks the
@@ -1105,7 +1105,7 @@ func TestRefreshTokenGrantTypeRequired(t *testing.T) {
 	})
 }
 
-// --- Finding #17: Cross-namespace revocation ---
+// --- Cross-namespace revocation ---
 
 // TestCrossNamespaceRevocationBlocked verifies that revoking tokens in one
 // namespace does not affect tokens in another namespace.

@@ -69,7 +69,8 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 	}
 
 	// Look for an existing entry for this server
-	fc, tsIdx := osdfConfig.FindTransferServer(param.Federation_DiscoveryUrl.GetString(), serverURL)
+	disco := param.Federation_DiscoveryUrl.GetString()
+	fc, tsIdx := osdfConfig.FindTransferServer(disco, serverURL)
 
 	var entry *config.TransferServerEntry
 	if tsIdx >= 0 {
@@ -124,7 +125,16 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 			entry.ClientSecret = resp.ClientSecret
 		}
 
-		if err := config.SaveConfigContents(osdfConfig); err != nil {
+		// Persist under the credential-file lock, re-reading and merging just
+		// this delta so a concurrent writer (e.g. the client-agent background
+		// refresh) is not clobbered by our stale in-memory snapshot.
+		if err := config.UpsertTransferServerEntry(disco, serverURL, func(e *config.TransferServerEntry) {
+			e.ClientID = resp.ClientID
+			e.ClientSecret = resp.ClientSecret
+			if len(e.ClientScopes) == 0 {
+				e.ClientScopes = []string{"offline_access", "pelican.transfer"}
+			}
+		}); err != nil {
 			log.Warningln("Failed to save transfer server registration:", err)
 		}
 	}
@@ -176,7 +186,10 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 		entry.ClientSecret = resp.ClientSecret
 		oauthCfg.ClientID = resp.ClientID
 		oauthCfg.ClientSecret = resp.ClientSecret
-		if err := config.SaveConfigContents(osdfConfig); err != nil {
+		if err := config.UpsertTransferServerEntry(disco, serverURL, func(e *config.TransferServerEntry) {
+			e.ClientID = resp.ClientID
+			e.ClientSecret = resp.ClientSecret
+		}); err != nil {
 			log.Warningln("Failed to save updated transfer server registration:", err)
 		}
 
@@ -204,7 +217,9 @@ func authenticateWithTransferServer(ctx context.Context, serverURL string) (stri
 	}
 	entry.Tokens = []config.TokenEntry{newToken}
 
-	if err := config.SaveConfigContents(osdfConfig); err != nil {
+	if err := config.UpsertTransferServerEntry(disco, serverURL, func(e *config.TransferServerEntry) {
+		e.Tokens = []config.TokenEntry{newToken}
+	}); err != nil {
 		log.Warningln("Failed to save credential file:", err)
 	}
 
@@ -547,7 +562,15 @@ func acquireTokenFromIssuer(ctx context.Context, issuerURL string, storageScopes
 			entry.ClientSecret = resp.ClientSecret
 		}
 
-		if err := config.SaveConfigContents(osdfConfig); err != nil {
+		// Persist under the credential-file lock, re-reading and merging just
+		// this delta so a concurrent writer is not clobbered.
+		if err := config.MutatePrefixEntry(discoveryURL, issuerURL, func(e *config.PrefixEntry) {
+			e.ClientID = resp.ClientID
+			e.ClientSecret = resp.ClientSecret
+			if len(e.ClientScopes) == 0 {
+				e.ClientScopes = allScopes
+			}
+		}); err != nil {
 			log.Warningln("Failed to save issuer client registration:", err)
 		}
 	}
@@ -584,11 +607,14 @@ func acquireTokenFromIssuer(ctx context.Context, issuerURL string, storageScopes
 	}
 
 	// Cache the token for future reuse.
-	entry.Tokens = []config.TokenEntry{{
+	newTok := config.TokenEntry{
 		AccessToken: token.AccessToken,
 		Expiration:  token.Expiry.Unix(),
-	}}
-	if err := config.SaveConfigContents(osdfConfig); err != nil {
+	}
+	entry.Tokens = []config.TokenEntry{newTok}
+	if err := config.MutatePrefixEntry(discoveryURL, issuerURL, func(e *config.PrefixEntry) {
+		e.Tokens = []config.TokenEntry{newTok}
+	}); err != nil {
 		log.Warningln("Failed to save cached issuer token:", err)
 	}
 
@@ -783,33 +809,17 @@ func resolveNamespaceInfo(ctx context.Context, rawURL string) *token_scopes.Name
 func saveCredentialMapping(serverURL, issuerURL, credID string, scopes []string) {
 	serverURL = normalizeServerURL(serverURL)
 
-	osdfConfigVal, err := config.GetCredentialConfigContents()
-	var osdfConfig *config.CredentialConfig
-	if err != nil {
-		osdfConfig = &config.CredentialConfig{}
-	} else {
-		osdfConfig = &osdfConfigVal
-	}
-
 	newEntry := config.CredentialEntry{
 		IssuerURL:    issuerURL,
 		CredentialID: credID,
 		Scopes:       scopes,
 	}
 
-	fc, tsIdx := osdfConfig.FindTransferServer(param.Federation_DiscoveryUrl.GetString(), serverURL)
-
-	if tsIdx >= 0 {
-		fc.TransferServers[tsIdx].Credentials = append(
-			fc.TransferServers[tsIdx].Credentials, newEntry)
-	} else {
-		fc.TransferServers = append(fc.TransferServers, config.TransferServerEntry{
-			ServerURL:   serverURL,
-			Credentials: []config.CredentialEntry{newEntry},
-		})
-	}
-
-	if err := config.SaveConfigContents(osdfConfig); err != nil {
+	// Append under the credential-file lock, re-reading and merging so a
+	// concurrent writer is not clobbered.
+	if err := config.UpsertTransferServerEntry(param.Federation_DiscoveryUrl.GetString(), serverURL, func(e *config.TransferServerEntry) {
+		e.Credentials = append(e.Credentials, newEntry)
+	}); err != nil {
 		log.Warningln("Failed to save credential mapping:", err)
 	}
 }

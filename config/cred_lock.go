@@ -78,6 +78,52 @@ func credentialLockPath() (string, error) {
 	return name + ".lock", nil
 }
 
+// MutatePrefixEntry atomically applies mutate to the OAuth client entry for the
+// given federation discovery URL and prefix, holding the credential file lock
+// and re-reading the wallet first so concurrent changes to other entries (e.g. a
+// background token refresh) are preserved. The entry is matched by its Prefix
+// field (in the federation section, falling back to the legacy OSDF section) and
+// is created in the federation section if absent. Unlike UpsertPrefixEntry it
+// merges into the freshly-read entry rather than replacing it wholesale, so a
+// concurrent update to the same prefix is not silently lost.
+func MutatePrefixEntry(discoveryURL, prefix string, mutate func(*PrefixEntry)) error {
+	return WithCredentialFileLock(func() error {
+		cfg, err := GetCredentialConfigContents()
+		if err != nil {
+			return err
+		}
+		fc, idx := cfg.FindOauthClient(discoveryURL, prefix)
+		if idx < 0 {
+			fc.OauthClient = append(fc.OauthClient, PrefixEntry{Prefix: prefix})
+			idx = len(fc.OauthClient) - 1
+		}
+		mutate(&fc.OauthClient[idx])
+		return SaveConfigContents(&cfg)
+	})
+}
+
+// UpsertTransferServerEntry atomically applies mutate to the TransferServerEntry
+// for the given federation discovery URL and transfer server URL, holding the
+// credential file lock and re-reading the wallet first so concurrent changes to
+// other entries are preserved. The entry is matched by ServerURL (in the
+// federation section, falling back to the legacy OSDF section) and is created in
+// the federation section if absent.
+func UpsertTransferServerEntry(discoveryURL, serverURL string, mutate func(*TransferServerEntry)) error {
+	return WithCredentialFileLock(func() error {
+		cfg, err := GetCredentialConfigContents()
+		if err != nil {
+			return err
+		}
+		fc, idx := cfg.FindTransferServer(discoveryURL, serverURL)
+		if idx < 0 {
+			fc.TransferServers = append(fc.TransferServers, TransferServerEntry{ServerURL: serverURL})
+			idx = len(fc.TransferServers) - 1
+		}
+		mutate(&fc.TransferServers[idx])
+		return SaveConfigContents(&cfg)
+	})
+}
+
 // UpsertPrefixEntry atomically replaces (or appends) the OAuth client entry for
 // the given federation discovery URL and prefix, holding the credential file
 // lock and re-reading the wallet first so concurrent changes to other prefixes

@@ -60,7 +60,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		encClientID, err := encryptSecret(req.ClientID)
+		encClientID, err := encryptSecret(req.ClientID, owner.UserID, fieldClientID)
 		if err != nil {
 			log.Errorf("Failed to encrypt client ID: %v", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -70,7 +70,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		encClientSecret, err := encryptSecret(req.ClientSecret)
+		encClientSecret, err := encryptSecret(req.ClientSecret, owner.UserID, fieldClientSecret)
 		if err != nil {
 			log.Errorf("Failed to encrypt client secret: %v", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{

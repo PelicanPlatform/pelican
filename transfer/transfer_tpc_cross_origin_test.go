@@ -404,8 +404,29 @@ func cliCredentialAdd(t testing.TB, cliPath, serverURL, transferTokenFile, name,
 //   - The CLI stores both storage tokens as transfer-server credentials and then
 //     runs `object copy --transfer-server ...` referencing them, moving the file
 //     from origin #2 to origin #1.
+//
+// TestTransferTPCCrossOriginE2E runs the cross-origin third-party-copy end to end
+// against Pelican's Go-native (posixv2) origin backend.
 func TestTransferTPCCrossOriginE2E(t *testing.T) {
-	ft, _, testUserPassword, dataDir := setupFedForTransferTPC(t, "posixv2")
+	runCrossOriginTPCE2E(t, "posixv2")
+}
+
+// TestTransferTPCCrossOriginE2EXRootD runs the same cross-origin third-party copy
+// against the XRootD (posix) origin backend. Real deployments run XRootD origins,
+// and this path was previously exercised only by the (CI-skipped) benchmark. It
+// is skipped where the xrootd server binary is unavailable (e.g. dev laptops);
+// CI's test image ships it.
+func TestTransferTPCCrossOriginE2EXRootD(t *testing.T) {
+	if _, err := exec.LookPath("xrootd"); err != nil {
+		t.Skip("xrootd binary not found; skipping the XRootD-backend cross-origin TPC test")
+	}
+	runCrossOriginTPCE2E(t, "posix")
+}
+
+// runCrossOriginTPCE2E drives the full cross-origin TPC flow with both origins on
+// the given storage backend ("posixv2" or "posix").
+func runCrossOriginTPCE2E(t *testing.T, storageType string) {
+	ft, _, testUserPassword, dataDir := setupFedForTransferTPC(t, storageType)
 	require.NoError(t, param.Server_SSRFProtection_Disabled.Set(true))
 	config.ResetSSRFTransportForTest()
 
@@ -420,7 +441,7 @@ func TestTransferTPCCrossOriginE2E(t *testing.T) {
 	// Launch the independent second origin and wait for it to join the fed.
 	ctx, cancel := context.WithCancel(ft.Ctx)
 	defer cancel()
-	o2 := launchSecondOrigin(t, ctx, host, user2, user2Password, "posixv2")
+	o2 := launchSecondOrigin(t, ctx, host, user2, user2Password, storageType)
 	_ = testUserPassword
 
 	// Seed user2's source file on origin #2's storage (owned by the xrootd daemon).

@@ -9196,3 +9196,38 @@ paths:
           description: Job not found or not owned by this user
           schema:
             $ref: "#/definitions/TransferErrorResponse"
+  /transfer/jobs/{job_id}/events:
+    get:
+      tags:
+        - transfer
+      summary: Stream transfer job status (Server-Sent Events)
+      description: >-
+        Streams a transfer job's status changes as Server-Sent Events until the
+        job reaches a terminal state, if owned by the authenticated user. The
+        first event carries the job's current status (so a client can reconnect
+        after a dropped stream) and the stream ends with the terminal event.
+        Requires a valid JWT with `pelican.transfer` scope.
+      security:
+        - Bearer: []
+      produces:
+        - text/event-stream
+      parameters:
+        - in: path
+          name: job_id
+          description: The transfer job ID
+          required: true
+          type: string
+      responses:
+        "200":
+          description: >-
+            An `text/event-stream` of `event: status` messages, each a JSON
+            object with the job ID and current status, ending with the terminal
+            status.
+        "403":
+          description: Authentication required or insufficient permissions
+          schema:
+            $ref: "#/definitions/TransferErrorResponse"
+        "404":
+          description: Job not found or not owned by this user
+          schema:
+            $ref: "#/definitions/TransferErrorResponse"

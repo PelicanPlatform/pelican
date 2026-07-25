@@ -130,3 +130,24 @@ func TestPersistTerminalJob(t *testing.T) {
 	assert.Empty(t, ok.Error)
 	assert.Equal(t, "completed", deriveJobStatus(ok))
 }
+
+// TestPersistTerminalJobRecordsCancellation is a regression test: a cancelled
+// agent job carries no error, so before the status column existed it persisted
+// completed_at with an empty status and was reported as "completed". The
+// terminal status must be recorded so a cancelled job is never mistaken for a
+// successful one.
+func TestPersistTerminalJobRecordsCancellation(t *testing.T) {
+	db, userID := newTransferTestDB(t)
+
+	now := time.Now()
+	require.NoError(t, db.Create(&TransferJob{ID: "cancel-job", UserID: userID, RequestBody: "{}", CreatedAt: now, UpdatedAt: now}).Error)
+
+	cancelAt := now.Add(time.Second)
+	persistTerminalJob(db)(&client_agent.TransferJob{ID: "cancel-job", Status: client_agent.StatusCancelled, CompletedAt: &cancelAt})
+
+	var got TransferJob
+	require.NoError(t, db.Where("id = ?", "cancel-job").First(&got).Error)
+	require.NotNil(t, got.CompletedAt)
+	assert.Empty(t, got.Error, "cancellation carries no error")
+	assert.Equal(t, "cancelled", deriveJobStatus(got), "a cancelled job must not be reported as completed")
+}

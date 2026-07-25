@@ -19,6 +19,7 @@
 package client_agent
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -71,6 +72,13 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 	job, err := s.transferManager.CreateJob(req.Transfers, options)
 	if err != nil {
 		log.Errorf("Failed to create job: %v", err)
+		if errors.Is(err, ErrTooManyJobs) {
+			c.JSON(http.StatusTooManyRequests, ErrorResponse{
+				Code:  ErrCodeTooManyJobs,
+				Error: err.Error(),
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Code:  ErrCodeInternal,
 			Error: "Failed to create job: " + err.Error(),

@@ -163,6 +163,11 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 	if store != nil {
 		tm.recoverJobs()
 		tm.startBackgroundTasks()
+	} else {
+		// With no persistent store there is no archival task to evict terminal
+		// jobs, so run a lightweight in-memory reaper to bound memory (the
+		// transfer server runs the manager this way).
+		tm.startMemoryEviction()
 	}
 
 	return tm
@@ -325,6 +330,22 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 func (tm *TransferManager) CreateJobWithID(jobID string, requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// Admission control: every job parks a goroutine on the concurrency
+	// semaphore, so cap the number of non-terminal jobs to keep a client from
+	// exhausting memory/goroutines by flooding submissions. Callers surface this
+	// as HTTP 429.
+	if bound := tm.maxJobs * maxQueuedJobFactor; bound > 0 {
+		active := 0
+		for _, j := range tm.jobs {
+			if !IsTerminalStatus(j.Status) {
+				active++
+			}
+		}
+		if active >= bound {
+			return nil, ErrTooManyJobs
+		}
+	}
 
 	jobCtx, jobCancel := context.WithCancel(tm.ctx)
 
@@ -748,19 +769,26 @@ func (tm *TransferManager) CancelJob(jobID string) (int, int, error) {
 		}
 	}
 
-	job.Status = StatusCancelled
-	if job.CompletedAt == nil {
-		now := time.Now()
-		job.CompletedAt = &now
-	}
-
-	// Persist job cancellation to database
-	if tm.store != nil {
-		if err := tm.store.UpdateJobStatus(job.ID, StatusCancelled); err != nil {
-			log.Warnf("Failed to update cancelled job %s in database: %v", job.ID, err)
+	// Only relabel the job as cancelled if we actually cancelled something. If
+	// every transfer had already finished by the time we acquired the lock
+	// (cancelled == 0), the job genuinely reached its own terminal state and its
+	// completion callback already persisted it — relabeling to "cancelled" here
+	// would misreport a job that completed just before the cancel landed.
+	if cancelled > 0 {
+		job.Status = StatusCancelled
+		if job.CompletedAt == nil {
+			now := time.Now()
+			job.CompletedAt = &now
 		}
-		if err := tm.store.UpdateJobTimes(job.ID, nil, job.CompletedAt); err != nil {
-			log.Warnf("Failed to update cancelled job %s time in database: %v", job.ID, err)
+
+		// Persist job cancellation to database
+		if tm.store != nil {
+			if err := tm.store.UpdateJobStatus(job.ID, StatusCancelled); err != nil {
+				log.Warnf("Failed to update cancelled job %s in database: %v", job.ID, err)
+			}
+			if err := tm.store.UpdateJobTimes(job.ID, nil, job.CompletedAt); err != nil {
+				log.Warnf("Failed to update cancelled job %s time in database: %v", job.ID, err)
+			}
 		}
 	}
 
@@ -998,6 +1026,73 @@ func (tm *TransferManager) archiveCompletedJobs() {
 
 	if archived > 0 {
 		log.Infof("Archived %d completed jobs to history", archived)
+	}
+}
+
+// ErrTooManyJobs is returned by CreateJob(WithID) when the number of non-terminal
+// jobs is at the admission bound; callers map it to HTTP 429.
+var ErrTooManyJobs = errors.New("too many queued transfer jobs; retry later")
+
+// maxQueuedJobFactor bounds the number of non-terminal jobs a manager admits, as
+// a multiple of the concurrency limit (maxJobs). It is a var so tests can lower
+// it.
+var maxQueuedJobFactor = 100
+
+// memoryEvictionInterval and memoryEvictionGrace control the in-memory reaper
+// used when the manager has no persistent store. The grace matches
+// archiveCompletedJobs so a just-finished job stays observable to a status poll
+// or SSE stream. They are vars so tests can shorten them.
+var (
+	memoryEvictionInterval = 1 * time.Minute
+	memoryEvictionGrace    = 5 * time.Minute
+)
+
+// startMemoryEviction runs a periodic in-memory reaper. It is used only when the
+// manager has no store (otherwise archiveCompletedJobs handles eviction).
+func (tm *TransferManager) startMemoryEviction() {
+	log.Debug("Starting in-memory job eviction task")
+	tm.eg.Go(func() error {
+		ticker := time.NewTicker(memoryEvictionInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-tm.ctx.Done():
+				log.Debug("Stopping in-memory job eviction task")
+				return nil
+			case <-ticker.C:
+				tm.evictTerminalJobsFromMemory(memoryEvictionGrace)
+			}
+		}
+	})
+}
+
+// evictTerminalJobsFromMemory drops terminal jobs (and their transfers) that
+// finished more than grace ago from the in-memory maps. Unlike
+// archiveCompletedJobs it makes no store calls, so it bounds memory on a manager
+// with no persistent store. A job with active event-stream subscribers is kept
+// so a live SSE stream still resolves its terminal status.
+func (tm *TransferManager) evictTerminalJobsFromMemory(grace time.Duration) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	evicted := 0
+	for jobID, job := range tm.jobs {
+		if !IsTerminalStatus(job.Status) {
+			continue
+		}
+		if job.subscriberCount.Load() > 0 {
+			continue
+		}
+		if job.CompletedAt == nil || time.Since(*job.CompletedAt) <= grace {
+			continue
+		}
+		for _, transfer := range job.Transfers {
+			delete(tm.transfers, transfer.ID)
+		}
+		delete(tm.jobs, jobID)
+		evicted++
+	}
+	if evicted > 0 {
+		log.Debugf("Evicted %d terminal transfer job(s) from memory", evicted)
 	}
 }
 

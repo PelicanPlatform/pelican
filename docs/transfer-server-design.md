@@ -1,6 +1,6 @@
 # Transfer Server Design
 
-> **Status:** Design / architecture reference, reflecting the implementation in the `transfer/` package as of this branch.
+> **Status:** Design / architecture reference, reflecting the implementation in the `transfer/` package.
 >
 > **Scope:** This document describes how the Pelican *transfer server* works, with particular emphasis on its OAuth2 flows. It is intended for developers working on the transfer module, not as end-user documentation.
 
@@ -264,15 +264,15 @@ users (existing)
   │                               scopes, token_issuer, token_expiry, last_used_at)
   │        ▲             ▲
   │        │ source      │ dest
-  └──< transfer_jobs ────┘        (id, user_id FK, agent_job_id FK→jobs,
-  │      (request_body, error, completed_at, …)
+  └──< transfer_jobs ────┘        (id, user_id FK, agent_job_id (plain ref),
+  │      (request_body, status, error, completed_at, …)
   └──< transfer_oauth_clients     (id, user_id FK, name, issuer_url,
                                    encrypted_client_id, encrypted_client_secret,
                                    grant_types, scopes)
 ```
 
 - All three tables `FK → users(id) ON DELETE CASCADE` (a deleted user's credentials/clients/jobs are removed).
-- `transfer_jobs.agent_job_id → jobs(id) ON DELETE SET NULL` links to the `client_agent` engine's own job row; the credential FKs are `ON DELETE SET NULL`.
+- `transfer_jobs.agent_job_id` is a plain correlation column (not a foreign key) referencing the in-memory `client_agent` job; the two credential FKs are `ON DELETE SET NULL`.
 - `(user_id, name)` is unique for both credentials and OAuth clients.
 
 ## 8. API surface
@@ -299,7 +299,7 @@ Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 - **Secrets at rest.** Access tokens, refresh tokens, and OAuth client secrets are all encrypted before storage under a key derived from the server master key (§4.1).
 - **Auth-code session locality.** Because bootstrap sessions are in-memory, the browser callback and the CLI poll must hit the same server process. A multi-replica deployment needs sticky routing for `/api/callback*` and the poll endpoint, or a shared session store, before the auth-code flow is HA.
 - **Start-code vs. session-id separation.** The auth-code flow deliberately keeps the pollable session ID out of the terminal-visible URL.
-- **Group gating is cookie-only by design.** API bearer tokens bypass `Transfer.EnabledGroups`; restrict issuance of `pelican.transfer` tokens accordingly if group confinement matters for programmatic access.
+- **Group gating is cookie-only by design.** API bearer tokens bypass `Transfer.EnabledGroups`. The **local** issuer applies the group gate when it mints the `pelican.transfer` scope, so its bearer tokens are already confined; however this middleware also accepts bearer tokens from the **federation** issuer and the **origin's** issuer, and for those `Transfer.EnabledGroups` is *not* re-applied. If group confinement matters for programmatic access from those issuers, do not have them mint `pelican.transfer` broadly (or front the API with an issuer allow-list).
 - **Origin-embedded confinement.** In origin mode, `allowedPrefixes` ensures every transfer touches the origin's own namespaces.
 
 ## 10. Configuration parameters

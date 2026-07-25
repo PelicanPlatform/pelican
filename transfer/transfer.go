@@ -218,11 +218,10 @@ func registerTransferRoutes(ctx context.Context, engine *gin.Engine, egrp *errgr
 // support. This is typically called during the launcher sequence before routes
 // are registered.
 func InitTransferDatabase() error {
-	dbPath := param.Transfer_DbLocation.GetString()
-	if dbPath == "" {
-		dbPath = param.Server_DbLocation.GetString()
-	}
-	log.Debugf("Transfer module using database: %s", dbPath)
+	// The transfer module stores its credential, OAuth-client, and job tables in
+	// the shared server database (see the transfer migrations); it does not open
+	// a database of its own.
+	log.Debugf("Transfer module using the shared server database: %s", param.Server_DbLocation.GetString())
 
 	// The server database should already be initialized by the launcher.
 	// We just verify the connection and that our tables exist.
@@ -274,20 +273,29 @@ func runCredentialCleanup(ctx context.Context, db *gorm.DB, timeout time.Duratio
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			cutoff := time.Now().Add(-timeout)
-
-			// Delete credentials that have been used but not within the timeout,
-			// or that have never been used and were created before the cutoff.
-			result := db.Where(
-				"(last_used_at IS NOT NULL AND last_used_at < ?) OR (last_used_at IS NULL AND created_at < ?)",
-				cutoff, cutoff,
-			).Delete(&TransferCredential{})
-
-			if result.Error != nil {
-				log.Errorf("Transfer credential cleanup error: %v", result.Error)
-			} else if result.RowsAffected > 0 {
-				log.Infof("Transfer credential cleanup removed %d idle credential(s)", result.RowsAffected)
+			removed, err := sweepIdleCredentials(db, time.Now().Add(-timeout))
+			if err != nil {
+				log.Errorf("Transfer credential cleanup error: %v", err)
+			} else if removed > 0 {
+				log.Infof("Transfer credential cleanup removed %d idle credential(s)", removed)
 			}
 		}
 	}
+}
+
+// sweepIdleCredentials deletes credentials last used (or, if never used, created)
+// before cutoff, EXCEPT any that a still-queued job references — last_used_at
+// only advances at execution, so a job parked in the queue longer than the idle
+// timeout would otherwise have its credential swept out from under it. Returns
+// the number of credentials removed.
+func sweepIdleCredentials(db *gorm.DB, cutoff time.Time) (int64, error) {
+	result := db.Where(
+		"(last_used_at IS NOT NULL AND last_used_at < ?) OR (last_used_at IS NULL AND created_at < ?)",
+		cutoff, cutoff,
+	).Where(
+		"id NOT IN (SELECT source_credential_id FROM transfer_jobs WHERE completed_at IS NULL AND source_credential_id IS NOT NULL)",
+	).Where(
+		"id NOT IN (SELECT dest_credential_id FROM transfer_jobs WHERE completed_at IS NULL AND dest_credential_id IS NOT NULL)",
+	).Delete(&TransferCredential{})
+	return result.RowsAffected, result.Error
 }

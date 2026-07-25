@@ -37,7 +37,10 @@ func wantsEventStream(c *gin.Context) bool {
 
 // sseKeepAliveInterval bounds how long an SSE stream stays silent; a comment
 // ping keeps the connection alive through idle proxies during a long transfer.
-const sseKeepAliveInterval = 15 * time.Second
+// It also bounds how long a stream can take to notice a terminal state whose
+// event was dropped from a full subscriber buffer (see StreamJobEvents). A var
+// rather than a const so tests can shorten it.
+var sseKeepAliveInterval = 15 * time.Second
 
 // progressEmitInterval throttles per-job progress broadcasts: transfer progress
 // callbacks fire per chunk, but subscribers only need a periodic update.
@@ -267,6 +270,17 @@ func (tm *TransferManager) StreamJobEvents(c *gin.Context, jobID, fallbackStatus
 				return
 			}
 		case <-keepAlive.C:
+			// Event delivery is best-effort: if this subscriber's buffer was
+			// full when the job finished, the terminal event was dropped and no
+			// further event will ever arrive on the channel. Re-read the job's
+			// current status so a finished job is always reported instead of the
+			// stream hanging on keepalives forever. (If the job has been evicted
+			// from memory the snapshot is absent; the client re-reads the durable
+			// record on reconnect, where it becomes the fallback status.)
+			if ev, ok := tm.jobEventSnapshot(jobID); ok && IsTerminalStatus(ev.Status) {
+				writeEvent(ev)
+				return
+			}
 			_, _ = fmt.Fprint(c.Writer, ": keepalive\n\n")
 			if flusher != nil {
 				flusher.Flush()

@@ -513,7 +513,6 @@ var runtimeConfigurableMap = map[string]bool{
 	"Topology.DisableOriginX509": false,
 	"Topology.DisableOrigins": false,
 	"Transfer.CredentialIdleTimeout": false,
-	"Transfer.DbLocation": false,
 	"Transfer.EnableOAuth2Clients": false,
 	"Transfer.EnabledGroups": false,
 	"Transfer.MaxConcurrentJobs": false,
@@ -756,7 +755,6 @@ var stringAccessors = map[string]func(*Config) string{
 	"StagePlugin.MountPrefix": func(c *Config) string { return c.StagePlugin.MountPrefix },
 	"StagePlugin.OriginPrefix": func(c *Config) string { return c.StagePlugin.OriginPrefix },
 	"StagePlugin.ShadowOriginPrefix": func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
-	"Transfer.DbLocation": func(c *Config) string { return c.Transfer.DbLocation },
 	"Xrootd.Authfile": func(c *Config) string { return c.Xrootd.Authfile },
 	"Xrootd.ConfigFile": func(c *Config) string { return c.Xrootd.ConfigFile },
 	"Xrootd.DetailedMonitoringHost": func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
@@ -1690,7 +1688,6 @@ var allParameterNames = []string{
 	"Topology.DisableOriginX509",
 	"Topology.DisableOrigins",
 	"Transfer.CredentialIdleTimeout",
-	"Transfer.DbLocation",
 	"Transfer.EnableOAuth2Clients",
 	"Transfer.EnabledGroups",
 	"Transfer.MaxConcurrentJobs",
@@ -1906,7 +1903,6 @@ var (
 	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
-	Transfer_DbLocation = StringParam{"Transfer.DbLocation"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
 	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
@@ -2393,7 +2389,6 @@ func init() {
 		"StagePlugin.MountPrefix": StagePlugin_MountPrefix,
 		"StagePlugin.OriginPrefix": StagePlugin_OriginPrefix,
 		"StagePlugin.ShadowOriginPrefix": StagePlugin_ShadowOriginPrefix,
-		"Transfer.DbLocation": Transfer_DbLocation,
 		"Xrootd.Authfile": Xrootd_Authfile,
 		"Xrootd.ConfigFile": Xrootd_ConfigFile,
 		"Xrootd.DetailedMonitoringHost": Xrootd_DetailedMonitoringHost,

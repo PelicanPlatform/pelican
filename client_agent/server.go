@@ -386,7 +386,7 @@ func (s *Server) monitorWalletRefresh() error {
 			}
 			n, err := s.wallet.RefreshExpiring(s.ctx, walletRefreshWindow)
 			if err != nil {
-				log.Debugf("Wallet credential refresh cycle failed: %v", err)
+				log.Warnf("Wallet credential refresh cycle failed: %v", err)
 			} else if n > 0 {
 				log.Infof("Refreshed %d transfer credential(s) nearing expiry", n)
 			}

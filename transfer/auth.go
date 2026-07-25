@@ -123,8 +123,17 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// Cookie (web-UI) sessions are additionally gated on Transfer.EnabledGroups.
-		// Bearer tokens are authorized by their pelican.transfer scope alone (the
-		// issuer applied the group gate when it minted the scope).
+		// Bearer tokens are authorized by their pelican.transfer scope alone.
+		//
+		// SECURITY / TRUST BOUNDARY: this delegates group confinement to the token
+		// issuer. The LOCAL issuer applies Transfer.EnabledGroups when it mints the
+		// pelican.transfer scope (see transferAccessAllowed), so its bearer tokens
+		// are already confined. But this middleware also accepts bearer tokens from
+		// the FederationIssuer and the origin's issuer (above); for those,
+		// Transfer.EnabledGroups is NOT re-applied here — anyone those issuers give
+		// a pelican.transfer token to may use the transfer API regardless of group.
+		// Operators who must confine federation/origin-issued tokens by group should
+		// not have those issuers mint pelican.transfer broadly. See the design doc.
 		if enabledGroups := param.Transfer_EnabledGroups.GetStringSlice(); len(enabledGroups) > 0 && result.Source == token.Cookie {
 			if !groupsOverlap(tokenGroups(result.Token), enabledGroups) {
 				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{

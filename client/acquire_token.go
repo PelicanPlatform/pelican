@@ -972,7 +972,13 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
-		fc.OauthClient[prefixIdx] = *prefixEntry
+		// prefixIdx is -1 when this prefix was freshly registered earlier in
+		// this call (it was appended, not found at an index); only update the
+		// in-memory slice in place when we have a real index. UpsertPrefixEntry
+		// persists by Prefix match in either case.
+		if prefixIdx >= 0 {
+			fc.OauthClient[prefixIdx] = *prefixEntry
+		}
 		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}

@@ -111,9 +111,17 @@ func (w *WalletSession) IsOpen() bool {
 }
 
 // Contents returns the decrypted wallet, read fresh from disk. It returns
-// ErrWalletLocked if the wallet has not been opened.
+// ErrWalletLocked if the wallet has not been opened. The wallet lock is held
+// across the open-check and the read so a concurrent Close() (which forgets the
+// decryption password) cannot slip in between and turn the read into a spurious
+// decrypt failure.
 func (w *WalletSession) Contents() (config.CredentialConfig, error) {
-	if !w.IsOpen() {
+	if w == nil {
+		return config.CredentialConfig{}, ErrWalletLocked
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.open {
 		return config.CredentialConfig{}, ErrWalletLocked
 	}
 	return config.GetCredentialConfigContents()

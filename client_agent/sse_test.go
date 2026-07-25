@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -73,4 +74,58 @@ func TestStreamJobEventsSSE(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "/jobs/sync-job/events", nil)
 	r.ServeHTTP(w2, req2)
 	assert.Contains(t, w2.Body.String(), `"status":"failed"`)
+}
+
+// TestStreamJobEventsRecoversDroppedTerminal is a regression test for the
+// best-effort event buffer: if a job's terminal event is dropped because a slow
+// subscriber's buffer was full, the stream must still report completion (via the
+// keepalive re-read of the current status) rather than hang on keepalives
+// forever. We reproduce the drop deterministically by transitioning the job to
+// terminal in memory without ever publishing an event on the channel.
+func TestStreamJobEventsRecoversDroppedTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	orig := sseKeepAliveInterval
+	sseKeepAliveInterval = 15 * time.Millisecond
+	defer func() { sseKeepAliveInterval = orig }()
+
+	tm := NewTransferManager(context.Background(), 5, nil)
+	defer func() { _ = tm.Shutdown() }()
+
+	// Insert a running job directly so the stream starts non-terminal and enters
+	// its event loop. No terminal event is ever published on the subscriber
+	// channel — that models the dropped-from-full-buffer case.
+	tm.mu.Lock()
+	tm.jobs["stuck-job"] = &TransferJob{ID: "stuck-job", Status: StatusRunning}
+	tm.mu.Unlock()
+
+	r := gin.New()
+	r.GET("/jobs/:id/events", func(c *gin.Context) {
+		tm.StreamJobEvents(c, c.Param("id"), "")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/jobs/stuck-job/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Let the stream emit the initial running status and settle into its loop,
+	// then flip the job to terminal in memory without publishing an event.
+	time.Sleep(50 * time.Millisecond)
+	tm.mu.Lock()
+	tm.jobs["stuck-job"].Status = StatusCompleted
+	tm.mu.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StreamJobEvents hung: a dropped terminal event was never recovered on the keepalive tick")
+	}
+	assert.Contains(t, w.Body.String(), `"status":"completed"`,
+		"the stream must report the terminal status recovered on the keepalive tick")
 }

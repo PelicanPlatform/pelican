@@ -5253,16 +5253,6 @@ components: ["director", "registry"]
 ##############################
 #  Transfer-level Configs    #
 ##############################
-name: Transfer.DbLocation
-description: |+
-  A filepath to the intended location of the transfer server's SQLite database.
-  This database stores credential information, OAuth2 client registrations,
-  and transfer job metadata.
-type: filename
-root_default: /var/lib/pelican/transfer.sqlite
-default: $ConfigBase/transfer.sqlite
-components: ["transfer"]
----
 name: Transfer.EnabledGroups
 description: |+
   A list of group names whose members are permitted to use the transfer API.

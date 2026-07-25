@@ -593,7 +593,7 @@ func TestCredentialCleanup(t *testing.T) {
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, mockDB.AutoMigrate(&TransferCredential{}))
+	require.NoError(t, mockDB.AutoMigrate(&TransferCredential{}, &TransferJob{}))
 
 	encToken, err := config.EncryptString("test-token")
 	require.NoError(t, err)
@@ -623,25 +623,33 @@ func TestCredentialCleanup(t *testing.T) {
 			Name: "new-never-used", EncryptedAccessToken: encToken,
 			CreatedAt: recentTime, UpdatedAt: recentTime,
 		},
+		{
+			// Idle enough to be swept, but a still-queued job references it, so
+			// it must survive (its job would otherwise run without a token).
+			ID: "old-but-referenced", UserID: "test-user",
+			Name: "old-but-referenced", EncryptedAccessToken: encToken,
+			CreatedAt: oldTime, UpdatedAt: oldTime, LastUsedAt: &oldTime,
+		},
 	}
 	for _, c := range creds {
 		require.NoError(t, mockDB.Create(&c).Error)
 	}
+	// A non-terminal job (completed_at NULL) referencing the idle credential.
+	refCredID := "old-but-referenced"
+	require.NoError(t, mockDB.Create(&TransferJob{
+		ID: "queued-job", UserID: "test-user", RequestBody: "{}",
+		SourceCredentialID: &refCredID,
+		CreatedAt:          oldTime, UpdatedAt: oldTime,
+	}).Error)
 
-	// Run one cleanup cycle with a 1 hour timeout
-	timeout := 1 * time.Hour
-	cutoff := time.Now().Add(-timeout)
-	result := mockDB.Where(
-		"(last_used_at IS NOT NULL AND last_used_at < ?) OR (last_used_at IS NULL AND created_at < ?)",
-		cutoff, cutoff,
-	).Delete(&TransferCredential{})
-	require.NoError(t, result.Error)
-	assert.Equal(t, int64(2), result.RowsAffected)
+	// Run one cleanup cycle with a 1 hour timeout via the production sweep.
+	removed, err := sweepIdleCredentials(mockDB, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), removed)
 
 	// Verify which credentials remain
 	var remaining []TransferCredential
 	require.NoError(t, mockDB.Find(&remaining).Error)
-	assert.Equal(t, 2, len(remaining))
 
 	remainingIDs := make(map[string]bool)
 	for _, c := range remaining {
@@ -649,6 +657,7 @@ func TestCredentialCleanup(t *testing.T) {
 	}
 	assert.True(t, remainingIDs["old-used-recently"], "recently-used credential should survive")
 	assert.True(t, remainingIDs["new-never-used"], "new credential should survive")
+	assert.True(t, remainingIDs["old-but-referenced"], "a credential referenced by a queued job must survive")
 	assert.False(t, remainingIDs["old-never-used"], "old never-used credential should be cleaned up")
 	assert.False(t, remainingIDs["old-used-long-ago"], "old stale credential should be cleaned up")
 }
@@ -679,7 +688,7 @@ func TestCredentialTokenProvider(t *testing.T) {
 	resetTransferSecretKey()
 
 	secretToken := "my-secret-access-token"
-	encToken, err := encryptSecret(secretToken)
+	encToken, err := encryptSecret(secretToken, "test-user", fieldCredAccessToken)
 	require.NoError(t, err)
 
 	cred := TransferCredential{

@@ -19,6 +19,7 @@
 package transfer
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2/issuer"
 )
 
@@ -86,6 +88,20 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 					return
 				}
 			}
+		}
+
+		// A standalone transfer server accepts arbitrary raw http(s) endpoints, so
+		// vet each one against the SSRF policy to keep the server from being used
+		// as a pivot to internal services (e.g. cloud metadata at 169.254.169.254).
+		// pelican:// endpoints are resolved through the federation and are not
+		// checked here.
+		if err := validateTransferEndpointsSSRF(c.Request.Context(), req.Transfers); err != nil {
+			log.Warnf("Rejecting transfer job on SSRF policy: %v", err)
+			c.JSON(http.StatusForbidden, ErrorResponse{
+				Code:  "ENDPOINT_NOT_ALLOWED",
+				Error: "Transfer endpoint is not permitted",
+			})
+			return
 		}
 
 		// Build transfer options, potentially including credential tokens
@@ -154,9 +170,17 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			// isn't left dangling (and isn't resurrected by the reconciler).
 			db.Model(&TransferJob{}).Where("id = ?", jobID).Updates(map[string]any{
 				"completed_at": time.Now(),
+				"status":       client_agent.StatusFailed,
 				"error":        "failed to start job: " + err.Error(),
 				"updated_at":   time.Now(),
 			})
+			if errors.Is(err, client_agent.ErrTooManyJobs) {
+				c.JSON(http.StatusTooManyRequests, ErrorResponse{
+					Code:  "TOO_MANY_JOBS",
+					Error: err.Error(),
+				})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to create transfer job: " + err.Error(),
@@ -408,11 +432,12 @@ func handleCancelTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		cancelled, completed, err := tm.CancelJob(jobID)
 		if err != nil {
 			if err.Error() == "job not found" {
-				// Job already evicted from memory; record completion time
+				// Job already evicted from memory; record cancellation.
 				now := time.Now()
 				db.Model(&TransferJob{}).Where("id = ?", jobID).Updates(map[string]interface{}{
 					"updated_at":   now,
 					"completed_at": now,
+					"status":       client_agent.StatusCancelled,
 				})
 				c.JSON(http.StatusOK, gin.H{
 					"job_id":  jobID,
@@ -427,12 +452,20 @@ func handleCancelTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 			return
 		}
 
-		// Record completion time; the agent job's own status tracks "cancelled"
+		// Record cancellation only when something was actually cancelled. This
+		// write lands after CancelJob (and thus after the persistTerminalJob
+		// callback fired by executeJob), so "cancelled" is the final durable
+		// status. If the job had already finished on its own (cancelled == 0), the
+		// callback's terminal status stands, so we don't overwrite it.
 		now := time.Now()
-		db.Model(&TransferJob{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"updated_at":   now,
 			"completed_at": now,
-		})
+		}
+		if cancelled > 0 {
+			updates["status"] = client_agent.StatusCancelled
+		}
+		db.Model(&TransferJob{}).Where("id = ?", jobID).Updates(updates)
 
 		c.JSON(http.StatusOK, gin.H{
 			"job_id":              jobID,
@@ -502,11 +535,18 @@ func errorToString(err error) string {
 
 // deriveJobStatus infers a transfer job's status from its persisted metadata
 // when the in-memory agent job is no longer available (e.g. after eviction or
-// server restart).  The heuristic is:
+// server restart).  The persisted Status is authoritative when present (it
+// distinguishes "cancelled" from "completed"); the (completed_at, error)
+// heuristic is only a fallback for rows written before a terminal status was
+// recorded:
+//   - Status recorded                   → that status
 //   - CompletedAt set + Error non-empty → "failed"
 //   - CompletedAt set + no Error        → "completed"
 //   - otherwise                         → "unknown"
 func deriveJobStatus(job TransferJob) string {
+	if job.Status != "" {
+		return job.Status
+	}
 	if job.CompletedAt != nil {
 		if job.Error != "" {
 			return "failed"
@@ -535,6 +575,39 @@ func transferMatchesPrefixes(t TransferItem, prefixes []string) bool {
 // extractPath returns the path component of a URL string.  For bare paths
 // (no scheme) it returns the input cleaned.  For URLs it strips the
 // scheme and authority portions.
+// validateTransferEndpointsSSRF rejects transfers whose source or destination is
+// a raw http(s) URL resolving to a non-publicly-routable address, so the transfer
+// server cannot be used as an SSRF pivot to internal services. Non-http(s)
+// endpoints (e.g. pelican://) are resolved through the federation/director and
+// are out of scope here. This is a point-in-time resolution check (see
+// config.CheckSSRFHost); an SSRF-safe dialer on the data path would additionally
+// defeat DNS rebinding.
+func validateTransferEndpointsSSRF(ctx context.Context, transfers []TransferItem) error {
+	check := func(raw string) error {
+		if raw == "" {
+			return nil
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return nil // malformed endpoints are rejected later in the pipeline
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http", "https":
+			return config.CheckSSRFHost(ctx, u.Hostname())
+		}
+		return nil
+	}
+	for _, t := range transfers {
+		if err := check(t.Source); err != nil {
+			return err
+		}
+		if err := check(t.Destination); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func extractPath(raw string) string {
 	if raw == "" {
 		return ""

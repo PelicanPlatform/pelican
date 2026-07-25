@@ -89,10 +89,29 @@ func secretAEAD() (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
+// Column identifiers used as AES-GCM associated data (see secretAAD). Changing
+// these strings would make previously stored secrets undecryptable.
+const (
+	fieldCredAccessToken  = "transfer_credentials.access_token"
+	fieldCredRefreshToken = "transfer_credentials.refresh_token"
+	fieldClientID         = "transfer_oauth_clients.client_id"
+	fieldClientSecret     = "transfer_oauth_clients.client_secret"
+)
+
+// secretAAD binds a ciphertext to the row and column it belongs to. Passing it as
+// AES-GCM associated data means a stored secret fails to decrypt if it is moved
+// to a different owner's row or a different column — defense-in-depth against a
+// DB-write primitive that cannot read the master key. userID is the owning row's
+// user_id (for a shared/admin OAuth client, that is the admin who registered it,
+// so encrypt and decrypt must both use the row's own user_id).
+func secretAAD(userID, field string) []byte {
+	return []byte(userID + "|" + field)
+}
+
 // encryptSecret encrypts a secret value for storage in the database. The result
-// is base64(nonce || ciphertext), authenticated with AES-GCM under a key
-// derived from the server master key.
-func encryptSecret(plaintext string) (string, error) {
+// is base64(nonce || ciphertext), authenticated with AES-GCM under a key derived
+// from the server master key and bound to (userID, field) via associated data.
+func encryptSecret(plaintext, userID, field string) (string, error) {
 	gcm, err := secretAEAD()
 	if err != nil {
 		return "", err
@@ -101,12 +120,13 @@ func encryptSecret(plaintext string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", errors.Wrap(err, "failed to generate nonce")
 	}
-	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), secretAAD(userID, field))
 	return base64.StdEncoding.EncodeToString(sealed), nil
 }
 
-// decryptSecret reverses encryptSecret.
-func decryptSecret(ciphertext string) (string, error) {
+// decryptSecret reverses encryptSecret. It must be called with the same
+// (userID, field) the value was encrypted under, or decryption fails.
+func decryptSecret(ciphertext, userID, field string) (string, error) {
 	gcm, err := secretAEAD()
 	if err != nil {
 		return "", err
@@ -119,7 +139,7 @@ func decryptSecret(ciphertext string) (string, error) {
 		return "", errors.New("encrypted secret is too short")
 	}
 	nonce, sealed := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
-	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
+	plaintext, err := gcm.Open(nil, nonce, sealed, secretAAD(userID, field))
 	if err != nil {
 		return "", errors.Wrap(err, "failed to decrypt secret")
 	}

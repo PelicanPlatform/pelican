@@ -491,7 +491,6 @@ type Config struct {
 	} `mapstructure:"topology" yaml:"Topology"`
 	Transfer struct {
 		CredentialIdleTimeout time.Duration `mapstructure:"credentialidletimeout" yaml:"CredentialIdleTimeout"`
-		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		EnableOAuth2Clients bool `mapstructure:"enableoauth2clients" yaml:"EnableOAuth2Clients"`
 		EnabledGroups []string `mapstructure:"enabledgroups" yaml:"EnabledGroups"`
 		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
@@ -1002,7 +1001,6 @@ type configWithType struct {
 	}
 	Transfer struct {
 		CredentialIdleTimeout struct { Type string; Value time.Duration }
-		DbLocation struct { Type string; Value string }
 		EnableOAuth2Clients struct { Type string; Value bool }
 		EnabledGroups struct { Type string; Value []string }
 		MaxConcurrentJobs struct { Type string; Value int }

@@ -1052,12 +1052,16 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 		case identTransferOptionTokenProvider{}:
 			// The destination (or primary, for non-copy transfers) token is
 			// produced dynamically by an external provider.
-			token.SetExternalProvider(opt.Value().(TokenProvider))
+			if p, ok := opt.Value().(TokenProvider); ok && p != nil {
+				token.SetExternalProvider(p)
+			}
 		case identTransferOptionSourceTokenProvider{}:
-			if isCopy {
-				srcToken.SetExternalProvider(opt.Value().(TokenProvider))
-			} else if !upload {
-				token.SetExternalProvider(opt.Value().(TokenProvider))
+			if p, ok := opt.Value().(TokenProvider); ok && p != nil {
+				if isCopy {
+					srcToken.SetExternalProvider(p)
+				} else if !upload {
+					token.SetExternalProvider(p)
+				}
 			}
 		}
 	}
