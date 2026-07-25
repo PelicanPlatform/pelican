@@ -91,6 +91,33 @@ func isInbandWrite(ctx context.Context) bool {
 	return v
 }
 
+// poscInternalKey is the context key POSC sets while operating on its own
+// staging/cleanup plumbing (creating, stat'ing, renaming, and removing
+// temp files; reaping stale uploads; rolling back a refused commit).
+type poscInternalKey struct{}
+
+// withPoscInternal flags ctx as a POSC-internal filesystem operation.
+// The observation layer skips its entire change-detection/recording
+// ladder for such calls: POSC temp files are not real objects, and a
+// rollback that removes a just-staged `final` after the publish refused
+// the commit must NOT emit object.deleted (no object.committed was ever
+// published). Without this, the reaper and transactional rollback leak
+// internal staging paths into the catalog as spurious delete/modify
+// webhooks. See aferoFileSystem.{RemoveAll,Rename,Stat}.
+func withPoscInternal(ctx context.Context) context.Context {
+	return context.WithValue(ctx, poscInternalKey{}, true)
+}
+
+// isPoscInternal returns true iff withPoscInternal was called on this
+// (or an ancestor of this) ctx.
+func isPoscInternal(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(poscInternalKey{}).(bool)
+	return v
+}
+
 // ============================================================
 // In-memory LRU cache
 // ============================================================
@@ -354,8 +381,8 @@ func (o *observationConfig) recordExternalObserve(ctx context.Context, fedPath s
 		EtagSource:   EtagSourceBackend,
 		BackendMtime: mtime,
 		// Actor unknown — no token context on background-init
-		// observations. The TODO(actor) work will fill these in
-		// from request context where available.
+		// observations. TODO: populate Actor from request context on
+		// observation paths that do have an authenticated caller.
 	}
 	if err := o.dao.RecordExternalObserve(ctx, in); err != nil {
 		log.Debugf("object-metadata observation: RecordExternalObserve(%s,%s) failed: %v", o.namespace, fedPath, err)

@@ -282,8 +282,8 @@ Director:
 	assert.Equal(t, "object.committed", parsed.Type)
 	assert.Equal(t, "/test", parsed.Namespace)
 
-	// The path must be federation-rooted (regression cover for the
-	// gap-doc P1.1 issue).
+	// The path must be federation-rooted, not export-relative (the
+	// webdav.Handler strips the federation prefix before OpenFile).
 	assert.Equal(t, "/test/payload.bin", parsed.Object["path"])
 
 	// All the auto-collected fields are present.

@@ -383,7 +383,8 @@ func TestPoscCloseHookFailureReturnsError(t *testing.T) {
 // TestPoscCloseHookFailureRollsBackFinal — when the close hook fails,
 // POSC must remove the just-renamed final object so the storage state
 // matches the publish state ("metadata service refused → object not
-// visible"). This is the rollback the design doc names.
+// visible"). This is the transactional rollback described in
+// docs/metadata-publish-design.md.
 func TestPoscCloseHookFailureRollsBackFinal(t *testing.T) {
 	ctx, p, mem, cleanup := newTestPosc(t)
 	defer cleanup()
@@ -755,3 +756,40 @@ var (
 	_ = mustReadDir
 	_ = mustReadAll
 )
+
+// TestSanitizePoscUser verifies the per-user POSC staging segment can never
+// contain a path separator or a "."/".." traversal component, so a hostile
+// or unusual token subject cannot relocate the staging directory outside
+// poscPrefix.
+func TestSanitizePoscUser(t *testing.T) {
+	exact := map[string]string{
+		"alice":     "alice",
+		"anonymous": "anonymous",
+		"a/b":       "a%2Fb",
+		"..":        "%2E%2E",
+		".":         "%2E",
+		"":          "_",
+		"../../etc": "%2E%2E%2F%2E%2E%2Fetc",
+	}
+	for in, want := range exact {
+		if got := sanitizePoscUser(in); got != want {
+			t.Errorf("sanitizePoscUser(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// Property check across adversarial inputs: the result is always a
+	// single safe segment (no separator, never "." or "..") and is
+	// deterministic.
+	for _, in := range []string{"a/b", "..", ".", "/", "//", "a/../b", "x\\y", "user@ex.com", "sub with space"} {
+		got := sanitizePoscUser(in)
+		if strings.ContainsRune(got, '/') {
+			t.Errorf("sanitizePoscUser(%q) = %q contains a path separator", in, got)
+		}
+		if got == "." || got == ".." || got == "" {
+			t.Errorf("sanitizePoscUser(%q) = %q is a degenerate segment", in, got)
+		}
+		if again := sanitizePoscUser(in); again != got {
+			t.Errorf("sanitizePoscUser(%q) not deterministic: %q vs %q", in, got, again)
+		}
+	}
+}

@@ -233,7 +233,13 @@ func handleCopyTPC(c *gin.Context, backend server_utils.OriginBackend, exportPre
 	// RecordCommitCloseHook reads it via sourceEtagFromContext and
 	// includes it in the batched commit row. Empty ETag from the
 	// source is fine — withSourceEtag treats it as a no-op.
-	openCtx := withSourceEtag(c.Request.Context(), getResp.Header.Get("ETag"))
+	// A third-party COPY is a Pelican-initiated write, just like a PUT.
+	// Flag the destination's OpenFile context as an in-band write so the
+	// observation layer does not misread POSC's post-rename Stat of the
+	// destination as an out-of-band change (which would record a spurious
+	// external_modify/observe and, on an overwrite, publish a duplicate
+	// object.updated alongside the authoritative commit-hook event).
+	openCtx := withInbandWrite(withSourceEtag(c.Request.Context(), getResp.Header.Get("ETag")))
 
 	// Open the destination file for writing via the backend's WebDAV filesystem
 	fs := backend.FileSystem()

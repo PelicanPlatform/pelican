@@ -14,7 +14,11 @@ ALTER TABLE object_metadata_history ADD COLUMN source_etag TEXT;
 
 -- +goose Down
 -- +goose StatementBegin
--- SQLite doesn't support DROP COLUMN portably before 3.35. Callers
--- rolling back this migration should recreate the tables from the
--- prior migration if they need to reclaim the space.
+-- The bundled modernc SQLite driver is >= 3.35, which supports
+-- ALTER TABLE ... DROP COLUMN, so the reversal is a plain column drop.
+ALTER TABLE object_metadata         DROP COLUMN source_etag;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+ALTER TABLE object_metadata_history DROP COLUMN source_etag;
 -- +goose StatementEnd

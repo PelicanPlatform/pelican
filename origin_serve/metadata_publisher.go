@@ -63,7 +63,8 @@ const (
 
 // PermanentRejectStatus is the HTTP status a catalog returns to say "this
 // metadata event is permanently unacceptable — stop retrying it." It is the
-// wire contract shared with external catalog operators (see the design doc).
+// wire contract shared with external catalog operators (see
+// docs/metadata-publish-design.md).
 // We use 422 Unprocessable Content: the request was well-formed and
 // authenticated, but the event's content is semantically rejected. Every other
 // non-2xx (including auth 401/403 and 5xx) is treated as transient.

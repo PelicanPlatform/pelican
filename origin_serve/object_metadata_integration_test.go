@@ -16,18 +16,18 @@
  *
  ***************************************************************/
 
-// File object_metadata_more_test.go is the second batch of integration
-// tests for the object-metadata tracking subsystem. Each test
-// targets a gap that surfaced during pre-PR review:
+// File object_metadata_integration_test.go holds integration
+// tests for the object-metadata tracking subsystem, wiring up the
+// full origin stack rather than exercising units in isolation:
 //
-//   P1.1 — full request path: PUT → real webdav.Handler →
-//          close hook → DAO → admin endpoint shows the row.
-//   P1.2 — composeCloseHooks ordering + error isolation.
-//   P2.3 — per-export TrackAccess override actually splits two
-//          namespaces (one tracked, one not) inside the same origin.
-//   P3.5 — pruner Start/Stop lifecycle, not just onePass.
-//   P3.6 — SHA-256 ETag survives end-to-end into the DAO row with
-//          etag_source='origin'.
+//   - full request path: PUT → real webdav.Handler → close hook →
+//     DAO → admin endpoint shows the row.
+//   - composeCloseHooks ordering + error isolation.
+//   - per-export TrackAccess override actually splits two
+//     namespaces (one tracked, one not) inside the same origin.
+//   - pruner Start/Stop lifecycle, not just onePass.
+//   - SHA-256 ETag survives end-to-end into the DAO row with
+//     etag_source='origin'.
 
 package origin_serve
 
@@ -54,7 +54,7 @@ import (
 )
 
 // ============================================================
-// P1.2 — composeCloseHooks
+// composeCloseHooks
 // ============================================================
 
 func TestComposeCloseHooks_Nil(t *testing.T) {
@@ -194,7 +194,7 @@ func TestComposeCloseHooks_LastHookNilOverwritesEarlier(t *testing.T) {
 }
 
 // ============================================================
-// P1.1 — full PUT → webdav.Handler → close hook → DAO → admin
+// full PUT → webdav.Handler → close hook → DAO → admin
 // ============================================================
 
 // TestE2E_TrackingThroughWebdavHandler bootstraps the full request
@@ -323,7 +323,7 @@ func TestE2E_TrackingThroughWebdavHandler(t *testing.T) {
 }
 
 // ============================================================
-// P2.3 — per-export overrides
+// per-export overrides
 // ============================================================
 
 func TestResolveTrackAccess_PerExportOverridesOriginWide(t *testing.T) {
@@ -453,7 +453,7 @@ func TestTwoNamespaces_OnlyTrackedNamespaceRecords(t *testing.T) {
 }
 
 // ============================================================
-// P3.5 — pruner Start/Stop lifecycle
+// pruner Start/Stop lifecycle
 // ============================================================
 
 // TestPruner_StartTickDeleteStop — the pruner's goroutine, started
@@ -519,7 +519,7 @@ func TestPruner_StartTickDeleteStop(t *testing.T) {
 }
 
 // ============================================================
-// P3.6 — SHA-256 ETag round-trips into DAO row
+// SHA-256 ETag round-trips into DAO row
 // ============================================================
 
 // TestEtagPolicySHA256_PersistedToDB confirms that when POSC's

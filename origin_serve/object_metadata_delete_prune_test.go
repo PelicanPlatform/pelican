@@ -16,22 +16,23 @@
  *
  ***************************************************************/
 
-// File object_metadata_p1_fixes_test.go contains the regression
-// tests for the three P1 bugs surfaced during pre-PR review:
+// File object_metadata_delete_prune_test.go covers the
+// external-delete and pruning behavior of the object-metadata
+// subsystem:
 //
-//   P1.1 — handleENOENT must fire external_delete even when the
-//          observation cache is cold (the DAO row alone is enough
-//          evidence that the object existed and is now gone).
+//   - handleENOENT fires external_delete even when the observation
+//     cache is cold (the DAO row alone is enough evidence that the
+//     object existed and is now gone).
 //
-//   P1.2 — sqliteBatcher.Stop() must not lose ops to a shutdown
-//          race. Every op a caller successfully began enqueueing
-//          either lands in the final flush OR fails with a
-//          caller-side error; no op gets stranded.
+//   - sqliteBatcher.Stop() does not lose ops to a shutdown race.
+//     Every op a caller successfully began enqueueing either lands
+//     in the final flush OR fails with a caller-side error; no op
+//     gets stranded.
 //
-//   P1.3 — objectMetadataPruner must hard-delete soft-deleted
-//          live rows older than retention, not just history rows.
-//          Without this, busy-delete namespaces accumulate
-//          `object_metadata` rows forever.
+//   - objectMetadataPruner hard-deletes soft-deleted live rows
+//     older than retention, not just history rows. Without this,
+//     busy-delete namespaces would accumulate `object_metadata`
+//     rows forever.
 
 package origin_serve
 
@@ -47,7 +48,7 @@ import (
 )
 
 // ============================================================
-// P1.1 — cold-cache external_delete
+// cold-cache external_delete
 // ============================================================
 
 // TestExternalDelete_FiresWhenCacheCold seeds a live row in the
@@ -125,7 +126,7 @@ func TestExternalDelete_ColdCacheTruePositiveOnly(t *testing.T) {
 }
 
 // ============================================================
-// P1.2 — Stop() shutdown race
+// Stop() shutdown race
 // ============================================================
 
 // TestBatcher_StopNoLostOpsUnderConcurrency hammers the batcher
@@ -230,7 +231,7 @@ func TestBatcher_StopReturnsPromptly(t *testing.T) {
 }
 
 // ============================================================
-// P1.3 — soft-deleted live rows pruned
+// soft-deleted live rows pruned
 // ============================================================
 
 // TestPruner_HardDeletesSoftDeletedLiveRows seeds a soft-deleted
