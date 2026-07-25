@@ -365,12 +365,21 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 	require.NoError(t, err)
 	defer testStore.Close()
 
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
+	// Pass an errgroup via context so we can deterministically wait for the
+	// recovered-job goroutines to exit before the store is closed and the
+	// TempDir is removed. Shutdown() only signals cancellation; without
+	// draining, a recovered job still executing (and writing job status to
+	// the SQLite DB, recreating -wal/-shm) races the TempDir RemoveAll and
+	// flakily fails with "directory not empty". This drain defer is declared
+	// after `defer testStore.Close()` so LIFO runs it first.
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
+	ctx2, cancel2 := context.WithCancel(context.WithValue(egrpCtx, config.EgrpKey, egrp))
 
 	tm2 := NewTransferManager(ctx2, 5, testStore)
 	defer func() {
+		cancel2()
 		_ = tm2.Shutdown()
+		_ = egrp.Wait()
 	}()
 
 	// Wait for job to be recovered
