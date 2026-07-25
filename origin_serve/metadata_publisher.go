@@ -53,12 +53,21 @@ import (
 type publishOutcome string
 
 const (
-	outcomeSuccess publishOutcome = "success"
-	outcomeHTTP4xx publishOutcome = "http_4xx"
-	outcomeHTTP5xx publishOutcome = "http_5xx"
-	outcomeNetwork publishOutcome = "network"
-	outcomeTimeout publishOutcome = "timeout"
+	outcomeSuccess  publishOutcome = "success"
+	outcomeRejected publishOutcome = "rejected" // catalog said the event is permanently bad (HTTP 422)
+	outcomeHTTP4xx  publishOutcome = "http_4xx"
+	outcomeHTTP5xx  publishOutcome = "http_5xx"
+	outcomeNetwork  publishOutcome = "network"
+	outcomeTimeout  publishOutcome = "timeout"
 )
+
+// PermanentRejectStatus is the HTTP status a catalog returns to say "this
+// metadata event is permanently unacceptable — stop retrying it." It is the
+// wire contract shared with external catalog operators (see the design doc).
+// We use 422 Unprocessable Content: the request was well-formed and
+// authenticated, but the event's content is semantically rejected. Every other
+// non-2xx (including auth 401/403 and 5xx) is treated as transient.
+const PermanentRejectStatus = 422
 
 // publishResult bundles the outcome of one attempt.
 type publishResult struct {
@@ -69,6 +78,11 @@ type publishResult struct {
 
 // IsSuccess reports whether the attempt counts as a successful publish.
 func (r publishResult) IsSuccess() bool { return r.outcome == outcomeSuccess }
+
+// IsPermanentReject reports whether the catalog permanently refused the event
+// (HTTP 422). Callers must not retry: eventual mode marks the row terminal,
+// transactional mode fails the upload.
+func (r publishResult) IsPermanentReject() bool { return r.outcome == outcomeRejected }
 
 // IdempotencyKeyHeader is the header that carries the event UUID on
 // the outgoing webhook request. The well-known `Idempotency-Key`
@@ -207,6 +221,12 @@ func (p *publisher) Attempt(ctx context.Context, endpoint string, event *ObjectC
 	}()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return publishResult{outcome: outcomeSuccess, status: resp.StatusCode}
+	}
+	if resp.StatusCode == PermanentRejectStatus {
+		// The catalog understood the request but permanently rejects this
+		// event's content. Do not retry.
+		log.Warnf("metadata endpoint permanently rejected event %s ns=%s: %d", event.ID, event.Namespace, resp.StatusCode)
+		return publishResult{outcome: outcomeRejected, status: resp.StatusCode, err: fmt.Errorf("http %d (permanently rejected)", resp.StatusCode)}
 	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 		log.Warnf("metadata endpoint returned 4xx for event %s ns=%s: %d", event.ID, event.Namespace, resp.StatusCode)

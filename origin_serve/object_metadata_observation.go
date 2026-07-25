@@ -65,6 +65,32 @@ func isListingMode(ctx context.Context) bool {
 	return v
 }
 
+// inbandWriteKey is the context key the HTTP handler sets while serving
+// a Pelican-initiated write (PUT) or delete (DELETE) request.
+type inbandWriteKey struct{}
+
+// withInbandWrite flags ctx as belonging to a Pelican-initiated
+// mutation. The change-detection ladder consults this so that a Stat
+// the write path performs internally — most importantly POSC's
+// post-rename Stat to build the commit event, which runs *before*
+// RecordCommit updates the tracking row — is not misclassified as an
+// out-of-band change. Without this, an overwrite PUT publishes a
+// spurious object.updated (from the observation layer) alongside the
+// authoritative object.updated the commit hook already emits.
+func withInbandWrite(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inbandWriteKey{}, true)
+}
+
+// isInbandWrite returns true iff withInbandWrite was called on this
+// (or an ancestor of this) ctx.
+func isInbandWrite(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(inbandWriteKey{}).(bool)
+	return v
+}
+
 // ============================================================
 // In-memory LRU cache
 // ============================================================
@@ -178,6 +204,14 @@ type observationConfig struct {
 	// "cache hit rate" number, but in practice the storage layer
 	// metrics already capture the cost difference indirectly.
 	cacheHits atomic.Int64
+
+	// onDelete / onUpdate, when set, publish object.deleted / object.updated
+	// webhook events to the external catalog. Wired in InitializeHandlers only
+	// when BOTH metadata publishing and TrackAccess are enabled for the export
+	// (TrackAccess is what detects deletes / out-of-band changes). nil = don't
+	// publish.
+	onDelete func(ctx context.Context, fedPath string)
+	onUpdate func(ctx context.Context, fedPath string, size int64, etag string, mtime time.Time)
 }
 
 // handleStatSuccess is called after a successful backend Stat. It
@@ -208,6 +242,14 @@ func (o *observationConfig) handleStatSuccess(ctx context.Context, fedPath strin
 		o.accessDebouncer.Note(o.namespace, fedPath, time.Now())
 	}
 
+	// A Stat performed while Pelican is itself writing this object (POSC
+	// Stats the final path to build the commit event before RecordCommit
+	// runs, so the tracking row still holds the OLD etag) is observing an
+	// in-band change, not an external one. Warm the cache to the new etag
+	// but do not record/publish an external_modify — the commit hook emits
+	// the authoritative object.updated. See withInbandWrite.
+	inband := isInbandWrite(ctx)
+
 	if entry, ok := o.cache.Get(o.namespace, fedPath); ok {
 		if entry.ETag == etag {
 			o.cacheHits.Add(1)
@@ -219,7 +261,9 @@ func (o *observationConfig) handleStatSuccess(ctx context.Context, fedPath strin
 		// re-reading the live row, and the cache mirrors the live
 		// row's etag at our last write).
 		objMetaCacheHits.WithLabelValues(o.namespace).Inc()
-		o.recordExternalChange(ctx, fedPath, size, etag, mtime)
+		if !inband {
+			o.recordExternalChange(ctx, fedPath, size, etag, mtime)
+		}
 		o.cache.Set(o.namespace, fedPath, etag)
 		return
 	}
@@ -232,7 +276,9 @@ func (o *observationConfig) handleStatSuccess(ctx context.Context, fedPath strin
 		return
 	}
 	if live == nil {
-		o.recordExternalObserve(ctx, fedPath, size, etag, mtime)
+		if !inband {
+			o.recordExternalObserve(ctx, fedPath, size, etag, mtime)
+		}
 		o.cache.Set(o.namespace, fedPath, etag)
 		return
 	}
@@ -241,7 +287,9 @@ func (o *observationConfig) handleStatSuccess(ctx context.Context, fedPath strin
 		o.cache.Set(o.namespace, fedPath, etag)
 		return
 	}
-	o.recordExternalChange(ctx, fedPath, size, etag, mtime)
+	if !inband {
+		o.recordExternalChange(ctx, fedPath, size, etag, mtime)
+	}
 	o.cache.Set(o.namespace, fedPath, etag)
 }
 
@@ -260,6 +308,14 @@ func (o *observationConfig) handleStatSuccess(ctx context.Context, fedPath strin
 // permanently absent.
 func (o *observationConfig) handleENOENT(ctx context.Context, fedPath string) {
 	if o == nil {
+		return
+	}
+	// A Stat-sees-gone while Pelican is itself deleting this object is
+	// in-band: aferoFileSystem.RemoveAll already records the delete and
+	// fires onDelete. Firing again here would double-publish
+	// object.deleted. See withInbandWrite.
+	if isInbandWrite(ctx) {
+		o.cache.Invalidate(o.namespace, fedPath)
 		return
 	}
 	if _, ok := o.cache.Get(o.namespace, fedPath); !ok {
@@ -284,6 +340,9 @@ func (o *observationConfig) handleENOENT(ctx context.Context, fedPath string) {
 		return
 	}
 	objMetaExternalChanges.WithLabelValues(o.namespace, string(ObjectEventExternalDelete)).Inc()
+	if o.onDelete != nil {
+		o.onDelete(ctx, fedPath)
+	}
 }
 
 func (o *observationConfig) recordExternalObserve(ctx context.Context, fedPath string, size int64, etag string, mtime time.Time) {
@@ -319,6 +378,9 @@ func (o *observationConfig) recordExternalChange(ctx context.Context, fedPath st
 		return
 	}
 	objMetaExternalChanges.WithLabelValues(o.namespace, string(ObjectEventExternalModify)).Inc()
+	if o.onUpdate != nil {
+		o.onUpdate(ctx, fedPath, size, etag, mtime)
+	}
 }
 
 // closeHookFn is the close-hook function signature used everywhere a

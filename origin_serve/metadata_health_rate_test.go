@@ -84,7 +84,7 @@ func TestRefreshHealthMetrics_GaugeTransitions(t *testing.T) {
 
 	base := time.Now().UTC()
 	ev := NewObjectCommitEvent("/exp", "/exp/x.dat", 1, "", base, nil)
-	if _, err := ctl.queue.EnqueueEvent(context.Background(), ev); err != nil {
+	if _, err := ctl.queue.EnqueueEvent(context.Background(), ev, managementTokens{}, 0); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 

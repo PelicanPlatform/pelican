@@ -60,10 +60,42 @@ type MetadataPublishRow struct {
 	NextAttemptAt       time.Time `gorm:"column:next_attempt_at;not null;index"`
 	Attempts            int       `gorm:"column:attempts;not null;default:0"`
 	LastError           string    `gorm:"column:last_error;not null;default:''"`
+
+	// State is "pending" (the worker keeps retrying) or "rejected" (terminal:
+	// the catalog answered 422 / permanently-bad, so the worker stops touching
+	// it; the row lingers for status queries and admin/operator deletion).
+	State string `gorm:"column:state;not null;default:'pending'"`
+
+	// QueryToken / ManageToken are per-row random capability tokens embedded in
+	// the status / manage URLs handed back to the uploading client in eventual
+	// mode. Possession of the (unguessable) URL is the authority — no separate
+	// bearer token is required. Empty for transactional-mode rows (which never
+	// outlive the request).
+	QueryToken  string `gorm:"column:query_token;not null;default:''"`
+	ManageToken string `gorm:"column:manage_token;not null;default:''"`
+
+	// EventType is the wire `type` (object.committed / object.updated /
+	// object.deleted). Persisted so a retry rebuilds the event with its
+	// original type, and so the worker knows to skip the "object still exists?"
+	// check for deletes.
+	EventType string `gorm:"column:event_type;not null;default:'object.committed'"`
 }
 
 // TableName overrides the default GORM pluralization rule.
 func (MetadataPublishRow) TableName() string { return "metadata_publish_queue" }
+
+// Publish-queue row states.
+const (
+	metadataStatePending  = "pending"
+	metadataStateRejected = "rejected"
+)
+
+// managementTokens carries the random capability tokens for a queued row.
+// Both are empty in transactional mode.
+type managementTokens struct {
+	Query  string
+	Manage string
+}
 
 // ErrEventNotFound is returned by mutators when no row matches the
 // supplied event_id.
@@ -112,7 +144,13 @@ func (q *publishQueue) handle() *gorm.DB {
 // event_id=?. The extra read is amortized across the coalesced
 // batch — typically zero round-trips of latency because the row is
 // already in SQLite's page cache.
-func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent) (*MetadataPublishRow, error) {
+// firstAttemptDelay pushes the row's next_attempt_at into the future so the
+// background worker won't claim it while the caller is still performing its
+// synchronous first attempt (preventing a duplicate publish). The caller
+// deletes / reschedules the row itself; the delay only governs when the worker
+// would recover the row if the caller's process crashed mid-attempt. Pass 0
+// for immediate claimability (queue-level tests).
+func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent, tok managementTokens, firstAttemptDelay time.Duration) (*MetadataPublishRow, error) {
 	customJSON := []byte("{}")
 	if len(e.CustomFields) > 0 {
 		var err error
@@ -122,6 +160,7 @@ func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent) (
 		}
 	}
 	now := time.Now().UTC()
+	firstAttempt := now.Add(firstAttemptDelay)
 	if q.batcher == nil {
 		// Direct path (tests + early-init).
 		row := &MetadataPublishRow{
@@ -135,7 +174,11 @@ func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent) (
 			MetadataContentType: e.MetadataContentType,
 			MetadataBody:        e.MetadataBody,
 			CreatedAt:           now,
-			NextAttemptAt:       now,
+			NextAttemptAt:       firstAttempt,
+			State:               metadataStatePending,
+			QueryToken:          tok.Query,
+			ManageToken:         tok.Manage,
+			EventType:           e.Type,
 		}
 		if err := q.handle().Create(row).Error; err != nil {
 			return nil, err
@@ -158,11 +201,13 @@ func (q *publishQueue) EnqueueEvent(ctx context.Context, e *ObjectCommitEvent) (
 		`INSERT INTO metadata_publish_queue
 			(event_id, namespace, object_path, object_size, etag, object_created,
 			 custom_fields, metadata_content_type, metadata_body,
-			 created_at, next_attempt_at, attempts, last_error)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,0,'')`,
+			 created_at, next_attempt_at, attempts, last_error,
+			 state, query_token, manage_token, event_type)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,0,'',?,?,?,?)`,
 		e.ID, e.Namespace, e.ObjectPath, e.ObjectSize, e.ETag, e.ObjectCreated.UTC(),
 		string(customJSON), e.MetadataContentType, metadataBody,
-		now, now,
+		now, firstAttempt,
+		metadataStatePending, tok.Query, tok.Manage, e.Type,
 	); err != nil {
 		return nil, err
 	}
@@ -181,9 +226,13 @@ func EventFromRow(r *MetadataPublishRow) (*ObjectCommitEvent, error) {
 			return nil, err
 		}
 	}
+	eventType := r.EventType
+	if eventType == "" {
+		eventType = ObjectCommitEventType
+	}
 	return &ObjectCommitEvent{
 		ID:                  r.EventID,
-		Type:                ObjectCommitEventType,
+		Type:                eventType,
 		Timestamp:           r.CreatedAt,
 		Namespace:           r.Namespace,
 		ObjectPath:          r.ObjectPath,
@@ -243,7 +292,10 @@ func (q *publishQueue) claimDue(limit int, lease time.Duration) ([]*MetadataPubl
 			panic(r)
 		}
 	}()
-	if err := tx.Where("next_attempt_at <= ?", now).
+	// Only "pending" rows are claimable; "rejected" rows are terminal (the
+	// catalog permanently refused them) and wait for a status query or an
+	// operator delete rather than being retried.
+	if err := tx.Where("next_attempt_at <= ? AND state = ?", now, metadataStatePending).
 		Order("next_attempt_at ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -287,6 +339,37 @@ func (q *publishQueue) scheduleRetry(rowID int64, nextAttemptAt time.Time, errMs
 // successful publish where we already have the row in hand.
 func (q *publishQueue) deleteByID(rowID int64) error {
 	return q.handle().Where("id = ?", rowID).Delete(&MetadataPublishRow{}).Error
+}
+
+// markRejected moves a row to the terminal "rejected" state (the catalog
+// answered 422 / permanently-bad). The worker's claimDue skips it thereafter;
+// it lingers so a status query can report the rejection and an operator can
+// delete it. attempts is bumped so the count reflects the final try.
+func (q *publishQueue) markRejected(rowID int64, errMsg string) error {
+	return q.handle().Model(&MetadataPublishRow{}).
+		Where("id = ?", rowID).
+		Updates(map[string]any{
+			"state":      metadataStateRejected,
+			"attempts":   gorm.Expr("attempts + 1"),
+			"last_error": errMsg,
+		}).Error
+}
+
+// FindByToken looks a row up by either capability token. isManage reports
+// whether the supplied token was the (more privileged) manage token, so the
+// caller can gate cancel/delete on it. An empty token never matches.
+func (q *publishQueue) FindByToken(token string) (row *MetadataPublishRow, isManage bool, err error) {
+	if token == "" {
+		return nil, false, ErrEventNotFound
+	}
+	var r MetadataPublishRow
+	if e := q.handle().Where("manage_token = ? OR query_token = ?", token, token).First(&r).Error; e != nil {
+		if errors.Is(e, gorm.ErrRecordNotFound) {
+			return nil, false, ErrEventNotFound
+		}
+		return nil, false, e
+	}
+	return &r, r.ManageToken == token, nil
 }
 
 // listOptions narrows the rows returned by ListPending. All fields are
@@ -346,6 +429,7 @@ func (q *publishQueue) NextDueAt() (time.Time, bool, error) {
 	var rows []MetadataPublishRow
 	err := q.handle().Model(&MetadataPublishRow{}).
 		Select("next_attempt_at").
+		Where("state = ?", metadataStatePending).
 		Order("next_attempt_at ASC").
 		Limit(1).
 		Find(&rows).Error
@@ -364,7 +448,9 @@ func (q *publishQueue) NextDueAt() (time.Time, bool, error) {
 // expected scale it's fine.
 func (q *publishQueue) QueueStats() (*queueStats, error) {
 	var rows []*MetadataPublishRow
-	if err := q.handle().Find(&rows).Error; err != nil {
+	// Only pending rows count toward depth / oldest-age (and thus the health
+	// gauge); terminal "rejected" rows are a separate, operator-facing concern.
+	if err := q.handle().Where("state = ?", metadataStatePending).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	stats := &queueStats{

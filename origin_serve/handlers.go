@@ -921,6 +921,13 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 					cache:           newObservationCache(0),
 					accessDebouncer: objectMetaAccess,
 				}
+				// When publishing is also enabled, publish object.deleted /
+				// object.updated as the tracking layer observes deletes and
+				// out-of-band modifications.
+				if metadataCtl != nil {
+					obs.onDelete = metadataCtl.PublishDeleteHook(export.FederationPrefix)
+					obs.onUpdate = metadataCtl.PublishUpdateHook(export.FederationPrefix)
+				}
 				aferoFs.setObservation(obs)
 				log.Infof("Object-metadata tracking enabled for %s (TrackExtra=%t)",
 					export.FederationPrefix, obs.trackExtra)
@@ -936,19 +943,28 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			// metadata DAO (objectMetaDAO + per-export TrackAccess).
 			// Either, both, or neither may be active. closeHook is
 			// nil iff no one wants to be told.
-			var publishHook, trackHook closeHookFn
-			if metadataCtl != nil {
-				publishHook = metadataCtl.CommitEventFromCloseHook(export.FederationPrefix)
-			}
-			if objectMetaDAO != nil && resolveTrackAccess(export) {
+			trackEnabled := objectMetaDAO != nil && resolveTrackAccess(export)
+			var trackHook closeHookFn
+			if trackEnabled {
 				trackHook = RecordCommitCloseHook(objectMetaDAO, export.FederationPrefix, resolveTrackExtra(export))
 			}
-			// Argument order = fire order; the LAST hook's error
-			// is the one surfaced to the caller. Track is best-
-			// effort so it goes first (its error is overwritten
-			// by publish's nil on the happy path); publish's
-			// error is what the close caller acts on.
-			closeHook := composeCloseHooks(trackHook, publishHook)
+			// Choose the commit close hook:
+			//   - publish + track: overwrite-aware hook — probes the tracking
+			//     DB (create vs overwrite → object.committed / object.updated),
+			//     runs the track hook, then publishes (publish error gates the
+			//     close for transactional rollback).
+			//   - publish only: always object.committed (no DB to tell create
+			//     from overwrite).
+			//   - track only: just record the commit.
+			var closeHook closeHookFn
+			switch {
+			case metadataCtl != nil && trackEnabled:
+				closeHook = metadataCtl.CommitEventFromCloseHookTracked(export.FederationPrefix, objectMetaDAO, trackHook)
+			case metadataCtl != nil:
+				closeHook = metadataCtl.CommitEventFromCloseHook(export.FederationPrefix)
+			case trackEnabled:
+				closeHook = trackHook
+			}
 
 			poscEnabled := param.Origin_Posc_Enabled.GetBool()
 			if poscEnabled {
@@ -978,7 +994,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				// hook still fires only on a successful Close().
 				fs = newCloseNotifyFs(fs, closeHook)
 				log.Infof("Close-hook enabled for %s (without POSC; publish=%t, track=%t)",
-					export.FederationPrefix, publishHook != nil, trackHook != nil)
+					export.FederationPrefix, metadataCtl != nil, trackEnabled)
 			}
 
 			// Capture the pre-multiuser FileSystem for the metadata
@@ -1125,6 +1141,16 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// the close hook can inline custom fields into the webhook.
 			modifiedReq = extractObjectMetadataFromRequest(modifiedReq)
 
+			// Flag Pelican-initiated mutations so the object-metadata
+			// observation layer does not misread the write/delete path's
+			// own internal Stat (e.g. POSC's post-rename Stat, taken
+			// before RecordCommit runs) as an out-of-band change and
+			// publish a spurious object.updated / object.deleted on top of
+			// the authoritative commit-hook / RemoveAll event.
+			if req.Method == http.MethodPut || req.Method == http.MethodDelete {
+				req = req.WithContext(withInbandWrite(req.Context()))
+			}
+
 			// When the upload is multipart/form-data, peel the
 			// metadata part now (capped, into memory) and rewire
 			// r.Body to stream the object part into the webdav
@@ -1151,6 +1177,11 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 				// For GET requests, add ETag header based on file metadata
 				handleGetWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
 			} else if c.Request.Method == http.MethodPut {
+				// Plumb the response header map through so the metadata close
+				// hook can stamp X-Pelican-Metadata-* result headers on the PUT
+				// response (the deferred-header writer flushes them after webdav
+				// returns). Harmless when metadata publishing is disabled.
+				req = req.WithContext(withResponseHeader(req.Context(), c.Writer.Header()))
 				// For PUT requests, return ETag of the newly written file
 				handlePutWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
 			} else {

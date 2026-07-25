@@ -330,6 +330,10 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 		}); recErr != nil {
 			log.Debugf("object-metadata: RecordDelete(%s,%s) failed: %v", afs.obs.namespace, fedPath, recErr)
 		}
+		// Publish an object.deleted webhook (best-effort, async) when enabled.
+		if afs.obs.onDelete != nil {
+			afs.obs.onDelete(ctx, fedPath)
+		}
 	}
 	return nil
 }

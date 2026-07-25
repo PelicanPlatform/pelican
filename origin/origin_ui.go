@@ -48,6 +48,11 @@ func RegisterOriginWebAPI(routerGroup *gin.RouterGroup) error {
 	// V2-origin metadata-publish queue admin (no-op when disabled).
 	origin_serve.RegisterMetadataAdminAPI(routerGroup, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
+	// V2-origin client-facing metadata-publish status/cancel endpoints.
+	// Deliberately no auth middleware: the random capability token in the
+	// URL (handed to the uploader on the PUT response) is the authorization.
+	origin_serve.RegisterMetadataStatusAPI(routerGroup)
+
 	// V2-origin local object-metadata tracking admin (no-op when
 	// TrackAccess is off for every namespace).
 	origin_serve.RegisterObjectMetadataAdminAPI(routerGroup, web_ui.AuthHandler, web_ui.AdminAuthHandler)
