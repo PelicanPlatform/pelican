@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -375,9 +375,11 @@ func ResetTestState() {
 	ResetOriginExports()
 	logging.ResetLogFlush()
 	logging.ResetGlobalManager()
+	baseAdMu.Lock()
 	baseAdOnce = sync.Once{}
 	baseAd = server_structs.ServerBaseAd{}
 	baseAdErr = nil
+	baseAdMu.Unlock()
 	directorEndpoints.Store(nil)
 	if err := database.ShutdownDB(); err != nil {
 		log.Errorf("Failed to shutdown the database: %v", err)

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -990,10 +990,13 @@ var (
 		Help: "Statistics about connection calls.",
 	}, []string{"type"})
 
-	lastStats        SummaryStat
-	lastOssStats     OSSStatsGs
-	lastS3CacheStats OssS3CacheGs
-	lastXrdCurlStats struct {
+	lastStatsMu        sync.Mutex
+	lastStats          SummaryStat
+	lastOssStatsMu     sync.Mutex
+	lastOssStats       OSSStatsGs
+	lastS3CacheStatsMu sync.Mutex
+	lastS3CacheStats   OssS3CacheGs
+	lastXrdCurlStats   struct {
 		File    XrdCurlFileStats
 		Queues  XrdCurlQueueStats
 		Workers map[string]float64
@@ -1902,6 +1905,8 @@ func HandleSummaryPacket(packet []byte) error {
 		// We only care about the xrootd summary packets
 		return nil
 	}
+	lastStatsMu.Lock()
+	defer lastStatsMu.Unlock()
 	for _, stat := range summaryStats.Stats {
 		switch stat.Id {
 
@@ -2082,6 +2087,10 @@ func handleS3CacheStats(blobs [][]byte) error {
 
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
+	// lastS3CacheStats has the same concurrent exposure as lastOssStats (both are
+	// reached through handleOSSPacket), so guard it the same way.
+	lastS3CacheStatsMu.Lock()
+	defer lastS3CacheStatsMu.Unlock()
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		s3fileStats := OssS3CacheGs{}
@@ -2212,6 +2221,8 @@ func handleOSSStats(blobs [][]byte) error {
 	}
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
+	lastOssStatsMu.Lock()
+	defer lastOssStatsMu.Unlock()
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		ossStats := OSSStatsGs{}
@@ -2306,7 +2317,6 @@ func handleOSSStats(blobs [][]byte) error {
 		// Found and processed the last valid event, so we are done
 		break
 	}
-
 	return nil
 }
 

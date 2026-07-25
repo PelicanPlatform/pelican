@@ -33,6 +33,12 @@ import (
 var (
 	ssrfTransport     *SSRFTransport
 	onceSSRFTransport sync.Once
+	// ssrfTransportMu guards onceSSRFTransport and ssrfTransport for the same
+	// reason transportMu guards the default transport: sync.Once serializes
+	// callers through Do, but does not protect a concurrent
+	// ResetSSRFTransportForTest from overwriting the Once (or the singleton
+	// pointer) while a getter reads it.
+	ssrfTransportMu sync.Mutex
 )
 
 // SSRFTransport is an http.Transport wrapper that prevents server-side request
@@ -207,17 +213,17 @@ func (t *SSRFTransport) ssrfDialContext(ctx context.Context, network, addr strin
 //
 // The transport is initialised once; subsequent calls return the same instance.
 func GetSSRFTransport() *SSRFTransport {
-	onceSSRFTransport.Do(func() {
-		setupSSRFTransport()
-	})
+	ssrfTransportMu.Lock()
+	defer ssrfTransportMu.Unlock()
+	onceSSRFTransport.Do(setupSSRFTransport)
 	return ssrfTransport
 }
 
 func setupSSRFTransport() {
-	// Ensure the base transport is initialised.
-	onceTransport.Do(func() {
-		setupTransport()
-	})
+	// Ensure the base transport is initialised.  Route through initTransport so
+	// the base onceTransport/transport pointers are touched under transportMu
+	// rather than raced against a concurrent resetTransport.
+	initTransport()
 
 	disabled := param.Server_SSRFProtection_Disabled.GetBool()
 	skipDefaultBlocks := param.Server_SSRFProtection_SkipDefaultBlocks.GetBool()
@@ -254,6 +260,8 @@ func GetSSRFHttpTransport() *http.Transport {
 // ResetSSRFTransportForTest resets the SSRF transport singleton so it can be
 // re-initialised with different config values in tests.
 func ResetSSRFTransportForTest() {
+	ssrfTransportMu.Lock()
+	defer ssrfTransportMu.Unlock()
 	onceSSRFTransport = sync.Once{}
 	ssrfTransport = nil
 }

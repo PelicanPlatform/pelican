@@ -103,7 +103,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go directorAds.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
-		serverAd := i.Value().ServerAd
+		serverAd := i.Value().GetServerAd()
 		serverUrl := i.Key()
 		log.Debugf("serverAds for %s server %s is evicted. Clean up started.", string(serverAd.Type), serverAd.Name)
 
