@@ -367,19 +367,24 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		for _, export := range originExports {
 			go func(prefix string) {
 				defer wg.Done()
+				// Use goroutine-local error variables: these run concurrently
+				// and must not share the enclosing function's named-return `err`
+				// (concurrent writes are a data race and let one prefix's result
+				// clobber another's, causing spurious advertisement failures).
 				// Probably no need to incur another err check since we already checked the director URL.
 				urlToCheck, _ := url.Parse(directorUrl.String())
-				urlToCheck.Path, err = url.JoinPath("/api/v1.0/director/origin", prefix)
+				joinedPath, joinErr := url.JoinPath("/api/v1.0/director/origin", prefix)
+				if joinErr != nil {
+					errCh <- errors.Wrapf(joinErr, "Failed to join path %s for origin advertisement check", prefix)
+					return
+				}
+				urlToCheck.Path = joinedPath
 				// Skip stat check. Otherwise it will return 404
 				query := urlToCheck.Query()
 				query.Add("skipstat", "")
 				urlToCheck.RawQuery = query.Encode()
-				if err != nil {
-					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
-					return
-				}
-				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); err != nil {
-					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
+				if waitErr := server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); waitErr != nil {
+					errCh <- errors.Wrapf(waitErr, "The prefix %s does not seem to have advertised correctly", prefix)
 				}
 
 			}(export.FederationPrefix)
