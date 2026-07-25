@@ -135,7 +135,7 @@ func TestHTTPSFileInfo(t *testing.T) {
 	fi := &httpsFileInfo{name: "test.txt", size: 100, isDir: false}
 	assert.Equal(t, "test.txt", fi.Name())
 	assert.Equal(t, int64(100), fi.Size())
-	assert.Equal(t, os.FileMode(0444), fi.Mode())
+	assert.Equal(t, os.FileMode(0644), fi.Mode())
 	assert.False(t, fi.IsDir())
 	assert.Nil(t, fi.Sys())
 	assert.False(t, fi.ModTime().IsZero()) // zero modtime gets replaced
