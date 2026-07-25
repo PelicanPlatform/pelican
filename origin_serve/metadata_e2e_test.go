@@ -225,8 +225,8 @@ func TestE2ETransactional_RollbackOn5xx(t *testing.T) {
 // stack: an HTTP PUT goes through a real webdav.Handler (which strips
 // the federation prefix), through POSC, into memfs, and the close
 // hook publishes to a receiver. The test asserts the receiver sees
-// the *federation-rooted* path in the JSON body — closing the gap
-// that the synthetic (handler-bypassing) e2e test missed.
+// the *federation-rooted* path in the JSON body, exercising the real
+// handler prefix-stripping rather than a synthetic handler bypass.
 func TestE2EWebdavHandler_PathIsFederationRooted(t *testing.T) {
 	bodies := make(chan []byte, 4)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -332,10 +332,10 @@ func TestE2EWebdavHandler_PathIsFederationRooted(t *testing.T) {
 // EVENTUAL mode, where the background worker runs the skip-if-deleted
 // existence check via FilesystemForExists.
 //
-// This is the gap the other tests missed: every existing eventual-mode
-// test overrides ctl.objectExists with a closure that Stats the SAME path
-// space the object was written in, so none of them exercise the real
-// FilesystemForExists closure. In production the queue row's ObjectPath is
+// This exercises the real FilesystemForExists closure: other eventual-mode
+// tests override ctl.objectExists with a closure that Stats the SAME path
+// space the object was written in, so they do not cover it. In production
+// the queue row's ObjectPath is
 // federation-rooted (/exp/data/x) while the per-export FileSystem is
 // export-relative (/data/x). If the existence check doesn't reconcile the
 // two, the worker drops every committed object as "deleted" and NOTHING is

@@ -790,8 +790,14 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			// tracking uses; concurrent commits coalesce into one tx.
 			Batcher: objectMetaBatcher,
 		}
+		// Construct the controller now (the per-export loop below needs it
+		// to wire close hooks), but do NOT Start its worker pool yet: the
+		// workers' FilesystemForExists closure reads preMultiuserFs, which
+		// the loop is still populating. Starting here would race the map
+		// write (fatal "concurrent map read and map write") the moment a
+		// worker claims a due row on restart. Start() is deferred until
+		// after the loop, once preMultiuserFs is fully built.
 		metadataCtl = newMetadataController(opts)
-		metadataCtl.Start(ctx)
 		log.Infof("metadata publishing enabled (mode=%s)", param.Origin_Metadata_Mode.GetString())
 	}
 
@@ -1108,6 +1114,13 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			copyEnabledPrefixes[export.FederationPrefix] = true
 		}
 		log.Infof("Initialized WebDAV handler for %s -> %s (storage: %s)", export.FederationPrefix, export.StoragePrefix, storageType)
+	}
+
+	// Now that preMultiuserFs is fully populated, it is safe to start the
+	// publish worker pool: FilesystemForExists can no longer observe a
+	// half-built map while a worker resumes queued rows on restart.
+	if metadataCtl != nil {
+		metadataCtl.Start(ctx)
 	}
 
 	return nil

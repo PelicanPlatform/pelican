@@ -1,6 +1,6 @@
 # Origin POSC and Object-Metadata Upload (V2 Origin)
 
-Status: design — implementation in progress Audience: Pelican origin developers and operators Scope: V2 (POSIXv2) origin only.
+Status: implemented Audience: Pelican origin developers and operators Scope: V2 (POSIXv2) origin only.
 
 ## Motivation
 
@@ -355,9 +355,9 @@ Latency, attempt count, and queue-depth gauges are updated under the publisher's
 
 ### Admin HTTP endpoint
 
-A new authenticated admin API surface is added under `/api/v1.0/origin/metadata_queue` (gated by an existing Pelican admin scope; same gating as other origin admin APIs). This is a thin SQL-on-HTTP wrapper, not a CRUD UI.
+A new authenticated admin API surface is added under `/api/v1.0/origin_ui/metadata_queue` (gated by an existing Pelican admin scope; same gating as other origin admin APIs). This is a thin SQL-on-HTTP wrapper, not a CRUD UI.
 
-| Method & path | Behavior | |--------------------------------------------------------|---------------------------------------------------------------------------------------| | `GET /api/v1.0/origin/metadata_queue` | List pending rows (paginated, filterable by `namespace`, sorted by `created_at`). | | `GET /api/v1.0/origin/metadata_queue/{event_id}` | Show a single row including `last_error` and `attempts`. | | `DELETE /api/v1.0/origin/metadata_queue/{event_id}` | Drop a single row (e.g. an operator has decided not to publish). | | `POST /api/v1.0/origin/metadata_queue/{event_id}/retry`| Force `next_attempt_at = now`, leaving `attempts` unchanged. Useful after fixing the receiver. | | `GET /api/v1.0/origin/metadata_queue/_health` | JSON view of the origin-wide health state and per-namespace age summary. |
+| Method & path | Behavior | |--------------------------------------------------------|---------------------------------------------------------------------------------------| | `GET /api/v1.0/origin_ui/metadata_queue` | List pending rows (paginated, filterable by `namespace`, sorted by `created_at`). | | `GET /api/v1.0/origin_ui/metadata_queue/{event_id}` | Show a single row including `last_error` and `attempts`. | | `DELETE /api/v1.0/origin_ui/metadata_queue/{event_id}` | Drop a single row (e.g. an operator has decided not to publish). | | `POST /api/v1.0/origin_ui/metadata_queue/{event_id}/retry`| Force `next_attempt_at = now`, leaving `attempts` unchanged. Useful after fixing the receiver. | | `GET /api/v1.0/origin_ui/metadata_queue/_health` | JSON view of the origin-wide health state and per-namespace age summary. |
 
 The web UI status page consumes these endpoints to render a queue view; that view is a follow-up and not in scope for the initial PR.
 
@@ -400,14 +400,14 @@ The implementation will be tested at three layers:
 
 The PR will not be marked ready until coverage of `origin_serve/posc*.go` and `origin_serve/metadata*.go` is at least at parity with the rest of the package.
 
-## Open questions
+## Future work
 
-- Should we support TLS client-cert auth to the metadata endpoint as an alternative to JWT? Filed as a follow-up; default is JWT only.
-- Do we want a header-only signature instead of a full bearer JWT, to let the receiver verify without downloading the issuer's JWKS? We are punting on this until at least one consumer is written.
+- TLS client-cert auth to the metadata endpoint as an alternative to JWT. Filed as a follow-up; the default is JWT only.
+- A header-only signature instead of a full bearer JWT, to let the receiver verify without downloading the issuer's JWKS. Deferred until at least one consumer is written.
 
 ## Addendum: opaque-blob metadata via multipart upload
 
-Status: design, not yet implemented. This section is layered on top of the original design — none of it is in tree yet, and nothing above changes shape. The existing `X-Pelican-Object-Metadata` header path stays. This addendum specifies the *opt-in* multipart form for consumers whose metadata is not key/value-shaped (the motivating case: XML documents).
+Status: implemented. This section is layered on top of the original design and does not change the shape of anything above it. The existing `X-Pelican-Object-Metadata` header path stays. This addendum specifies the *opt-in* multipart form for consumers whose metadata is not key/value-shaped (the motivating case: XML documents).
 
 ### Why a separate path
 
@@ -548,13 +548,13 @@ Both can be present on a single upload:
 
 | `X-Pelican-Object-Metadata` | multipart `metadata` part | Webhook shape | |-----------------------------|---------------------------|----------------------------------------------------------------------------| | absent | absent | plain JSON, no `metadata` field | | present | absent | plain JSON, custom fields inline into `object` | | absent | present | `multipart/related` outbound; JSON event + opaque blob | | present | present | `multipart/related` outbound; JSON event has both inline custom fields AND a `metadata` sub-object pointing at the blob |
 
-### Streaming bounds (the question that started this)
+### Streaming bounds
 
 Multipart parsing is a one-pass stream:
 
 - The metadata part is read into memory up to `MaxMetadataBytes`, then closed. If the first part's payload exceeds the cap, the middleware aborts with 413 *before* opening any staging file — no partial write hits disk.
 - The object part is wrapped as an `io.Reader` and fed straight into the existing POSC `OpenFile → Write → Close` pipeline. Memory cost is bounded by Go's stdlib multipart buffering (currently a small bufio default per part) — independent of total upload size.
-- `Content-Length` from the request still bounds the *total* PUT body, which the existing rate-limit / metrics layers honor. The POSC-side `expected_size` check we added in P2.7 is dropped for multipart uploads because the per-part length is not known from the request header alone; an operator who wants size guarantees on multipart uploads can re-introduce them by having the client send a custom `Content-Disposition` `size=` param and adding a middleware check.
+- `Content-Length` from the request still bounds the *total* PUT body, which the existing rate-limit / metrics layers honor. The POSC-side `expected_size` check, which rejects a commit whose written byte count does not match the declared size, is dropped for multipart uploads because the per-part length is not known from the request header alone; an operator who wants size guarantees on multipart uploads can re-introduce them by having the client send a custom `Content-Disposition` `size=` param and adding a middleware check.
 
 ### Server-side composition
 
@@ -591,7 +591,7 @@ The POSC close-hook reads `multipartMetadataFromContext(ctx)` to decide whether 
 1. E2E (mirrors `TestClientUploadWithObjectMetadata`): client posts a multipart upload with a synthetic XML blob, receiver gets a `multipart/related` POST whose second part is the same XML byte-for-byte.
 1. E2E: an upload with both `X-Pelican-Object-Metadata` and a multipart `metadata` part is accepted and both surface in the outbound `multipart/related` webhook.
 
-### Open questions for review
+### Open design questions
 
 - Should `Origin.Metadata.AllowMultipart` default to `true` (opt-out) or `false` (opt-in)? Defaulting to true matches the "accept both" guidance and minimizes friction for operators; the flag is then a safety valve for deployments behind a proxy that rewrites `Content-Type`.
 - `MaxMetadataBytes = 4 MB` is a guess. Real consumers' XML manifests are typically \<100 KB; 4 MB leaves slack but bounds worst-case row sizes in SQLite. Open to data.
@@ -619,7 +619,7 @@ Two crash windows are possible. (a) Origin dies between the POSC rename and the 
 
 ### No fsync between rename and reply
 
-Matches the C++ POSC reference and POSIX defaults. Power-loss after the 2xx but before the kernel flushes the rename can leave the client believing a commit happened that's no longer visible. If a deployment cares about durability across host crashes, the recommended posture is filesystem-level barriers (eg ext4 default journaling) rather than per-syscall fsync, which would meaningfully slow down the upload path. This stance is identical to the C++ POSC's; the design doc reaffirms it here so it's not an issue per PR.
+Matches the C++ POSC reference and POSIX defaults. Power-loss after the 2xx but before the kernel flushes the rename can leave the client believing a commit happened that's no longer visible. If a deployment cares about durability across host crashes, the recommended posture is filesystem-level barriers (eg ext4 default journaling) rather than per-syscall fsync, which would meaningfully slow down the upload path. This stance is identical to the C++ POSC's; the design doc reaffirms it here.
 
 ### New runtime dependency
 

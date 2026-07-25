@@ -34,13 +34,13 @@ import (
 	"time"
 )
 
-// TestEventual_MultipartBlobSurvivesBatchedEnqueueAndWorker closes the gap
-// where a metadata blob rides an eventual-mode publish. The blob columns are
+// TestEventual_MultipartBlobSurvivesBatchedEnqueueAndWorker verifies that a
+// metadata blob rides an eventual-mode publish intact. The blob columns are
 // only ever populated through the BATCHED INSERT path (metadata_content_type
 // / metadata_body are named explicitly in the raw INSERT), and then have to
 // round-trip out of the queue row, through EventFromRow, and into the
-// publisher's multipart/related body. No prior eventual-mode test enqueued a
-// blob, so that whole chain was unverified.
+// publisher's multipart/related body. This exercises that whole chain end to
+// end.
 func TestEventual_MultipartBlobSurvivesBatchedEnqueueAndWorker(t *testing.T) {
 	const (
 		wantBlob = `<datasetSummary><experiment>atlas</experiment></datasetSummary>`

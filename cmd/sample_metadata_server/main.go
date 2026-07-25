@@ -137,6 +137,9 @@ func main() {
 	if cfg.audience == "" {
 		log.Printf("WARNING: -audience is empty; the token audience will NOT be checked. Set it to this receiver's public URL in production.")
 	}
+	if !cfg.requireNamespace {
+		log.Printf("WARNING: -require-namespace-scope is off; any token bearing the bare 'pelican.metadata' scope is accepted for ANY namespace. Enable it in production.")
+	}
 
 	v := newVerifier(client)
 	mux := http.NewServeMux()

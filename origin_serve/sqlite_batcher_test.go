@@ -330,7 +330,7 @@ func TestBatcher_ConcurrentDurablesCoalesce(t *testing.T) {
 }
 
 // ============================================================
-// P2.2 — FlushNow
+// FlushNow
 // ============================================================
 
 // TestBatcher_FlushNowDrainsBuffer — queue best-effort writes with
@@ -392,7 +392,7 @@ func TestBatcher_FlushNowAfterStopReturnsError(t *testing.T) {
 }
 
 // ============================================================
-// P2.4 — flush() respects the transaction timeout
+// flush() respects the transaction timeout
 // ============================================================
 
 // TestBatcher_FlushHonorsTxTimeout — set the per-tx timeout to a

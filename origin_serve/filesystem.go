@@ -539,7 +539,10 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 	if err := afs.fs.RemoveAll(fullPath); err != nil {
 		return err
 	}
-	if afs.obs != nil {
+	// POSC-internal removals (reaped stale temp files, transactional
+	// rollback of a refused commit) must not be observed: they are not
+	// real object deletions and must not emit object.deleted.
+	if afs.obs != nil && !isPoscInternal(ctx) {
 		fedPath := joinFederationPath(afs.obs.namespace, name)
 		afs.obs.cache.Invalidate(afs.obs.namespace, fedPath)
 		// RecordDelete reads the live row inside the DAO; if no
@@ -605,7 +608,9 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 	if err := afs.fs.Rename(oldPath, newPath); err != nil {
 		return err
 	}
-	if afs.obs != nil {
+	// The POSC temp→final rename is internal plumbing, not a user MOVE;
+	// the commit is recorded by the close hook, so skip observation here.
+	if afs.obs != nil && !isPoscInternal(ctx) {
 		oldFed := joinFederationPath(afs.obs.namespace, oldName)
 		newFed := joinFederationPath(afs.obs.namespace, newName)
 		afs.obs.cache.Invalidate(afs.obs.namespace, oldFed)
@@ -647,13 +652,13 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 		// ENOENT may indicate an external_delete; let observation
 		// decide. Skipped for listing mode (and when observation
 		// is off for the namespace).
-		if afs.obs != nil && !isListingMode(ctx) && os.IsNotExist(err) {
+		if afs.obs != nil && !isListingMode(ctx) && !isPoscInternal(ctx) && os.IsNotExist(err) {
 			afs.obs.handleENOENT(ctx, joinFederationPath(afs.obs.namespace, name))
 		}
 		return nil, err
 	}
 	wrapped := withBackendETag(info)
-	if afs.obs != nil && !isListingMode(ctx) {
+	if afs.obs != nil && !isListingMode(ctx) && !isPoscInternal(ctx) {
 		afs.obs.handleStatSuccess(ctx, joinFederationPath(afs.obs.namespace, name), wrapped)
 	}
 	return wrapped, nil

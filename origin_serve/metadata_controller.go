@@ -296,7 +296,15 @@ func newMetadataController(opts metadataControllerOptions) *metadataController {
 			// Stat'ing, otherwise every existence check misses and the
 			// worker drops every row as "object deleted".
 			_, err := fs.Stat(ctx, exportRelativePath(ns, op))
-			return err == nil
+			if err == nil {
+				return true
+			}
+			// Only a definitive "not found" means the object was deleted
+			// and the pending publish should be dropped. Any other error
+			// (permission, EIO, transient backend hiccup) must NOT be read
+			// as deletion — report "exists" so the row is retried rather
+			// than permanently discarded.
+			return !os.IsNotExist(err)
 		}
 	} else {
 		c.objectExists = func(context.Context, string, string) bool { return true }
@@ -922,8 +930,8 @@ func expectedContentLengthFromContext(ctx context.Context) int64 {
 // stashes the request's Content-Length before it knows the body is
 // multipart/form-data; once the multipart rewrite runs, that length covers
 // the whole multipart envelope, not the object part, so the check must be
-// dropped (per the design: "the per-part length is not known from the request
-// header alone").
+// dropped — the per-part object length is not known from the request's
+// Content-Length header alone.
 func clearExpectedContentLength(ctx context.Context) context.Context {
 	return context.WithValue(ctx, expectedContentLengthKey{}, int64(-1))
 }

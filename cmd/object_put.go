@@ -181,6 +181,16 @@ func putMain(cmd *cobra.Command, args []string) {
 	// Check for async mode
 	isAsync, _ := cmd.Flags().GetBool("async")
 	if isAsync {
+		// The async path builds client_agent.TransferOptions, which carries
+		// no metadata fields, so the metadata-publish flags would be silently
+		// dropped. Fail loudly instead (mirrors the --metadata-content-type
+		// guard on the synchronous path).
+		for _, f := range []string{"metadata-file", "metadata-body", "metadata-content-type"} {
+			if v, _ := cmd.Flags().GetString(f); v != "" {
+				log.Errorf("--%s is not yet supported with --async", f)
+				os.Exit(1)
+			}
+		}
 		// Validate arguments
 		if len(args) < 2 {
 			log.Errorln("No Source or Destination")

@@ -168,7 +168,7 @@ TE: trailers
 
 **Format:** A single [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651) Structured-Fields **dictionary**.
 
-**Description:** On a `PUT`, the origin parses this header and inlines its typed key/value pairs into the `object` field of the outbound webhook JSON. Structured Fields are used (rather than embedding JSON in a header) so values keep their type across intermediaries — e.g. `run_number=4172` round-trips as a JSON integer. The reserved keys `path`, `size`, `etag`, and `created_at` are origin-computed and cannot be overridden by the client; a colliding custom key is ignored.
+**Description:** On a `PUT`, the origin parses this header and inlines its typed key/value pairs into the `object` field of the outbound webhook JSON. Structured Fields are used (rather than embedding JSON in a header) so values keep their type across intermediaries — e.g. `run_number=4172` round-trips as a JSON integer. The reserved keys `path`, `size`, `etag`, and `created_at` are origin-computed and cannot be overridden by the client. The client rejects a custom key that collides with a reserved key before sending the request, and the origin independently ignores (overwrites) any colliding key that still arrives.
 
 **Example:**
 

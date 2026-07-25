@@ -241,6 +241,11 @@ func (p *poscFileSystem) OpenFile(ctx context.Context, name string, flag int, pe
 	if user == "" {
 		user = "anonymous"
 	}
+	// The token subject becomes a path segment under poscPrefix. A subject
+	// containing "/" or ".." would otherwise relocate the staging dir
+	// outside poscPrefix (defeating inPoscDir hiding and the reaper's
+	// scan). Encode it to a single safe segment.
+	user = sanitizePoscUser(user)
 	if err := p.ensureUserDir(ctx, user); err != nil {
 		log.Debugf("POSC: failed to ensure user temp dir for %q: %v", user, err)
 		return nil, err
@@ -347,6 +352,29 @@ func (p *poscFileSystem) ensureUserDir(ctx context.Context, user string) error {
 	return nil
 }
 
+// sanitizePoscUser reduces an authenticated subject to a single safe path
+// segment for use as the per-user POSC staging directory. Any byte outside
+// a conservative allowlist — critically "/" and "." — is percent-encoded,
+// so the result can never contain a path separator or a "."/".." traversal
+// component and always stays inside poscPrefix. Encoding is deterministic
+// (same subject → same directory) so retries and the reaper agree.
+func sanitizePoscUser(user string) string {
+	const safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+	var b strings.Builder
+	for i := 0; i < len(user); i++ {
+		c := user[i]
+		if strings.IndexByte(safe, c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			b.WriteString(fmt.Sprintf("%%%02X", c))
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
+}
+
 // generateTempPath returns a unique-with-high-probability staging filename
 // inside the per-user POSC subdirectory. Uniqueness is *probabilistic*; the
 // caller must retry on EEXIST (mirroring the C++ implementation).
@@ -449,6 +477,9 @@ func (p *poscFileSystem) touchOpenFiles(ctx context.Context) {
 // expireFiles walks each per-user POSC subdirectory and removes
 // in-progress.* files whose mtime is older than fileTimeout.
 func (p *poscFileSystem) expireFiles(ctx context.Context) {
+	// The reaper only ever touches POSC staging paths; flag every inner
+	// call so the observation layer never records/publishes for them.
+	ctx = withPoscInternal(ctx)
 	rootHandle, err := p.inner.OpenFile(ctx, p.poscPrefix, os.O_RDONLY, 0)
 	if err != nil {
 		// The POSC dir hasn't been created yet — that's normal on a
@@ -554,7 +585,7 @@ func (f *poscFile) touchIfStale(ctx context.Context, now time.Time, keepalive ti
 		if err := f.fs.touchFS.Chtimes(tempPath, now, now); err != nil {
 			log.Debugf("POSC: keepalive Chtimes of %q failed: %v", tempPath, err)
 		}
-	} else if _, err := f.fs.inner.Stat(ctx, tempPath); err != nil {
+	} else if _, err := f.fs.inner.Stat(withPoscInternal(ctx), tempPath); err != nil {
 		log.Debugf("POSC: keepalive stat of %q failed: %v", tempPath, err)
 	}
 	f.markActivity()
@@ -601,8 +632,14 @@ func (f *poscFile) Close() error {
 		f.fs.activeCount.Add(-1)
 	}()
 
+	// ictx marks the temp-file plumbing below (stat/rename/cleanup) as
+	// POSC-internal so the observation layer ignores it: staging paths are
+	// not real objects. The close hook itself runs on the un-flagged f.ctx
+	// because it publishes the authoritative object event.
+	ictx := withPoscInternal(f.ctx)
+
 	if err := f.File.Close(); err != nil {
-		_ = f.fs.inner.RemoveAll(f.ctx, temp)
+		_ = f.fs.inner.RemoveAll(ictx, temp)
 		return err
 	}
 
@@ -615,9 +652,9 @@ func (f *poscFile) Close() error {
 	// truncated/oversized upload. Mirrors the C++ POSC's `oss.asize`
 	// check.
 	if expected := expectedContentLengthFromContext(f.ctx); expected > 0 {
-		if info, err := f.fs.inner.Stat(f.ctx, temp); err == nil {
+		if info, err := f.fs.inner.Stat(ictx, temp); err == nil {
 			if info.Size() != expected {
-				_ = f.fs.inner.RemoveAll(f.ctx, temp)
+				_ = f.fs.inner.RemoveAll(ictx, temp)
 				return fmt.Errorf("posc: staged size %d does not match Content-Length %d", info.Size(), expected)
 			}
 		}
@@ -626,8 +663,8 @@ func (f *poscFile) Close() error {
 	// Rename temp → final. If the destination already exists as a
 	// directory the os layer returns EISDIR; surface it unchanged so
 	// the webdav handler can map to 409 Conflict.
-	if err := f.fs.inner.Rename(f.ctx, temp, final); err != nil {
-		_ = f.fs.inner.RemoveAll(f.ctx, temp)
+	if err := f.fs.inner.Rename(ictx, temp, final); err != nil {
+		_ = f.fs.inner.RemoveAll(ictx, temp)
 		return err
 	}
 
@@ -662,8 +699,10 @@ func (f *poscFile) Close() error {
 		if err := f.fs.closeHook(f.ctx, final, info); err != nil {
 			// Transactional rollback: the publish refused the
 			// commit, so the object should not be visible. Best-
-			// effort delete; if even that fails, count it.
-			if rmErr := f.fs.inner.RemoveAll(f.ctx, final); rmErr != nil {
+			// effort delete; if even that fails, count it. Removed on
+			// ictx so the observation layer does not publish
+			// object.deleted for a commit that was never published.
+			if rmErr := f.fs.inner.RemoveAll(ictx, final); rmErr != nil {
 				log.Warnf("POSC: rollback delete of %q after close-hook error failed: %v", final, rmErr)
 				if f.fs.hooks != nil && f.fs.hooks.IncRollbackFailed != nil {
 					f.fs.hooks.IncRollbackFailed()
@@ -709,7 +748,7 @@ func (f *poscFile) Abort() error {
 	}
 
 	closeErr := f.File.Close()
-	rmErr := f.fs.inner.RemoveAll(f.ctx, temp)
+	rmErr := f.fs.inner.RemoveAll(withPoscInternal(f.ctx), temp)
 	if closeErr != nil {
 		return closeErr
 	}
