@@ -285,6 +285,7 @@ type Config struct {
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultChecksumTypes []string `mapstructure:"defaultchecksumtypes" yaml:"DefaultChecksumTypes"`
+		DelegateIssuerToDirector bool `mapstructure:"delegateissuertodirector" yaml:"DelegateIssuerToDirector"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableCopies bool `mapstructure:"disablecopies" yaml:"DisableCopies"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
@@ -806,6 +807,7 @@ type configWithType struct {
 		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DefaultChecksumTypes struct { Type string; Value []string }
+		DelegateIssuerToDirector struct { Type string; Value bool }
 		DirectorTest struct { Type string; Value bool }
 		DisableCopies struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }

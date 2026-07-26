@@ -1037,6 +1037,36 @@ func getConfigBase() string {
 	return filepath.Join(home, ".config", "pelican")
 }
 
+// GetNamespaceIssuerURL returns the OAuth2 issuer IDENTITY URL for a namespace —
+// the value used as a minted token's `iss`, as the per-namespace OIDC discovery
+// document's `issuer`, and as the advertised issuer, so all three agree. It is
+// the single source of truth for that identity (as opposed to the serving base,
+// which is always the origin's own web URL — the director issuer proxy rewrites
+// serving endpoints/JWKS separately).
+//
+// By default it is the origin's own embedded issuer,
+// <ExternalWebUrl>/api/v1.0/issuer/ns<namespace>. When
+// Origin.DelegateIssuerToDirector is set — for a firewalled/DNS-less origin whose
+// issuer clients can reach only through the director proxy (WS4) — it returns the
+// director-proxy URL, <director>/api/v1.0/director/issuer/ns<namespace>, instead.
+// An empty namespace yields the bare external web URL (legacy behavior).
+//
+// NOTE: the delegated path is EXPERIMENTAL and not yet verified end-to-end (it
+// needs the broker/token harness); it is off by default.
+func GetNamespaceIssuerURL(namespace string) string {
+	externalBase := strings.TrimSuffix(param.Server_ExternalWebUrl.GetString(), "/")
+	if namespace == "" {
+		return externalBase
+	}
+	if param.Origin_DelegateIssuerToDirector.GetBool() {
+		if fedInfo, err := GetFederation(context.Background()); err == nil && fedInfo.DirectorEndpoint != "" {
+			return strings.TrimSuffix(fedInfo.DirectorEndpoint, "/") + "/api/v1.0/director/issuer/ns" + namespace
+		}
+		log.Warning("Origin.DelegateIssuerToDirector is set but the federation director endpoint is not yet known; falling back to the local issuer URL")
+	}
+	return externalBase + "/api/v1.0/issuer/ns" + namespace
+}
+
 // GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
 // - Server.IssuerUrl
 // - Server.IssuerHostname and Server.IssuerPort

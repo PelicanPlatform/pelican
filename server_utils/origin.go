@@ -352,11 +352,13 @@ func handleIssuersIfNeeded(exports []OriginExport) error {
 		if len(export.IssuerUrls) == 0 && ((export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes) {
 			if embeddedIssuer {
 				// Per-namespace issuer URLs are always rooted at Server_ExternalWebUrl,
-				// not GetServerIssuerURL(). In co-located mode (origin + director in
-				// one process) GetServerIssuerURL() returns a sub-path like
-				// <externalWebUrl>/api/v1.0/origin, but the embedded issuer serves
-				// OIDC discovery at <externalWebUrl>/api/v1.0/issuer/ns/<prefix>.
-				nsIssuerUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/ns" + export.FederationPrefix
+				// not GetServerIssuerURL(). config.GetNamespaceIssuerURL is the single
+				// source of truth so the advertised issuer matches the token `iss`
+				// and the OIDC discovery `issuer` (and can delegate the identity to
+				// the director proxy, WS4). In co-located mode GetServerIssuerURL()
+				// returns a sub-path like <externalWebUrl>/api/v1.0/origin, but the
+				// embedded issuer serves discovery at <externalWebUrl>/api/v1.0/issuer/ns/<prefix>.
+				nsIssuerUrl := config.GetNamespaceIssuerURL(export.FederationPrefix)
 				log.Infof("The export for '%s' has no configured Issuer URLs. Using per-namespace issuer URL '%s'.",
 					export.FederationPrefix, nsIssuerUrl)
 				exports[i].IssuerUrls = append(exports[i].IssuerUrls, nsIssuerUrl)

@@ -1408,6 +1408,21 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.DelegateIssuerToDirector
+description: |+
+  Advertise this origin's OAuth2 issuer as the director's issuer-proxy URL instead
+  of the origin's own, so clients that cannot reach a firewalled/DNS-less origin
+  acquire and validate tokens through the always-reachable director (WS4). When
+  set, the token 'iss', the OIDC discovery 'issuer', and the advertised issuer all
+  resolve to <director>/api/v1.0/director/issuer/ns<prefix>; the director proxies
+  those requests to this origin. Requires the director to run the issuer proxy.
+
+  EXPERIMENTAL: this flips the token issuer identity and has not yet been verified
+  end-to-end; leave it off unless you are testing the director issuer proxy.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.EnableIssuer
 description: |+
   Enable the built-in issuer daemon for the origin.

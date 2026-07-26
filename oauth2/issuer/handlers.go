@@ -31,6 +31,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
@@ -71,11 +72,11 @@ func IssuerURL() string {
 // Otherwise it falls back to the legacy global issuer URL for backward
 // compatibility.
 func IssuerURLForNamespace(namespace string) string {
-	base := IssuerURL()
-	if namespace == "" {
-		return base
-	}
-	return base + "/api/v1.0/issuer/ns" + namespace
+	// The issuer IDENTITY (token `iss`, discovery `issuer`, advertised issuer) is
+	// centralized in config so the origin and director agree and so it can be
+	// delegated to the director proxy (WS4). The SERVING base — used for the
+	// discovery endpoints and JWKS — stays the origin's own IssuerURL().
+	return config.GetNamespaceIssuerURL(namespace)
 }
 
 // ServiceURIForNamespace returns the base path for OIDC endpoints scoped to a namespace.

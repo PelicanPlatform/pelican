@@ -327,6 +327,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.ConcurrencyDegradedThreshold": false,
 	"Origin.DbLocation": false,
 	"Origin.DefaultChecksumTypes": false,
+	"Origin.DelegateIssuerToDirector": false,
 	"Origin.DirectorTest": false,
 	"Origin.DisableCopies": false,
 	"Origin.DisableDirectClients": false,
@@ -1047,6 +1048,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
 	"Monitoring.PromQLAuthorization": func(c *Config) bool { return c.Monitoring.PromQLAuthorization },
+	"Origin.DelegateIssuerToDirector": func(c *Config) bool { return c.Origin.DelegateIssuerToDirector },
 	"Origin.DirectorTest": func(c *Config) bool { return c.Origin.DirectorTest },
 	"Origin.DisableCopies": func(c *Config) bool { return c.Origin.DisableCopies },
 	"Origin.DisableDirectClients": func(c *Config) bool { return c.Origin.DisableDirectClients },
@@ -1523,6 +1525,7 @@ var allParameterNames = []string{
 	"Origin.ConcurrencyDegradedThreshold",
 	"Origin.DbLocation",
 	"Origin.DefaultChecksumTypes",
+	"Origin.DelegateIssuerToDirector",
 	"Origin.DirectorTest",
 	"Origin.DisableCopies",
 	"Origin.DisableDirectClients",
@@ -2095,6 +2098,7 @@ var (
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
+	Origin_DelegateIssuerToDirector = BoolParam{"Origin.DelegateIssuerToDirector"}
 	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
 	Origin_DisableCopies = BoolParam{"Origin.DisableCopies"}
 	Origin_DisableDirectClients = BoolParam{"Origin.DisableDirectClients"}
@@ -2580,6 +2584,7 @@ func init() {
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,
 		"Monitoring.PromQLAuthorization": Monitoring_PromQLAuthorization,
+		"Origin.DelegateIssuerToDirector": Origin_DelegateIssuerToDirector,
 		"Origin.DirectorTest": Origin_DirectorTest,
 		"Origin.DisableCopies": Origin_DisableCopies,
 		"Origin.DisableDirectClients": Origin_DisableDirectClients,
