@@ -95,6 +95,22 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine
 		return
 	}
 	metrics.PelicanBrokerObjectRequests.Inc()
+
+	// Native "v2" origins (posixv2, s3v2, https v2, globus v2, ssh) have no XRootD
+	// child process; their object data is served directly by this pelican web
+	// engine, so there is no local XRootD port to proxy to (Origin.Port is 0).
+	// Route object requests to the engine instead, mirroring the path scheme
+	// RegisterHandlers uses: under /api/v1.0/origin/data when a director is
+	// co-located, at the raw federation prefix when standalone.
+	if st, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString()); err == nil && !st.UsesXRootD() {
+		if config.IsServerEnabled(server_structs.DirectorType) {
+			req.URL.Path = "/api/v1.0/origin/data" + req.URL.Path
+		}
+		log.Debugf("Origin broker proxy: routing v2 object request to the local web engine at %s", req.URL.Path)
+		engine.ServeHTTP(resp, req)
+		return
+	}
+
 	url := req.URL
 	url.Scheme = "https"
 	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())

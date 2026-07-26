@@ -1,0 +1,27 @@
+# Native (posixv2) origin export used to test object serving over the broker.
+# A posixv2 origin has no XRootD child process, so the origin-side broker proxy
+# must hand object requests to the pelican web engine rather than a local XRootD
+# port. See TestBrokerObjectGet.
+
+Director:
+  EnableBroker: true
+
+Origin:
+  SelfTest: False
+  DirectorTest: False
+
+  StorageType: "posixv2"
+  EnableBroker: true
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Reads", "Writes", "DirectReads", "Listings"]
+
+Cache:
+  SelfTest: False
+  DirectorTest: False
+  # Use the native Go cache so the test does not require XRootD plugins. This
+  # test dials the origin's broker endpoint directly and does not exercise the
+  # cache, but NewFedTest still launches one.
+  EnableV2: true
