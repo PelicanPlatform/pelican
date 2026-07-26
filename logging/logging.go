@@ -77,9 +77,13 @@ func buildRotateConfig() (rotateConfig, error) {
 	// The admin-facing knobs are phrased as "Disable..." so their zero value is
 	// the desired default (rotation on, compression on); invert them here so the
 	// writer's internal logic stays positive.
+	frequency, err := parseRotationFrequency(param.Logging_Rotation_Frequency.GetString())
+	if err != nil {
+		return rotateConfig{}, fmt.Errorf("invalid %s: %w", param.Logging_Rotation_Frequency.GetName(), err)
+	}
 	cfg := rotateConfig{
 		enable:             !param.Logging_Rotation_Disable.GetBool(),
-		frequency:          parseRotationFrequency(param.Logging_Rotation_Frequency.GetString()),
+		frequency:          frequency,
 		maxRetentionPeriod: param.Logging_Rotation_MaxRetentionPeriod.GetDuration(),
 		compress:           !param.Logging_Rotation_DisableCompress.GetBool(),
 	}
@@ -97,6 +101,14 @@ func buildRotateConfig() (rotateConfig, error) {
 	for _, k := range sizeKnobs {
 		if k.val == "" {
 			continue
+		}
+		// A leading "-" is rejected here rather than by the parser: a negative
+		// quantity converts to an enormous unsigned value, which then either
+		// wraps to zero -- silently disabling the very limit the administrator
+		// was configuring -- or trips the overflow check below and reports a
+		// misleading "too large" for a value that is too small.
+		if strings.HasPrefix(strings.TrimSpace(k.val), "-") {
+			return cfg, fmt.Errorf("invalid %s value %q: size must not be negative", k.name, k.val)
 		}
 		size, err := utils.ParseBytes(k.val)
 		if err != nil {

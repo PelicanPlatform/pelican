@@ -107,6 +107,13 @@ func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10
 var egrpPostHandler func(error) (bool, error)
 
 func Execute() error {
+	// log.Fatal writes the entry and then calls os.Exit, which runs no defers.
+	// Without this the fatal line -- the one explaining why the process died --
+	// sits in the async writer's buffer and is never written. logrus runs exit
+	// handlers after the entry has been handed to the writer, so the flush sees
+	// it. Registered before any command can log.
+	log.RegisterExitHandler(logging.EnterSyncMode)
+
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
 	// Register the errgroup with the logging subsystem so the asynchronous log

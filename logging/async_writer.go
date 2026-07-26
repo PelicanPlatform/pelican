@@ -28,14 +28,20 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
+
+// This file deliberately does not import logrus. Everything here runs
+// underneath logrus -- it is the writer logrus hands lines to -- so calling
+// back into it would re-enter the writer, at best recursing and at worst
+// deadlocking against a mutex the calling path already holds. Problems are
+// reported with reportProblem, which writes to stderr.
 
 // asyncWriter is an io.Writer that decouples the (synchronous) logging call
 // sites from disk I/O. Log lines handed to Write are copied into an in-memory
@@ -100,6 +106,15 @@ type asyncWriter struct {
 	// period advances past it, the file is rotated and named for periodStart.
 	// Only meaningful when time-based rotation is active.
 	periodStart time.Time
+	// rotateRetryAfter suppresses rotation attempts until this instant. Set after
+	// a failed rotation so a persistent failure neither spins on syscalls nor
+	// floods stderr on every flush; zero when rotation is healthy.
+	rotateRetryAfter time.Time
+	// mode is the permission mode the active log file is (re)opened with, and the
+	// mode given to a compressed rotated copy. It tracks the mode of the file
+	// rotation replaces, so an operator's chmod on the log survives a rotation
+	// instead of reverting to the default.
+	mode os.FileMode
 
 	// dir is the directory containing the log file. root, when non-nil, is an
 	// os.Root handle to that directory: it holds an open directory descriptor and
@@ -109,6 +124,13 @@ type asyncWriter struct {
 	dir  string
 	base string
 	root *os.Root
+	// rename and openFile are the two filesystem operations a rotation can fail
+	// on. They are reached through the struct rather than through root directly so
+	// those failure paths -- a rename losing to a handle held elsewhere, a
+	// directory that has become unwritable -- can be driven deterministically;
+	// both default to the corresponding os.Root method.
+	rename   func(oldName, newName string) error
+	openFile func(name string, flag int, perm os.FileMode) (*os.File, error)
 
 	// rotation configuration; rotateOK reports whether the target is eligible
 	// (a regular file with rotation enabled).
@@ -151,16 +173,19 @@ const (
 	freqNone
 )
 
-// parseRotationFrequency maps an admin-facing string to a rotationFrequency; any
-// unrecognized value falls back to daily.
-func parseRotationFrequency(s string) rotationFrequency {
+// parseRotationFrequency maps an admin-facing string to a rotationFrequency. An
+// unrecognized value is an error rather than a fallback: silently rotating on a
+// cadence the administrator did not ask for is worse than refusing to start.
+func parseRotationFrequency(s string) (rotationFrequency, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "daily":
+		return freqDaily, nil
 	case "hourly":
-		return freqHourly
+		return freqHourly, nil
 	case "none", "":
-		return freqNone
+		return freqNone, nil
 	default:
-		return freqDaily
+		return freqDaily, fmt.Errorf("unrecognized rotation frequency %q (expected \"daily\", \"hourly\", or \"none\")", s)
 	}
 }
 
@@ -194,6 +219,75 @@ func (ri rotationFrequency) format(t time.Time) string {
 	}
 }
 
+// rotatedSuffixRe matches everything rotate() appends to the log file's name:
+// the period/instant stamp produced by rotationFrequency.format, the optional
+// collision counter added by uniqueRotatedBase, and the optional compression
+// extension -- "<stamp>[-N][.gz]". The three stamp formats are distinguished by
+// length, and the greedy inner group resolves the one ambiguity, "T15-04-05"
+// (a size-only stamp) versus "T15" followed by a counter.
+var rotatedSuffixRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}(?:T\d{2}(?:-\d{2}-\d{2})?)?)(?:-(\d+))?(?:\.gz)?$`)
+
+// rotatedStampLayouts are the time layouts rotationFrequency.format emits, one
+// per frequency; they are mutually distinguishable by length.
+var rotatedStampLayouts = []string{"2006-01-02T15-04-05", "2006-01-02T15", "2006-01-02"}
+
+// rotatedStamp locates a rotated file in the rotation order: the period it
+// covers, plus the collision counter that separates rotations sharing a period.
+type rotatedStamp struct {
+	period time.Time
+	seq    int
+}
+
+// before reports whether s covers an earlier rotation than other.
+func (s rotatedStamp) before(other rotatedStamp) bool {
+	if !s.period.Equal(other.period) {
+		return s.period.Before(other.period)
+	}
+	return s.seq < other.seq
+}
+
+// parseRotatedName reports whether name is a file this writer produced by
+// rotating the log file named base and, if so, where it falls in the rotation
+// order. Two properties depend on going through this parse rather than comparing
+// names directly: only names matching the rotated grammar may be deleted by
+// retention (a sibling such as "pelican.log.incident-4471" belongs to whoever
+// made it), and rotated names are not lexically ordered -- the stamp formats
+// differ in granularity between frequencies and the collision counter is
+// unpadded decimal, so "-9" sorts after "-12".
+func parseRotatedName(base, name string) (rotatedStamp, bool) {
+	suffix, ok := strings.CutPrefix(name, base+".")
+	if !ok {
+		return rotatedStamp{}, false
+	}
+	m := rotatedSuffixRe.FindStringSubmatch(suffix)
+	if m == nil {
+		return rotatedStamp{}, false
+	}
+	var period time.Time
+	parsed := false
+	for _, layout := range rotatedStampLayouts {
+		if len(m[1]) != len(layout) {
+			continue
+		}
+		if t, err := time.ParseInLocation(layout, m[1], time.Local); err == nil {
+			period, parsed = t, true
+		}
+		break
+	}
+	if !parsed {
+		return rotatedStamp{}, false
+	}
+	seq := 0
+	if m[2] != "" {
+		var err error
+		// A counter too large to be one of ours means the name is not ours.
+		if seq, err = strconv.Atoi(m[2]); err != nil {
+			return rotatedStamp{}, false
+		}
+	}
+	return rotatedStamp{period: period, seq: seq}, true
+}
+
 // rotateConfig captures the admin-facing rotation knobs in already-parsed form.
 type rotateConfig struct {
 	enable    bool
@@ -214,6 +308,11 @@ const (
 	// logFileFlags is how the active log file is (re)opened: write-only, created
 	// if absent, appending to preserve any existing content.
 	logFileFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	// defaultLogFileMode is the mode a log file is created with when there is
+	// no existing file whose permissions should be carried forward. Readable
+	// by the owning group so a log-shipping account can be given access
+	// without granting it write.
+	defaultLogFileMode os.FileMode = 0640
 	// compressTempSuffix is appended to a rotated file's name while its gzip
 	// archive is being written; it is renamed to ".gz" once complete.
 	compressTempSuffix = ".gz.tmp"
@@ -234,7 +333,7 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, defaultLogFileMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file %q: %w", path, err)
 	}
@@ -266,8 +365,13 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 	// eligible for rotation; special files (devices, pipes, terminals) are
 	// written through untouched.
 	periodAnchor := time.Now()
+	w.mode = defaultLogFileMode
 	if fi, statErr := f.Stat(); statErr == nil && fi.Mode().IsRegular() {
 		w.rotateOK = cfg.enable
+		// Carry the existing file's permissions forward so a hardened log
+		// (an operator's chmod 0600 after an incident) keeps its mode when
+		// rotation replaces it.
+		w.mode = fi.Mode().Perm()
 		// If the file already holds content, account for its current size
 		// (size-based rotation) and anchor the current period on its
 		// last-modified time so a restart after a boundary rotates the existing
@@ -291,9 +395,17 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 			return nil, fmt.Errorf("failed to open log directory %q for rotation: %w", dir, rerr)
 		}
 		w.root = root
+		w.rename = root.Rename
+		w.openFile = root.OpenFile
 		// Remove any leftover compression temp files from a previous run that was
 		// killed mid-compression. No compression is running yet, so this is safe.
 		w.cleanupStaleTempFiles()
+		// Enforce the retention budgets against what is already on disk.
+		// Retention is otherwise only applied as a side effect of rotating, so
+		// a process that never reaches a rotation -- size-based only on a quiet
+		// server, or one that restarts often -- would let old logs accumulate
+		// past the budget indefinitely.
+		w.pruneRetention()
 	}
 
 	return w, nil
@@ -404,13 +516,26 @@ func (w *asyncWriter) stopCompression() {
 	})
 }
 
+// reportProblem reports a log-maintenance failure straight to stderr.
+//
+// Nothing on the writer's own maintenance paths may report through logrus.
+// Those paths run while fileMu is held, and a logrus call would come back
+// round through Write into writeDirect, which wants that same mutex; in
+// synchronous mode, where the compression worker's caller is waiting on the
+// worker to finish, that is a deadlock rather than a delay. Compression and
+// removal failures are exactly the kind that happen when the disk is full,
+// which is when this path matters most.
+func reportProblem(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "pelican logging: "+format+"\n", args...)
+}
+
 // compressAndPrune compresses rotatedBase to "<base>.gz", removes the source on
 // success, and applies the retention budgets.
 func (w *asyncWriter) compressAndPrune(rotatedBase string) {
 	if err := w.compressBackup(rotatedBase); err != nil {
-		log.Warnf("Failed to compress rotated log %q: %v", filepath.Join(w.dir, rotatedBase), err)
+		reportProblem("failed to compress rotated log %q: %v", filepath.Join(w.dir, rotatedBase), err)
 	} else if err := w.root.Remove(rotatedBase); err != nil {
-		log.Warnf("Failed to remove %q after compression (leaving an uncompressed copy): %v",
+		reportProblem("failed to remove %q after compression (leaving an uncompressed copy): %v",
 			filepath.Join(w.dir, rotatedBase), err)
 	}
 	w.pruneRetention()
@@ -627,16 +752,32 @@ func (w *asyncWriter) shouldRotateTime(now time.Time) bool {
 // is written whole into its own file (the only case a file may exceed MaxSize).
 // Callers must hold fileMu.
 func (w *asyncWriter) writeRotatingLocked(batch []byte) error {
+	// A previous rotation may have left the writer without a file.
+	if err := w.ensureFileLocked(); err != nil {
+		return err
+	}
+
+	// A rotation that failed recently is left alone for a while, during
+	// which the active file keeps growing with nothing to cap it. That is
+	// tolerable only while it stays inside the operator's disk budget.
+	if w.rotateOK && w.rotationSuppressed() {
+		if err := w.checkUnrotatedGrowth(); err != nil {
+			return err
+		}
+	}
+
+	rotationOK := w.rotateOK && !w.rotationSuppressed()
+
 	// Time-based rotation happens before the write so the batch lands in the new
 	// period's file.
-	if w.rotateOK && w.shouldRotateTime(w.now()) {
-		if err := w.rotate(); err != nil {
+	if rotationOK && w.shouldRotateTime(w.now()) {
+		if err := w.tryRotate(); err != nil {
 			return err
 		}
 	}
 
 	// No size cap (or rotation disabled): a single write.
-	if !w.rotateOK || w.rot.maxSize <= 0 {
+	if !rotationOK || w.rot.maxSize <= 0 {
 		n, err := w.file.Write(batch)
 		w.written += int64(n)
 		return err
@@ -646,10 +787,22 @@ func (w *asyncWriter) writeRotatingLocked(batch []byte) error {
 		capacity := w.rot.maxSize - w.written
 		if capacity <= 0 {
 			// Active file is full; start a fresh one.
-			if err := w.rotate(); err != nil {
+			if err := w.tryRotate(); err != nil {
 				return err
 			}
-			capacity = w.rot.maxSize
+			capacity = w.rot.maxSize - w.written
+		}
+		if w.rotationSuppressed() {
+			// Rotation just failed and is being left alone. Overshooting
+			// MaxSize is the lesser evil: the alternative is to loop asking
+			// for capacity that nothing is going to reclaim. Growth is only
+			// tolerated up to the total the operator budgeted for logs.
+			if err := w.checkUnrotatedGrowth(); err != nil {
+				return err
+			}
+			n, werr := w.file.Write(batch)
+			w.written += int64(n)
+			return werr
 		}
 
 		cut := lineCutWithin(batch, capacity)
@@ -657,7 +810,7 @@ func (w *asyncWriter) writeRotatingLocked(batch []byte) error {
 			// The next line does not fit in the remaining capacity.
 			if w.written > 0 {
 				// Give the line a fresh file rather than overshoot the current one.
-				if err := w.rotate(); err != nil {
+				if err := w.tryRotate(); err != nil {
 					return err
 				}
 				continue
@@ -704,10 +857,22 @@ func firstLineEnd(b []byte) int {
 // opens a fresh one for the current period, and kicks off (optional) compression
 // and retention pruning. Callers must hold fileMu.
 func (w *asyncWriter) rotate() error {
+	// Re-read the mode from the file about to be rotated so a chmod applied to
+	// a running server is carried onto its successor, not just one applied
+	// before startup.
+	if fi, serr := w.file.Stat(); serr == nil && fi.Mode().IsRegular() {
+		w.mode = fi.Mode().Perm()
+	}
+
 	// fsync is best-effort: a failure must not abort rotation.
 	_ = w.file.Sync()
-	if err := w.file.Close(); err != nil {
-		return fmt.Errorf("failed to close log file before rotation: %w", err)
+	closeErr := w.file.Close()
+	// The descriptor is gone whether or not Close reported a problem, so drop
+	// it: a closed *os.File left in place would silently swallow every
+	// subsequent write, and w.file == nil is the signal to reopen.
+	w.file = nil
+	if closeErr != nil {
+		return fmt.Errorf("failed to close log file before rotation: %w", closeErr)
 	}
 
 	// Name the rotated file for the period it covered (time-based), or with a
@@ -717,27 +882,102 @@ func (w *asyncWriter) rotate() error {
 		suffixTime = w.now()
 	}
 	rotatedBase := w.uniqueRotatedBase(w.base + "." + w.rot.frequency.format(suffixTime))
-	if err := w.root.Rename(w.base, rotatedBase); err != nil {
-		// Try to reopen the original so logging can continue even if the rename
-		// failed; report the rename error regardless.
-		if f, oerr := w.root.OpenFile(w.base, logFileFlags, 0640); oerr == nil {
-			w.file = f
-		}
+	if err := w.rename(w.base, rotatedBase); err != nil {
 		return fmt.Errorf("failed to rotate log file %q: %w", w.path, err)
 	}
 
-	f, err := w.root.OpenFile(w.base, logFileFlags, 0640)
+	// Past the rename the old file is gone, so the byte counter no longer
+	// describes anything and must not survive into a retry.
+	w.written = 0
+	w.periodStart = w.rot.frequency.truncate(w.now())
+
+	f, err := w.openFile(w.base, logFileFlags, w.mode)
 	if err != nil {
 		return fmt.Errorf("failed to open new log file after rotation: %w", err)
 	}
 	w.file = f
-	w.written = 0
-	w.periodStart = w.rot.frequency.truncate(w.now())
 
 	// Hand the (slow) compression to the permanent worker, or do it inline in
 	// synchronous mode; afterRotate also applies retention.
 	w.afterRotate(rotatedBase)
 	return nil
+}
+
+// rotateRetryInterval is how long rotation is left alone after it fails.
+// Rotation failures are usually transient but not brief -- a handle held open
+// by another process on Windows, a directory that has gone read-only -- so
+// retrying on the very next flush would burn syscalls and fill stderr to no
+// purpose.
+const rotateRetryInterval = time.Minute
+
+// tryRotate rotates the log file, treating a rotation failure as a degraded
+// condition rather than a fatal one: the process keeps logging to whatever
+// file it can open, and rotation is retried later. Losing the ability to
+// start a new file is not a reason to stop a data server, and rotation
+// failures are dominated by transient causes.
+//
+// An error is returned only when the writer is left with no usable file at
+// all, which is a genuine inability to record what the process is doing.
+// Callers must hold fileMu.
+func (w *asyncWriter) tryRotate() error {
+	err := w.rotate()
+	if err == nil {
+		w.rotateRetryAfter = time.Time{}
+		return nil
+	}
+	w.rotateRetryAfter = w.now().Add(rotateRetryInterval)
+	reportProblem("%v; continuing without rotating, will retry in %s", err, rotateRetryInterval)
+	return w.ensureFileLocked()
+}
+
+// ensureFileLocked reopens the active log file when rotation left the writer
+// without one. Callers must hold fileMu.
+func (w *asyncWriter) ensureFileLocked() error {
+	if w.file != nil {
+		return nil
+	}
+	f, err := w.openFile(w.base, logFileFlags, w.mode)
+	if err != nil {
+		return fmt.Errorf("failed to reopen log file %q: %w", w.path, err)
+	}
+	w.file = f
+	// The reopened file may be the pre-rotation one (rename failed) or a fresh
+	// one (rename succeeded, the open did not); either way its real size is
+	// what size-based rotation must count from.
+	if fi, serr := f.Stat(); serr == nil {
+		w.written = fi.Size()
+	}
+	return nil
+}
+
+// rotationSuppressed reports whether a recent rotation failure means rotation
+// should be left alone for now. Callers must hold fileMu.
+func (w *asyncWriter) rotationSuppressed() bool {
+	return !w.rotateRetryAfter.IsZero() && w.now().Before(w.rotateRetryAfter)
+}
+
+// checkUnrotatedGrowth decides how long a broken rotation may be tolerated.
+//
+// Failing to rotate is survivable: the process can keep recording into the
+// file it already has, and the cause is usually transient. Failing to respect
+// the disk the operator set aside for logs is not, because the next thing to
+// fill the filesystem takes the rest of the service down with it -- and an
+// unrotatable log grows without any bound of its own.
+//
+// MaxRetentionSize is that budget: it is what the administrator said all
+// logs may occupy, and with rotation broken the active file is all the logs
+// there are. Leaving it unset asks for unlimited retention, which is equally
+// an answer for this case.
+//
+// Callers must hold fileMu.
+func (w *asyncWriter) checkUnrotatedGrowth() error {
+	budget := w.rot.maxRetentionSize
+	if budget <= 0 || w.written <= budget {
+		return nil
+	}
+	return fmt.Errorf(
+		"log file %q has grown to %d bytes, past the %s budget of %d, and cannot be rotated",
+		w.path, w.written, "Logging.Rotation.MaxRetentionSize", budget)
 }
 
 // uniqueRotatedBase returns base unchanged if no rotated file with that name
@@ -782,28 +1022,34 @@ func (w *asyncWriter) pruneRetention() {
 	if err != nil {
 		return
 	}
-	prefix := w.base + "."
 	type backup struct {
-		name string
-		size int64
-		mod  time.Time
+		name  string
+		size  int64
+		mod   time.Time
+		stamp rotatedStamp
 	}
 	backups := make([]backup, 0)
 	for _, e := range entries {
 		name := e.Name()
-		if name == w.base || !strings.HasPrefix(name, prefix) {
+		// Only files this writer produced are subject to retention. A name
+		// that merely starts with the log's name -- an operator's saved copy,
+		// or another role's log in a shared directory -- belongs to whoever
+		// created it.
+		stamp, ok := parseRotatedName(w.base, name)
+		if !ok {
 			continue
 		}
 		info, ierr := e.Info()
 		if ierr != nil {
 			continue
 		}
-		backups = append(backups, backup{name: name, size: info.Size(), mod: info.ModTime()})
+		backups = append(backups, backup{name: name, size: info.Size(), mod: info.ModTime(), stamp: stamp})
 	}
 
-	// Sort newest first. Rotated names embed a sortable period/timestamp suffix,
-	// so reverse-lexical order is reverse-chronological.
-	sort.Slice(backups, func(i, j int) bool { return backups[i].name > backups[j].name })
+	// Sort newest first by rotation order. Rotated names are not lexically
+	// ordered: stamp granularity differs between frequencies and the collision
+	// counter is unpadded, so "-9" would sort after "-12".
+	sort.Slice(backups, func(i, j int) bool { return backups[j].stamp.before(backups[i].stamp) })
 
 	now := w.now()
 	var kept int64
@@ -838,7 +1084,7 @@ func (w *asyncWriter) cleanupStaleTempFiles() {
 			continue
 		}
 		if rerr := w.root.Remove(name); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			log.Warnf("Failed to remove stale compression temp file %q: %v", filepath.Join(w.dir, name), rerr)
+			reportProblem("failed to remove stale compression temp file %q: %v", filepath.Join(w.dir, name), rerr)
 		}
 	}
 }
@@ -859,8 +1105,17 @@ func (w *asyncWriter) compressBackup(base string) error {
 	}
 	defer in.Close()
 
+	// Take the archive's permissions from the file being compressed rather
+	// than from the writer, both because it is the mode being preserved and
+	// because this runs on the compression worker, which shares no mutex with
+	// the rotation path that maintains the writer's copy.
+	mode := defaultLogFileMode
+	if fi, serr := in.Stat(); serr == nil && fi.Mode().IsRegular() {
+		mode = fi.Mode().Perm()
+	}
+
 	tmp := base + compressTempSuffix
-	out, err := w.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	out, err := w.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}

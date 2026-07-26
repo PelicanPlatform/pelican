@@ -102,9 +102,36 @@ func TestBuildRotateConfigRejectsBadSize(t *testing.T) {
 	require.Error(t, err, "an out-of-range MaxSize must surface an error")
 	assert.Contains(t, err.Error(), "too large")
 
+	// A negative size must be rejected rather than turning rotation off: the
+	// unsigned parse it would otherwise reach yields 0, which reads as
+	// "no size limit".
+	require.NoError(t, param.Logging_Rotation_MaxSize.Set("-1GB"))
+	_, err = buildRotateConfig()
+	require.Error(t, err, "a negative MaxSize must surface an error, not silently disable rotation")
+	assert.Contains(t, err.Error(), "negative")
+
 	// A valid size parses cleanly.
 	require.NoError(t, param.Logging_Rotation_MaxSize.Set("250MB"))
 	cfg, err := buildRotateConfig()
 	require.NoError(t, err)
 	assert.Equal(t, int64(250*1024*1024), cfg.maxSize)
+}
+
+// TestBuildRotateConfigRejectsUnknownFrequency verifies an unrecognized
+// Frequency is reported rather than quietly treated as daily: an administrator
+// who asked for "weekly" must learn that no such cadence exists instead of
+// discovering months later that logs rotated every night.
+func TestBuildRotateConfigRejectsUnknownFrequency(t *testing.T) {
+	t.Cleanup(func() { _ = param.Reset() })
+
+	require.NoError(t, param.Logging_Rotation_Frequency.Set("weekly"))
+	_, err := buildRotateConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), param.Logging_Rotation_Frequency.GetName())
+
+	for _, valid := range []string{"daily", "hourly", "none", "DAILY", ""} {
+		require.NoError(t, param.Logging_Rotation_Frequency.Set(valid))
+		_, err := buildRotateConfig()
+		assert.NoError(t, err, "%q must be accepted", valid)
+	}
 }

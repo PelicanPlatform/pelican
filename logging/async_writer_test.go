@@ -21,8 +21,10 @@
 package logging
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,6 +35,7 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -229,8 +232,9 @@ func TestAsyncWriterCompressionWorkerGracefulShutdown(t *testing.T) {
 		}
 	}
 
-	// Graceful shutdown: enterSyncMode drains the worker; egrp.Wait then returns
-	// with no AwaitCompression-style call needed.
+	// Graceful shutdown: the worker runs in the errgroup, so enterSyncMode
+	// drains it and egrp.Wait joins it. No further wait is needed to know
+	// compression has finished.
 	w.enterSyncMode()
 	require.NoError(t, egrp.Wait())
 
@@ -729,6 +733,72 @@ func TestAsyncWriterNonRegularNoRotation(t *testing.T) {
 
 // TestAsyncWriterWriteErrorIsFatal verifies that a write failure is surfaced
 // through the errgroup (so the process can shut down).
+// TestAsyncWriterTolveratesRotationFailureWithinBudget pins the first half of
+// the rotation-failure policy: a process that cannot rotate keeps recording.
+// Losing the ability to start a new file is not a reason to stop serving data,
+// and the usual causes (a handle held open elsewhere, a briefly unwritable
+// directory) clear on their own.
+func TestAsyncWriterToleratesRotationFailureWithinBudget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 8, 10, 0, 0, 0, time.Local)}
+	cfg := rotateConfig{
+		enable:           true,
+		frequency:        freqNone,
+		maxSize:          64,
+		maxRetentionSize: 1 << 20,
+	}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	// Every rotation attempt fails from here on.
+	w.rename = func(string, string) error { return errors.New("rename refused") }
+
+	for i := 0; i < 20; i++ {
+		_, err := w.Write([]byte(strings.Repeat("x", 40) + "\n"))
+		require.NoError(t, err)
+		require.NoError(t, w.flushOnce(), "a failed rotation must not fail the write")
+	}
+
+	// The lines are still on disk: the file simply grew past MaxSize.
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, 20, bytes.Count(content, []byte("\n")),
+		"no log line may be lost because rotation is broken")
+	assert.Greater(t, int64(len(content)), cfg.maxSize,
+		"the file is expected to overshoot MaxSize while rotation is unavailable")
+}
+
+// TestAsyncWriterRotationFailureBecomesFatalPastBudget pins the second half:
+// tolerance ends at the disk the operator set aside. An unrotatable log has no
+// bound of its own, and filling the filesystem takes down more than logging.
+func TestAsyncWriterRotationFailureBecomesFatalPastBudget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 8, 10, 0, 0, 0, time.Local)}
+	cfg := rotateConfig{
+		enable:           true,
+		frequency:        freqNone,
+		maxSize:          64,
+		maxRetentionSize: 512,
+	}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	w.rename = func(string, string) error { return errors.New("rename refused") }
+
+	var flushErr error
+	for i := 0; i < 100 && flushErr == nil; i++ {
+		_, err := w.Write([]byte(strings.Repeat("y", 40) + "\n"))
+		require.NoError(t, err)
+		flushErr = w.flushOnce()
+	}
+
+	require.Error(t, flushErr,
+		"growth past MaxRetentionSize with rotation broken must be surfaced as fatal")
+	assert.Contains(t, flushErr.Error(), "cannot be rotated")
+}
+
 func TestAsyncWriterWriteErrorIsFatal(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
@@ -773,4 +843,298 @@ func TestAsyncWriterFlushOnceReturnsErrorOnClosedFile(t *testing.T) {
 	w.fileMu.Unlock()
 
 	assert.Error(t, w.flushOnce(), "flushOnce should report the underlying write error")
+}
+
+// mkBackup writes a rotated-log stand-in of the given size with an explicit
+// mtime, so retention policy can be checked without driving real rotations.
+func mkBackup(t *testing.T, dir, name string, size int, mod time.Time) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(p, make([]byte, size), 0640))
+	require.NoError(t, os.Chtimes(p, mod, mod))
+	return p
+}
+
+// TestAsyncWriterRetentionKeepsNewestCollisions verifies the size budget retains
+// the most recent rotated files when more than nine rotations share a period.
+// The collision counter is unpadded decimal, so the names are not lexically
+// ordered ("-9" sorts after "-12") and the retained set must be chosen by the
+// period/counter the name encodes.
+func TestAsyncWriterRetentionKeepsNewestCollisions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Date(2026, 1, 1, 23, 0, 0, 0, time.Local)
+	clk := &fakeClock{t: now}
+	// 10 bytes per backup, budget of 25 -> the two newest are retained.
+	cfg := rotateConfig{enable: true, frequency: freqDaily, maxRetentionSize: 25}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	mkBackup(t, dir, "test.log.2026-01-01", 10, now)
+	for i := 1; i <= 12; i++ {
+		mkBackup(t, dir, fmt.Sprintf("test.log.2026-01-01-%d", i), 10, now)
+	}
+
+	w.pruneRetention()
+
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+	assert.True(t, exists("test.log.2026-01-01-12"), "the newest rotated file must be retained")
+	assert.True(t, exists("test.log.2026-01-01-11"), "the second-newest rotated file must be retained")
+	assert.False(t, exists("test.log.2026-01-01-9"), "an older rotated file must not outlive newer ones")
+	assert.False(t, exists("test.log.2026-01-01"), "the oldest rotated file must be pruned first")
+}
+
+// TestAsyncWriterRetentionOrdersAcrossFormats verifies retention orders rotated
+// files by the period they encode even when the directory mixes the daily,
+// hourly and size-only suffix formats (a frequency change leaves both behind).
+func TestAsyncWriterRetentionOrdersAcrossFormats(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.Local)
+	clk := &fakeClock{t: now}
+	cfg := rotateConfig{enable: true, frequency: freqHourly, maxRetentionSize: 25}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	mkBackup(t, dir, "test.log.2026-06-08", 10, now)             // oldest (daily)
+	mkBackup(t, dir, "test.log.2026-06-09T23", 10, now)          // hourly
+	mkBackup(t, dir, "test.log.2026-06-10T11-30-00.gz", 10, now) // newest (size-only)
+
+	w.pruneRetention()
+
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+	assert.True(t, exists("test.log.2026-06-10T11-30-00.gz"), "newest rotated file must be retained")
+	assert.True(t, exists("test.log.2026-06-09T23"), "second-newest rotated file must be retained")
+	assert.False(t, exists("test.log.2026-06-08"), "oldest rotated file must be pruned first")
+}
+
+// TestAsyncWriterRetentionIgnoresForeignFiles verifies retention only deletes
+// files matching the rotated-name grammar. Anything else sharing the log's name
+// prefix -- an operator's incident copy, a note, an unrelated log -- belongs to
+// somebody else and must be left alone by both budgets.
+func TestAsyncWriterRetentionIgnoresForeignFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.Local)
+	clk := &fakeClock{t: now}
+	cfg := rotateConfig{enable: true, frequency: freqDaily, maxRetentionSize: 1, maxRetentionPeriod: time.Hour}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	foreign := []string{
+		"test.log.incident-4471",
+		"test.log.bak",
+		"test.log.2026-13-45", // prefix-shaped but not a real date
+		"test.log.old.gz",
+	}
+	for _, name := range foreign {
+		mkBackup(t, dir, name, 4096, now.Add(-72*time.Hour))
+	}
+	mkBackup(t, dir, "test.log.2026-06-07", 4096, now.Add(-72*time.Hour))
+
+	w.pruneRetention()
+
+	for _, name := range foreign {
+		_, err := os.Stat(filepath.Join(dir, name))
+		assert.NoErrorf(t, err, "retention must not delete %q: it is not a rotated log file", name)
+	}
+	_, err := os.Stat(filepath.Join(dir, "test.log.2026-06-07"))
+	assert.True(t, os.IsNotExist(err), "a genuine rotated file outside both budgets should be pruned")
+}
+
+// TestAsyncWriterPrunesAtStartup verifies retention is enforced when the writer
+// is constructed. Rotation is the only other trigger, so a process configured
+// with Frequency "none" (or one that restarts often) would otherwise never
+// enforce the budgets.
+func TestAsyncWriterPrunesAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Now()
+
+	mkBackup(t, dir, "test.log.2026-06-07", 10, now.Add(-72*time.Hour))
+	mkBackup(t, dir, "test.log.2026-06-09", 10, now.Add(-time.Hour))
+
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxRetentionPeriod: 48 * time.Hour}
+	w, err := newAsyncWriter(path, cfg, time.Millisecond)
+	require.NoError(t, err)
+	defer w.close()
+
+	_, err = os.Stat(filepath.Join(dir, "test.log.2026-06-07"))
+	assert.True(t, os.IsNotExist(err), "a rotated file past the age budget should be pruned at startup")
+	_, err = os.Stat(filepath.Join(dir, "test.log.2026-06-09"))
+	assert.NoError(t, err, "a rotated file within the age budget must survive startup pruning")
+}
+
+// TestAsyncWriterRotationPreservesFileMode verifies rotation does not widen the
+// permission bits of the log: an operator who tightens the active file must find
+// the same mode on its successor, and on the compressed rotated copy.
+func TestAsyncWriterRotationPreservesFileMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 8, 10, 0, 0, 0, time.Local)}
+	cfg := rotateConfig{enable: true, frequency: freqDaily, compress: true}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+
+	require.NoError(t, os.Chmod(path, 0600))
+
+	_, _ = w.Write([]byte("day8\n"))
+	require.NoError(t, w.flushOnce())
+	clk.advance(24 * time.Hour)
+	_, _ = w.Write([]byte("day9\n"))
+	require.NoError(t, w.flushOnce())
+	w.close()
+
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), fi.Mode().Perm(),
+		"the log file opened after rotation must keep the mode of the one it replaces")
+
+	gz, err := os.Stat(filepath.Join(dir, "test.log.2026-06-08.gz"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), gz.Mode().Perm(),
+		"a compressed rotated file must keep the mode of its source")
+}
+
+// reentrantLogHook routes every logrus entry back into the writer under test.
+// In production the writer *is* logrus's output, so anything the writer logs
+// re-enters it; logrus fires hooks without holding its own mutex, so a hook that
+// blocks reproduces that reentrancy without wedging the standard logger for the
+// rest of the suite.
+type reentrantLogHook struct{ w *asyncWriter }
+
+func (h *reentrantLogHook) Levels() []log.Level { return log.AllLevels }
+
+func (h *reentrantLogHook) Fire(*log.Entry) error {
+	_, _ = h.w.Write([]byte("reentrant\n"))
+	return nil
+}
+
+// removeHook drops a specific hook from the standard logger, leaving any others
+// (notably the test hook) in place.
+func removeHook(target log.Hook) {
+	old := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
+	filtered := make(log.LevelHooks)
+	for lvl, hooks := range old {
+		for _, h := range hooks {
+			if h == target {
+				continue
+			}
+			filtered[lvl] = append(filtered[lvl], h)
+		}
+	}
+	log.StandardLogger().ReplaceHooks(filtered)
+}
+
+// TestAsyncWriterCompressionFailureDuringShutdownDoesNotDeadlock verifies that a
+// compression failure on the synchronous-mode path (the ENOSPC-at-shutdown case)
+// is reported without re-entering the writer. Post-rotation work runs under
+// fileMu, so anything it emits through logrus would come straight back to
+// writeDirect and self-deadlock the rotating goroutine.
+func TestAsyncWriterCompressionFailureDuringShutdownDoesNotDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 9, 12, 0, 0, 0, time.Local)}
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxSize: 10, compress: true}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+
+	egrp, ctx := errgroup.WithContext(context.Background())
+	w.start(ctx, egrp)
+	// Drain and flip to synchronous mode, so the next rotation compresses inline
+	// on the writing goroutine while it holds fileMu.
+	w.enterSyncMode()
+	require.NoError(t, egrp.Wait())
+
+	// One oversized line fills the active file without rotating it.
+	_, err := w.Write([]byte("aaaaaaaaaa\n"))
+	require.NoError(t, err)
+
+	// A directory where the compression temp file belongs makes the next
+	// rotation's compression fail.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "test.log.2026-06-09T12-00-00"+compressTempSuffix), 0750))
+
+	hook := &reentrantLogHook{w: w}
+	log.AddHook(hook)
+	defer removeHook(hook)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = w.Write([]byte("bbbbbbbbbb\n"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("a rotation whose compression fails must not block: post-rotation work must never re-enter the writer")
+	}
+
+	// The failure left the uncompressed rotated file in place rather than losing it.
+	_, err = os.Stat(filepath.Join(dir, "test.log.2026-06-09T12-00-00"))
+	assert.NoError(t, err, "a failed compression must leave the rotated source behind")
+
+	_, err = w.Write([]byte("cccccccccc\n"))
+	assert.NoError(t, err, "the writer must keep serving after a compression failure")
+	w.close()
+}
+
+// TestAsyncWriterConcurrentWriters drives the writer from many goroutines at once
+// while rotation is active, so the race detector actually exercises fileMu and
+// the backpressure condition variable. Every line must survive somewhere in the
+// rotated set, intact and unsplit.
+func TestAsyncWriterConcurrentWriters(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	cfg := rotateConfig{enable: true, frequency: freqNone, maxSize: 4096, compress: false}
+	w, err := newAsyncWriter(path, cfg, time.Millisecond)
+	require.NoError(t, err)
+
+	egrp, ctx := errgroup.WithContext(context.Background())
+	w.start(ctx, egrp)
+	w.maxBufBytes = 8 * 1024 // small enough that writers actually hit backpressure
+
+	const writers, perWriter = 16, 200
+	var wg sync.WaitGroup
+	for g := 0; g < writers; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				_, werr := w.Write([]byte(fmt.Sprintf("writer-%02d-line-%04d-padding\n", g, i)))
+				assert.NoError(t, werr)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	w.enterSyncMode()
+	require.NoError(t, egrp.Wait())
+	w.close()
+
+	// Reassemble every log file in the directory and confirm nothing was lost or
+	// interleaved mid-line.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	seen := make(map[string]bool, writers*perWriter)
+	for _, e := range entries {
+		content, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NoError(t, rerr)
+		for _, line := range strings.Split(strings.TrimSuffix(string(content), "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			assert.Falsef(t, seen[line], "line written once appeared twice: %q", line)
+			seen[line] = true
+		}
+	}
+	for g := 0; g < writers; g++ {
+		for i := 0; i < perWriter; i++ {
+			line := fmt.Sprintf("writer-%02d-line-%04d-padding", g, i)
+			assert.Truef(t, seen[line], "line lost by concurrent writers: %q", line)
+		}
+	}
 }

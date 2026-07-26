@@ -55,14 +55,24 @@ func main() {
 		}
 		err := generateCLIDocs(outputDir)
 		if err != nil {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		return
 	}
 	err := handleCLI(os.Args)
 	if err != nil {
-		os.Exit(1)
+		exitWithFlush(1)
 	}
+}
+
+// exitWithFlush terminates the process after draining the log writer. The
+// deferred flush in main covers a normal return and a panic unwind, but
+// os.Exit runs no defers, so every explicit exit has to drain for itself or
+// lose whatever is still buffered -- including the line explaining the exit.
+func exitWithFlush(code int) {
+	logging.EnterSyncMode()
+	logging.FlushLogs(false)
+	os.Exit(code)
 }
 
 func handleCLI(args []string) error {
@@ -94,7 +104,7 @@ func handleCLI(args []string) error {
 		cliExecErrorHook(err)
 	}
 	if err != nil {
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	return nil
 }
