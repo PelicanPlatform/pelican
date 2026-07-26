@@ -74,6 +74,13 @@ type LogTailResponse struct {
 	FirstCursor string `json:"firstCursor"`
 	LastCursor  string `json:"lastCursor"`
 	Reached     bool   `json:"reached"`
+	// Dropped is how many lines are missing between the caller's `since`
+	// cursor and the start of Content, because they were evicted from the
+	// buffer before the caller asked for them or trimmed to satisfy
+	// `limit`. Content is contiguous only when this is 0. Cursors are
+	// opaque, so a client cannot derive this and must read it here to know
+	// whether what it is displaying has holes in it.
+	Dropped int64 `json:"dropped"`
 	// InstanceID identifies the buffer that produced this response. It
 	// changes when the server restarts (or the buffer is otherwise
 	// re-initialized); clients use a change here as a signal to drop
@@ -222,6 +229,7 @@ func HandleLogTail(ctx *gin.Context) {
 		FirstCursor: logTailCursor(tail.FirstSeq),
 		LastCursor:  logTailCursor(tail.LastSeq),
 		Reached:     tail.Reached,
+		Dropped:     tail.Dropped,
 		InstanceID:  buf.InstanceID(),
 	})
 }

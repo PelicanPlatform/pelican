@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,8 +327,7 @@ func TestLogBuffer_TailSinceHonorsLimit(t *testing.T) {
 	assert.NotContains(t, string(tail.Content), "body-070",
 		"lines older than the truncation must not appear in the response")
 
-	// limit=0 must behave exactly like the pre-limit API -- return
-	// everything held.
+	// A limit of 0 means unbounded: everything held is returned.
 	full := buf.TailSince(0, 0)
 	assert.Equal(t, 100, bytes.Count(full.Content, []byte("\n")))
 	assert.Equal(t, int64(1), full.FirstSeq)
@@ -425,4 +425,197 @@ func TestLogBuffer_TailBeforePendingStraddle(t *testing.T) {
 	assert.NotContains(t, string(tail.Content), "pending-3")
 	assert.Equal(t, int64(1), tail.FirstSeq)
 	assert.Equal(t, int64(3), tail.LastSeq)
+}
+
+// A client polling with a cursor whose lines have since been evicted must be
+// told how many it missed. Cursors are opaque, so this is the only way it can
+// distinguish "nothing has happened" from "the server outran me".
+func TestLogBuffer_ReportsEvictedLinesAsDropped(t *testing.T) {
+	buf := newTestBuffer(t, 5, 200)
+	for i := 0; i < 5; i++ {
+		fire(t, buf, log.InfoLevel, fmt.Sprintf("early line %d", i))
+	}
+	// Read once so we hold a realistic cursor, then outrun it by enough to
+	// force eviction of everything it covered.
+	cursor := buf.TailSince(0, 0).LastSeq
+	require.Greater(t, cursor, int64(0))
+	for i := 0; i < 100; i++ {
+		fire(t, buf, log.InfoLevel, fmt.Sprintf("later line %d with filler text", i))
+	}
+
+	tail := buf.TailSince(cursor, 0)
+	assert.Positive(t, tail.Dropped, "eviction past the caller's cursor must be reported")
+	assert.Equal(t, tail.FirstSeq-cursor-1, tail.Dropped,
+		"the count must be exactly the seq range missing between the cursor and the content")
+}
+
+// Trimming to `limit` also leaves a hole, and the caller has to be able to
+// tell -- otherwise a bounded initial load looks like the whole history.
+func TestLogBuffer_ReportsLimitTrimAsDropped(t *testing.T) {
+	buf := newTestBuffer(t, 1000, 1<<20)
+	for i := 0; i < 100; i++ {
+		fire(t, buf, log.InfoLevel, fmt.Sprintf("line %d", i))
+	}
+
+	tail := buf.TailSince(0, 10)
+	assert.Equal(t, 10, bytes.Count(tail.Content, []byte("\n")))
+	assert.Equal(t, int64(90), tail.Dropped, "the 90 trimmed lines must be reported")
+}
+
+// A caller that is keeping up sees no gap, so the viewer must not show a
+// break in an unbroken stream.
+func TestLogBuffer_NoDropReportedWhenCallerKeepsUp(t *testing.T) {
+	buf := newTestBuffer(t, 1000, 1<<20)
+	for i := 0; i < 10; i++ {
+		fire(t, buf, log.InfoLevel, fmt.Sprintf("line %d", i))
+	}
+	cursor := buf.TailSince(0, 0).LastSeq
+
+	// An idle poll, then a poll that picks up new lines: neither is a gap.
+	assert.Zero(t, buf.TailSince(cursor, 0).Dropped)
+	fire(t, buf, log.InfoLevel, "fresh line")
+	tail := buf.TailSince(cursor, 0)
+	assert.Zero(t, tail.Dropped)
+	assert.Contains(t, string(tail.Content), "fresh line")
+
+	// A first load (no cursor) is not a gap either: the caller never had
+	// the older lines to lose.
+	assert.Zero(t, buf.TailSince(0, 0).Dropped)
+}
+
+// Fire runs on every log line in the process while readers serve the log-read
+// API concurrently, so the two paths must be safe together and reads must not
+// hold the buffer's mutex across their decompression work.
+func TestLogBuffer_ConcurrentFireAndTail(t *testing.T) {
+	buf := newTestBuffer(t, 50, 64<<10)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				fire(t, buf, log.InfoLevel, fmt.Sprintf("writer-%d-line-%d", id, i))
+			}
+		}(w)
+	}
+	for r := 0; r < 3; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				buf.TailSince(0, 100)
+				buf.TailBefore(buf.TailSince(0, 0).LastSeq, 20)
+			}
+		}()
+	}
+
+	// Readers run until the writers are done, then drain.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(stop)
+	}()
+	wg.Wait()
+
+	assert.LessOrEqual(t, buf.StoredBytes()+buf.PendingBytes(), 2*(64<<10),
+		"concurrent writers must not push the buffer past its budget")
+}
+
+// The web server logs every request path at Info, including for requests that
+// match no route, so line content and line length are both attacker-chosen.
+// Memory must stay bounded by Logging.Buffer.MaxSize no matter how few lines
+// it takes to get there -- eviction works in whole batches, so a pending
+// buffer that only seals on a line count never reclaims anything.
+func TestLogBuffer_BoundedByMaxSizeWithLongLines(t *testing.T) {
+	const maxBytes = 1 << 20
+	// Production defaults: a line budget high enough that byte pressure
+	// arrives long before the line counter would seal a batch.
+	buf := newTestBuffer(t, 10000, maxBytes)
+
+	huge := strings.Repeat("A", 500<<10)
+	for i := 0; i < 200; i++ {
+		fire(t, buf, log.InfoLevel, huge)
+	}
+
+	held := buf.StoredBytes() + buf.PendingBytes()
+	assert.LessOrEqual(t, held, 2*maxBytes,
+		"the buffer must stay near its configured cap regardless of line length")
+}
+
+// A single over-long line must not be able to flush every other line out of
+// the buffer, which would let a caller erase recent history on demand.
+func TestLogBuffer_TruncatesOverlongLines(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	fire(t, buf, log.InfoLevel, "keep-me")
+	fire(t, buf, log.InfoLevel, strings.Repeat("B", 1<<20))
+
+	content := buf.TailSince(0, 0).Content
+	assert.Contains(t, string(content), "keep-me",
+		"an over-long line should not evict the lines around it")
+	assert.Contains(t, string(content), "...[truncated]")
+	// Line-oriented paging depends on every stored line ending in a newline.
+	assert.Equal(t, 2, bytes.Count(content, []byte("\n")))
+	assert.Less(t, len(content), 2*maxBufferedLineBytes)
+}
+
+// sampleBearerToken is shaped to satisfy bearerTokenRegexStr: two "ey"-prefixed
+// segments of at least 18 characters and a signature of at least 64.
+const sampleBearerToken = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9." +
+	"eyJzdWIiOiJ1c2VyMSIsInNjb3BlIjoic3RvcmFnZS5yZWFkOi8ifQ." +
+	"c2lnbmF0dXJlYnl0ZXNjMmxuYm1GMGRYSmxZbmwwWlhOemFXZHVZWFIxY21WaWVYUmxjdw"
+
+// The buffer is readable by anyone holding pelican.log_read, a lesser
+// privilege than admin, so it must not retain credentials the on-disk log
+// censors. XRootD's forwarded output carries these tokens as query
+// parameters, and the signature is the part that makes a token replayable.
+func TestLogBuffer_RedactsBearerTokensInMessage(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	fire(t, buf, log.InfoLevel,
+		"XrdPfc_Cache: info Attach() pelican://example.com/foo?&authz=Bearer%20"+sampleBearerToken)
+
+	content := string(buf.TailSince(0, 0).Content)
+	assert.NotContains(t, content, sampleBearerToken)
+	assert.Contains(t, content, "REDACTED")
+	// The header and payload survive: they identify the issuer and subject,
+	// which is what makes a censored log useful for triage.
+	assert.Contains(t, content, "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9")
+}
+
+// The censor rewrites the "url" field as well as the message, so the buffer
+// must cover both.
+func TestLogBuffer_RedactsBearerTokensInURLField(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	entry := log.NewEntry(log.StandardLogger())
+	entry.Level = log.InfoLevel
+	entry.Time = time.Now()
+	entry.Message = "GET"
+	entry.Data = log.Fields{"url": "https://example.com/f?authz=Bearer%20" + sampleBearerToken}
+	require.NoError(t, buf.Fire(entry))
+
+	content := string(buf.TailSince(0, 0).Content)
+	assert.NotContains(t, content, sampleBearerToken)
+	assert.Contains(t, content, "REDACTED")
+}
+
+// Redaction must not disturb the entry logrus goes on to hand the remaining
+// hooks; the buffer censors a copy.
+func TestLogBuffer_RedactionLeavesCallerEntryIntact(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	raw := "authz=Bearer%20" + sampleBearerToken
+	entry := log.NewEntry(log.StandardLogger())
+	entry.Level = log.InfoLevel
+	entry.Time = time.Now()
+	entry.Message = raw
+	entry.Data = log.Fields{"url": "https://example.com/?" + raw}
+	require.NoError(t, buf.Fire(entry))
+
+	assert.Equal(t, raw, entry.Message)
+	assert.Equal(t, "https://example.com/?"+raw, entry.Data["url"])
 }

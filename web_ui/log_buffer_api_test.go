@@ -19,11 +19,104 @@
 package web_ui
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+// TestLogReadAuthHandler pins who may read the server's logs. The buffer this
+// gate protects holds recent log lines from every subsystem, so admitting the
+// wrong caller discloses far more than the log-viewer page itself; the
+// dedicated pelican.log_read scope exists so an operator can grant log access
+// without granting administration, and it must not work in reverse.
+func TestLogReadAuthHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	testCases := []struct {
+		name          string
+		setupUserFunc func(*gin.Context)
+		expectedCode  int
+		expectedError string
+	}{
+		{
+			name: "anonymous-caller-rejected",
+			setupUserFunc: func(ctx *gin.Context) {
+				ctx.Set("User", "")
+			},
+			expectedCode:  http.StatusUnauthorized,
+			expectedError: "Login required to view server logs",
+		},
+		{
+			name: "authenticated-user-without-scope-rejected",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1"}))
+				ctx.Set("User", "someone")
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "You do not have permission to read server logs",
+		},
+		{
+			name: "admin-admitted-without-an-explicit-grant",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1"}))
+				ctx.Set("User", "admin1")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "admin-group-member-admitted",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
+				require.NoError(t, param.Server_AdminGroups.Set([]string{"pelican-admins"}))
+				ctx.Set("User", "user1")
+				ctx.Set("Groups", []string{"pelican-admins"})
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "non-admin-group-member-rejected",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
+				require.NoError(t, param.Server_AdminGroups.Set([]string{"pelican-admins"}))
+				ctx.Set("User", "user1")
+				ctx.Set("Groups", []string{"pelican-users"})
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "You do not have permission to read server logs",
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			router := gin.Default()
+			router.GET("/test",
+				func(ctx *gin.Context) { tc.setupUserFunc(ctx) },
+				LogReadAuthHandler,
+				func(ctx *gin.Context) { ctx.AbortWithStatus(http.StatusOK) },
+			)
+			req, err := http.NewRequest("GET", "/test", nil)
+			require.NoError(t, err)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.expectedCode, w.Code)
+			if tc.expectedError != "" {
+				assert.Contains(t, w.Body.String(), tc.expectedError)
+			}
+			server_utils.ResetTestState()
+		})
+	}
+}
 
 func TestParseCount(t *testing.T) {
 	t.Parallel()
@@ -45,8 +138,8 @@ func TestParseCount(t *testing.T) {
 	})
 
 	t.Run("rejects invalid values", func(t *testing.T) {
-		// The strict strconv.Atoi parse must reject partly-numeric input
-		// (the reason we moved off fmt.Sscanf), negatives, and non-numbers.
+		// parseCount is strict: partly-numeric input ("100abc"), negatives,
+		// and non-numbers are all rejected rather than silently truncated.
 		for _, in := range []string{"", "100abc", "abc", "-1", "-100", "1.5", " 100", "0x10"} {
 			_, err := parseCount(in)
 			assert.Error(t, err, "input %q should be rejected", in)

@@ -32,9 +32,17 @@ export class LogViewerPage {
   readonly heading: Locator;
   readonly textFilter: Locator;
   readonly downloadButton: Locator;
+  readonly scrollToBottomButton: Locator;
   readonly autoScrollCheckbox: Locator;
-  // "Showing X of Y lines." — the count summary above the log pane.
+  // The scrolling log pane. Every row assertion is scoped to it so a match
+  // means "mounted in the pane", not "this string appears somewhere on the
+  // page".
+  readonly pane: Locator;
+  // "Showing X of Y lines." — the count summary above the log pane. Also
+  // carries the "Loading older…" / "No more history." suffixes.
   readonly summary: Locator;
+  // The dismissible warning the viewer raises when a tail fetch fails.
+  readonly fetchErrorAlert: Locator;
   // The "In-memory log capture is not yet available" notice shown when the
   // server reports the buffer disabled.
   readonly unavailableNotice: Locator;
@@ -46,10 +54,17 @@ export class LogViewerPage {
     this.heading = page.getByRole('heading', { name: 'Server Logs' });
     this.textFilter = page.getByLabel('Text filter');
     this.downloadButton = page.getByRole('button', { name: /Download/ });
+    this.scrollToBottomButton = page.getByRole('button', {
+      name: 'Scroll to bottom',
+    });
     this.autoScrollCheckbox = page.getByRole('checkbox', {
       name: 'Auto-scroll',
     });
+    this.pane = page.getByTestId('log-pane');
     this.summary = page.getByText(/Showing .* of .* lines\./);
+    this.fetchErrorAlert = page
+      .locator('.MuiAlert-root')
+      .filter({ hasText: /log tail fetch failed/ });
     this.unavailableNotice = page.getByText(
       /In-memory log capture is not yet available/
     );
@@ -61,11 +76,32 @@ export class LogViewerPage {
   }
 
   /**
-   * Returns a locator for a rendered log row that contains the given text.
-   * Matches a substring of the formatted line.
+   * Every log row currently mounted in the pane. With virtualization this is
+   * the window around the viewport, not the whole buffer — compare against
+   * `summary` for the full count.
+   */
+  rows(): Locator {
+    return this.pane.getByTestId('log-row');
+  }
+
+  /**
+   * Placeholders marking lines the server dropped before this view could
+   * read them. Distinct from `rows()`: a gap is a statement about the
+   * record rather than part of it, and it survives the level and text
+   * filters that log rows are subject to.
+   */
+  gaps(): Locator {
+    return this.pane.getByTestId('log-gap');
+  }
+
+  /**
+   * Returns a locator for a mounted log row containing the given text.
+   * Matches a substring of the formatted line. A row that is filtered out
+   * and a row that is merely scrolled out of the virtualization window both
+   * resolve to zero elements, so pair negative assertions with a count.
    */
   logLine(text: string): Locator {
-    return this.page.getByText(text);
+    return this.rows().filter({ hasText: text });
   }
 
   /**
@@ -82,5 +118,39 @@ export class LogViewerPage {
   /** Toggles a level chip in / out of the selected set. */
   async toggleLevel(level: string) {
     await this.levelChip(level).click();
+  }
+
+  /** Dismisses the tail-fetch warning via its Close button. */
+  async dismissFetchError() {
+    await this.fetchErrorAlert.getByRole('button', { name: 'Close' }).click();
+  }
+
+  /** Current scroll offset of the pane, in pixels from the top. */
+  paneScrollTop(): Promise<number> {
+    return this.pane.evaluate((el) => el.scrollTop);
+  }
+
+  /**
+   * Pixels of un-scrolled content below the viewport. The viewer treats
+   * anything at or under 20 px as "pinned to the bottom".
+   */
+  paneBottomGap(): Promise<number> {
+    return this.pane.evaluate(
+      (el) => el.scrollHeight - el.scrollTop - el.clientHeight
+    );
+  }
+
+  /** Scrolls the pane to the very top, which is what triggers a history load. */
+  async scrollPaneToTop() {
+    await this.pane.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+  }
+
+  /** Scrolls the pane up by `px`, clamped at the top. */
+  async scrollPaneUpBy(px: number) {
+    await this.pane.evaluate((el, delta) => {
+      el.scrollTop = Math.max(0, el.scrollTop - delta);
+    }, px);
   }
 }

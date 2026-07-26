@@ -139,6 +139,19 @@ definitions:
           currently holds — a further `before` request with the same
           cursor will return nothing. Callers use this to disable a
           scroll-up affordance.
+      dropped:
+        type: integer
+        format: int64
+        description: >-
+          Number of lines missing between the caller's `since` cursor and
+          the start of `content`, because they were evicted from the
+          buffer before the caller requested them or trimmed to satisfy
+          `limit`. `content` is contiguous with what the caller already
+          holds only when this is 0. Because cursors are opaque, a client
+          cannot compute this itself and MUST read it here to know
+          whether the history it is presenting has holes in it. Always 0
+          for a `before=` (scroll-up) request, which reports exhaustion
+          through `reached` instead.
       instanceId:
         type: string
         description: >-

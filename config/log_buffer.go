@@ -95,7 +95,9 @@ type LogRingBuffer struct {
 	// The compression worker owns compressQueue exclusively; producers use a
 	// non-blocking select-with-default so a slow compressor never blocks the
 	// hot log path. When the send fails we mark the batch as Raw and skip
-	// compression entirely -- exactly the behavior called for by the design.
+	// compression entirely: a raw batch costs more memory against maxBytes
+	// than a compressed one, but it is fully readable, and both TailSince and
+	// TailBefore decode either state.
 	compressQueue chan *logRingBatch
 	workerCtx     context.Context
 	workerCancel  context.CancelFunc
@@ -203,9 +205,9 @@ func StartLogRingBuffer(ctx context.Context) {
 			FullTimestamp:          true,
 		},
 		// One-slot channel: if the compressor is still busy on the previous
-		// batch when a new one is ready, the send fails and we skip
-		// compression -- the "skip if backlogged" behavior called for by
-		// the design.
+		// batch when a new one is ready, the send fails and the batch is left
+		// uncompressed. Falling behind costs memory, never latency on the
+		// logging path.
 		compressQueue: make(chan *logRingBatch, 1),
 		workerCtx:     workerCtx,
 		workerCancel:  cancel,
@@ -303,10 +305,18 @@ func (b *LogRingBuffer) Fire(entry *log.Entry) error {
 	if !shouldBuffer(entry.Level) {
 		return nil
 	}
-	line, err := b.formatter.Format(entry)
+	// Censor credentials before the line is stored. The buffer is served back
+	// to anyone holding pelican.log_read, so it must not retain material the
+	// on-disk log redacts: XRootD's forwarded output routinely carries
+	// "authz=Bearer <token>" query parameters. Redacting here rather than
+	// relying on the censor hook keeps the guarantee independent of hook
+	// ordering, which SetLogging is free to rearrange.
+	line, err := b.formatter.Format(redactEntryCopy(entry))
 	if err != nil {
 		return errors.Wrap(err, "log buffer: formatting entry")
 	}
+
+	line = capLineLength(line)
 
 	b.mu.Lock()
 	seq := b.nextSeq
@@ -317,7 +327,7 @@ func (b *LogRingBuffer) Fire(entry *log.Entry) error {
 	b.pending.Write(line)
 	b.pendingCount++
 
-	if b.pendingCount >= b.batchLines {
+	if b.pendingCount >= b.batchLines || b.pending.Len() >= b.pendingCap() {
 		batch := b.finalizeLocked()
 		b.batches = append(b.batches, batch)
 		b.total += len(batch.Payload)
@@ -328,10 +338,45 @@ func (b *LogRingBuffer) Fire(entry *log.Entry) error {
 		case b.compressQueue <- batch:
 		default:
 		}
-		b.evictLocked()
 	}
+	b.evictLocked()
 	b.mu.Unlock()
 	return nil
+}
+
+// maxBufferedLineBytes bounds a single buffered line. Log lines are
+// attacker-influenced -- request paths and user agents reach the buffer
+// through the web server's access log -- and one very long line would
+// otherwise consume the whole buffer and evict every line an operator
+// actually wants to read. The log file keeps the untruncated text; the
+// buffer is a bounded window over recent history, not the record of what
+// was logged.
+const maxBufferedLineBytes = 64 << 10
+
+// capLineLength truncates an over-long formatted line, preserving the
+// trailing newline that TailSince/TailBefore rely on to count lines. The
+// returned slice never aliases a truncated input, so the caller's buffer
+// stays intact.
+func capLineLength(line []byte) []byte {
+	if len(line) <= maxBufferedLineBytes {
+		return line
+	}
+	const marker = "...[truncated]\n"
+	out := make([]byte, 0, maxBufferedLineBytes)
+	out = append(out, line[:maxBufferedLineBytes-len(marker)]...)
+	return append(out, marker...)
+}
+
+// pendingCap is the byte size at which the pending buffer is sealed into a
+// batch. Sized as a fraction of the buffer's overall budget so that a
+// sealed batch is small enough for eviction to be responsive, while still
+// large enough that compression has something worthwhile to work on.
+func (b *LogRingBuffer) pendingCap() int {
+	limit := b.maxBytes / 8
+	if limit < maxBufferedLineBytes {
+		limit = maxBufferedLineBytes
+	}
+	return limit
 }
 
 // finalizeLocked seals the pending buffer into a logRingBatch. Caller must
@@ -352,14 +397,18 @@ func (b *LogRingBuffer) finalizeLocked() *logRingBatch {
 	return batch
 }
 
-// evictLocked drops the oldest batches until total <= maxBytes. The byte
-// cap is a soft target: we never drop the last surviving batch. Under
-// heavy write pressure with one very large batch, that means the buffer
-// can hold more than maxBytes.
+// evictLocked drops the oldest batches until the buffer fits in maxBytes.
+// The pending buffer counts against the budget: it holds live lines that
+// occupy memory just as a sealed batch does, and it can reach pendingCap
+// between seals.
+//
+// The byte cap is a soft target: we never drop the last surviving batch, so
+// a single batch larger than maxBytes keeps the buffer above budget until
+// the next seal replaces it.
 //
 // Caller holds b.mu.
 func (b *LogRingBuffer) evictLocked() {
-	for b.total > b.maxBytes && len(b.batches) > 1 {
+	for b.total+b.pending.Len() > b.maxBytes && len(b.batches) > 1 {
 		oldest := b.batches[0]
 		b.total -= len(oldest.Payload)
 		b.batches = b.batches[1:]
@@ -432,6 +481,42 @@ func (b *LogRingBuffer) compressOne(batch *logRingBatch) {
 	}
 }
 
+// logBufferSnapshot is a consistent view of the buffer's contents taken in
+// one critical section. Reads work from a snapshot so that decompression --
+// which is unbounded work proportional to how much history the operator
+// configured -- happens outside b.mu. Fire takes that same mutex on every
+// log line in the process, so a read that decompressed under it would stall
+// all logging, including the web server's per-request access log.
+type logBufferSnapshot struct {
+	// batches is a private copy of the slice header. The batches it points
+	// at are immutable once stored -- compression installs a replacement
+	// rather than rewriting one in place -- so they can be decoded safely
+	// after the lock is dropped.
+	batches         []*logRingBatch
+	pending         []byte
+	pendingFirstSeq int64
+	pendingCount    int
+	batchLines      int
+	oldestSeq       int64
+	newestSeq       int64
+}
+
+func (b *LogRingBuffer) snapshot() logBufferSnapshot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return logBufferSnapshot{
+		batches: append([]*logRingBatch(nil), b.batches...),
+		// The pending buffer is still being appended to, so it has to be
+		// copied rather than aliased.
+		pending:         append([]byte(nil), b.pending.Bytes()...),
+		pendingFirstSeq: b.pendingFirstSeq,
+		pendingCount:    b.pendingCount,
+		batchLines:      b.batchLines,
+		oldestSeq:       b.oldestSeqLocked(),
+		newestSeq:       b.newestSeqLocked(),
+	}
+}
+
 // LogTail is one page of TailSince / TailBefore output. Content is the
 // raw log text (newline-terminated lines concatenated in seq order); the
 // two seq fields describe the range covered by that content.
@@ -454,6 +539,13 @@ type LogTail struct {
 	FirstSeq int64
 	LastSeq  int64
 	Reached  bool
+	// Dropped counts lines that fell between the caller's cursor and the
+	// start of Content: either evicted before the caller came back for them,
+	// or trimmed to honor a limit. A reader that ignores this field silently
+	// presents a truncated history as a complete one, which during an
+	// incident is the difference between "nothing happened" and "we stopped
+	// keeping up".
+	Dropped int64
 }
 
 // TailSince returns lines held by the buffer with seq > since. A `since`
@@ -470,8 +562,7 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 	if b == nil {
 		return LogTail{}
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	snap := b.snapshot()
 
 	out := &bytes.Buffer{}
 	firstSeqInContent := int64(-1)
@@ -479,7 +570,7 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 	// Walk finalized batches in insertion order. Skip batches entirely
 	// consumed by the caller; for a batch straddling `since`, drop the
 	// already-seen prefix by counting newlines in the payload.
-	for _, batch := range b.batches {
+	for _, batch := range snap.batches {
 		if batch.lastSeq() <= since {
 			continue
 		}
@@ -507,13 +598,13 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 	}
 
 	// Pending buffer -- the tail that hasn't been finalized yet.
-	if b.pendingCount > 0 {
-		pendingLastSeq := b.pendingFirstSeq + int64(b.pendingCount) - 1
+	if snap.pendingCount > 0 {
+		pendingLastSeq := snap.pendingFirstSeq + int64(snap.pendingCount) - 1
 		if pendingLastSeq > since {
-			payload := b.pending.Bytes()
-			effectiveFirst := b.pendingFirstSeq
-			if since >= b.pendingFirstSeq {
-				skip := int(since - b.pendingFirstSeq + 1)
+			payload := snap.pending
+			effectiveFirst := snap.pendingFirstSeq
+			if since >= snap.pendingFirstSeq {
+				skip := int(since - snap.pendingFirstSeq + 1)
 				payload = skipNLines(payload, skip)
 				effectiveFirst = since + 1
 			}
@@ -525,7 +616,16 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 	}
 
 	content := out.Bytes()
-	newest := b.newestSeqLocked()
+	newest := snap.newestSeq
+
+	// Lines the caller's cursor asked for that the buffer no longer holds:
+	// they were evicted between this call and the last one. The caller
+	// cannot work this out for itself -- cursors are opaque by contract --
+	// so the count has to be reported explicitly.
+	var dropped int64
+	if since > 0 && snap.oldestSeq > since+1 {
+		dropped = snap.oldestSeq - since - 1
+	}
 
 	// Apply the limit: if we've accumulated more than `limit` lines,
 	// drop the OLDEST lines and advance firstSeqInContent accordingly.
@@ -538,6 +638,10 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 			drop := totalLines - limit
 			content = skipNLines(content, drop)
 			firstSeqInContent += int64(drop)
+			// Trimming to the limit is a gap too. It is recoverable via
+			// TailBefore, unlike an eviction, but the caller still must not
+			// render the result as contiguous.
+			dropped += int64(drop)
 		}
 	}
 
@@ -545,6 +649,7 @@ func (b *LogRingBuffer) TailSince(since int64, limit int) LogTail {
 		Content:  content,
 		FirstSeq: since,
 		LastSeq:  since,
+		Dropped:  dropped,
 	}
 	if firstSeqInContent >= 0 {
 		tail.FirstSeq = firstSeqInContent
@@ -579,11 +684,10 @@ func (b *LogRingBuffer) TailBefore(before int64, count int) LogTail {
 	if b == nil {
 		return LogTail{}
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	snap := b.snapshot()
 
 	if count <= 0 {
-		count = b.batchLines
+		count = snap.batchLines
 	}
 
 	// chunks are collected NEWEST-first (matching the reverse walk) and
@@ -599,19 +703,19 @@ func (b *LogRingBuffer) TailBefore(before int64, count int) LogTail {
 	// Pending first (it lives at the newest end of the buffer). Only
 	// relevant when `before` is high enough that any pending seq falls
 	// under it -- unusual for a scroll-up call but correct if it happens.
-	if b.pendingCount > 0 && b.pendingFirstSeq < before {
-		pendingLastSeq := b.pendingFirstSeq + int64(b.pendingCount) - 1
-		payload := append([]byte(nil), b.pending.Bytes()...)
-		lines := b.pendingCount
+	if snap.pendingCount > 0 && snap.pendingFirstSeq < before {
+		pendingLastSeq := snap.pendingFirstSeq + int64(snap.pendingCount) - 1
+		payload := snap.pending
+		lines := snap.pendingCount
 		if pendingLastSeq >= before {
-			keep := int(before - b.pendingFirstSeq)
+			keep := int(before - snap.pendingFirstSeq)
 			payload = takeFirstNLines(payload, keep)
 			lines = keep
 		}
 		if lines > 0 {
 			chunks = append(chunks, chunk{
 				bytes:    payload,
-				firstSeq: b.pendingFirstSeq,
+				firstSeq: snap.pendingFirstSeq,
 				lines:    lines,
 			})
 			totalLines += lines
@@ -620,8 +724,8 @@ func (b *LogRingBuffer) TailBefore(before int64, count int) LogTail {
 
 	// Now walk finalized batches newest-to-oldest until we've collected
 	// at least `count` lines. Each batch is decompressed at most once.
-	for i := len(b.batches) - 1; i >= 0 && totalLines < count; i-- {
-		batch := b.batches[i]
+	for i := len(snap.batches) - 1; i >= 0 && totalLines < count; i-- {
+		batch := snap.batches[i]
 		if batch.FirstSeq >= before {
 			continue
 		}
@@ -648,7 +752,7 @@ func (b *LogRingBuffer) TailBefore(before int64, count int) LogTail {
 		totalLines += lines
 	}
 
-	oldestHeld := b.oldestSeqLocked()
+	oldestHeld := snap.oldestSeq
 	tail := LogTail{
 		FirstSeq: before,
 		LastSeq:  before,
@@ -781,4 +885,15 @@ func (b *LogRingBuffer) PendingLineCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.pendingCount
+}
+
+// PendingBytes returns the byte size of the pending buffer. Together with
+// StoredBytes it accounts for everything the buffer holds. Test-only.
+func (b *LogRingBuffer) PendingBytes() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pending.Len()
 }

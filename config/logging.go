@@ -79,13 +79,14 @@ var (
 	formatterConfigured bool
 
 	// effectiveLogLevel is the fast-path cache for GetEffectiveLogLevel.
-	// Read on the hot log-buffer path (shouldBuffer runs on every incoming
-	// log line), so the original mutex+atomic-load+slice-walk implementation
-	// was expensive under trace/debug loads. Every level-changing site --
-	// SetLogging (called by the param-callback registered via
-	// RegisterLoggingCallback), initFilterLogging, and
-	// ResetGlobalLoggingHooks -- writes the new level here, so a plain
-	// atomic load is enough to answer the query.
+	// shouldBuffer reads it on every incoming log line, so answering the
+	// query must stay a single atomic load: it cannot take
+	// globalTransformMu or walk the transform hook's LogLevels slice, which
+	// is what the level would otherwise have to be derived from. Keeping
+	// that true is the job of every level-changing site -- SetLogging
+	// (called by the param-callback registered via RegisterLoggingCallback),
+	// initFilterLogging, and ResetGlobalLoggingHooks -- each of which writes
+	// the new level here.
 	effectiveLogLevel atomic.Uint32
 )
 
@@ -181,19 +182,77 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 		return nil
 	}
 
-	regex := rt.regex.Load()
-	if regex != nil {
-		entry.Message = regex.ReplaceAllString(entry.Message, rt.template)
-		for key, value := range entry.Data {
-			if key != "url" {
-				continue
-			}
-			if s, ok := value.(string); ok {
-				entry.Data[key] = regex.ReplaceAllString(s, rt.template)
-			}
+	redactEntryInPlace(entry)
+	return hook.Fire(entry)
+}
+
+// redactEntryInPlace censors credentials in an entry's message and "url"
+// field. Mutating the caller's entry is what makes the censor effective for
+// logrus's own output path: this hook owns the writer, so every consumer
+// downstream of it sees the censored text.
+//
+// Any consumer that reads an entry WITHOUT going through this hook -- a hook
+// registered ahead of this one, or one that formats the entry itself -- sees
+// the raw credential and must call redactEntryCopy instead. Hook order is not
+// a durable guarantee: SetLogging rebuilds the hook set and re-appends the
+// global hooks last, so a hook installed earlier stays ahead of this one.
+func redactEntryInPlace(entry *log.Entry) {
+	regex := globalTransform.regex.Load()
+	if regex == nil {
+		return
+	}
+	entry.Message = regex.ReplaceAllString(entry.Message, globalTransform.template)
+	for key, value := range entry.Data {
+		if key != "url" {
+			continue
+		}
+		if s, ok := value.(string); ok {
+			entry.Data[key] = regex.ReplaceAllString(s, globalTransform.template)
 		}
 	}
-	return hook.Fire(entry)
+}
+
+// redactEntryCopy returns a censored copy of entry, leaving the caller's entry
+// untouched so hooks that run later still observe what logrus handed them.
+// The copy is shallow apart from Data, which is cloned only when it holds a
+// field the censor rewrites.
+//
+// Callers that format an entry into storage a user can read back -- rather
+// than into the writer redactEntryInPlace already covers -- must route it
+// through here first.
+func redactEntryCopy(entry *log.Entry) *log.Entry {
+	regex := globalTransform.regex.Load()
+	if regex == nil {
+		return entry
+	}
+	template := globalTransform.template
+
+	message := regex.ReplaceAllString(entry.Message, template)
+	// Rewrite "url" only when the censor actually changes it, so the common
+	// case (no credential in the entry) allocates nothing.
+	var data log.Fields
+	if raw, ok := entry.Data["url"].(string); ok {
+		if censored := regex.ReplaceAllString(raw, template); censored != raw {
+			data = make(log.Fields, len(entry.Data))
+			for k, v := range entry.Data {
+				data[k] = v
+			}
+			data["url"] = censored
+		}
+	}
+	if message == entry.Message && data == nil {
+		return entry
+	}
+
+	dup := *entry
+	dup.Message = message
+	if data != nil {
+		dup.Data = data
+	}
+	// The formatter writes into Buffer when it is non-nil; that buffer belongs
+	// to logrus's own write path and must not be shared with a copy.
+	dup.Buffer = nil
+	return &dup
 }
 
 func initFilterLogging() {

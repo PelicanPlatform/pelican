@@ -99,3 +99,42 @@ func TestFileLoggingThroughRedactionFilter(t *testing.T) {
 	assert.Contains(t, got, "REDACTED", "the bearer token should be redacted by the filter hook")
 	assert.NotContains(t, got, signature, "the raw token signature must not appear in the log file")
 }
+
+// The in-memory buffer is served back over the log-read API, so it must hold
+// the same censored text the log file does. This asserts that with the hook
+// installation order InitServer actually uses: the ring buffer is installed
+// well before the censor, so it cannot depend on the censor having already
+// rewritten the entry.
+func TestLogRingBufferRedactsUnderProductionHookOrder(t *testing.T) {
+	require.NoError(t, param.Reset())
+
+	t.Cleanup(func() {
+		StopLogRingBuffer()
+		ResetGlobalLoggingHooks()
+		globalTransform.regex.Store(regexp.MustCompile(bearerTokenRegexStr))
+		log.SetOutput(os.Stderr)
+		log.SetLevel(log.InfoLevel)
+		_ = param.Reset()
+	})
+
+	globalTransform.regex.Store(regexp.MustCompile(bearerTokenRegexStr))
+	log.SetLevel(log.InfoLevel)
+
+	// InitServer installs the ring buffer first and the censor afterwards;
+	// logrus fires hooks in installation order.
+	StartLogRingBuffer(context.Background())
+	initFilterLogging()
+
+	signature := strings.Repeat("b", 64)
+	token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0dXNlciIsImlhdCI6MTUxNjIzOTAyMn0." + signature
+	log.Infof("XrdPfc_Cache: info Attach() pelican://example.org/data?&authz=Bearer%%20%s", token)
+
+	buf := GlobalLogRingBuffer()
+	require.NotNil(t, buf, "the ring buffer should be installed")
+	got := string(buf.TailSince(0, 0).Content)
+
+	assert.Contains(t, got, "XrdPfc_Cache", "the line should reach the buffer")
+	assert.Contains(t, got, "REDACTED")
+	assert.NotContains(t, got, signature,
+		"a pelican.log_read holder must not be able to read a replayable token out of the buffer")
+}

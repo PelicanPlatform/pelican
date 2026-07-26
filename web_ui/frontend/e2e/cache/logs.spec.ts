@@ -18,7 +18,9 @@
 
 import { test } from '@playwright/test';
 import { registerLogViewerTests } from '../shared_tests/logViewerTests';
+import { registerLogViewerAccessTests } from '../shared_tests/logViewerAccessTests';
 
 test.describe('Cache Server Logs', () => {
   registerLogViewerTests('./view/settings/logs/');
+  registerLogViewerAccessTests('./view/settings/logs/');
 });

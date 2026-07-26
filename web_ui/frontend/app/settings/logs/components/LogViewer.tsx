@@ -59,6 +59,10 @@ interface LogTailResponse {
   firstCursor: string;
   lastCursor: string;
   reached: boolean;
+  // Count of lines missing between our cursor and the start of `content`,
+  // evicted or trimmed before we asked for them. Non-zero means the
+  // content is not contiguous with what we already hold.
+  dropped: number;
   // instanceId identifies the server's buffer. It changes on restart;
   // the viewer resets local state when it changes so cursors from a
   // previous instance don't leak into requests against the new one.
@@ -120,6 +124,23 @@ interface Line {
   // React keys and for eviction ordering. Unrelated to any server
   // seq; the cursor is opaque to the client.
   id: number;
+  // Marks a placeholder standing in for lines the server dropped before
+  // this client could read them, rather than a line the server sent. It
+  // occupies a row so the break is visible where it happened; without it
+  // the lines on either side read as consecutive.
+  gap?: boolean;
+}
+
+// gapLine builds the placeholder shown where the server reported missing
+// lines.
+function gapLine(dropped: number, id: number): Line {
+  const plural = dropped === 1 ? 'line' : 'lines';
+  return {
+    text: `--- ${dropped.toLocaleString()} ${plural} dropped: the server's buffer filled faster than this view could read it ---`,
+    level: 'gap',
+    id,
+    gap: true,
+  };
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -287,8 +308,22 @@ export default function LogViewer() {
       }
       instanceIdRef.current = resp.instanceId;
 
+      // A reported gap is only meaningful once something is already on
+      // screen: on the very first load, and on the reset that follows a
+      // server restart, there is no earlier content for the missing lines
+      // to be missing from. Claim the marker's id before splitting the new
+      // content so ids stay in list order.
+      const gap =
+        resp.dropped > 0 && sinceRef.current !== ''
+          ? gapLine(resp.dropped, ++appendIdRef.current)
+          : null;
       const fresh = splitLines(resp.content, () => ++appendIdRef.current);
 
+      if (gap) {
+        setLines((prev) =>
+          prev.length > 0 ? pruneToByteCap(prev.concat(gap)) : prev
+        );
+      }
       if (fresh.length > 0) {
         setLines((prev) => pruneToByteCap(prev.concat(fresh)));
       }
@@ -362,8 +397,10 @@ export default function LogViewer() {
   const levelCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const lvl of LOG_LEVELS) counts[lvl] = 0;
-    for (const line of lines)
+    for (const line of lines) {
+      if (line.gap) continue;
       counts[line.level] = (counts[line.level] || 0) + 1;
+    }
     return counts;
   }, [lines]);
 
@@ -371,11 +408,26 @@ export default function LogViewer() {
     const levelSet = new Set(selectedLevels);
     const filter = textFilter.toLowerCase();
     return lines.filter((line) => {
+      // Gap markers are not log lines and carry no level; hiding one
+      // behind a level or text filter would restore the very illusion of
+      // contiguity it exists to break.
+      if (line.gap) return true;
       if (!levelSet.has(line.level)) return false;
       if (filter && !line.text.toLowerCase().includes(filter)) return false;
       return true;
     });
   }, [lines, selectedLevels, textFilter]);
+
+  // Gap markers occupy a row but are not log lines, so they are excluded
+  // from the counts an operator reads as "how much am I looking at".
+  const visibleLineCount = useMemo(
+    () => visibleLines.reduce((n, line) => n + (line.gap ? 0 : 1), 0),
+    [visibleLines]
+  );
+  const totalLineCount = useMemo(
+    () => lines.reduce((n, line) => n + (line.gap ? 0 : 1), 0),
+    [lines]
+  );
 
   // Measure the scroll pane so virtualization knows the viewport height.
   // Runs on mount and on window resize.
@@ -520,14 +572,18 @@ export default function LogViewer() {
       </Stack>
 
       <Typography variant='body2' color='text.secondary'>
-        Showing {visibleLines.length.toLocaleString()} of{' '}
-        {lines.length.toLocaleString()} lines.
+        Showing {visibleLineCount.toLocaleString()} of{' '}
+        {totalLineCount.toLocaleString()} lines.
         {loadingOlder && ' Loading older…'}
         {reachedOldest && ' No more history.'}
       </Typography>
 
       <Box
         ref={scrollRef}
+        // Stable hooks for the end-to-end suite. Scoping row assertions to
+        // the pane is what lets a test tell "filtered out" apart from
+        // "virtualized off-screen" -- a page-wide text query cannot.
+        data-testid='log-pane'
         sx={{
           fontFamily: 'monospace',
           fontSize: '0.8rem',
@@ -567,12 +623,17 @@ export default function LogViewer() {
           <Box
             key={line.id}
             component='div'
+            data-testid={line.gap ? 'log-gap' : 'log-row'}
             sx={{
               height: ROW_HEIGHT,
               lineHeight: `${ROW_HEIGHT}px`,
               whiteSpace: 'pre',
               wordBreak: 'keep-all',
-              color: LEVEL_COLORS[line.level] || undefined,
+              // A gap is a statement about the record rather than part of
+              // it, so it is styled to stand apart from every level colour.
+              ...(line.gap
+                ? { color: '#ffd54f', fontStyle: 'italic' }
+                : { color: LEVEL_COLORS[line.level] || undefined }),
             }}
           >
             {line.text}
