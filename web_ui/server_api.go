@@ -18,6 +18,7 @@
 package web_ui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -218,7 +219,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 	// Mirror to Registry when running as Origin/Cache so downtime persists centrally (Director polls Registry for all sources)
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, downtime, http.MethodPost, idStr); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), downtime, http.MethodPost, idStr); err != nil {
 		log.Warningf("Failed to sync downtime creation to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -375,7 +376,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 
 	// Mirror updates to the Registry to keep the central downtime records consistent with local changes.
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, updatedDowntime, http.MethodPut, uuid); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), updatedDowntime, http.MethodPut, uuid); err != nil {
 		log.Warningf("Failed to sync downtime update to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -409,7 +410,7 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 
 	// Mirror deletion to the Registry so the central DB removes the downtime as well.
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, *existingDowntime, http.MethodDelete, uuid); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), *existingDowntime, http.MethodDelete, uuid); err != nil {
 		log.Warningf("Failed to sync downtime deletion to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -497,7 +498,13 @@ func HandleGetServerLocalMetadataHistory(ctx *gin.Context) {
 // mirrorDowntimeToRegistry forwards a downtime CRUD to the Registry, if the
 // current server has an Origin or Cache service. It uses the server's issuer key to mint a short-lived
 // service token and sets Authorization: Bearer <token>.
-func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, method string, id string) error {
+// The context must NOT be the *gin.Context. Gin pools its contexts and
+// reuses them for later requests, while net/http's transport keeps a
+// reference to whatever context an outbound request was built from until
+// that connection's read loop finishes -- reaching back into a context that
+// by then belongs to a different request. Pass ctx.Request.Context(), which
+// has the lifetime of the request being served.
+func mirrorDowntimeToRegistry(ctx context.Context, dt server_structs.Downtime, method string, id string) error {
 	if id == "" {
 		return errors.New("downtime ID is required")
 	}
