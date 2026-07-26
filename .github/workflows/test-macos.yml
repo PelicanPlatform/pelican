@@ -95,13 +95,24 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # macOS runs the federation test suite at -p=2 (Linux uses the default
+          # higher parallelism). At -p=4 the concurrent federations intermittently
+          # make xrootd's loopback UDP monitor-collector connect() fail with
+          # EINVAL ("Unable to setup primary monitor collector"), which is fatal
+          # to xrootd startup and fails ~30% of federation launches. This is not
+          # file-descriptor exhaustion (raising RLIMIT_NOFILE and kern.maxfiles
+          # 13-17x had no effect) nor TIME_WAIT/ephemeral-port exhaustion (peak
+          # TIME_WAIT measured at 1 with a widened range + shortened MSL); it is a
+          # concurrency limit in the macOS loopback network stack / xrootd's
+          # network init under CPU contention. -p=2 runs cleanly and is ~2x faster
+          # than the fully-serial -p=1.
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
             --junitfile "$JUNIT_FILE" \
             -- \
-            -p=4 \
-            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
+            -p=2 \
+            -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
             ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
