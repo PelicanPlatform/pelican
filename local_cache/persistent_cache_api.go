@@ -308,8 +308,11 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle write-through requests (PUT, DELETE) - proxy to origin
-	if r.Method == "PUT" || r.Method == "DELETE" {
+	// Handle write-through requests (PUT, DELETE, MKCOL) - proxy to origin.
+	// MKCOL creates a collection (no body) and needs no cached copy invalidated.
+	// (COPY is not yet supported: its Destination header is a full URL that would
+	// need rewriting into origin terms — and may target a different origin.)
+	if r.Method == "PUT" || r.Method == "DELETE" || r.Method == "MKCOL" {
 		pc.proxyWrite(w, r, objectPath, bearerToken)
 		return
 	}
@@ -1443,6 +1446,12 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	})
 	// Register DELETE for write-through deletion (proxy to origin)
 	group.DELETE("/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	// Register MKCOL for collection creation (proxy to origin, WS1)
+	group.Handle("MKCOL", "/:discovery/*path", func(c *gin.Context) {
 		if setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
