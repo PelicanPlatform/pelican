@@ -1018,6 +1018,35 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
+	// WS1: a firewalled (broker-only) origin cannot be reached directly by a
+	// client for any data operation (write, PROPFIND, directread, or a GET that
+	// fell back to the origin). When the chosen origin is broker-only and a cache
+	// is available, route the client through a cache instead — the cache mediates
+	// the operation to the origin over the broker. (A hypothetical broker-capable
+	// client would be handled here too; none exists today.)
+	if len(oAds) > 0 && isBrokerOnlyOrigin(oAds[0].ServerAd) && len(cAds) > 0 {
+		chosenService = "cache"
+		chosenCaches := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			chosenCaches = append(chosenCaches, ad.ServerAd)
+		}
+		oServers := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServers = append(oServers, ad.ServerAd)
+		}
+		if status, err := validateClientToken(ginCtx, requestId); err != nil {
+			ginCtx.JSON(status, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+			})
+			return
+		}
+		log.Debugf("Origin for %s is broker-only; routing the client through a cache. Request ID: %s", reqPath, requestId.String())
+		redirectSucceeded = true
+		generateRedirectResponse(ginCtx, chosenCaches, oServers, oAds[0].NamespaceAd, requestId)
+		return
+	}
+
 	chosenServers := make([]server_structs.ServerAd, 0, serverResLimit)
 	for idx, ad := range oAds {
 		if idx >= serverResLimit {
@@ -1460,6 +1489,15 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
+// isBrokerOnlyOrigin reports whether an origin is reachable only through the
+// broker (i.e. firewalled): it advertised a broker URL and has no direct-reach
+// endpoint a client could use (WS2). Such an origin must be mediated by a cache
+// (WS1). An origin that is directly reachable (a normal DNS host, or advertised
+// direct endpoints) is not broker-only even if it also enabled the broker.
+func isBrokerOnlyOrigin(ad server_structs.ServerAd) bool {
+	return ad.BrokerURL.String() != "" && len(ad.DirectEndpoints) == 0
+}
+
 // isPublicIP reports whether ip is a globally-routable unicast address (not
 // loopback, private, link-local, or unspecified).
 func isPublicIP(ip net.IP) bool {

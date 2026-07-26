@@ -30,6 +30,24 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
+func TestIsBrokerOnlyOrigin(t *testing.T) {
+	brokerURL, err := url.Parse("https://broker.example/api/v1.0/broker/reverse?origin=o&prefix=/origins/o")
+	require.NoError(t, err)
+
+	t.Run("broker URL and no direct endpoints is broker-only", func(t *testing.T) {
+		assert.True(t, isBrokerOnlyOrigin(server_structs.ServerAd{BrokerURL: *brokerURL}))
+	})
+	t.Run("broker URL but with direct endpoints is directly reachable (WS2)", func(t *testing.T) {
+		assert.False(t, isBrokerOnlyOrigin(server_structs.ServerAd{
+			BrokerURL:       *brokerURL,
+			DirectEndpoints: []string{"192.0.2.10:8443"},
+		}))
+	})
+	t.Run("no broker URL is not broker-only", func(t *testing.T) {
+		assert.False(t, isBrokerOnlyOrigin(server_structs.ServerAd{}))
+	})
+}
+
 func TestAutoCaptureDirectEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	newCtx := func(remoteAddr string) *gin.Context {
