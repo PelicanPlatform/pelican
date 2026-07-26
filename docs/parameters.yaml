@@ -2693,7 +2693,10 @@ description: |+
   waiting for a worker before it starts shedding load with HTTP 429 responses.
 
   When the total pending count reaches this value, any additional incoming request is
-  failed immediately with a "too many requests" error rather than being enqueued.
+  failed immediately with a "too many requests" error rather than being enqueued — except
+  that an origin with nothing queued may always enqueue one request, so a few saturated
+  origins cannot lock every healthy origin out of admission (the buffer may transiently
+  exceed this value by up to one entry per active origin).
 
   Set to 0 to disable the fair scheduler entirely (the cache falls back to the raw
   first-come-first-served channel).

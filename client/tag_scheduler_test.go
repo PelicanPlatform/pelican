@@ -502,3 +502,220 @@ func TestTagSchedulerRejectClassifiesOriginSlow(t *testing.T) {
 	require.ErrorAs(t, err, &rej)
 	assert.Equal(t, ShedOriginSlow, rej.Reason)
 }
+
+// A transfer that fails before producing any body must release both its
+// active and starving slots; otherwise a string of early failures would
+// permanently consume the tag's (small) starving budget and wedge the tag.
+func TestTagSchedulerStarvingReleasedOnEarlyFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap = 1: the limiter
+		PerTagActivePercent:   90,
+		PendingBufferSize:     100,
+		PerTagPendingSize:     100,
+		EMAWindow:             5 * time.Second,
+	})
+	out := make(chan *clientTransferFile)
+	sched.Start(ctx, out)
+	t.Cleanup(sched.Stop)
+
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+
+	// First dispatch holds the whole starving budget. Fail it without a
+	// first byte; the queued transfer must then dispatch.
+	first := <-out
+	first.file.schedDone()
+	select {
+	case second := <-out:
+		second.file.schedFirstByte()
+		second.file.schedDone()
+	case <-ctx.Done():
+		t.Fatal("second transfer never dispatched: early failure did not release the starving slot")
+	}
+
+	// All slots must drain back to zero (no double-decrement, no leak).
+	require.Eventually(t, func() bool {
+		snap := sched.Snapshot(ctx)
+		st := snap.Tags["originA"]
+		return st.Active == 0 && st.Starving == 0
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+// Transfers still queued when the scheduler stops must be handed to the
+// onDrop hook (which the engine uses to synthesize failure results) rather
+// than silently discarded — otherwise their jobs would wait forever.
+func TestTagSchedulerStopDrainsQueued(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PendingBufferSize: 100,
+		PerTagPendingSize: 100,
+		EMAWindow:         5 * time.Second,
+	})
+	var dropped []*clientTransferFile
+	sched.onDrop = func(f *clientTransferFile) { dropped = append(dropped, f) }
+	// No reader on out: everything admitted stays queued.
+	out := make(chan *clientTransferFile)
+	sched.Start(ctx, out)
+
+	const N = 3
+	for i := 0; i < N; i++ {
+		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	}
+	// Stop returns only after the scheduler goroutine has drained the
+	// FIFOs, so reading `dropped` afterwards is race-free.
+	sched.Stop()
+	assert.Len(t, dropped, N, "every queued transfer must be surfaced via onDrop at shutdown")
+}
+
+// Submissions racing shutdown must shed like any other rejection (so the
+// caller synthesizes a failure result) instead of dropping the transfer.
+func TestTagSchedulerSubmitAfterStop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{PendingBufferSize: 10})
+	out := make(chan *clientTransferFile)
+	sched.Start(ctx, out)
+	sched.Stop()
+
+	err := sched.Submit(ctx, "originA", makeFile("originA"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+	var rej *SchedulerRejection
+	require.ErrorAs(t, err, &rej)
+	assert.Equal(t, ShedCacheOverloaded, rej.Reason)
+}
+
+// Stop is safe to call repeatedly, concurrently, and on a scheduler that was
+// never started.
+func TestTagSchedulerStopIsIdempotent(t *testing.T) {
+	// Never started: must return promptly rather than wait on a goroutine
+	// that does not exist.
+	neverStarted := NewTagScheduler(4, SchedulerConfig{})
+	done := make(chan struct{})
+	go func() { neverStarted.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop on a never-started scheduler hung")
+	}
+
+	// Started: concurrent Stops must all return without panicking.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{})
+	sched.Start(ctx, make(chan *clientTransferFile))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); sched.Stop() }()
+	}
+	wg.Wait()
+}
+
+// Fully-idle tags must be evicted after the grace period so the per-tag maps
+// (and the monitoring snapshot / Prometheus label set derived from them) do
+// not grow forever with every origin the cache has ever contacted. Tags with
+// queued or in-flight work, a still-decaying EMA, or recent activity stay.
+func TestTagSchedulerEvictsIdleTags(t *testing.T) {
+	sched := NewTagScheduler(4, SchedulerConfig{}) // EMAWindow 0 → grace floor (10s)
+	now := time.Now()
+	stale := now.Add(-time.Minute)
+
+	// Idle: counters only, no other state — must be evicted.
+	sched.admits["idle"] = 5
+	sched.rejects["idle"] = 2
+	sched.lastSeen["idle"] = stale
+	// In-flight: active transfer pins the tag.
+	sched.admits["busy"] = 1
+	sched.active["busy"] = 1
+	sched.lastSeen["busy"] = stale
+	// Decaying: EMA still present pins the tag.
+	sched.admits["decaying"] = 1
+	sched.ema["decaying"] = 0.5
+	sched.lastSeen["decaying"] = stale
+	// Recent: activity within the grace period pins the tag.
+	sched.admits["recent"] = 1
+	sched.lastSeen["recent"] = now
+
+	sched.evictIdleTags(now)
+
+	assert.NotContains(t, sched.admits, "idle")
+	assert.NotContains(t, sched.rejects, "idle")
+	assert.NotContains(t, sched.lastSeen, "idle")
+	assert.Contains(t, sched.admits, "busy")
+	assert.Contains(t, sched.admits, "decaying")
+	assert.Contains(t, sched.admits, "recent")
+
+	// The evicted tag no longer appears in snapshots (buildSnapshot runs on
+	// the scheduler goroutine; calling it directly is safe on a scheduler
+	// that was never started).
+	snap := sched.buildSnapshot()
+	assert.NotContains(t, snap.Tags, "idle")
+	assert.Contains(t, snap.Tags, "busy")
+}
+
+// When the global pending buffer is full, a tag with an empty queue may
+// still enqueue one entry. Without this reservation, a few saturated origins
+// could pin the global buffer and starve every healthy origin out of
+// admission entirely — inverting the fairness the scheduler exists for.
+func TestTagSchedulerGlobalBufferReservesForIdleTags(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap 1: originA's queue backs up
+		PerTagActivePercent:   90,
+		PendingBufferSize:     2,
+		PerTagPendingSize:     100,
+		EMAWindow:             5 * time.Second,
+	})
+	// No consumer on out: dispatched work parks, queues build.
+	sched.out = make(chan *clientTransferFile)
+	sched.stopped = make(chan struct{})
+	sched.started.Store(true)
+	go sched.run(ctx)
+	t.Cleanup(sched.Stop)
+
+	// Saturate the global buffer with one origin.
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	// Same origin again: global buffer is full and its queue is non-empty →
+	// shed.
+	err := sched.Submit(ctx, "originA", makeFile("originA"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+
+	// A different, idle origin must still get its one reserved slot…
+	require.NoError(t, sched.Submit(ctx, "originB", makeFile("originB")),
+		"an idle origin must not be locked out by other origins pinning the global buffer")
+	// …but only one: with something queued it is subject to the global cap
+	// like everyone else.
+	err = sched.Submit(ctx, "originB", makeFile("originB"))
+	require.Error(t, err)
+	var rej *SchedulerRejection
+	require.ErrorAs(t, err, &rej)
+	assert.Equal(t, ShedCacheOverloaded, rej.Reason,
+		"an origin under its own caps must not be blamed for pool-wide saturation")
+}
+
+// classifyShed attributes a shed to the origin only when the origin's own
+// in-flight composition is the limit; a tag whose queue backed up purely
+// because of pool-wide contention is reported as cache_overloaded, not
+// blamed as slow.
+func TestTagSchedulerClassifyShedHonesty(t *testing.T) {
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap 1
+		PerTagActivePercent:   50, // active cap 2
+	})
+	// Idle tag: nothing in flight → pool contention, not the origin's fault.
+	assert.Equal(t, ShedCacheOverloaded, sched.classifyShed("idleTag"))
+	// At the starving cap: first-byte-less fetches dominate → unresponsive.
+	sched.active["starved"] = 1
+	sched.starving["starved"] = 1
+	assert.Equal(t, ShedOriginUnresponsive, sched.classifyShed("starved"))
+	// At the active cap, delivering data → merely slow.
+	sched.active["slow"] = 2
+	assert.Equal(t, ShedOriginSlow, sched.classifyShed("slow"))
+}

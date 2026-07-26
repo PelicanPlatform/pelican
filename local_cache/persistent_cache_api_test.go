@@ -122,6 +122,20 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		}
 	})
 
+	t.Run("UpstreamThrottlePassesThrough", func(t *testing.T) {
+		// When the upstream server 429s the cache's own fetch, the resulting
+		// client.CacheThrottleError must surface to the remote client as a
+		// 429 with the upstream's reason — not as a misleading 500.
+		rec := httptest.NewRecorder()
+		throttled := &client.CacheThrottleError{Reason: string(client.ShedOriginSlow)}
+		handleError(rec, throttled, false, reqLog)
+		require.Equal(t, 429, rec.Code)
+		require.Equal(t, "60", rec.Header().Get("Retry-After"))
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		assert.Equal(t, string(client.ShedOriginSlow), body["error"])
+	})
+
 	t.Run("UnrelatedErrorStaysNon429", func(t *testing.T) {
 		// A regression guard: any bare error should still take the
 		// existing internal_error / not_found / etc. paths, not fall

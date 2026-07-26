@@ -150,6 +150,12 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	resp.Body.Close()
 	// Go's http.Client follows redirects automatically, so 3XX codes
 	// won't appear here.  Reject anything other than 200 OK.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// Source throttled the request; carry the Retry-After hint on the
+		// retryable throttle error (the body was not read on this path).
+		err = newThrottleErrorFromResponse(resp, "", xfer.attempts[0].Url.Host)
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode),
 			wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("source HEAD returned HTTP %d", resp.StatusCode))}
@@ -228,7 +234,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		var respBytes []byte
-		respBytes, err = io.ReadAll(resp.Body)
+		respBytes, err = io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		if err != nil {
 			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
 			err = error_codes.NewContactError(
@@ -247,6 +253,10 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
 					resp.StatusCode), Err: statusErr}
+			} else if resp.StatusCode == http.StatusTooManyRequests {
+				// Destination throttled the copy; classify with the structured
+				// reason + Retry-After hint like any other throttle response.
+				err = newThrottleErrorFromResponse(resp, string(respBytes), resolvedDestUrl.Host)
 			} else {
 				log.Errorf("TPC COPY to %s failed (HTTP status %d): %q", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
@@ -606,6 +616,11 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 		log.Debugln("Constructed source attempt URL for TPC copy:", fileURL.String(), "file:", srcFilePath)
 	}
 
+	// totalXfer must be counted before submission: a scheduler rejection
+	// pushes a synthetic failure result for this file, and runMux treats
+	// totalXfer == 0 as "job created no transfers" and closes the results
+	// channel — racing the synthetic result's delivery.
+	job.job.totalXfer += 1
 	job.job.activeXfer.Add(1)
 	if err := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
@@ -630,8 +645,6 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 		if !errors.Is(err, ErrTooManyRequests) {
 			return err
 		}
-	} else {
-		job.job.totalXfer += 1
 	}
 	return nil
 }

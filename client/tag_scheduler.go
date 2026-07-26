@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -89,12 +90,17 @@ type PerTagStats struct {
 	// the configured EMAWindow. Used as the weight input for the
 	// per-tag round-robin dispatch decision.
 	EMA float64
-	// Admits and Rejects are monotonic totals since scheduler start.
+	// Admits and Rejects count admissions/rejections for this tag since
+	// the tag was first seen — or since it was last evicted: a tag idle
+	// long enough is dropped entirely (see evictIdleTags), and starts
+	// from zero if it returns. Lifetime totals live in GlobalStats.
 	Admits  uint64
 	Rejects uint64
 }
 
-// GlobalStats is the pool-wide scheduler snapshot.
+// GlobalStats is the pool-wide scheduler snapshot. The Total* counters
+// are monotonic for the scheduler's lifetime (unlike PerTagStats, whose
+// counters reset when an idle tag is evicted).
 type GlobalStats struct {
 	WorkerCount        int
 	StarvingCap        int
@@ -147,27 +153,38 @@ type TagScheduler struct {
 	cfg         SchedulerConfig
 	workerCount int
 
+	// onDrop, when set, is invoked (on the scheduler goroutine, during
+	// shutdown) for every admitted-but-never-dispatched transfer so the
+	// owner can synthesize a failure result instead of silently losing
+	// the file. Must be set before Start.
+	onDrop func(*clientTransferFile)
+
 	// Communication channels. Every field below the channels is owned
 	// by the scheduler goroutine and MUST NOT be touched from outside.
 	admit    chan *admitReq
 	events   chan schedulerEvent
 	snapReqs chan chan<- SchedulerSnapshot
 	stop     chan struct{}
+	stopOnce sync.Once
+	started  atomic.Bool
 	stopped  chan struct{}
 	out      chan<- *clientTransferFile
 	rng      *rand.Rand
 
 	fifos    map[string]*list.List // tag → FIFO of *clientTransferFile
-	active   map[string]int        // tag → in-flight (any state)
-	starving map[string]int        // tag → in-flight without first byte
+	active   map[string]int        // tag → in-flight (any state); zero entries are deleted
+	starving map[string]int        // tag → in-flight without first byte; zero entries are deleted
 	ema      map[string]float64    // tag → EMA of active
-	admits   map[string]uint64     // tag → monotonic admit count
-	rejects  map[string]uint64     // tag → monotonic rejection count
+	admits   map[string]uint64     // tag → admit count since the tag was last evicted
+	rejects  map[string]uint64     // tag → rejection count since the tag was last evicted
+	lastSeen map[string]time.Time  // tag → last admit/reject/dispatch/event, for idle eviction
 	lastTick time.Time
 	pending  int
 
-	// Global monotonic counters, broken down by why we rejected.
-	// TotalAdmits = sum(admits values); TotalRejects = same for rejects.
+	// Global monotonic counters. Unlike the per-tag maps these are never
+	// reset: idle tags are evicted from the maps (see evictIdleTags) so
+	// per-tag totals cannot serve as lifetime counters.
+	totalAdmits        uint64
 	totalRejectsGlobal uint64 // rejected because global pending was full
 	totalRejectsPerTag uint64 // rejected because per-tag pending was full
 }
@@ -198,11 +215,19 @@ func NewTagScheduler(workerCount int, cfg SchedulerConfig) *TagScheduler {
 	if workerCount < 1 {
 		workerCount = 1
 	}
+	// Each in-flight transfer produces at most two events (first-byte and
+	// done), so sizing the buffer to 2× the worker pool (with a floor)
+	// guarantees the hooks fired from transfer workers never block on a
+	// busy scheduler goroutine.
+	eventBuf := 2 * workerCount
+	if eventBuf < 256 {
+		eventBuf = 256
+	}
 	return &TagScheduler{
 		cfg:         cfg,
 		workerCount: workerCount,
 		admit:       make(chan *admitReq),
-		events:      make(chan schedulerEvent, 256),
+		events:      make(chan schedulerEvent, eventBuf),
 		snapReqs:    make(chan chan<- SchedulerSnapshot),
 		stop:        make(chan struct{}),
 		stopped:     make(chan struct{}),
@@ -213,25 +238,30 @@ func NewTagScheduler(workerCount int, cfg SchedulerConfig) *TagScheduler {
 		ema:         make(map[string]float64),
 		admits:      make(map[string]uint64),
 		rejects:     make(map[string]uint64),
+		lastSeen:    make(map[string]time.Time),
 	}
 }
 
 // Start begins the scheduler goroutine, dispatching admitted transfers on
-// the out channel. Stop() blocks until the goroutine exits.
+// the out channel. Stop() blocks until the goroutine exits. Start may be
+// called at most once per scheduler; a second call panics (programming
+// error, not a runtime condition).
 func (s *TagScheduler) Start(ctx context.Context, out chan<- *clientTransferFile) {
+	if !s.started.CompareAndSwap(false, true) {
+		panic("TagScheduler.Start called more than once")
+	}
 	s.out = out
 	go s.run(ctx)
 }
 
-// Stop signals the scheduler to exit and waits for the goroutine.
+// Stop signals the scheduler to exit and waits for the goroutine. It is
+// safe to call multiple times, including concurrently, and safe to call
+// on a scheduler that was never started.
 func (s *TagScheduler) Stop() {
-	select {
-	case <-s.stop:
-		// Already stopped
-	default:
-		close(s.stop)
+	s.stopOnce.Do(func() { close(s.stop) })
+	if s.started.Load() {
+		<-s.stopped
 	}
-	<-s.stopped
 }
 
 // Submit asks the scheduler to admit `file`, tagged with `tag`. Returns
@@ -250,14 +280,21 @@ func (s *TagScheduler) Submit(ctx context.Context, tag string, file *clientTrans
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.stop:
-		return errors.New("transfer scheduler is shut down")
+		// Shutting down: shed with a SchedulerRejection so the caller takes
+		// the same synthesize-a-result path as any other shed and the
+		// remote client gets a retryable 429 rather than a silent drop.
+		return &SchedulerRejection{
+			Reason: ShedCacheOverloaded,
+			Tag:    tag,
+			msg:    fmt.Sprintf("%s: transfer scheduler is shutting down", ErrTooManyRequests.Error()),
+		}
 	}
-	select {
-	case err := <-reply:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Once the admit request has been received, handleAdmit always writes
+	// the (buffered) reply before the scheduler goroutine does anything
+	// else, so this receive cannot block for long and must not be raced
+	// against ctx: abandoning the reply would leave an admitted file in
+	// the FIFO while telling the caller it was never submitted.
+	return <-reply
 }
 
 func (s *TagScheduler) attachHooks(tag string, file *clientTransferFile) {
@@ -309,6 +346,22 @@ func (s *TagScheduler) activeCap() int {
 // / done events, and dispatch attempts, and periodically ticks the EMA.
 func (s *TagScheduler) run(ctx context.Context) {
 	defer close(s.stopped)
+	// On exit, hand every admitted-but-undispatched transfer to onDrop so
+	// its job still observes a completion (otherwise the owning job's
+	// active-transfer count never drains and its results channel never
+	// closes). Registered after the close(s.stopped) defer so it runs
+	// first, i.e. Stop() does not return until the drain is complete.
+	defer func() {
+		for tag, q := range s.fifos {
+			for e := q.Front(); e != nil; e = e.Next() {
+				if s.onDrop != nil {
+					s.onDrop(e.Value.(*clientTransferFile))
+				}
+			}
+			delete(s.fifos, tag)
+		}
+		s.pending = 0
+	}()
 
 	tickInterval := s.cfg.EMAWindow / 8
 	if tickInterval < 250*time.Millisecond {
@@ -333,7 +386,7 @@ func (s *TagScheduler) run(ctx context.Context) {
 			case reply := <-s.snapReqs:
 				reply <- s.buildSnapshot()
 			case <-tick.C:
-				s.tickEMA()
+				s.onTick()
 			case <-s.stop:
 				return
 			case <-ctx.Done():
@@ -348,7 +401,7 @@ func (s *TagScheduler) run(ctx context.Context) {
 			case reply := <-s.snapReqs:
 				reply <- s.buildSnapshot()
 			case <-tick.C:
-				s.tickEMA()
+				s.onTick()
 			case <-s.stop:
 				return
 			case <-ctx.Done():
@@ -358,16 +411,63 @@ func (s *TagScheduler) run(ctx context.Context) {
 	}
 }
 
+// onTick advances the EMA and evicts fully-idle tags. Runs on the
+// scheduler goroutine at the tick cadence.
+func (s *TagScheduler) onTick() {
+	s.tickEMA()
+	s.evictIdleTags(time.Now())
+}
+
+// classifyShed inspects a tag's own in-flight composition to decide why a
+// submission for it is being shed. If the tag itself is holding a
+// starving-cap worth of first-byte-less fetches, the origin looks
+// unresponsive; if it is at its active cap, it is delivering data but
+// already holds its fair share (merely slow). If the tag's own counters
+// are under both caps, the shed is due to pool-wide contention — blaming
+// the origin would be wrong, so report the cache as overloaded.
+func (s *TagScheduler) classifyShed(tag string) ShedReason {
+	if s.starving[tag] >= s.starvingCap() {
+		return ShedOriginUnresponsive
+	}
+	if s.active[tag] >= s.activeCap() {
+		return ShedOriginSlow
+	}
+	return ShedCacheOverloaded
+}
+
 func (s *TagScheduler) handleAdmit(req *admitReq) {
-	if s.cfg.PendingBufferSize > 0 && s.pending >= s.cfg.PendingBufferSize {
+	s.lastSeen[req.tag] = time.Now()
+	qLen := 0
+	if q, ok := s.fifos[req.tag]; ok {
+		qLen = q.Len()
+	}
+	// Per-tag cap is checked before the global one so a rejection is
+	// attributed to the tag's own state whenever its own queue is the
+	// limit.
+	if s.cfg.PerTagPendingSize > 0 && qLen >= s.cfg.PerTagPendingSize {
+		s.rejects[req.tag]++
+		s.totalRejectsPerTag++
+		reason := s.classifyShed(req.tag)
+		req.reply <- &SchedulerRejection{
+			Reason: reason,
+			Tag:    req.tag,
+			msg:    fmt.Sprintf("%s: origin %q pending queue is full (%s)", ErrTooManyRequests.Error(), req.tag, reason),
+		}
+		return
+	}
+	// Global buffer full. A tag with nothing queued may still enqueue one
+	// entry past the global cap: without that reservation, a handful of
+	// saturated origins could pin the global buffer and starve every
+	// healthy origin out of admission entirely. The overshoot is bounded
+	// by one entry per distinct tag.
+	if s.cfg.PendingBufferSize > 0 && s.pending >= s.cfg.PendingBufferSize && qLen > 0 {
 		s.rejects[req.tag]++
 		s.totalRejectsGlobal++
-		// Global buffer full: the cache is saturated across all origins,
-		// not just this one.
+		reason := s.classifyShed(req.tag)
 		req.reply <- &SchedulerRejection{
-			Reason: ShedCacheOverloaded,
+			Reason: reason,
 			Tag:    req.tag,
-			msg:    fmt.Sprintf("%s: cache pending queue is full", ErrTooManyRequests.Error()),
+			msg:    fmt.Sprintf("%s: cache pending queue is full (%s)", ErrTooManyRequests.Error(), reason),
 		}
 		return
 	}
@@ -376,44 +476,35 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 		q = list.New()
 		s.fifos[req.tag] = q
 	}
-	if s.cfg.PerTagPendingSize > 0 && q.Len() >= s.cfg.PerTagPendingSize {
-		s.rejects[req.tag]++
-		s.totalRejectsPerTag++
-		// Per-tag FIFO full: dispatch for this origin is blocked because it
-		// is at one of its caps.  Classify by which: if the origin is holding
-		// its starving-cap worth of first-byte-less fetches it looks
-		// unresponsive; otherwise it is delivering data but at its active
-		// share, i.e. merely slow.
-		reason := ShedOriginSlow
-		if s.starving[req.tag] >= s.starvingCap() {
-			reason = ShedOriginUnresponsive
-		}
-		req.reply <- &SchedulerRejection{
-			Reason: reason,
-			Tag:    req.tag,
-			msg:    fmt.Sprintf("%s: origin %q pending queue is full (%s)", ErrTooManyRequests.Error(), req.tag, reason),
-		}
-		return
-	}
 	q.PushBack(req.file)
 	s.pending++
 	s.admits[req.tag]++
+	s.totalAdmits++
 	req.reply <- nil
 }
 
 func (s *TagScheduler) handleEvent(ev schedulerEvent) {
+	s.lastSeen[ev.tag] = time.Now()
 	switch ev.kind {
 	case evFirstByte:
-		if s.starving[ev.tag] > 0 {
-			s.starving[ev.tag]--
-		}
+		s.decrementCounter(s.starving, ev.tag)
 	case evDone:
-		if s.active[ev.tag] > 0 {
-			s.active[ev.tag]--
+		s.decrementCounter(s.active, ev.tag)
+		if ev.stillStarving {
+			s.decrementCounter(s.starving, ev.tag)
 		}
-		if ev.stillStarving && s.starving[ev.tag] > 0 {
-			s.starving[ev.tag]--
-		}
+	}
+}
+
+// decrementCounter lowers a per-tag counter by one, deleting the map
+// entry when it reaches zero so idle tags do not accumulate in memory
+// (or in the monitoring snapshot) forever.
+func (s *TagScheduler) decrementCounter(m map[string]int, tag string) {
+	switch v := m[tag]; {
+	case v > 1:
+		m[tag] = v - 1
+	case v == 1:
+		delete(m, tag)
 	}
 }
 
@@ -468,6 +559,7 @@ func (s *TagScheduler) onDispatched(tag string) {
 	s.pending--
 	s.active[tag]++
 	s.starving[tag]++
+	s.lastSeen[tag] = time.Now()
 }
 
 // tickEMA advances the per-tag exponentially-weighted moving average of
@@ -498,6 +590,42 @@ func (s *TagScheduler) tickEMA() {
 		if s.active[tag] > 0 {
 			s.ema[tag] = alpha * float64(s.active[tag])
 		}
+	}
+}
+
+// evictIdleTags drops all per-tag state for tags with no queued or
+// in-flight work, no still-decaying EMA, and no activity for at least a
+// grace period. Without eviction, every origin ever contacted would stay
+// in the maps (and thus in every monitoring snapshot) for the process
+// lifetime — unbounded memory and Prometheus label cardinality, plus an
+// ever-growing O(tags) snapshot cost paid on this goroutine.
+//
+// The grace period is at least the EMA window so the metrics publisher
+// (which samples every few seconds) reliably observes a tag's final
+// admit/reject totals before the tag disappears. Evicted tags that
+// return start their per-tag counters from zero; the metrics layer
+// treats per-tag totals as delta sources and handles the reset.
+func (s *TagScheduler) evictIdleTags(now time.Time) {
+	grace := s.cfg.EMAWindow
+	if grace < 10*time.Second {
+		grace = 10 * time.Second
+	}
+	for tag, seen := range s.lastSeen {
+		if now.Sub(seen) < grace {
+			continue
+		}
+		if _, ok := s.fifos[tag]; ok {
+			continue
+		}
+		if s.active[tag] > 0 || s.starving[tag] > 0 {
+			continue
+		}
+		if _, ok := s.ema[tag]; ok {
+			continue
+		}
+		delete(s.lastSeen, tag)
+		delete(s.admits, tag)
+		delete(s.rejects, tag)
 	}
 }
 
@@ -534,14 +662,16 @@ func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
 			StarvingCap:        s.starvingCap(),
 			ActiveCap:          s.activeCap(),
 			TotalPending:       s.pending,
+			TotalAdmits:        s.totalAdmits,
+			TotalRejects:       s.totalRejectsGlobal + s.totalRejectsPerTag,
 			TotalRejectsGlobal: s.totalRejectsGlobal,
 			TotalRejectsPerTag: s.totalRejectsPerTag,
 		},
 	}
 	// Collect the union of every tag we know about — a tag may have
 	// pending entries in `fifos`, active/starving counters even after
-	// its FIFO drained, an EMA that's still decaying, or lifetime
-	// admit/reject totals long after all its in-flight work is done.
+	// its FIFO drained, an EMA that's still decaying, or admit/reject
+	// totals awaiting idle eviction after its in-flight work is done.
 	seen := make(map[string]struct{})
 	add := func(m map[string]struct{}, k string) { m[k] = struct{}{} }
 	for tag := range s.fifos {
@@ -564,13 +694,12 @@ func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
 	}
 
 	snap.Tags = make(map[string]PerTagStats, len(seen))
-	var totalAdmits, totalRejects uint64
 	for tag := range seen {
 		var pending int
 		if q, ok := s.fifos[tag]; ok {
 			pending = q.Len()
 		}
-		p := PerTagStats{
+		snap.Tags[tag] = PerTagStats{
 			Pending:  pending,
 			Active:   s.active[tag],
 			Starving: s.starving[tag],
@@ -578,35 +707,33 @@ func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
 			Admits:   s.admits[tag],
 			Rejects:  s.rejects[tag],
 		}
-		snap.Tags[tag] = p
-		totalAdmits += p.Admits
-		totalRejects += p.Rejects
 	}
 	snap.Global.TotalTags = len(snap.Tags)
-	snap.Global.TotalAdmits = totalAdmits
-	snap.Global.TotalRejects = totalRejects
 	return snap
 }
 
-// synthesizeRejectionResult builds a TransferResults that surfaces a 429
-// rejection to callers. Exposed so wire code can push it to te.results
-// without special-casing.
+// synthesizeRejectionResult builds a TransferResults that surfaces a
+// scheduler rejection to callers. Exposed so wire code can push it to
+// te.results without special-casing.
 func synthesizeRejectionResult(file *clientTransferFile, err error) *clientTransferResults {
 	res := TransferResults{
 		JobId: file.jobId,
 		Error: err,
 	}
-	if file.file != nil {
-		// runMux's results-side branch (client/handle_http.go around
-		// the tmpResults[id] processing) unconditionally dereferences
+	if file.file != nil && file.file.job != nil {
+		// Populate the same base fields newTransferResults would: the
+		// results are consumed by job status displays and the client
+		// agent API, which expect Source to be set and Attempts to be
+		// non-nil. runMux also unconditionally dereferences
 		// TransferResults.job to decrement activeXfer and check
-		// completion.  Wire the job here so a scheduler-rejected
-		// transfer doesn't panic on shutdown.
-		res.job = file.file.job
+		// completion, so a scheduler-rejected transfer must carry it.
+		res = newTransferResults(file.file.job)
+		res.JobId = file.jobId
+		res.Error = err
 		if file.file.remoteURL != nil {
 			res.Scheme = file.file.remoteURL.Scheme
 		}
-		if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
+		if file.file.job.dirResp.RedirectInfo != nil {
 			res.DirectorDecision = file.file.job.dirResp.RedirectInfo
 		}
 	}

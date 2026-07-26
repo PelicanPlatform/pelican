@@ -64,17 +64,27 @@ func wrapErrorByStatusCode(code int, err error) error {
 	}
 }
 
+// maxErrorBodySize bounds how much of an error-response body the client reads
+// and retains. Error bodies come from remote peers that are not necessarily
+// trustworthy; without a cap, a hostile server could feed each transfer worker
+// an arbitrarily large body.
+const maxErrorBodySize = 64 << 10
+
+// maxRetryAfter clamps the Retry-After hint carried on throttle errors so a
+// misbehaving server cannot push an absurd backoff to external retriers.
+const maxRetryAfter = time.Hour
+
 // throttleErrorForReason maps the machine-parseable reason string carried in a
 // cache's 429 response body (the "error" field written by the cache's
 // handleError) to the specific retryable Pelican error type. Unknown or empty
 // reasons fall back to the generic cache-overloaded classification.
 func throttleErrorForReason(reason string, err error) error {
-	switch reason {
-	case "origin_unresponsive":
+	switch ShedReason(reason) {
+	case ShedOriginUnresponsive:
 		return error_codes.NewTransfer_OriginUnresponsiveError(err)
-	case "origin_slow":
+	case ShedOriginSlow:
 		return error_codes.NewTransfer_OriginSlowError(err)
-	case "cache_overloaded":
+	case ShedCacheOverloaded:
 		return error_codes.NewTransfer_CacheOverloadedError(err)
 	default:
 		return error_codes.NewTransfer_CacheOverloadedError(err)
@@ -82,9 +92,12 @@ func throttleErrorForReason(reason string, err error) error {
 }
 
 // parseThrottleReason extracts the machine-parseable reason from a cache's 429
-// JSON body of the form {"error": "<reason>", "detail": "..."}. Returns "" if
-// the body is not JSON or has no "error" field, in which case callers fall back
-// to the generic throttle classification.
+// JSON body of the form {"error": "<reason>", "detail": "..."}. The value is
+// validated against the known ShedReason constants — the body comes from a
+// remote peer, and an arbitrary string must not flow into logs or error
+// messages. Returns "" if the body is not JSON, has no "error" field, or
+// carries an unrecognized reason; callers then fall back to the generic
+// throttle classification.
 func parseThrottleReason(body string) string {
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -96,29 +109,57 @@ func parseThrottleReason(body string) string {
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		return ""
 	}
-	return parsed.Error
+	switch ShedReason(parsed.Error) {
+	case ShedOriginUnresponsive, ShedOriginSlow, ShedCacheOverloaded:
+		return parsed.Error
+	}
+	return ""
+}
+
+// sanitizeErrorDetail makes a server-provided message safe to embed in log
+// lines and error strings: control characters (including CR/LF, which would
+// permit forging log records) are replaced with spaces and the result is
+// truncated.
+func sanitizeErrorDetail(detail string) string {
+	const maxDetail = 512
+	detail = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, detail)
+	if len(detail) > maxDetail {
+		detail = detail[:maxDetail] + "…"
+	}
+	return strings.TrimSpace(detail)
 }
 
 // parseRetryAfter parses an HTTP Retry-After header value. Per RFC 7231 it may
-// be a number of seconds or an HTTP date; the cache emits seconds. Returns 0 if
-// absent or unparsable.
+// be a number of seconds or an HTTP date; the cache emits seconds. Returns 0
+// if absent or unparsable; values are clamped to maxRetryAfter.
 func parseRetryAfter(v string) time.Duration {
 	v = strings.TrimSpace(v)
+	var d time.Duration
 	if v == "" {
 		return 0
-	}
-	if secs, err := strconv.Atoi(v); err == nil {
+	} else if secs, err := strconv.Atoi(v); err == nil {
 		if secs < 0 {
 			return 0
 		}
-		return time.Duration(secs) * time.Second
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		if d := time.Until(t); d > 0 {
-			return d
+		if secs > int(maxRetryAfter/time.Second) {
+			return maxRetryAfter
 		}
+		d = time.Duration(secs) * time.Second
+	} else if t, err := http.ParseTime(v); err == nil {
+		d = time.Until(t)
 	}
-	return 0
+	if d < 0 {
+		return 0
+	}
+	if d > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return d
 }
 
 // wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
@@ -455,9 +496,28 @@ func (e *CacheThrottleError) Unwrap() error {
 	return e.Err
 }
 
+// Is reports a match for ErrTooManyRequests so a throttle observed as a
+// remote 429 satisfies the same errors.Is check as a shed performed by
+// this process's own scheduler.
+func (e *CacheThrottleError) Is(target error) bool {
+	return target == ErrTooManyRequests
+}
+
+// newThrottleErrorFromResponse builds the structured throttle error for an
+// HTTP 429 from any request flavor (GET, PUT, HEAD, COPY): the reason is
+// parsed (and validated) from the already-read response body, the backoff
+// hint from the Retry-After header. body may be empty when the response
+// body was unavailable (e.g. HEAD).
+func newThrottleErrorFromResponse(resp *http.Response, body, endpoint string) *CacheThrottleError {
+	reason := parseThrottleReason(body)
+	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+	return newCacheThrottleError(reason, strings.TrimSpace(body), endpoint, retryAfter)
+}
+
 // newCacheThrottleError builds a CacheThrottleError from a cache's 429
 // response: the reason parsed from the JSON body's "error" field, the
-// Retry-After header, the endpoint host, and the raw body detail.
+// Retry-After header, the endpoint host, and the body detail (sanitized
+// here — it is server-controlled text headed for logs and error strings).
 func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Duration) *CacheThrottleError {
 	base := fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
 	return &CacheThrottleError{
@@ -465,7 +525,7 @@ func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Dura
 		RetryAfter: retryAfter,
 		Endpoint:   endpoint,
 		Err:        throttleErrorForReason(reason, base),
-		detail:     detail,
+		detail:     sanitizeErrorDetail(detail),
 	}
 }
 

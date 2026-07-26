@@ -873,6 +873,18 @@ func NewTransferEngineWithScheduler(ctx context.Context, workerCount int, schedu
 		return te, nil
 	}
 	te.scheduler = scheduler
+	// Transfers still queued in the scheduler when it stops would
+	// otherwise vanish without a result, leaving their jobs' active
+	// counts permanently non-zero (and result waiters blocked until ctx
+	// cancellation). Synthesize a failure result for each, exactly as
+	// submitFile does for an admission rejection.
+	scheduler.onDrop = func(file *clientTransferFile) {
+		res := synthesizeRejectionResult(file, errors.New("transfer engine shut down before the transfer could be dispatched"))
+		select {
+		case te.results <- res:
+		case <-te.ctx.Done():
+		}
+	}
 	scheduler.Start(te.ctx, te.files)
 	return te, nil
 }
@@ -2794,10 +2806,22 @@ func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, result
 	var err error
 	var transferResults TransferResults
 	switch file.file.xferType {
-	case transferTypeUpload:
-		transferResults, err = uploadObject(file.file)
-	case transferTypeCopy:
-		transferResults, err = copyHTTP(file.file)
+	case transferTypeUpload, transferTypeCopy:
+		// The scheduler's "starving" bucket tracks transfers that have not
+		// yet produced a first byte of downloaded body; uploads and
+		// third-party copies have no wiring to report data progress back to
+		// the scheduler. Mark them non-starving at dispatch — otherwise the
+		// (much smaller) starving cap would silently become their effective
+		// per-tag concurrency limit. The cost is that the unresponsive-
+		// destination protection does not apply to these transfer types.
+		if file.file.schedFirstByte != nil {
+			file.file.schedFirstByte()
+		}
+		if file.file.xferType == transferTypeUpload {
+			transferResults, err = uploadObject(file.file)
+		} else {
+			transferResults, err = copyHTTP(file.file)
+		}
 	default:
 		transferResults, err = downloadObject(file.file)
 	}
@@ -3815,7 +3839,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
-		bodyBytes, readErr := io.ReadAll(resp.Body)
+		// Cap the error-body read: the peer is not necessarily trustworthy,
+		// and the body is copied into error strings that outlive the
+		// request. Anything useful fits well within the cap.
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		if readErr != nil {
 			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
 		}
@@ -3839,11 +3866,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			// error is classified as the specific retryable throttle type and
 			// the advertised backoff is carried to the caller / external
 			// retrier.
-			reason := parseThrottleReason(bodyStr)
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-			throttleErr := newCacheThrottleError(reason, strings.TrimSpace(bodyStr), transfer.Url.Host, retryAfter)
-			log.WithFields(fields).Warnf("Cache %s throttled the request (reason=%s, retry-after=%s)",
-				transfer.Url.Host, reason, retryAfter)
+			throttleErr := newThrottleErrorFromResponse(resp, bodyStr, transfer.Url.Host)
+			log.WithFields(fields).Warnf("Server %s throttled the request (reason=%s, retry-after=%s)",
+				transfer.Url.Host, throttleErr.Reason, throttleErr.RetryAfter)
 			return 0, 0, -1, serverVersion, "", throttleErr
 		}
 		sce := StatusCodeError(resp.StatusCode)
@@ -4628,6 +4653,15 @@ Loop:
 			// older versions of XRootD incorrectly use 200.
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
+				if response.StatusCode == http.StatusTooManyRequests {
+					// The destination throttled the upload; classify it with
+					// the structured reason + Retry-After hint so the error is
+					// the same retryable throttle type a download would get.
+					// runPut re-buffered the (bounded) error body for us.
+					bodyBytes, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBodySize))
+					lastError = newThrottleErrorFromResponse(response, string(bodyBytes), request.URL.Host)
+					break Loop
+				}
 				sce := StatusCodeError(response.StatusCode)
 				// Wrap StatusCodeError with appropriate PelicanError based on status code
 				wrappedErr := wrapStatusCodeError(&sce)
@@ -4792,13 +4826,17 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
-		textResponse, err := io.ReadAll(response.Body)
+		textResponse, err := io.ReadAll(io.LimitReader(response.Body, maxErrorBodySize))
 		if err != nil {
 			log.Errorln("Error reading response from server:", err)
 			responseChan <- response
 			return
 		}
 		log.Debugln(string(textResponse))
+		// Re-buffer the (bounded) body so the consumer on responseChan can
+		// still inspect it — e.g. to extract the structured reason from a
+		// 429 throttle response.
+		response.Body = io.NopCloser(strings.NewReader(string(textResponse)))
 	}
 	responseChan <- response
 
@@ -4961,6 +4999,12 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						transferAttempts[i].Url = fileURL
 						log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 					}
+					// totalXfer must be counted before submission: a scheduler
+					// rejection pushes a synthetic failure result for this
+					// file, and runMux treats totalXfer == 0 as "job created
+					// no transfers" and closes the results channel — racing
+					// the synthetic result's delivery.
+					job.job.totalXfer += 1
 					job.job.activeXfer.Add(1)
 					if err := te.submitFile(job.job.ctx, &clientTransferFile{
 						uuid:  job.uuid,
@@ -4986,8 +5030,6 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						}
 						// 429 already reported to te.results by submitFile;
 						// continue enumerating the collection.
-					} else {
-						job.job.totalXfer += 1
 					}
 				}
 			}
@@ -5045,6 +5087,10 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				transferAttempts[i].Url = fileURL
 				log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 			}
+			// totalXfer is counted before submission so a scheduler
+			// rejection's synthetic result cannot race runMux's
+			// "no transfers created" close of the results channel.
+			job.job.totalXfer += 1
 			job.job.activeXfer.Add(1)
 			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
@@ -5068,8 +5114,6 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				if !errors.Is(err, ErrTooManyRequests) {
 					return err
 				}
-			} else {
-				job.job.totalXfer += 1
 			}
 		}
 	}
@@ -5099,6 +5143,10 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(localPath, job.job.localPath)); skipUpload(job.job, localPath, job.job.remoteURL) {
 				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 			} else if info.Mode().Type().IsRegular() {
+				// totalXfer is counted before submission so a scheduler
+				// rejection's synthetic result cannot race runMux's
+				// "no transfers created" close of the results channel.
+				job.job.totalXfer += 1
 				job.job.activeXfer.Add(1)
 				if err := te.submitFile(job.job.ctx, &clientTransferFile{
 					uuid:  job.uuid,
@@ -5119,8 +5167,6 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					if !errors.Is(err, ErrTooManyRequests) {
 						return err
 					}
-				} else {
-					job.job.totalXfer += 1
 				}
 			}
 			return nil
@@ -5146,6 +5192,10 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		} else if skipUpload(job.job, newPath, remoteUrl) {
 			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
+			// totalXfer is counted before submission so a scheduler
+			// rejection's synthetic result cannot race runMux's
+			// "no transfers created" close of the results channel.
+			job.job.totalXfer += 1
 			job.job.activeXfer.Add(1)
 			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
@@ -5166,8 +5216,6 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 				if !errors.Is(err, ErrTooManyRequests) {
 					return err
 				}
-			} else {
-				job.job.totalXfer += 1
 			}
 		}
 	}
@@ -5833,6 +5881,10 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 				age = ageParsed
 			}
 		}
+	} else if headResponse.StatusCode == http.StatusTooManyRequests {
+		// Throttled: classify as the retryable throttle type, carrying the
+		// Retry-After hint (no body is available on this path).
+		err = newThrottleErrorFromResponse(headResponse, "", objectUrl.Host)
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{
@@ -5874,6 +5926,8 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 
 			}
 		}
+	} else if headResponse.StatusCode == http.StatusTooManyRequests {
+		err = newThrottleErrorFromResponse(headResponse, "", objectUrl.Host)
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{

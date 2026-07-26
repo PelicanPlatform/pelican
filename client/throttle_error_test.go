@@ -19,8 +19,17 @@
 package client
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +37,26 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+// shedReasonTypes is the contract between the scheduler's shed reasons (the
+// "error" field a cache writes into its 429 JSON body) and the Pelican error
+// type the client classifies each into. It is deliberately keyed on the
+// ShedReason constants rather than fresh string literals: if a constant's
+// value is renamed on the producer side, these tests fail instead of the
+// client silently degrading every shed to the generic fallback.
+//
+// If a new ShedReason constant is added, it must be added here (and to
+// throttleErrorForReason / parseThrottleReason) as well.
+var shedReasonTypes = map[ShedReason]string{
+	ShedOriginUnresponsive: "Transfer.OriginUnresponsive",
+	ShedOriginSlow:         "Transfer.OriginSlow",
+	ShedCacheOverloaded:    "Transfer.CacheOverloaded",
+}
 
 // wrapErrorByStatusCode maps HTTP 429 to a retryable Pelican error, so a cache
 // shed is no longer mis-classified as a fatal specification error.
@@ -40,38 +68,46 @@ func TestWrapStatusCode429IsRetryable(t *testing.T) {
 	assert.True(t, IsRetryable(wrapped), "IsRetryable must report 429 as retryable")
 }
 
-// throttleErrorForReason maps the structured reason string to the specific
-// retryable Pelican error type; unknown reasons fall back to cache-overloaded.
+// Every declared ShedReason must map to its own specific retryable error
+// type; unknown or empty reasons fall back to cache-overloaded.
 func TestThrottleErrorForReason(t *testing.T) {
-	cases := []struct {
-		reason  string
-		errType string
-	}{
-		{"origin_unresponsive", "Transfer.OriginUnresponsive"},
-		{"origin_slow", "Transfer.OriginSlow"},
-		{"cache_overloaded", "Transfer.CacheOverloaded"},
-		{"", "Transfer.CacheOverloaded"},
-		{"garbage", "Transfer.CacheOverloaded"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.reason, func(t *testing.T) {
-			err := throttleErrorForReason(tc.reason, errors.New("x"))
+	for reason, errType := range shedReasonTypes {
+		t.Run(string(reason), func(t *testing.T) {
+			err := throttleErrorForReason(string(reason), errors.New("x"))
 			var pe *error_codes.PelicanError
 			require.ErrorAs(t, err, &pe)
-			assert.Equal(t, tc.errType, pe.ErrorType())
+			assert.Equal(t, errType, pe.ErrorType())
+			assert.True(t, pe.IsRetryable())
+		})
+	}
+	for _, reason := range []string{"", "garbage"} {
+		t.Run("fallback/"+reason, func(t *testing.T) {
+			err := throttleErrorForReason(reason, errors.New("x"))
+			var pe *error_codes.PelicanError
+			require.ErrorAs(t, err, &pe)
+			assert.Equal(t, "Transfer.CacheOverloaded", pe.ErrorType())
 			assert.True(t, pe.IsRetryable())
 		})
 	}
 }
 
 func TestParseThrottleReason(t *testing.T) {
-	assert.Equal(t, "origin_unresponsive",
-		parseThrottleReason(`{"error":"origin_unresponsive","detail":"..."}`))
-	assert.Equal(t, "cache_overloaded",
-		parseThrottleReason(`{"error":"cache_overloaded"}`))
+	// Round-trip every ShedReason constant through the same JSON shape the
+	// cache's handleError writes; this welds the producer constants to the
+	// consumer's parser.
+	for reason := range shedReasonTypes {
+		body, err := json.Marshal(map[string]string{"error": string(reason), "detail": "..."})
+		require.NoError(t, err)
+		assert.Equal(t, string(reason), parseThrottleReason(string(body)))
+	}
+	// Anything that is not a known reason is rejected: the body comes from
+	// a remote peer, and an arbitrary string must not flow into logs or
+	// error messages.
 	assert.Equal(t, "", parseThrottleReason(""))
 	assert.Equal(t, "", parseThrottleReason("not json"))
 	assert.Equal(t, "", parseThrottleReason(`{"other":"field"}`))
+	assert.Equal(t, "", parseThrottleReason(`{"error":"made_up_reason"}`))
+	assert.Equal(t, "", parseThrottleReason(`{"error":"origin_slow\nfake log line"}`))
 }
 
 func TestParseRetryAfter(t *testing.T) {
@@ -79,19 +115,41 @@ func TestParseRetryAfter(t *testing.T) {
 	assert.Equal(t, time.Duration(0), parseRetryAfter(""))
 	assert.Equal(t, time.Duration(0), parseRetryAfter("-5"))
 	assert.Equal(t, time.Duration(0), parseRetryAfter("garbage"))
-	// HTTP-date form: a time in the future yields a positive duration.
+	// Values are clamped so a misbehaving server cannot push an absurd
+	// backoff (or overflow the duration into a negative) downstream.
+	assert.Equal(t, maxRetryAfter, parseRetryAfter("7200"))
+	assert.Equal(t, maxRetryAfter, parseRetryAfter("9223372036854775807"))
+	// HTTP-date form: a time in the future yields a positive duration; a
+	// past date yields zero; a far-future date is clamped.
 	future := time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat)
 	d := parseRetryAfter(future)
 	assert.Greater(t, d, time.Duration(0))
 	assert.LessOrEqual(t, d, 30*time.Second)
+	past := time.Now().Add(-30 * time.Second).UTC().Format(http.TimeFormat)
+	assert.Equal(t, time.Duration(0), parseRetryAfter(past))
+	farFuture := time.Now().Add(48 * time.Hour).UTC().Format(http.TimeFormat)
+	assert.Equal(t, maxRetryAfter, parseRetryAfter(farFuture))
+}
+
+// Server-provided detail strings are sanitized before they can reach logs or
+// error messages: control characters (which would let a hostile server forge
+// log records) become spaces, and over-long bodies are truncated.
+func TestSanitizeErrorDetail(t *testing.T) {
+	assert.Equal(t, "a b c", sanitizeErrorDetail("a\nb\rc"))
+	assert.Equal(t, "tab here", sanitizeErrorDetail("tab\there"))
+	long := strings.Repeat("x", 2048)
+	sanitized := sanitizeErrorDetail(long)
+	assert.LessOrEqual(t, len(sanitized), 512+len("…"))
+	assert.True(t, strings.HasSuffix(sanitized, "…"))
 }
 
 // A CacheThrottleError built from a cache's 429 wraps the specific retryable
-// Pelican error, so both errors.Is(ErrTooManyRequests-adjacent) checks via the
-// PelicanError chain and IsRetryable hold, and it carries the reason + hint.
+// Pelican error and matches ErrTooManyRequests, so a remote shed satisfies
+// the same errors.Is check as a shed by this process's own scheduler, and
+// IsRetryable/ShouldRetry hold; it carries the reason + backoff hint.
 func TestCacheThrottleErrorIsRetryable(t *testing.T) {
-	err := newCacheThrottleError("origin_unresponsive", "origin is over its share", "cache.example.org:8443", 60*time.Second)
-	assert.Equal(t, "origin_unresponsive", err.Reason)
+	err := newCacheThrottleError(string(ShedOriginUnresponsive), "origin is over its share", "cache.example.org:8443", 60*time.Second)
+	assert.Equal(t, string(ShedOriginUnresponsive), err.Reason)
 	assert.Equal(t, 60*time.Second, err.RetryAfter)
 	assert.Equal(t, "cache.example.org:8443", err.Endpoint)
 
@@ -100,9 +158,167 @@ func TestCacheThrottleErrorIsRetryable(t *testing.T) {
 	assert.Equal(t, "Transfer.OriginUnresponsive", pe.ErrorType())
 	assert.True(t, IsRetryable(err), "a cache throttle must be retryable")
 	assert.True(t, ShouldRetry(err), "ShouldRetry must honor a cache throttle")
+	assert.True(t, errors.Is(err, ErrTooManyRequests),
+		"a remote 429 must satisfy the same errors.Is check as a local scheduler shed")
 
 	// Recoverable as a typed error so external retriers can read RetryAfter.
 	var throttled *CacheThrottleError
 	require.ErrorAs(t, err, &throttled)
 	assert.Equal(t, 60*time.Second, throttled.RetryAfter)
+}
+
+// wrapDownloadError must pass a CacheThrottleError through unmodified: the
+// typed reason and Retry-After hint must survive to the caller even as other
+// error kinds get rewrapped.
+func TestWrapDownloadErrorPreservesThrottle(t *testing.T) {
+	orig := newCacheThrottleError(string(ShedOriginSlow), "detail", "cache.example.org:8443", 60*time.Second)
+	wrapped, _, _ := wrapDownloadError(orig, "https://cache.example.org:8443", "", "")
+	var throttled *CacheThrottleError
+	require.ErrorAs(t, wrapped, &throttled,
+		"wrapDownloadError must not bury the CacheThrottleError type")
+	assert.Equal(t, string(ShedOriginSlow), throttled.Reason)
+	assert.Equal(t, 60*time.Second, throttled.RetryAfter)
+	assert.True(t, ShouldRetry(wrapped))
+}
+
+// A 429 observed by the actual download path must come back as a typed,
+// retryable CacheThrottleError carrying the parsed reason, the Retry-After
+// hint, and the serving host.
+func TestDownloadHTTP429(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[param.Param]any{})
+
+	cases := []struct {
+		name       string
+		body       string
+		retryAfter string
+		wantReason string
+		wantHint   time.Duration
+		wantType   string
+	}{
+		{
+			name:       "StructuredReason",
+			body:       fmt.Sprintf(`{"error":%q,"detail":"origin is over its share"}`, string(ShedOriginUnresponsive)),
+			retryAfter: "60",
+			wantReason: string(ShedOriginUnresponsive),
+			wantHint:   60 * time.Second,
+			wantType:   "Transfer.OriginUnresponsive",
+		},
+		{
+			name:       "EmptyBody",
+			body:       "",
+			retryAfter: "60",
+			wantReason: "",
+			wantHint:   60 * time.Second,
+			wantType:   "Transfer.CacheOverloaded",
+		},
+		{
+			name:       "GarbageBodyNoRetryAfter",
+			body:       "<html>not json</html>",
+			retryAfter: "",
+			wantReason: "",
+			wantHint:   0,
+			wantType:   "Transfer.CacheOverloaded",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _, _ := test_utils.TestContext(context.Background(), t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			serverURL, err := url.Parse(server.URL)
+			require.NoError(t, err)
+
+			fname := filepath.Join(t.TempDir(), "test.txt")
+			writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+			require.NoError(t, err)
+			defer writer.Close()
+
+			_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
+				transferAttemptDetails{Url: serverURL, Proxy: false},
+				fname, writer, 0, -1, -1, "", "", nil, nil)
+			require.Error(t, err)
+
+			var throttled *CacheThrottleError
+			require.ErrorAs(t, err, &throttled, "429 must produce a CacheThrottleError")
+			assert.Equal(t, tc.wantReason, throttled.Reason)
+			assert.Equal(t, tc.wantHint, throttled.RetryAfter)
+			assert.Equal(t, serverURL.Host, throttled.Endpoint)
+			var pe *error_codes.PelicanError
+			require.ErrorAs(t, err, &pe)
+			assert.Equal(t, tc.wantType, pe.ErrorType())
+			assert.True(t, ShouldRetry(err), "a throttled download must be retryable")
+			assert.True(t, errors.Is(err, ErrTooManyRequests))
+		})
+	}
+}
+
+// A 429 on the upload (PUT) path must get the same typed classification as a
+// download: reason parsed from the body, Retry-After hint carried, retryable.
+func TestUploadObject429(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[param.Param]any{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Report the destination object as absent for the pre-upload stat.
+		if r.Method == "PROPFIND" || r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Drain the PUT body before answering: otherwise the client-side
+		// transport may still hold the upload file open when the test's
+		// TempDir cleanup runs, which fails on Windows (open files cannot
+		// be deleted there).
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"error":%q,"detail":"cache is saturated"}`, string(ShedCacheOverloaded))))
+	}))
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	localFile := filepath.Join(t.TempDir(), "upload.txt")
+	require.NoError(t, os.WriteFile(localFile, []byte("upload me"), 0o644))
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		localPath: localFile,
+		remoteURL: serverURL,
+		xferType:  transferTypeUpload,
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   serverURL.Host,
+				Path:   "/test/upload.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					CollectionsUrl: serverURL,
+				},
+			},
+		},
+		attempts: []transferAttemptDetails{{Url: serverURL, Proxy: false}},
+	}
+
+	// uploadObject reports per-attempt failures via transferResult.Error (a
+	// TransferErrors accumulator), not its error return; asserting through
+	// it also proves the throttle type survives the accumulator's unwrap
+	// chain — the same path the plugin's retryable-exit logic walks.
+	transferResult, err := uploadObject(transfer)
+	require.NoError(t, err)
+	require.Error(t, transferResult.Error)
+	var throttled *CacheThrottleError
+	require.ErrorAs(t, transferResult.Error, &throttled, "a 429 on PUT must produce a CacheThrottleError")
+	assert.Equal(t, string(ShedCacheOverloaded), throttled.Reason)
+	assert.Equal(t, 60*time.Second, throttled.RetryAfter)
+	assert.True(t, ShouldRetry(transferResult.Error), "a throttled upload must be retryable")
 }

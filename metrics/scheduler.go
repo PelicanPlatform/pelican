@@ -26,8 +26,9 @@ import (
 )
 
 // Metrics exposed by the cache's per-origin fair scheduler
-// (client.TagScheduler). See docs/object-transfer-semantics.md and
-// docs/tag-scheduler-design.md for what each cap and EMA mean.
+// (client.TagScheduler in client/tag_scheduler.go). The starving/active
+// caps and the EMA weighting are documented on client.SchedulerConfig and
+// in the Cache.Throttle.* parameter descriptions in docs/parameters.yaml.
 var (
 	CacheSchedulerActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_scheduler_active",
@@ -56,7 +57,7 @@ var (
 
 	CacheSchedulerRejectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_scheduler_rejects_total",
-		Help: "Per-origin count of upstream fetches rejected by the cache's fair scheduler with a 429-equivalent error. reason=\"global\": the global pending buffer was full; reason=\"per_tag\": this origin's own pending queue was full.",
+		Help: "Count of upstream fetches rejected by the cache's fair scheduler with a 429-equivalent error. Per-origin series carry reason=\"any\" (the per-origin snapshot does not break rejections down by cause). The cause breakdown is published only on the synthetic origin=\"*\" series: reason=\"global\" (the global pending buffer was full) and reason=\"per_tag\" (that origin's own pending queue was full).",
 	}, []string{"origin", "reason"})
 
 	// Pool-wide aggregates. Handy for a single-panel overview even if
@@ -71,7 +72,7 @@ var (
 	})
 	CacheSchedulerPoolTags = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "pelican_cache_scheduler_pool_tags_total",
-		Help: "Number of distinct origins the scheduler is currently tracking (either in-flight, queued, or with a still-decaying EMA).",
+		Help: "Number of distinct origins the scheduler is currently tracking (in-flight, queued, with a still-decaying EMA, or awaiting idle eviction). Idle origins are evicted after a grace period, so this can shrink.",
 	})
 	CacheSchedulerPoolStarvingCap = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "pelican_cache_scheduler_pool_starving_cap",
