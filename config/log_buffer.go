@@ -216,7 +216,12 @@ func StartLogRingBuffer(ctx context.Context) {
 	go buf.compressLoop()
 
 	globalLogBuffer.Store(buf)
+	// Installing the hook mutates the same global set SetLogging and
+	// removeLogRingBufferHook rebuild; take the lock they take so an
+	// install cannot be dropped by a rebuild running alongside it.
+	globalTransformMu.Lock()
 	log.AddHook(&logRingBufferHook{buf: buf})
+	globalTransformMu.Unlock()
 }
 
 // StopLogRingBuffer detaches the ring buffer's hook from logrus, marks the
@@ -246,8 +251,25 @@ func StopLogRingBuffer() {
 // logger while preserving all other hooks. logrus exposes no per-hook removal,
 // so we rebuild the hook set without ours (mirrors logging.removeBufferedHook).
 func removeLogRingBufferHook() {
-	oldHooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
-	filtered := make(log.LevelHooks)
+	// Serialize against the other rebuilders of this set (SetLogging,
+	// initFilterLogging): each of them is a read-modify-write on the same
+	// global, so two running at once lose whichever finishes first.
+	globalTransformMu.Lock()
+	defer globalTransformMu.Unlock()
+
+	// logrus offers no way to read the hook set without swapping something
+	// in, and while the empty set is installed the logger has no hooks at
+	// all -- with output going to io.Discard, entries emitted in that
+	// window are not merely unbuffered, they are lost. Put a copy back at
+	// once so the gap spans no work, then install the filtered set in one
+	// further atomic swap. The copy matters: the map that comes back from
+	// ReplaceHooks is read below, and reinstalling that same map would
+	// leave it being read here while logrus writes to it.
+	logger := log.StandardLogger()
+	oldHooks := logger.ReplaceHooks(log.LevelHooks{})
+	logger.ReplaceHooks(copyLevelHooks(oldHooks))
+
+	filtered := make(log.LevelHooks, len(oldHooks))
 	for lvl, hooks := range oldHooks {
 		for _, h := range hooks {
 			if _, ok := h.(*logRingBufferHook); ok {
@@ -256,7 +278,17 @@ func removeLogRingBufferHook() {
 			filtered[lvl] = append(filtered[lvl], h)
 		}
 	}
-	log.StandardLogger().ReplaceHooks(filtered)
+	logger.ReplaceHooks(filtered)
+}
+
+// copyLevelHooks returns a hook set that shares no map or slice storage with
+// the original, so the two can be handed to different owners.
+func copyLevelHooks(src log.LevelHooks) log.LevelHooks {
+	dst := make(log.LevelHooks, len(src))
+	for lvl, hooks := range src {
+		dst[lvl] = append([]log.Hook(nil), hooks...)
+	}
+	return dst
 }
 
 // logRingBufferHook is the logrus hook that pumps entries into the buffer.

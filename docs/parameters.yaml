@@ -372,8 +372,14 @@ description: |+
   The size threshold at which the active log file is rotated, e.g. "100MB" or
   "1GB". Set to "0" to disable size-based rotation and rely solely on
   ${Logging.Rotation.Frequency}. Size- and time-based rotation may be combined.
+
+  Together with ${Logging.Rotation.MaxRetentionSize} this bounds the disk the
+  logs may occupy: the default pair reserves a little over 1GB. Raise both on a
+  server whose logs are worth keeping longer; the defaults are chosen to be
+  unobtrusive on a workstation, where the client agent writes under the user's
+  own directory.
 type: string
-default: 1GB
+default: 100MB
 components: ["*"]
 ---
 name: Logging.Rotation.MaxRetentionSize
@@ -383,8 +389,13 @@ description: |+
   oldest are deleted until it fits (the most recent rotated file is always kept).
   Set to "0" to not limit retention by size. Applied independently of
   ${Logging.Rotation.MaxRetentionPeriod}.
+
+  This is also the ceiling on the active log file when rotation is failing:
+  with nothing able to rotate it, the active file is the only log on disk, and
+  growth past this budget is treated as fatal rather than allowed to fill the
+  filesystem.
 type: string
-default: 10GB
+default: 1GB
 components: ["*"]
 ---
 name: Logging.Rotation.MaxRetentionPeriod

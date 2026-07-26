@@ -417,9 +417,9 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	// Logging.Rotation.MaxRetentionPeriod
 	v.SetDefault(param.Logging_Rotation_MaxRetentionPeriod.GetName(), "720h")
 	// Logging.Rotation.MaxRetentionSize
-	v.SetDefault(param.Logging_Rotation_MaxRetentionSize.GetName(), "10GB")
+	v.SetDefault(param.Logging_Rotation_MaxRetentionSize.GetName(), "1GB")
 	// Logging.Rotation.MaxSize
-	v.SetDefault(param.Logging_Rotation_MaxSize.GetName(), "1GB")
+	v.SetDefault(param.Logging_Rotation_MaxSize.GetName(), "100MB")
 	// Lotman.DefaultLotDeletionLifetime
 	v.SetDefault(param.Lotman_DefaultLotDeletionLifetime.GetName(), "48h")
 	// Lotman.DefaultLotExpirationLifetime

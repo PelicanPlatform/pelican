@@ -427,6 +427,42 @@ func TestLogBuffer_TailBeforePendingStraddle(t *testing.T) {
 	assert.Equal(t, int64(3), tail.LastSeq)
 }
 
+// Detaching the buffer rebuilds logrus's global hook set, as does every
+// level change. Both are read-modify-write over the same global, so they
+// have to be serialized: an interleaving drops whichever set was written
+// first, which would silently take the log file's writer hook with it.
+func TestLogBuffer_StopIsSafeAgainstConcurrentLevelChanges(t *testing.T) {
+	prev := GetEffectiveLogLevel()
+	t.Cleanup(func() {
+		StopLogRingBuffer()
+		SetLogging(prev)
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 25; j++ {
+				if i%2 == 0 {
+					StartLogRingBuffer(context.Background())
+					StopLogRingBuffer()
+				} else {
+					SetLogging(log.InfoLevel)
+					SetLogging(log.DebugLevel)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// The censor must still be installed: losing it is the failure this
+	// guards against, and it is the hook that writes the log file.
+	StartLogRingBuffer(context.Background())
+	log.Info("after concurrent teardown")
+	assert.NotNil(t, GlobalLogRingBuffer(), "the buffer should be installed")
+}
+
 // A client polling with a cursor whose lines have since been evicted must be
 // told how many it missed. Cursors are opaque, so this is the only way it can
 // distinguish "nothing has happened" from "the server outran me".

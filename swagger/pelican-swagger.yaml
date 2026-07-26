@@ -2831,9 +2831,10 @@ tags:
   - name: logs
     description: >-
       Read the server's in-memory log buffer. Gated by the
-      `pelican.log_read` scope; the buffer is bounded by
-      `Logging.Buffer.MaxSize` and older lines are evicted as new ones
-      arrive.
+      `pelican.log_read` scope, or by the `server.admin` role, which
+      carries it. The buffer is bounded by `Logging.Buffer.MaxSize`;
+      older lines are evicted as new ones arrive, and a read reports how
+      many it missed.
 paths:
   /health:
     get:
@@ -9330,8 +9331,13 @@ paths:
         structure (batching, LZ4 compression, pending buffer) is not part
         of the API contract.
 
-        Access requires either the `server.admin` role or a session/token
-        carrying the `pelican.log_read` scope.
+        Access requires either the `server.admin` role or the
+        `pelican.log_read` scope. The scope is resolved from the
+        authenticated user's grants, not read out of the presented
+        credential, so it cannot be used to narrow what a credential may
+        do. Authentication is by browser session or by a locally-issued
+        JWT; Pelican API tokens (`id.secret`) are not accepted on these
+        endpoints.
       produces: [application/json]
       parameters:
         - in: query
@@ -9397,8 +9403,13 @@ paths:
         a UTC timestamp so downloads saved into the same directory from
         different servers or times don't collide.
 
-        Access requires either the `server.admin` role or a session/token
-        carrying the `pelican.log_read` scope.
+        Access requires either the `server.admin` role or the
+        `pelican.log_read` scope. The scope is resolved from the
+        authenticated user's grants, not read out of the presented
+        credential, so it cannot be used to narrow what a credential may
+        do. Authentication is by browser session or by a locally-issued
+        JWT; Pelican API tokens (`id.secret`) are not accepted on these
+        endpoints.
       produces: [application/gzip]
       responses:
         "200":

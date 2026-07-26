@@ -292,6 +292,18 @@ func TestAsyncWriterContinuousRotation(t *testing.T) {
 // newRotatingTestWriter builds a writer with rotation enabled and an injected
 // clock anchored at start, so calendar-boundary rotation can be driven
 // deterministically.
+// newAsyncWriterForTest builds a writer on the fake clock without requiring
+// that rotation be eligible, for the cases where rotation is deliberately
+// left to something outside the process.
+func newAsyncWriterForTest(t *testing.T, path string, cfg rotateConfig, clk *fakeClock) *asyncWriter {
+	t.Helper()
+	w, err := newAsyncWriter(path, cfg, time.Millisecond)
+	require.NoError(t, err)
+	w.now = clk.now
+	w.periodStart = cfg.frequency.truncate(clk.now())
+	return w
+}
+
 func newRotatingTestWriter(t *testing.T, path string, cfg rotateConfig, clk *fakeClock) *asyncWriter {
 	t.Helper()
 	w, err := newAsyncWriter(path, cfg, time.Millisecond)
@@ -860,6 +872,124 @@ func mkBackup(t *testing.T, dir, name string, size int, mod time.Time) string {
 // The collision counter is unpadded decimal, so the names are not lexically
 // ordered ("-9" sorts after "-12") and the retained set must be chosen by the
 // period/counter the name encodes.
+// TestAsyncWriterCollisionCounterResumes verifies repeated rotations inside
+// one period keep allocating distinct names without re-probing the ones
+// already taken. A small MaxSize produces many rotations per period, so a
+// scan that restarted at 1 each time would make every rotation dearer than
+// the one before it.
+// TestAsyncWriterReopensAfterExternalRotation covers the deployment
+// Logging.Rotation.Disable is meant for: an external logrotate renames the
+// log aside and creates a fresh one. Holding the old descriptor open would
+// send every subsequent line to an inode nobody can read and the rotator
+// will eventually delete.
+func TestAsyncWriterReopensAfterExternalRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 8, 10, 0, 0, 0, time.Local)}
+	// Rotation disabled: this writer must not rotate, only notice.
+	w := newAsyncWriterForTest(t, path, rotateConfig{}, clk)
+
+	_, _ = w.Write([]byte("before\n"))
+	require.NoError(t, w.flushOnce())
+
+	// What logrotate does: rename the live file, leave the path free.
+	require.NoError(t, os.Rename(path, filepath.Join(dir, "test.log.1")))
+
+	// Move past the throttle so the next flush re-examines the path.
+	clk.advance(2 * replaceCheckInterval)
+	_, _ = w.Write([]byte("after\n"))
+	require.NoError(t, w.flushOnce())
+	w.close()
+
+	current, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(current), "after",
+		"lines written after an external rotation must land in the recreated file")
+	assert.NotContains(t, string(current), "before")
+
+	rotated, err := os.ReadFile(filepath.Join(dir, "test.log.1"))
+	require.NoError(t, err)
+	assert.Contains(t, string(rotated), "before",
+		"lines written before the rename stay with the renamed file")
+	assert.NotContains(t, string(rotated), "after",
+		"the renamed file must stop receiving writes")
+}
+
+// The check must not fire when nothing has happened: reopening on every
+// flush would reset the size counter that drives size-based rotation.
+func TestAsyncWriterDoesNotReopenAnUntouchedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	clk := &fakeClock{t: time.Date(2026, 6, 8, 10, 0, 0, 0, time.Local)}
+	w := newAsyncWriterForTest(t, path, rotateConfig{}, clk)
+	defer w.close()
+
+	_, _ = w.Write([]byte("one\n"))
+	require.NoError(t, w.flushOnce())
+
+	w.fileMu.Lock()
+	before, err := w.file.Stat()
+	w.fileMu.Unlock()
+	require.NoError(t, err)
+
+	clk.advance(2 * replaceCheckInterval)
+	_, _ = w.Write([]byte("two\n"))
+	require.NoError(t, w.flushOnce())
+
+	w.fileMu.Lock()
+	after, serr := w.file.Stat()
+	written := w.written
+	w.fileMu.Unlock()
+	require.NoError(t, serr)
+	assert.True(t, os.SameFile(before, after), "an untouched log must keep its descriptor")
+	assert.Equal(t, int64(len("one\ntwo\n")), written,
+		"the byte counter must keep accumulating rather than restart")
+}
+
+func TestAsyncWriterCollisionCounterResumes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Date(2026, 1, 1, 9, 0, 0, 0, time.Local)
+	clk := &fakeClock{t: now}
+	cfg := rotateConfig{enable: true, frequency: freqDaily}
+	w := newRotatingTestWriter(t, path, cfg, clk)
+	defer w.close()
+
+	// Names already on disk from an earlier run must not be handed out again.
+	mkBackup(t, dir, "test.log.2026-01-01", 10, now)
+	mkBackup(t, dir, "test.log.2026-01-01-1", 10, now)
+	mkBackup(t, dir, "test.log.2026-01-01-2", 10, now)
+
+	base := "test.log.2026-01-01"
+	assert.Equal(t, "test.log.2026-01-01-3", w.uniqueRotatedBase(base),
+		"allocation must resume past the highest counter already present")
+	assert.Equal(t, "test.log.2026-01-01-4", w.uniqueRotatedBase(base))
+	assert.Equal(t, "test.log.2026-01-01-5", w.uniqueRotatedBase(base))
+
+	// A new period starts its own counter, and the unsuffixed name is free.
+	nextDay := "test.log.2026-01-02"
+	assert.Equal(t, nextDay, w.uniqueRotatedBase(nextDay))
+	assert.Equal(t, "test.log.2026-01-02-1", w.uniqueRotatedBase(nextDay))
+}
+
+// A name the writer did not create must still be stepped over: the counter
+// is a hint about where to resume, not a promise the name is free.
+func TestAsyncWriterCollisionCounterYieldsToForeignFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	now := time.Date(2026, 1, 1, 9, 0, 0, 0, time.Local)
+	clk := &fakeClock{t: now}
+	w := newRotatingTestWriter(t, path, rotateConfig{enable: true, frequency: freqDaily}, clk)
+	defer w.close()
+
+	base := "test.log.2026-01-01"
+	require.Equal(t, base, w.uniqueRotatedBase(base))
+
+	// Something else claims the name the counter was about to use.
+	mkBackup(t, dir, base+"-1", 10, now)
+	assert.Equal(t, base+"-2", w.uniqueRotatedBase(base))
+}
+
 func TestAsyncWriterRetentionKeepsNewestCollisions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")

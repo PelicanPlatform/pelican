@@ -92,10 +92,12 @@ export function parseLogCursor(raw: string | null): number {
 class MockLogBuffer {
   private lines: string[];
   private firstSeq: number;
+  private readonly instanceId: string;
 
-  constructor(lines: string[], firstSeq = 1) {
+  constructor(lines: string[], firstSeq = 1, instanceId = INSTANCE_ID) {
     this.lines = [...lines];
     this.firstSeq = firstSeq;
+    this.instanceId = instanceId;
   }
 
   append(lines: string[]) {
@@ -159,7 +161,7 @@ class MockLogBuffer {
       // The forward tail never runs off the end of history.
       reached: false,
       dropped,
-      instanceId: INSTANCE_ID,
+      instanceId: this.instanceId,
     };
   }
 
@@ -193,7 +195,7 @@ class MockLogBuffer {
       // `dropped` describes the forward tail only; scroll-up reports the
       // wall through `reached`.
       dropped: 0,
-      instanceId: INSTANCE_ID,
+      instanceId: this.instanceId,
     };
   }
 }
@@ -446,5 +448,33 @@ export async function mockLogTailDisabled(page: Page) {
       dropped: 0,
       instanceId: '',
     } satisfies LogTailResponse);
+  });
+}
+
+export interface LogTailRestartOptions {
+  /** Buffer contents before the restart. */
+  initial?: string[];
+  /** Buffer contents the restarted server reports. */
+  afterRestart?: string[];
+}
+
+/**
+ * Intercepts GET /api/v1.0/logs/tail and swaps in a different buffer, with a
+ * different instanceId, on the first forward poll -- what a client sees when
+ * the server it is tailing restarts. The cursors it holds refer to a buffer
+ * that no longer exists, so it has to discard them along with the lines they
+ * describe rather than stitch the two servers' output together.
+ */
+export async function mockLogTailRestarting(
+  page: Page,
+  { initial = DEFAULT_LOG_LINES, afterRestart = [] }: LogTailRestartOptions = {}
+) {
+  const before = new MockLogBuffer(initial);
+  const after = new MockLogBuffer(afterRestart, 1, INSTANCE_ID + '-restarted');
+  let requests = 0;
+  await routeTail(page, (route, url) => {
+    requests++;
+    const isForwardPoll = url.searchParams.get('before') === null;
+    serveTail(route, url, isForwardPoll && requests > 1 ? after : before);
   });
 }

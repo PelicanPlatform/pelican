@@ -115,6 +115,12 @@ type asyncWriter struct {
 	// rotation replaces, so an operator's chmod on the log survives a rotation
 	// instead of reverting to the default.
 	mode os.FileMode
+	// rotateSeqBase is the rotated name (without any collision counter) that
+	// rotateSeqNext counts within, and rotateSeqNext is the next counter to
+	// try for it. Together they keep repeated rotations inside one period
+	// from rescanning the names already taken.
+	rotateSeqBase string
+	rotateSeqNext int
 
 	// dir is the directory containing the log file. root, when non-nil, is an
 	// os.Root handle to that directory: it holds an open directory descriptor and
@@ -133,9 +139,15 @@ type asyncWriter struct {
 	openFile func(name string, flag int, perm os.FileMode) (*os.File, error)
 
 	// rotation configuration; rotateOK reports whether the target is eligible
-	// (a regular file with rotation enabled).
-	rot      rotateConfig
-	rotateOK bool
+	// (a regular file with rotation enabled). regularFile records only the
+	// first half of that test, because a regular file whose rotation is left
+	// to an external tool still needs the replacement check below.
+	rot         rotateConfig
+	rotateOK    bool
+	regularFile bool
+	// lastReplaceCheck is when the active file was last compared against the
+	// path it was opened from, throttling that stat off the flush path.
+	lastReplaceCheck time.Time
 
 	// now returns the current time; overridable in tests for deterministic
 	// boundary crossing. Defaults to time.Now.
@@ -367,6 +379,7 @@ func newAsyncWriter(path string, cfg rotateConfig, flushInterval time.Duration) 
 	periodAnchor := time.Now()
 	w.mode = defaultLogFileMode
 	if fi, statErr := f.Stat(); statErr == nil && fi.Mode().IsRegular() {
+		w.regularFile = true
 		w.rotateOK = cfg.enable
 		// Carry the existing file's permissions forward so a hardened log
 		// (an operator's chmod 0600 after an incident) keeps its mode when
@@ -756,6 +769,8 @@ func (w *asyncWriter) writeRotatingLocked(batch []byte) error {
 	if err := w.ensureFileLocked(); err != nil {
 		return err
 	}
+	// Something outside this process may have moved the log aside.
+	w.reopenIfReplaced()
 
 	// A rotation that failed recently is left alone for a while, during
 	// which the active file keeps growing with nothing to cap it. That is
@@ -950,6 +965,62 @@ func (w *asyncWriter) ensureFileLocked() error {
 	return nil
 }
 
+// replaceCheckInterval is how often the active file is compared against the
+// path it was opened from. External rotation runs on the order of hours, so
+// noticing within this window is prompt enough to be worth only one stat.
+const replaceCheckInterval = 10 * time.Second
+
+// reopenIfReplaced reopens the log when the path no longer refers to the file
+// currently held open.
+//
+// An external rotator -- the logrotate configuration Logging.Rotation.Disable
+// exists to defer to -- renames the log aside and creates a new one. Nothing
+// about that invalidates the descriptor already open, so a writer that never
+// looks keeps appending to the renamed inode: the file the administrator now
+// sees stays empty, and the bytes go somewhere only this process can reach,
+// until they vanish when the rotator eventually deletes the old file. The
+// same applies to copytruncate, which leaves the descriptor's offset past the
+// new end of file.
+//
+// Callers must hold fileMu.
+func (w *asyncWriter) reopenIfReplaced() {
+	if !w.regularFile || w.file == nil {
+		return
+	}
+	now := w.now()
+	if !w.lastReplaceCheck.IsZero() && now.Sub(w.lastReplaceCheck) < replaceCheckInterval {
+		return
+	}
+	w.lastReplaceCheck = now
+
+	onDisk, statErr := os.Stat(w.path)
+	held, heldErr := w.file.Stat()
+	if heldErr != nil {
+		return
+	}
+	// A missing path is the rename-and-not-yet-recreated case; opening it
+	// below recreates it.
+	if statErr == nil && os.SameFile(onDisk, held) {
+		return
+	}
+
+	f, err := os.OpenFile(w.path, logFileFlags, w.mode)
+	if err != nil {
+		// Keep writing to the descriptor we have: it is the only one that
+		// works, and losing lines is worse than writing them somewhere
+		// inconvenient.
+		reportProblem("failed to reopen %q after it was replaced: %v", w.path, err)
+		return
+	}
+	_ = w.file.Sync()
+	_ = w.file.Close()
+	w.file = f
+	w.written = 0
+	if fi, ferr := f.Stat(); ferr == nil {
+		w.written = fi.Size()
+	}
+}
+
 // rotationSuppressed reports whether a recent rotation failure means rotation
 // should be left alone for now. Callers must hold fileMu.
 func (w *asyncWriter) rotationSuppressed() bool {
@@ -994,15 +1065,60 @@ func (w *asyncWriter) uniqueRotatedBase(base string) string {
 		}
 		return false
 	}
-	if !exists(base) {
+
+	// Probing upward from 1 on every rotation costs two stats per name
+	// already taken, so a small MaxSize -- which produces many rotations
+	// inside one period -- makes each rotation more expensive than the last.
+	// Resume from the counter this period reached instead, and pay the scan
+	// only when the period changes or the process has just started.
+	if base != w.rotateSeqBase {
+		w.rotateSeqBase = base
+		w.rotateSeqNext = w.highestRotatedSeq(base) + 1
+	}
+	if w.rotateSeqNext == 0 && !exists(base) {
+		w.rotateSeqNext = 1
 		return base
 	}
-	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
+	for {
+		candidate := fmt.Sprintf("%s-%d", base, w.rotateSeqNext)
+		w.rotateSeqNext++
+		// The counter is a hint, not an authority: a file could have been
+		// put there by something other than this writer.
 		if !exists(candidate) {
 			return candidate
 		}
 	}
+}
+
+// highestRotatedSeq returns the largest collision counter already used for
+// base, or 0 when only the unsuffixed name exists and -1 when nothing does.
+// Reads the directory once rather than probing name by name.
+func (w *asyncWriter) highestRotatedSeq(base string) int {
+	entries, err := fs.ReadDir(w.root.FS(), ".")
+	if err != nil {
+		// Fall back to probing; a directory we cannot read is a problem
+		// rotation itself will report soon enough.
+		return 0
+	}
+	highest := -1
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".gz")
+		if name == base {
+			if highest < 0 {
+				highest = 0
+			}
+			continue
+		}
+		suffix, ok := strings.CutPrefix(name, base+"-")
+		if !ok {
+			continue
+		}
+		n, cerr := strconv.Atoi(suffix)
+		if cerr == nil && n > highest {
+			highest = n
+		}
+	}
+	return highest
 }
 
 // pruneRetention enforces the retention budgets on the set of rotated files.

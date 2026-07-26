@@ -20,12 +20,14 @@ import { test, expect, Page } from '@playwright/test';
 import { LogViewerPage } from '../shared_pages/LogViewerPage';
 import {
   CLIENT_TAIL_LIMIT,
+  DEFAULT_LOG_LINES,
   makeLogLines,
   mockLogTail,
   mockLogTailDisabled,
   mockLogTailEvicting,
   mockLogTailFailing,
   mockLogTailForbidden,
+  mockLogTailRestarting,
   mockLogTailStreaming,
 } from '../mocks/api/v1.0/logs/tail';
 import { mockLogDownload } from '../mocks/api/v1.0/logs/download';
@@ -173,6 +175,78 @@ export function registerLogViewerTests(serviceUrl: string) {
     await logs.goto();
     await expect(logs.unavailableNotice).toBeVisible();
     await expect(logs.logLine(INFO_LINE)).not.toBeVisible();
+  });
+
+  test('distinguishes an empty buffer from a disabled one @mocked', async ({
+    page,
+  }) => {
+    // Both states show no log lines, and only one of them is a problem an
+    // operator can act on.
+    await mockLogTail(page, []);
+    await logs.goto();
+
+    await expect(logs.summary).toContainText('Showing 0 of 0 lines.');
+    await expect(logs.unavailableNotice).not.toBeVisible();
+    for (const level of ['info', 'warning', 'error']) {
+      await expect(logs.levelChip(level)).toContainText(`${level} (0)`);
+    }
+  });
+
+  test('treats short-form and level-less lines consistently @mocked', async ({
+    page,
+  }) => {
+    // logrus emits "warning", but plenty of tools that log through Pelican
+    // write "warn"; and a stack trace's continuation lines carry no level at
+    // all, so they must inherit one rather than disappear.
+    await mockLogTail(page, [
+      ...DEFAULT_LOG_LINES,
+      'time="2026-07-25T10:00:04Z" level=warn msg="Short form warning"',
+      '    /usr/lib/pelican/foo.go:42 +0x1a',
+    ]);
+    await logs.goto();
+
+    await expect(logs.levelChip('warning')).toContainText('warning (2)');
+    await expect(logs.levelChip('info')).toContainText('info (3)');
+
+    // The continuation line counts as info, so hiding info hides it too.
+    await logs.toggleLevel('info');
+    await expect(logs.logLine('foo.go:42')).toHaveCount(0);
+    await expect(logs.summary).toContainText('Showing 3 of 6 lines.');
+  });
+
+  test('empties and restores the pane as levels are toggled @mocked', async () => {
+    for (const level of ['panic', 'fatal', 'error', 'warning', 'info']) {
+      await logs.toggleLevel(level);
+    }
+    await expect(logs.summary).toContainText('Showing 0 of 4 lines.');
+    await expect(logs.rows()).toHaveCount(0);
+
+    await logs.toggleLevel('info');
+    await expect(logs.summary).toContainText('Showing 2 of 4 lines.');
+    await expect(logs.logLine(INFO_LINE)).toBeVisible();
+  });
+
+  test('starts over when the server it is tailing restarts @mocked @slow', async ({
+    page,
+  }) => {
+    // Cursors belong to one buffer instance. After a restart the viewer's
+    // are meaningless, so it must drop what it holds rather than append the
+    // new server's lines to the old server's.
+    await mockLogTailRestarting(page, {
+      afterRestart: [
+        'time="2026-07-25T11:00:00Z" level=info msg="Pelican origin restarted"',
+      ],
+    });
+    await logs.goto();
+    await expect(logs.summary).toContainText('Showing 4 of 4 lines.');
+
+    await expect(logs.logLine('Pelican origin restarted')).toBeVisible({
+      timeout: POLL_TIMEOUT,
+    });
+    await expect(logs.summary).toContainText('Showing 1 of 1 lines.');
+    await expect(logs.logLine(INFO_LINE)).toHaveCount(0);
+    // A restart is not a dropped-line event; the marker would be misleading.
+    await expect(logs.gaps()).toHaveCount(0);
   });
 
   // ---------------------------------------------------------------------

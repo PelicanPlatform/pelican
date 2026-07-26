@@ -75,8 +75,10 @@ var (
 
 	globalTransform *regexpTransformHook
 
-	// Track whether we've already configured the formatter to avoid resetting it
-	formatterConfigured bool
+	// Guards the one-time formatter setup. SetLogging is reachable
+	// concurrently -- the runtime log-level API calls it per request -- so
+	// the "have we done this yet" flag cannot be a plain bool.
+	formatterOnce sync.Once
 
 	// effectiveLogLevel is the fast-path cache for GetEffectiveLogLevel.
 	// shouldBuffer reads it on every incoming log line, so answering the
@@ -356,7 +358,7 @@ func SetLogging(logLevel log.Level) {
 	effectiveLogLevel.Store(uint32(logLevel))
 
 	// Only configure the formatter once to preserve formatting across log level changes
-	if !formatterConfigured {
+	formatterOnce.Do(func() {
 		textFormatter := log.TextFormatter{}
 		textFormatter.DisableLevelTruncation = true
 		textFormatter.FullTimestamp = true
@@ -365,8 +367,7 @@ func SetLogging(logLevel log.Level) {
 		// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
 		textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
 		log.SetFormatter(&textFormatter)
-		formatterConfigured = true
-	}
+	})
 
 	// When global filters are active, we use hook-based filtering instead of logrus's
 	// internal level filtering. We set logrus to TraceLevel (the most permissive) so
