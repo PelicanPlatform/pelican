@@ -51,8 +51,10 @@ import (
 
 // issuerProxyPathPrefix is the director path under which the issuer proxy is
 // mounted; the part after it mirrors the origin's own /api/v1.0/issuer/ns tail
-// (namespace + action).
-const issuerProxyPathPrefix = "/api/v1.0/director/issuer/ns"
+// (namespace + action). It is deliberately NOT under /api/v1.0/director/ —
+// RegisterDirectorAPI registers a catch-all wildcard there (/api/v1.0/director/*any)
+// and gin forbids any sibling route under a catch-all prefix.
+const issuerProxyPathPrefix = "/api/v1.0/issuer-proxy/ns"
 
 // rewriteIssuerDiscoveryDoc rewrites the absolute URLs in an origin's
 // per-namespace openid-configuration so they point at the director proxy instead

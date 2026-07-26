@@ -1060,7 +1060,9 @@ func GetNamespaceIssuerURL(namespace string) string {
 	}
 	if param.Origin_DelegateIssuerToDirector.GetBool() {
 		if fedInfo, err := GetFederation(context.Background()); err == nil && fedInfo.DirectorEndpoint != "" {
-			return strings.TrimSuffix(fedInfo.DirectorEndpoint, "/") + "/api/v1.0/director/issuer/ns" + namespace
+			// Must match director.issuerProxyPathPrefix (mounted outside
+			// /api/v1.0/director/ to avoid the director's catch-all wildcard route).
+			return strings.TrimSuffix(fedInfo.DirectorEndpoint, "/") + "/api/v1.0/issuer-proxy/ns" + namespace
 		}
 		log.Warning("Origin.DelegateIssuerToDirector is set but the federation director endpoint is not yet known; falling back to the local issuer URL")
 	}
