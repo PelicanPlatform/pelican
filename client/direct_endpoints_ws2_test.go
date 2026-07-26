@@ -60,6 +60,39 @@ func TestXPelDirectEndpointsParse(t *testing.T) {
 	})
 }
 
+func TestParseDirectorInfoBrokerRegistrar(t *testing.T) {
+	var gotHost, gotBroker string
+	SetBrokerRegistrar(func(host, brokerURL string) { gotHost = host; gotBroker = brokerURL })
+	t.Cleanup(func() { SetBrokerRegistrar(nil) })
+
+	brokerURL := "https://broker.example/api/v1.0/broker/reverse?origin=origin.example&prefix=/origins/origin.example"
+
+	t.Run("broker-only origin registers the mapping", func(t *testing.T) {
+		gotHost, gotBroker = "", ""
+		resp := &http.Response{Header: http.Header{}}
+		resp.Header.Set("Location", "https://origin.example:8443/foo/bar")
+		resp.Header.Set("X-Pelican-Namespace", "namespace=/foo, require-token=false")
+		resp.Header.Set("X-Pelican-Broker", brokerURL)
+
+		_, err := ParseDirectorInfo(resp)
+		require.NoError(t, err)
+		assert.Equal(t, "origin.example:8443", gotHost, "registrar should get the object-server host:port")
+		assert.Equal(t, brokerURL, gotBroker)
+	})
+
+	t.Run("no broker header does not register", func(t *testing.T) {
+		gotHost, gotBroker = "", ""
+		resp := &http.Response{Header: http.Header{}}
+		resp.Header.Set("Location", "https://origin.example:8443/foo/bar")
+		resp.Header.Set("X-Pelican-Namespace", "namespace=/foo, require-token=false")
+
+		_, err := ParseDirectorInfo(resp)
+		require.NoError(t, err)
+		assert.Empty(t, gotHost)
+		assert.Empty(t, gotBroker)
+	})
+}
+
 func TestPrependDirectEndpoints(t *testing.T) {
 	mustParse := func(s string) *url.URL {
 		u, err := url.Parse(s)

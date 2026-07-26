@@ -362,6 +362,19 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 
 // Given the Director response, parse the headers and construct the ordered list of object
 // servers.
+// brokerRegistrar, when set, is invoked after a director response is parsed with
+// each chosen object-server host and the broker URL the director advertised for
+// it (X-Pelican-Broker). It lets a caller that owns a broker dialer — namely a
+// cache mediating client operations to a firewalled origin (WS1) — teach that
+// dialer how to reach the origin before the transfer connects. nil (the default,
+// e.g. for an end-user client) makes this a no-op.
+var brokerRegistrar func(objectServerHost, brokerURL string)
+
+// SetBrokerRegistrar installs the hook described on brokerRegistrar.
+func SetBrokerRegistrar(f func(objectServerHost, brokerURL string)) {
+	brokerRegistrar = f
+}
+
 func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse, error) {
 	var xPelNs server_structs.XPelNs
 	if err := (&xPelNs).ParseRawHeader(&dirResp.Header); err != nil {
@@ -412,6 +425,19 @@ func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse,
 			if locUrl, parseErr := url.Parse(location); parseErr == nil {
 				sortedObjectServers = []*url.URL{locUrl}
 				log.Debugf("No Link headers in director response; using Location as object server: %s", location)
+			}
+		}
+	}
+
+	// WS1: if a broker registrar is installed (a cache), teach it how to reach a
+	// broker-only origin the director selected, so the subsequent transfer can
+	// dial the firewalled origin over the broker.
+	if brokerRegistrar != nil {
+		if brokerURL := dirResp.Header.Get("X-Pelican-Broker"); brokerURL != "" {
+			for _, objServer := range sortedObjectServers {
+				if objServer != nil {
+					brokerRegistrar(objServer.Host, brokerURL)
+				}
 			}
 		}
 	}

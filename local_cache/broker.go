@@ -23,6 +23,7 @@ import (
 	"net/url"
 
 	"github.com/pelicanplatform/pelican/broker"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -32,23 +33,21 @@ import (
 var cacheBrokerDialer *broker.BrokerDialer
 
 // SetBrokerDialer records the broker-aware dialer so the cache's origin-facing
-// requests can reach a firewalled origin through the broker.
+// requests can reach a firewalled origin through the broker. It also installs a
+// registrar on the client transfer stack so the cache's GET-miss fetches (which
+// go through client.TransferClient, not the proxy path) become broker-aware too.
 func SetBrokerDialer(d *broker.BrokerDialer) {
 	cacheBrokerDialer = d
+	client.SetBrokerRegistrar(registerOriginBroker)
 }
 
-// registerOriginBrokerFromRedirect teaches the broker dialer how to reach an
-// origin when the director's 307 redirect (resp) indicates the origin is
-// broker-only via the X-Pelican-Broker header. The address key is the redirect
-// target (host:port) that the transport will dial; the broker URL self-encodes
-// the origin prefix, so the reverse request routes correctly. A no-op when the
-// cache has no broker dialer or the origin is not broker-only.
-func registerOriginBrokerFromRedirect(dialAddr string, resp *http.Response) {
-	if cacheBrokerDialer == nil || resp == nil {
-		return
-	}
-	brokerURL := resp.Header.Get("X-Pelican-Broker")
-	if brokerURL == "" {
+// registerOriginBroker teaches the broker dialer how to reach an origin at
+// dialAddr (host:port, the address the transport will dial) via the broker URL
+// the director advertised. The broker URL self-encodes the origin prefix, so the
+// reverse request routes correctly. A no-op when the cache has no broker dialer
+// or no broker URL was advertised (the origin is directly reachable).
+func registerOriginBroker(dialAddr, brokerURL string) {
+	if cacheBrokerDialer == nil || brokerURL == "" {
 		return
 	}
 	prefix := ""
@@ -56,4 +55,13 @@ func registerOriginBrokerFromRedirect(dialAddr string, resp *http.Response) {
 		prefix = bu.Query().Get("prefix")
 	}
 	cacheBrokerDialer.UseBroker(server_structs.OriginType, dialAddr, brokerURL, prefix)
+}
+
+// registerOriginBrokerFromRedirect is the write/PROPFIND-path variant: it reads
+// the X-Pelican-Broker header from the director's 307 redirect response.
+func registerOriginBrokerFromRedirect(dialAddr string, resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	registerOriginBroker(dialAddr, resp.Header.Get("X-Pelican-Broker"))
 }
