@@ -35,15 +35,38 @@ func init() {
 	g_cache_fds = [2]int{-1, -1}
 }
 
+// closePairFds closes both still-open ends of a parent-held socketpair.
+// The parent keeps fds[0] (the control end used by sendChildFD) and
+// fds[1] (the signal end, a copy of which was handed to the child via
+// ExtraFiles). Neither is closed anywhere on the normal shutdown path,
+// so when a new xrootd is launched into the same process — most visibly
+// in back-to-back federation unit tests — the previous pair is orphaned
+// and leaks two descriptors. On macOS (kqueue) these accumulate until
+// the 256 open-file limit is hit and sockets start failing with
+// "invalid argument". Closing the prior pair before overwriting the
+// global keeps the descriptor count flat across relaunches. The old
+// child process is already gone by the time a replacement is set, so
+// closing is safe; a -1 sentinel closes nothing.
+func closePairFds(fds [2]int) {
+	if fds[0] != -1 {
+		_ = syscall.Close(fds[0])
+	}
+	if fds[1] != -1 && fds[1] != fds[0] {
+		_ = syscall.Close(fds[1])
+	}
+}
+
 // Set the global copy of the origin's communication FDs
 // To be used later for sending updated CAs and host certificates.
 func setOriginFds(fds [2]int) {
+	closePairFds(g_origin_fds)
 	g_origin_fds = fds
 }
 
 // Set the global copy of the cache's communication FDs
 // To be used later for sending updated CAs and host certificates.
 func setCacheFds(fds [2]int) {
+	closePairFds(g_cache_fds)
 	g_cache_fds = fds
 }
 
@@ -65,10 +88,22 @@ func sendChildFD(origin bool, cmd int, fp *os.File) error {
 	return syscall.Sendmsg(g_cache_fds[0], []byte{byte(cmd)}, rights, nil, 0)
 }
 
-// Close the child socket
+// Close the child socket. Closes both parent-held ends of the pair and
+// resets the global to the -1 sentinel so a later setOriginFds/setCacheFds
+// does not attempt to close an already-closed descriptor.
 func closeChildSocket(origin bool) error {
 	if origin {
-		return syscall.Close(g_origin_fds[0])
+		err := syscall.Close(g_origin_fds[0])
+		if g_origin_fds[1] != -1 && g_origin_fds[1] != g_origin_fds[0] {
+			_ = syscall.Close(g_origin_fds[1])
+		}
+		g_origin_fds = [2]int{-1, -1}
+		return err
 	}
-	return syscall.Close(g_cache_fds[0])
+	err := syscall.Close(g_cache_fds[0])
+	if g_cache_fds[1] != -1 && g_cache_fds[1] != g_cache_fds[0] {
+		_ = syscall.Close(g_cache_fds[1])
+	}
+	g_cache_fds = [2]int{-1, -1}
+	return err
 }
