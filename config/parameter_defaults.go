@@ -504,6 +504,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Origin.DefaultChecksumTypes
 	v.SetDefault(param.Origin_DefaultChecksumTypes.GetName(), []string{"crc32c"})
+	// Origin.DelegateIssuerToDirector
+	v.SetDefault(param.Origin_DelegateIssuerToDirector.GetName(), false)
 	// Origin.DirectorTest
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Origin.DisableCopies
