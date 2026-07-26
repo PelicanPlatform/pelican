@@ -4495,6 +4495,12 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 				}
 				return transferResult, transferResult.Error
 			}
+			// Nothing else closes this handle: the request body below is a
+			// TeeReader (not a ReadCloser), so the HTTP transport wraps it
+			// in a NopCloser and never closes the underlying file. Without
+			// this, every filesystem upload leaks a file descriptor — and
+			// on Windows leaves the source file locked.
+			defer file.Close()
 			ioreader = file
 			sizer = &ConstantSizer{size: fileInfo.Size()}
 			fileSizeHint = fileInfo.Size()
