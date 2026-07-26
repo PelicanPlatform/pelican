@@ -92,6 +92,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterFedMetadata(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
+	director.RegisterIssuerProxy(rootGroup) // WS4: proxy a (firewalled) origin's OAuth2 issuer
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	director.RegisterDirectorAPI(ctx, rootGroup)
 
