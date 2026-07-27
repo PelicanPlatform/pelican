@@ -836,7 +836,11 @@ func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, ind
 					indent, ref, "param."+refVar)
 			}
 			for _, env := range tier.envRefs {
-				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"$%s\", os.Getenv(%q))\n",
+				// runtimeEnvValue (config package) resolves the env var with a
+				// writable fallback for XDG_RUNTIME_DIR when it is unset, rather
+				// than substituting an empty string (which collapses
+				// "$XDG_RUNTIME_DIR/pelican/..." to "/pelican/...").
+				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"$%s\", runtimeEnvValue(%q))\n",
 					indent, env, env)
 			}
 			fmt.Fprintf(buf, "%s\tv.SetDefault(%s, val)\n", indent, paramVar)

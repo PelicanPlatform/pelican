@@ -101,7 +101,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/cache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Cache_RunLocation.GetName(), val)
 		}
 	}
@@ -123,7 +123,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/cache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Cache_StorageLocation.GetName(), val)
 		}
 	}
@@ -336,7 +336,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/localcache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.LocalCache_RunLocation.GetName(), val)
 		}
 	}
@@ -556,7 +556,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/xrootd/origin/globus"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), val)
 		}
 	}
@@ -650,7 +650,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/origin"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Origin_RunLocation.GetName(), val)
 		}
 	}
