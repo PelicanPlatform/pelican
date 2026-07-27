@@ -208,6 +208,40 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		server_utils.ResetTestState()
 	})
+
+	// VOMS requires TLS client auth to request a client certificate; enabling VOMS
+	// without it is a non-functional setup and must be rejected.
+	t.Run("TestOriginVomsWithoutTLSClientAuthErrors", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		require.NoError(t, param.Origin_EnableVoms.Set(true))
+		require.NoError(t, param.Origin_EnableTLSClientAuth.Set(false))
+
+		_, err := ConfigXrootd(ctx, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), param.Origin_EnableTLSClientAuth.GetName())
+	})
+
+	t.Run("TestOriginTLSClientAuthRendering", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		// Off by default
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+off`, string(content))
+
+		// On when enabled
+		require.NoError(t, param.Origin_EnableTLSClientAuth.Set(true))
+		configPath, err = ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		content, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+on`, string(content))
+	})
 }
 
 func TestShouldEnableTPC(t *testing.T) {
@@ -363,6 +397,40 @@ func TestXrootDCacheConfig(t *testing.T) {
 		err = CheckCacheXrootdEnv(cache, uid, gid)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
+	})
+
+	// VOMS requires TLS client auth to request a client certificate; enabling VOMS
+	// without it is a non-functional setup and must be rejected.
+	t.Run("TestCacheVomsWithoutTLSClientAuthErrors", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.CacheType, egrp)
+
+		require.NoError(t, param.Cache_EnableVoms.Set(true))
+		require.NoError(t, param.Cache_EnableTLSClientAuth.Set(false))
+
+		_, err := ConfigXrootd(ctx, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), param.Cache_EnableTLSClientAuth.GetName())
+	})
+
+	t.Run("TestCacheTLSClientAuthRendering", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.CacheType, egrp)
+
+		// Off by default
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+off`, string(content))
+
+		// On when enabled
+		require.NoError(t, param.Cache_EnableTLSClientAuth.Set(true))
+		configPath, err = ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		content, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+on`, string(content))
 	})
 }
 
