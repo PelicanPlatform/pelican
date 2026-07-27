@@ -312,7 +312,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 	if slices.Contains(serverPages, serverName) {
 		if (serverName == "director" && !config.IsServerEnabled(server_structs.DirectorType)) ||
 			(serverName == "registry" && !config.IsServerEnabled(server_structs.RegistryType)) ||
-			(serverName == "origin" && !config.IsServerEnabled(server_structs.OriginType)) ||
+			(serverName == "origin" && !config.IsServerEnabled(server_structs.OriginType) && !isViewingOriginUI(ctx)) ||
 			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) ||
 			(serverName == "transfer" && !config.IsServerEnabled(server_structs.TransferType)) {
 			file, _ := webAssets.ReadFile(notFoundFilePath)
@@ -325,6 +325,21 @@ func handleWebUIRedirect(ctx *gin.Context) {
 			return
 		}
 	}
+}
+
+// isViewingOriginUI reports whether this request is a director serving a
+// firewalled origin's UI on the admin's behalf (WS5, "reduce origin
+// requirements"). In that mode the director renders the origin pages from its
+// own identical bundle even though the origin module isn't enabled locally; the
+// origin-owned API calls those pages make are proxied to the origin over the
+// broker (see director.ViewOriginProxyMiddleware). The signal is the
+// view-origin cookie on a director.
+func isViewingOriginUI(ctx *gin.Context) bool {
+	if !config.IsServerEnabled(server_structs.DirectorType) {
+		return false
+	}
+	c, err := ctx.Cookie(server_structs.ViewOriginCookieName)
+	return err == nil && c != ""
 }
 
 func handleWebUIAuth(ctx *gin.Context) {

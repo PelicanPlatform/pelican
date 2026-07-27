@@ -93,6 +93,14 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
+	// On a director, intercept origin-owned UI API calls and forward them to the
+	// origin the browser is "viewing" over the broker (WS5). Installed BEFORE the
+	// web UI routes are registered so it precedes them in gin's handler chain; it
+	// no-ops for every request that isn't in view-origin mode.
+	if modules.IsEnabled(server_structs.DirectorType) {
+		engine.Use(director.ViewOriginProxyMiddleware())
+	}
+
 	// Set up necessary APIs to support Web UI, including auth and metrics
 	if err = web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 		return

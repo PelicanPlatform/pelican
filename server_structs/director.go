@@ -37,6 +37,13 @@ import (
 	"github.com/pelicanplatform/pelican/version"
 )
 
+// ViewOriginCookieName is the browser cookie carrying the ServerID of the origin
+// whose web UI the director is currently proxying ("view origin" mode, WS5).
+// Defined here so both the director (which sets/reads it) and web_ui (which
+// relaxes its origin-page gate when it is present) can reference one constant
+// without an import cycle.
+const ViewOriginCookieName = "pelican-view-origin"
+
 type (
 	TokenIssuer struct {
 		BasePaths       []string `json:"base-paths"`

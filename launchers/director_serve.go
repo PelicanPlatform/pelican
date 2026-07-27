@@ -92,7 +92,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterFedMetadata(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
-	director.RegisterIssuerProxy(rootGroup) // WS4: proxy a (firewalled) origin's OAuth2 issuer
+	director.RegisterIssuerProxy(rootGroup)                               // WS4: proxy a (firewalled) origin's OAuth2 issuer
+	director.RegisterOriginUIControls(rootGroup, web_ui.AdminAuthHandler) // WS5: view a (firewalled) origin's web UI
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	director.RegisterDirectorAPI(ctx, rootGroup)
 
