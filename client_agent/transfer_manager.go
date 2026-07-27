@@ -86,6 +86,11 @@ type TransferManager struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	eg        *errgroup.Group
+	// ownsEg is true when this manager created its own errgroup (no caller
+	// provided one via EgrpKey). In that case Shutdown() is responsible for
+	// waiting on the background goroutines; when a caller owns the errgroup,
+	// the caller waits and Shutdown() only signals cancellation.
+	ownsEg bool
 	// Job-event pub/sub for push (SSE) status delivery. Guarded by its own
 	// mutex so publishing a status change never contends with job execution.
 	subMu                  sync.Mutex
@@ -128,10 +133,13 @@ func (tm *TransferManager) fireJobTerminal(job *TransferJob) {
 func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreInterface) *TransferManager {
 	// Extract errgroup from context
 	eg, ok := ctx.Value(pelican_config.EgrpKey).(*errgroup.Group)
+	ownsEg := false
 	if !ok || eg == nil {
-		// No errgroup provided, create one
+		// No errgroup provided, create one — and take responsibility for
+		// waiting on it at Shutdown.
 		eg, ctx = errgroup.WithContext(ctx)
 		ctx = context.WithValue(ctx, pelican_config.EgrpKey, eg)
+		ownsEg = true
 	}
 
 	// Create TransferManager's own cancellable context for internal control
@@ -156,6 +164,7 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 		ctx:         managerCtx,
 		cancel:      cancel,
 		eg:          eg,
+		ownsEg:      ownsEg,
 		subscribers: make(map[string]map[int]chan JobEvent),
 	}
 
@@ -1157,8 +1166,23 @@ func (tm *TransferManager) Shutdown() error {
 	// Cancel context to signal all background goroutines to stop
 	tm.cancel()
 
-	// The errgroup will wait for all goroutines to complete
-	log.Info("Transfer manager shutdown initiated (waiting handled by errgroup)")
+	// If this manager owns its errgroup, no caller is waiting on the
+	// background goroutines, so Shutdown must block until they have all
+	// exited. Otherwise they can keep writing to the store after Shutdown
+	// returns — e.g. a recovery-restarted job racing the caller's
+	// store.Close()/temp-dir cleanup (observed as flaky
+	// "unlinkat ...: directory not empty" in TestJobRecovery). When a caller
+	// provided the errgroup, the caller is responsible for waiting.
+	if tm.ownsEg {
+		log.Info("Waiting for transfer manager background goroutines to exit")
+		if err := tm.eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warnf("Transfer manager background goroutine returned error during shutdown: %v", err)
+			return err
+		}
+		return nil
+	}
+
+	log.Info("Transfer manager shutdown initiated (waiting handled by caller's errgroup)")
 	return nil
 }
 
