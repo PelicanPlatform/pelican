@@ -331,12 +331,21 @@ func (q *publishQueue) claimDue(limit int, lease time.Duration) ([]*MetadataPubl
 
 // scheduleRetry records a failed attempt: increments attempts, captures
 // the error message, and pushes next_attempt_at forward.
+//
+// next_attempt_at is normalized to UTC before storing. SQLite has no timezone
+// type, so GORM writes a time.Time as its wall-clock text in whatever location
+// the value carries, and claimDue selects due rows by string-comparing that
+// text against time.Now().UTC(). A caller passing a local-zone time (e.g.
+// c.clock().Add(backoff) with a non-UTC clock) would store "07:53" while the
+// selector compares "12:51" (UTC), making every backoff row instantly
+// re-eligible and turning a failing publish into a tight retry loop. Storing
+// UTC keeps the write consistent with claimDue / firstEnqueue / NextDueAt.
 func (q *publishQueue) scheduleRetry(rowID int64, nextAttemptAt time.Time, errMsg string) error {
 	return q.handle().Model(&MetadataPublishRow{}).
 		Where("id = ?", rowID).
 		Updates(map[string]any{
 			"attempts":        gorm.Expr("attempts + 1"),
-			"next_attempt_at": nextAttemptAt,
+			"next_attempt_at": nextAttemptAt.UTC(),
 			"last_error":      errMsg,
 		}).Error
 }
