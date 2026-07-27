@@ -153,12 +153,20 @@ func TestExpirationDirector(t *testing.T) {
 
 	require.NoError(t, param.Server_AdLifetime.SetString("100ms"))
 	fed_test_utils.NewFedTest(t, "")
-	time.Sleep(time.Duration(500 * time.Millisecond))
-	assert.Less(t, 10, int(listDirectorCount.Load()))
+	// With a 100ms ad lifetime the servers re-advertise frequently. Poll until
+	// each endpoint has seen more than 10 ads rather than sleeping a fixed
+	// 500ms and asserting once: on a loaded CI runner the fixed-sleep version
+	// flaked when exactly 10 (not >10) ads had arrived by the deadline. Polling
+	// to a generous timeout tolerates slow runners while still verifying that
+	// re-advertisement happens repeatedly.
+	require.Eventually(t, func() bool {
+		return int(listDirectorCount.Load()) > 10 &&
+			int(directorPostCount.Load()) > 10 &&
+			int(originPostCount.Load()) > 10
+	}, 10*time.Second, 50*time.Millisecond,
+		"expected >10 ads to each endpoint (list, director-post, origin-post) with a 100ms ad lifetime")
 	log.Debugln("Fake director received", directorPostCount.Load(), "ads from the director")
-	assert.Less(t, 10, int(directorPostCount.Load()))
 	log.Debugln("Fake director received", originPostCount.Load(), "ads from the origin")
-	assert.Less(t, 10, int(originPostCount.Load()))
 }
 
 func TestForwardDirector(t *testing.T) {
