@@ -155,17 +155,23 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 
 		mockNamespaceKey := "foo"
 
-		deletedChan := make(chan int)
-		cancelChan := make(chan int)
+		// Register the key synchronously. This was previously done in a
+		// goroutine that called require.True on t; under load that goroutine
+		// could run after the subtest had already returned, panicking with
+		// "Fail in goroutine after test has completed". Doing it inline keeps
+		// all testing-API calls on the test goroutine.
+		namespaceKeys.DeleteAll()
+		namespaceKeys.Set(mockNamespaceKey, jwk.NewSet(), time.Second*2)
+		require.True(t, namespaceKeys.Has(mockNamespaceKey), "Failed to register namespace key")
 
-		go func() {
-			namespaceKeys.DeleteAll()
+		// Buffered so neither the checker's send nor the timeout's cancel can
+		// block if the other side has already moved on.
+		deletedChan := make(chan int, 1)
+		cancelChan := make(chan int, 1)
 
-			namespaceKeys.Set(mockNamespaceKey, jwk.NewSet(), time.Second*2)
-			require.True(t, namespaceKeys.Has(mockNamespaceKey), "Failed to register namespace key")
-		}()
-
-		// Keep checking if the cache item is absent or cancelled
+		// Keep checking if the cache item has been evicted, until told to stop.
+		// This goroutine touches no testing API, so it is safe if it outlives
+		// the subtest.
 		go func() {
 			for {
 				select {
@@ -176,6 +182,7 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 						deletedChan <- 1
 						return
 					}
+					time.Sleep(10 * time.Millisecond)
 				}
 			}
 		}()
@@ -183,10 +190,10 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		// Wait for 3s to check if the expired cache item is evicted
 		select {
 		case <-deletedChan:
-			require.True(t, true)
+			// Evicted as expected.
 		case <-time.After(3 * time.Second):
 			cancelChan <- 1
-			require.False(t, true, "Cache didn't evict expired item")
+			require.Fail(t, "Cache didn't evict expired item")
 		}
 	})
 }
