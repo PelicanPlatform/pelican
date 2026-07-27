@@ -538,10 +538,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
 	// Origin.EnableReads
 	v.SetDefault(param.Origin_EnableReads.GetName(), true)
+	// Origin.EnableTLSClientAuth
+	v.SetDefault(param.Origin_EnableTLSClientAuth.GetName(), false)
 	// Origin.EnableTransferAPI
 	v.SetDefault(param.Origin_EnableTransferAPI.GetName(), false)
 	// Origin.EnableVoms
-	v.SetDefault(param.Origin_EnableVoms.GetName(), true)
+	v.SetDefault(param.Origin_EnableVoms.GetName(), false)
 	// Origin.EnableWrites
 	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
 	// Origin.FedTokenLocation

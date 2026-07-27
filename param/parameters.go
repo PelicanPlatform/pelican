@@ -345,6 +345,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.EnableOIDC": false,
 	"Origin.EnablePublicReads": false,
 	"Origin.EnableReads": false,
+	"Origin.EnableTLSClientAuth": false,
 	"Origin.EnableTransferAPI": false,
 	"Origin.EnableVoms": false,
 	"Origin.EnableWrite": false,
@@ -1059,6 +1060,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableOIDC": func(c *Config) bool { return c.Origin.EnableOIDC },
 	"Origin.EnablePublicReads": func(c *Config) bool { return c.Origin.EnablePublicReads },
 	"Origin.EnableReads": func(c *Config) bool { return c.Origin.EnableReads },
+	"Origin.EnableTLSClientAuth": func(c *Config) bool { return c.Origin.EnableTLSClientAuth },
 	"Origin.EnableTransferAPI": func(c *Config) bool { return c.Origin.EnableTransferAPI },
 	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
 	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
@@ -1536,6 +1538,7 @@ var allParameterNames = []string{
 	"Origin.EnableOIDC",
 	"Origin.EnablePublicReads",
 	"Origin.EnableReads",
+	"Origin.EnableTLSClientAuth",
 	"Origin.EnableTransferAPI",
 	"Origin.EnableVoms",
 	"Origin.EnableWrite",
@@ -2102,6 +2105,7 @@ var (
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
+	Origin_EnableTLSClientAuth = BoolParam{"Origin.EnableTLSClientAuth"}
 	Origin_EnableTransferAPI = BoolParam{"Origin.EnableTransferAPI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
@@ -2584,6 +2588,7 @@ func init() {
 		"Origin.EnableOIDC": Origin_EnableOIDC,
 		"Origin.EnablePublicReads": Origin_EnablePublicReads,
 		"Origin.EnableReads": Origin_EnableReads,
+		"Origin.EnableTLSClientAuth": Origin_EnableTLSClientAuth,
 		"Origin.EnableTransferAPI": Origin_EnableTransferAPI,
 		"Origin.EnableVoms": Origin_EnableVoms,
 		"Origin.EnableWrite": Origin_EnableWrite,

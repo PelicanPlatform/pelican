@@ -108,6 +108,7 @@ type (
 		EnableTPC           bool
 		AllowNonPublicTPC   bool
 		EnableAtomicUploads bool
+		EnableTLSClientAuth bool
 		SelfTest            bool
 		MonitoringPrefix    string
 		Concurrency         int
@@ -1260,6 +1261,16 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			}
 		}
 		xrdConfig.Cache.LotmanCfg = lotmanCfg
+
+		// VOMS authentication relies on the client presenting an X.509 certificate
+		// during the TLS handshake, which only happens when TLS client auth is
+		// requested. Enabling VOMS without TLS client auth yields a non-functional
+		// setup: the cache never asks for a client certificate, so VOMS has nothing
+		// to extract.
+		if xrdConfig.Cache.EnableVoms && !xrdConfig.Cache.EnableTLSClientAuth {
+			return "", errors.Errorf("%s is enabled but %s is disabled; VOMS/X.509 client authentication cannot function because the cache will not request a client certificate. Set %s to true, or disable %s.",
+				param.Cache_EnableVoms.GetName(), param.Cache_EnableTLSClientAuth.GetName(), param.Cache_EnableTLSClientAuth.GetName(), param.Cache_EnableVoms.GetName())
+		}
 	}
 
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
@@ -1311,6 +1322,16 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 					xrdConfig.Origin.GlobusTransferTokenFile = globusExports[0].TransferTokenFile
 				}
 			}
+		}
+
+		// VOMS authentication relies on the client presenting an X.509 certificate
+		// during the TLS handshake, which only happens when TLS client auth is
+		// requested. Enabling VOMS without TLS client auth yields a non-functional
+		// setup: the origin never asks for a client certificate, so VOMS has nothing
+		// to extract.
+		if xrdConfig.Origin.EnableVoms && !xrdConfig.Origin.EnableTLSClientAuth {
+			return "", errors.Errorf("%s is enabled but %s is disabled; VOMS/X.509 client authentication cannot function because the origin will not request a client certificate. Set %s to true, or disable %s.",
+				param.Origin_EnableVoms.GetName(), param.Origin_EnableTLSClientAuth.GetName(), param.Origin_EnableTLSClientAuth.GetName(), param.Origin_EnableVoms.GetName())
 		}
 	}
 
