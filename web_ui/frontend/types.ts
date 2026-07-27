@@ -33,6 +33,7 @@ export type ServerType = 'Origin' | 'Cache';
 
 interface ServerBase {
   name: string;
+  serverId: string;
   version: string;
   storageType: string;
   disableDirectorTest: boolean;

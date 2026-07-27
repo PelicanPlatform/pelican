@@ -4,7 +4,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { Box, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { grey, red } from '@mui/material/colors';
 import { User } from '@/index';
-import { Equalizer, Language } from '@mui/icons-material';
+import { Equalizer, Language, Visibility } from '@mui/icons-material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import Link from 'next/link';
 import { alertOnError } from '@/helpers/util';
@@ -93,6 +93,26 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
                       <Tooltip title={'View Server Metrics'}>
                         <IconButton size={'small'}>
                           <Equalizer fill={'inherit'} />
+                        </IconButton>
+                      </Tooltip>
+                    </Link>
+                  </Box>
+                )}
+              {/* Origins may be firewalled/DNS-less, so their own web UI is
+                  unreachable directly. The director can proxy it: this enters
+                  "view origin" mode (WS5) and opens the origin's dashboard
+                  served through the director. Admin-only. */}
+              {authenticated &&
+                authenticated.role == 'admin' &&
+                server.type === 'Origin' &&
+                server?.serverId && (
+                  <Box ml={1}>
+                    <Link
+                      href={`/api/v1.0/origin-ui/select/${encodeURIComponent(server.serverId)}`}
+                    >
+                      <Tooltip title={'View Origin UI'}>
+                        <IconButton size={'small'}>
+                          <Visibility fill={'inherit'} />
                         </IconButton>
                       </Tooltip>
                     </Link>
