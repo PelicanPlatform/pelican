@@ -93,7 +93,15 @@ type (
 	// Struct holding pending requests waiting on an origin callback
 	pendingReversals struct {
 		channel chan http.ResponseWriter
-		prefix  string
+		// done is closed by ResetState (test teardown) to unblock the waiting
+		// ConnectToService goroutine and the callback sender WITHOUT closing
+		// `channel`. `channel` is a two-party handshake owned solely by
+		// ConnectToService (which closes it to signal the sender that the
+		// connection was hijacked); a third party closing it raced
+		// ConnectToService's own close ("close of closed channel") and the
+		// sender's send ("send on closed channel").
+		done   chan struct{}
+		prefix string
 	}
 )
 
@@ -108,9 +116,12 @@ const requestIdBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
 func ResetState() {
 	responseMapLock.Lock()
 	defer responseMapLock.Unlock()
-	// Close all pending channels to unblock any waiting goroutines
+	// Signal (don't close `channel`) to unblock any waiting goroutines. The
+	// response channel is owned and closed by ConnectToService; closing it here
+	// raced that close and the callback sender. `done` is owned by the map and
+	// closed exactly once, here, before the map is cleared.
 	for _, pending := range response {
-		close(pending.channel)
+		close(pending.done)
 	}
 	response = make(map[string]pendingReversals)
 
@@ -242,8 +253,11 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 
 	responseChannel := make(chan http.ResponseWriter)
 	defer close(responseChannel)
+	// resetDone lets ResetState unblock this goroutine at test teardown without
+	// closing responseChannel (which this function alone owns and closes).
+	resetDone := make(chan struct{})
 	responseMapLock.Lock()
-	response[reqC.RequestId] = pendingReversals{channel: responseChannel, prefix: prefix}
+	response[reqC.RequestId] = pendingReversals{channel: responseChannel, done: resetDone, prefix: prefix}
 	responseMapLock.Unlock()
 	defer func() {
 		responseMapLock.Lock()
@@ -349,6 +363,10 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 	case <-tck.C:
 		log.WithFields(logFields).Warn("Request has timed out when waiting for callback from origin")
 		err = errors.Errorf("Timeout when waiting for callback from origin")
+		return
+	case <-resetDone:
+		log.WithFields(logFields).Debug("Broker state was reset while waiting for callback")
+		err = errors.New("broker state reset while waiting for callback from origin")
 		return
 	case writer := <-responseChannel:
 		hj, ok := writer.(http.Hijacker)
