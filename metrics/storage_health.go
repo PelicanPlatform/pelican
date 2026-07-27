@@ -74,12 +74,18 @@ func getPathsToCheck(modules server_structs.ServerType) []string {
 	pathsMap := make(map[string]bool)
 	var paths []string
 
-	// Add logging location if configured and not /dev/null
-	// Empty string means stdout, so we skip it
-	if logPath := param.Logging_LogLocation.GetString(); logPath != "" && logPath != "/dev/null" {
-		// Get the directory containing the log file
+	// Add the logging location's directory, but only when it is a real file on
+	// disk. An empty value means stdout; /dev/stdout, /dev/stderr, /dev/null and
+	// any other /dev/* target resolve (via filepath.Dir) to a devfs directory
+	// whose usage is always reported as ~100%, which would raise a bogus
+	// critical storage alert. The log target is not real storage, so skip it.
+	if logPath := param.Logging_LogLocation.GetString(); logPath != "" {
 		logDir := filepath.Dir(logPath)
-		pathsMap[logDir] = true
+		if logDir != "/dev" && !strings.HasPrefix(logDir, "/dev/") {
+			pathsMap[logDir] = true
+		} else {
+			log.Debugf("Skipping storage health check for log location %q (device path, not real storage)", logPath)
+		}
 	}
 
 	// Add Server.DbLocation (always used)
