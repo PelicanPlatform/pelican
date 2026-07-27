@@ -1716,6 +1716,7 @@ const runtimeDirCleanupKey = "runtimeDirCleanupInternal"
 
 func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 	if runtimeDir := v.GetString(param.RuntimeDir.GetName()); runtimeDir != "" {
+		log.Debugf("Runtime directory already configured as %q", runtimeDir)
 		return runtimeDir, v.GetBool(runtimeDirCleanupKey), nil
 	}
 
@@ -1723,6 +1724,7 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 		runtimeDir := filepath.Join("/run", "pelican")
 		v.Set(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(runtimeDirCleanupKey, false)
+		log.Debugf("Runtime directory set to %q (root execution)", runtimeDir)
 		return runtimeDir, false, nil
 	}
 
@@ -1730,6 +1732,7 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 		runtimeDir := filepath.Join(userRuntimeDir, "pelican")
 		v.Set(param.RuntimeDir.GetName(), runtimeDir)
 		v.Set(runtimeDirCleanupKey, false)
+		log.Debugf("Runtime directory set to %q (from XDG_RUNTIME_DIR)", runtimeDir)
 		return runtimeDir, false, nil
 	}
 
@@ -1746,7 +1749,28 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 	// Temporary runtime directories are cleaned up on shutdown.
 	v.Set(param.RuntimeDir.GetName(), runtimeDir)
 	v.Set(runtimeDirCleanupKey, true)
+	log.Debugf("Runtime directory set to %q (temporary; XDG_RUNTIME_DIR is unset, cleaned up on shutdown)", runtimeDir)
 	return runtimeDir, true, nil
+}
+
+// runtimeEnvValue resolves an environment-variable reference embedded in a
+// generated parameter default (see the generated SetParameterDefaults). It
+// exists for XDG_RUNTIME_DIR: that variable is unset on macOS and on
+// non-systemd Linux sessions, and substituting the empty string collapses a
+// default like "$XDG_RUNTIME_DIR/pelican/cache" to the unwritable
+// "/pelican/cache". When XDG_RUNTIME_DIR is unset, fall back to a subtree of
+// the OS temp directory so the per-directory runtime defaults (Cache/Origin
+// RunLocation, etc.) land somewhere writable — mirroring the temp-dir fallback
+// ensureRuntimeDir already uses for RuntimeDir itself. Any other environment
+// reference passes through unchanged.
+func runtimeEnvValue(name string) string {
+	if val := os.Getenv(name); val != "" {
+		return val
+	}
+	if name == "XDG_RUNTIME_DIR" {
+		return strings.TrimRight(os.TempDir(), string(os.PathSeparator))
+	}
+	return ""
 }
 
 // ComputeExternalWebUrl computes the Server.ExternalWebUrl if not explicitly set.
