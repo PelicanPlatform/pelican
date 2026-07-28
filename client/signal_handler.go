@@ -23,47 +23,60 @@ package client
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 )
+
+var setupSignalHandlersOnce sync.Once
 
 // SetupSignalHandlers sets up signal handlers for SIGTERM to ensure logs are flushed
 // before the process exits. If debug mode is enabled, it will also send SIGQUIT to dump
 // stack traces before exiting.
 func SetupSignalHandlers() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM)
+	setupSignalHandlersOnce.Do(func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGTERM)
 
-	go func() {
-		sig := <-sigChan
-		log.Warnf("Received signal: %v. Flushing logs before exit...", sig)
+		go func() {
+			sig := <-sigChan
+			log.Warnf("Received signal: %v. Flushing logs before exit...", sig)
 
-		// Flush all buffered logs
-		logging.FlushLogs(param.Logging_LogLocation.GetString() != "")
+			// Flush all buffered logs
+			logging.FlushLogs(param.Logging_LogLocation.GetString() != "")
 
-		// Sync stdout and stderr to ensure all output is written
-		if err := os.Stdout.Sync(); err != nil {
-			log.Debugf("Error syncing stdout: %v", err)
-		}
-		if err := os.Stderr.Sync(); err != nil {
-			log.Debugf("Error syncing stderr: %v", err)
-		}
+			// Sync stdout and stderr to ensure all output is written
+			if err := os.Stdout.Sync(); err != nil {
+				log.Debugf("Error syncing stdout: %v", err)
+			}
+			if err := os.Stderr.Sync(); err != nil {
+				log.Debugf("Error syncing stderr: %v", err)
+			}
 
-		// If debug mode is enabled, send SIGQUIT to dump stack traces
-		if log.GetLevel() == log.DebugLevel || log.GetLevel() == log.TraceLevel {
-			log.Warnln("Debug mode enabled. Sending SIGQUIT to dump stack traces...")
-			_ = syscall.Kill(os.Getpid(), syscall.SIGQUIT)
-			// Give a moment for the stack trace to be written
-			// Note: SIGQUIT will cause the process to exit with a core dump
-			// so we don't need to explicitly exit here
-			return
-		}
+			// If debug mode is enabled, send SIGQUIT to dump stack traces; the Go
+			// runtime's default SIGQUIT behavior prints all goroutine stacks and exits.
+			// Note logrus's global level is pinned to Trace when filter-based logging
+			// is active, so consult the effective level instead of log.GetLevel().
+			if effLevel := config.GetEffectiveLogLevel(); effLevel == log.DebugLevel || effLevel == log.TraceLevel {
+				log.Warnln("Debug mode enabled. Sending SIGQUIT to dump stack traces...")
+				_ = syscall.Kill(os.Getpid(), syscall.SIGQUIT)
+			} else {
+				// Re-raise SIGTERM with the default disposition restored so the process
+				// reports a killed-by-SIGTERM wait status (e.g. to HTCondor) rather than
+				// an ordinary exit code.
+				log.Warnln("Exiting after signal handling...")
+				signal.Reset(syscall.SIGTERM)
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			}
 
-		log.Warnln("Exiting after signal handling...")
-		os.Exit(1)
-	}()
+			// Signal delivery is asynchronous; block until the pending signal
+			// terminates the process.
+			select {}
+		}()
+	})
 }
