@@ -20,6 +20,7 @@ package director
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,6 +90,30 @@ func TestBridgeBrowserCookieHeader_OnlyDirectorLoginIsDropped(t *testing.T) {
 	bridgeBrowserCookieHeader(req)
 
 	assert.Empty(t, req.Header.Get("Cookie"))
+}
+
+// TestRewriteOriginRequestHeaders covers the CSRF/same-origin fix: a proxied
+// request must present the origin's own host in Origin/Referer, or the origin
+// rejects a POST (e.g. login) as cross-origin.
+func TestRewriteOriginRequestHeaders(t *testing.T) {
+	originWebURL := url.URL{Scheme: "https", Host: "origin.example:8445"}
+
+	req, err := http.NewRequest(http.MethodPost, "https://director.example/api/v1.0/auth/login", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://director.example")
+	req.Header.Set("Referer", "https://director.example/view/origin/login/")
+
+	rewriteOriginRequestHeaders(req, originWebURL)
+
+	assert.Equal(t, "https://origin.example:8445", req.Header.Get("Origin"))
+	assert.Equal(t, "https://origin.example:8445/view/origin/login/", req.Header.Get("Referer"))
+
+	// Absent headers stay absent (no spurious values injected).
+	req2, err := http.NewRequest(http.MethodGet, "https://director.example/api/v1.0/auth/whoami", nil)
+	require.NoError(t, err)
+	rewriteOriginRequestHeaders(req2, originWebURL)
+	assert.Empty(t, req2.Header.Get("Origin"))
+	assert.Empty(t, req2.Header.Get("Referer"))
 }
 
 func TestRewriteOriginRedirectLocation(t *testing.T) {

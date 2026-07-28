@@ -204,6 +204,24 @@ func rewriteOriginRedirectLocation(resp *http.Response, originHost, directorHost
 	}
 }
 
+// rewriteOriginRequestHeaders rewrites the Origin and Referer headers on a
+// request being proxied to the origin. The origin's same-origin (CSRF) check
+// compares these against its own Host; through the proxy the browser sends the
+// director's host, which the origin would reject as cross-origin, so re-point
+// them at the origin's host. Without this a proxied POST (e.g. login) is refused.
+func rewriteOriginRequestHeaders(req *http.Request, originWebURL url.URL) {
+	if req.Header.Get("Origin") != "" {
+		req.Header.Set("Origin", originWebURL.Scheme+"://"+originWebURL.Host)
+	}
+	if ref := req.Header.Get("Referer"); ref != "" {
+		if u, err := url.Parse(ref); err == nil {
+			u.Scheme = originWebURL.Scheme
+			u.Host = originWebURL.Host
+			req.Header.Set("Referer", u.String())
+		}
+	}
+}
+
 // newOriginUIReverseProxy builds the reverse proxy to a viewed origin's web
 // endpoint. config.GetTransport() is broker-aware on the director, so a
 // firewalled origin's web port is reachable transparently.
@@ -215,6 +233,7 @@ func newOriginUIReverseProxy(originWebURL url.URL, directorHost string) *httputi
 			req.URL.Scheme = originWebURL.Scheme
 			req.URL.Host = originWebURL.Host
 			req.Host = originWebURL.Host
+			rewriteOriginRequestHeaders(req, originWebURL)
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			bridgeOriginSetCookies(resp)
