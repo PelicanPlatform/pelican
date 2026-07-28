@@ -308,11 +308,14 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle write-through requests (PUT, DELETE, MKCOL) - proxy to origin.
+	// Handle write-through requests (PUT, DELETE, MKCOL, COPY) - proxy to origin.
 	// MKCOL creates a collection (no body) and needs no cached copy invalidated.
-	// (COPY is not yet supported: its Destination header is a full URL that would
-	// need rewriting into origin terms — and may target a different origin.)
-	if r.Method == "PUT" || r.Method == "DELETE" || r.Method == "MKCOL" {
+	// COPY is WLCG third-party copy (TPC) "pull" mode: the client sends COPY to
+	// the destination path with a Source header naming a remote object; the
+	// origin GETs from Source and writes locally, streaming perf markers back.
+	// The Source is already a full remote URL (no origin-term rewriting needed);
+	// proxyWrite forwards the TPC headers and streams the markers.
+	if r.Method == "PUT" || r.Method == "DELETE" || r.Method == "MKCOL" || r.Method == "COPY" {
 		pc.proxyWrite(w, r, objectPath, bearerToken)
 		return
 	}
@@ -866,6 +869,23 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 // back to the caller (status + headers + body), and post-success cache
 // invalidation with ETag-aware instance management.  Until the engine
 // exposes hooks for those, the manual approach is the pragmatic choice.
+// forwardTPCHeaders copies the WLCG third-party-copy headers from src to dst:
+// the Source URL, the WebDAV Overwrite flag, and any TransferHeader* headers
+// (which carry the credentials the destination origin uses to GET from the
+// source). Header keys arrive canonicalized ("Transferheaderauthorization"),
+// which is exactly the form the origin matches, so a case-insensitive prefix
+// check re-selects them here.
+func forwardTPCHeaders(dst, src http.Header) {
+	for key, values := range src {
+		if key == "Source" || key == "Overwrite" ||
+			strings.HasPrefix(strings.ToLower(key), "transferheader") {
+			for _, v := range values {
+				dst.Add(key, v)
+			}
+		}
+	}
+}
+
 func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
 	reqLog := requestLogger(r, objectPath)
 
@@ -947,6 +967,12 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	if jobId := r.Header.Get("X-Pelican-JobId"); jobId != "" {
 		proxyReq.Header.Set("X-Pelican-JobId", jobId)
 	}
+	// For third-party COPY, forward the Source URL, the WebDAV Overwrite flag, and
+	// any TransferHeader* headers (the credentials the origin uses to GET from the
+	// source).
+	if r.Method == "COPY" {
+		forwardTPCHeaders(proxyReq.Header, r.Header)
+	}
 
 	// The director 307-redirects to the origin (a different host), so Go's
 	// default redirect policy strips the Authorization header.  Use a
@@ -1006,6 +1032,33 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	}
 
 	w.WriteHeader(resp.StatusCode)
+
+	// A TPC COPY streams WLCG performance markers over a potentially long-lived
+	// response; flush each chunk so the client sees progress in real time and
+	// doesn't time out waiting for the final status line. Other writes stream
+	// normally.
+	if r.Method == "COPY" {
+		flusher, _ := w.(http.Flusher)
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+					reqLog.Debugln("Error writing COPY response body:", writeErr)
+					return
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if readErr != nil {
+				if readErr != io.EOF {
+					reqLog.Debugln("Error reading COPY response body:", readErr)
+				}
+				return
+			}
+		}
+	}
 
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		reqLog.Debugln("Error copying write-through response body:", err)
@@ -1452,6 +1505,12 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	})
 	// Register MKCOL for collection creation (proxy to origin, WS1)
 	group.Handle("MKCOL", "/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	// Register COPY for third-party copy (proxy to origin, WS1)
+	group.Handle("COPY", "/:discovery/*path", func(c *gin.Context) {
 		if setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
