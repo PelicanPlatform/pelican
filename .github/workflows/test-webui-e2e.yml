@@ -314,3 +314,79 @@ jobs:
           if [ -f /tmp/pelican-server.pid ]; then
             kill "$(cat /tmp/pelican-server.pid)" || true
           fi
+
+  # ── WS5: origin-UI proxy (TWO processes) ──────────────────────────────────────
+  # The director proxies a firewalled origin's web UI over the broker. This needs
+  # a director+registry AND a SEPARATE broker-mode origin, so it can't reuse the
+  # single-process matrix leg above.
+  e2e-origin-ui-proxy:
+    name: E2E (origin-ui-proxy)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install libatomic (Node.js >= 24 runtime dependency)
+        run: dnf install -y libatomic
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: "web_ui/frontend/package.json"
+          cache: "npm"
+          cache-dependency-path: "web_ui/frontend/package-lock.json"
+
+      - name: Download Pelican binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: pelican-binaries
+          path: /tmp/pelican-binaries
+
+      - name: Install Pelican binaries
+        run: install -m 755 /tmp/pelican-binaries/pelican-server ./pelican-server
+
+      - name: Start the two-process federation (director + broker origin)
+        run: |
+          chmod +x web_ui/frontend/e2e/scripts/start-origin-ui-proxy-fed.sh
+          OUT=$(web_ui/frontend/e2e/scripts/start-origin-ui-proxy-fed.sh \
+            "$PWD/pelican-server" /tmp/ws5-fed password)
+          echo "$OUT"
+          echo "PELICAN_VIEW_ORIGIN_ID=${OUT##*VIEW_ORIGIN_ID=}" >> "$GITHUB_ENV"
+
+      - name: Install npm dependencies and Playwright browsers
+        working-directory: web_ui/frontend
+        run: |
+          npm ci
+          dnf install -y \
+            alsa-lib atk cups-libs gtk3 libdrm libgbm libXcomposite libXdamage \
+            libXext libXfixes libXi libXrandr libXScrnSaver libXtst mesa-libgbm \
+            nss nspr pango
+          npx playwright install chromium
+
+      - name: Run Playwright e2e tests (origin-ui-proxy)
+        working-directory: web_ui/frontend
+        env:
+          CI: "true"
+          TARGET_DIRECTOR_UI_PROXY_URL: https://localhost:8444
+          PELICAN_E2E_PASSWORD: password
+        run: npx playwright test --project=origin-ui-proxy
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-origin-ui-proxy
+          path: web_ui/frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload federation logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pelican-server-state-origin-ui-proxy
+          path: /tmp/ws5-fed/*.log
+          retention-days: 7

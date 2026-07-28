@@ -8,7 +8,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname + '/e2e', '.env') });
 
-type Service = 'origin' | 'cache' | 'director' | 'registry' | 'transfer';
+type Service =
+  | 'origin'
+  | 'cache'
+  | 'director'
+  | 'registry'
+  | 'transfer'
+  | 'origin-ui-proxy';
 interface TestTarget {
   baseURL: string;
   token?: string;
@@ -41,6 +47,13 @@ const targets: Record<Service, TestTarget> = {
   transfer: {
     baseURL: process.env.TARGET_TRANSFER_URL || defaultBaseUrl,
     token: process.env.TARGET_TRANSFER_TOKEN || defaultToken,
+  },
+  // WS5: targets the DIRECTOR of a two-process federation (director + a separate
+  // broker-mode origin). It authenticates via seeded cookies in the spec, not a
+  // Bearer header, so no token is set here.
+  'origin-ui-proxy': {
+    baseURL: process.env.TARGET_DIRECTOR_UI_PROXY_URL || defaultBaseUrl,
+    token: undefined,
   },
 };
 
