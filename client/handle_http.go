@@ -307,6 +307,7 @@ type (
 		requestedChecksums []ChecksumType
 		requireChecksum    bool
 		recursive          bool
+		rejectCollections  bool // If true, error when the remote path is a collection
 		skipAcquire        bool
 		dryRun             bool                            // Enable dry-run mode to display what would be transferred without actually doing it
 		srcURL             *url.URL                        // When a copy job, this is the source URL
@@ -377,25 +378,26 @@ type (
 
 	// A client to the transfer engine.
 	TransferClient struct {
-		id             uuid.UUID
-		ctx            context.Context
-		cancel         context.CancelFunc
-		callback       TransferCallbackFunc
-		engine         *TransferEngine
-		skipAcquire    bool          // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		syncLevel      SyncLevel     // Policy for the client to synchronize data
-		tokenLocation  string        // Location of a token file to use for transfers
-		token          string        // Token that should be used for transfers
-		fedToken       TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
-		cacheMode      bool          // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/)
-		dryRun         bool          // Enable dry-run mode to display what would be transferred without actually doing it
-		work           chan *TransferJob
-		closed         bool
-		closeOnce      sync.Once
-		prefObjServers []*url.URL // holds any client-requested caches/origins
-		results        chan *TransferResults
-		finalResults   chan TransferResults
-		setupResults   sync.Once
+		id                uuid.UUID
+		ctx               context.Context
+		cancel            context.CancelFunc
+		callback          TransferCallbackFunc
+		engine            *TransferEngine
+		skipAcquire       bool          // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		syncLevel         SyncLevel     // Policy for the client to synchronize data
+		tokenLocation     string        // Location of a token file to use for transfers
+		token             string        // Token that should be used for transfers
+		fedToken          TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
+		cacheMode         bool          // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/)
+		dryRun            bool          // Enable dry-run mode to display what would be transferred without actually doing it
+		rejectCollections bool          // Reject downloads of collections when not in recursive mode
+		work              chan *TransferJob
+		closed            bool
+		closeOnce         sync.Once
+		prefObjServers    []*url.URL // holds any client-requested caches/origins
+		results           chan *TransferResults
+		finalResults      chan TransferResults
+		setupResults      sync.Once
 	}
 
 	TransferOption                              = option.Interface
@@ -430,6 +432,7 @@ type (
 	identTransferOptionSourceTokenProvider      struct{}
 	identTransferOptionNonInteractive           struct{}
 	identTransferOptionStatUploadDestination    struct{}
+	identTransferOptionRejectCollections        struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -1441,6 +1444,22 @@ func getJobId(ctx context.Context) (string, bool) {
 	return searchJobAd(attrJobId)
 }
 
+// Create an option to reject collections during download
+//
+// When enabled, the client determines whether the remote path is a collection
+// before downloading it, and fails the transfer if it is. This is for callers
+// that mean to fetch a single object: without it, a collection is downloaded as
+// whatever bytes the origin happens to serve for it, which is at best a
+// listing and at worst an empty file.
+//
+// The check costs no additional requests -- it rides along with the endpoint
+// probe every download already performs -- but it cannot always be answered,
+// since not every origin implements PROPFIND. An unanswered check lets the
+// transfer proceed.
+func WithRejectCollections(reject bool) TransferOption {
+	return option.New(identTransferOptionRejectCollections{}, reject)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -1477,6 +1496,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.dryRun = option.Value().(bool)
 		case identTransferOptionCacheEmbeddedClientMode{}:
 			client.cacheMode = option.Value().(bool)
+		case identTransferOptionRejectCollections{}:
+			client.rejectCollections = option.Value().(bool)
 		case identTransferOptionForcePrestageAPI{}:
 			// This option is handled at the job level, not client level
 			// Skip it here; it will be processed in NewTransferJob/NewPrestageJob
@@ -1848,17 +1869,21 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
-		localPath:      localPath,
-		remoteURL:      &copyUrl,
-		callback:       tc.callback,
-		skipAcquire:    tc.skipAcquire,
-		dryRun:         tc.dryRun,
-		syncLevel:      tc.syncLevel,
-		xferType:       transferTypeDownload,
-		uuid:           id,
-		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
-		inPlace:        false, // Default to using temporary files (rsync-style)
+		// A recursive job is asking for the collection, so it cannot also
+		// refuse one. This covers the ?recursive query form too, which has
+		// already been folded into `recursive` above.
+		rejectCollections: tc.rejectCollections && !recursive,
+		localPath:         localPath,
+		remoteURL:         &copyUrl,
+		callback:          tc.callback,
+		skipAcquire:       tc.skipAcquire,
+		dryRun:            tc.dryRun,
+		syncLevel:         tc.syncLevel,
+		xferType:          transferTypeDownload,
+		uuid:              id,
+		project:           project,
+		token:             newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		inPlace:           false, // Default to using temporary files (rsync-style)
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1895,6 +1920,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.cacheMode = option.Value().(bool)
 		case identTransferOptionRequestId{}:
 			tj.requestId = option.Value().(string)
+		case identTransferOptionRejectCollections{}:
+			tj.rejectCollections = option.Value().(bool)
 		}
 	}
 
@@ -2388,7 +2415,8 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	cacheUrl := *sortedServers[0]
 	cacheUrl.Path = remoteUrl.Path
 
-	return objectCached(ctx, &cacheUrl, token)
+	age, size, _, _, err = objectCached(ctx, &cacheUrl, token, false)
+	return
 }
 
 // Close the transfer client object
@@ -2951,9 +2979,26 @@ func compareAttempts(left attemptSorter, right attemptSorter) int {
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
 // a second behind those that do respond.
-func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token *tokenGenerator) (size int64, results []transferAttemptDetails) {
+// collectionCheckTimeout bounds the probe when its answer decides whether a
+// download is refused. It is deliberately far longer than the budget for
+// merely ordering endpoints: an answer that arrives late is still useful,
+// whereas no answer means the download the caller wanted refused goes ahead.
+// It remains a bound, so an unresponsive federation degrades to proceeding
+// rather than hanging.
+const collectionCheckTimeout = 10 * time.Second
+
+// wantCollectionInfo additionally reports whether the path names a collection.
+// Asking for it changes two things: the per-endpoint probe learns the answer at
+// no extra cost (see objectCached), and a lone endpoint is still probed, where
+// otherwise there would be nothing to sort and the function would return
+// immediately.
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token *tokenGenerator, wantCollectionInfo bool) (size int64, collection collectionAnswer, results []transferAttemptDetails) {
 	size = -1
-	if len(attempts) < 2 {
+	if len(attempts) < 2 && !wantCollectionInfo {
+		results = attempts
+		return
+	}
+	if len(attempts) == 0 {
 		results = attempts
 		return
 	}
@@ -2961,7 +3006,13 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		idx  int
 		size uint64
 		age  int
-		err  error
+		// answeredCollection distinguishes "this endpoint told us" from "this
+		// endpoint did not": an unanswered question is not the same as a
+		// negative answer, and the caller refuses the download rather than
+		// guess.
+		answeredCollection bool
+		isCollection       bool
+		err                error
 	}
 	headChan := make(chan checkResults)
 
@@ -2974,7 +3025,20 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 
 	defer close(headChan)
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	// Ranking endpoints and asking whether the path is a collection want
+	// different budgets. A second is plenty to decide which cache to prefer,
+	// and giving up on that is harmless -- the download proceeds against an
+	// unsorted list. The collection answer is acted on, so abandoning it is
+	// not harmless: it silently lets through the download the caller asked to
+	// have refused. A healthy endpoint answers a Depth-0 PROPFIND well inside
+	// the longer budget, and a first success still cancels the rest, so this
+	// only costs time when every endpoint is slow -- which is when the answer
+	// is worth waiting for.
+	probeTimeout := time.Second
+	if wantCollectionInfo {
+		probeTimeout = collectionCheckTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	for idx, transferEndpoint := range attempts {
 		tUrl := *transferEndpoint.Url
@@ -2983,15 +3047,15 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		go func(idx int, tUrl *url.URL) {
 			// If the scheme is unix://, it is a local cache and therefore, we should always try this cache first and skip the HEAD request (since it will fail)
 			if tUrl.Scheme == "unix" {
-				headChan <- checkResults{idx, 0, -1, nil}
+				headChan <- checkResults{idx, 0, -1, false, false, nil}
 				return
 			}
 
-			if age, size, err := objectCached(ctx, tUrl, token); err != nil {
-				headChan <- checkResults{idx, 0, -1, err}
+			if age, size, answered, isCollection, err := objectCached(ctx, tUrl, token, wantCollectionInfo); err != nil {
+				headChan <- checkResults{idx, 0, -1, false, false, err}
 				return
 			} else {
-				headChan <- checkResults{idx, uint64(size), age, err}
+				headChan <- checkResults{idx, uint64(size), age, answered, isCollection, err}
 			}
 
 		}(idx, &tUrl)
@@ -3013,6 +3077,14 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			}
 		} else {
 			finished[result.idx] = 1
+			// Any endpoint that answered the question answers it for the
+			// object as a whole; they are all describing the same path.
+			if result.answeredCollection {
+				collection.answered = true
+				if result.isCollection {
+					collection.isCollection = true
+				}
+			}
 			if result.age >= 0 {
 				attempts[result.idx].CacheAge = time.Duration(result.age) * time.Second
 				attempts[result.idx].CacheQuery = true
@@ -3070,6 +3142,37 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	}
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
+
+	var size int64 = -1
+	attempts := transfer.attempts
+	// A job that refuses collections has to find out before anything is
+	// created locally, or the caller is left holding the empty file this is
+	// meant to prevent. The endpoint probe that would otherwise happen further
+	// down is simply brought forward and asked one additional question; it is
+	// the same requests either way. Skipped for a dry run, which creates
+	// nothing and is expected not to reach out to the object servers at all.
+	sorted := false
+	if transfer.job != nil && transfer.job.ctx != nil && transfer.job.rejectCollections && !transfer.job.dryRun {
+		var collection collectionAnswer
+		size, collection, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token, true)
+		sorted = true
+		if collection.isCollection {
+			err = error_codes.NewParameterError(
+				errors.Errorf("remote path %s is a collection; pass --recursive to download its contents", transfer.remoteURL.Path),
+			)
+			return
+		}
+		if !collection.answered {
+			// Downloading anyway is how the caller ends up with a directory
+			// listing saved as though it were their object. An endpoint that
+			// cannot answer a PROPFIND for the path it is about to serve is
+			// not one to take a GET on faith from, so refuse and say why.
+			err = errors.Errorf(
+				"no object server could confirm whether %s is a collection; refusing to download",
+				transfer.remoteURL.Path)
+			return
+		}
+	}
 
 	// Create hash instances for all known checksum types so we can verify against
 	// whatever algorithm the server actually supports. This handles cases like a multiuser
@@ -3297,10 +3400,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
-	var size int64 = -1
-	attempts := transfer.attempts
-	if transfer.job != nil && transfer.job.ctx != nil {
-		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	// Sort (re-order) the transfer attempts by querying each endpoint, which
+	// also discovers the object size. A job that refuses collections has
+	// already done this above.
+	if !sorted && transfer.job != nil && transfer.job.ctx != nil {
+		size, _, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token, false)
 	}
 
 	// Create a new transferResults if we don't already have one
@@ -5018,7 +5122,7 @@ func skipPrestage(object string, job *TransferJob) bool {
 	}
 
 	cache.Path = object
-	if age, _, err := objectCached(job.ctx, &cache, job.token); err == nil {
+	if age, _, _, _, err := objectCached(job.ctx, &cache, job.token, false); err == nil {
 		return age >= 0
 	} else {
 		log.Warningln("Failed to check cache status of object", cache.String(), "so assuming it needs prestaging:", err)
@@ -6013,7 +6117,63 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 // Note that xrootd returns an `Age` header for GETs but only a `Content-Length`
 // header for HEADs.  If `Content-Range` is found, we will use that header; if not,
 // we will issue two commands.
-func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator) (age int, size int64, err error) {
+// propfindObject asks a single endpoint, directly, whether objectUrl is a
+// collection and how large it is.
+//
+// This deliberately does not go through statHttp: that fans out across every
+// object server the director returned and waits for all of them with no
+// deadline, which is far too much machinery -- and far too much latency -- to
+// put in front of an ordinary download. Here the endpoint is already chosen
+// and the caller's context bounds the wait.
+// propfindObject asks a single endpoint, directly, whether objectUrl is a
+// collection and how large it is.
+//
+// This deliberately does not go through statHttp: that fans out across every
+// object server the director returned and waits for all of them with no
+// deadline, which is far too much machinery -- and far too much latency -- to
+// put in front of an ordinary download. Here the endpoint is already chosen.
+//
+// gowebdav exposes no context-taking method (no release of it does), so the
+// caller's deadline is attached through the interceptor, which runs on the
+// request the library is about to send. Without that, a stalled endpoint would
+// hang the download for as long as the transport allowed.
+func propfindObject(ctx context.Context, objectUrl *url.URL, token *tokenGenerator) (size int64, isCollection bool, err error) {
+	base := *objectUrl
+	base.Path = ""
+	base.RawQuery = ""
+	client := gowebdav.NewAuthClient(base.String(), &bearerAuth{token: token})
+	client.SetTransport(config.GetTransport())
+	client.SetInterceptor(func(_ string, r *http.Request) {
+		*r = *r.WithContext(ctx)
+	})
+
+	info, statErr := client.Stat(objectUrl.Path)
+	if statErr != nil {
+		// An XRootD cache reports a collection by refusing the PROPFIND with
+		// 409 rather than describing it, so the refusal is itself the answer.
+		if gowebdav.IsErrCode(statErr, http.StatusConflict) {
+			log.Debugln("PROPFIND of", objectUrl.Path, "at", objectUrl.Host, "returned 409; treating as a collection")
+			return -1, true, nil
+		}
+		return -1, false, statErr
+	}
+	return info.Size(), info.IsDir(), nil
+}
+
+// collectionAnswer is what an endpoint probe learned about whether a path is a
+// collection. `answered` is separate from `isCollection` because not knowing is
+// not the same as knowing it is an object: a caller that refuses collections
+// refuses on either, rather than downloading something it cannot describe.
+type collectionAnswer struct {
+	answered     bool
+	isCollection bool
+}
+
+// wantCollectionInfo asks objectCached to determine whether the URL names a
+// collection as well as sizing it. It costs nothing extra: the fall-back
+// request objectCached already makes to learn the size becomes a PROPFIND,
+// which reports both.
+func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator, wantCollectionInfo bool) (age int, size int64, answeredCollection bool, isCollection bool, err error) {
 
 	age = -1
 
@@ -6090,9 +6250,36 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 			Err:  &sce,
 		}
 	}
-	// Early return -- all the info we wanted was in the GET response.
+	// Early return -- all the info we wanted was in the GET response. A server
+	// that satisfied a byte range served an object: collections have no byte
+	// ranges to serve, so there is nothing further to ask about.
 	if gotContentRange {
+		// A server that satisfied a byte range served an object, and that is
+		// an answer, not an absence of one.
+		answeredCollection = wantCollectionInfo
 		return
+	}
+
+	// The size is not in the GET response, so a second request is needed. When
+	// the caller also wants to know whether this is a collection, ask by
+	// PROPFIND rather than HEAD -- it answers both questions in the one
+	// request a HEAD would have cost.
+	if wantCollectionInfo {
+		var propErr error
+		if size, isCollection, propErr = propfindObject(ctx, objectUrl, token); propErr == nil {
+			// The follow-up request is what decides this endpoint's fate, as
+			// it did when it was a HEAD: an answer here supersedes whatever
+			// the ranged GET made of the request.
+			answeredCollection = true
+			err = nil
+			return
+		}
+		// The endpoint did not answer. Fall through to the HEAD so sizing and
+		// endpoint selection keep working, but leave the collection question
+		// unanswered -- the caller decides what to do about that, and refusing
+		// is the safe choice when the alternative is writing an unknown
+		// response to the caller's file.
+		log.Debugln("PROPFIND unanswered at", objectUrl.Host, ":", propErr)
 	}
 
 	headRequest, err = http.NewRequestWithContext(ctx, http.MethodHead, objectUrl.String(), nil)

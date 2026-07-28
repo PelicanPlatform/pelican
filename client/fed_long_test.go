@@ -1005,6 +1005,82 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 		}
 	})
 
+	t.Run("testObjectGetNonRecursiveDirPath", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
+
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			// Create a collection on the origin to download
+			storagePrefix := export.StoragePrefix
+			testCollectionName := "test-collection-get-nonrecursive"
+			testCollection := filepath.Join(storagePrefix, testCollectionName)
+			err := os.Mkdir(testCollection, 0755)
+			require.NoError(t, err)
+			defer os.RemoveAll(testCollection)
+
+			// Create an object inside the collection
+			testFilePath := filepath.Join(testCollection, "testfile.txt")
+			err = os.WriteFile(testFilePath, []byte("test content"), 0644)
+			require.NoError(t, err)
+
+			// Try to download the collection with collection rejection enabled (simulates CLI non-recursive)
+			downloadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, testCollectionName)
+			destPath := filepath.Join(t.TempDir(), "downloaded-collection")
+
+			opts := []client.TransferOption{client.WithRejectCollections(true)}
+			var getErr error
+			if export.Capabilities.PublicReads {
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, opts...)
+			} else {
+				opts = append(opts, client.WithTokenLocation(tempToken.Name()))
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, opts...)
+			}
+
+			require.Error(t, getErr, "Expected an error when passing a collection to object get without the recursive option set")
+			expectedMessage := "is a collection"
+			require.Contains(t, getErr.Error(), expectedMessage, "Error message did not match expected text")
+
+			// Verify it's a ParameterError
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(getErr, &pe), "Error should be wrapped in PelicanError")
+			assert.Equal(t, 1000, pe.Code(), "Should be Parameter error code")
+
+			// Verify that nothing was created at the destination
+			_, statErr := os.Stat(destPath)
+			require.True(t, os.IsNotExist(statErr), "Destination should not have been created")
+
+			// The guard must not fire when the caller asked for the
+			// collection: recursively, or via the ?recursive query form that
+			// NewTransferJob folds into the same flag.
+			recursiveDest := filepath.Join(t.TempDir(), "recursive-collection")
+			_, recErr := client.DoGet(fed.Ctx, downloadURL, recursiveDest, true, opts...)
+			require.NoError(t, recErr, "a recursive get must still download the collection")
+
+			queryDest := filepath.Join(t.TempDir(), "query-collection")
+			_, queryErr := client.DoGet(fed.Ctx, downloadURL+"?recursive", queryDest, false, opts...)
+			require.NoError(t, queryErr, "?recursive must also disable the collection guard")
+
+			// And an ordinary object must still download with the guard on --
+			// the check runs on the same probe as every other get, so a
+			// regression here would break downloads generally.
+			objectURL := fmt.Sprintf("pelican://%s%s/%s/testfile.txt", discoveryUrl.Host,
+				export.FederationPrefix, testCollectionName)
+			objectDest := filepath.Join(t.TempDir(), "testfile.txt")
+			_, objErr := client.DoGet(fed.Ctx, objectURL, objectDest, false, opts...)
+			require.NoError(t, objErr, "a regular object must download with collection rejection enabled")
+			contents, readErr := os.ReadFile(objectDest)
+			require.NoError(t, readErr)
+			assert.Equal(t, "test content", string(contents))
+		}
+	})
+
 	t.Cleanup(func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)

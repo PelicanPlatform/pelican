@@ -315,6 +315,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			client.WithCaches(caches...),
 			client.WithInPlace(inPlace),
 			client.WithDryRun(dryRun),
+			client.WithRejectCollections(!isRecursive),
 		}
 		options = append(options, tokenOpts...)
 		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
