@@ -402,7 +402,8 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...)}, tokenOpts...)
+		options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...),
+			client.WithRejectCollections(!isRecursive)}, tokenOpts...)
 		_, result = client.DoCopy(ctx, src, dest, isRecursive, options...)
 		if result != nil {
 			lastSrc = src

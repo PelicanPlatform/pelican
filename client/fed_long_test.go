@@ -1034,6 +1034,9 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 				export.FederationPrefix, testCollectionName)
 			destPath := filepath.Join(t.TempDir(), "downloaded-collection")
 
+			// The commands ask for this explicitly -- it is not a client
+			// default, because the cache fetches from origins through the
+			// same client and must not pay for the check.
 			opts := []client.TransferOption{client.WithRejectCollections(true)}
 			var getErr error
 			if export.Capabilities.PublicReads {
@@ -1066,6 +1069,25 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			queryDest := filepath.Join(t.TempDir(), "query-collection")
 			_, queryErr := client.DoGet(fed.Ctx, downloadURL+"?recursive", queryDest, false, opts...)
 			require.NoError(t, queryErr, "?recursive must also disable the collection guard")
+
+			// The guard belongs to the client rather than to `object get`, so
+			// every entry point that downloads inherits it. DoCopy backs
+			// `object copy`; DoGet backs `object get`, the transfer server's
+			// async jobs, and the HTCondor plugin. `object sync` always asks
+			// recursively, so the guard correctly never applies there.
+			copyDest := filepath.Join(t.TempDir(), "copied-collection")
+			_, copyErr := client.DoCopy(fed.Ctx, downloadURL, copyDest, false, opts...)
+			require.Error(t, copyErr, "a non-recursive copy of a collection must be refused too")
+			require.Contains(t, copyErr.Error(), "is a collection")
+			_, statErr = os.Stat(copyDest)
+			require.True(t, os.IsNotExist(statErr), "a refused copy must leave nothing behind")
+
+			// A client that does not ask keeps the older behavior, which is
+			// what the cache relies on.
+			defaultDest := filepath.Join(t.TempDir(), "not-asked")
+			_, defaultErr := client.DoGet(fed.Ctx, downloadURL, defaultDest, false)
+			assert.NotContains(t, fmt.Sprint(defaultErr), "is a collection",
+				"the guard must be off unless the caller asks for it")
 
 			// And an ordinary object must still download with the guard on --
 			// the check runs on the same probe as every other get, so a

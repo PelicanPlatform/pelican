@@ -1444,7 +1444,16 @@ func getJobId(ctx context.Context) (string, bool) {
 	return searchJobAd(attrJobId)
 }
 
-// Create an option to reject collections during download
+// Create an option to reject collections during download.
+//
+// This is off by default, and deliberately so. Pelican's own machinery moves
+// bytes through this same client -- the cache submits ordinary non-recursive
+// download jobs for the blocks it is filling, and the HTCondor plugin does the
+// same on behalf of a batch system -- and none of it has any use for the
+// check: it is not interpreting a command line, and it pays for the endpoint
+// probe the check needs. Turning this on by default put that probe in front of
+// every cache block fetch. The commands that do interpret a command line ask
+// for it explicitly.
 //
 // When enabled, the client determines whether the remote path is a collection
 // before downloading it, and fails the transfer if it is. This is for callers
