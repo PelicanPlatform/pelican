@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 func TestGetNamespaceIssuerURL(t *testing.T) {
@@ -47,4 +48,28 @@ func TestGetNamespaceIssuerURL(t *testing.T) {
 	// (The delegation-on path resolves the federation director endpoint and is
 	// covered by the WS4 e2e once the broker/token harness is available; it is
 	// off by default and falls back to the local issuer when no director is known.)
+}
+
+func TestGetDirectorRedirectHost(t *testing.T) {
+	origDelegate := param.Origin_DelegateIssuerToDirector.GetBool()
+	t.Cleanup(func() {
+		_ = param.Origin_DelegateIssuerToDirector.Set(origDelegate)
+		ResetConfig()
+	})
+
+	SetFederation(pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.example:9999"})
+
+	// Delegation off: no auto-derive; the caller uses the origin's own host.
+	require.NoError(t, param.Origin_DelegateIssuerToDirector.Set(false))
+	assert.Equal(t, "", GetDirectorRedirectHost())
+
+	// Delegation on with a known federation director: its host (with port) is
+	// used as the OAuth2 redirect target.
+	require.NoError(t, param.Origin_DelegateIssuerToDirector.Set(true))
+	assert.Equal(t, "director.example:9999", GetDirectorRedirectHost())
+
+	// Delegation on but the director isn't known yet: empty, so the caller falls
+	// back to the origin's own host rather than producing a broken redirect.
+	SetFederation(pelican_url.FederationDiscovery{})
+	assert.Equal(t, "", GetDirectorRedirectHost())
 }

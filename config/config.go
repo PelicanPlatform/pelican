@@ -1069,6 +1069,34 @@ func GetNamespaceIssuerURL(namespace string) string {
 	return externalBase + "/api/v1.0/issuer/ns" + namespace
 }
 
+// GetDirectorRedirectHost returns the director's host (host or host:port) to use
+// as the OAuth2 login redirect_uri host when this origin delegates its
+// issuer/login to the director (the same Origin.DelegateIssuerToDirector signal
+// as GetNamespaceIssuerURL). A firewalled/DNS-less origin cannot receive the IdP
+// callback directly; the director proxies its login (WS5), so the director must
+// be the registered redirect target. Returns "" when delegation is off or the
+// federation director endpoint is not yet known, so the caller falls back to the
+// origin's own host.
+//
+// (The director callback URL, https://<director>/api/v1.0/auth/oauth/callback,
+// must still be registered as an allowed redirect_uri on the origin's OIDC client
+// at the IdP — an external step OAuth requires and Pelican cannot forge.)
+func GetDirectorRedirectHost() string {
+	if !param.Origin_DelegateIssuerToDirector.GetBool() {
+		return ""
+	}
+	fedInfo, err := GetFederation(context.Background())
+	if err != nil || fedInfo.DirectorEndpoint == "" {
+		log.Debug("OIDC redirect host: federation director endpoint not yet known; using the origin's own host")
+		return ""
+	}
+	u, err := url.Parse(fedInfo.DirectorEndpoint)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host
+}
+
 // GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
 // - Server.IssuerUrl
 // - Server.IssuerHostname and Server.IssuerPort

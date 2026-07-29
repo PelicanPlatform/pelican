@@ -149,8 +149,8 @@ func GetRedirectURL(callback string) (redirURL string, err error) {
 		return
 	}
 	redirectUrl.Path = callback
-	redirectHostname := param.OIDC_ClientRedirectHostname.GetString()
-	if redirectHostname != "" {
+	if redirectHostname := param.OIDC_ClientRedirectHostname.GetString(); redirectHostname != "" {
+		// Explicit operator override wins.
 		_, _, err := net.SplitHostPort(redirectHostname)
 		if err != nil {
 			// Port not present
@@ -159,6 +159,12 @@ func GetRedirectURL(callback string) (redirURL string, err error) {
 			// Port present
 			redirectUrl.Host = redirectHostname
 		}
+	} else if dh := config.GetDirectorRedirectHost(); dh != "" {
+		// A delegating (firewalled) origin can't receive the IdP callback itself;
+		// the director proxies its login, so register the director as the redirect
+		// target (WS5). Auto-derived from the federation director so the origin
+		// admin needn't set OIDC.ClientRedirectHostname by hand.
+		redirectUrl.Host = dh
 	}
 	redirURL = redirectUrl.String()
 	return

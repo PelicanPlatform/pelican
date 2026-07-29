@@ -4447,6 +4447,14 @@ description: |+
 
   For development use only. Useful when developing in a container and you want to expose localhost
   instead of container hostname to your OAuth provider.
+
+  When Origin.DelegateIssuerToDirector is set (a firewalled origin whose web UI is
+  proxied by the director), this hostname is auto-derived from the federation
+  director if left unset, so the IdP returns the browser to the reachable director
+  rather than the unreachable origin. An explicit value here always takes
+  precedence. Either way, the director callback URL
+  (https://<director>/api/v1.0/auth/oauth/callback) must be registered as an
+  allowed redirect_uri on the origin's OIDC client at the identity provider.
 type: string
 default: none
 components: ["registry", "origin", "cache", "director"]
