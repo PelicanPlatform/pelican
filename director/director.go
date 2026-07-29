@@ -1073,6 +1073,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
 		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/") ||
+			strings.HasPrefix(c.Request.URL.Path, "/pelican/api/v1.0/") ||
 			(strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/") && !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/")) {
 			c.Next()
 			return
