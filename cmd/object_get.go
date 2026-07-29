@@ -319,12 +319,12 @@ func getMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		errMsg := attemptErr.Error()
-		var pe error_codes.PelicanError
+		var pe *error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(attemptErr, &te) {
 			errMsg = te.UserError()
 		}
-		if errors.Is(attemptErr, &pe) {
+		if errors.As(attemptErr, &pe) {
 			errMsg = pe.Error()
 			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
 			os.Exit(pe.ExitCode())
