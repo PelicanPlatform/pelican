@@ -125,6 +125,26 @@ func (cd *CacheDirectives) IsStaleWithDefaults(lastValidated time.Time) bool {
 	return time.Since(lastValidated) > DefaultFreshness(lastValidated)
 }
 
+// IsStaleFor is the policy-parameterized variant of IsStale, for callers
+// outside the local cache (e.g. the origin's storage cache) that apply their
+// own default freshness configuration.  Directives take precedence exactly as
+// in IsStale; when the response carries no freshness information, the given
+// defaultMaxAge (with deterministic jitter) applies.  A defaultMaxAge <= 0
+// means "no default freshness": such responses are always considered stale
+// and must be revalidated on every use.
+func (cd *CacheDirectives) IsStaleFor(lastValidated time.Time, defaultMaxAge time.Duration, jitterPercent int) bool {
+	if cd.NoCache() {
+		return time.Since(lastValidated) > NoCacheGracePeriod
+	}
+	if freshness, ok := cd.Freshness(); ok {
+		return time.Since(lastValidated) > freshness
+	}
+	if defaultMaxAge <= 0 {
+		return true
+	}
+	return time.Since(lastValidated) > DefaultFreshnessFor(lastValidated, defaultMaxAge, jitterPercent)
+}
+
 // DefaultFreshness returns the jittered freshness lifetime used when the origin
 // doesn't provide explicit Cache-Control headers.  The jitter is deterministic
 // per object (seeded from lastValidated) so that repeated calls for the same
@@ -134,8 +154,13 @@ func DefaultFreshness(lastValidated time.Time) time.Duration {
 	if defaultMaxAge <= 0 {
 		defaultMaxAge = 24 * time.Hour // Fallback default
 	}
+	return DefaultFreshnessFor(lastValidated, defaultMaxAge, param.LocalCache_RevalidationJitter.GetInt())
+}
 
-	jitterPercent := param.LocalCache_RevalidationJitter.GetInt()
+// DefaultFreshnessFor computes the jittered freshness lifetime for an
+// explicit default-max-age / jitter policy rather than the LocalCache
+// configuration.  See DefaultFreshness for the jitter semantics.
+func DefaultFreshnessFor(lastValidated time.Time, defaultMaxAge time.Duration, jitterPercent int) time.Duration {
 	if jitterPercent < 0 {
 		jitterPercent = 0
 	} else if jitterPercent > 100 {
