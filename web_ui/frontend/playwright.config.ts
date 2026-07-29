@@ -125,6 +125,9 @@ export default defineConfig({
           : token
             ? { storageState: loginCookieState(baseURL, token) }
             : {}),
+        ...(token
+          ? { extraHTTPHeaders: { Authorization: `Bearer ${token}` } }
+          : {}),
       },
     })),
   ],
