@@ -1,5 +1,5 @@
 run:
-	docker compose up pelican-server pelican-api-proxy
+	docker compose up pelican-server-central pelican-server-origin pelican-api-proxy
 
 build:
 	docker compose run pelican-builder
