@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -37,13 +37,16 @@ var setupSignalHandlersOnce sync.Once
 
 // SetupSignalHandlers sets up signal handlers for SIGTERM to ensure logs are flushed
 // before the process exits. If debug mode is enabled, it will also send SIGQUIT to dump
-// stack traces before exiting.
+// stack traces before exiting. The handler is fully installed by the time this
+// function returns.
 func SetupSignalHandlers() {
 	setupSignalHandlersOnce.Do(func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGTERM)
 
+		ready := make(chan struct{})
 		go func() {
+			close(ready)
 			sig := <-sigChan
 			log.Warnf("Received signal: %v. Flushing logs before exit...", sig)
 
@@ -78,5 +81,6 @@ func SetupSignalHandlers() {
 			// terminates the process.
 			select {}
 		}()
+		<-ready
 	})
 }

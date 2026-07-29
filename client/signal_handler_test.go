@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,17 +36,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 )
-
-// TestSignalHandlerSetup verifies that SetupSignalHandlers can be called without errors
-// and is idempotent
-func TestSignalHandlerSetup(t *testing.T) {
-	// This test simply verifies that SetupSignalHandlers doesn't panic, even when
-	// invoked repeatedly. The actual signal handling is tested in TestSignalHandlerIntegration
-	SetupSignalHandlers()
-	SetupSignalHandlers()
-	// Give the goroutine a moment to start
-	time.Sleep(10 * time.Millisecond)
-}
 
 // signalHandlerSubprocess is the body run inside the re-executed test binary for the
 // integration tests below. It installs the signal handler at the given log level,
