@@ -1518,6 +1518,45 @@ func TestPublicClientPKCE(t *testing.T) {
 		"token exchange without code_verifier should fail for public client")
 }
 
+// TestEnsurePublicClientReconcilesRedirectURIs verifies that EnsurePublicClient
+// is not just create-if-absent: when the public client already exists (e.g. it
+// was seeded by an earlier run before the web UI was enabled or the external web
+// URL changed), a subsequent call adds any missing redirect URIs while
+// preserving the existing ones, so browser (PKCE) logins keep working instead of
+// silently breaking against a stale redirect list.
+func TestEnsurePublicClientReconcilesRedirectURIs(t *testing.T) {
+	const publicClientID = "pelican-public-client"
+	const originalRedirect = "https://localhost/viewer/callback"
+	const uiRedirect = "https://origin.example.com:8444/view/origin/client/"
+
+	provider, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	// First run: seed the client with only the original redirect URI.
+	require.NoError(t, provider.EnsurePublicClient(ctx, publicClientID, []string{originalRedirect}))
+
+	client, err := provider.Storage().GetClient(ctx, publicClientID)
+	require.NoError(t, err)
+	require.Equal(t, []string{originalRedirect}, client.GetRedirectURIs())
+
+	// Later run: the web UI redirect URI now needs to be allowed. It should be
+	// added without dropping the original entry.
+	require.NoError(t, provider.EnsurePublicClient(ctx, publicClientID, []string{uiRedirect}))
+
+	client, err = provider.Storage().GetClient(ctx, publicClientID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{originalRedirect, uiRedirect}, client.GetRedirectURIs(),
+		"web UI redirect URI should be added while preserving the existing one")
+
+	// Idempotent: re-running with already-present URIs must not duplicate them.
+	require.NoError(t, provider.EnsurePublicClient(ctx, publicClientID, []string{originalRedirect, uiRedirect}))
+
+	client, err = provider.Storage().GetClient(ctx, publicClientID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{originalRedirect, uiRedirect}, client.GetRedirectURIs(),
+		"re-running with existing URIs should not create duplicates")
+}
+
 // TestPerNamespaceAuthzRules verifies that two namespaces can have independent
 // authorization templates.  A user with group /collab/analysis should receive
 // storage.read:/data/analysis from namespace /ns/alpha (which grants read for

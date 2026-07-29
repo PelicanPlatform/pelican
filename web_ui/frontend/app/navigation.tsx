@@ -121,6 +121,8 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
+    { title: 'Object Browser', href: '/origin/client/', icon: <FolderOpen /> },
+    { title: 'Metrics', href: '/origin/metrics/', icon: <Equalizer /> },
     {
       title: 'Collections',
       href: '/origin/collections/',
