@@ -50,8 +50,16 @@ const targets: Record<Service, TestTarget> = {
  * (web_ui/authentication.go). Using the cookie instead of an `Authorization`
  * header means in-browser flows are authenticated too: notably the Origin
  * Object Browser's issuer `/authorize` call, which authenticates via this cookie
- * (not a header). The token only needs to be signed by the server's issuer key
- * and carry a `user_id` claim (issuer/audience are not checked for the cookie).
+ * (not a header).
+ *
+ * The cookie path validates MORE than the Authorization header path it replaced:
+ * `extractUserFromBearerToken` checks only the issuer, while the cookie branch of
+ * GetUserGroups requires BOTH `iss` and `aud` to equal config.GetLocalIssuerUrl().
+ * That value is "<ExternalWebUrl>/api/v1.0/origin" when origin and director are
+ * co-located, so a token minted with the bare web URL as its audience — fine over
+ * the header — is rejected as a cookie. Whoever mints the token must include
+ * GetLocalIssuerUrl() in `aud`; see the token step in
+ * .github/workflows/test-webui-e2e.yml.
  */
 const loginCookieState = (baseURL: string, token: string) => ({
   cookies: [
