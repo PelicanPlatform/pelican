@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/go-jose/go-jose/v3"
@@ -484,10 +485,31 @@ func RegisterLocalProvider(ctx context.Context, egrp *errgroup.Group, registry *
 
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
 // Public clients rely on PKCE for security and use token_endpoint_auth_method "none".
+//
+// If the client already exists, its redirect URIs are reconciled so that every
+// entry in redirectURIs is allowed, adding any that are missing while preserving
+// the rest. This keeps the pre-allocated public client in sync with the current
+// configuration — for example after the origin's web UI is enabled or its
+// external web URL changes — instead of silently breaking browser (PKCE) logins
+// against a stale redirect list persisted by an earlier run.
 func (p *OIDCProvider) EnsurePublicClient(ctx context.Context, clientID string, redirectURIs []string) error {
-	_, err := p.storage.GetClient(ctx, clientID)
+	existing, err := p.storage.GetClient(ctx, clientID)
 	if err == nil {
-		return nil // already exists
+		merged := existing.GetRedirectURIs()
+		added := false
+		for _, uri := range redirectURIs {
+			if !slices.Contains(merged, uri) {
+				merged = append(merged, uri)
+				added = true
+			}
+		}
+		if added {
+			log.Infof("Reconciling redirect URIs for public OIDC client %q: %v", clientID, merged)
+			if _, err := p.storage.UpdateClient(ctx, clientID, ClientUpdate{RedirectURIs: &merged}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if !errors.Is(err, fosite.ErrNotFound) {
 		return err
