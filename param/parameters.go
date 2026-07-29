@@ -139,6 +139,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.PermittedNamespaces": false,
 	"Cache.Port": false,
 	"Cache.RunLocation": false,
+	"Cache.S3DisableRedirect": false,
+	"Cache.S3PresignEvictionHold": false,
+	"Cache.S3PresignExpiry": false,
+	"Cache.S3StorageTargets": false,
+	"Cache.S3UploadThreshold": false,
 	"Cache.SelfTest": false,
 	"Cache.SelfTestInterval": false,
 	"Cache.SelfTestMaxAge": false,
@@ -671,6 +676,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Cache.NamespaceLocation": func(c *Config) string { return c.Cache.NamespaceLocation },
 	"Cache.PSSOrigin": func(c *Config) string { return c.Cache.PSSOrigin },
 	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
+	"Cache.S3UploadThreshold": func(c *Config) string { return c.Cache.S3UploadThreshold },
 	"Cache.SentinelLocation": func(c *Config) string { return c.Cache.SentinelLocation },
 	"Cache.StorageLocation": func(c *Config) string { return c.Cache.StorageLocation },
 	"Cache.Url": func(c *Config) string { return c.Cache.Url },
@@ -1114,6 +1120,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Cache.EnableTLSClientAuth": func(c *Config) bool { return c.Cache.EnableTLSClientAuth },
 	"Cache.EnableV2": func(c *Config) bool { return c.Cache.EnableV2 },
 	"Cache.EnableVoms": func(c *Config) bool { return c.Cache.EnableVoms },
+	"Cache.S3DisableRedirect": func(c *Config) bool { return c.Cache.S3DisableRedirect },
 	"Cache.SelfTest": func(c *Config) bool { return c.Cache.SelfTest },
 	"Client.AssumeDirectorServerHeader": func(c *Config) bool { return c.Client.AssumeDirectorServerHeader },
 	"Client.DisableHttpProxy": func(c *Config) bool { return c.Client.DisableHttpProxy },
@@ -1236,6 +1243,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.DefaultCacheTimeout": func(c *Config) time.Duration { return c.Cache.DefaultCacheTimeout },
 	"Cache.EvictionMonitoringInterval": func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
 	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
+	"Cache.S3PresignEvictionHold": func(c *Config) time.Duration { return c.Cache.S3PresignEvictionHold },
+	"Cache.S3PresignExpiry": func(c *Config) time.Duration { return c.Cache.S3PresignExpiry },
 	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
 	"Cache.Throttle.EMAWindow": func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
@@ -1463,6 +1472,11 @@ var allParameterNames = []string{
 	"Cache.PermittedNamespaces",
 	"Cache.Port",
 	"Cache.RunLocation",
+	"Cache.S3DisableRedirect",
+	"Cache.S3PresignEvictionHold",
+	"Cache.S3PresignExpiry",
+	"Cache.S3StorageTargets",
+	"Cache.S3UploadThreshold",
 	"Cache.SelfTest",
 	"Cache.SelfTestInterval",
 	"Cache.SelfTestMaxAge",
@@ -1968,6 +1982,7 @@ var (
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
 	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
+	Cache_S3UploadThreshold = StringParam{"Cache.S3UploadThreshold"}
 	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
@@ -2290,6 +2305,7 @@ var (
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableV2 = BoolParam{"Cache.EnableV2"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
+	Cache_S3DisableRedirect = BoolParam{"Cache.S3DisableRedirect"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
@@ -2384,6 +2400,8 @@ var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
+	Cache_S3PresignEvictionHold = DurationParam{"Cache.S3PresignEvictionHold"}
+	Cache_S3PresignExpiry = DurationParam{"Cache.S3PresignExpiry"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	Cache_Throttle_EMAWindow = DurationParam{"Cache.Throttle.EMAWindow"}
@@ -2483,6 +2501,7 @@ var (
 )
 
 var (
+	Cache_S3StorageTargets = ObjectParam{"Cache.S3StorageTargets"}
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
@@ -2529,6 +2548,7 @@ func init() {
 		"Cache.NamespaceLocation": Cache_NamespaceLocation,
 		"Cache.PSSOrigin": Cache_PSSOrigin,
 		"Cache.RunLocation": Cache_RunLocation,
+		"Cache.S3UploadThreshold": Cache_S3UploadThreshold,
 		"Cache.SentinelLocation": Cache_SentinelLocation,
 		"Cache.StorageLocation": Cache_StorageLocation,
 		"Cache.Url": Cache_Url,
@@ -2839,6 +2859,7 @@ func init() {
 		"Cache.EnableTLSClientAuth": Cache_EnableTLSClientAuth,
 		"Cache.EnableV2": Cache_EnableV2,
 		"Cache.EnableVoms": Cache_EnableVoms,
+		"Cache.S3DisableRedirect": Cache_S3DisableRedirect,
 		"Cache.SelfTest": Cache_SelfTest,
 		"Client.AssumeDirectorServerHeader": Client_AssumeDirectorServerHeader,
 		"Client.DisableHttpProxy": Client_DisableHttpProxy,
@@ -2930,6 +2951,8 @@ func init() {
 		"Cache.DefaultCacheTimeout": Cache_DefaultCacheTimeout,
 		"Cache.EvictionMonitoringInterval": Cache_EvictionMonitoringInterval,
 		"Cache.MinDirectorRefreshInterval": Cache_MinDirectorRefreshInterval,
+		"Cache.S3PresignEvictionHold": Cache_S3PresignEvictionHold,
+		"Cache.S3PresignExpiry": Cache_S3PresignExpiry,
 		"Cache.SelfTestInterval": Cache_SelfTestInterval,
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
 		"Cache.Throttle.EMAWindow": Cache_Throttle_EMAWindow,
@@ -3026,6 +3049,7 @@ func init() {
 		"Xrootd.LivenessMaxUnresponsiveTime": Xrootd_LivenessMaxUnresponsiveTime,
 		"Xrootd.MaxStartupWait": Xrootd_MaxStartupWait,
 		"Xrootd.ShutdownTimeout": Xrootd_ShutdownTimeout,
+		"Cache.S3StorageTargets": Cache_S3StorageTargets,
 		"GeoIPOverrides": GeoIPOverrides,
 		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
 		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,

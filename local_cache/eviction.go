@@ -58,6 +58,11 @@ type EvictionManager struct {
 	// Sorted list of directory IDs.  Read-only after construction.
 	dirIDs []StorageID
 
+	// Sorted list of directory IDs eligible for new-object placement
+	// (excludes NoPlacement targets such as S3 buckets).  Read-only
+	// after construction.
+	placementIDs []StorageID
+
 	// Pre-computed shuffled lookup table for ChooseDiskStorage.
 	// The table has rrTableSize entries, each containing a storageID.
 	// Entries are assigned proportional to free space and then
@@ -81,6 +86,24 @@ type dirEvictionLimits struct {
 	lowWater  uint64
 }
 
+// clampToInt64 converts a byte count to the signed arithmetic the eviction
+// bookkeeping uses, saturating rather than wrapping.
+//
+// These limits are already clamped where they are built, but that is several
+// functions away from where they are used: the checks live in
+// NewEvictionManager and the conversions happen wherever a limit meets a usage
+// figure.  Keeping a bound at each conversion means the guarantee is visible
+// at the point it matters -- to a reader, to a future edit that introduces
+// another limit, and to static analysis, which cannot carry the invariant
+// across a struct field and reports every one of these as an unchecked
+// narrowing conversion.
+func clampToInt64(v uint64) int64 {
+	if v > uint64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(v)
+}
+
 // EvictionConfig holds configuration for the eviction manager
 type EvictionConfig struct {
 	// DirConfigs maps storageID to its eviction limits.
@@ -95,6 +118,11 @@ type EvictionDirConfig struct {
 	LowWaterPercentage  int    // Percentage at which eviction stops  (0 = default 80)
 	HighWaterBytes      uint64 // Absolute byte threshold (overrides percentage when > 0)
 	LowWaterBytes       uint64 // Absolute byte threshold (overrides percentage when > 0)
+	// NoPlacement excludes this storage target from new-object placement
+	// (ChooseDiskStorage).  Used for S3 targets, which only receive
+	// completed objects tiered by the uploader; they still participate in
+	// usage accounting and eviction.
+	NoPlacement bool
 }
 
 // NewEvictionManager creates a new eviction manager
@@ -125,12 +153,18 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 		}
 
 		// Sanity: clamp watermarks to MaxSize, ensure high >= low,
-		// and cap at MaxInt64 so uint64→int64 conversions are safe.
-		if highWater > dcfg.MaxSize {
-			highWater = dcfg.MaxSize
+		// and cap everything at MaxInt64 so the uint64→int64 conversions
+		// used throughout eviction (e.g. DirFree) cannot produce a negative
+		// value from an absurdly large configured size.
+		maxSize := dcfg.MaxSize
+		if highWater > maxSize {
+			highWater = maxSize
 		}
 		if lowWater > highWater {
 			lowWater = highWater
+		}
+		if maxSize > uint64(math.MaxInt64) {
+			maxSize = uint64(math.MaxInt64)
 		}
 		if highWater > uint64(math.MaxInt64) {
 			highWater = uint64(math.MaxInt64)
@@ -140,7 +174,7 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 		}
 
 		dirLimits[id] = &dirEvictionLimits{
-			maxSize:   dcfg.MaxSize,
+			maxSize:   maxSize,
 			highWater: highWater,
 			lowWater:  lowWater,
 		}
@@ -148,19 +182,29 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 
 	dirUsage := make(map[StorageID]*atomic.Int64, len(config.DirConfigs))
 	dirIDs := make([]StorageID, 0, len(config.DirConfigs))
-	for id := range config.DirConfigs {
+	placementIDs := make([]StorageID, 0, len(config.DirConfigs))
+	for id, dcfg := range config.DirConfigs {
 		dirUsage[id] = &atomic.Int64{}
 		dirIDs = append(dirIDs, id)
+		if !dcfg.NoPlacement {
+			placementIDs = append(placementIDs, id)
+		}
 	}
 	sort.Slice(dirIDs, func(i, j int) bool { return dirIDs[i] < dirIDs[j] })
+	sort.Slice(placementIDs, func(i, j int) bool { return placementIDs[i] < placementIDs[j] })
+	if len(placementIDs) == 0 {
+		// Safety: never leave placement with an empty candidate set.
+		placementIDs = dirIDs
+	}
 
 	em := &EvictionManager{
-		db:        db,
-		storage:   storage,
-		dirLimits: dirLimits,
-		dirUsage:  dirUsage,
-		dirIDs:    dirIDs,
-		evictChan: make(chan struct{}, 1),
+		db:           db,
+		storage:      storage,
+		dirLimits:    dirLimits,
+		dirUsage:     dirUsage,
+		dirIDs:       dirIDs,
+		placementIDs: placementIDs,
+		evictChan:    make(chan struct{}, 1),
 	}
 	em.rebuildRRTable()
 	return em
@@ -258,7 +302,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 
 	// Fast path: check the atomic estimate against the watermark.
 	limits, lok := em.dirLimits[storageID]
-	if !lok || newVal <= int64(limits.highWater) {
+	if !lok || newVal <= clampToInt64(limits.highWater) {
 		return
 	}
 
@@ -267,9 +311,37 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 	dbUsage := em.getDirUsage(storageID)
 	counter.Store(dbUsage)
 
-	if dbUsage > int64(limits.highWater) {
+	if dbUsage > clampToInt64(limits.highWater) {
 		em.TriggerEviction()
 	}
+}
+
+// NoteUsageDecrease adjusts the in-memory estimate downward after bytes
+// were released from a storage target (e.g. the local copy removed after
+// tiering to S3, or a failed upload refunded).  The DB-level counters must
+// already have been updated by the caller.
+func (em *EvictionManager) NoteUsageDecrease(storageID StorageID, bytes int64) {
+	if counter, ok := em.dirUsage[storageID]; ok {
+		counter.Add(-bytes)
+	}
+}
+
+// DirFree returns the estimated free bytes on a storage target based on
+// the in-memory usage estimate (no DB query).  Returns 0 for unknown IDs.
+func (em *EvictionManager) DirFree(storageID StorageID) int64 {
+	limits, ok := em.dirLimits[storageID]
+	if !ok {
+		return 0
+	}
+	used := em.dirUsage[storageID].Load()
+	if used < 0 {
+		used = 0
+	}
+	free := clampToInt64(limits.maxSize) - used
+	if free < 0 {
+		free = 0
+	}
+	return free
 }
 
 // GetTotalUsage returns the current total cache usage (sum of per-dir atomics).
@@ -379,9 +451,13 @@ func (em *EvictionManager) checkAndEvict() {
 				"highWater": limits.highWater,
 			}).Info("Starting eviction")
 
+			// Namespaces that made no eviction progress this pass (e.g.
+			// every candidate protected by a presign hold) are excluded
+			// so the loop moves on instead of spinning on them.
+			excluded := make(map[NamespaceID]bool)
 			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
-				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
+				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid, excluded)
 				if err != nil {
 					rl.WithFields(log.Fields{"storageID": sid}).Warn("Failed to find greediest namespace")
 					break
@@ -392,7 +468,7 @@ func (em *EvictionManager) checkAndEvict() {
 					break
 				}
 
-				overhead := dirUsage - int64(limits.lowWater)
+				overhead := dirUsage - clampToInt64(limits.lowWater)
 				rl.WithFields(log.Fields{
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
@@ -414,19 +490,24 @@ func (em *EvictionManager) checkAndEvict() {
 				totalEvictedObjects.Add(int64(count))
 				totalSkipped.Add(int64(skipped))
 
-				// A pass that freed nothing will pick the same namespace and
-				// do the same thing again, so looping only burns CPU until the
-				// timeout below.  Stop and let the next cycle try, by which
-				// time whatever blocked this one has usually cleared.
+				// A pass that freed nothing would pick the same namespace and
+				// do the same thing again, so retrying it only burns CPU until
+				// the timeout below.  Exclude the namespace and move on to the
+				// next-greediest one: a namespace whose LRU head is entirely
+				// in use (open readers, or objects under a presign hold) must
+				// not stop the whole storage target from draining, or a bucket
+				// sitting above its high-water mark never recovers and tiering
+				// stalls once no target has room.  When every namespace is
+				// excluded, findGreediestNamespaceInDir reports no usage and
+				// the loop exits above.
 				if count == 0 {
-					if skipped > 0 {
-						rl.WithFields(log.Fields{
-							"storageID":   targetKey.StorageID,
-							"namespaceID": targetKey.NamespaceID,
-							"skipped":     skipped,
-						}).Debug("Eviction made no progress; every candidate was in use")
-					}
-					break
+					rl.WithFields(log.Fields{
+						"storageID":   targetKey.StorageID,
+						"namespaceID": targetKey.NamespaceID,
+						"skipped":     skipped,
+					}).Debug("Eviction made no progress in namespace; excluding it for this pass")
+					excluded[targetKey.NamespaceID] = true
+					continue
 				}
 
 				// Safety: don't run for too long
@@ -454,8 +535,10 @@ func (em *EvictionManager) checkAndEvict() {
 }
 
 // findGreediestNamespaceInDir finds the namespace with highest usage
-// within a specific storage directory.
-func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID) (StorageUsageKey, int64, error) {
+// within a specific storage directory.  Namespaces in the excluded set
+// (nil = none) are skipped; callers use this to move past namespaces whose
+// candidates are all protected from eviction.
+func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID, excluded map[NamespaceID]bool) (StorageUsageKey, int64, error) {
 	nsUsage, err := em.db.GetDirUsage(storageID)
 	if err != nil {
 		return StorageUsageKey{}, 0, errors.Wrap(err, "failed to get namespace usage")
@@ -464,6 +547,9 @@ func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID) (Sto
 	var bestNS NamespaceID
 	var bestUsage int64
 	for ns, usage := range nsUsage {
+		if excluded[ns] {
+			continue
+		}
 		if usage > bestUsage {
 			bestUsage = usage
 			bestNS = ns
@@ -638,10 +724,10 @@ func (em *EvictionManager) HasSpace(needed uint64) bool {
 func (em *EvictionManager) rebuildRRTable() {
 	var table [rrTableSize]StorageID
 
-	if len(em.dirIDs) == 1 {
+	if len(em.placementIDs) == 1 {
 		// Single-directory fast path: fill the entire table.
 		for i := range table {
-			table[i] = em.dirIDs[0]
+			table[i] = em.placementIDs[0]
 		}
 		em.rrTable.Store(&table)
 		em.rrLastUpdate.Store(time.Now().UnixMilli())
@@ -653,14 +739,14 @@ func (em *EvictionManager) rebuildRRTable() {
 		id   StorageID
 		free int64
 	}
-	raw := make([]dirWeight, 0, len(em.dirIDs))
+	raw := make([]dirWeight, 0, len(em.placementIDs))
 	var rawTotal int64
-	for _, sid := range em.dirIDs {
+	for _, sid := range em.placementIDs {
 		used := em.dirUsage[sid].Load()
 		if used < 0 {
 			used = 0
 		}
-		free := int64(em.dirLimits[sid].maxSize) - used
+		free := clampToInt64(em.dirLimits[sid].maxSize) - used
 		if free < 1 {
 			free = 1
 		}
@@ -756,7 +842,7 @@ func (em *EvictionManager) ChooseDiskStorage() StorageID {
 func (em *EvictionManager) ForcePurge() error {
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = int64(limits.lowWater)
+		targets[sid] = clampToInt64(limits.lowWater)
 	}
 	_, _, err := em.forcePurgeToTargets("Force purge", targets)
 	return err
@@ -782,7 +868,7 @@ func (em *EvictionManager) ForcePurgeToBytes(targetBytes uint64) (uint64, int64,
 
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = int64((targetBytes * limits.maxSize) / totalMax)
+		targets[sid] = clampToInt64((targetBytes * limits.maxSize) / totalMax)
 	}
 	return em.forcePurgeToTargets("Purge-to-target", targets)
 }
@@ -827,8 +913,9 @@ func (em *EvictionManager) forcePurgeToTargets(label string, targets map[Storage
 				return
 			}
 
+			excluded := make(map[NamespaceID]bool)
 			for dirUsage > dirTarget {
-				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
+				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid, excluded)
 				if err != nil || targetUsage <= 0 {
 					break
 				}
@@ -846,16 +933,21 @@ func (em *EvictionManager) forcePurgeToTargets(label string, targets map[Storage
 				evictedBytes.Add(bytes)
 				evictedObjects.Add(int64(count))
 
-				// As in checkAndEvict: no progress means the next iteration
-				// would repeat this one exactly.
+				// As in checkAndEvict: a namespace that freed nothing would be
+				// chosen again on the next iteration, so exclude it and try the
+				// next-greediest one.  Once every namespace is excluded the
+				// loop exits via the targetUsage check above, at which point
+				// the purge really could not reach its target.
 				if count == 0 {
 					if skipped > 0 {
 						rl.WithFields(log.Fields{
-							"storageID": sid,
-							"skipped":   skipped,
-						}).Warnf("%s could not reach its target; every candidate was in use", label)
+							"storageID":   sid,
+							"namespaceID": targetKey.NamespaceID,
+							"skipped":     skipped,
+						}).Debugf("%s made no progress in namespace; excluding it", label)
 					}
-					break
+					excluded[targetKey.NamespaceID] = true
+					continue
 				}
 
 				if time.Since(startTime) > 60*time.Second {
