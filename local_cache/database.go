@@ -67,6 +67,18 @@ type CacheDB struct {
 	// usageMu protects usageMergeOps for lazy creation of merge operators
 	usageMu       sync.RWMutex
 	usageMergeOps map[StorageUsageKey]*badger.MergeOperator
+
+	// presignHold is how long after a pre-signed URL was handed out an
+	// object is protected from eviction (0 = no protection).  Set during
+	// single-threaded init via SetPresignHold; read-only afterwards.
+	presignHold time.Duration
+}
+
+// SetPresignHold configures the eviction protection window for objects
+// with a recently issued pre-signed URL.  Must be called during
+// single-threaded initialization.
+func (cdb *CacheDB) SetPresignHold(d time.Duration) {
+	cdb.presignHold = d
 }
 
 // NewCacheDB creates and initializes a new cache database.
@@ -1385,6 +1397,153 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 	return actual, err
 }
 
+// --- S3 Tiering Operations ---
+
+// SetS3UploadIntent records an in-progress upload to an S3 target.  Written
+// before the first byte reaches the bucket so that a crash never leaves an
+// untracked object in S3.
+func (cdb *CacheDB) SetS3UploadIntent(instanceHash InstanceHash, intent *S3UploadIntent) error {
+	data, err := msgpack.Marshal(intent)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal upload intent")
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(S3UploadIntentKey(instanceHash), data)
+	})
+}
+
+// DeleteS3UploadIntent removes an upload intent record.
+func (cdb *CacheDB) DeleteS3UploadIntent(instanceHash InstanceHash) error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		err := txn.Delete(S3UploadIntentKey(instanceHash))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		return err
+	})
+}
+
+// ListS3UploadIntents returns all recorded upload intents, used by crash
+// recovery to reconcile the bucket with the metadata store.
+func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, error) {
+	intents := make(map[InstanceHash]*S3UploadIntent)
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixS3Upload)
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			hash := InstanceHash(item.Key()[len(PrefixS3Upload):])
+			var intent S3UploadIntent
+			err := item.Value(func(val []byte) error {
+				return msgpack.Unmarshal(val, &intent)
+			})
+			if err != nil {
+				log.Warnf("Failed to unmarshal S3 upload intent for %s: %v", hash, err)
+				continue
+			}
+			intents[hash] = &intent
+		}
+		return nil
+	})
+	return intents, err
+}
+
+// RecordPresignIssued stamps the current time on an object's presign key.
+// Objects with a stamp newer than the configured presign hold window are
+// skipped by eviction, so a client holding a fresh pre-signed URL never has
+// the object deleted out from under it.
+func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
+	val := make([]byte, 8)
+	binary.BigEndian.PutUint64(val, uint64(time.Now().UnixNano()))
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(PresignKey(instanceHash), val)
+	})
+}
+
+// presignHeldInTxn reports whether the object's presign stamp is within the
+// eviction protection window.
+func (cdb *CacheDB) presignHeldInTxn(txn *badger.Txn, instanceHash InstanceHash) bool {
+	if cdb.presignHold <= 0 {
+		return false
+	}
+	item, err := txn.Get(PresignKey(instanceHash))
+	if err != nil {
+		return false
+	}
+	var issuedAt int64
+	_ = item.Value(func(val []byte) error {
+		if len(val) >= 8 {
+			issuedAt = int64(binary.BigEndian.Uint64(val))
+		}
+		return nil
+	})
+	return issuedAt > 0 && time.Since(time.Unix(0, issuedAt)) < cdb.presignHold
+}
+
+// RelocateObject atomically moves a completed, non-chunked object's
+// metadata from one storage target to another: the StorageID is rewritten
+// (bypassing the set-once merge rule — this is the one sanctioned
+// transition) and the LRU index entry is moved to the new storage ID.
+//
+// The caller is responsible for moving the object *data* and for adjusting
+// usage counters after the transaction commits (AddUsage cannot run inside
+// a transaction).  Returns the pre-relocation metadata.
+func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID StorageID) (*CacheMetadata, error) {
+	var prev CacheMetadata
+	err := cdb.db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get(MetaKey(instanceHash))
+		if err != nil {
+			return errors.Wrap(err, "object metadata not found")
+		}
+		if err := item.Value(func(val []byte) error {
+			return msgpack.Unmarshal(val, &prev)
+		}); err != nil {
+			return errors.Wrap(err, "failed to unmarshal metadata")
+		}
+
+		if prev.Completed.IsZero() {
+			return errors.New("cannot relocate an incomplete object")
+		}
+		if prev.IsChunked() {
+			return errors.New("cannot relocate a chunked object")
+		}
+		if prev.StorageID == StorageIDInline {
+			return errors.New("cannot relocate an inline object")
+		}
+		if prev.StorageID == newStorageID {
+			return errors.New("object already resides on the target storage")
+		}
+
+		// Move the LRU index entry, preserving the access timestamp.
+		if !prev.LastAccessTime.IsZero() {
+			oldKey := LRUKey(prev.StorageID, prev.NamespaceID, prev.LastAccessTime, instanceHash)
+			if err := txn.Delete(oldKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				return errors.Wrap(err, "failed to delete old LRU key")
+			}
+			newKey := LRUKey(newStorageID, prev.NamespaceID, prev.LastAccessTime, instanceHash)
+			if err := txn.Set(newKey, nil); err != nil {
+				return errors.Wrap(err, "failed to set new LRU key")
+			}
+		}
+
+		updated := prev
+		updated.StorageID = newStorageID
+		data, err := msgpack.Marshal(&updated)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal relocated metadata")
+		}
+		return txn.Set(MetaKey(instanceHash), data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &prev, nil
+}
+
 // --- Bulk Operations ---
 
 // deleteObjectInTxn removes all DB keys for a cached object within an
@@ -1430,7 +1589,7 @@ func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) 
 		if err == nil {
 			var currentETag string
 			err = etagItem.Value(func(val []byte) error {
-				currentETag = string(val)
+				currentETag, _ = decodeETagEntry(val)
 				return nil
 			})
 			if err == nil && currentETag == meta.ETag {
@@ -1458,8 +1617,10 @@ func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) 
 		}
 	}
 
-	// Delete purge-first marker if present (best-effort, ignore not-found)
+	// Delete purge-first marker and presign stamp if present
+	// (best-effort, ignore not-found)
 	_ = txn.Delete(PurgeFirstKey(instanceHash))
+	_ = txn.Delete(PresignKey(instanceHash))
 
 	if hasMetadata {
 		return &meta, nil
@@ -1536,6 +1697,13 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 
 		// --- helper: delete one object by hash, record results ---
 		evictOne := func(hash InstanceHash) {
+			// Objects with a recently issued pre-signed URL are
+			// protected: a client may still be downloading directly
+			// from the bucket.
+			if cdb.presignHeldInTxn(txn, hash) {
+				log.Debugf("Skipping eviction of %s: pre-signed URL issued within hold window", hash)
+				return
+			}
 			meta, err := deleteObjectInTxn(txn, cdb.salt, hash)
 			if err != nil {
 				log.Warnf("Failed to delete object %s during eviction: %v", hash, err)
@@ -1896,6 +2064,11 @@ func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[StorageID]string) (S
 	for _, dm := range mappings {
 		if _, mounted := mountedDirs[dm.ID]; mounted {
 			continue // still in use
+		}
+		if dm.Backend != BackendPosix {
+			// S3 targets are never in mountedDirs; they must not be
+			// recycled out from under a configured bucket.
+			continue
 		}
 
 		// Sum usage across all namespaces for this storageID.

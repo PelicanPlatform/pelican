@@ -261,6 +261,13 @@ func (cc *ConsistencyChecker) Start(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		return cc.dataScanLoop(ctx)
 	})
+
+	// S3 bucket reconciliation - runs hourly when S3 targets exist
+	if len(cc.storage.s3Targets) > 0 {
+		egrp.Go(func() error {
+			return cc.s3ScanLoop(ctx)
+		})
+	}
 }
 
 // Stop stops the consistency checker
@@ -708,8 +715,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 
 			// For completed disk objects, verify all required chunk files exist.
 			// In-progress objects may have partial chunks (from byte-range downloads),
-			// so we only check completed objects.
-			if meta.IsDisk() && !meta.Completed.IsZero() {
+			// so we only check completed objects.  Objects resident on an S3
+			// storage target have no local files at all — they are verified
+			// against the bucket listing by the S3 sweep instead.
+			if meta.IsDisk() && !meta.Completed.IsZero() && !cc.storage.IsS3Backed(meta.StorageID) {
 				if !cc.allChunkFilesExist(meta, instanceHash) {
 					// Some chunk files are missing - queue DB entry for deletion
 					if len(deletions) < maxDeletionsPerTx {
@@ -1322,6 +1331,13 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	bytesLimiter *rate.Limiter,
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
 ) error {
+	// Objects resident on an S3 target have no local data to read back.
+	// The bucket provides its own at-rest durability; the S3 sweep
+	// cross-checks existence and size against metadata instead.
+	if cc.storage.IsS3Backed(meta.StorageID) {
+		return errChecksumSkipped
+	}
+
 	// For disk storage, check if complete before attempting any checksumming
 	if meta.IsDisk() {
 		complete, err := cc.storage.IsComplete(instanceHash)
@@ -1548,6 +1564,16 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, err
 	}
 	if meta == nil {
 		return false, errors.New("object not found")
+	}
+
+	// S3-resident objects have no local data; verify existence and size
+	// against the bucket instead.
+	if target := cc.storage.getS3Target(meta.StorageID); target != nil {
+		size, exists, err := target.objectSize(context.Background(), instanceHash)
+		if err != nil {
+			return false, err
+		}
+		return exists && size == meta.ContentLength, nil
 	}
 
 	// For disk storage, check that all ALLOCATED chunk files exist and object is complete

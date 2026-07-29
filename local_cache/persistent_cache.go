@@ -220,6 +220,10 @@ type PersistentCache struct {
 
 	// Prestage worker pool manager (created lazily on first API call).
 	prestageManager *PrestageManager
+
+	// s3Uploader tiers completed objects to S3 storage targets.
+	// Nil when no S3 targets are configured.
+	s3Uploader *s3Uploader
 }
 
 // persistentDownload tracks an active download operation
@@ -526,6 +530,21 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize storage manager")
 	}
 
+	// Register any configured S3 storage targets.  They receive their own
+	// storage IDs (persisted via an identity object in the bucket) but are
+	// excluded from new-object placement — objects arrive there only by
+	// tiering after completion.
+	s3TargetConfigs, err := ParseS3TargetsConfig()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s3TargetIDs, err := storage.RegisterS3Targets(ctx, s3TargetConfigs)
+	if err != nil {
+		db.Close()
+		return nil, errors.Wrap(err, "failed to register S3 storage targets")
+	}
+
 	// Build eviction dir configs now that we know storageID → path mapping.
 	// GetDirs() returns paths with /objects appended; strip the suffix to
 	// match against the original config paths.
@@ -569,6 +588,37 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 			HighWaterBytes:      defaultHWBytes,
 			LowWaterBytes:       defaultLWBytes,
 		}
+	}
+
+	// S3 targets get their own eviction limits (MaxSize is required in the
+	// config since bucket capacity cannot be auto-detected).  Absolute
+	// default watermarks are not applied — they are tuned for local
+	// directories; buckets use the percentage watermarks.
+	for id, s3cfg := range s3TargetIDs {
+		hwp := s3cfg.HighWaterMarkPercentage
+		if hwp <= 0 {
+			hwp = defaultHWP
+		}
+		lwp := s3cfg.LowWaterMarkPercentage
+		if lwp <= 0 {
+			lwp = defaultLWP
+		}
+		evictionDirCfgs[id] = EvictionDirConfig{
+			MaxSize:             s3cfg.MaxSize,
+			HighWaterPercentage: hwp,
+			LowWaterPercentage:  lwp,
+			NoPlacement:         true,
+		}
+	}
+
+	// Objects with a recently issued pre-signed URL must not be evicted —
+	// a client may still be mid-download directly from the bucket.
+	if len(s3TargetIDs) > 0 {
+		hold := param.Cache_S3PresignEvictionHold.GetDuration()
+		if hold <= 0 {
+			hold = 5 * time.Minute
+		}
+		db.SetPresignHold(hold)
 	}
 
 	// Initialize eviction manager
@@ -685,6 +735,30 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	db.StartGC(ctx, egrp)
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
+
+	// Start the S3 tiering uploader: crash recovery first (reconciling any
+	// interrupted uploads against the buckets), then workers + backfill.
+	// Completion notifications are wired before any download can start.
+	if len(s3TargetIDs) > 0 {
+		threshold := int64(4 * 1024 * 1024)
+		if thresholdStr := param.Cache_S3UploadThreshold.GetString(); thresholdStr != "" {
+			parsed, err := utils.ParseBytes(thresholdStr)
+			if err != nil {
+				db.Close()
+				return nil, errors.Wrap(err, "failed to parse Cache.S3UploadThreshold")
+			}
+			threshold = int64(parsed)
+		}
+		uploader := newS3Uploader(db, storage, eviction, threshold)
+		storage.onObjectComplete = uploader.MaybeEnqueue
+		pc.s3Uploader = uploader
+		egrp.Go(func() error {
+			if err := uploader.Start(ctx, egrp); err != nil {
+				log.Errorf("S3 tiering uploader failed to start: %v", err)
+			}
+			return nil
+		})
+	}
 
 	// Ensure all resources are released when the context is cancelled.
 	// Without this, the TransferEngine and BadgerDB leak across tests
@@ -1144,6 +1218,12 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 			}}, res.meta, nil
 		}
 
+		// Objects tiered to an S3 storage target are proxied through a
+		// seekable remote stream (no local blocks exist for them).
+		if target := pc.storage.getS3Target(res.meta.StorageID); target != nil {
+			return pc.newS3SeekableReader(ctx, target, res), res.meta, nil
+		}
+
 		rr, err := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
 		if err != nil {
 			if attempt < maxAttempts-1 && isEvictedError(err) {
@@ -1173,6 +1253,27 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
 			return res.noStoreRC, nil
+		}
+
+		// Objects tiered to an S3 storage target stream directly from the
+		// bucket (optionally limited to the requested range).
+		if target := pc.storage.getS3Target(res.meta.StorageID); target != nil {
+			stream := newS3ObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
+			if rangeHeader != "" {
+				ranges, err := ParseRangeHeader(rangeHeader, res.meta.ContentLength)
+				if err != nil {
+					stream.Close()
+					return nil, errors.Wrap(err, "invalid range header")
+				}
+				if len(ranges) > 0 {
+					if _, err := stream.Seek(ranges[0].Start, io.SeekStart); err != nil {
+						stream.Close()
+						return nil, err
+					}
+					return &limitedReadCloser{stream: stream, remain: ranges[0].End - ranges[0].Start + 1}, nil
+				}
+			}
+			return stream, nil
 		}
 
 		// Handle range request

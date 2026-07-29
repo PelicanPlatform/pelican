@@ -2658,6 +2658,12 @@ description: |+
         SecretKeyfile: /etc/pelican/s3-secret
   ```
 
+  **The cache assumes exclusive ownership of the bucket (or of the configured
+  Prefix within it).**  Its consistency sweep deletes any object under the prefix
+  it does not recognize, and crash recovery aborts all in-progress multipart
+  uploads there — do not share the prefix with other applications or with a
+  second cache instance.
+
   This setting only has effect when `${Cache.EnableV2}` is true.
 type: object
 default: none
@@ -2677,6 +2683,14 @@ description: |+
   When objects are stored on an S3 storage target (${Cache.S3StorageTargets}), the V2 cache
   by default redirects GET requests to a pre-signed S3 URL so clients download directly from
   the bucket.  Set this to true to instead proxy the object bytes through the cache.
+
+  The pre-signed URL is self-authenticating and never carries the client's Pelican bearer
+  token.  Spec-compliant HTTP clients (including Pelican's own client) strip the Authorization
+  header when following a redirect to a different host, so the token is not disclosed to the
+  S3 provider.  Enable this option (proxy instead of redirect) if you serve private namespaces
+  to clients that forward Authorization across hosts (e.g. `curl --location-trusted`), or if
+  the S3 endpoint shares the cache's hostname, since in those cases a redirect could expose the
+  token to the S3 endpoint.
 type: bool
 default: false
 components: ["cache"]
