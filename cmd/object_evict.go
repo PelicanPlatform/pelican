@@ -31,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
@@ -52,12 +53,21 @@ tokens are discovered from the environment, credential files, or
 negotiated via OAuth when needed.  Use --token to provide a token
 file explicitly.
 
+By default the request is sent to the cache the director selects for the
+path.  Use --cache to evict from one or more specific caches instead (a
+comma-separated list, with a trailing "+" to also fall back to the
+director-provided caches).
+
 Examples:
   pelican object evict pelican://fed.example.com/data/file.dat
   pelican object evict pelican://fed.example.com/data/project/
   pelican object evict --immediate pelican://fed.example.com/data/project/
+  pelican object evict --cache https://cache.example.com:8443 pelican://fed.example.com/data/file.dat
   pelican object evict --token /path/to/token pelican://fed.example.com/data/file.dat`,
-		Args:         cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
+		PreRun: func(cmd *cobra.Command, args []string) {
+			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
+		},
 		RunE:         objectEvictMain,
 		SilenceUsage: true,
 	}
@@ -67,6 +77,9 @@ func init() {
 	flagSet := objectEvictCmd.Flags()
 	flagSet.BoolP("immediate", "i", false, "Delete objects immediately instead of marking them for priority eviction")
 	flagSet.StringP("token", "t", "", "Token file to use for authorization")
+	flagSet.StringP("cache", "c", "", `A comma-separated list of caches to evict from, where a "+" in the list indicates
+the client should also fall back to the director-provided caches.  If omitted, the
+director's selected cache for the path is used.`)
 	objectCmd.AddCommand(objectEvictCmd)
 }
 
@@ -87,8 +100,18 @@ func objectEvictMain(cmd *cobra.Command, args []string) error {
 	immediate, _ := cmd.Flags().GetBool("immediate")
 	source := args[0]
 
+	// Reuse the same preferred-caches pipeline as object get/copy/sync: the
+	// --cache flag populates Client_PreferredCaches (via the PreRun above),
+	// which getPreferredCaches reads and WithCaches passes to the client.
+	caches, err := getPreferredCaches()
+	if err != nil {
+		log.Errorln("Failed to get preferred caches:", err)
+		os.Exit(1)
+	}
+
 	options := []client.TransferOption{
 		client.WithTokenLocation(tokenLocation),
+		client.WithCaches(caches...),
 	}
 
 	message, err := client.DoEvict(ctx, source, immediate, options...)
@@ -97,12 +120,12 @@ func objectEvictMain(cmd *cobra.Command, args []string) error {
 			os.Exit(1)
 		}
 		errMsg := err.Error()
-		var pe error_codes.PelicanError
+		var pe *error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(err, &te) {
 			errMsg = te.UserError()
 		}
-		if errors.Is(err, &pe) {
+		if errors.As(err, &pe) {
 			errMsg = pe.Error()
 			log.Errorln("Failure evicting " + source + ": " + errMsg)
 			os.Exit(pe.ExitCode())

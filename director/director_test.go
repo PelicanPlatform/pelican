@@ -1789,6 +1789,12 @@ func TestRedirectMiddleware(t *testing.T) {
 		// Host-aware tests for different headers
 		{"Host header - cache mode", "GET", "/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", map[string]string{"Host": "origin-hostname.com"}},
 		{"X-Forwarded-Host header - cache mode", "GET", "/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", map[string]string{"X-Forwarded-Host": "origin-hostname.com"}},
+
+		// The cache's legacy /pelican/api/v1.0/{evict,prestage} endpoints must pass
+		// through unchanged rather than be rewritten into an object redirect;
+		// otherwise a co-located director+cache shadows the cache's own routes.
+		{"Cache mode - pelican evict API passes through", "GET", "/pelican/api/v1.0/evict", "cache", "/pelican/api/v1.0/evict", nil},
+		{"Cache mode - pelican prestage API passes through", "GET", "/pelican/api/v1.0/prestage", "cache", "/pelican/api/v1.0/prestage", nil},
 	}
 
 	// Set the necessary viper configuration for host-aware tests

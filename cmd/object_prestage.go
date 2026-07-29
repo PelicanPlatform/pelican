@@ -264,12 +264,12 @@ func prestageMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		errMsg := err.Error()
-		var pe error_codes.PelicanError
+		var pe *error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(err, &te) {
 			errMsg = te.UserError()
 		}
-		if errors.Is(err, &pe) {
+		if errors.As(err, &pe) {
 			errMsg = pe.Error()
 			log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
 			os.Exit(pe.ExitCode())
