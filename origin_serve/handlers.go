@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alecthomas/units"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
@@ -820,6 +821,34 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	// Determine storage type for filesystem creation
 	storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
 
+	// The storage cache keeps local copies of objects fetched from remote
+	// backends (avoiding repeated provider egress).  It is shared across
+	// exports so the configured size bound applies to the whole tree.
+	var storageCacheMgr *storageCache
+	if loc := param.Origin_StorageCacheLocation.GetString(); loc != "" {
+		switch storageType {
+		case server_structs.OriginStorageS3v2, server_structs.OriginStorageHTTPSv2, server_structs.OriginStorageGlobusv2:
+			var cacheSize int64
+			if sizeStr := param.Origin_StorageCacheSize.GetString(); sizeStr != "" && sizeStr != "0" {
+				parsed, err := units.ParseStrictBytes(sizeStr)
+				if err != nil {
+					return fmt.Errorf("failed to parse Origin.StorageCacheSize %q: %w", sizeStr, err)
+				}
+				cacheSize = parsed
+			}
+			var err error
+			storageCacheMgr, err = newStorageCache(ctx, loc, cacheSize,
+				param.Origin_StorageCacheDefaultMaxAge.GetDuration(),
+				param.Origin_StorageCacheRevalidationJitter.GetInt())
+			if err != nil {
+				return err
+			}
+			log.Infof("Origin storage cache enabled at %s (max size: %d bytes; 0 means unbounded)", loc, cacheSize)
+		default:
+			log.Warningf("Origin.StorageCacheLocation is set but storage type %q reads local storage directly; ignoring the storage cache", storageType)
+		}
+	}
+
 	for _, export := range exports {
 		var backend server_utils.OriginBackend
 
@@ -1100,6 +1129,12 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 
 			backend = newLocalBackend(fs, export.StoragePrefix)
+		}
+
+		// Interpose the storage cache between the handler and the backend.
+		if storageCacheMgr != nil {
+			backend = newCachedBackend(backend, storageCacheMgr.newLayer(export.FederationPrefix, backend.FileSystem()))
+			log.Infof("Storage cache layered over backend for %s", export.FederationPrefix)
 		}
 
 		// Create a WebDAV handler

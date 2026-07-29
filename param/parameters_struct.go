@@ -447,6 +447,10 @@ type Config struct {
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
+		StorageCacheDefaultMaxAge time.Duration `mapstructure:"storagecachedefaultmaxage" yaml:"StorageCacheDefaultMaxAge"`
+		StorageCacheLocation string `mapstructure:"storagecachelocation" yaml:"StorageCacheLocation"`
+		StorageCacheRevalidationJitter int `mapstructure:"storagecacherevalidationjitter" yaml:"StorageCacheRevalidationJitter"`
+		StorageCacheSize string `mapstructure:"storagecachesize" yaml:"StorageCacheSize"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
@@ -1036,6 +1040,10 @@ type configWithType struct {
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SelfTestMaxAge struct { Type string; Value time.Duration }
+		StorageCacheDefaultMaxAge struct { Type string; Value time.Duration }
+		StorageCacheLocation struct { Type string; Value string }
+		StorageCacheRevalidationJitter struct { Type string; Value int }
+		StorageCacheSize struct { Type string; Value string }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
 		SupportedChecksumTypes struct { Type string; Value []string }

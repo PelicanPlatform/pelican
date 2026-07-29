@@ -1962,6 +1962,63 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.StorageCacheLocation
+description: |+
+  A directory on local disk where the origin caches objects fetched from a remote storage backend
+  (storage types `s3v2`, `https`, and `globusv2`), avoiding repeated egress from the remote provider.
+
+  Cache validity follows standard HTTP caching rules driven by the backend's Cache-Control
+  information (an S3 object's Cache-Control metadata, or the Cache-Control response header from an
+  HTTPS backend).  While a copy is fresh it is served with no backend interaction at all; once
+  stale, the origin revalidates with a single metadata request (ETag comparison) and only refetches
+  when the object actually changed.  Backends that supply no Cache-Control fall under the
+  Origin.StorageCacheDefaultMaxAge policy; `no-store`/`private` objects are never cached.
+
+  Object fetches triggered by a client read continue at full speed into the cache even when the
+  requesting client is slower, and complete even if the client disconnects.
+
+  The directory must be writable by the origin and should live on a filesystem large enough to hold
+  the working set; use Origin.StorageCacheSize to bound total usage.  Leaving this unset disables
+  the storage cache.  The setting has no effect for local (posix) storage types.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.StorageCacheDefaultMaxAge
+description: |+
+  The default freshness lifetime for objects in the origin's storage cache (see
+  Origin.StorageCacheLocation) when the storage backend does not provide explicit Cache-Control
+  information.  While fresh, cached objects are served without contacting the backend; after this
+  lifetime, the origin revalidates the object's ETag with the backend before serving it again.
+
+  This mirrors LocalCache.DefaultMaxAge.  Setting this to 0 disables default freshness: every read
+  revalidates with the backend (a metadata-only request; no data egress) unless the backend's own
+  Cache-Control directives say otherwise.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.StorageCacheRevalidationJitter
+description: |+
+  A percentage (0-100) of deterministic per-object jitter applied to Origin.StorageCacheDefaultMaxAge,
+  preventing many objects cached at the same time from all revalidating simultaneously.  Mirrors
+  LocalCache.RevalidationJitter.
+type: int
+default: 10
+components: ["origin"]
+---
+name: Origin.StorageCacheSize
+description: |+
+  The maximum total size of the origin's local storage cache (see Origin.StorageCacheLocation).
+  This parameter can be provided with units (e.g., 20GB, 150MB); if no unit is provided, then
+  it is assumed to be in bytes.
+
+  When usage exceeds the limit, the least-recently-accessed objects are evicted until usage falls
+  below 90% of the limit.  If not set (or 0), the cache size is unbounded.
+type: string
+default: 0
+components: ["origin"]
+---
 name: Origin.HttpServiceUrl
 description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
