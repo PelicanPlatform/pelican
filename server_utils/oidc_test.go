@@ -229,12 +229,13 @@ Server:
 		assert.NotContains(t, resp.Issuer, "/ns/")
 	})
 
-	// The embedded discovery endpoints must be derived from
-	// Server.ExternalWebUrl, never from GetServerIssuerURL(). The next
-	// three cases drive the inputs GetServerIssuerURL keys off of
-	// (Server.IssuerUrl, Server.IssuerHostname, and the co-located
-	// sub-path) and assert none of them leak into or distort the emitted
-	// discovery document.
+	// The "issuer" and "jwks_uri" fields follow GetServerIssuerURL() — they
+	// describe the server issuer's identity — but the embedded OAuth
+	// endpoints must be derived from Server.ExternalWebUrl, never from
+	// GetServerIssuerURL(). The next three cases drive the inputs
+	// GetServerIssuerURL keys off of (Server.IssuerUrl,
+	// Server.IssuerHostname, and the co-located sub-path) and assert none
+	// of them leak into or distort the emitted OAuth endpoints.
 
 	embeddedDataYaml := `
 Origin:
@@ -255,22 +256,23 @@ Server:
 		defer ResetOriginExports()
 
 		setupExports(t, embeddedDataYaml)
-		// A Server.IssuerUrl pointing at a different host must NOT leak
-		// into the embedded discovery — those endpoints are always
+		// A Server.IssuerUrl pointing at a different host defines the
+		// issuer identity (the "issuer" and "jwks_uri" fields) but must
+		// NOT leak into the embedded OAuth endpoints — those are always
 		// ExternalWebUrl-based.
 		require.NoError(t, param.Server_IssuerUrl.Set("https://issuer.example.com:9999"))
 
 		resp := callDiscovery(t)
 
-		expectedBase := "https://origin.example.com:8444/api/v1.0/issuer/ns/data"
-		assert.Equal(t, expectedBase, resp.Issuer)
-		assert.Equal(t, expectedBase+"/token", resp.TokenEndpoint)
-		assert.Equal(t, expectedBase+"/authorize", resp.AuthorizationEndpoint)
-		assert.Equal(t, "https://origin.example.com:8444/.well-known/issuer.jwks", resp.JwksUri)
-		// The configured issuer host must be nowhere in the output.
-		assert.NotContains(t, resp.Issuer, "issuer.example.com")
+		assert.Equal(t, "https://issuer.example.com:9999", resp.Issuer)
+		assert.Equal(t, "https://issuer.example.com:9999/.well-known/issuer.jwks", resp.JwksUri)
+		assert.Equal(t, localIssuerBase+"/token", resp.TokenEndpoint)
+		assert.Equal(t, localIssuerBase+"/authorize", resp.AuthorizationEndpoint)
+		// The configured issuer host must be nowhere in the OAuth endpoints.
 		assert.NotContains(t, resp.TokenEndpoint, "issuer.example.com")
-		assert.NotContains(t, resp.JwksUri, "issuer.example.com")
+		assert.NotContains(t, resp.AuthorizationEndpoint, "issuer.example.com")
+		assert.NotContains(t, resp.RegistrationEndpoint, "issuer.example.com")
+		assert.NotContains(t, resp.DeviceEndpoint, "issuer.example.com")
 	})
 
 	t.Run("ServerIssuerHostnameIgnoredForEmbeddedDiscovery", func(t *testing.T) {
@@ -281,18 +283,19 @@ Server:
 		setupExports(t, embeddedDataYaml)
 		// Clear Server.IssuerUrl so GetServerIssuerURL falls through to the
 		// Server.IssuerHostname/Server.IssuerPort precedence, then confirm
-		// that likewise doesn't leak into the embedded discovery.
+		// that likewise doesn't leak into the embedded OAuth endpoints.
 		require.NoError(t, param.Server_IssuerUrl.Set(""))
 		require.NoError(t, param.Server_IssuerHostname.Set("issuer.example.com"))
 		require.NoError(t, param.Server_IssuerPort.Set(9999))
 
 		resp := callDiscovery(t)
 
-		expectedBase := "https://origin.example.com:8444/api/v1.0/issuer/ns/data"
-		assert.Equal(t, expectedBase, resp.Issuer)
-		assert.Equal(t, expectedBase+"/token", resp.TokenEndpoint)
-		assert.Equal(t, "https://origin.example.com:8444/.well-known/issuer.jwks", resp.JwksUri)
-		assert.NotContains(t, resp.Issuer, "issuer.example.com")
+		assert.Equal(t, "https://issuer.example.com:9999", resp.Issuer)
+		assert.Equal(t, "https://issuer.example.com:9999/.well-known/issuer.jwks", resp.JwksUri)
+		assert.Equal(t, localIssuerBase+"/token", resp.TokenEndpoint)
+		assert.Equal(t, localIssuerBase+"/authorize", resp.AuthorizationEndpoint)
+		assert.NotContains(t, resp.TokenEndpoint, "issuer.example.com")
+		assert.NotContains(t, resp.AuthorizationEndpoint, "issuer.example.com")
 	})
 
 	t.Run("CoLocatedOriginDirectorNoDoublePath", func(t *testing.T) {
@@ -306,24 +309,26 @@ Server:
 		// "<ExternalWebUrl>/api/v1.0/origin" sub-path. Setting
 		// Server.IssuerUrl to that value reproduces the exact issuerStr the
 		// discovery handler would see, without toggling the process-global
-		// enabled-servers set. The embedded endpoints must still be based on
-		// the bare ExternalWebUrl, with no doubled path.
+		// enabled-servers set. The issuer identity keeps the sub-path, but
+		// the embedded OAuth endpoints must still be based on the bare
+		// ExternalWebUrl, with no doubled path.
 		require.NoError(t, param.Server_IssuerUrl.Set("https://origin.example.com:8444/api/v1.0/origin"))
 
 		resp := callDiscovery(t)
 
-		expectedBase := "https://origin.example.com:8444/api/v1.0/issuer/ns/data"
-		assert.Equal(t, expectedBase, resp.Issuer)
-		assert.Equal(t, expectedBase+"/token", resp.TokenEndpoint)
-		assert.Equal(t, "https://origin.example.com:8444/.well-known/issuer.jwks", resp.JwksUri)
+		assert.Equal(t, "https://origin.example.com:8444/api/v1.0/origin", resp.Issuer)
+		assert.Equal(t, "https://origin.example.com:8444/api/v1.0/origin/.well-known/issuer.jwks", resp.JwksUri)
+		assert.Equal(t, localIssuerBase+"/token", resp.TokenEndpoint)
+		assert.Equal(t, localIssuerBase+"/authorize", resp.AuthorizationEndpoint)
 
-		// Guard against the regression the issuerStr→issuerBaseUrl change
-		// fixed: building endpoints on GetServerIssuerURL's sub-path would
-		// double "/api/v1.0/origin" into the issuer path.
+		// Guard against building endpoints on GetServerIssuerURL's
+		// sub-path, which would double "/api/v1.0/origin" into the issuer
+		// path.
 		const doubled = "/api/v1.0/origin/api/v1.0/issuer"
 		assert.NotContains(t, resp.Issuer, doubled)
 		assert.NotContains(t, resp.TokenEndpoint, doubled)
 		assert.NotContains(t, resp.AuthorizationEndpoint, doubled)
-		assert.NotContains(t, resp.JwksUri, "/api/v1.0/origin")
+		assert.NotContains(t, resp.TokenEndpoint, "/api/v1.0/origin")
+		assert.NotContains(t, resp.AuthorizationEndpoint, "/api/v1.0/origin")
 	})
 }
