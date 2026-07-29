@@ -68,6 +68,11 @@ type Config struct {
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
+		S3DisableRedirect bool `mapstructure:"s3disableredirect" yaml:"S3DisableRedirect"`
+		S3PresignEvictionHold time.Duration `mapstructure:"s3presignevictionhold" yaml:"S3PresignEvictionHold"`
+		S3PresignExpiry time.Duration `mapstructure:"s3presignexpiry" yaml:"S3PresignExpiry"`
+		S3StorageTargets any `mapstructure:"s3storagetargets" yaml:"S3StorageTargets"`
+		S3UploadThreshold string `mapstructure:"s3uploadthreshold" yaml:"S3UploadThreshold"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
@@ -586,6 +591,11 @@ type configWithType struct {
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
+		S3DisableRedirect struct { Type string; Value bool }
+		S3PresignEvictionHold struct { Type string; Value time.Duration }
+		S3PresignExpiry struct { Type string; Value time.Duration }
+		S3StorageTargets struct { Type string; Value any }
+		S3UploadThreshold struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SelfTestMaxAge struct { Type string; Value time.Duration }
