@@ -228,12 +228,26 @@ jobs:
             ISSUER="https://localhost:8444/api/v1.0/origin"
             SCOPE="web_ui.access monitoring.query monitoring.scrape"
           fi
+          # Two audiences, because this one token is consumed by two validators
+          # that accept different values:
+          #  - ${ISSUER}: the web-UI `login` cookie path (GetUserGroups in
+          #    web_ui/authentication.go) requires aud == config.GetLocalIssuerUrl(),
+          #    which is "<ExternalWebUrl>/api/v1.0/origin" whenever origin and
+          #    director are co-located -- the origin and cache legs here. Playwright
+          #    injects this token as that cookie, and unlike the Authorization
+          #    header path it checks the audience, so omitting this value rejects
+          #    every request on those legs.
+          #  - https://localhost:8444: the origin's data-plane authz
+          #    (origin_serve/authz.go) matches aud against Origin.TokenAudience,
+          #    which defaults to the bare origin URL. The Object Browser tests
+          #    reach the data plane with the same token.
           TOKEN=$(./pelican-server origin token create \
             --profile wlcg \
             --scope "${SCOPE}" \
             --issuer "${ISSUER}" \
             --lifetime 7200 \
             --subject admin \
+            --audience "${ISSUER}" \
             --audience https://localhost:8444 \
             --claim "oidc_iss=${ISSUER}" \
             --claim "oidc_sub=admin")
