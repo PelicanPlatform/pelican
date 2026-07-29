@@ -74,6 +74,7 @@ pelican token create <pelican-url> [flags]
       --expiration string       Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.
   -h, --help                    help for create
   -i, --issuer string           Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.
+      --kid string              Override the JWS key ID ('kid' header) stamped on the token. Pelican normally auto-detects the right KID by matching the local signing key against the issuer's published JWKS, so this flag is only needed when auto-detection cannot reach the issuer (e.g. air-gapped) or when you need to force a specific KID for testing.
   -l, --lifetime int            Set the token's lifetime in seconds. (default 1200)
   -m, --modify                  Indicate the requested token should provide the ability to modify/delete the specified resource.
   -k, --private-key string      Path to the private key used to sign the token. If not provided, Pelican will look for the private key in the default location pointed to by the '{IssuerKeysDirectory}' config parameter.
