@@ -12,4 +12,5 @@ export default {
     "registry": "pelican-server registry",
     "server": "pelican-server server",
     "token": "pelican-server token",
+    "transfer": "pelican-server transfer",
 }
