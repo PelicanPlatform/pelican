@@ -1,5 +1,6 @@
 export default {
     "copy": "pelican object copy",
+    "du": "pelican object du",
     "evict": "pelican object evict",
     "get": "pelican object get",
     "ls": "pelican object ls",
