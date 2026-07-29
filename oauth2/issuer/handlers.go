@@ -1409,6 +1409,15 @@ func deviceViewURL(namespace, userCode string) string {
 	if userCode != "" {
 		u += "&user_code=" + url.QueryEscape(userCode)
 	}
+	// Tell the page which issuer API base to call so its fetches land on the right
+	// route regardless of who served it: the origin's own /api/v1.0/issuer/ns, or
+	// the director proxy's /api/v1.0/issuer-proxy/ns when this origin delegates its
+	// issuer to the director (WS4/WS5). IssuerURLForNamespace already resolves that
+	// distinction; we pass only its path so the fetch stays same-origin on the
+	// serving host.
+	if issuerURL, err := url.Parse(IssuerURLForNamespace(namespace)); err == nil && issuerURL.Path != "" {
+		u += "&issuer_base=" + url.QueryEscape(issuerURL.Path)
+	}
 	return u
 }
 

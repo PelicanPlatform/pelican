@@ -65,7 +65,16 @@ function DeviceVerifyInner() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const codeComplete = rawCode.length === 8;
-  const apiBase = `/api/v1.0/issuer/ns${namespace}/device`;
+  // The issuer API base depends on which host served this page: an origin serves
+  // its issuer at /api/v1.0/issuer/ns, but the director proxies a delegating
+  // origin's issuer at /api/v1.0/issuer-proxy/ns (WS4/WS5). The backend passes the
+  // correct same-origin path in `issuer_base`; fall back to the origin default,
+  // and constrain to an issuer path so the fetch can't be redirected elsewhere.
+  const issuerBaseParam = searchParams.get('issuer_base') || '';
+  const issuerBase = /^\/api\/v1\.0\/issuer(-proxy)?\/ns/.test(issuerBaseParam)
+    ? issuerBaseParam
+    : `/api/v1.0/issuer/ns${namespace}`;
+  const apiBase = `${issuerBase}/device`;
 
   // Fetch CSRF token and (when a code is supplied) scopes / client info.
   // Returns true if a user_code was provided and resolved to a valid session.
