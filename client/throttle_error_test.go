@@ -131,16 +131,18 @@ func TestParseRetryAfter(t *testing.T) {
 	assert.Equal(t, maxRetryAfter, parseRetryAfter(farFuture))
 }
 
-// Server-provided detail strings are sanitized before they can reach logs or
-// error messages: control characters (which would let a hostile server forge
-// log records) become spaces, and over-long bodies are truncated.
-func TestSanitizeErrorDetail(t *testing.T) {
-	assert.Equal(t, "a b c", sanitizeErrorDetail("a\nb\rc"))
-	assert.Equal(t, "tab here", sanitizeErrorDetail("tab\there"))
+// Server-provided detail strings are truncated at storage and quoted at
+// display: control characters a hostile server embeds render as escapes
+// (\n, \r) in the error message, so they cannot forge log records.
+func TestThrottleDetailQuotedAndTruncated(t *testing.T) {
+	err := newCacheThrottleError(string(ShedOriginSlow), "line one\nFAKE-LOG-LINE", "cache.example.org:8443", 0)
+	msg := err.Error()
+	assert.NotContains(t, msg, "\n", "raw newlines must not survive into the error message")
+	assert.Contains(t, msg, `line one\nFAKE-LOG-LINE`, "detail must be rendered with escapes, not dropped")
+
 	long := strings.Repeat("x", 2048)
-	sanitized := sanitizeErrorDetail(long)
-	assert.LessOrEqual(t, len(sanitized), 512+len("…"))
-	assert.True(t, strings.HasSuffix(sanitized, "…"))
+	assert.LessOrEqual(t, len(truncateErrorDetail(long)), 512+len("…"))
+	assert.True(t, strings.HasSuffix(truncateErrorDetail(long), "…"))
 }
 
 // A CacheThrottleError built from a cache's 429 wraps the specific retryable

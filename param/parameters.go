@@ -148,6 +148,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.Throttle.PerOriginActivePercent": false,
 	"Cache.Throttle.PerOriginPendingSize": false,
 	"Cache.Throttle.PerOriginStarvingPercent": false,
+	"Cache.Throttle.RetryAfter": false,
 	"Cache.Url": false,
 	"Cache.WorkerCount": false,
 	"Cache.XRootDPrefix": false,
@@ -1141,6 +1142,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
 	"Cache.Throttle.EMAWindow": func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
+	"Cache.Throttle.RetryAfter": func(c *Config) time.Duration { return c.Cache.Throttle.RetryAfter },
 	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
 	"ClientAgent.ProgressUpdateInterval": func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
 	"Client.SlowTransferRampupTime": func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
@@ -1351,6 +1353,7 @@ var allParameterNames = []string{
 	"Cache.Throttle.PerOriginActivePercent",
 	"Cache.Throttle.PerOriginPendingSize",
 	"Cache.Throttle.PerOriginStarvingPercent",
+	"Cache.Throttle.RetryAfter",
 	"Cache.Url",
 	"Cache.WorkerCount",
 	"Cache.XRootDPrefix",
@@ -2168,6 +2171,7 @@ var (
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	Cache_Throttle_EMAWindow = DurationParam{"Cache.Throttle.EMAWindow"}
+	Cache_Throttle_RetryAfter = DurationParam{"Cache.Throttle.RetryAfter"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
 	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
@@ -2653,6 +2657,7 @@ func init() {
 		"Cache.SelfTestInterval": Cache_SelfTestInterval,
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
 		"Cache.Throttle.EMAWindow": Cache_Throttle_EMAWindow,
+		"Cache.Throttle.RetryAfter": Cache_Throttle_RetryAfter,
 		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,
 		"ClientAgent.ProgressUpdateInterval": ClientAgent_ProgressUpdateInterval,
 		"Client.SlowTransferRampupTime": Client_SlowTransferRampupTime,

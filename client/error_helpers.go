@@ -116,18 +116,12 @@ func parseThrottleReason(body string) string {
 	return ""
 }
 
-// sanitizeErrorDetail makes a server-provided message safe to embed in log
-// lines and error strings: control characters (including CR/LF, which would
-// permit forging log records) are replaced with spaces and the result is
-// truncated.
-func sanitizeErrorDetail(detail string) string {
+// truncateErrorDetail bounds a server-provided message before it is retained
+// on an error value. Escaping for safe display happens at formatting time
+// (the detail is rendered with %q, so control characters a hostile server
+// embeds cannot forge log records).
+func truncateErrorDetail(detail string) string {
 	const maxDetail = 512
-	detail = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, detail)
 	if len(detail) > maxDetail {
 		detail = detail[:maxDetail] + "…"
 	}
@@ -473,23 +467,30 @@ type CacheThrottleError struct {
 }
 
 func (e *CacheThrottleError) Error() string {
-	msg := "request throttled by cache"
+	var sb strings.Builder
+	sb.WriteString("request throttled by cache")
 	if e.Endpoint != "" {
-		msg += " " + e.Endpoint
+		sb.WriteString(" ")
+		sb.WriteString(e.Endpoint)
 	}
 	if e.Reason != "" {
-		msg += " (" + e.Reason + ")"
+		sb.WriteString(" (")
+		sb.WriteString(e.Reason)
+		sb.WriteString(")")
 	}
 	if e.RetryAfter > 0 {
-		msg += fmt.Sprintf("; retry after %s", e.RetryAfter)
+		fmt.Fprintf(&sb, "; retry after %s", e.RetryAfter)
 	}
 	if e.detail != "" {
-		msg += ": " + e.detail
+		// The detail is server-provided text: render it quoted so embedded
+		// control characters cannot forge log records downstream.
+		fmt.Fprintf(&sb, ": %q", e.detail)
 	}
 	if e.Err != nil {
-		msg += ": " + e.Err.Error()
+		sb.WriteString(": ")
+		sb.WriteString(e.Err.Error())
 	}
-	return msg
+	return sb.String()
 }
 
 func (e *CacheThrottleError) Unwrap() error {
@@ -516,8 +517,8 @@ func newThrottleErrorFromResponse(resp *http.Response, body, endpoint string) *C
 
 // newCacheThrottleError builds a CacheThrottleError from a cache's 429
 // response: the reason parsed from the JSON body's "error" field, the
-// Retry-After header, the endpoint host, and the body detail (sanitized
-// here — it is server-controlled text headed for logs and error strings).
+// Retry-After header, the endpoint host, and the body detail (truncated
+// here; quoted at display time since it is server-controlled text).
 func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Duration) *CacheThrottleError {
 	base := fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
 	return &CacheThrottleError{
@@ -525,7 +526,7 @@ func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Dura
 		RetryAfter: retryAfter,
 		Endpoint:   endpoint,
 		Err:        throttleErrorForReason(reason, base),
-		detail:     sanitizeErrorDetail(detail),
+		detail:     truncateErrorDetail(detail),
 	}
 }
 

@@ -870,6 +870,24 @@ func createTransferError(err error) (transferError *classad.ClassAd) {
 
 	isRetryable := client.IsRetryable(err)
 
+	// A cache throttle (HTTP 429) carries a machine-parseable reason and a
+	// Retry-After hint. The plugin protocol has no retry-delay field and the
+	// plugin must never sleep (HTCondor is timing it), so surface both in
+	// DeveloperData for external retriers and operators reading the job ad.
+	var throttled *client.CacheThrottleError
+	if errors.As(err, &throttled) {
+		if throttled.RetryAfter > 0 {
+			if adErr := developerData.Set("RetryAfterSeconds", int64(throttled.RetryAfter.Seconds())); adErr != nil {
+				log.Errorf("Failed to set RetryAfterSeconds: %s", adErr)
+			}
+		}
+		if throttled.Reason != "" {
+			if adErr := developerData.Set("ThrottleReason", throttled.Reason); adErr != nil {
+				log.Errorf("Failed to set ThrottleReason: %s", adErr)
+			}
+		}
+	}
+
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
 		err := developerData.Set("PelicanErrorCode", int64(pe.Code()))

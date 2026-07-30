@@ -2731,6 +2731,16 @@ default: 30s
 hidden: true
 components: ["cache"]
 ---
+name: Cache.Throttle.RetryAfter
+description: |+
+  The backoff duration advertised in the Retry-After header when the cache sheds a
+  request with HTTP 429. This is a hint for clients and external retriers; the cache
+  does not enforce it. Rounded up to whole seconds on the wire.
+type: duration
+default: 60s
+hidden: true
+components: ["cache"]
+---
 name: Cache.AllowedFederations
 description: |+
   A list of federation discovery URLs (or host:port values) that this cache is allowed to serve.

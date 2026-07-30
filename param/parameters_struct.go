@@ -79,6 +79,7 @@ type Config struct {
 			PerOriginActivePercent int `mapstructure:"peroriginactivepercent" yaml:"PerOriginActivePercent"`
 			PerOriginPendingSize int `mapstructure:"peroriginpendingsize" yaml:"PerOriginPendingSize"`
 			PerOriginStarvingPercent int `mapstructure:"peroriginstarvingpercent" yaml:"PerOriginStarvingPercent"`
+			RetryAfter time.Duration `mapstructure:"retryafter" yaml:"RetryAfter"`
 		} `mapstructure:"throttle" yaml:"Throttle"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
@@ -605,6 +606,7 @@ type configWithType struct {
 			PerOriginActivePercent struct { Type string; Value int }
 			PerOriginPendingSize struct { Type string; Value int }
 			PerOriginStarvingPercent struct { Type string; Value int }
+			RetryAfter struct { Type string; Value time.Duration }
 		}
 		Url struct { Type string; Value string }
 		WorkerCount struct { Type string; Value int }

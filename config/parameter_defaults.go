@@ -161,6 +161,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_Throttle_PerOriginPendingSize.GetName(), 50)
 	// Cache.Throttle.PerOriginStarvingPercent
 	v.SetDefault(param.Cache_Throttle_PerOriginStarvingPercent.GetName(), 25)
+	// Cache.Throttle.RetryAfter
+	v.SetDefault(param.Cache_Throttle_RetryAfter.GetName(), "60s")
 	// Cache.Url
 	{
 		val := "https://${Server.Hostname}:${Cache.Port}"

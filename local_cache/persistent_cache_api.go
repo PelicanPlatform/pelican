@@ -177,6 +177,18 @@ func (etr *errorTrackingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// retryAfterValue returns the whole-seconds Retry-After header value
+// advertised on shed (429) responses, from Cache.Throttle.RetryAfter.
+// Unset or non-positive values fall back to 60 seconds.
+func retryAfterValue() string {
+	d := param.Cache_Throttle_RetryAfter.GetDuration()
+	if d <= 0 {
+		d = 60 * time.Second
+	}
+	secs := int64((d + time.Second - 1) / time.Second)
+	return strconv.FormatInt(secs, 10)
+}
+
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
 // every log line emitted here is correlated with the original request.
@@ -227,7 +239,7 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 			errCode = throttled.Reason
 		}
 		reqLog.Warnf("Rejecting fetch with 429 (%s): %v", errCode, getErr)
-		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Retry-After", retryAfterValue())
 		writeJSON(http.StatusTooManyRequests, errCode, getErr.Error())
 		return
 	}

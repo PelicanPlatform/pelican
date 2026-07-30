@@ -324,7 +324,7 @@ func NewTransfer_OriginUnresponsiveError(err error) *PelicanError {
 		exitCode:    9,
 		code:        6008,
 		retryable:   true,
-		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The client should back off (honoring Retry-After) before trying again.",
+		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 		err:         err,
 	}
 }
@@ -335,7 +335,7 @@ func NewTransfer_OriginSlowError(err error) *PelicanError {
 		exitCode:    9,
 		code:        6009,
 		retryable:   true,
-		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The client should back off (honoring Retry-After) before trying again.",
+		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 		err:         err,
 	}
 }
@@ -346,7 +346,7 @@ func NewTransfer_CacheOverloadedError(err error) *PelicanError {
 		exitCode:    9,
 		code:        6010,
 		retryable:   true,
-		description: "A cache refused to admit the upstream fetch because its global pending buffer is full; the cache is saturated across all origins it is serving. The client should back off (honoring Retry-After) before trying again.",
+		description: "A cache refused to admit the upstream fetch because its global pending buffer is full; the cache is saturated across all origins it is serving. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 		err:         err,
 	}
 }
