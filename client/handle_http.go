@@ -33,6 +33,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -271,9 +272,13 @@ type (
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 
 		// TagScheduler hooks: nil unless the engine was constructed with a
-		// scheduler. schedFirstByte fires once, on the first non-empty body
-		// byte written to the local sink (idempotent). schedDone fires
-		// exactly once when the worker is done with this file.
+		// scheduler. schedFirstByte fires once (idempotent) as soon as the
+		// remote end proves responsive: for downloads, the first non-empty
+		// body byte written to the local sink; for uploads, a negotiated
+		// 100-continue or the first byte of the PUT response; for
+		// third-party copies, the first byte of the COPY response or the
+		// first performance marker, whichever arrives first. schedDone
+		// fires exactly once when the worker is done with this file.
 		schedFirstByte func()
 		schedDone      func()
 	}
@@ -794,23 +799,74 @@ func (tr TransferResults) ID() string {
 	return tr.JobId.String()
 }
 
-// Returns a new transfer engine object whose lifetime is tied
-// to the provided context.  Will launcher worker goroutines to
-// handle the underlying transfers
-// NewTransferEngine creates a transfer engine using the client's configured
-// worker count (Client.WorkerCount).
-func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
-	return NewTransferEngineWithWorkers(ctx, param.Client_WorkerCount.GetInt())
+// transferEngineConfig collects the settings assembled from the
+// TransferEngineOption arguments handed to NewTransferEngine.
+type transferEngineConfig struct {
+	workerCount int
+	scheduler   *TagScheduler
+}
+
+// TransferEngineOption customizes the engine returned by NewTransferEngine.
+//
+// Unlike TransferOption (an alias for the option package's untyped
+// interface), engine options are a distinct function type; the two sets are
+// therefore not interchangeable, so a per-transfer option such as
+// WithCallback cannot be handed to the constructor and silently dropped.
+type TransferEngineOption func(*transferEngineConfig)
+
+// WithWorkerCount sets the number of transfer workers the engine launches,
+// overriding the Client.WorkerCount default.  This lets embedded consumers
+// (e.g. the cache) run with more concurrency than a command-line client
+// would.  A workerCount <= 0 is an error at construction.
+func WithWorkerCount(workerCount int) TransferEngineOption {
+	return func(cfg *transferEngineConfig) {
+		cfg.workerCount = workerCount
+	}
+}
+
+// WithScheduler wires the engine to a TagScheduler that admits transfers
+// into per-tag FIFOs and dispatches them to workers with a weighted random
+// draw.  Callers that don't want per-tag fairness (e.g., single-user CLI
+// transfers) should omit this option.
+//
+// The scheduler must have been created with NewTagScheduler; it is started
+// by NewTransferEngine and stopped when the engine shuts down.  A nil
+// scheduler is ignored.
+func WithScheduler(scheduler *TagScheduler) TransferEngineOption {
+	return func(cfg *transferEngineConfig) {
+		cfg.scheduler = scheduler
+	}
 }
 
 // NewTransferEngineWithWorkers creates a transfer engine with an explicit
-// number of transfer workers, overriding the Client.WorkerCount default.  This
-// lets embedded consumers (e.g. the cache) run with more concurrency than a
-// command-line client would.  A workerCount <= 0 is an error.
+// number of transfer workers.
+//
+// Deprecated: use NewTransferEngine with WithWorkerCount.
 func NewTransferEngineWithWorkers(ctx context.Context, workerCount int) (te *TransferEngine, err error) {
+	return NewTransferEngine(ctx, WithWorkerCount(workerCount))
+}
+
+// Returns a new transfer engine object whose lifetime is tied
+// to the provided context.  Will launcher worker goroutines to
+// handle the underlying transfers
+//
+// With no options the engine runs the client's configured number of workers
+// (Client.WorkerCount) and hands transfers straight to them; see
+// WithWorkerCount and WithScheduler to change either behavior.
+func NewTransferEngine(ctx context.Context, opts ...TransferEngineOption) (te *TransferEngine, err error) {
 	// If we did not initClient yet, we should fail to avoid unexpected/undesired behavior
 	if !config.IsClientInitialized() {
 		return nil, errors.New("client has not been initialized, unable to create transfer engine")
+	}
+
+	cfg := transferEngineConfig{workerCount: param.Client_WorkerCount.GetInt()}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	// Validate before anything is allocated so a bad worker count cannot leak
+	// the derived context or the URL cache's goroutine.
+	if cfg.workerCount <= 0 {
+		return nil, errors.New("worker count must be a positive integer")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -841,52 +897,37 @@ func NewTransferEngineWithWorkers(ctx context.Context, workerCount int) (te *Tra
 		dirRespCache:       NewDirRespCache(5 * time.Minute),
 		prestageAPISupport: make(map[string]bool),
 	}
-	if workerCount <= 0 {
-		return nil, errors.New("worker count must be a positive integer")
-	}
-	for idx := 0; idx < workerCount; idx++ {
+	for idx := 0; idx < cfg.workerCount; idx++ {
 		egrp.Go(func() error {
 			return runTransferWorker(ctx, te.files, te.results)
 		})
 	}
-	te.workersActive = workerCount
+	te.workersActive = cfg.workerCount
 	egrp.Go(te.runMux)
 	egrp.Go(te.runJobHandler)
-	return
-}
 
-// NewTransferEngineWithScheduler creates a transfer engine like
-// NewTransferEngineWithWorkers, but wires it to a TagScheduler that
-// admits transfers into per-tag FIFOs and dispatches them to workers
-// with a weighted random draw. Callers that don't want per-tag fairness
-// (e.g., single-user CLI transfers) should keep using
-// NewTransferEngineWithWorkers.
-//
-// The scheduler must have been created with NewTagScheduler; it will be
-// started by this function and stopped when the engine shuts down.
-func NewTransferEngineWithScheduler(ctx context.Context, workerCount int, scheduler *TagScheduler) (te *TransferEngine, err error) {
-	te, err = NewTransferEngineWithWorkers(ctx, workerCount)
-	if err != nil {
-		return nil, err
-	}
-	if scheduler == nil {
-		return te, nil
-	}
-	te.scheduler = scheduler
-	// Transfers still queued in the scheduler when it stops would
-	// otherwise vanish without a result, leaving their jobs' active
-	// counts permanently non-zero (and result waiters blocked until ctx
-	// cancellation). Synthesize a failure result for each, exactly as
-	// submitFile does for an admission rejection.
-	scheduler.onDrop = func(file *clientTransferFile) {
-		res := synthesizeRejectionResult(file, errors.New("transfer engine shut down before the transfer could be dispatched"))
-		select {
-		case te.results <- res:
-		case <-te.ctx.Done():
+	if cfg.scheduler != nil {
+		scheduler := cfg.scheduler
+		te.scheduler = scheduler
+		// Transfers still queued in the scheduler when it stops would
+		// otherwise vanish without a result, leaving their jobs' active
+		// counts permanently non-zero (and result waiters blocked until ctx
+		// cancellation). Synthesize a failure result for each, exactly as
+		// submitFile does for an admission rejection.
+		scheduler.onDrop = func(file *clientTransferFile) {
+			res := synthesizeRejectionResult(file, errors.New("transfer engine shut down before the transfer could be dispatched"))
+			select {
+			case te.results <- res:
+			case <-te.ctx.Done():
+			}
 		}
+		// The scheduler goroutine joins the engine's errgroup. It cannot make
+		// Shutdown's egrp.Wait() hang: runJobHandler — also in that group —
+		// calls scheduler.Stop() before closing te.files, so run() has already
+		// returned by the time the group drains.
+		scheduler.Start(te.ctx, te.egrp, te.files)
 	}
-	scheduler.Start(te.ctx, te.files)
-	return te, nil
+	return
 }
 
 // submitFile hands a clientTransferFile off to the worker pool. When a
@@ -2807,16 +2848,10 @@ func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, result
 	var transferResults TransferResults
 	switch file.file.xferType {
 	case transferTypeUpload, transferTypeCopy:
-		// The scheduler's "starving" bucket tracks transfers that have not
-		// yet produced a first byte of downloaded body; uploads and
-		// third-party copies have no wiring to report data progress back to
-		// the scheduler. Mark them non-starving at dispatch — otherwise the
-		// (much smaller) starving cap would silently become their effective
-		// per-tag concurrency limit. The cost is that the unresponsive-
-		// destination protection does not apply to these transfer types.
-		if file.file.schedFirstByte != nil {
-			file.file.schedFirstByte()
-		}
+		// Both of these report their own first-byte signal to the scheduler
+		// (see the schedFirstByte docs on transferFile), so they stay in the
+		// "starving" bucket — and thus under the smaller starving cap — until
+		// the destination proves it is responding.
 		if file.file.xferType == transferTypeUpload {
 			transferResults, err = uploadObject(file.file)
 		} else {
@@ -4549,12 +4584,26 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferStartTime := time.Now()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
+	// Tell the scheduler (if any) the destination is alive as soon as it says
+	// anything back: a negotiated 100-continue is the earliest such proof,
+	// otherwise the first byte of the final response is.  The trace is scoped
+	// to the PUT itself, not to the checksum fetch that reuses putContext.
+	// Note that we do not send an Expect: 100-continue header, so
+	// Got100Continue only fires when the transport negotiates it on its own.
+	requestContext := putContext
+	if transfer.schedFirstByte != nil {
+		schedFirstByte := transfer.schedFirstByte
+		requestContext = httptrace.WithClientTrace(putContext, &httptrace.ClientTrace{
+			Got100Continue:       func() { schedFirstByte() },
+			GotFirstResponseByte: func() { schedFirstByte() },
+		})
+	}
 	var request *http.Request
 	// For files that are 0 length, we need to send a PUT request with an nil body
 	if nonZeroSize {
-		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), tee)
+		request, err = http.NewRequestWithContext(requestContext, http.MethodPut, dest.String(), tee)
 	} else {
-		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), http.NoBody)
+		request, err = http.NewRequestWithContext(requestContext, http.MethodPut, dest.String(), http.NoBody)
 	}
 	if err != nil {
 		log.Errorln("Error creating request:", err)

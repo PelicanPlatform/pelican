@@ -23,13 +23,14 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // ErrTooManyRequests is returned by TagScheduler.Submit when the scheduler
@@ -145,6 +146,40 @@ type SchedulerConfig struct {
 	EMAWindow time.Duration
 }
 
+const (
+	// emaFloor is the value below which a decaying EMA is treated as zero.
+	// The decay is asymptotic, so without a floor an idle tag would never
+	// satisfy the "no residual EMA" precondition for eviction.
+	emaFloor = 1e-6
+	// minEvictionGrace is the lower bound on how long a tag must be idle
+	// before its state is dropped (see evictIdleTags).
+	minEvictionGrace = 10 * time.Second
+)
+
+// tagState is the complete scheduler state for one tag. Holding it in a
+// single struct rather than a set of parallel maps keeps a tag's queue,
+// counters, and bookkeeping created, updated, and evicted together, and
+// lets a snapshot be built with one map iteration.
+//
+// Owned by the scheduler goroutine; no field may be touched from outside.
+type tagState struct {
+	fifo     *list.List // FIFO of *clientTransferFile awaiting dispatch; never nil
+	active   int        // in-flight transfers (any state)
+	starving int        // in-flight transfers without a first byte yet
+	ema      float64    // EMA of active over the configured EMAWindow
+	weight   float64    // dispatch weight, 1/(1+ema); refreshed once per tick
+	admits   uint64     // admissions since the tag was last evicted
+	rejects  uint64     // rejections since the tag was last evicted
+	lastSeen time.Time  // last admit/reject/dispatch/event, for idle eviction
+}
+
+// dispatchCandidate is one entry in the weighted draw performed by
+// pickForDispatch. The backing slice is reused across dispatches.
+type dispatchCandidate struct {
+	st *tagState
+	w  float64
+}
+
 // TagScheduler admits transfers into a bounded per-tag FIFO and dispatches
 // them to workers with a weighted random draw across tags. It exists to
 // keep one misbehaving origin from monopolising the transfer engine's
@@ -171,18 +206,16 @@ type TagScheduler struct {
 	out      chan<- *clientTransferFile
 	rng      *rand.Rand
 
-	fifos    map[string]*list.List // tag → FIFO of *clientTransferFile
-	active   map[string]int        // tag → in-flight (any state); zero entries are deleted
-	starving map[string]int        // tag → in-flight without first byte; zero entries are deleted
-	ema      map[string]float64    // tag → EMA of active
-	admits   map[string]uint64     // tag → admit count since the tag was last evicted
-	rejects  map[string]uint64     // tag → rejection count since the tag was last evicted
-	lastSeen map[string]time.Time  // tag → last admit/reject/dispatch/event, for idle eviction
+	// tags holds all per-tag state. Entries are created on first contact
+	// and removed only by evictIdleTags, so the map cannot grow without
+	// bound as origins come and go.
+	tags     map[string]*tagState
+	cands    []dispatchCandidate // scratch space for pickForDispatch
 	lastTick time.Time
 	pending  int
 
-	// Global monotonic counters. Unlike the per-tag maps these are never
-	// reset: idle tags are evicted from the maps (see evictIdleTags) so
+	// Global monotonic counters. Unlike the per-tag state these are never
+	// reset: idle tags are evicted from the map (see evictIdleTags) so
 	// per-tag totals cannot serve as lifetime counters.
 	totalAdmits        uint64
 	totalRejectsGlobal uint64 // rejected because global pending was full
@@ -231,27 +264,45 @@ func NewTagScheduler(workerCount int, cfg SchedulerConfig) *TagScheduler {
 		snapReqs:    make(chan chan<- SchedulerSnapshot),
 		stop:        make(chan struct{}),
 		stopped:     make(chan struct{}),
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
-		fifos:       make(map[string]*list.List),
-		active:      make(map[string]int),
-		starving:    make(map[string]int),
-		ema:         make(map[string]float64),
-		admits:      make(map[string]uint64),
-		rejects:     make(map[string]uint64),
-		lastSeen:    make(map[string]time.Time),
+		// The math/rand/v2 top-level generator is automatically seeded, so
+		// it can seed this scheduler's private generator. Kept private (and
+		// as a field) so dispatch draws neither contend on the global
+		// generator nor resist deterministic seeding in tests.
+		rng:  rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+		tags: make(map[string]*tagState),
 	}
 }
 
-// Start begins the scheduler goroutine, dispatching admitted transfers on
-// the out channel. Stop() blocks until the goroutine exits. Start may be
-// called at most once per scheduler; a second call panics (programming
-// error, not a runtime condition).
-func (s *TagScheduler) Start(ctx context.Context, out chan<- *clientTransferFile) {
+// tagFor returns the state for `tag`, creating it on first contact. Must
+// be called on the scheduler goroutine.
+func (s *TagScheduler) tagFor(tag string) *tagState {
+	if st, ok := s.tags[tag]; ok {
+		return st
+	}
+	// A new tag has an EMA of zero, whose dispatch weight is 1/(1+0); seed
+	// it so a tag admitted between two ticks competes on equal footing
+	// before its first weight refresh.
+	st := &tagState{fifo: list.New(), weight: 1.0}
+	s.tags[tag] = st
+	return st
+}
+
+// Start begins the scheduler goroutine under `egrp`, dispatching admitted
+// transfers on the out channel. Stop() blocks until the goroutine exits.
+// Start may be called at most once per scheduler; a second call panics
+// (programming error, not a runtime condition).
+//
+// The goroutine never returns an error: a scheduler shutdown is not a
+// failure of the group it runs in.
+func (s *TagScheduler) Start(ctx context.Context, egrp *errgroup.Group, out chan<- *clientTransferFile) {
 	if !s.started.CompareAndSwap(false, true) {
 		panic("TagScheduler.Start called more than once")
 	}
 	s.out = out
-	go s.run(ctx)
+	egrp.Go(func() error {
+		s.run(ctx)
+		return nil
+	})
 }
 
 // Stop signals the scheduler to exit and waits for the goroutine. It is
@@ -352,13 +403,13 @@ func (s *TagScheduler) run(ctx context.Context) {
 	// closes). Registered after the close(s.stopped) defer so it runs
 	// first, i.e. Stop() does not return until the drain is complete.
 	defer func() {
-		for tag, q := range s.fifos {
-			for e := q.Front(); e != nil; e = e.Next() {
+		for _, st := range s.tags {
+			for e := st.fifo.Front(); e != nil; e = e.Next() {
 				if s.onDrop != nil {
 					s.onDrop(e.Value.(*clientTransferFile))
 				}
 			}
-			delete(s.fifos, tag)
+			st.fifo.Init()
 		}
 		s.pending = 0
 	}()
@@ -374,11 +425,11 @@ func (s *TagScheduler) run(ctx context.Context) {
 	for {
 		// If we have a candidate to dispatch AND caps allow, try to
 		// hand it off to a worker while still servicing other events.
-		if tag, ok := s.pickForDispatch(); ok {
-			head := s.fifos[tag].Front().Value.(*clientTransferFile)
+		if st, ok := s.pickForDispatch(); ok {
+			head := st.fifo.Front().Value.(*clientTransferFile)
 			select {
 			case s.out <- head:
-				s.onDispatched(tag)
+				s.onDispatched(st)
 			case req := <-s.admit:
 				s.handleAdmit(req)
 			case ev := <-s.events:
@@ -426,26 +477,28 @@ func (s *TagScheduler) onTick() {
 // are under both caps, the shed is due to pool-wide contention — blaming
 // the origin would be wrong, so report the cache as overloaded.
 func (s *TagScheduler) classifyShed(tag string) ShedReason {
-	if s.starving[tag] >= s.starvingCap() {
+	st, ok := s.tags[tag]
+	if !ok {
+		return ShedCacheOverloaded
+	}
+	if st.starving >= s.starvingCap() {
 		return ShedOriginUnresponsive
 	}
-	if s.active[tag] >= s.activeCap() {
+	if st.active >= s.activeCap() {
 		return ShedOriginSlow
 	}
 	return ShedCacheOverloaded
 }
 
 func (s *TagScheduler) handleAdmit(req *admitReq) {
-	s.lastSeen[req.tag] = time.Now()
-	qLen := 0
-	if q, ok := s.fifos[req.tag]; ok {
-		qLen = q.Len()
-	}
+	st := s.tagFor(req.tag)
+	st.lastSeen = time.Now()
+	qLen := st.fifo.Len()
 	// Per-tag cap is checked before the global one so a rejection is
 	// attributed to the tag's own state whenever its own queue is the
 	// limit.
 	if s.cfg.PerTagPendingSize > 0 && qLen >= s.cfg.PerTagPendingSize {
-		s.rejects[req.tag]++
+		st.rejects++
 		s.totalRejectsPerTag++
 		reason := s.classifyShed(req.tag)
 		req.reply <- &SchedulerRejection{
@@ -461,7 +514,7 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 	// healthy origin out of admission entirely. The overshoot is bounded
 	// by one entry per distinct tag.
 	if s.cfg.PendingBufferSize > 0 && s.pending >= s.cfg.PendingBufferSize && qLen > 0 {
-		s.rejects[req.tag]++
+		st.rejects++
 		s.totalRejectsGlobal++
 		reason := s.classifyShed(req.tag)
 		req.reply <- &SchedulerRejection{
@@ -471,40 +524,28 @@ func (s *TagScheduler) handleAdmit(req *admitReq) {
 		}
 		return
 	}
-	q, ok := s.fifos[req.tag]
-	if !ok {
-		q = list.New()
-		s.fifos[req.tag] = q
-	}
-	q.PushBack(req.file)
+	st.fifo.PushBack(req.file)
 	s.pending++
-	s.admits[req.tag]++
+	st.admits++
 	s.totalAdmits++
 	req.reply <- nil
 }
 
 func (s *TagScheduler) handleEvent(ev schedulerEvent) {
-	s.lastSeen[ev.tag] = time.Now()
+	st := s.tagFor(ev.tag)
+	st.lastSeen = time.Now()
 	switch ev.kind {
 	case evFirstByte:
-		s.decrementCounter(s.starving, ev.tag)
-	case evDone:
-		s.decrementCounter(s.active, ev.tag)
-		if ev.stillStarving {
-			s.decrementCounter(s.starving, ev.tag)
+		if st.starving > 0 {
+			st.starving--
 		}
-	}
-}
-
-// decrementCounter lowers a per-tag counter by one, deleting the map
-// entry when it reaches zero so idle tags do not accumulate in memory
-// (or in the monitoring snapshot) forever.
-func (s *TagScheduler) decrementCounter(m map[string]int, tag string) {
-	switch v := m[tag]; {
-	case v > 1:
-		m[tag] = v - 1
-	case v == 1:
-		delete(m, tag)
+	case evDone:
+		if st.active > 0 {
+			st.active--
+		}
+		if ev.stillStarving && st.starving > 0 {
+			st.starving--
+		}
 	}
 }
 
@@ -512,58 +553,60 @@ func (s *TagScheduler) decrementCounter(m map[string]int, tag string) {
 // hand off to a worker, using a weighted random draw across eligible
 // tags (those under both the starving and active caps). Weight is
 // 1/(1+EMA) so tags that have used less of the pool recently are more
-// likely to be picked. Returns "", false if nothing is dispatchable.
-func (s *TagScheduler) pickForDispatch() (string, bool) {
+// likely to be picked; it is refreshed once per tick (see tickEMA)
+// because dispatch decisions are far more frequent than ticks. Cap
+// eligibility, by contrast, must be evaluated live: the counters move
+// with every transfer event. Returns nil, false if nothing is
+// dispatchable.
+func (s *TagScheduler) pickForDispatch() (*tagState, bool) {
 	starvingCap := s.starvingCap()
 	activeCap := s.activeCap()
 
-	type cand struct {
-		tag string
-		w   float64
-	}
-	var cands []cand
+	cands := s.cands[:0]
 	totalW := 0.0
-	for tag, q := range s.fifos {
-		if q.Len() == 0 {
+	for _, st := range s.tags {
+		if st.fifo.Len() == 0 {
 			continue
 		}
-		if s.starving[tag] >= starvingCap {
+		if st.starving >= starvingCap {
 			continue
 		}
-		if s.active[tag] >= activeCap {
+		if st.active >= activeCap {
 			continue
 		}
-		w := 1.0 / (1.0 + s.ema[tag])
-		cands = append(cands, cand{tag, w})
-		totalW += w
+		cands = append(cands, dispatchCandidate{st: st, w: st.weight})
+		totalW += st.weight
 	}
+	// Retain the grown backing array; the scheduler goroutine is the sole
+	// user, so it can be reused on the next dispatch decision.
+	s.cands = cands
 	if len(cands) == 0 {
-		return "", false
+		return nil, false
 	}
 	r := s.rng.Float64() * totalW
-	for _, c := range cands {
-		r -= c.w
+	for i := range cands {
+		r -= cands[i].w
 		if r <= 0 {
-			return c.tag, true
+			return cands[i].st, true
 		}
 	}
-	return cands[len(cands)-1].tag, true
+	return cands[len(cands)-1].st, true
 }
 
-func (s *TagScheduler) onDispatched(tag string) {
-	q := s.fifos[tag]
-	q.Remove(q.Front())
-	if q.Len() == 0 {
-		delete(s.fifos, tag)
-	}
+func (s *TagScheduler) onDispatched(st *tagState) {
+	st.fifo.Remove(st.fifo.Front())
 	s.pending--
-	s.active[tag]++
-	s.starving[tag]++
-	s.lastSeen[tag] = time.Now()
+	st.active++
+	st.starving++
+	st.lastSeen = time.Now()
 }
 
 // tickEMA advances the per-tag exponentially-weighted moving average of
-// active workers. Called at a fixed cadence (roughly EMAWindow/8).
+// active workers and refreshes the cached dispatch weight derived from
+// it. Called at a fixed cadence (roughly EMAWindow/8).
+//
+// A tag first seen since the last tick starts from an EMA of zero, so the
+// same update rule bootstraps it correctly.
 func (s *TagScheduler) tickEMA() {
 	now := time.Now()
 	dt := now.Sub(s.lastTick)
@@ -572,33 +615,27 @@ func (s *TagScheduler) tickEMA() {
 		return
 	}
 	alpha := 1.0 - math.Exp(-float64(dt)/float64(s.cfg.EMAWindow))
-	seen := make(map[string]struct{}, len(s.ema))
-	for tag, e := range s.ema {
-		next := (1-alpha)*e + alpha*float64(s.active[tag])
-		if next < 1e-6 && s.active[tag] == 0 {
-			delete(s.ema, tag)
-		} else {
-			s.ema[tag] = next
+	for _, st := range s.tags {
+		next := (1-alpha)*st.ema + alpha*float64(st.active)
+		if next < emaFloor && st.active == 0 {
+			// Snap the tail of the decay to zero: an exponential never
+			// reaches it, and an idle tag must be able to become evictable.
+			next = 0
 		}
-		seen[tag] = struct{}{}
-	}
-	// Bootstrap EMA for tags that appeared since the last tick.
-	for tag := range s.active {
-		if _, ok := seen[tag]; ok {
-			continue
-		}
-		if s.active[tag] > 0 {
-			s.ema[tag] = alpha * float64(s.active[tag])
-		}
+		st.ema = next
+		st.weight = 1.0 / (1.0 + st.ema)
 	}
 }
 
-// evictIdleTags drops all per-tag state for tags with no queued or
-// in-flight work, no still-decaying EMA, and no activity for at least a
-// grace period. Without eviction, every origin ever contacted would stay
-// in the maps (and thus in every monitoring snapshot) for the process
-// lifetime — unbounded memory and Prometheus label cardinality, plus an
-// ever-growing O(tags) snapshot cost paid on this goroutine.
+// evictIdleTags drops all state for tags with no queued or in-flight
+// work, no still-decaying EMA, and no activity for at least a grace
+// period. This periodic sweep is the only place tag state is removed:
+// counters reaching zero are left alone, because a tag that just finished
+// a transfer is very likely to start another one. Without eviction,
+// though, every origin ever contacted would stay in the map (and thus in
+// every monitoring snapshot) for the process lifetime — unbounded memory
+// and Prometheus label cardinality, plus an ever-growing O(tags) snapshot
+// cost paid on this goroutine.
 //
 // The grace period is at least the EMA window so the metrics publisher
 // (which samples every few seconds) reliably observes a tag's final
@@ -607,25 +644,23 @@ func (s *TagScheduler) tickEMA() {
 // treats per-tag totals as delta sources and handles the reset.
 func (s *TagScheduler) evictIdleTags(now time.Time) {
 	grace := s.cfg.EMAWindow
-	if grace < 10*time.Second {
-		grace = 10 * time.Second
+	if grace < minEvictionGrace {
+		grace = minEvictionGrace
 	}
-	for tag, seen := range s.lastSeen {
-		if now.Sub(seen) < grace {
+	for tag, st := range s.tags {
+		if now.Sub(st.lastSeen) < grace {
 			continue
 		}
-		if _, ok := s.fifos[tag]; ok {
+		if st.fifo.Len() > 0 {
 			continue
 		}
-		if s.active[tag] > 0 || s.starving[tag] > 0 {
+		if st.active > 0 || st.starving > 0 {
 			continue
 		}
-		if _, ok := s.ema[tag]; ok {
+		if st.ema >= emaFloor {
 			continue
 		}
-		delete(s.lastSeen, tag)
-		delete(s.admits, tag)
-		delete(s.rejects, tag)
+		delete(s.tags, tag)
 	}
 }
 
@@ -652,9 +687,9 @@ func (s *TagScheduler) Snapshot(ctx context.Context) SchedulerSnapshot {
 }
 
 // buildSnapshot must be called on the scheduler goroutine (all state
-// reads are lock-free because we're the sole writer). Copies every
-// map value; the returned SchedulerSnapshot never aliases scheduler
-// state.
+// reads are lock-free because we're the sole writer). Every per-tag
+// value is copied out; the returned SchedulerSnapshot never aliases
+// scheduler state.
 func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
 	snap := SchedulerSnapshot{
 		Global: GlobalStats{
@@ -668,44 +703,18 @@ func (s *TagScheduler) buildSnapshot() SchedulerSnapshot {
 			TotalRejectsPerTag: s.totalRejectsPerTag,
 		},
 	}
-	// Collect the union of every tag we know about — a tag may have
-	// pending entries in `fifos`, active/starving counters even after
-	// its FIFO drained, an EMA that's still decaying, or admit/reject
-	// totals awaiting idle eviction after its in-flight work is done.
-	seen := make(map[string]struct{})
-	add := func(m map[string]struct{}, k string) { m[k] = struct{}{} }
-	for tag := range s.fifos {
-		add(seen, tag)
-	}
-	for tag := range s.active {
-		add(seen, tag)
-	}
-	for tag := range s.starving {
-		add(seen, tag)
-	}
-	for tag := range s.ema {
-		add(seen, tag)
-	}
-	for tag := range s.admits {
-		add(seen, tag)
-	}
-	for tag := range s.rejects {
-		add(seen, tag)
-	}
-
-	snap.Tags = make(map[string]PerTagStats, len(seen))
-	for tag := range seen {
-		var pending int
-		if q, ok := s.fifos[tag]; ok {
-			pending = q.Len()
-		}
+	// Every tag the scheduler knows about is reported, including ones whose
+	// queue has drained and whose transfers have finished: their
+	// admit/reject totals stay visible until the tag is evicted.
+	snap.Tags = make(map[string]PerTagStats, len(s.tags))
+	for tag, st := range s.tags {
 		snap.Tags[tag] = PerTagStats{
-			Pending:  pending,
-			Active:   s.active[tag],
-			Starving: s.starving[tag],
-			EMA:      s.ema[tag],
-			Admits:   s.admits[tag],
-			Rejects:  s.rejects[tag],
+			Pending:  st.fifo.Len(),
+			Active:   st.active,
+			Starving: st.starving,
+			EMA:      st.ema,
+			Admits:   st.admits,
+			Rejects:  st.rejects,
 		}
 	}
 	snap.Global.TotalTags = len(snap.Tags)

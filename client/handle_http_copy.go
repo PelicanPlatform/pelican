@@ -26,6 +26,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"strconv"
@@ -202,7 +203,18 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	}
 
 	// COPY request to the destination
-	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
+	//
+	// Tell the scheduler (if any) the destination is alive as soon as the first
+	// byte of its response arrives.  The trace is scoped to the COPY so the
+	// earlier HEAD — which contacts the *source* — cannot satisfy it.
+	copyContext := ctx
+	if xfer.schedFirstByte != nil {
+		schedFirstByte := xfer.schedFirstByte
+		copyContext = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GotFirstResponseByte: func() { schedFirstByte() },
+		})
+	}
+	req, err = http.NewRequestWithContext(copyContext, "COPY", resolvedDestUrl.String(), nil)
 	if err != nil {
 		err = error_codes.NewParameterError(
 			errors.Wrapf(err, "unable to create COPY request for third-party-copy to %s", xfer.remoteURL.String()),
@@ -274,6 +286,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	defer ticker.Stop()
 
 	gotFirstByte := false
+	schedFirstByteSent := false
 MessageHandler:
 	for {
 		select {
@@ -291,6 +304,15 @@ MessageHandler:
 					err = error_codes.NewTransferError(msg.err)
 				}
 				break MessageHandler
+			}
+			// A parsed performance marker proves the destination is talking to
+			// us even if it reports no bytes moved yet, so it is a valid
+			// first-byte signal for the scheduler.  The hook is CAS-guarded by
+			// the scheduler, so firing here as well as from the httptrace on
+			// the COPY request is harmless — whichever happens first wins.
+			if !schedFirstByteSent && xfer.schedFirstByte != nil {
+				schedFirstByteSent = true
+				xfer.schedFirstByte()
 			}
 			downloaded = int64(msg.xferred)
 			if !gotFirstByte && downloaded > 0 {

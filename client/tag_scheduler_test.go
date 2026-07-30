@@ -20,6 +20,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // makeFile builds a minimal *clientTransferFile whose first attempt
@@ -44,6 +46,20 @@ func makeFile(host string) *clientTransferFile {
 			remoteURL: &url.URL{Scheme: "pelican", Host: "ns", Path: "/x"},
 		},
 	}
+}
+
+// startScheduler starts `sched` under a throwaway errgroup, dispatching to
+// `out`, and registers cleanup that stops it and waits for the goroutine.
+// Tests that want submissions to pile up in the FIFOs simply pass an
+// unbuffered `out` that nothing reads.
+func startScheduler(t *testing.T, ctx context.Context, sched *TagScheduler, out chan *clientTransferFile) {
+	t.Helper()
+	egrp, _ := errgroup.WithContext(ctx)
+	sched.Start(ctx, egrp, out)
+	t.Cleanup(func() {
+		sched.Stop()
+		require.NoError(t, egrp.Wait())
+	})
 }
 
 // drainOut consumes files from `out` and, for each one, invokes any
@@ -73,8 +89,9 @@ func drainOut(ctx context.Context, t *testing.T, out <-chan *clientTransferFile,
 }
 
 // TestTagSchedulerAcceptsAndDispatches: with generous caps, all
-// admitted transfers should be dispatched in-order to the worker
-// channel.
+// admitted transfers should be dispatched to the worker channel, and a
+// single tag's transfers must come out in submission order (the per-tag
+// queue is a FIFO; only the choice *between* tags is randomized).
 func TestTagSchedulerAcceptsAndDispatches(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -86,14 +103,21 @@ func TestTagSchedulerAcceptsAndDispatches(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
+	// Each file carries a distinct remote path so the dispatch order can be
+	// compared against the submission order.
 	const N = 10
+	submitted := make([]string, 0, N)
 	for i := 0; i < N; i++ {
-		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+		f := makeFile("originA")
+		f.file.remoteURL.Path = fmt.Sprintf("/obj-%d", i)
+		submitted = append(submitted, f.file.remoteURL.Path)
+		require.NoError(t, sched.Submit(ctx, "originA", f))
 	}
+	dispatched := make([]string, 0, N)
 	got := drainOut(ctx, t, out, N, func(_ string, f *clientTransferFile) {
+		dispatched = append(dispatched, f.file.remoteURL.Path)
 		// Simulate the transfer completing immediately.
 		f.file.schedDone()
 	})
@@ -101,6 +125,7 @@ func TestTagSchedulerAcceptsAndDispatches(t *testing.T) {
 	for _, h := range got {
 		assert.Equal(t, "originA", h)
 	}
+	assert.Equal(t, submitted, dispatched, "a single tag must be dispatched in FIFO order")
 }
 
 // TestTagSchedulerGlobalBufferFullRejects: when total pending reaches
@@ -115,12 +140,9 @@ func TestTagSchedulerGlobalBufferFullRejects(t *testing.T) {
 		PerTagPendingSize:     100, // large; hit the global cap first
 		EMAWindow:             5 * time.Second,
 	})
-	// Don't Start yet — we want submissions to enqueue without a worker
-	// draining them.
-	sched.out = make(chan *clientTransferFile)
-	sched.stopped = make(chan struct{})
-	go sched.run(ctx)
-	t.Cleanup(sched.Stop)
+	// Nothing reads `out`, so submissions enqueue without a worker draining
+	// them.
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 
 	// Fill the buffer with 3 admits; the scheduler will hold them
 	// (starving cap = 2, so at most 2 dispatch attempts fire before a
@@ -147,10 +169,7 @@ func TestTagSchedulerPerTagPendingFullRejects(t *testing.T) {
 		PerTagPendingSize:     2,
 		EMAWindow:             5 * time.Second,
 	})
-	sched.out = make(chan *clientTransferFile)
-	sched.stopped = make(chan struct{})
-	go sched.run(ctx)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -176,24 +195,18 @@ func TestTagSchedulerStarvingCap(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	// Admit 10 transfers for one tag.  Do NOT fire first-byte or done.
 	for i := 0; i < 10; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
 	}
-	// Give the scheduler a moment to attempt to dispatch.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) && len(out) < 3 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	// Only 3 should be dispatched (starving cap); the other 7 sit
-	// in the FIFO.
-	assert.Equal(t, 3, len(out), "starving cap should hold dispatch at ceil(30%%)")
-	// Wait an extra beat and confirm we still don't overshoot.
-	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, 3, len(out), "no further dispatch until first byte or done")
+	// Only 3 should be dispatched (starving cap); the other 7 sit in the
+	// FIFO, and stay there — nothing releases a starving slot.
+	require.Eventually(t, func() bool { return len(out) == 3 }, time.Second, 10*time.Millisecond,
+		"starving cap should hold dispatch at ceil(30%)")
+	assert.Never(t, func() bool { return len(out) != 3 }, 300*time.Millisecond, 10*time.Millisecond,
+		"no further dispatch until first byte or done")
 }
 
 // TestTagSchedulerFirstByteReleasesStarvingSlot: once a dispatched
@@ -210,8 +223,7 @@ func TestTagSchedulerFirstByteReleasesStarvingSlot(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	for i := 0; i < 10; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -239,8 +251,7 @@ func TestTagSchedulerActiveCap(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	for i := 0; i < 10; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -255,8 +266,8 @@ func TestTagSchedulerActiveCap(t *testing.T) {
 	}
 	// Active cap should hold at 4; nothing more dispatches until a
 	// schedDone fires.
-	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, 0, len(out), "active cap should prevent further dispatch until a done")
+	assert.Never(t, func() bool { return len(out) > 0 }, 300*time.Millisecond, 10*time.Millisecond,
+		"active cap should prevent further dispatch until a done")
 
 	firstFour[0].file.schedDone()
 	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
@@ -276,8 +287,7 @@ func TestTagSchedulerFairnessAcrossTags(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	for i := 0; i < 10; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -318,8 +328,7 @@ func TestTagSchedulerSnapshot(t *testing.T) {
 	})
 	// No consumer on `out`; buffered so dispatch doesn't block.
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	// Submit enough for originA that we're guaranteed to see rejects
 	// once its FIFO fills (starving cap = 1, active cap = 2 ⇒ at
@@ -384,8 +393,7 @@ func TestTagSchedulerConcurrentSubmit(t *testing.T) {
 		EMAWindow:             time.Second,
 	})
 	out := make(chan *clientTransferFile, 500)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	var wg sync.WaitGroup
 	var accepted, rejected int64
@@ -421,10 +429,7 @@ func TestTagSchedulerRejectClassifiesCacheOverloaded(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	// No worker draining out, so submissions enqueue and fill the buffer.
-	sched.out = make(chan *clientTransferFile)
-	sched.stopped = make(chan struct{})
-	go sched.run(ctx)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -451,8 +456,7 @@ func TestTagSchedulerRejectClassifiesOriginUnresponsive(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	// First submit dispatches and becomes starving (no first-byte fired).
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -485,8 +489,7 @@ func TestTagSchedulerRejectClassifiesOriginSlow(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile, 100)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	// One dispatches (active == 1 == activeCap). starving (1) stays below the
 	// high starving cap, so the FIFO-full reject classifies as slow, not
@@ -517,8 +520,7 @@ func TestTagSchedulerStarvingReleasedOnEarlyFailure(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	out := make(chan *clientTransferFile)
-	sched.Start(ctx, out)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, out)
 
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -557,8 +559,7 @@ func TestTagSchedulerStopDrainsQueued(t *testing.T) {
 	var dropped []*clientTransferFile
 	sched.onDrop = func(f *clientTransferFile) { dropped = append(dropped, f) }
 	// No reader on out: everything admitted stays queued.
-	out := make(chan *clientTransferFile)
-	sched.Start(ctx, out)
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 
 	const N = 3
 	for i := 0; i < N; i++ {
@@ -576,8 +577,7 @@ func TestTagSchedulerSubmitAfterStop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	sched := NewTagScheduler(4, SchedulerConfig{PendingBufferSize: 10})
-	out := make(chan *clientTransferFile)
-	sched.Start(ctx, out)
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 	sched.Stop()
 
 	err := sched.Submit(ctx, "originA", makeFile("originA"))
@@ -606,7 +606,7 @@ func TestTagSchedulerStopIsIdempotent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	sched := NewTagScheduler(4, SchedulerConfig{})
-	sched.Start(ctx, make(chan *clientTransferFile))
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -615,45 +615,63 @@ func TestTagSchedulerStopIsIdempotent(t *testing.T) {
 	wg.Wait()
 }
 
-// Fully-idle tags must be evicted after the grace period so the per-tag maps
-// (and the monitoring snapshot / Prometheus label set derived from them) do
+// Fully-idle tags must be evicted after the grace period so per-tag state
+// (and the monitoring snapshot / Prometheus label set derived from it) does
 // not grow forever with every origin the cache has ever contacted. Tags with
-// queued or in-flight work, a still-decaying EMA, or recent activity stay.
+// queued or in-flight work, a still-decaying EMA, or recent activity stay:
+// the periodic sweep is the only thing that removes a tag, so counters
+// hitting zero on their own must not.
 func TestTagSchedulerEvictsIdleTags(t *testing.T) {
 	sched := NewTagScheduler(4, SchedulerConfig{}) // EMAWindow 0 → grace floor (10s)
 	now := time.Now()
 	stale := now.Add(-time.Minute)
 
 	// Idle: counters only, no other state — must be evicted.
-	sched.admits["idle"] = 5
-	sched.rejects["idle"] = 2
-	sched.lastSeen["idle"] = stale
+	idle := sched.tagFor("idle")
+	idle.admits, idle.rejects, idle.lastSeen = 5, 2, stale
+	// Queued: a pending transfer pins the tag.
+	queued := sched.tagFor("queued")
+	queued.admits, queued.lastSeen = 1, stale
+	queued.fifo.PushBack(makeFile("queued"))
 	// In-flight: active transfer pins the tag.
-	sched.admits["busy"] = 1
-	sched.active["busy"] = 1
-	sched.lastSeen["busy"] = stale
-	// Decaying: EMA still present pins the tag.
-	sched.admits["decaying"] = 1
-	sched.ema["decaying"] = 0.5
-	sched.lastSeen["decaying"] = stale
+	busy := sched.tagFor("busy")
+	busy.admits, busy.active, busy.lastSeen = 1, 1, stale
+	// Starving: a dispatched transfer still awaiting a first byte pins it.
+	starved := sched.tagFor("starved")
+	starved.admits, starved.active, starved.starving, starved.lastSeen = 1, 1, 1, stale
+	// Decaying: a residual EMA pins the tag.
+	decaying := sched.tagFor("decaying")
+	decaying.admits, decaying.ema, decaying.lastSeen = 1, 0.5, stale
 	// Recent: activity within the grace period pins the tag.
-	sched.admits["recent"] = 1
-	sched.lastSeen["recent"] = now
+	recent := sched.tagFor("recent")
+	recent.admits, recent.lastSeen = 1, now
 
 	sched.evictIdleTags(now)
 
-	assert.NotContains(t, sched.admits, "idle")
-	assert.NotContains(t, sched.rejects, "idle")
-	assert.NotContains(t, sched.lastSeen, "idle")
-	assert.Contains(t, sched.admits, "busy")
-	assert.Contains(t, sched.admits, "decaying")
-	assert.Contains(t, sched.admits, "recent")
+	assert.NotContains(t, sched.tags, "idle")
+	assert.Contains(t, sched.tags, "queued")
+	assert.Contains(t, sched.tags, "busy")
+	assert.Contains(t, sched.tags, "starved")
+	assert.Contains(t, sched.tags, "decaying")
+	assert.Contains(t, sched.tags, "recent")
+
+	// A tag whose transfers have all finished is not evicted on the spot —
+	// only once it has been idle through the grace period.
+	settled := sched.tagFor("settled")
+	settled.admits, settled.lastSeen = 3, now
+	sched.evictIdleTags(now)
+	assert.Contains(t, sched.tags, "settled",
+		"a tag that just went idle keeps its counters until the grace period elapses")
+	settled.lastSeen = stale
+	sched.evictIdleTags(now)
+	assert.NotContains(t, sched.tags, "settled")
 
 	// The evicted tag no longer appears in snapshots (buildSnapshot runs on
 	// the scheduler goroutine; calling it directly is safe on a scheduler
 	// that was never started).
 	snap := sched.buildSnapshot()
 	assert.NotContains(t, snap.Tags, "idle")
+	assert.NotContains(t, snap.Tags, "settled")
 	assert.Contains(t, snap.Tags, "busy")
 }
 
@@ -672,11 +690,7 @@ func TestTagSchedulerGlobalBufferReservesForIdleTags(t *testing.T) {
 		EMAWindow:             5 * time.Second,
 	})
 	// No consumer on out: dispatched work parks, queues build.
-	sched.out = make(chan *clientTransferFile)
-	sched.stopped = make(chan struct{})
-	sched.started.Store(true)
-	go sched.run(ctx)
-	t.Cleanup(sched.Stop)
+	startScheduler(t, ctx, sched, make(chan *clientTransferFile))
 
 	// Saturate the global buffer with one origin.
 	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
@@ -709,13 +723,16 @@ func TestTagSchedulerClassifyShedHonesty(t *testing.T) {
 		PerTagStarvingPercent: 25, // starving cap 1
 		PerTagActivePercent:   50, // active cap 2
 	})
-	// Idle tag: nothing in flight → pool contention, not the origin's fault.
+	// Unknown tag: nothing in flight → pool contention, not the origin's fault.
+	assert.Equal(t, ShedCacheOverloaded, sched.classifyShed("unknownTag"))
+	// Known but wholly idle: same verdict.
+	sched.tagFor("idleTag")
 	assert.Equal(t, ShedCacheOverloaded, sched.classifyShed("idleTag"))
 	// At the starving cap: first-byte-less fetches dominate → unresponsive.
-	sched.active["starved"] = 1
-	sched.starving["starved"] = 1
+	starved := sched.tagFor("starved")
+	starved.active, starved.starving = 1, 1
 	assert.Equal(t, ShedOriginUnresponsive, sched.classifyShed("starved"))
 	// At the active cap, delivering data → merely slow.
-	sched.active["slow"] = 2
+	sched.tagFor("slow").active = 2
 	assert.Equal(t, ShedOriginSlow, sched.classifyShed("slow"))
 }

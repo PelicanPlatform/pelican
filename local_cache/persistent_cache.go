@@ -657,9 +657,9 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		}
 		if schedCfg.PendingBufferSize > 0 {
 			pcScheduler = client.NewTagScheduler(workers, schedCfg)
-			te, err = client.NewTransferEngineWithScheduler(ctx, workers, pcScheduler)
+			te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers), client.WithScheduler(pcScheduler))
 		} else {
-			te, err = client.NewTransferEngineWithWorkers(ctx, workers)
+			te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers))
 		}
 	} else {
 		te, err = client.NewTransferEngine(ctx)
