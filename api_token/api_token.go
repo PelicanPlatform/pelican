@@ -44,6 +44,12 @@ var (
 	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
 	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
 
+	// DB returns the live server database handle. The web_ui layer
+	// wires this at init time; this package deliberately does not
+	// import database, so that the client binary never pulls in gorm
+	// and SQLite.
+	DB func() *gorm.DB = nil
+
 	// EffectiveScopesForUser is a hook the web_ui layer wires up at
 	// init time to expose the effective scope set for a user (the
 	// union of DB user_scopes / group_scopes plus config-derived
@@ -245,8 +251,21 @@ func VerifyApiKey(apiKey string) (bool, []string, string, error) {
 		return false, nil, "", errors.New("Failed to decode the secret")
 	}
 
+	// Resolve the database handle on every call rather than reading a
+	// value captured at startup; see the DB hook's docstring. Both
+	// branches below fail closed: token.Verify folds the error into its
+	// compound error and the request gets a 403, which is the same
+	// outcome as any other failed issuer check.
+	if DB == nil {
+		return false, nil, "", errors.New("API token verification unavailable: database hook is not wired")
+	}
+	db := DB()
+	if db == nil {
+		return false, nil, "", errors.New("API token verification unavailable: server database is not initialized")
+	}
+
 	var apiToken server_structs.ApiKey
-	result := ServerDatabase.First(&apiToken, "id = ?", id)
+	result := db.First(&apiToken, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return false, nil, "", errors.New("Token not found") // token not found
@@ -364,7 +383,3 @@ func ListApiKeys(db *gorm.DB) ([]server_structs.ApiKey, error) {
 
 	return apiKeys, nil
 }
-
-// ServerDatabase holds the gorm.DB reference for looking up API keys.
-// It is set by the caller (e.g. web_ui) before any token verification happens.
-var ServerDatabase *gorm.DB

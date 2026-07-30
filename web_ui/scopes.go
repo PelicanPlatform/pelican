@@ -62,11 +62,25 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-// init wires the api_token package's EffectiveScopesForUser hook so
-// API-token verification can intersect a key's persisted scopes
-// against the creator's *current* authority on every use. Without
-// this, a user who lost server.user_admin would keep using the
-// scope through any API token they had previously minted.
+// init wires the two hooks the api_token package needs. Both are
+// resolved on every call rather than captured once, because
+// database.ServerDatabase is assigned (and reassigned) by
+// InitServerDatabase long after this init runs.
+//
+// api_token.DB hands over the live server database handle. api_token
+// deliberately does not import database — that separation keeps gorm
+// and SQLite out of the client binary — so it cannot read the global
+// itself. This used to be a plain pointer copy made from
+// ConfigureServerWebAPI, which runs before every InitServerDatabase
+// call site and therefore only ever copied nil; API-token
+// verification then panicked on the nil handle. See the DB hook's
+// docstring in api_token for the full story.
+//
+// EffectiveScopesForUser lets API-token verification intersect a
+// key's persisted scopes against the creator's *current* authority on
+// every use. Without this, a user who lost server.user_admin would
+// keep using the scope through any API token they had previously
+// minted.
 //
 // We resolve through EffectiveScopesForIdentity rather than the
 // pure DB-layer EffectiveScopes so config-derived grants
@@ -80,6 +94,8 @@ import (
 // gap is OIDC-asserted groups, which by definition aren't part of
 // an API token's audit trail.
 func init() {
+	api_token.DB = func() *gorm.DB { return database.ServerDatabase }
+
 	api_token.EffectiveScopesForUser = func(userID string) []token_scopes.TokenScope {
 		// Look up the user record so we can populate Username for
 		// config-derived matching. A deleted user → no scopes,
