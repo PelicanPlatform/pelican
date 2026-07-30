@@ -44,7 +44,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
@@ -761,7 +760,6 @@ func TestApiToken(t *testing.T) {
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
-	api_token.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
