@@ -22,7 +22,6 @@ package fed_tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +68,27 @@ func isPerOriginShedReason(reason string) bool {
 		reason == string(client.ShedOriginSlow)
 }
 
+// burstOriginConfig is this test's private copy of the persistent-cache origin
+// configuration (resources/persistent_cache_config.yaml) plus one addition:
+// Origin.TransferRateLimit. The shared resource file is used by many other
+// tests that do not want a slow origin, so the knob is added here instead of
+// there.
+//
+// posixv2 is the origin backend that honors the rate limit (see
+// origin_serve/rate_limited_fs.go), and 40 KB/s against a 256 KiB object makes
+// every cache-miss fetch take ~6.5 s. That is what turns this test from a race
+// into arithmetic: the fetch the scheduler admits first is still holding its
+// tag's only active slot when the remaining requests of the burst arrive.
+const burstOriginConfig = `Origin:
+  StorageType: "posixv2"
+  EnableDirectReads: true
+  TransferRateLimit: 40KB/s
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
+`
+
 // burstObjectPath is the federation path of the i'th object of a burst set.
 func burstObjectPath(prefix string, i int) string {
 	return fmt.Sprintf("/test/%s-%d.bin", prefix, i)
@@ -81,19 +101,24 @@ func burstObjectURL(prefix string, i int) string {
 		burstObjectPath(prefix, i))
 }
 
-// uploadBurstObjects uploads n objects with identical contents but distinct
-// paths to the origin. Distinct paths are what make a burst interesting: each
+// stageBurstObjects places n objects with identical contents but distinct
+// paths on the origin. Distinct paths are what make a burst interesting: each
 // one becomes its own cache-miss download inside the cache and therefore has
 // to independently clear scheduler admission, rather than coalescing onto a
 // single in-flight fetch.
-func uploadBurstObjects(ctx context.Context, t *testing.T, prefix string, payload []byte, n int, token string) {
+//
+// The objects are written straight into the origin's storage directory instead
+// of being uploaded through the origin's HTTP interface, because the origin's
+// rate limiter is a single bucket shared by reads and writes: pushing
+// nRequests * 256 KiB through it at 40 KB/s would take minutes and outlive the
+// upload tokens. The rate limit exists to slow the cache's fetches down, not
+// the staging of the test data.
+func stageBurstObjects(t *testing.T, ft *fed_test_utils.FedTest, prefix string, payload []byte, n int) {
 	t.Helper()
-	localDir := t.TempDir()
+	storageDir := ft.Exports[0].StoragePrefix
 	for i := 0; i < n; i++ {
-		localFile := filepath.Join(localDir, fmt.Sprintf("%s-%d.bin", prefix, i))
-		require.NoError(t, os.WriteFile(localFile, payload, 0644))
-		_, err := client.DoPut(ctx, localFile, burstObjectURL(prefix, i), false, client.WithToken(token))
-		require.NoError(t, err)
+		objectFile := filepath.Join(storageDir, fmt.Sprintf("%s-%d.bin", prefix, i))
+		require.NoError(t, os.WriteFile(objectFile, payload, 0644))
 	}
 }
 
@@ -124,12 +149,25 @@ func uploadBurstObjects(ctx context.Context, t *testing.T, prefix string, payloa
 //	Cache.Throttle.PerOriginPendingSize      1
 //	Cache.Throttle.EMAWindow                 1s
 //
+// plus, on the origin side (burstOriginConfig):
+//
+//	Origin.TransferRateLimit                 40KB/s
+//
 // Why that configuration sheds: every object in a burst lives on the same
 // origin, so all admissions share one scheduler tag. That tag may hold a
 // single in-flight transfer (active cap 1) and queue a single pending one
 // (per-origin pending 1), so at most two of a 30-request burst are in the
 // system at any moment and the other ~28 arrive to find the tag's FIFO already
 // full.
+//
+// The rate limit is what makes that deterministic rather than timing-dependent.
+// A 256 KiB object at 40 KB/s takes ~6.5 s to fetch, so the admitted transfer
+// still holds the tag's only active slot for seconds after the burst is issued
+// — the shed count follows from the caps instead of from how fast the origin
+// happens to be. It also keeps the successful requests comfortably inside the
+// budget: only two fetches ever run, back to back, so the slowest 200 response
+// lands ~13 s in, well under the 60 s HTTP client timeout below and under
+// ft.Ctx's deadline (inherited from the go-test timeout).
 //
 // Those rejections are attributed to the origin rather than the cache: the
 // per-origin pending cap is checked before the global pending buffer, and the
@@ -153,19 +191,20 @@ func TestScheduler_BurstRejects429(t *testing.T) {
 	require.NoError(t, param.Cache_Throttle_PerOriginPendingSize.Set(1))
 	require.NoError(t, param.Cache_Throttle_EMAWindow.Set(time.Second))
 
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+	ft := fed_test_utils.NewFedTest(t, burstOriginConfig)
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	// A modest 256 KiB payload gives the origin enough real transfer time that
-	// concurrent scheduler admissions overlap.
+	// A 256 KiB payload against the origin's 40 KB/s limit makes each
+	// cache-miss fetch take ~6.5 s, so an admitted transfer is guaranteed to
+	// still hold its tag's active slot while the rest of the burst arrives.
 	const nRequests = 30
 	const httpPrefix = "burst"
 	const clientPrefix = "client-burst"
 	payload := bytes.Repeat([]byte("scheduler-burst-test-"), 256*1024/21+1)[:256*1024]
 
 	testToken := getTempTokenForTest(t)
-	uploadBurstObjects(ft.Ctx, t, httpPrefix, payload, nRequests, testToken)
+	stageBurstObjects(t, ft, httpPrefix, payload, nRequests)
 
 	// Phase 1: raw HTTP against the cache.
 	//
@@ -300,9 +339,10 @@ func TestScheduler_BurstRejects429(t *testing.T) {
 	//
 	// A fresh object set keeps these downloads on the cache-miss path (a hit
 	// is served from local storage and never reaches the scheduler), and a
-	// fresh token avoids the one-minute lifetime of the phase-1 token.
+	// fresh token avoids the one-minute lifetime of the phase-1 token, which
+	// phase 1 may well have burned through waiting on 40 KB/s fetches.
 	clientToken := getTempTokenForTest(t)
-	uploadBurstObjects(ft.Ctx, t, clientPrefix, payload, nRequests, clientToken)
+	stageBurstObjects(t, ft, clientPrefix, payload, nRequests)
 
 	downloadDir := t.TempDir()
 	clientErrs := make([]error, nRequests)
