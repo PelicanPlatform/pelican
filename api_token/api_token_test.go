@@ -21,10 +21,14 @@ package api_token
 import (
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -246,5 +250,154 @@ func TestValidateScopesForCreator(t *testing.T) {
 		}, "u-alice")
 		assert.NoError(t, err,
 			"the fail-closed posture is per-scope: bearer-token authority isn't derived from any user role, so the hook isn't required to authorize it")
+	})
+}
+
+// wellFormedToken is the minimal credential that reaches the database
+// lookup in VerifyApiKey. Both gates in front of the lookup have to be
+// cleared: ApiTokenRegex wants 5 alphanumerics, a dot, and 64
+// alphanumerics, and the secret is then hex-decoded — so the tail must
+// also be valid hex, or the call bails out one step early and never
+// touches the handle. No such key exists in any database; the point is
+// to reach the lookup, not to authenticate. Do not "simplify" this
+// value: a tail with a non-hex letter in it turns every test below
+// into a no-op that passes for the wrong reason.
+const wellFormedToken = "abcde.0000000000000000000000000000000000000000000000000000000000000000"
+
+// newTestDB opens a fresh in-memory SQLite database with the api_keys
+// table migrated.
+func newTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&server_structs.ApiKey{}))
+	return db
+}
+
+// withDBHook installs the DB hook for the duration of the subtest and
+// restores whatever was there before.
+//
+// It also clears VerifiedKeysCache at both ends. That cache is a
+// package global keyed by token ID and is consulted before the
+// database; a key verified in one subtest would short-circuit the
+// lookup in the next, skipping the exact code path these tests exist to
+// exercise.
+func withDBHook(t *testing.T, hook func() *gorm.DB) {
+	t.Helper()
+	prev := DB
+	DB = hook
+	VerifiedKeysCache.DeleteAll()
+	t.Cleanup(func() {
+		DB = prev
+		VerifiedKeysCache.DeleteAll()
+	})
+}
+
+// TestDBHookIsResolvedPerCall pins the fix for the nil-handle panic that
+// shipped in v7.26.0, introduced by 482348da9 ("Extract API token code
+// into api_token package").
+//
+// api_token used to hold a `ServerDatabase *gorm.DB` copied from
+// database.ServerDatabase by web_ui.ConfigureServerWebAPI. That runs at
+// launcher.go:97, ahead of every database.InitServerDatabase call site,
+// so the copy was nil for the entire life of every server process and
+// VerifyApiKey panicked inside gorm's getInstance() on the first real
+// API token presented. It was not a startup race — the ordering is
+// deterministic and single-threaded.
+//
+// The contract now: DB is a function resolved on every call, so a handle
+// that appears (or changes) after wiring is picked up, and an
+// unavailable handle produces an error rather than a panic.
+func TestDBHookIsResolvedPerCall(t *testing.T) {
+	scope := token_scopes.Monitoring_Scrape.String()
+
+	t.Run("handle assigned after wiring is seen", func(t *testing.T) {
+		// Mirrors production ordering exactly: the hook is wired while
+		// the underlying handle is still nil (web_ui's init()), and the
+		// database only materializes later (InitServerDatabase). Under
+		// the old snapshot this is precisely the sequence that yielded
+		// a permanently nil handle.
+		var live *gorm.DB
+		withDBHook(t, func() *gorm.DB { return live })
+
+		live = newTestDB(t)
+		tok, err := CreateApiKey(live, "late-db", "u-alice", scope, time.Time{})
+		require.NoError(t, err)
+
+		valid, caps, createdBy, err := VerifyApiKey(tok)
+		require.NoError(t, err)
+		assert.True(t, valid)
+		assert.Equal(t, []string{scope}, caps)
+		assert.Equal(t, "u-alice", createdBy)
+	})
+
+	t.Run("handle reassignment is seen", func(t *testing.T) {
+		// InitServerDatabase reassigns database.ServerDatabase and runs
+		// more than once in a process hosting several modules
+		// (serve --module director --module origin, and the fed tests,
+		// which launch four servers in-process). A captured handle would
+		// stay pinned to the first database even after the swap, so this
+		// case would fail even with the old snapshot correctly ordered.
+		first := newTestDB(t)
+		second := newTestDB(t)
+
+		live := first
+		withDBHook(t, func() *gorm.DB { return live })
+
+		// Mint the key into the SECOND database only.
+		tok, err := CreateApiKey(second, "reassigned", "u-alice", scope, time.Time{})
+		require.NoError(t, err)
+
+		valid, _, _, err := VerifyApiKey(tok)
+		require.Error(t, err, "key must not resolve while the hook still points at the first database")
+		assert.False(t, valid)
+
+		live = second
+		valid, _, _, err = VerifyApiKey(tok)
+		require.NoError(t, err, "the swap must be picked up on the next call")
+		assert.True(t, valid)
+	})
+
+	t.Run("unwired hook fails closed without panicking", func(t *testing.T) {
+		withDBHook(t, nil)
+
+		var valid bool
+		var err error
+		require.NotPanics(t, func() {
+			valid, _, _, err = VerifyApiKey(wellFormedToken)
+		}, "an unavailable database must never panic the request goroutine")
+		require.Error(t, err)
+		assert.False(t, valid)
+		assert.Contains(t, err.Error(), "not wired")
+	})
+
+	t.Run("nil handle fails closed without panicking", func(t *testing.T) {
+		// The v7.26.0 shape: the hook is present but the database behind
+		// it was never initialized.
+		withDBHook(t, func() *gorm.DB { return nil })
+
+		var valid bool
+		var err error
+		require.NotPanics(t, func() {
+			valid, _, _, err = VerifyApiKey(wellFormedToken)
+		}, "an uninitialized database must never panic the request goroutine")
+		require.Error(t, err)
+		assert.False(t, valid)
+		assert.Contains(t, err.Error(), "not initialized")
+	})
+
+	t.Run("Verify surfaces an unavailable database as an error", func(t *testing.T) {
+		// Verify is what token.CheckApiTokenIssuerFunc actually calls, so
+		// this is the entry point the panicking stack traces came in
+		// through. token.Verify folds the error into its compound error
+		// and the request gets a 403.
+		withDBHook(t, func() *gorm.DB { return nil })
+
+		var err error
+		require.NotPanics(t, func() {
+			err = Verify(wellFormedToken, []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}, false)
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not initialized")
 	})
 }
