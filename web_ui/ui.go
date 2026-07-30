@@ -1042,9 +1042,6 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
-	// Give the API token package access to the server DB
-	api_token.ServerDatabase = database.ServerDatabase
-
 	// start the cache for verified API keys
 	egrp.Go(func() error {
 		api_token.VerifiedKeysCache.Start()
