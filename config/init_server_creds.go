@@ -38,6 +38,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -984,13 +986,22 @@ func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOverridePEM ...string) (jwk.Set, error) {
 	jwks := jwk.NewSet()
 	if existingJWKS != "" {
-		raw, err := jwk.ReadFile(existingJWKS)
+		// This function is on the request path of every public JWKS endpoint,
+		// so go through the shared reader: bounded, throttled to one read per
+		// few seconds, permission-checked, and tolerant of a torn read while
+		// the file is being rewritten.
+		//
+		// The set the reader returns is shared and must not be mutated, and
+		// the private-key loop below adds to jwks, so copy it into a set of
+		// our own.
+		fileKeys, err := ReadPublicJWKSFile(existingJWKS)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to read issuer JWKS file")
 		}
-		jwks, err = stripPrivateKeys(raw)
-		if err != nil {
-			return nil, errors.Wrap(err, "issuer JWKS file contains invalid keys")
+		if err := ForEachKey(fileKeys, func(k jwk.Key) error {
+			return errors.Wrap(jwks.AddKey(k), "failed to add key from issuer JWKS file")
+		}); err != nil {
+			return nil, err
 		}
 	} else if len(keyPathOverridePEM) > 0 && keyPathOverridePEM[0] != "" {
 		key, err := LoadSinglePEM(keyPathOverridePEM[0])
@@ -1132,21 +1143,16 @@ func stripPrivateKeys(set jwk.Set) (jwk.Set, error) {
 	})
 }
 
-// ReadPublicJWKSFile reads the JWKS file at path and returns a new set
-// containing only the public projection of each key. Symmetric (kty=oct)
-// keys are rejected. Private key material is stripped via jwk.PublicKeyOf.
-// This is the canonical way to load an operator-supplied key file for use
-// in a public JWKS endpoint.
+// ReadPublicJWKSFile returns the public projection of every key in the JWKS
+// file at path. Symmetric (kty=oct) keys are rejected. Private key material is
+// stripped via jwk.PublicKeyOf. This is the canonical way to load an
+// operator-supplied key file for use in a public JWKS endpoint.
+//
+// Reads are bounded, throttled, and fall back to the last good contents on a
+// torn read; see readPublicJWKSFileCached for the details and for the
+// read-only contract on the returned set.
 func ReadPublicJWKSFile(path string) (jwk.Set, error) {
-	raw, err := jwk.ReadFile(path)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read JWKS file %s", path)
-	}
-	out, err := stripPrivateKeys(raw)
-	if err != nil {
-		return nil, errors.Wrapf(err, "JWKS file %s is invalid", path)
-	}
-	return out, nil
+	return readPublicJWKSFileCached(path)
 }
 
 // GetIssuerPublicJWKS returns the full server-level public JWKS.
@@ -1166,15 +1172,21 @@ func GetIssuerPublicJWKS(keyPathOverridePEM ...string) (jwk.Set, error) {
 // extraJwksPath. When extraJwksPath is empty the result is identical to
 // GetIssuerPublicJWKS.
 //
+// A kid present in both the extra file and the base set is an override, not a
+// conflict: the per-namespace file is the more specific configuration, so its
+// key is published and the base key carrying that kid is not published for
+// this namespace. The override is logged, because it also means tokens signed
+// by the server's own key with that kid stop verifying here.
+//
 // The base key set and the optional extra file fail independently. A failure
 // to load the base set is always returned as an error: there is no correct
 // subset left to serve. A failure to read or merge the extra file (unreadable
-// or corrupt file, a symmetric key, or a kid that collides with an already-
-// published key) is instead routed through onExtraError, which owns the
-// abort-vs-degrade policy: returning nil degrades to the base-only set;
-// returning a non-nil error propagates it. The extra file is optional and
-// operator-supplied, so a serve-time caller passes a policy that logs and
-// degrades rather than dropping the server's own valid keys.
+// or corrupt file, a symmetric key, or one kid used twice within the file) is
+// instead routed through onExtraError, which owns the abort-vs-degrade policy:
+// returning nil degrades to the base-only set; returning a non-nil error
+// propagates it. The extra file is optional and operator-supplied, so a
+// serve-time caller passes a policy that logs and degrades rather than
+// dropping the server's own valid keys.
 //
 // The extra file is merged all-or-nothing: it is fully validated before any
 // of its keys are added, so a degrade yields exactly the base set, never a
@@ -1189,7 +1201,7 @@ func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(err
 	if extraJwksPath == "" {
 		return base, nil
 	}
-	extraKeys, mergeErr := collectMergeableExtraKeys(base, extraJwksPath)
+	extraKeys, overridden, mergeErr := collectMergeableExtraKeys(base, extraJwksPath)
 	if mergeErr != nil {
 		if err := onExtraError(mergeErr); err != nil {
 			return nil, err
@@ -1197,11 +1209,29 @@ func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(err
 		// Degrade: serve the base keys without the extra file's keys.
 		return base, nil
 	}
-	// Build a fresh set so that the merged keys cannot alias the base set and
-	// affect other callers (e.g., if GetIssuerPublicJWKS is ever changed to
-	// cache its result). collectMergeableExtraKeys never mutates base.
+	if len(overridden) > 0 {
+		kids := make([]string, 0, len(overridden))
+		for kid := range overridden {
+			kids = append(kids, kid)
+		}
+		sort.Strings(kids)
+		joined := strings.Join(kids, ", ")
+		logJWKSWarningOnChange(extraJwksPath, "kid-override", joined,
+			"Per-namespace JWKS file %s republishes kid(s) %s, which the server's own key "+
+				"set also publishes. The per-namespace key wins: the server's key with that "+
+				"kid is not published for this namespace, so tokens this server signed with "+
+				"it will no longer verify here. Give the per-namespace key a distinct kid if "+
+				"that was not intended.", extraJwksPath, joined)
+	}
+	// Build a fresh set so that the merged keys cannot alias the base set or
+	// the read cache's set and affect other callers.
+	// collectMergeableExtraKeys never mutates base.
 	result := jwk.NewSet()
 	if err := ForEachKey(base, func(k jwk.Key) error {
+		if kid := k.KeyID(); kid != "" && overridden[kid] {
+			// Superseded by the per-namespace key carrying the same kid.
+			return nil
+		}
 		return errors.Wrap(result.AddKey(k),
 			"failed to copy base key into namespace JWKS")
 	}); err != nil {
@@ -1217,48 +1247,55 @@ func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(err
 }
 
 // collectMergeableExtraKeys reads the JWKS file at extraJwksPath, strips any
-// private key material, and returns its keys after verifying that every key
-// carrying a kid has a kid unique against base and against the other extra
-// keys. It never mutates base; the caller merges the returned keys only once
-// the whole file has validated, which keeps the merge all-or-nothing.
-func collectMergeableExtraKeys(base jwk.Set, extraJwksPath string) ([]jwk.Key, error) {
+// private key material, and returns its keys along with the set of kids that
+// the file takes over from base.
+//
+// Two kinds of kid reuse are treated differently. One kid used twice within
+// the extra file is an error: neither key is more specific than the other, so
+// there is no defensible way to pick a winner, and rejecting the file is
+// better than publishing an ambiguous set. A kid shared between the extra file
+// and base is an override: the per-namespace file is the more specific
+// configuration, so it wins and the colliding base kid is reported in
+// overridden for the caller to drop and log.
+//
+// It never mutates base; the caller merges the returned keys only once the
+// whole file has validated, which keeps the merge all-or-nothing.
+func collectMergeableExtraKeys(base jwk.Set, extraJwksPath string) (keys []jwk.Key, overridden map[string]bool, err error) {
 	extra, err := ReadPublicJWKSFile(extraJwksPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// Seed the seen-kid set with the base keys so a collision against either
-	// the server's public key set or an earlier key in the extra file itself
-	// is caught the same way.
-	seen := make(map[string]bool)
-	_ = ForEachKey(base, func(k jwk.Key) error {
-		if kid := k.KeyID(); kid != "" {
-			seen[kid] = true
-		}
-		return nil
-	})
-	keys := make([]jwk.Key, 0, extra.Len())
+	claimed := make(map[string]bool)
+	keys = make([]jwk.Key, 0, extra.Len())
 	if err := ForEachKey(extra, func(k jwk.Key) error {
-		// Only keys carrying a kid are checked for uniqueness. Keyless
-		// entries are still merged into and published in the namespace
-		// JWKS, and verifiers may try them for tokens with no matching kid,
-		// so they are not inert. The check is skipped for them only because
-		// there is no kid to compare, not because they are unusable.
+		// Only keys carrying a kid are checked. Keyless entries are still
+		// merged into and published in the namespace JWKS, and verifiers may
+		// try them for tokens with no matching kid, so they are not inert.
+		// The check is skipped for them only because there is no kid to
+		// compare, not because they are unusable.
 		if kid := k.KeyID(); kid != "" {
-			if seen[kid] {
+			if claimed[kid] {
 				return errors.Errorf(
-					"per-namespace JWKS file %s: key kid %q conflicts with"+
-						" another published key; each published key that"+
-						" carries a kid must have a unique kid",
+					"per-namespace JWKS file %s: kid %q appears more than once"+
+						" in the same file; each key in the file that carries a"+
+						" kid must have a unique kid",
 					extraJwksPath, kid)
 			}
-			seen[kid] = true
+			claimed[kid] = true
 		}
 		keys = append(keys, k)
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return keys, nil
+	overridden = make(map[string]bool)
+	_ = ForEachKey(base, func(k jwk.Key) error {
+		if kid := k.KeyID(); kid != "" && claimed[kid] {
+			overridden[kid] = true
+		}
+		return nil
+	})
+	return keys, overridden, nil
 }
 
 // Check if there is a session secret exists at param.Server_SessionSecretFile and is not empty if there is one.

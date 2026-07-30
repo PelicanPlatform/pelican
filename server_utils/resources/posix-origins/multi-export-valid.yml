@@ -14,3 +14,4 @@ Origin:
     - StoragePrefix: /test2
       FederationPrefix: /second/namespace
       Capabilities: ["Writes"]
+      IssuerJwks: /etc/pelican/extra-keys/second.jwks
