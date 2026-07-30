@@ -471,6 +471,7 @@ func TestIntegrationCORSHeaders(t *testing.T) {
 	require.NoError(t, param.Issuer_RedirectUris.Set([]string{browserOrigin + "/callback"}))
 
 	discoveryURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/openid-configuration"
+	jwksURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
 	tokenURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/token"
 
 	t.Run("discovery is readable from any origin", func(t *testing.T) {
@@ -494,6 +495,49 @@ func TestIntegrationCORSHeaders(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	// The per-namespace discovery document advertises the per-namespace JWKS
+	// as its jwks_uri, so a browser client reads discovery and then fetches
+	// this immediately. If the JWKS is not readable from the same origins as
+	// discovery, that second fetch fails and the client cannot validate any
+	// token signature.
+	t.Run("namespace JWKS is readable from any origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, jwksURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://some-unregistered-site.example.org")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("namespace JWKS preflight is allowed from any origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodOptions, jwksURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://some-unregistered-site.example.org")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("credentialed path ending in the JWKS suffix is not wildcarded", func(t *testing.T) {
+		// The same crafted-path concern as the discovery suffix below: an
+		// attacker-controlled client id ending in ".well-known/issuer.jwks"
+		// dispatches to the credentialed client-configuration read, which must
+		// not inherit the JWKS endpoint's allow-any-origin header.
+		craftedURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/x" + "/.well-known/issuer.jwks"
+		req, err := http.NewRequest(http.MethodGet, craftedURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", "https://evil.example.org")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
 	})
 
 	t.Run("preflight from a registered origin is allowed", func(t *testing.T) {
