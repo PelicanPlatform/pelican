@@ -232,6 +232,13 @@ func TestGetExports(t *testing.T) {
 		assert.False(t, exports[1].Capabilities.Listings)
 		assert.False(t, exports[1].Capabilities.Reads)
 		assert.False(t, exports[1].Capabilities.DirectReads)
+
+		// IssuerJwks is plumbed through by mapstructure tag alone; without an
+		// assertion here a typo in the tag would silently make the
+		// per-namespace JWKS feature a no-op with no failing test.
+		assert.Empty(t, exports[0].IssuerJwks, "an export that omits IssuerJwks should get the zero value")
+		assert.Equal(t, "/etc/pelican/extra-keys/second.jwks", exports[1].IssuerJwks,
+			"IssuerJwks should be parsed from the export block")
 	})
 
 	t.Run("testTrailingSlashRemovalPosix", func(t *testing.T) {

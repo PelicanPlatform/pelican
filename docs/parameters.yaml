@@ -958,8 +958,20 @@ description: |+
       (see `Server.IssuerJwks` for details on that key set).
       If unset, only the server's exported public key set is served.
       This field mirrors `Server.IssuerJwks` but is scoped to a single export.
-      It only takes effect when the origin uses the embedded OAuth2 issuer
-      and the export requires authorization.
+      It only takes effect when the origin uses the embedded OAuth2 issuer,
+      the export requires authorization, and the export does not set its own
+      `IssuerUrls` (an export that names its issuers explicitly does not
+      advertise the per-namespace issuer, so nothing consults these keys).
+      A startup warning is logged when the setting cannot take effect.
+      If a key in this file carries the same `kid` as one of the server's own
+      published keys, the key in this file wins and the server's key with that
+      `kid` is not published for this namespace; the override is logged.
+      Every key in this file is published as a trusted signing key for this
+      namespace, so write access to the file is the authority to mint tokens
+      this origin accepts: keep it owned by the Pelican user and not
+      world-writable. The file is re-read at most once every few seconds, is
+      not read past 1 MiB, and if it is ever unreadable or unparsable the
+      last version that loaded successfully continues to be served.
 
     Example:
 
@@ -3626,6 +3638,16 @@ description: |+
   A filepath to a JWKS-formatted file containing pre-generated public keys. These keys will be
   appended to the public keys dynamically generated from the private keys in [Server.IssuerKeysDirectory](https://docs.pelicanplatform.org/parameters#IssuerKeysDirectory)
   and [Server.IssuerKey](https://docs.pelicanplatform.org/parameters#IssuerKey) (deprecated), to form the final exported public keys JWKS.
+
+  Private key material in this file is stripped before publication, and symmetric keys (`kty=oct`)
+  are rejected outright because they are shared secrets with no public half; a symmetric key here
+  will prevent the server from starting.
+
+  Every key in this file is published as a trusted signing key, so write access to the file is the
+  authority to mint tokens this server accepts: keep it owned by the Pelican user and not
+  world-writable. The file is re-read at most once every few seconds, is not read past 1 MiB, and
+  if it is ever unreadable or unparsable the last version that loaded successfully continues to be
+  served.
 type: filename
 default: none
 components: ["cache", "director", "origin", "registry"]

@@ -2755,6 +2755,10 @@ func ResetConfig() {
 	// Clear out director's ad cache
 	ClearServerAds()
 
+	// Clear cached JWKS file contents so a test that writes a new file at a
+	// path an earlier test used does not see the earlier projection
+	ResetJWKSFileCache()
+
 	// Reset federation metadata
 	resetFedDiscoveryOnce()
 	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
