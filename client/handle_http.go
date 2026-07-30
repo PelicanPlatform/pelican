@@ -274,11 +274,13 @@ type (
 		// TagScheduler hooks: nil unless the engine was constructed with a
 		// scheduler. schedFirstByte fires once (idempotent) as soon as the
 		// remote end proves responsive: for downloads, the first non-empty
-		// body byte written to the local sink; for uploads, a negotiated
-		// 100-continue or the first byte of the PUT response; for
-		// third-party copies, the first byte of the COPY response or the
-		// first performance marker, whichever arrives first. schedDone
-		// fires exactly once when the worker is done with this file.
+		// body byte written to the local sink; for uploads, the earliest of
+		// a negotiated 100-continue, the first byte of the PUT response, or
+		// uploadNonStarvingSentBytes of body consumed by the transport (the
+		// far end must be draining it); for third-party copies, the first
+		// byte of the COPY response or the first performance marker,
+		// whichever arrives first. schedDone fires exactly once when the
+		// worker is done with this file.
 		schedFirstByte func()
 		schedDone      func()
 	}
@@ -4329,12 +4331,29 @@ func (cs *ConstantSizer) BytesComplete() int64 {
 	return cs.read.Load()
 }
 
+// uploadNonStarvingSentBytes is the volume of request body the transport must
+// have consumed before an upload destination is presumed to be draining the
+// connection. Kernel socket buffers plus the transport's own buffering can
+// absorb a few megabytes from a peer that has stopped reading, so a small
+// number of sent bytes proves nothing; once this many bytes have gone out,
+// the far end must actually be consuming them.
+const uploadNonStarvingSentBytes = 4 << 20
+
 // progressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type progressReader struct {
 	reader io.ReadCloser
 	sizer  Sizer
 	closed chan bool
+
+	// sentBytes counts what the HTTP transport has consumed from the
+	// reader (a close proxy for bytes sent on the wire — the transport's
+	// write buffering is a few KiB). When it crosses sentThreshold,
+	// onSentThreshold fires once. Both are touched only from Read, which
+	// the transport calls from a single goroutine, so no locking.
+	sentBytes       int64
+	sentThreshold   int64
+	onSentThreshold func()
 }
 
 // Read implements the common read function for io.Reader
@@ -4342,6 +4361,13 @@ func (pr *progressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
 	if cs, ok := pr.sizer.(*ConstantSizer); ok {
 		cs.read.Add(int64(n))
+	}
+	if pr.onSentThreshold != nil {
+		pr.sentBytes += int64(n)
+		if pr.sentBytes >= pr.sentThreshold {
+			pr.onSentThreshold()
+			pr.onSentThreshold = nil
+		}
 	}
 	return n, err
 }
@@ -4577,22 +4603,28 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	reader := &progressReader{ioreader, sizer, closed}
+	reader := &progressReader{reader: ioreader, sizer: sizer, closed: closed}
 	// This will write to the checksum hashes as we read from the file
 	tee := io.TeeReader(reader, hashesWriter)
 	putContext, cancel := context.WithCancel(transfer.ctx)
 	transferStartTime := time.Now()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
-	// Tell the scheduler (if any) the destination is alive as soon as it says
-	// anything back: a negotiated 100-continue is the earliest such proof,
-	// otherwise the first byte of the final response is.  The trace is scoped
-	// to the PUT itself, not to the checksum fetch that reuses putContext.
-	// Note that we do not send an Expect: 100-continue header, so
-	// Got100Continue only fires when the transport negotiates it on its own.
+	// Tell the scheduler (if any) the destination is alive on the earliest of
+	// three signals: a negotiated 100-continue, the first byte of the final
+	// response, or enough request body consumed that the far end must be
+	// draining it (without 100-continue, a server that only answers after the
+	// whole body would otherwise leave a long upload "starving" for its
+	// entire duration). The hook is CAS-guarded upstream, so the three paths
+	// firing in any combination is harmless. The trace is scoped to the PUT
+	// itself, not to the checksum fetch that reuses putContext. Note that we
+	// do not send an Expect: 100-continue header, so Got100Continue only
+	// fires when the transport negotiates it on its own.
 	requestContext := putContext
 	if transfer.schedFirstByte != nil {
 		schedFirstByte := transfer.schedFirstByte
+		reader.sentThreshold = uploadNonStarvingSentBytes
+		reader.onSentThreshold = schedFirstByte
 		requestContext = httptrace.WithClientTrace(putContext, &httptrace.ClientTrace{
 			Got100Continue:       func() { schedFirstByte() },
 			GotFirstResponseByte: func() { schedFirstByte() },
