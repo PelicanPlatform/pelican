@@ -81,6 +81,97 @@ func fire(t *testing.T, buf *LogRingBuffer, level log.Level, msg string) {
 	require.NoError(t, buf.Fire(entry))
 }
 
+// fireAt feeds an entry stamped with a caller-chosen time, so a test can
+// assert on the buffer's reported span rather than on wall-clock timing.
+func fireAt(t *testing.T, buf *LogRingBuffer, when time.Time, msg string) {
+	t.Helper()
+	entry := log.NewEntry(log.StandardLogger())
+	entry.Level = log.InfoLevel
+	entry.Message = msg
+	entry.Time = when
+	require.NoError(t, buf.Fire(entry))
+}
+
+// TestLogBuffer_SpanSurvivesCompression is the regression guard for the field
+// copy in compressOne: that function replaces the batch it compresses instead
+// of mutating it, so a field it forgets to carry across is lost within
+// milliseconds of the batch being sealed -- long before any operator reads it.
+// The test therefore waits for compression to have actually happened rather
+// than reading the span straight after the seal.
+func TestLogBuffer_SpanSurvivesCompression(t *testing.T) {
+	buf := newTestBuffer(t, 5, 1<<20)
+	first := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		fireAt(t, buf, first.Add(time.Duration(i)*time.Minute), fmt.Sprintf("line %d", i))
+	}
+	require.Equal(t, 1, buf.BatchCount(), "five lines at batchLines=5 seal one batch")
+	require.Eventually(t, func() bool { return buf.CompressedBatchCount() == 1 },
+		2*time.Second, 5*time.Millisecond, "the worker should compress the sealed batch")
+
+	oldest, newest, ok := buf.Span()
+	require.True(t, ok, "a buffer holding dated lines must report a span")
+	assert.True(t, oldest.Equal(first), "oldest must be the first line's time, got %v", oldest)
+	assert.True(t, newest.Equal(first.Add(4*time.Minute)),
+		"newest must be the last line's time, got %v", newest)
+}
+
+// TestLogBuffer_SpanCoversPendingLines covers the other end: lines that have
+// not been sealed into a batch are held just as much as batched ones, and on a
+// quiet server they are all there is.
+func TestLogBuffer_SpanCoversPendingLines(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	first := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	fireAt(t, buf, first, "only line")
+	fireAt(t, buf, first.Add(time.Minute), "second line")
+	require.Equal(t, 0, buf.BatchCount(), "batchLines=100 keeps these pending")
+
+	oldest, newest, ok := buf.Span()
+	require.True(t, ok)
+	assert.True(t, oldest.Equal(first))
+	assert.True(t, newest.Equal(first.Add(time.Minute)))
+}
+
+// TestLogBuffer_SpanFollowsEviction confirms the span describes what is still
+// held rather than what was ever written: the oldest end has to advance as
+// batches are evicted, or the viewer would offer a download of history the
+// buffer no longer has.
+func TestLogBuffer_SpanFollowsEviction(t *testing.T) {
+	buf := newTestBuffer(t, 5, 300)
+	first := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < 100; i++ {
+		fireAt(t, buf, first.Add(time.Duration(i)*time.Minute),
+			fmt.Sprintf("line %d with enough text to fill the cap", i))
+	}
+	require.Less(t, buf.BatchCount(), 20, "the cap must have evicted early batches")
+
+	oldest, _, ok := buf.Span()
+	require.True(t, ok)
+	assert.True(t, oldest.After(first),
+		"the oldest end must advance past evicted lines, got %v", oldest)
+}
+
+// TestLogBuffer_SpanIgnoresUndatedLines covers an entry constructed without a
+// time -- not something logrus itself produces, but the zero value is what a
+// hand-built entry carries. One undated line must not blank the range, and a
+// buffer of nothing but undated lines must report no range at all rather than
+// year zero.
+func TestLogBuffer_SpanIgnoresUndatedLines(t *testing.T) {
+	buf := newTestBuffer(t, 100, 1<<20)
+	dated := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	fireAt(t, buf, dated, "dated line")
+	fireAt(t, buf, time.Time{}, "undated line")
+
+	oldest, newest, ok := buf.Span()
+	require.True(t, ok, "one undated line must not suppress the whole span")
+	assert.True(t, oldest.Equal(dated))
+	assert.True(t, newest.Equal(dated), "the undated line must not become the newest end")
+
+	empty := newTestBuffer(t, 100, 1<<20)
+	fireAt(t, empty, time.Time{}, "undated only")
+	_, _, ok = empty.Span()
+	assert.False(t, ok, "a buffer with nothing datable reports no span")
+}
+
 // TestLogBuffer_BatchFinalization checks the primary invariant: once
 // batchLines entries have been fed in, a batch is finalized and the
 // pending buffer resets. Subsequent lines land in a fresh pending buffer.

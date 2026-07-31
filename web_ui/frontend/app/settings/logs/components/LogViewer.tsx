@@ -24,6 +24,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   FormControlLabel,
   Stack,
   TextField,
@@ -33,6 +34,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import React, {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -67,6 +69,11 @@ interface LogTailResponse {
   // the viewer resets local state when it changes so cursors from a
   // previous instance don't leak into requests against the new one.
   instanceId: string;
+  // RFC3339 stamps bracketing everything the server's buffer holds -- what a
+  // download would contain, which is more than this viewer has necessarily
+  // paged in. Absent when the buffer holds nothing datable.
+  bufferOldest?: string;
+  bufferNewest?: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -111,6 +118,37 @@ function extractLevel(line: string): string {
   return raw === 'warn' ? 'warning' : raw;
 }
 
+// Logrus's TextFormatter leads every formatted line with the timestamp:
+// `time="2026-07-25T10:00:04Z" level=info msg="..."`. The value is quoted
+// whenever it contains characters logrus escapes (an RFC3339 stamp always
+// does), but the unquoted form is accepted too so a differently-configured
+// formatter still lines up.
+const TIME_PREFIX_REGEX = /^time=(?:"([^"]*)"|(\S+))\s*/;
+
+// extractStamp returns the leading timestamp as the server wrote it, or ''
+// for a line that has none (a stack trace's continuation lines, for
+// instance). It is kept only to date the buffer in the summary line; the row
+// itself renders the formatted line unchanged, timestamp included.
+function extractStamp(line: string): string {
+  const m = TIME_PREFIX_REGEX.exec(line);
+  if (!m) return '';
+  return m[1] ?? m[2] ?? '';
+}
+
+// formatStamp renders a stamp as a local "YYYY-MM-DD HH:MM", or '' if it
+// isn't a date this browser can parse -- an unparsable stamp should leave the
+// range blank rather than put "Invalid Date" in the summary.
+function formatStamp(stamp: string): string {
+  if (stamp === '') return '';
+  const d = new Date(stamp);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    ` ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
 // -----------------------------------------------------------------------------
 // LogViewer -- single-endpoint polling with an opaque cursor. State is
 // deliberately simple: a flat list of accumulated Lines plus the current
@@ -120,6 +158,10 @@ function extractLevel(line: string): string {
 interface Line {
   text: string;
   level: string;
+  // The line's own timestamp, exactly as the server wrote it, or '' when the
+  // line carries none. Used to date the buffer in the summary line; see
+  // extractStamp.
+  stamp: string;
   // Client-local monotonic id (assigned in arrival order) used for
   // React keys and for eviction ordering. Unrelated to any server
   // seq; the cursor is opaque to the client.
@@ -135,9 +177,13 @@ interface Line {
 // lines.
 function gapLine(dropped: number, id: number): Line {
   const plural = dropped === 1 ? 'line' : 'lines';
+  const text = `--- ${dropped.toLocaleString()} ${plural} dropped: the server's buffer filled faster than this view could read it ---`;
   return {
-    text: `--- ${dropped.toLocaleString()} ${plural} dropped: the server's buffer filled faster than this view could read it ---`,
+    text,
     level: 'gap',
+    // A gap is not a record and has no time of its own, so it never dates
+    // the buffer.
+    stamp: '',
     id,
     gap: true,
   };
@@ -162,6 +208,40 @@ const MAX_CLIENT_BYTES = 64 * 1024 * 1024;
 // per-row lineHeight set in the render below.
 const ROW_HEIGHT = 18;
 const OVERSCAN_ROWS = 30;
+
+// Floor for the width of the row area, in pixels; see the width calculation
+// in the render for why the row area is sized explicitly at all.
+const CONTENT_MIN_WIDTH = 1600;
+
+// Fixed width of each level chip, in pixels, and the abbreviation that keeps
+// its label inside that width.
+//
+// This is load-bearing for the pane's width, not just for the toolbar's
+// tidiness. The chip label is `nowrap` (MUI clips and ellipsizes it rather
+// than wrapping), so a chip's min-content width is its whole label -- and the
+// settings shell puts this component in a MUI Grid item, whose `min-width` is
+// `auto`, so the item cannot be narrower than the min-content width of what
+// is inside it. A chip that grows from "info (2)" to "info (237,394)" therefore
+// widens the toolbar, overrides the Grid item's size percentage, and takes the
+// log pane's width with it. A fixed width plus a bounded label breaks that
+// chain: nothing in the toolbar changes size as the counts climb.
+const LEVEL_CHIP_WIDTH = 128;
+
+// formatCount abbreviates a level count so the chip label has a bounded
+// length: exact below a thousand, then "12k" / "1.2M". The precise figure is
+// in the chip's tooltip, and the summary line under the toolbar always
+// carries exact numbers.
+function formatCount(n: number): string {
+  if (n < 1000) return n.toString();
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+// Slack, in characters, added to the widest line when sizing the row area.
+// Covers the occasional glyph that is not exactly one character advance wide
+// (a non-ASCII byte in a log message, say) so a line still cannot overrun the
+// width computed for it.
+const CONTENT_WIDTH_SLACK_CH = 4;
 
 // TAIL_LIMIT bounds each forward-poll response. The initial load (empty
 // cursor) is the primary reason: on a server configured with a large
@@ -208,6 +288,7 @@ function splitLines(text: string, ids: () => number): Line[] {
   return raw.map((t) => ({
     text: t,
     level: extractLevel(t),
+    stamp: extractStamp(t),
     id: ids(),
   }));
 }
@@ -235,13 +316,30 @@ function pruneToByteCap(lines: Line[]): Line[] {
 
 export default function LogViewer() {
   const [lines, setLines] = useState<Line[]>([]);
-  const [selectedLevels, setSelectedLevels] = useState<string[]>(LOG_LEVELS);
+  // null means "no level filter" -- every level is shown. It is a distinct
+  // state from an explicit selection that happens to list all seven levels,
+  // and the distinction is what lets the first click on a chip narrow to that
+  // level while a later click on an already-selected chip removes it. See
+  // onLevelClick.
+  const [selectedLevels, setSelectedLevels] = useState<string[] | null>(null);
   const [textFilter, setTextFilter] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedOldest, setReachedOldest] = useState(false);
+  // Running total of lines the server reported dropped before this view
+  // could read them. Each one is marked in place by a gap row; the total is
+  // also summarized above the pane, because that is where an operator looks
+  // to find out whether the numbers they are reading are the whole story.
+  const [droppedTotal, setDroppedTotal] = useState(0);
+  // What the server's whole buffer spans, straight from the last poll -- the
+  // extent of a download, which is not something this viewer can work out from
+  // the lines it happens to hold. Reported under the download control.
+  const [bufferSpan, setBufferSpan] = useState<{
+    oldest: string;
+    newest: string;
+  } | null>(null);
   // Virtualization viewport: the current scroll offset and the pane's pixel
   // height drive which slice of lines is mounted. Updated on scroll and on
   // resize.
@@ -278,6 +376,15 @@ export default function LogViewer() {
       setEnabled(resp.enabled);
       if (!resp.enabled) return resp;
 
+      // Applies whatever the server just said its buffer spans, including
+      // across a restart: it describes the buffer that answered this poll, not
+      // the local state being reset below.
+      setBufferSpan(
+        resp.bufferOldest && resp.bufferNewest
+          ? { oldest: resp.bufferOldest, newest: resp.bufferNewest }
+          : null
+      );
+
       // Restart detection: the buffer answering us is not the one we were
       // reading. Everything held describes a server that is gone, so it is
       // discarded here rather than by reloading the page -- the viewer
@@ -291,6 +398,8 @@ export default function LogViewer() {
         appendIdRef.current = 0;
         prependIdRef.current = 0;
         setReachedOldest(false);
+        // The drop total described the previous instance's buffer.
+        setDroppedTotal(0);
         // The cursor must go too. The server does not know a cursor
         // belongs to a previous instance -- it only compares sequence
         // numbers, and a restarted buffer numbers from the beginning
@@ -323,6 +432,7 @@ export default function LogViewer() {
         setLines((prev) =>
           prev.length > 0 ? pruneToByteCap(prev.concat(gap)) : prev
         );
+        setDroppedTotal((prev) => prev + resp.dropped);
       }
       if (fresh.length > 0) {
         setLines((prev) => pruneToByteCap(prev.concat(fresh)));
@@ -404,19 +514,41 @@ export default function LogViewer() {
     return counts;
   }, [lines]);
 
+  // Filtering runs over every accumulated line, and the accumulated set
+  // reaches the hundreds of thousands on a busy server -- enough for one
+  // re-filter to cost long enough to feel. Deferring the filter inputs lets
+  // React paint the keystroke (and the "Filtering…" indicator) against the
+  // previous result first, then re-render with the new one at lower
+  // priority, so the controls never feel stuck. `filtering` is true exactly
+  // while the displayed rows are still the pre-change ones.
+  const deferredLevels = useDeferredValue(selectedLevels);
+  const deferredTextFilter = useDeferredValue(textFilter);
+  const filtering =
+    deferredLevels !== selectedLevels || deferredTextFilter !== textFilter;
+
   const visibleLines = useMemo(() => {
-    const levelSet = new Set(selectedLevels);
-    const filter = textFilter.toLowerCase();
+    // No selection means no level test at all, rather than a test against the
+    // seven levels in LOG_LEVELS. The difference matters for a line whose
+    // level is none of them -- `level=notice`, or whatever a library logging
+    // through Pelican emits -- which a whitelist would hide by default, with
+    // no chip on screen to turn it back on. The default view shows everything
+    // the server sent.
+    const levelSet = deferredLevels === null ? null : new Set(deferredLevels);
+    const filter = deferredTextFilter.toLowerCase();
     return lines.filter((line) => {
       // Gap markers are not log lines and carry no level; hiding one
       // behind a level or text filter would restore the very illusion of
       // contiguity it exists to break.
       if (line.gap) return true;
-      if (!levelSet.has(line.level)) return false;
+      if (levelSet && !levelSet.has(line.level)) return false;
+      // Matched against the line as the server formatted it, which is a
+      // superset of what the row displays: the timestamp moves to the
+      // gutter but is still on screen, so a match there is still a match
+      // the operator can see.
       if (filter && !line.text.toLowerCase().includes(filter)) return false;
       return true;
     });
-  }, [lines, selectedLevels, textFilter]);
+  }, [lines, deferredLevels, deferredTextFilter]);
 
   // Gap markers occupy a row but are not log lines, so they are excluded
   // from the counts an operator reads as "how much am I looking at".
@@ -428,6 +560,69 @@ export default function LogViewer() {
     () => lines.reduce((n, line) => n + (line.gap ? 0 : 1), 0),
     [lines]
   );
+
+  // The dates the buffer spans, for the right-hand end of the summary line:
+  // "which days am I looking at" is the other half of "how many lines am I
+  // looking at", and it is not otherwise answerable without scrolling to both
+  // ends of the pane.
+  //
+  // Just the two ends of lines[]: the list is in arrival order, so the first
+  // and last entry date the whole of it -- no scan. The only reason this is
+  // not literally lines[0] and lines[at(-1)] is that not every entry carries a
+  // timestamp: a stack trace's continuation lines don't, and neither do gap
+  // markers, so an end that has no date falls inward to the next line that
+  // does. In practice that stops on the first or second try.
+  //
+  // Both ends are always shown, to the minute: at this buffer size they are
+  // usually the same day, and the times are what distinguish them.
+  const dateRange = useMemo(() => {
+    let first = '';
+    for (const line of lines) {
+      first = formatStamp(line.stamp);
+      if (first !== '') break;
+    }
+    let last = '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      last = formatStamp(lines[i].stamp);
+      if (last !== '') break;
+    }
+    if (first === '' || last === '') return '';
+    return `${first} - ${last}`;
+  }, [lines]);
+
+  // Levels that get a chip: the ones actually present in what the viewer
+  // holds. A "panic (0)" chip is a control that can only ever empty the pane,
+  // and on a healthy server most of the row is those -- the levels that do
+  // have lines are what an operator is scanning for. A level still in the
+  // selection keeps its chip even at zero, so a selection is always
+  // explainable by the chips on screen (and can always be undone), which
+  // matters when a level's last line ages out of the buffer while it is
+  // selected.
+  // Levels outside LOG_LEVELS get a chip too, after the known ones: they are
+  // in the buffer and therefore on screen by default, so they need to be
+  // filterable like anything else.
+  const chipLevels = useMemo(() => {
+    const worthShowing = (lvl: string) =>
+      (levelCounts[lvl] ?? 0) > 0 || (selectedLevels?.includes(lvl) ?? false);
+    const known = LOG_LEVELS.filter(worthShowing);
+    const unknown = Object.keys(levelCounts)
+      .filter((lvl) => !LOG_LEVELS.includes(lvl) && worthShowing(lvl))
+      .sort();
+    return [...known, ...unknown];
+  }, [levelCounts, selectedLevels]);
+
+  // Character count of the longest line held, which is what the row area is
+  // sized from. Measured over everything accumulated rather than over the
+  // filtered or mounted subset on purpose: a width that depends on which
+  // rows are on screen is exactly the width that moves while you scroll.
+  const maxLineChars = useMemo(() => {
+    let max = 0;
+    for (const line of lines) {
+      const len = line.text.length;
+      if (len > max) max = len;
+    }
+    return max;
+  }, [lines]);
 
   // Measure the scroll pane so virtualization knows the viewport height.
   // Runs on mount and on window resize.
@@ -450,18 +645,43 @@ export default function LogViewer() {
     el.scrollTop = el.scrollHeight;
   }, [visibleLines, autoScroll]);
 
+  // Re-sync the stored scroll offset with the pane's real one whenever the
+  // number of rows changes. A filter that shortens the content makes the
+  // browser clamp scrollTop without firing a scroll event we listen for, so
+  // the state would otherwise stay stale until the user scrolled -- with
+  // auto-scroll off, that means an empty pane that never recovers on its
+  // own. Only writes when something actually moved, so this cannot loop.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setViewport((v) =>
+      v.scrollTop === el.scrollTop && v.height === el.clientHeight
+        ? v
+        : { scrollTop: el.scrollTop, height: el.clientHeight }
+    );
+  }, [visibleLines.length]);
+
   // Virtualization window: the contiguous slice of visibleLines currently
   // mounted, with pixel spacers standing in for the rows above and below.
   const rowCount = visibleLines.length;
   const viewportHeight = viewport.height || 600;
+  // The offset is clamped to what the filtered content can actually scroll
+  // to. Applying a filter shrinks the content, and the browser silently
+  // clamps the pane's real scrollTop to the new maximum -- but the offset
+  // this render works from is React state, still holding the pre-filter
+  // value. Left unclamped it puts the window past the end of the filtered
+  // list, so the pane renders no rows at all while the summary above it
+  // reports matches: the filter looks broken when it worked. The effect
+  // below re-syncs the state; this keeps the render in between correct.
+  const maxScrollTop = Math.max(0, rowCount * ROW_HEIGHT - viewportHeight);
+  const scrollTop = Math.min(viewport.scrollTop, maxScrollTop);
   const startIdx = Math.max(
     0,
-    Math.floor(viewport.scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS
+    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS
   );
   const endIdx = Math.min(
     rowCount,
-    Math.ceil((viewport.scrollTop + viewportHeight) / ROW_HEIGHT) +
-      OVERSCAN_ROWS
+    Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
   );
   const topPad = startIdx * ROW_HEIGHT;
   const bottomPad = Math.max(0, (rowCount - endIdx) * ROW_HEIGHT);
@@ -470,6 +690,40 @@ export default function LogViewer() {
   const onDownload = useCallback(() => {
     window.location.assign(`${API_V1_BASE_URL}/logs/download`);
   }, []);
+
+  // Chip click semantics. A plain click isolates: you get only the level you
+  // clicked, which is what clicking one item out of a row of them reads as.
+  // Clicking the level you are already isolated on is the way back to all
+  // levels. Holding a modifier keeps the old additive behaviour, for building
+  // up a combination like error+warning; that is the only way to reach a
+  // multi-level selection, and the only way to end up with none selected.
+  const onLevelClick = useCallback(
+    (lvl: string, additive: boolean) => {
+      setSelectedLevels((prev) => {
+        // Nothing filtered yet: narrow to the level clicked. Clicking one item
+        // out of a row of them reads as "show me this one".
+        if (prev === null) {
+          return additive ? chipLevels.filter((v) => v !== lvl) : [lvl];
+        }
+        // A filter is already active, so a level not in it is being added:
+        // error then warning gives error+warning, no modifier needed. The
+        // selection is rebuilt in chip order -- not LOG_LEVELS order, which
+        // would drop any level outside the seven known ones from a selection
+        // that already held it -- so it never depends on click order either.
+        if (!prev.includes(lvl)) {
+          const next = new Set(prev);
+          next.add(lvl);
+          return chipLevels.filter((v) => next.has(v));
+        }
+        // Clicking the last level still selected clears the filter -- the way
+        // back to everything. Under a modifier it deselects instead, which is
+        // the only route to a selection of nothing.
+        if (prev.length === 1 && !additive) return null;
+        return prev.filter((v) => v !== lvl);
+      });
+    },
+    [chipLevels]
+  );
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -488,40 +742,66 @@ export default function LogViewer() {
     );
   }
 
+  // The root carries minWidth: 0 so this component can never be the reason
+  // its container is wider than the container's own layout says it should be:
+  // everything inside is either wrappable, shrinkable, or a scroll container.
   return (
-    <Box display='flex' flexDirection='column' gap={2} width='100%'>
+    <Box
+      display='flex'
+      flexDirection='column'
+      gap={2}
+      width='100%'
+      minWidth={0}
+      id={'log-viewer'}
+    >
       {error && (
         <Alert severity='warning' onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
+      {/*
+        Top row: everything that narrows what the pane shows -- the level chips
+        and the text filter.
+
+        flexWrap and the minWidth: 0 here and on the children below are the
+        other half of the fix described on LEVEL_CHIP_WIDTH: a row of controls
+        that refuses to wrap or shrink reports a large min-content width, and
+        the Grid item this component sits in (min-width: auto) then sizes
+        itself to that instead of to its own size percentage -- so the toolbar
+        would set the log pane's width. Allowed to wrap, it grows downwards
+        instead, which changes nothing horizontally.
+      */}
       <Stack
         direction={{ xs: 'column', md: 'row' }}
         spacing={2}
         alignItems={{ md: 'center' }}
+        flexWrap='wrap'
+        useFlexGap
+        sx={{ minWidth: 0 }}
       >
         {/*
-          One chip per level, always in the fixed LOG_LEVELS order. Clicking
-          toggles that level in / out of the selected set.
+          One chip per level present in the buffer, in the fixed LOG_LEVELS
+          order. See onLevelClick for what a click does, which the tooltip
+          advertises; and chipLevels for why a level with no lines has no chip.
         */}
-        <Box display='flex' flexWrap='wrap' gap={0.75}>
-          {LOG_LEVELS.map((lvl) => {
-            const active = selectedLevels.includes(lvl);
+        <Box display='flex' flexWrap='wrap' gap={0.75} minWidth={0}>
+          {chipLevels.map((lvl) => {
+            // A null selection means no level filter, so every chip reads as
+            // included.
+            const active =
+              selectedLevels === null || selectedLevels.includes(lvl);
             const count = levelCounts[lvl] ?? 0;
             return (
               <Chip
                 key={lvl}
                 size='small'
                 clickable
-                onClick={() =>
-                  setSelectedLevels((prev) =>
-                    prev.includes(lvl)
-                      ? prev.filter((v) => v !== lvl)
-                      : [...prev, lvl]
-                  )
+                title={`${count.toLocaleString()} ${lvl} lines held. Click to show only ${lvl}; click again for all levels; hold Ctrl/⌘ or Shift to add or remove one level at a time.`}
+                onClick={(e) =>
+                  onLevelClick(lvl, e.ctrlKey || e.metaKey || e.shiftKey)
                 }
-                label={`${lvl} (${count.toLocaleString()})`}
+                label={`${lvl} (${formatCount(count)})`}
                 sx={{
                   backgroundColor: active
                     ? LEVEL_COLORS[lvl] || '#616161'
@@ -529,6 +809,11 @@ export default function LogViewer() {
                   color: active ? '#000' : 'text.secondary',
                   border: `1px solid ${LEVEL_COLORS[lvl] || '#616161'}`,
                   fontWeight: active ? 600 : 400,
+                  // Fixed, not a floor: see LEVEL_CHIP_WIDTH. Tabular figures
+                  // keep the digits from jittering inside it.
+                  width: LEVEL_CHIP_WIDTH,
+                  flex: '0 0 auto',
+                  fontVariantNumeric: 'tabular-nums',
                 }}
               />
             );
@@ -540,9 +825,27 @@ export default function LogViewer() {
           label='Text filter'
           value={textFilter}
           onChange={(e) => setTextFilter(e.target.value)}
-          sx={{ flexGrow: 1, minWidth: 220 }}
+          // minWidth: 0 rather than a 220px floor: the floor is a min-content
+          // width the Grid item would have to honour, and this field is the
+          // widest thing in the row. flexBasis gives it the same comfortable
+          // size when there is room, without insisting on it when there
+          // isn't.
+          sx={{ flexGrow: 1, flexBasis: 220, minWidth: 0 }}
         />
+      </Stack>
 
+      {/*
+        Bottom row: the controls that act on the view rather than filter it.
+        Same wrap-and-shrink rules as the row above.
+      */}
+      <Stack
+        direction='row'
+        spacing={2}
+        alignItems='center'
+        flexWrap='wrap'
+        useFlexGap
+        sx={{ minWidth: 0 }}
+      >
         <FormControlLabel
           control={
             <Checkbox
@@ -562,21 +865,106 @@ export default function LogViewer() {
           Scroll to bottom
         </Button>
 
-        <Button
-          variant='outlined'
-          startIcon={<DownloadIcon />}
-          onClick={onDownload}
-        >
-          Download .log.gz
-        </Button>
+        {/*
+          The download covers the server's whole buffer, which is typically
+          more than this viewer has paged in, so its extent is reported from
+          what the server said rather than from the lines on screen -- an admin
+          deciding whether to download wants to know what is in the file, not
+          what happens to be in this tab. Absent until a poll has reported a
+          span, so the button never claims a range it doesn't have.
+        */}
+        <Stack spacing={0.25} minWidth={0}>
+          <Button
+            variant='outlined'
+            size='small'
+            startIcon={<DownloadIcon />}
+            onClick={onDownload}
+          >
+            Download Logs In Buffer
+          </Button>
+          {bufferSpan && (
+            <Typography
+              variant='caption'
+              color='text.secondary'
+              data-testid='log-download-span'
+              sx={{ fontVariantNumeric: 'tabular-nums' }}
+            >
+              Available: {formatStamp(bufferSpan.oldest)} -{' '}
+              {formatStamp(bufferSpan.newest)}
+            </Typography>
+          )}
+        </Stack>
       </Stack>
 
-      <Typography variant='body2' color='text.secondary'>
-        Showing {visibleLineCount.toLocaleString()} of{' '}
-        {totalLineCount.toLocaleString()} lines.
-        {loadingOlder && ' Loading older…'}
-        {reachedOldest && ' No more history.'}
-      </Typography>
+      {/*
+        The denominator names its own set. "of 237,394 lines" alone invites
+        the reading that the server has 237,394 lines to look at, when what
+        it counts is the lines this page has fetched and is still holding --
+        a window that starts when the page opens, grows as polls arrive and
+        as scroll-up pulls history in, and is trimmed from the oldest end at
+        MAX_CLIENT_BYTES. Lines the server dropped before this view could
+        read them were never part of it, so they are reported separately
+        rather than folded into a count of what is here to read.
+      */}
+      <Stack
+        direction='row'
+        spacing={1}
+        alignItems='center'
+        flexWrap='wrap'
+        useFlexGap
+        sx={{ minWidth: 0 }}
+      >
+        <Typography
+          variant='body2'
+          color='text.secondary'
+          data-testid='log-summary'
+          sx={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          Showing {visibleLineCount.toLocaleString()} of{' '}
+          {totalLineCount.toLocaleString()} lines held in this browser.
+          {droppedTotal > 0 &&
+            ` ${droppedTotal.toLocaleString()} dropped before this view could read them.`}
+          {loadingOlder && ' Loading older…'}
+          {reachedOldest && ' No more history.'}
+        </Typography>
+        {filtering && (
+          <Stack
+            direction='row'
+            spacing={0.75}
+            alignItems='center'
+            data-testid='log-filtering'
+          >
+            <CircularProgress size={12} thickness={6} />
+            <Typography variant='body2' color='text.secondary'>
+              Filtering…
+            </Typography>
+          </Stack>
+        )}
+
+        {/*
+          The span the buffer covers, right-justified on the same line: ml:auto
+          takes up all the free space to its left. Absent until something
+          dateable has arrived, so the label never appears with nothing after
+          it. nowrap keeps a range from breaking mid-timestamp -- the parent
+          wraps this whole span to its own line instead when the row is tight.
+        */}
+        {dateRange !== '' && (
+          <Typography
+            variant='body2'
+            color='text.secondary'
+            data-testid='log-range'
+            sx={{
+              ml: 'auto',
+              pl: 2,
+              textAlign: 'right',
+              whiteSpace: 'nowrap',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            Logs in time range: {dateRange}
+          </Typography>
+        )}
+      </Stack>
 
       <Box
         ref={scrollRef}
@@ -592,7 +980,18 @@ export default function LogViewer() {
           padding: 1,
           borderRadius: 1,
           height: '60vh',
+          // Explicit width plus minWidth: 0: the pane takes the width its
+          // container gives it and reports no opinion of its own upward. Being
+          // a scroll container, the rows inside it cannot reach past it
+          // either, however long they are.
+          width: '100%',
+          minWidth: 0,
           overflow: 'auto',
+          // Reserve the vertical scrollbar's width at all times. Without it
+          // the row area's usable width changes the moment the content
+          // becomes taller than the pane, re-wrapping nothing but shifting
+          // everything.
+          scrollbarGutter: 'stable',
         }}
         onScroll={(e) => {
           const el = e.currentTarget;
@@ -618,28 +1017,52 @@ export default function LogViewer() {
           ROW_HEIGHT and keeps whiteSpace: 'pre' so long lines scroll
           horizontally within the pane.
         */}
-        <Box sx={{ height: topPad }} />
-        {windowLines.map((line) => (
-          <Box
-            key={line.id}
-            component='div'
-            data-testid={line.gap ? 'log-gap' : 'log-row'}
-            sx={{
-              height: ROW_HEIGHT,
-              lineHeight: `${ROW_HEIGHT}px`,
-              whiteSpace: 'pre',
-              wordBreak: 'keep-all',
-              // A gap is a statement about the record rather than part of
-              // it, so it is styled to stand apart from every level colour.
-              ...(line.gap
-                ? { color: '#ffd54f', fontStyle: 'italic' }
-                : { color: LEVEL_COLORS[line.level] || undefined }),
-            }}
-          >
-            {line.text}
-          </Box>
-        ))}
-        <Box sx={{ height: bottomPad }} />
+        {/*
+          The row area is given an explicit width, wide enough for the longest
+          line held, so the pane's scrollable extent stops depending on which
+          rows happen to be mounted.
+
+          Neither `width: 100%` nor a `min-width` floor achieves that: rows are
+          `white-space: pre` and overrun their parent freely, so whichever long
+          line is on screen sets the extent and gives it back when it scrolls
+          out -- the horizontal scrollbar grows, shifts and disappears under
+          the content as the virtualization window moves.
+
+          Sizing in `ch` works here because the pane is monospace: one ch is
+          one character advance, so maxLineChars ch is the width of the longest
+          line. The floor keeps a nearly-empty buffer from rendering a narrow
+          pane; the `100%` term keeps a wider pane filled.
+        */}
+        <Box
+          sx={{
+            width: `max(100%, ${CONTENT_MIN_WIDTH}px, ${
+              maxLineChars + CONTENT_WIDTH_SLACK_CH
+            }ch)`,
+          }}
+        >
+          <Box sx={{ height: topPad }} />
+          {windowLines.map((line) => (
+            <Box
+              key={line.id}
+              component='div'
+              data-testid={line.gap ? 'log-gap' : 'log-row'}
+              sx={{
+                height: ROW_HEIGHT,
+                lineHeight: `${ROW_HEIGHT}px`,
+                whiteSpace: 'pre',
+                wordBreak: 'keep-all',
+                // A gap is a statement about the record rather than part of
+                // it, so it is styled to stand apart from every level colour.
+                ...(line.gap
+                  ? { color: '#ffd54f', fontStyle: 'italic' }
+                  : { color: LEVEL_COLORS[line.level] || undefined }),
+              }}
+            >
+              {line.text}
+            </Box>
+          ))}
+          <Box sx={{ height: bottomPad }} />
+        </Box>
       </Box>
     </Box>
   );

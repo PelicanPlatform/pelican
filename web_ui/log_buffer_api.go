@@ -87,6 +87,14 @@ type LogTailResponse struct {
 	// their local state and start fresh -- cursors from a previous
 	// instance are meaningless against the new one.
 	InstanceID string `json:"instanceId"`
+	// BufferOldest and BufferNewest bracket everything the buffer holds --
+	// i.e. what GET /logs/download would return -- as RFC3339 timestamps,
+	// empty when the buffer holds nothing datable. This is deliberately not
+	// the range covered by Content: a reader has usually paged in only the
+	// newest lines, so it cannot tell from its own state how much history a
+	// download would give it.
+	BufferOldest string `json:"bufferOldest,omitempty"`
+	BufferNewest string `json:"bufferNewest,omitempty"`
 }
 
 // LogReadAuthHandler is the middleware that gates every log-read endpoint.
@@ -223,7 +231,7 @@ func HandleLogTail(ctx *gin.Context) {
 		tail = buf.TailSince(since, limit)
 	}
 
-	ctx.JSON(http.StatusOK, LogTailResponse{
+	resp := LogTailResponse{
 		Enabled:     true,
 		Content:     string(tail.Content),
 		FirstCursor: logTailCursor(tail.FirstSeq),
@@ -231,7 +239,12 @@ func HandleLogTail(ctx *gin.Context) {
 		Reached:     tail.Reached,
 		Dropped:     tail.Dropped,
 		InstanceID:  buf.InstanceID(),
-	})
+	}
+	if oldest, newest, ok := buf.Span(); ok {
+		resp.BufferOldest = oldest.Format(time.RFC3339)
+		resp.BufferNewest = newest.Format(time.RFC3339)
+	}
+	ctx.JSON(http.StatusOK, resp)
 }
 
 // parseCount decodes the `count=` hint that accompanies a before= scroll-up

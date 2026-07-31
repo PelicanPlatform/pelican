@@ -27,6 +27,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pierrec/lz4/v4"
 	"github.com/pkg/errors"
@@ -57,6 +58,12 @@ type logRingBatch struct {
 	State     LogRingBatchState
 	Payload   []byte // LZ4-compressed or raw depending on State
 	RawSize   int    // decompressed byte count (matches on-disk text size)
+	// FirstTime and LastTime are the logrus entry times of the batch's first
+	// and last lines. Recorded at write time from the entry itself rather than
+	// parsed back out of the formatted text, so reporting the buffer's span
+	// costs nothing and never has to decompress a payload.
+	FirstTime time.Time
+	LastTime  time.Time
 }
 
 // lastSeq is the sequence number of the last line in the batch (inclusive).
@@ -91,6 +98,11 @@ type LogRingBuffer struct {
 	pendingFirstSeq int64 // seq of the first line in the current pending buffer (0 when empty)
 	nextSeq         int64 // seq to assign to the next incoming line
 	formatter       log.Formatter
+	// Entry times of the first and last line sitting in the pending buffer.
+	// Together with the batches' own times these give the span of everything
+	// held; see Span.
+	pendingFirstTime time.Time
+	pendingLastTime  time.Time
 
 	// The compression worker owns compressQueue exclusively; producers use a
 	// non-blocking select-with-default so a slow compressor never blocks the
@@ -356,6 +368,18 @@ func (b *LogRingBuffer) Fire(entry *log.Entry) error {
 	if b.pendingCount == 0 {
 		b.pendingFirstSeq = seq
 	}
+	// Only a dated entry moves the pending window's ends. logrus stamps every
+	// entry it produces, but a hand-built one carries the zero value, and
+	// letting that through would hand Span a zero end -- suppressing the whole
+	// reported range over one undated line. finalizeLocked clears both fields
+	// with the rest of the pending state, so the zero value here always means
+	// "nothing dated in this window yet".
+	if !entry.Time.IsZero() {
+		if b.pendingFirstTime.IsZero() {
+			b.pendingFirstTime = entry.Time
+		}
+		b.pendingLastTime = entry.Time
+	}
 	b.pending.Write(line)
 	b.pendingCount++
 
@@ -422,10 +446,14 @@ func (b *LogRingBuffer) finalizeLocked() *logRingBatch {
 		State:     logRingBatchRaw,
 		Payload:   payload,
 		RawSize:   len(payload),
+		FirstTime: b.pendingFirstTime,
+		LastTime:  b.pendingLastTime,
 	}
 	b.pending.Reset()
 	b.pendingCount = 0
 	b.pendingFirstSeq = 0
+	b.pendingFirstTime = time.Time{}
+	b.pendingLastTime = time.Time{}
 	return batch
 }
 
@@ -491,12 +519,18 @@ func (b *LogRingBuffer) compressOne(batch *logRingBatch) {
 	// reader that holds the original pointer (with or without the mutex)
 	// sees a consistent Raw view -- fields never observe a partial
 	// update.
+	// Every field except State and Payload is carried across verbatim. A field
+	// left out here is silently lost the moment a batch is compressed -- which
+	// is the normal path, milliseconds after it is sealed -- so anything added
+	// to logRingBatch has to be added here too.
 	replacement := &logRingBatch{
 		FirstSeq:  batch.FirstSeq,
 		LineCount: batch.LineCount,
 		State:     logRingBatchCompressed,
 		Payload:   compressed,
 		RawSize:   batch.RawSize,
+		FirstTime: batch.FirstTime,
+		LastTime:  batch.LastTime,
 	}
 
 	b.mu.Lock()
@@ -886,6 +920,58 @@ func skipNLines(buf []byte, n int) []byte {
 	return buf
 }
 
+// Span returns the entry times of the oldest and newest lines the buffer
+// currently holds, and false when it holds nothing datable. This is what a
+// download of the buffer would cover, which is strictly more than any one
+// reader has necessarily paged in: it is the answer to "what is in the file I
+// am about to download", so it is reported from the buffer's own extent rather
+// than derived from a tail response.
+//
+// Both ends read off the ends of what is held -- the oldest surviving batch
+// and, ahead of it, the pending buffer -- so this needs no decompression and
+// no scan of the contents. The loops stop on their first iteration for any
+// entry that carried a time, which is every entry logrus itself produces; they
+// only step further for an entry constructed without one, so that a single
+// undated line at one end does not blank the whole range.
+//
+// Time is recorded per batch, so this is unaffected by eviction: the oldest
+// batch is simply whichever one survived.
+func (b *LogRingBuffer) Span() (oldest, newest time.Time, ok bool) {
+	if b == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, batch := range b.batches {
+		if !batch.FirstTime.IsZero() {
+			oldest = batch.FirstTime
+			break
+		}
+	}
+	for i := len(b.batches) - 1; i >= 0; i-- {
+		if !b.batches[i].LastTime.IsZero() {
+			newest = b.batches[i].LastTime
+			break
+		}
+	}
+	// Lines not yet sealed into a batch are held too, and on a quiet server
+	// they may be everything there is. They are newer than every batch, so
+	// they always win the newest end.
+	if b.pendingCount > 0 {
+		if oldest.IsZero() {
+			oldest = b.pendingFirstTime
+		}
+		if !b.pendingLastTime.IsZero() {
+			newest = b.pendingLastTime
+		}
+	}
+	if oldest.IsZero() || newest.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	return oldest, newest, true
+}
+
 // StoredBytes returns the current byte total across all held batches. Not
 // part of the public API; test-only.
 func (b *LogRingBuffer) StoredBytes() int {
@@ -906,6 +992,25 @@ func (b *LogRingBuffer) BatchCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.batches)
+}
+
+// CompressedBatchCount returns how many held batches have been through the
+// compression worker. Lets a test wait for compression to actually happen
+// rather than sleep, which matters because compressOne replaces the batch it
+// compresses and so has to carry every field across. Test-only.
+func (b *LogRingBuffer) CompressedBatchCount() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, batch := range b.batches {
+		if batch.State == logRingBatchCompressed {
+			n++
+		}
+	}
+	return n
 }
 
 // PendingLineCount returns the number of lines currently in the pending

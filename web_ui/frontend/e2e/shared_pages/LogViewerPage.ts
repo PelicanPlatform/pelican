@@ -38,9 +38,13 @@ export class LogViewerPage {
   // means "mounted in the pane", not "this string appears somewhere on the
   // page".
   readonly pane: Locator;
-  // "Showing X of Y lines." — the count summary above the log pane. Also
-  // carries the "Loading older…" / "No more history." suffixes.
+  // "Showing X of Y lines held in this browser." — the count summary above
+  // the log pane. Also carries the dropped-line total and the
+  // "Loading older…" / "No more history." suffixes.
   readonly summary: Locator;
+  // The "Filtering…" indicator shown while the pane's rows are still the
+  // pre-change ones after a filter edit.
+  readonly filteringIndicator: Locator;
   // The dismissible warning the viewer raises when a tail fetch fails.
   readonly fetchErrorAlert: Locator;
   // The "In-memory log capture is not yet available" notice shown when the
@@ -61,7 +65,8 @@ export class LogViewerPage {
       name: 'Auto-scroll',
     });
     this.pane = page.getByTestId('log-pane');
-    this.summary = page.getByText(/Showing .* of .* lines\./);
+    this.summary = page.getByTestId('log-summary');
+    this.filteringIndicator = page.getByTestId('log-filtering');
     this.fetchErrorAlert = page
       .locator('.MuiAlert-root')
       .filter({ hasText: /log tail fetch failed/ });
@@ -115,9 +120,39 @@ export class LogViewerPage {
       .filter({ hasText: new RegExp(`^${level} \\(`) });
   }
 
-  /** Toggles a level chip in / out of the selected set. */
-  async toggleLevel(level: string) {
+  /**
+   * Plain-clicks a level chip. From no filter that narrows to the level
+   * clicked; with a filter active it adds the level, or removes it if it was
+   * already selected; and on the last remaining level it clears the filter.
+   */
+  async clickLevel(level: string) {
     await this.levelChip(level).click();
+  }
+
+  /**
+   * Modifier-clicks a level chip, which adds it to or removes it from the
+   * current selection rather than isolating it.
+   */
+  async toggleLevel(level: string) {
+    await this.levelChip(level).click({ modifiers: ['ControlOrMeta'] });
+  }
+
+  /**
+   * The "Available: …" subtext under the download control, reporting what the
+   * server's whole buffer spans — i.e. what a download would contain, which is
+   * not the same set as the lines this page holds.
+   */
+  downloadSpan(): Locator {
+    return this.page.getByTestId('log-download-span');
+  }
+
+  /**
+   * The right-justified span at the end of the summary line: "Logs in time
+   * range: YYYY-MM-DD HH:MM - YYYY-MM-DD HH:MM", in the viewer's local zone.
+   * Absent entirely when nothing held carries a timestamp.
+   */
+  dateRange(): Locator {
+    return this.page.getByTestId('log-range');
   }
 
   /** Dismisses the tail-fetch warning via its Close button. */

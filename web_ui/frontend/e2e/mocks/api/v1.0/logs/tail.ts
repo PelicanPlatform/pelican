@@ -29,6 +29,8 @@ export interface LogTailResponse {
   reached: boolean;
   dropped: number;
   instanceId: string;
+  bufferOldest?: string;
+  bufferNewest?: string;
 }
 
 const TAIL_URL_PATTERN = '**/api/v1.0/logs/tail**';
@@ -162,7 +164,24 @@ class MockLogBuffer {
       reached: false,
       dropped,
       instanceId: this.instanceId,
+      ...this.span,
     };
+  }
+
+  /**
+   * The stamps bracketing everything held, mirroring the real buffer's Span():
+   * the extent of a download, which is independent of what any one response
+   * returns. The server reads these off the logrus entries; a fixture only has
+   * the formatted lines, so they come from the first and last line's own
+   * `time=` token.
+   */
+  private get span(): Pick<LogTailResponse, 'bufferOldest' | 'bufferNewest'> {
+    const stamp = (line: string | undefined) =>
+      line?.match(/^time="([^"]*)"/)?.[1] ?? '';
+    const oldest = stamp(this.lines[0]);
+    const newest = stamp(this.lines[this.lines.length - 1]);
+    if (oldest === '' || newest === '') return {};
+    return { bufferOldest: oldest, bufferNewest: newest };
   }
 
   tailBefore(before: number, count: number): LogTailResponse {
@@ -196,6 +215,7 @@ class MockLogBuffer {
       // wall through `reached`.
       dropped: 0,
       instanceId: this.instanceId,
+      ...this.span,
     };
   }
 }
