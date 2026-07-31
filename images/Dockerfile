@@ -413,7 +413,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y \
             cmake3 \
             gcc-c++ \
             git \
@@ -864,7 +864,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
 
-  dnf install -y --enablerepo=osg-contrib \
+  dnf install -y \
         cmake3 \
         delve \
         docker \
