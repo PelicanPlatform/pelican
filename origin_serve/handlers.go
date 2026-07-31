@@ -40,6 +40,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/identity"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -59,6 +60,36 @@ var (
 
 	// globusBackends stores Globus v2 backends for token refresh management.
 	globusBackends map[string]*globusBackend
+
+	// poscFilesystems holds the per-export POSC layer so it can be shut
+	// down via ResetHandlers in tests and via cancellation in production.
+	poscFilesystems map[string]*poscFileSystem
+
+	// metadataCtl is the singleton metadata-publish controller.
+	// nil when Origin.Metadata.Enabled is false.
+	metadataCtl *metadataController
+
+	// objectMetaBatcher is the singleton write-behind batcher
+	// shared by both the publish-queue insert path and the
+	// object-metadata tracking DAO. nil when no feature that needs
+	// it (webhook publishing OR per-namespace object tracking) is
+	// enabled. Owns its own goroutine — stopped via ResetHandlers.
+	objectMetaBatcher *sqliteBatcher
+
+	// objectMetaDAO is the singleton object-metadata DAO. nil when
+	// no namespace has TrackAccess enabled. Shared across exports
+	// (it's stateless; per-namespace policy comes from the
+	// per-export observationConfig).
+	objectMetaDAO *objectMetadataDAO
+
+	// objectMetaPruner is the background goroutine that trims
+	// object_metadata_history per the configured retention. nil
+	// when no namespace has TrackAccess + a positive retention.
+	objectMetaPruner *objectMetadataPruner
+
+	// objectMetaAccess is the origin-wide atime debouncer. Same
+	// nil-when-disabled rule as objectMetaDAO.
+	objectMetaAccess *accessDebouncer
 )
 
 const (
@@ -190,6 +221,30 @@ func init() {
 
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
+	for _, p := range poscFilesystems {
+		p.Stop()
+	}
+	poscFilesystems = nil
+	if metadataCtl != nil {
+		metadataCtl.Stop()
+		metadataCtl = nil
+	}
+	if objectMetaPruner != nil {
+		objectMetaPruner.Stop()
+		objectMetaPruner = nil
+	}
+	if objectMetaAccess != nil {
+		// Final atime flush BEFORE the batcher shuts down (the
+		// debouncer's Flush enqueues through the batcher).
+		objectMetaAccess.Stop()
+		objectMetaAccess = nil
+	}
+	if objectMetaBatcher != nil {
+		// Drain in-flight writes before discarding the singleton.
+		objectMetaBatcher.Stop()
+		objectMetaBatcher = nil
+	}
+	objectMetaDAO = nil
 	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
@@ -504,6 +559,29 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 // xrdMonitoringMiddleware emits XRootD-compatible monitoring packets for
 // data transfer requests (GET/PUT). It runs after authMiddleware so that
 // the authenticated user's DN and issuer are available for the 'u' packet.
+// listingModeMiddleware tags PROPFIND-with-Depth>=1 requests as
+// "directory enumeration." The object-metadata observation layer
+// reads the resulting context flag in aferoFileSystem.Stat and
+// short-circuits, so that listing a large cold directory stays as
+// cheap as today (no per-entry cache lookup, SELECT, or enqueue).
+// Single-target Stats (HEAD, GET, PROPFIND Depth:0) are *not*
+// marked — they drive change detection normally.
+func listingModeMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == "PROPFIND" {
+			// RFC 4918 §10.2: the Depth header is `"0"`, `"1"`,
+			// or `"infinity"`. Absence defaults to "infinity"
+			// for PROPFIND. We treat anything that isn't
+			// explicitly `"0"` as a listing.
+			depth := c.Request.Header.Get("Depth")
+			if depth != "0" {
+				c.Request = c.Request.WithContext(withListingMode(c.Request.Context()))
+			}
+		}
+		c.Next()
+	}
+}
+
 func xrdMonitoringMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
@@ -581,6 +659,108 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 	copyEnabledPrefixes = make(map[string]bool)
 	globusBackends = make(map[string]*globusBackend)
+	poscFilesystems = make(map[string]*poscFileSystem)
+
+	// preMultiuserFs maps a federation prefix to the wrapped
+	// FileSystem captured *before* the multiuser layer wraps it. The
+	// metadata-publish worker uses this for its skip-if-deleted Stat
+	// because the worker runs in goroutines without any user identity
+	// on its context — Stat'ing through the multiuser layer there
+	// would either fail or run as the wrong identity.
+	preMultiuserFs := make(map[string]webdav.FileSystem)
+
+	// Spin up the shared write-behind batcher first if anyone
+	// needs it: either the publish-queue insert path (when webhook
+	// publishing is on) or the object-metadata DAO (when
+	// TrackAccess is on for any namespace). Both routes go through
+	// the same goroutine so concurrent commits coalesce into one
+	// fsync. The metadata controller below consumes this batcher
+	// for its publish-queue inserts.
+	needBatcher := anyTrackAccessEnabled(exports) || shouldEnableMetadataController(exports)
+	if needBatcher {
+		if database.ServerDatabase == nil {
+			log.Warn("Metadata features enabled but ServerDatabase is nil; batcher disabled.")
+		} else {
+			bufferSize := param.Origin_Metadata_BatchBufferSize.GetInt()
+			flushInterval := param.Origin_Metadata_BatchFlushInterval.GetDuration()
+			objectMetaBatcher = newSQLiteBatcher(ctx, database.ServerDatabase, bufferSize, flushInterval)
+			objectMetaBatcher.SetHooks(batcherMetricsHooks())
+			log.Infof("Metadata SQLite batcher started (buffer=%d, flush=%s)", bufferSize, flushInterval)
+
+			if anyTrackAccessEnabled(exports) {
+				objectMetaDAO = newObjectMetadataDAO(database.ServerDatabase, objectMetaBatcher)
+				// Start the history pruner. It iterates exports
+				// per its own schedule and skips namespaces with
+				// retention=0.
+				pruneInterval := param.Origin_Metadata_History_PruneInterval.GetDuration()
+				pruneBatch := param.Origin_Metadata_History_PruneBatchSize.GetInt()
+				objectMetaPruner = newObjectMetadataPruner(objectMetaDAO, exports, pruneInterval, pruneBatch)
+				objectMetaPruner.SetHooks(prunerMetricsHooks())
+				objectMetaPruner.Start(ctx)
+				log.Infof("Object-metadata history pruner started (interval=%s, batch=%d)", pruneInterval, pruneBatch)
+
+				// Origin-wide atime debouncer: one instance per
+				// process; the namespace travels in each Note key
+				// so a single goroutine handles every export.
+				accessInterval := param.Origin_Metadata_AccessFlushInterval.GetDuration()
+				objectMetaAccess = newAccessDebouncer(objectMetaDAO, accessInterval)
+				objectMetaAccess.Start(ctx)
+				log.Infof("Object-metadata atime debouncer started (flush=%s)", accessInterval)
+			}
+		}
+	}
+
+	// If the metadata-publish feature is enabled (origin-wide or
+	// any export turns it on), construct the controller now. The
+	// controller is shared across exports; per-export endpoint /
+	// mode overrides are resolved per event.
+	if shouldEnableMetadataController(exports) {
+		opts := metadataControllerOptions{
+			OriginEnabled:  param.Origin_Metadata_Enabled.GetBool(),
+			OriginEndpoint: param.Origin_Metadata_Endpoint.GetString(),
+			OriginMode:     PublishMode(param.Origin_Metadata_Mode.GetString()),
+			Exports:        exports,
+			RequestTimeout: param.Origin_Metadata_RequestTimeout.GetDuration(),
+			TokenLifetime:  param.Origin_Metadata_TokenLifetime.GetDuration(),
+			MinBackoff:     param.Origin_Metadata_MinBackoff.GetDuration(),
+			MaxBackoff:     param.Origin_Metadata_MaxBackoff.GetDuration(),
+			MaxInflight:    param.Origin_Metadata_MaxInflight.GetInt(),
+			RatePerSecond:  param.Origin_Metadata_RatePerSecond.GetInt(),
+			WarnAfter:      param.Origin_Metadata_WarnAfter.GetDuration(),
+			ErrorAfter:     param.Origin_Metadata_ErrorAfter.GetDuration(),
+
+			MaxQueuedPerNamespace:      param.Origin_Metadata_MaxQueuedPerNamespace.GetInt(),
+			MaxQueuedBytesPerNamespace: param.Origin_Metadata_MaxQueuedBytesPerNamespace.GetInt(),
+			// preMultiuserFs is populated below in the per-export
+			// loop; the closure captures the map by reference so
+			// late-arriving entries are visible at call time.
+			FilesystemForExists: func(namespace string) webdav.FileSystem {
+				if fs, ok := preMultiuserFs[namespace]; ok {
+					return fs
+				}
+				return nil
+			},
+			// Share the same write-behind batcher object-metadata
+			// tracking uses; concurrent commits coalesce into one tx.
+			Batcher: objectMetaBatcher,
+
+			// TrackingDAO (nil unless TrackAccess is on somewhere) enables the
+			// publish watermark + the crash-recovery reconcile sweep.
+			TrackingDAO:           objectMetaDAO,
+			ReconcileEnabled:      param.Origin_Metadata_ReconcileEnabled.GetBool(),
+			ReconcileInterval:     param.Origin_Metadata_ReconcileInterval.GetDuration(),
+			ReconcileSettleWindow: param.Origin_Metadata_ReconcileSettleWindow.GetDuration(),
+		}
+		// Construct the controller now (the per-export loop below needs it
+		// to wire close hooks), but do NOT Start its worker pool yet: the
+		// workers' FilesystemForExists closure reads preMultiuserFs, which
+		// the loop is still populating. Starting here would race the map
+		// write (fatal "concurrent map read and map write") the moment a
+		// worker claims a due row on restart. Start() is deferred until
+		// after the loop, once preMultiuserFs is fully built.
+		metadataCtl = newMetadataController(opts)
+		log.Infof("metadata publishing enabled (mode=%s)", param.Origin_Metadata_Mode.GetString())
+	}
 
 	// Get optional rate limit for testing
 	readRateLimit := param.Origin_TransferRateLimit.GetByteRate()
@@ -742,7 +922,100 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 
 			autoFs := newAutoCreateDirFs(localFs)
-			var fs webdav.FileSystem = newAferoFileSystem(autoFs, "", logger)
+			aferoFs := newAferoFileSystem(autoFs, "", logger)
+			var fs webdav.FileSystem = aferoFs
+
+			// If TrackAccess is enabled for this namespace, wire
+			// the object-metadata observation hooks into the base
+			// aferoFileSystem. Resolution: per-export override
+			// wins over the origin-wide default.
+			if objectMetaDAO != nil && resolveTrackAccess(export) {
+				obs := &observationConfig{
+					namespace:       export.FederationPrefix,
+					trackExtra:      resolveTrackExtra(export),
+					dao:             objectMetaDAO,
+					cache:           newObservationCache(0),
+					accessDebouncer: objectMetaAccess,
+				}
+				// When publishing is also enabled, publish object.deleted /
+				// object.updated as the tracking layer observes deletes and
+				// out-of-band modifications.
+				if metadataCtl != nil {
+					obs.onDelete = metadataCtl.PublishDeleteHook(export.FederationPrefix)
+					obs.onUpdate = metadataCtl.PublishUpdateHook(export.FederationPrefix)
+				}
+				aferoFs.setObservation(obs)
+				log.Infof("Object-metadata tracking enabled for %s (TrackExtra=%t)",
+					export.FederationPrefix, obs.trackExtra)
+			}
+
+			// Wrap with POSC layer if enabled. POSC sits between the
+			// (optional) multiuser layer and the base aferoFileSystem so
+			// that staged temp files inherit the authenticated user's
+			// uid/gid and so that the expiry goroutine — which runs
+			// without a request context — bypasses multiuser entirely.
+			// Compose the close hook from any of: (a) the publish
+			// controller (metadataCtl), (b) the local object-
+			// metadata DAO (objectMetaDAO + per-export TrackAccess).
+			// Either, both, or neither may be active. closeHook is
+			// nil iff no one wants to be told.
+			trackEnabled := objectMetaDAO != nil && resolveTrackAccess(export)
+			// Choose the commit close hook:
+			//   - publish + track: overwrite-aware hook — probes the tracking
+			//     DB (create vs overwrite → object.committed / object.updated),
+			//     then folds the tracking-commit into the same durable tx as
+			//     the queue INSERT (crash-atomic) and publishes (publish error
+			//     gates the close for transactional rollback).
+			//   - publish only: always object.committed (no DB to tell create
+			//     from overwrite).
+			//   - track only: just record the commit.
+			var closeHook closeHookFn
+			switch {
+			case metadataCtl != nil && trackEnabled:
+				closeHook = metadataCtl.CommitEventFromCloseHookTracked(export.FederationPrefix, objectMetaDAO, resolveTrackExtra(export))
+			case metadataCtl != nil:
+				closeHook = metadataCtl.CommitEventFromCloseHook(export.FederationPrefix)
+			case trackEnabled:
+				closeHook = RecordCommitCloseHook(objectMetaDAO, export.FederationPrefix, resolveTrackExtra(export))
+			}
+
+			poscEnabled := param.Origin_Posc_Enabled.GetBool()
+			if poscEnabled {
+				poscPrefix := param.Origin_Posc_Prefix.GetString()
+				poscTimeout := param.Origin_Posc_FileTimeout.GetDuration()
+				poscKA := param.Origin_Posc_KeepaliveInterval.GetDuration()
+				posc := newPoscFileSystem(ctx, fs, poscPrefix, poscTimeout, poscKA)
+				// Hand POSC a direct afero.Fs handle so the
+				// keepalive goroutine can Chtimes — webdav.FileSystem
+				// has no utimes-equivalent.
+				posc.SetTouchFS(autoFs)
+				posc.SetMetricsHooks(poscMetricsHooks(export.FederationPrefix))
+				// Wire the origin-supplied ETag policy. Today the
+				// only non-empty value is "sha256"; the empty
+				// default leaves the backend ETag in charge.
+				posc.SetEtagPolicy(param.Origin_Metadata_EtagPolicy.GetString())
+				if closeHook != nil {
+					posc.SetCloseHook(closeHook)
+				}
+				poscFilesystems[export.FederationPrefix] = posc
+				fs = posc
+				log.Infof("POSC enabled for %s (prefix=%s, fileTimeout=%s, keepalive=%s)",
+					export.FederationPrefix, poscPrefix, poscTimeout, poscKA)
+			} else if closeHook != nil {
+				// POSC is off but at least one of publish/track
+				// is on. Use the thin close-notify wrapper so the
+				// hook still fires only on a successful Close().
+				fs = newCloseNotifyFs(fs, closeHook)
+				log.Infof("Close-hook enabled for %s (without POSC; publish=%t, track=%t)",
+					export.FederationPrefix, metadataCtl != nil, trackEnabled)
+			}
+
+			// Capture the pre-multiuser FileSystem for the metadata
+			// worker's skip-if-deleted check. It must be the layer
+			// just below multiuser so the worker (which has no user
+			// identity on its goroutine context) can Stat without
+			// triggering setuid/setgid.
+			preMultiuserFs[export.FederationPrefix] = fs
 
 			// Wrap with multiuser filesystem if configured
 			if param.Origin_Multiuser.GetBool() {
@@ -786,6 +1059,13 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 		log.Infof("Initialized WebDAV handler for %s -> %s (storage: %s)", export.FederationPrefix, export.StoragePrefix, storageType)
 	}
 
+	// Now that preMultiuserFs is fully populated, it is safe to start the
+	// publish worker pool: FilesystemForExists can no longer observe a
+	// half-built map while a worker resumes queued rows on restart.
+	if metadataCtl != nil {
+		metadataCtl.Start(ctx)
+	}
+
 	return nil
 }
 
@@ -825,6 +1105,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
 		group.Use(xrdMonitoringMiddleware())
+		group.Use(listingModeMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
@@ -876,6 +1157,35 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 				modifiedReq = modifiedReq.WithContext(ctx)
 			}
 
+			// Parse the optional X-Pelican-Object-Metadata header so
+			// the close hook can inline custom fields into the webhook.
+			modifiedReq = extractObjectMetadataFromRequest(modifiedReq)
+
+			// Flag Pelican-initiated mutations so the object-metadata
+			// observation layer does not misread the write/delete path's
+			// own internal Stat (e.g. POSC's post-rename Stat, taken
+			// before RecordCommit runs) as an out-of-band change and
+			// publish a spurious object.updated / object.deleted on top of
+			// the authoritative commit-hook / RemoveAll event.
+			if modifiedReq.Method == http.MethodPut || modifiedReq.Method == http.MethodDelete {
+				modifiedReq = modifiedReq.WithContext(withInbandWrite(modifiedReq.Context()))
+			}
+
+			// When the upload is multipart/form-data, peel the
+			// metadata part now (capped, into memory) and rewire
+			// r.Body to stream the object part into the webdav
+			// pipeline. Shape violations terminate the request
+			// with a 4xx; in that case we must NOT fall through
+			// to the webdav handler.
+			if modifiedReq.Method == http.MethodPut {
+				var ok bool
+				modifiedReq, ok = rewriteMultipartPUT(c.Writer, modifiedReq, loadMultipartConfig())
+				if !ok {
+					c.Abort()
+					return
+				}
+			}
+
 			if isTPCRequest(c.Request) {
 				handleCopyTPC(c, backend, prefix)
 			} else if c.Request.Method == http.MethodHead {
@@ -887,6 +1197,11 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 				// For GET requests, add ETag header based on file metadata
 				handleGetWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
 			} else if c.Request.Method == http.MethodPut {
+				// Plumb the response header map through so the metadata close
+				// hook can stamp X-Pelican-Metadata-* result headers on the PUT
+				// response (the deferred-header writer flushes them after webdav
+				// returns). Harmless when metadata publishing is disabled.
+				modifiedReq = modifiedReq.WithContext(withResponseHeader(modifiedReq.Context(), c.Writer.Header()))
 				// For PUT requests, return ETag of the newly written file
 				handlePutWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
 			} else {

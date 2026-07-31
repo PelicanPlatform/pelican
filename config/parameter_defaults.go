@@ -101,7 +101,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/cache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Cache_RunLocation.GetName(), val)
 		}
 	}
@@ -123,7 +123,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/cache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Cache_StorageLocation.GetName(), val)
 		}
 	}
@@ -336,7 +336,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/localcache"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.LocalCache_RunLocation.GetName(), val)
 		}
 	}
@@ -558,7 +558,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/xrootd/origin/globus"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), val)
 		}
 	}
@@ -572,6 +572,62 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_HttpAuthTokenPassthrough.GetName(), false)
 	// Origin.IssuerMode
 	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
+	// Origin.Metadata.AccessFlushInterval
+	v.SetDefault(param.Origin_Metadata_AccessFlushInterval.GetName(), "5m")
+	// Origin.Metadata.AllowMultipart
+	v.SetDefault(param.Origin_Metadata_AllowMultipart.GetName(), true)
+	// Origin.Metadata.BatchBufferSize
+	v.SetDefault(param.Origin_Metadata_BatchBufferSize.GetName(), 256)
+	// Origin.Metadata.BatchFlushInterval
+	v.SetDefault(param.Origin_Metadata_BatchFlushInterval.GetName(), "50ms")
+	// Origin.Metadata.Enabled
+	v.SetDefault(param.Origin_Metadata_Enabled.GetName(), false)
+	// Origin.Metadata.ErrorAfter
+	v.SetDefault(param.Origin_Metadata_ErrorAfter.GetName(), "24h")
+	// Origin.Metadata.EtagPolicy
+	v.SetDefault(param.Origin_Metadata_EtagPolicy.GetName(), "uuid")
+	// Origin.Metadata.History.PruneBatchSize
+	v.SetDefault(param.Origin_Metadata_History_PruneBatchSize.GetName(), 1000)
+	// Origin.Metadata.History.PruneInterval
+	v.SetDefault(param.Origin_Metadata_History_PruneInterval.GetName(), "1h")
+	// Origin.Metadata.History.RetentionDays
+	v.SetDefault(param.Origin_Metadata_History_RetentionDays.GetName(), 90)
+	// Origin.Metadata.MaxBackoff
+	v.SetDefault(param.Origin_Metadata_MaxBackoff.GetName(), "30m")
+	// Origin.Metadata.MaxInflight
+	v.SetDefault(param.Origin_Metadata_MaxInflight.GetName(), 4)
+	// Origin.Metadata.MaxMetadataBytes
+	v.SetDefault(param.Origin_Metadata_MaxMetadataBytes.GetName(), 4194304)
+	// Origin.Metadata.MaxQueuedBytesPerNamespace
+	v.SetDefault(param.Origin_Metadata_MaxQueuedBytesPerNamespace.GetName(), 0)
+	// Origin.Metadata.MaxQueuedPerNamespace
+	v.SetDefault(param.Origin_Metadata_MaxQueuedPerNamespace.GetName(), 0)
+	// Origin.Metadata.MetadataPartName
+	v.SetDefault(param.Origin_Metadata_MetadataPartName.GetName(), "metadata")
+	// Origin.Metadata.MinBackoff
+	v.SetDefault(param.Origin_Metadata_MinBackoff.GetName(), "30s")
+	// Origin.Metadata.Mode
+	v.SetDefault(param.Origin_Metadata_Mode.GetName(), "eventual")
+	// Origin.Metadata.ObjectPartName
+	v.SetDefault(param.Origin_Metadata_ObjectPartName.GetName(), "object")
+	// Origin.Metadata.RatePerSecond
+	v.SetDefault(param.Origin_Metadata_RatePerSecond.GetName(), 10)
+	// Origin.Metadata.ReconcileEnabled
+	v.SetDefault(param.Origin_Metadata_ReconcileEnabled.GetName(), true)
+	// Origin.Metadata.ReconcileInterval
+	v.SetDefault(param.Origin_Metadata_ReconcileInterval.GetName(), "2h")
+	// Origin.Metadata.ReconcileSettleWindow
+	v.SetDefault(param.Origin_Metadata_ReconcileSettleWindow.GetName(), "6h")
+	// Origin.Metadata.RequestTimeout
+	v.SetDefault(param.Origin_Metadata_RequestTimeout.GetName(), "10s")
+	// Origin.Metadata.TokenLifetime
+	v.SetDefault(param.Origin_Metadata_TokenLifetime.GetName(), "5m")
+	// Origin.Metadata.TrackAccess
+	v.SetDefault(param.Origin_Metadata_TrackAccess.GetName(), false)
+	// Origin.Metadata.TrackExtra
+	v.SetDefault(param.Origin_Metadata_TrackExtra.GetName(), false)
+	// Origin.Metadata.WarnAfter
+	v.SetDefault(param.Origin_Metadata_WarnAfter.GetName(), "4h")
 	// Origin.Multiuser
 	v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	// Origin.MultiuserMinID
@@ -582,13 +638,21 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_MultiuserVarlinkSocketPath.GetName(), "/run/systemd/userdb/io.systemd.UserDatabase")
 	// Origin.Port
 	v.SetDefault(param.Origin_Port.GetName(), 8443)
+	// Origin.Posc.Enabled
+	v.SetDefault(param.Origin_Posc_Enabled.GetName(), false)
+	// Origin.Posc.FileTimeout
+	v.SetDefault(param.Origin_Posc_FileTimeout.GetName(), "1h")
+	// Origin.Posc.KeepaliveInterval
+	v.SetDefault(param.Origin_Posc_KeepaliveInterval.GetName(), "19m")
+	// Origin.Posc.Prefix
+	v.SetDefault(param.Origin_Posc_Prefix.GetName(), ".pelican-posc")
 	// Origin.RunLocation
 	if isRoot {
 		v.SetDefault(param.Origin_RunLocation.GetName(), "/run/pelican/xrootd/origin")
 	} else {
 		{
 			val := "$XDG_RUNTIME_DIR/pelican/origin"
-			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", os.Getenv("XDG_RUNTIME_DIR"))
+			val = strings.ReplaceAll(val, "$XDG_RUNTIME_DIR", runtimeEnvValue("XDG_RUNTIME_DIR"))
 			v.SetDefault(param.Origin_RunLocation.GetName(), val)
 		}
 	}
