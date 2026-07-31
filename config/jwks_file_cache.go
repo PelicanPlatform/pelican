@@ -170,16 +170,7 @@ func loadPublicJWKSFile(path string) (set jwk.Set, nonEmpty bool, err error) {
 	if !fi.Mode().IsRegular() {
 		return nil, false, errors.Errorf("JWKS file %s is not a regular file", path)
 	}
-	if perm := fi.Mode().Perm(); perm&0o002 != 0 {
-		// Every key in this file is published as trusted for its namespace, so
-		// write access to it is authority to mint accepted tokens. Warn rather
-		// than refuse: taking a namespace's keys away over a permission bit
-		// would be a worse outcome than serving them with a loud complaint.
-		logJWKSWarningOnChange(path, "world-writable", fi.Mode().Perm().String(),
-			"JWKS file %s is world-writable (mode %#o). Every key it holds is published "+
-				"as a trusted signing key, so any local user can mint tokens this server "+
-				"will accept. Restrict it to mode 0640 or tighter.", path, perm)
-	}
+	warnIfJWKSFileWorldWritable(path, fi.Mode().Perm())
 	// Check the stat size first so an oversized file is rejected without
 	// reading it at all.
 	if fi.Size() > MaxJWKSFileSize {

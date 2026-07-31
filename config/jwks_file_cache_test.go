@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -102,6 +103,18 @@ func captureLogs(t *testing.T) func(substr string) bool {
 			}
 		}
 		return false
+	}
+}
+
+// skipIfNoUnixFilePerms skips a test that depends on the Unix permission bits.
+// Windows governs access through ACLs that os.FileInfo does not expose: os.Chmod
+// there only toggles the read-only attribute, and every writable file reports
+// mode 0666. The permission check is compiled out on that platform, so the tests
+// covering it have nothing to observe.
+func skipIfNoUnixFilePerms(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows: file permission bits are not meaningful there")
 	}
 }
 
@@ -264,6 +277,8 @@ func TestJWKSFileCacheBoundsReadSize(t *testing.T) {
 // is the authority to mint tokens the server accepts; that is worth a warning,
 // but not worth refusing to serve the namespace's keys over.
 func TestJWKSFileCacheWarnsOnWorldWritable(t *testing.T) {
+	skipIfNoUnixFilePerms(t)
+
 	t.Run("world-writable warns but still serves", func(t *testing.T) {
 		useFakeClock(t)
 		logged := captureLogs(t)
@@ -299,6 +314,8 @@ func TestJWKSFileCacheWarnsOnWorldWritable(t *testing.T) {
 // unauthenticated and polled continuously, so a per-refresh warning would bury
 // the log.
 func TestJWKSFileWarningsDoNotRepeat(t *testing.T) {
+	skipIfNoUnixFilePerms(t)
+
 	clock := useFakeClock(t)
 	hook := logrustest.NewLocal(log.StandardLogger())
 	t.Cleanup(hook.Reset)
