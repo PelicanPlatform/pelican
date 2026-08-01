@@ -5989,8 +5989,11 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
-	// Allow response body to fail to read; we are only interested in the headers
-	// of the response, not the contents.
+	// The probe wants headers, but an error response's body carries the
+	// structured reason that tells a throttle apart from any other refusal, so
+	// keep a bounded prefix of it. Reading is allowed to fail; whatever is left
+	// is drained so the connection can be reused.
+	bodyPrefix, _ := io.ReadAll(io.LimitReader(headResponse.Body, maxErrorBodySize))
 	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
 		log.Debugln("Failure when reading the one-byte-response body - expected because the body is discarded:", err)
 	}
@@ -6019,14 +6022,14 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 		}
 	} else if headResponse.StatusCode == http.StatusTooManyRequests {
 		// Throttled: classify as the retryable throttle type, carrying the
-		// Retry-After hint (no body is available on this path).
+		// reason from the body and the Retry-After hint.
 		//
 		// Return rather than falling through to the HEAD retry below. The
 		// cache answers HEAD without going through its fair scheduler, so a
 		// HEAD would likely succeed and overwrite this error, reporting the
 		// object's cache status as authoritative when in fact the request
 		// that would tell us was shed.
-		err = newThrottleErrorFromResponse(headResponse, "", objectUrl.Host)
+		err = newThrottleErrorFromResponse(headResponse, string(bodyPrefix), objectUrl.Host)
 		return
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
