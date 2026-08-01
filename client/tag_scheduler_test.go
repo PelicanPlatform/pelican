@@ -21,12 +21,14 @@ package client
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -205,8 +207,18 @@ func TestTagSchedulerStarvingCap(t *testing.T) {
 	// FIFO, and stay there — nothing releases a starving slot.
 	require.Eventually(t, func() bool { return len(out) == 3 }, time.Second, 10*time.Millisecond,
 		"starving cap should hold dispatch at ceil(30%)")
-	assert.Never(t, func() bool { return len(out) != 3 }, 300*time.Millisecond, 10*time.Millisecond,
-		"no further dispatch until first byte or done")
+
+	// Assert the resting state rather than watching the clock for a
+	// non-event: a tag at its starving cap with a non-empty FIFO is not
+	// eligible for dispatch, so nothing more can come out until a first-byte
+	// or done event arrives, and none is coming.
+	var snap SchedulerSnapshot
+	require.Eventually(t, func() bool {
+		snap = sched.Snapshot(ctx)
+		return snap.Tags["originA"].Starving == 3 && snap.Tags["originA"].Pending == 7
+	}, time.Second, 10*time.Millisecond, "expected 3 starving and 7 queued, got %+v", snap.Tags["originA"])
+	assert.Equal(t, 3, snap.Tags["originA"].Active, "every dispatched transfer is still in flight")
+	assert.Equal(t, 3, len(out))
 }
 
 // TestTagSchedulerFirstByteReleasesStarvingSlot: once a dispatched
@@ -264,10 +276,20 @@ func TestTagSchedulerActiveCap(t *testing.T) {
 		firstFour[i] = <-out
 		firstFour[i].file.schedFirstByte()
 	}
-	// Active cap should hold at 4; nothing more dispatches until a
-	// schedDone fires.
-	assert.Never(t, func() bool { return len(out) > 0 }, 300*time.Millisecond, 10*time.Millisecond,
-		"active cap should prevent further dispatch until a done")
+	// Active cap should hold at 4; nothing more dispatches until a schedDone
+	// fires. As above, assert the resting state instead of waiting out a
+	// non-event: a tag at its active cap with a non-empty FIFO cannot be
+	// picked for dispatch.
+	var snap SchedulerSnapshot
+	require.Eventually(t, func() bool {
+		snap = sched.Snapshot(ctx)
+		st := snap.Tags["originA"]
+		// Starving reaching 0 is what proves all four first-byte events have
+		// been processed; active and pending alone were already at these
+		// values before any of them landed.
+		return st.Active == 4 && st.Starving == 0 && st.Pending == 6
+	}, time.Second, 10*time.Millisecond, "expected 4 active, 0 starving and 6 queued, got %+v", snap.Tags["originA"])
+	assert.Equal(t, 0, len(out), "active cap should prevent further dispatch until a done")
 
 	firstFour[0].file.schedDone()
 	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
@@ -735,4 +757,395 @@ func TestTagSchedulerClassifyShedHonesty(t *testing.T) {
 	// At the active cap, delivering data → merely slow.
 	sched.tagFor("slow").active = 2
 	assert.Equal(t, ShedOriginSlow, sched.classifyShed("slow"))
+}
+
+// TestTagSchedulerCapRounding pins the percent-to-slots conversion across
+// pool sizes and percentages. The caps round up, so a small pool can never
+// produce a cap of zero — which would make the tag permanently ineligible
+// for dispatch and wedge every transfer for that origin. Out-of-range
+// percentages mean "no per-tag limit" and yield the whole pool.
+func TestTagSchedulerCapRounding(t *testing.T) {
+	for _, tc := range []struct {
+		workers int
+		pct     int
+		want    int
+	}{
+		{workers: 1, pct: 1, want: 1},
+		{workers: 1, pct: 25, want: 1},
+		{workers: 1, pct: 99, want: 1},
+		{workers: 2, pct: 25, want: 1},
+		{workers: 3, pct: 25, want: 1},
+		{workers: 4, pct: 25, want: 1},
+		{workers: 5, pct: 25, want: 2},
+		{workers: 100, pct: 25, want: 25},
+		{workers: 100, pct: 90, want: 90},
+		{workers: 100, pct: 33, want: 33},
+		// A non-positive or >=100 percentage disables the cap.
+		{workers: 10, pct: 0, want: 10},
+		{workers: 10, pct: -1, want: 10},
+		{workers: 10, pct: 100, want: 10},
+		{workers: 10, pct: 150, want: 10},
+		// The constructor floors the pool at one worker.
+		{workers: 0, pct: 25, want: 1},
+		{workers: -5, pct: 50, want: 1},
+	} {
+		t.Run(fmt.Sprintf("workers=%d_pct=%d", tc.workers, tc.pct), func(t *testing.T) {
+			starving := NewTagScheduler(tc.workers, SchedulerConfig{PerTagStarvingPercent: tc.pct})
+			assert.Equal(t, tc.want, starving.starvingCap())
+			active := NewTagScheduler(tc.workers, SchedulerConfig{PerTagActivePercent: tc.pct})
+			assert.Equal(t, tc.want, active.activeCap())
+			assert.GreaterOrEqual(t, starving.starvingCap(), 1, "a cap of zero would wedge the tag")
+		})
+	}
+}
+
+// TestTagSchedulerLateFirstByteDoesNotDoubleRelease pins that a first-byte
+// signal arriving after the transfer already completed is ignored.
+//
+// Completion and first-byte are not mutually exclusive: an upload can
+// abandon its transfer (stopped-transfer timeout, error on the side channel)
+// while the transport is still running, and the transport may afterwards
+// report a negotiated 100-continue, a first response byte, or enough request
+// body drained. If schedDone merely read the flag instead of claiming it,
+// that late signal would decrement the tag's starving count a second time
+// and hand some other in-flight transfer's slot away.
+func TestTagSchedulerLateFirstByteDoesNotDoubleRelease(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(10, SchedulerConfig{
+		PerTagStarvingPercent: 20, // starving cap = 2
+		PerTagActivePercent:   90,
+		PendingBufferSize:     100,
+		PerTagPendingSize:     100,
+		EMAWindow:             5 * time.Second,
+	})
+	out := make(chan *clientTransferFile, 100)
+	startScheduler(t, ctx, sched, out)
+
+	for i := 0; i < 6; i++ {
+		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	}
+	require.Eventually(t, func() bool { return len(out) == 2 }, time.Second, 10*time.Millisecond,
+		"starving cap should hold dispatch at 2")
+	fileA := <-out
+	fileB := <-out
+
+	// A completes without ever producing a byte: it gives back one starving
+	// slot, which lets exactly one more transfer dispatch.
+	fileA.file.schedDone()
+	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	fileC := <-out
+
+	// Now A's transport reports a first byte, too late to mean anything.
+	// Nothing may be released on the strength of it.
+	fileA.file.schedFirstByte()
+
+	var snap SchedulerSnapshot
+	require.Eventually(t, func() bool {
+		snap = sched.Snapshot(ctx)
+		return snap.Tags["originA"].Active == 2
+	}, time.Second, 10*time.Millisecond, "expected B and C in flight, got %+v", snap.Tags["originA"])
+	assert.Equal(t, 2, snap.Tags["originA"].Starving,
+		"B and C are still starving; A's late first byte must not release a slot")
+	assert.Equal(t, 3, snap.Tags["originA"].Pending)
+	assert.Equal(t, 0, len(out), "the tag is back at its starving cap, so nothing more dispatches")
+
+	// The accounting is still sound: real progress still releases slots.
+	fileB.file.schedFirstByte()
+	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	fileC.file.schedDone()
+}
+
+// TestTagSchedulerDoneFiresOncePerFile pins that the per-file completion
+// hook is fired exactly once per dispatched file rather than once for the
+// worker's whole lifetime: a worker that processes several files in a row
+// must return every one of their slots.
+func TestTagSchedulerDoneFiresOncePerFile(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 25, // starving cap = 1, so files go through one at a time
+		PerTagActivePercent:   90,
+		PendingBufferSize:     100,
+		PerTagPendingSize:     100,
+		EMAWindow:             5 * time.Second,
+	})
+	out := make(chan *clientTransferFile)
+	startScheduler(t, ctx, sched, out)
+
+	const N = 8
+	for i := 0; i < N; i++ {
+		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	}
+	// Run them the way runTransferWorkerFile does: take one, finish it, take
+	// the next. If a slot were ever not returned, the starving cap would
+	// block and this drain would time out.
+	drainOut(ctx, t, out, N, func(_ string, f *clientTransferFile) {
+		f.file.schedDone()
+	})
+
+	var snap SchedulerSnapshot
+	require.Eventually(t, func() bool {
+		snap = sched.Snapshot(ctx)
+		return snap.Global.TotalAdmits == N && snap.Global.TotalPending == 0
+	}, time.Second, 10*time.Millisecond, "expected all %d admitted and drained, got %+v", N, snap.Global)
+	// The tag may already have been evicted; if it is still present every
+	// counter must be back at zero.
+	if st, ok := snap.Tags["originA"]; ok {
+		assert.Zero(t, st.Active, "every dispatched file returned its slot")
+		assert.Zero(t, st.Starving)
+		assert.Zero(t, st.Pending)
+	}
+}
+
+// TestTagSchedulerEMAWeighting pins that the fairness draw actually consults
+// the EMA: a tag that has been holding workers recently carries a higher EMA
+// and therefore a smaller weight, so it is picked less often than a tag that
+// has been quiet. Without this the "fair" scheduler would be plain random
+// selection among eligible tags.
+func TestTagSchedulerEMAWeighting(t *testing.T) {
+	sched := NewTagScheduler(100, SchedulerConfig{
+		PerTagStarvingPercent: 90,
+		PerTagActivePercent:   90,
+		EMAWindow:             time.Second,
+	})
+	// Drive the EMA directly rather than through dispatch so the test states
+	// the weighting rule itself: "busy" has been holding workers, "quiet"
+	// has not.
+	busy := sched.tagFor("busy")
+	quiet := sched.tagFor("quiet")
+	busy.active = 50
+	quiet.active = 0
+	sched.lastTick = time.Now().Add(-time.Second)
+	sched.tickEMA()
+
+	require.Greater(t, busy.ema, quiet.ema, "the busy tag should carry the larger EMA")
+	require.Less(t, busy.weight, quiet.weight, "a larger EMA must mean a smaller draw weight")
+	assert.InDelta(t, 1.0/(1.0+busy.ema), busy.weight, 1e-9, "weight is 1/(1+EMA)")
+	assert.InDelta(t, 1.0, quiet.weight, 1e-9, "an idle tag draws at full weight")
+
+	// With both tags backlogged and eligible, the quiet tag must win the
+	// draw markedly more often. Seed the generator so the assertion is
+	// reproducible rather than flaky.
+	sched.rng = rand.New(rand.NewPCG(1, 2))
+	busy.active, quiet.active = 0, 0 // eligible for dispatch, EMA retained
+	for i := 0; i < 4; i++ {
+		busy.fifo.PushBack(makeFile("busy"))
+		quiet.fifo.PushBack(makeFile("quiet"))
+	}
+	picks := map[string]int{}
+	for i := 0; i < 1000; i++ {
+		st, ok := sched.pickForDispatch()
+		require.True(t, ok)
+		switch st {
+		case busy:
+			picks["busy"]++
+		case quiet:
+			picks["quiet"]++
+		default:
+			t.Fatal("pickForDispatch returned an unknown tag")
+		}
+	}
+	assert.Greater(t, picks["quiet"], picks["busy"],
+		"the tag with the lower EMA should be drawn more often (quiet=%d busy=%d)",
+		picks["quiet"], picks["busy"])
+
+	// A zero EMAWindow disables the weighting entirely: every tag keeps the
+	// full weight it was created with.
+	flat := NewTagScheduler(10, SchedulerConfig{EMAWindow: 0})
+	a, b := flat.tagFor("a"), flat.tagFor("b")
+	a.active = 9
+	flat.lastTick = time.Now().Add(-time.Second)
+	flat.tickEMA()
+	assert.Equal(t, a.weight, b.weight, "EMA updates are disabled, so weights stay equal")
+}
+
+// TestTagSchedulerGlobalBufferOvershootIsBounded pins the size of the
+// reservation that lets a tag with an empty FIFO enqueue past the global
+// pending limit. The reservation exists so a handful of saturated origins
+// cannot pin the global buffer and lock every healthy origin out of
+// admission, but it does mean the real ceiling is the configured buffer plus
+// one entry per distinct tag rather than the configured buffer alone.
+func TestTagSchedulerGlobalBufferOvershootIsBounded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(10, SchedulerConfig{
+		PerTagStarvingPercent: 10, // starving cap = 1
+		PerTagActivePercent:   90,
+		PendingBufferSize:     2,
+		PerTagPendingSize:     100,
+		EMAWindow:             5 * time.Second,
+	})
+	// Nothing reads `out`, so everything admitted stays queued.
+	out := make(chan *clientTransferFile)
+	startScheduler(t, ctx, sched, out)
+
+	const tags = 10
+	admitted := 0
+	for i := 0; i < tags; i++ {
+		tag := fmt.Sprintf("origin-%02d", i)
+		// Each tag's first submission is always admitted (the reservation);
+		// the second competes for the global buffer.
+		for j := 0; j < 2; j++ {
+			if err := sched.Submit(ctx, tag, makeFile(tag)); err == nil {
+				admitted++
+			}
+		}
+	}
+
+	var snap SchedulerSnapshot
+	require.Eventually(t, func() bool {
+		snap = sched.Snapshot(ctx)
+		return snap.Global.TotalAdmits == uint64(admitted)
+	}, time.Second, 10*time.Millisecond)
+
+	// Every tag got at least its one reserved entry, so no origin was locked
+	// out. (The first tag submitted gets both of its entries in, because the
+	// global buffer still had room when they arrived.)
+	assert.GreaterOrEqual(t, admitted, tags,
+		"each distinct tag must be able to enqueue one entry even with the global buffer full")
+	for i := 0; i < tags; i++ {
+		tag := fmt.Sprintf("origin-%02d", i)
+		assert.NotZero(t, snap.Tags[tag].Pending+snap.Tags[tag].Active,
+			"tag %s was locked out of admission entirely", tag)
+	}
+	// ...and the overshoot is exactly that: at most one entry per tag on top
+	// of the configured buffer, never unbounded.
+	assert.LessOrEqual(t, snap.Global.TotalPending, sched.cfg.PendingBufferSize+tags,
+		"overshoot must stay bounded by one entry per distinct tag")
+}
+
+// TestTagSchedulerSnapshotAfterStop pins that a snapshot requested after the
+// scheduler has stopped returns the zero value promptly instead of blocking
+// on a goroutine that will never answer. The cache's metrics publisher races
+// shutdown on every restart, and a blocked Snapshot there would wedge the
+// errgroup.
+func TestTagSchedulerSnapshotAfterStop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 50,
+		PerTagActivePercent:   90,
+		PendingBufferSize:     10,
+		PerTagPendingSize:     10,
+		EMAWindow:             time.Second,
+	})
+	out := make(chan *clientTransferFile, 4)
+	egrp, _ := errgroup.WithContext(ctx)
+	sched.Start(ctx, egrp, out)
+	require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
+	sched.Stop()
+	require.NoError(t, egrp.Wait())
+
+	done := make(chan SchedulerSnapshot, 1)
+	go func() { done <- sched.Snapshot(ctx) }()
+	select {
+	case snap := <-done:
+		assert.Zero(t, snap.Global.WorkerCount, "a stopped scheduler reports the zero snapshot")
+		assert.Nil(t, snap.Tags)
+	case <-ctx.Done():
+		t.Fatal("Snapshot blocked after the scheduler stopped")
+	}
+}
+
+// TestTagSchedulerRunExitOnContextReleasesWaiters pins that the scheduler
+// releases everything waiting on it when its context is cancelled, not only
+// when Stop() is what ended it. Submit, Snapshot, and the event hooks all
+// use the same internal stop signal as their escape hatch, so a run loop
+// that exited without closing it would leave those callers stuck until some
+// later Stop() call happened to arrive.
+func TestTagSchedulerRunExitOnContextReleasesWaiters(t *testing.T) {
+	outer, outerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer outerCancel()
+	schedCtx, schedCancel := context.WithCancel(outer)
+
+	sched := NewTagScheduler(4, SchedulerConfig{
+		PerTagStarvingPercent: 50,
+		PerTagActivePercent:   90,
+		PendingBufferSize:     10,
+		PerTagPendingSize:     10,
+		EMAWindow:             time.Second,
+	})
+	out := make(chan *clientTransferFile)
+	egrp, _ := errgroup.WithContext(outer)
+	sched.Start(schedCtx, egrp, out)
+
+	schedCancel()
+	require.NoError(t, egrp.Wait())
+
+	// Submitting against a context that is still live must still return
+	// promptly, shedding rather than hanging.
+	done := make(chan error, 1)
+	go func() { done <- sched.Submit(outer, "originA", makeFile("originA")) }()
+	select {
+	case err := <-done:
+		require.Error(t, err, "a submission to a dead scheduler must shed, not succeed")
+		assert.ErrorIs(t, err, ErrTooManyRequests)
+	case <-outer.Done():
+		t.Fatal("Submit blocked after the scheduler's context was cancelled")
+	}
+
+	// Snapshot likewise, and Stop() must remain safe to call afterwards.
+	snapDone := make(chan SchedulerSnapshot, 1)
+	go func() { snapDone <- sched.Snapshot(outer) }()
+	select {
+	case <-snapDone:
+	case <-outer.Done():
+		t.Fatal("Snapshot blocked after the scheduler's context was cancelled")
+	}
+	assert.NotPanics(t, sched.Stop)
+}
+
+// TestSchedulerRejectionIsRetryable pins that a shed performed by this
+// process's own scheduler is classified the same way as the identical shed
+// observed remotely as an HTTP 429: retryable, carrying the typed Pelican
+// error for its reason. The whole point of the shed is that the caller tries
+// again elsewhere or later, so a rejection that reads as fatal would defeat
+// it.
+func TestSchedulerRejectionIsRetryable(t *testing.T) {
+	for _, tc := range []struct {
+		reason   ShedReason
+		wantCode int
+	}{
+		{ShedOriginUnresponsive, 6008},
+		{ShedOriginSlow, 6009},
+		{ShedCacheOverloaded, 6010},
+	} {
+		t.Run(string(tc.reason), func(t *testing.T) {
+			rej := &SchedulerRejection{Reason: tc.reason, Tag: "originA"}
+			assert.True(t, IsRetryable(rej), "a shed must be retryable")
+			assert.ErrorIs(t, rej, ErrTooManyRequests, "existing sentinel checks must keep working")
+			var pe *error_codes.PelicanError
+			require.ErrorAs(t, rej, &pe)
+			assert.Equal(t, tc.wantCode, pe.Code())
+			assert.True(t, pe.IsRetryable())
+			assert.NotEmpty(t, rej.Error(), "a rejection built as a literal still renders a message")
+		})
+	}
+}
+
+// TestDeriveSchedulerTag pins the tag derivation, including the degenerate
+// inputs. Everything that cannot name an upstream host shares the empty tag,
+// and therefore shares one set of caps, so the fallback needs to be
+// deliberate rather than incidental.
+func TestDeriveSchedulerTag(t *testing.T) {
+	assert.Equal(t, "originA", deriveSchedulerTag(makeFile("originA")))
+
+	assert.Empty(t, deriveSchedulerTag(nil), "nil file")
+	assert.Empty(t, deriveSchedulerTag(&clientTransferFile{}), "nil inner file")
+	assert.Empty(t, deriveSchedulerTag(&clientTransferFile{file: &transferFile{}}), "no attempts")
+
+	noUrl := &clientTransferFile{file: &transferFile{
+		attempts: []transferAttemptDetails{{Url: nil}},
+	}}
+	assert.Empty(t, deriveSchedulerTag(noUrl), "attempt with no URL")
+
+	// The tag is the host alone: the same origin serving different paths is
+	// one tag, and the same host on a different scheme is still that host.
+	withPort := &clientTransferFile{file: &transferFile{
+		attempts: []transferAttemptDetails{
+			{Url: &url.URL{Scheme: "https", Host: "origin.example.com:8443", Path: "/deep/path"}},
+		},
+	}}
+	assert.Equal(t, "origin.example.com:8443", deriveSchedulerTag(withPort))
 }

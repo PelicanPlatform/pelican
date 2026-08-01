@@ -203,29 +203,65 @@ func onlyThrottled(err error) bool {
 	if err == nil {
 		return false
 	}
-	if multi, ok := err.(interface{ Unwrap() []error }); ok {
-		children := multi.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !onlyThrottled(child) {
+	// Walk down the single-error wrappers looking for an accumulator. The
+	// chain can be several links long -- github.com/pkg/errors.Wrap alone adds
+	// two -- so this has to loop rather than peek one level down, or a wrapped
+	// accumulator would collapse into the errors.Is below and lose the
+	// per-attempt detail this function exists to inspect.
+	for cur := err; cur != nil; {
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			children := multi.Unwrap()
+			if len(children) == 0 {
 				return false
 			}
-		}
-		return true
-	}
-	// Descend through a single wrapper so an accumulator nested inside one is
-	// still examined per-attempt rather than collapsed by errors.Is below.
-	if single, ok := err.(interface{ Unwrap() error }); ok {
-		if inner := single.Unwrap(); inner != nil {
-			if _, isMulti := inner.(interface{ Unwrap() []error }); isMulti {
-				return onlyThrottled(inner)
+			for _, child := range children {
+				if !onlyThrottled(child) {
+					return false
+				}
 			}
+			return true
 		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		cur = single.Unwrap()
 	}
 	return errors.Is(err, client.ErrTooManyRequests)
 }
+
+// anyAttemptNotFound reports whether any attempt in err definitively found the
+// object missing.
+//
+// errors.As stops at the first PelicanError in tree order, which for an
+// accumulator is whatever the first object server happened to return. When one
+// origin was throttled and another answered "not found", that ordering decides
+// whether the client is told 404 or something far less useful, so the
+// definitive answer is searched for explicitly instead.
+func anyAttemptNotFound(err error) bool {
+	for cur := err; cur != nil; {
+		if pe, ok := cur.(*error_codes.PelicanError); ok && pe.Code() == fileNotFoundErrorCode {
+			return true
+		}
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			for _, child := range multi.Unwrap() {
+				if anyAttemptNotFound(child) {
+					return true
+				}
+			}
+			return false
+		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		cur = single.Unwrap()
+	}
+	return false
+}
+
+// fileNotFoundErrorCode is error_codes' Specification.FileNotFound.
+const fileNotFoundErrorCode = 5011
 
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
@@ -286,13 +322,19 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	var sce *client.StatusCodeError
 	var pe *error_codes.PelicanError
 	var netErr net.Error
-	if errors.As(getErr, &sce) {
+	if anyAttemptNotFound(getErr) {
+		// A definitive "the object is not here" from any object server beats
+		// the transient failures the other attempts may have reported: a 404
+		// tells the client to stop, where a 429 or 500 tells it to come back
+		// for an object that will never exist.
+		writeJSON(http.StatusNotFound, "not_found", getErr.Error())
+	} else if errors.As(getErr, &sce) {
 		code := int(*sce)
 		writeJSON(code, http.StatusText(code), getErr.Error())
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
 		switch {
-		case pe.Code() == 5011: // FileNotFound
+		case pe.Code() == fileNotFoundErrorCode:
 			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
 			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())

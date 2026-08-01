@@ -20,15 +20,21 @@ package local_cache
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestIsFederationAllowed(t *testing.T) {
@@ -144,5 +150,197 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		handleError(rec, errors.New("some other error"), false, reqLog)
 		assert.NotEqual(t, 429, rec.Code, "non-scheduler errors must not accidentally map to 429")
 		assert.Empty(t, rec.Header().Get("Retry-After"))
+	})
+}
+
+// TestHandleErrorThrottlePrecedence pins the precedence between a throttle and
+// a definitive failure when a fetch tried several object servers.
+//
+// A cache fetch accumulates one error per server it contacted
+// (client.TransferErrors implements Unwrap() []error), so errors.Is finds
+// ErrTooManyRequests as soon as a *single* attempt was shed. Answering 429 on
+// that basis lets a throttled origin mask a definitive answer from another one:
+// a namespace served by origins A and B where A says "not found" and B is
+// throttled would be reported as "retry later", and the client would retry
+// forever for an object that does not exist. The 429 path is only correct when
+// throttling is the *whole* story.
+func TestHandleErrorThrottlePrecedence(t *testing.T) {
+	reqLog := log.NewEntry(log.New())
+
+	// accumulate builds the multi-error the transfer engine hands back after
+	// trying several object servers, one child per attempt.
+	accumulate := func(errs ...error) error {
+		te := client.NewTransferErrors()
+		for _, err := range errs {
+			te.AddError(err)
+		}
+		return te
+	}
+
+	notFound := func() error {
+		return error_codes.NewSpecification_FileNotFoundError(errors.New("object does not exist at origin"))
+	}
+	shed := func() error {
+		return &client.SchedulerRejection{Reason: client.ShedOriginSlow, Tag: "originB"}
+	}
+
+	tests := []struct {
+		name string
+		err  error
+		// wantStatus is the exact status expected; 0 means the only
+		// requirement is that the response is not a 429.
+		wantStatus int
+	}{
+		{
+			// Every server tried was shed: there is nothing more specific to
+			// report, so "retry later" is the honest answer.
+			name:       "AllAttemptsThrottled",
+			err:        accumulate(errors.Wrap(client.ErrTooManyRequests, "origin \"originA\" pending queue is full"), shed()),
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			// One server said the object does not exist. That answer is
+			// definitive and must reach the client, even though a sibling
+			// attempt was shed.
+			name:       "ThrottleDoesNotMaskNotFound",
+			err:        accumulate(client.ErrTooManyRequests, notFound()),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// Same, with the attempts recorded in the other order: precedence
+			// must not depend on which server happened to answer first.
+			name:       "NotFoundBeforeThrottle",
+			err:        accumulate(notFound(), client.ErrTooManyRequests),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// The accumulator reaches handleError wrapped with transfer
+			// context; the per-attempt errors must still be examined
+			// individually rather than collapsed by errors.Is.
+			name:       "WrappedAccumulatorDoesNotMaskNotFound",
+			err:        fmt.Errorf("failed to download object: %w", accumulate(client.ErrTooManyRequests, notFound())),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// errors.Wrap inserts two links (withStack around withMessage),
+			// and this path is wrapped that way in practice. Peeking only a
+			// single level below the top would miss the accumulator entirely
+			// and fall back to the errors.Is answer, which is exactly the
+			// masking this test exists to prevent.
+			name:       "PkgErrorsWrappedAccumulatorDoesNotMaskNotFound",
+			err:        errors.Wrap(accumulate(client.ErrTooManyRequests, notFound()), "failed to download object"),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// A structured rejection unwraps to a typed PelicanError, so a
+			// plain errors.As scan finds *its* code first and would answer
+			// 500. The definitive not-found from the sibling attempt still has
+			// to win.
+			name:       "StructuredThrottleDoesNotMaskNotFound",
+			err:        accumulate(shed(), notFound()),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// A non-throttle failure of any kind is enough to disqualify the
+			// 429 path: the client is told about the real failure instead of
+			// being sent into an unbounded retry loop.
+			name:       "ThrottleDoesNotMaskOtherFailure",
+			err:        accumulate(shed(), errors.New("connection reset by peer")),
+			wantStatus: 0,
+		},
+		{
+			// The common case: a single shed attempt, not accumulated.
+			name:       "SingleThrottle",
+			err:        shed(),
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			// A lone accumulated throttle is still purely a throttle.
+			name:       "SingleAccumulatedThrottle",
+			err:        accumulate(shed()),
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			// An accumulator with no attempts recorded carries no evidence of
+			// throttling, so it must not be advertised as retryable.
+			name:       "EmptyAccumulator",
+			err:        accumulate(),
+			wantStatus: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleError(rec, tt.err, false, reqLog)
+			if tt.wantStatus == 0 {
+				assert.NotEqual(t, http.StatusTooManyRequests, rec.Code,
+					"a throttled attempt must not mask a more specific failure")
+			} else {
+				assert.Equal(t, tt.wantStatus, rec.Code)
+			}
+			if rec.Code == http.StatusTooManyRequests {
+				assert.Equal(t, "60", rec.Header().Get("Retry-After"),
+					"a 429 must always carry the backoff hint")
+			} else {
+				assert.Empty(t, rec.Header().Get("Retry-After"),
+					"only a 429 advertises a backoff")
+			}
+		})
+	}
+}
+
+// TestRetryAfterValue verifies that the advertised backoff comes from
+// Cache.Throttle.RetryAfter. Operators tune this to match how long their cache
+// actually needs to drain; if the parameter were ignored, every deployment
+// would silently advertise the 60s fallback and clients would retry on a
+// schedule unrelated to the cache's real recovery time.
+func TestRetryAfterValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{
+			name:  "ConfiguredValue",
+			value: "90s",
+			want:  "90",
+		},
+		{
+			// Retry-After is whole seconds on the wire. A sub-second setting
+			// must round up: truncating to "0" tells the client to retry
+			// immediately, which turns a shed request into a hot loop against
+			// an already-overloaded cache.
+			name:  "SubSecondRoundsUp",
+			value: "500ms",
+			want:  "1",
+		},
+		{
+			name:  "ZeroFallsBackToDefault",
+			value: "0s",
+			want:  "60",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			t.Cleanup(server_utils.ResetTestState)
+			viper.Set(param.Cache_Throttle_RetryAfter.GetName(), tt.value)
+			assert.Equal(t, tt.want, retryAfterValue())
+
+			// The same value is what a shed request actually advertises.
+			rec := httptest.NewRecorder()
+			handleError(rec, client.ErrTooManyRequests, false, log.NewEntry(log.New()))
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			assert.Equal(t, tt.want, rec.Header().Get("Retry-After"))
+		})
+	}
+
+	t.Run("UnsetFallsBackToDefault", func(t *testing.T) {
+		server_utils.ResetTestState()
+		t.Cleanup(server_utils.ResetTestState)
+		assert.Equal(t, "60", retryAfterValue(),
+			"an unconfigured cache must still advertise a sane backoff")
 	})
 }
