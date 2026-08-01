@@ -969,6 +969,23 @@ func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFi
 	}
 }
 
+// uncountSubmission undoes the totalXfer/activeXfer increment a caller made
+// just before a submission that then failed for a reason other than a
+// scheduler shed.
+//
+// Those counts have to be taken before submitting, because a shed produces a
+// synthetic result immediately and runMux reads totalXfer == 0 as "this job
+// created no transfers". Any other failure produces no result at all, so the
+// counts have to come back off: a job whose active count never drains is never
+// finished, and the client's results channel stays open forever.
+//
+// Only safe to call from the goroutine that owns the job's lookup, since
+// totalXfer is a plain int written only there.
+func (tj *TransferJob) uncountSubmission() {
+	tj.totalXfer -= 1
+	tj.activeXfer.Add(-1)
+}
+
 // deriveSchedulerTag chooses the tag under which a transfer is admitted.
 // The tag is the hostname of the first attempt (the primary upstream
 // origin); the key is opaque to the scheduler, so a username or prefix can
@@ -2784,11 +2801,9 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			log.Debugln("Scheduler rejected transfer for", remoteUrl.String(), ":", submitErr)
 			return
 		}
-		// Nothing was queued and no result will ever be produced, so undo the
-		// bookkeeping above; leaving it in place would keep activeXfer
-		// permanently non-zero and the client's results channel open forever.
-		job.job.totalXfer -= 1
-		job.job.activeXfer.Add(-1)
+		// Nothing was queued and no result is coming, so this file must not
+		// stay on the job's books.
+		job.job.uncountSubmission()
 		err = submitErr
 		return
 	}
@@ -5152,6 +5167,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						},
 					}); err != nil {
 						if !errors.Is(err, ErrTooManyRequests) {
+							// Nothing was queued and no result is coming, so this
+							// file must not stay on the job's books.
+							job.job.uncountSubmission()
 							return err
 						}
 						// 429 already reported to te.results by submitFile;
@@ -5238,6 +5256,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				},
 			}); err != nil {
 				if !errors.Is(err, ErrTooManyRequests) {
+					// Nothing was queued and no result is coming, so this
+					// file must not stay on the job's books.
+					job.job.uncountSubmission()
 					return err
 				}
 			}
@@ -5291,6 +5312,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					},
 				}); err != nil {
 					if !errors.Is(err, ErrTooManyRequests) {
+						// Nothing was queued and no result is coming, so this
+						// file must not stay on the job's books.
+						job.job.uncountSubmission()
 						return err
 					}
 				}
@@ -5340,6 +5364,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 				},
 			}); err != nil {
 				if !errors.Is(err, ErrTooManyRequests) {
+					// Nothing was queued and no result is coming, so this
+					// file must not stay on the job's books.
+					job.job.uncountSubmission()
 					return err
 				}
 			}

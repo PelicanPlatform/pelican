@@ -667,6 +667,9 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 		},
 	}); err != nil {
 		if !errors.Is(err, ErrTooManyRequests) {
+			// Nothing was queued and no result is coming, so this
+			// file must not stay on the job's books.
+			job.job.uncountSubmission()
 			return err
 		}
 	}
