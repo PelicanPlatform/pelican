@@ -1050,7 +1050,10 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			expectedMessage := "is a collection"
 			require.Contains(t, getErr.Error(), expectedMessage, "Error message did not match expected text")
 
-			// Verify it's a ParameterError
+			// Naming a collection is a mistake in the request, so it must carry
+			// the parameter code (1000) and the exit status that goes with it,
+			// rather than looking like a transfer that failed. error_codes
+			// exports no constant for the value.
 			var pe *error_codes.PelicanError
 			require.True(t, errors.As(getErr, &pe), "Error should be wrapped in PelicanError")
 			assert.Equal(t, 1000, pe.Code(), "Should be Parameter error code")
@@ -1082,8 +1085,10 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			_, statErr = os.Stat(copyDest)
 			require.True(t, os.IsNotExist(statErr), "a refused copy must leave nothing behind")
 
-			// A client that does not ask keeps the older behavior, which is
-			// what the cache relies on.
+			// A client that does not ask keeps the unguarded behavior, which is
+			// what the cache relies on: it submits ordinary non-recursive
+			// download jobs for the blocks it is filling and must not have them
+			// refused.
 			defaultDest := filepath.Join(t.TempDir(), "not-asked")
 			_, defaultErr := client.DoGet(fed.Ctx, downloadURL, defaultDest, false)
 			assert.NotContains(t, fmt.Sprint(defaultErr), "is a collection",
