@@ -6065,8 +6065,12 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 		destCopy := statUrl
 		destCopy.Path = propfindPath
 
-		// gowebdav takes no context, so the caller's deadline is attached to
-		// each request as the library is about to send it.
+		// No method on studio-b12/gowebdav's Client takes a context -- not in
+		// any release through v0.13.0, nor on master -- so the caller's
+		// deadline is attached to each request through the interceptor, which
+		// runs on the request the library is about to send. (Not to be
+		// confused with golang.org/x/net/webdav, used on the origin side of
+		// this repo, whose FileSystem methods do take one.)
 		client.SetInterceptor(func(_ string, r *http.Request) {
 			*r = *r.WithContext(ctx)
 		})
@@ -6243,12 +6247,17 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 // unixSocket, when non-empty, is the local cache's socket: the endpoint is
 // reached by dialing it rather than by resolving the URL's host.
 //
-// gowebdav exposes no context-taking method (no release of it does), so the
-// caller's deadline is attached through the interceptor, which runs on the
-// request the library is about to send. Without that, a stalled endpoint would
-// hang the download for as long as the transport allowed. The interceptor also
-// restores the query, which carries the authorization some endpoints want and
-// which gowebdav has no way to pass through.
+// No method on studio-b12/gowebdav's Client takes a context -- not in any
+// release through v0.13.0, nor on master -- so the caller's deadline is
+// attached through the interceptor, which runs on the request the library is
+// about to send. Without that, a stalled endpoint would hang the download for
+// as long as the transport allowed. The interceptor also restores the query,
+// which carries the authorization some endpoints want and which gowebdav has
+// no way to pass through.
+//
+// This is the WebDAV *client*; golang.org/x/net/webdav, which the origin side
+// of this repo serves with, is a different package whose FileSystem methods do
+// take a context. Upgrading gowebdav would not remove the need for this.
 func propfindObject(ctx context.Context, objectUrl *url.URL, unixSocket string, token *tokenGenerator) (size int64, isCollection bool, err error) {
 	base := *objectUrl
 	base.Path = ""
