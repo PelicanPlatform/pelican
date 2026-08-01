@@ -263,6 +263,21 @@ func anyAttemptNotFound(err error) bool {
 // fileNotFoundErrorCode is error_codes' Specification.FileNotFound.
 const fileNotFoundErrorCode = 5011
 
+// validShedReason returns reason if it is one of the known shed reasons, and
+// the generic "too_many_requests" otherwise.
+//
+// The value is written to the machine-parseable "error" field of a 429 body,
+// so it must come from a fixed vocabulary. Callers can reach here holding a
+// reason that arrived from an upstream server, and an arbitrary string echoed
+// to a client would flow onward into its logs and job ads.
+func validShedReason(reason string) string {
+	switch client.ShedReason(reason) {
+	case client.ShedOriginUnresponsive, client.ShedOriginSlow, client.ShedCacheOverloaded:
+		return reason
+	}
+	return "too_many_requests"
+}
+
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
 // every log line emitted here is correlated with the original request.
@@ -308,9 +323,14 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		var rej *client.SchedulerRejection
 		var throttled *client.CacheThrottleError
 		if errors.As(getErr, &rej) {
-			errCode = string(rej.Reason)
+			errCode = validShedReason(string(rej.Reason))
 		} else if errors.As(getErr, &throttled) && throttled.Reason != "" {
-			errCode = throttled.Reason
+			// This reason originated at whatever upstream answered our fetch.
+			// It is validated where the response is parsed, but it reaches here
+			// through an exported field on an exported type, so re-check it
+			// rather than trusting a caller elsewhere to have done so: it is
+			// about to be echoed to a client as a machine-parseable value.
+			errCode = validShedReason(throttled.Reason)
 		}
 		reqLog.Warnf("Rejecting fetch with 429 (%s): %v", errCode, getErr)
 		w.Header().Set("Retry-After", retryAfterValue())

@@ -344,3 +344,60 @@ func TestRetryAfterValue(t *testing.T) {
 			"an unconfigured cache must still advertise a sane backoff")
 	})
 }
+
+// TestHandleErrorShedReasonIsValidated pins that the machine-parseable "error"
+// field of a 429 body only ever carries a known shed reason.
+//
+// The reason on a CacheThrottleError originated at whatever upstream answered
+// the cache's own fetch. It is validated where that response is parsed, but it
+// travels here on an exported field of an exported type, so nothing structural
+// stops a future caller from setting it to anything at all. Echoing an
+// arbitrary upstream string to a client would hand it onward into that
+// client's logs and HTCondor job ads, where an embedded newline forges records.
+func TestHandleErrorShedReasonIsValidated(t *testing.T) {
+	reqLog := log.NewEntry(log.New())
+
+	known := []string{"origin_unresponsive", "origin_slow", "cache_overloaded"}
+	for _, reason := range known {
+		t.Run("known/"+reason, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleError(rec, &client.CacheThrottleError{
+				Reason: reason,
+				Err:    client.ErrTooManyRequests,
+			}, false, reqLog)
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, reason, body["error"], "a known reason is passed through verbatim")
+		})
+	}
+
+	hostile := []struct {
+		name   string
+		reason string
+	}{
+		{"NewlineInjection", "origin_slow\nlevel=fatal msg=\"forged record\""},
+		{"UnknownVocabulary", "please_stop"},
+		{"CarriageReturn", "origin_slow\r\nSet-Cookie: x=y"},
+		{"Empty", " "},
+	}
+	for _, tt := range hostile {
+		t.Run("rejected/"+tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleError(rec, &client.CacheThrottleError{
+				Reason: tt.reason,
+				Err:    client.ErrTooManyRequests,
+			}, false, reqLog)
+			require.Equal(t, http.StatusTooManyRequests, rec.Code,
+				"the response is still a throttle; only the reason is discarded")
+
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, "too_many_requests", body["error"],
+				"an unrecognized reason must fall back to the generic vocabulary")
+			assert.NotContains(t, body["error"], "\n")
+			assert.NotContains(t, body["error"], "\r")
+		})
+	}
+}
