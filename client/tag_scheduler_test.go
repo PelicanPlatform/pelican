@@ -28,11 +28,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 // makeFile builds a minimal *clientTransferFile whose first attempt
