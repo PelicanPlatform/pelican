@@ -213,7 +213,11 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionCacheEmbeddedClientMode{}:
-			cacheMode = true
+			// The value, not merely the presence of the option: every caller
+			// in the cache passes useEmbeddedCacheMode(), which is false in
+			// site-local mode, and reading it as true there queries the
+			// Director with the wrong flavor.
+			cacheMode = option.Value().(bool)
 		case identTransferOptionStatUploadDestination{}:
 			uploadDestination = option.Value().(bool)
 		}

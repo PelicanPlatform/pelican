@@ -413,6 +413,17 @@ func requestOnlyIfCached(r *http.Request) bool {
 //   - No-store streaming (io.Copy) for non-seekable responses
 //   - Range requests via http.ServeContent for seekable responses
 func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
+	// Every response from here carries object bytes the cache did not author
+	// and whose type it does not know: the origin's Content-Type is not
+	// recorded anywhere, so both the stored path (http.ServeContent) and the
+	// pass-through path fall back to sniffing, which types anything
+	// HTML-shaped as a document. This handler is mounted on the same Gin
+	// engine as the web UI, so that document would run on the origin holding
+	// the admin session cookie -- reachable by anyone who can put a .html or
+	// .svg into a namespace this cache serves. Set once here, before any
+	// branch writes, so it covers GET, HEAD, and PROPFIND on both listeners.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
 	authzHeader := r.Header.Get("Authorization")
 	bearerToken := ""
 	if strings.HasPrefix(authzHeader, "Bearer ") {

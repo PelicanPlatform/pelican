@@ -230,9 +230,12 @@ func TestCacheServesButDoesNotStoreXrootdCollectionListing(t *testing.T) {
 		"the listing is still worth showing a user; only storing it is the problem")
 	// The cache does not record what the origin called the response, so it must
 	// not let net/http guess either: an index typed as HTML would run as a
-	// document on the same web origin as the cache's UI.
+	// document on the same web origin as the cache's UI. The header says the
+	// same thing to the browser, for every object rather than only this path.
 	assert.Equal(t, "application/octet-stream", resp.headers.Get("Content-Type"),
 		"a passed-through listing must be typed opaquely, not sniffed as HTML")
+	assert.Equal(t, "nosniff", resp.headers.Get("X-Content-Type-Options"),
+		"the cache must tell the browser not to re-guess the type it was given")
 
 	// A stored object is served with an Age header (see TestCacheControl_NoStore
 	// for the same signal used the other way round). The absence of one on every
