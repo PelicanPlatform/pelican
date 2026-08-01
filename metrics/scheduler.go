@@ -57,8 +57,18 @@ var (
 
 	CacheSchedulerRejectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_scheduler_rejects_total",
-		Help: "Count of upstream fetches rejected by the cache's fair scheduler with a 429-equivalent error. Per-origin series carry reason=\"any\" (the per-origin snapshot does not break rejections down by cause). The cause breakdown is published only on the synthetic origin=\"*\" series: reason=\"global\" (the global pending buffer was full) and reason=\"per_tag\" (that origin's own pending queue was full).",
-	}, []string{"origin", "reason"})
+		Help: "Per-origin count of upstream fetches rejected by the cache's fair scheduler with a 429-equivalent error.",
+	}, []string{"origin"})
+
+	// The cause breakdown is a separate metric rather than an extra label
+	// on the per-origin counter: the scheduler's per-origin snapshot does
+	// not attribute rejections to a cause, so publishing both views under
+	// one name would make the obvious sum() over that name count every
+	// rejection twice.
+	CacheSchedulerRejectsByCauseTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_scheduler_rejects_by_cause_total",
+		Help: "Pool-wide count of upstream fetches rejected by the cache's fair scheduler, broken down by cause: \"global\" (the global pending buffer was full) or \"per_tag\" (the origin's own pending queue was full).",
+	}, []string{"cause"})
 
 	// Pool-wide aggregates. Handy for a single-panel overview even if
 	// no per-origin labels are being scraped.
@@ -85,28 +95,44 @@ var (
 )
 
 // schedulerCounterTracker remembers the last observed monotonic total
-// per (origin, reason) tuple so we can Add the delta to the underlying
-// Prometheus counter without double-counting on republish.
+// per origin so we can Add the delta to the underlying Prometheus
+// counter without double-counting on republish.
 type schedulerCounterTracker struct {
-	mu           sync.Mutex
-	lastAdmits   map[string]uint64
-	lastRejects  map[schedulerRejectKey]uint64
-	knownAdmits  map[string]struct{} // set of tags that currently have an Admits > 0 series
-	knownRejects map[schedulerRejectKey]struct{}
-	knownGauges  map[string]struct{} // set of tags that currently have any gauge value published
+	mu                 sync.Mutex
+	lastAdmits         map[string]uint64
+	lastRejects        map[string]uint64
+	lastRejectsByCause map[string]uint64
+	knownAdmits        map[string]struct{} // set of tags that currently have an Admits > 0 series
+	knownRejects       map[string]struct{}
+	knownGauges        map[string]struct{} // set of tags that currently have any gauge value published
 }
 
-type schedulerRejectKey struct {
-	origin string
-	reason string // "global" or "per_tag"
+func newSchedulerCounterTracker() *schedulerCounterTracker {
+	return &schedulerCounterTracker{
+		lastAdmits:         make(map[string]uint64),
+		lastRejects:        make(map[string]uint64),
+		lastRejectsByCause: make(map[string]uint64),
+		knownAdmits:        make(map[string]struct{}),
+		knownRejects:       make(map[string]struct{}),
+		knownGauges:        make(map[string]struct{}),
+	}
 }
 
-var schedulerTracker = &schedulerCounterTracker{
-	lastAdmits:   make(map[string]uint64),
-	lastRejects:  make(map[schedulerRejectKey]uint64),
-	knownAdmits:  make(map[string]struct{}),
-	knownRejects: make(map[schedulerRejectKey]struct{}),
-	knownGauges:  make(map[string]struct{}),
+var schedulerTracker = newSchedulerCounterTracker()
+
+// counterDelta computes how much to Add to a Prometheus counter given the
+// previously published total and the current one.
+//
+// Both are unsigned, so the subtraction must not be done blind: a current
+// total below the previous one means the source counters restarted (a fresh
+// TagScheduler begins at zero, e.g. a cache re-created in the same process),
+// and `current - last` would wrap to something near 2^64. Treat that case as
+// a reset and count the current value as entirely new.
+func counterDelta(current, last uint64) float64 {
+	if current < last {
+		return float64(current)
+	}
+	return float64(current - last)
 }
 
 // SchedulerGlobalStats mirrors client.GlobalStats but lives in the
@@ -158,7 +184,7 @@ func PublishCacheSchedulerSnapshot(global SchedulerGlobalStats, tags map[string]
 
 	nowKnownGauges := make(map[string]struct{}, len(tags))
 	nowKnownAdmits := make(map[string]struct{}, len(tags))
-	nowKnownRejects := make(map[schedulerRejectKey]struct{}, len(tags))
+	nowKnownRejects := make(map[string]struct{}, len(tags))
 
 	for origin, s := range tags {
 		nowKnownGauges[origin] = struct{}{}
@@ -169,44 +195,31 @@ func PublishCacheSchedulerSnapshot(global SchedulerGlobalStats, tags map[string]
 
 		if s.Admits > 0 {
 			nowKnownAdmits[origin] = struct{}{}
-			last := schedulerTracker.lastAdmits[origin]
-			if s.Admits > last {
-				CacheSchedulerAdmitsTotal.WithLabelValues(origin).Add(float64(s.Admits - last))
+			if delta := counterDelta(s.Admits, schedulerTracker.lastAdmits[origin]); delta > 0 {
+				CacheSchedulerAdmitsTotal.WithLabelValues(origin).Add(delta)
 			}
 			schedulerTracker.lastAdmits[origin] = s.Admits
 		}
 		if s.Rejects > 0 {
-			// The snapshot only reports the sum across reasons per
-			// tag; we can only tell them apart via the global
-			// totals. For per-origin labels, publish the full delta
-			// under a synthetic reason="any" so the per-origin view
-			// still works. The reason=global/per_tag detail is
-			// available via the pool-wide counters.
-			key := schedulerRejectKey{origin: origin, reason: "any"}
-			nowKnownRejects[key] = struct{}{}
-			last := schedulerTracker.lastRejects[key]
-			if s.Rejects > last {
-				CacheSchedulerRejectsTotal.WithLabelValues(origin, "any").Add(float64(s.Rejects - last))
+			nowKnownRejects[origin] = struct{}{}
+			if delta := counterDelta(s.Rejects, schedulerTracker.lastRejects[origin]); delta > 0 {
+				CacheSchedulerRejectsTotal.WithLabelValues(origin).Add(delta)
 			}
-			schedulerTracker.lastRejects[key] = s.Rejects
+			schedulerTracker.lastRejects[origin] = s.Rejects
 		}
 	}
 
-	// Publish pool-wide reject totals under a special "*" origin so
-	// operators get the reason breakdown without paying a per-origin
-	// cardinality cost.
-	poolAllOriginKeyGlobal := schedulerRejectKey{origin: "*", reason: "global"}
-	poolAllOriginKeyPerTag := schedulerRejectKey{origin: "*", reason: "per_tag"}
-	nowKnownRejects[poolAllOriginKeyGlobal] = struct{}{}
-	nowKnownRejects[poolAllOriginKeyPerTag] = struct{}{}
-	if delta := global.TotalRejectsGlobal - schedulerTracker.lastRejects[poolAllOriginKeyGlobal]; delta > 0 {
-		CacheSchedulerRejectsTotal.WithLabelValues("*", "global").Add(float64(delta))
+	// The per-origin snapshot does not attribute a rejection to a cause, so
+	// the breakdown is only available pool-wide.
+	for cause, total := range map[string]uint64{
+		"global":  global.TotalRejectsGlobal,
+		"per_tag": global.TotalRejectsPerTag,
+	} {
+		if delta := counterDelta(total, schedulerTracker.lastRejectsByCause[cause]); delta > 0 {
+			CacheSchedulerRejectsByCauseTotal.WithLabelValues(cause).Add(delta)
+		}
+		schedulerTracker.lastRejectsByCause[cause] = total
 	}
-	schedulerTracker.lastRejects[poolAllOriginKeyGlobal] = global.TotalRejectsGlobal
-	if delta := global.TotalRejectsPerTag - schedulerTracker.lastRejects[poolAllOriginKeyPerTag]; delta > 0 {
-		CacheSchedulerRejectsTotal.WithLabelValues("*", "per_tag").Add(float64(delta))
-	}
-	schedulerTracker.lastRejects[poolAllOriginKeyPerTag] = global.TotalRejectsPerTag
 
 	// Prune labels for tags that disappeared from the snapshot.
 	for origin := range schedulerTracker.knownGauges {
@@ -223,13 +236,48 @@ func PublishCacheSchedulerSnapshot(global SchedulerGlobalStats, tags map[string]
 			delete(schedulerTracker.lastAdmits, origin)
 		}
 	}
-	for key := range schedulerTracker.knownRejects {
-		if _, still := nowKnownRejects[key]; !still {
-			CacheSchedulerRejectsTotal.DeleteLabelValues(key.origin, key.reason)
-			delete(schedulerTracker.lastRejects, key)
+	for origin := range schedulerTracker.knownRejects {
+		if _, still := nowKnownRejects[origin]; !still {
+			CacheSchedulerRejectsTotal.DeleteLabelValues(origin)
+			delete(schedulerTracker.lastRejects, origin)
 		}
 	}
 	schedulerTracker.knownGauges = nowKnownGauges
 	schedulerTracker.knownAdmits = nowKnownAdmits
 	schedulerTracker.knownRejects = nowKnownRejects
+}
+
+// ResetCacheSchedulerMetrics drops every scheduler series and zeroes the
+// pool-wide gauges. Call it when a cache's scheduler goes away: the gauges
+// describe instantaneous state, so leaving the final pre-shutdown values in
+// the exposition would misreport a scheduler that no longer exists.
+//
+// The delta bookkeeping is reset too, so a scheduler created afterwards in
+// the same process starts its counters from zero rather than being diffed
+// against a dead instance's totals.
+func ResetCacheSchedulerMetrics() {
+	schedulerTracker.mu.Lock()
+	defer schedulerTracker.mu.Unlock()
+
+	CacheSchedulerActive.Reset()
+	CacheSchedulerStarving.Reset()
+	CacheSchedulerPending.Reset()
+	CacheSchedulerEMA.Reset()
+	CacheSchedulerAdmitsTotal.Reset()
+	CacheSchedulerRejectsTotal.Reset()
+	CacheSchedulerRejectsByCauseTotal.Reset()
+
+	CacheSchedulerPoolSize.Set(0)
+	CacheSchedulerPoolPending.Set(0)
+	CacheSchedulerPoolTags.Set(0)
+	CacheSchedulerPoolStarvingCap.Set(0)
+	CacheSchedulerPoolActiveCap.Set(0)
+
+	fresh := newSchedulerCounterTracker()
+	schedulerTracker.lastAdmits = fresh.lastAdmits
+	schedulerTracker.lastRejects = fresh.lastRejects
+	schedulerTracker.lastRejectsByCause = fresh.lastRejectsByCause
+	schedulerTracker.knownAdmits = fresh.knownAdmits
+	schedulerTracker.knownRejects = fresh.knownRejects
+	schedulerTracker.knownGauges = fresh.knownGauges
 }

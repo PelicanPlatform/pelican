@@ -189,6 +189,44 @@ func retryAfterValue() string {
 	return strconv.FormatInt(secs, 10)
 }
 
+// onlyThrottled reports whether err represents throttling and nothing else.
+//
+// A cache fetch accumulates one error per object server it tried
+// (client.TransferErrors implements Unwrap() []error), so a plain
+// errors.Is(err, ErrTooManyRequests) is true when *any* single attempt was
+// shed. Answering 429 on that basis would let one throttled origin mask a
+// definitive answer from another: a namespace served by origins A and B where
+// A returns 404 and B is throttled would be reported to the client as "retry
+// later", and it would retry forever for an object that does not exist. Only
+// take the throttle path when there is no more specific failure to report.
+func onlyThrottled(err error) bool {
+	if err == nil {
+		return false
+	}
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		children := multi.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyThrottled(child) {
+				return false
+			}
+		}
+		return true
+	}
+	// Descend through a single wrapper so an accumulator nested inside one is
+	// still examined per-attempt rather than collapsed by errors.Is below.
+	if single, ok := err.(interface{ Unwrap() error }); ok {
+		if inner := single.Unwrap(); inner != nil {
+			if _, isMulti := inner.(interface{ Unwrap() []error }); isMulti {
+				return onlyThrottled(inner)
+			}
+		}
+	}
+	return errors.Is(err, client.ErrTooManyRequests)
+}
+
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
 // every log line emitted here is correlated with the original request.
@@ -222,7 +260,7 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		reqLog.Warn("Upstream response timeout")
 		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream response timeout")
 		return
-	} else if errors.Is(getErr, client.ErrTooManyRequests) {
+	} else if onlyThrottled(getErr) {
 		// Either the cache's own fair scheduler refused to admit this
 		// upstream fetch (SchedulerRejection), or the upstream server
 		// answered the fetch with a 429 of its own (CacheThrottleError).

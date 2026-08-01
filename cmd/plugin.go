@@ -877,7 +877,10 @@ func createTransferError(err error) (transferError *classad.ClassAd) {
 	var throttled *client.CacheThrottleError
 	if errors.As(err, &throttled) {
 		if throttled.RetryAfter > 0 {
-			if adErr := developerData.Set("RetryAfterSeconds", int64(throttled.RetryAfter.Seconds())); adErr != nil {
+			// Round up: a sub-second hint would truncate to 0, which reads as
+			// "no hint given" rather than "retry almost immediately".
+			secs := int64((throttled.RetryAfter + time.Second - 1) / time.Second)
+			if adErr := developerData.Set("RetryAfterSeconds", secs); adErr != nil {
 				log.Errorf("Failed to set RetryAfterSeconds: %s", adErr)
 			}
 		}

@@ -126,8 +126,19 @@ func invokePrestageAPI(ctx context.Context, cacheUrl *url.URL, remotePath string
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return 0, errors.Errorf("prestage API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		// Bound the read: the body comes from a remote cache, and an
+		// unbounded ReadAll here would be an allocation primitive for a
+		// hostile peer.
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
+		body := string(bodyBytes)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// The cache shed the request (its prestage queue is full or its
+			// fair scheduler refused the upstream fetch). Classify it so the
+			// caller sees a retryable error carrying the advertised backoff
+			// rather than an opaque status-code string.
+			return 0, newThrottleErrorFromResponse(resp, body, resp.Request.URL.Host)
+		}
+		return 0, errors.Errorf("prestage API returned status %d: %s", resp.StatusCode, body)
 	}
 
 	// Read the chunked response and parse progress updates

@@ -755,6 +755,12 @@ const schedulerMetricsPublishInterval = 5 * time.Second
 func (pc *PersistentCache) runSchedulerMetricsPublisher(ctx context.Context) error {
 	ticker := time.NewTicker(schedulerMetricsPublishInterval)
 	defer ticker.Stop()
+	// The scheduler gauges describe instantaneous state; once this cache is
+	// gone they would otherwise keep reporting whatever was true at the last
+	// tick. Clearing them also resets the counter-delta bookkeeping, which
+	// matters when another cache is created in the same process (tests do
+	// this routinely).
+	defer metrics.ResetCacheSchedulerMetrics()
 	for {
 		select {
 		case <-ctx.Done():

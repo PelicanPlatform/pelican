@@ -73,11 +73,25 @@ type SchedulerRejection struct {
 	msg    string
 }
 
-func (e *SchedulerRejection) Error() string { return e.msg }
+func (e *SchedulerRejection) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+	if e.Tag != "" {
+		return fmt.Sprintf("%s: %s (%s)", ErrTooManyRequests.Error(), e.Tag, e.Reason)
+	}
+	return ErrTooManyRequests.Error()
+}
 
-// Unwrap returns ErrTooManyRequests so errors.Is(err, ErrTooManyRequests)
-// continues to hold for every rejection.
-func (e *SchedulerRejection) Unwrap() error { return ErrTooManyRequests }
+// Unwrap returns the typed, retryable Pelican error for this rejection's
+// reason, which in turn wraps ErrTooManyRequests. Going through the typed
+// error rather than straight to the sentinel is what makes a locally-shed
+// transfer retryable under IsRetryable, matching how the same shed is
+// classified when it is observed remotely as a 429 (CacheThrottleError).
+// errors.Is(err, ErrTooManyRequests) still holds, one link further down.
+func (e *SchedulerRejection) Unwrap() error {
+	return throttleErrorForReason(string(e.Reason), ErrTooManyRequests)
+}
 
 // PerTagStats is a per-origin snapshot of scheduler state, intended for
 // monitoring / debugging. Values are consistent (all taken under one
@@ -356,7 +370,15 @@ func (s *TagScheduler) attachHooks(tag string, file *clientTransferFile) {
 		}
 	}
 	file.file.schedDone = func() {
-		stillStarving := !firstByteFired.Load()
+		// CompareAndSwap, not Load: completion and the first-byte signal are
+		// not mutually exclusive. An upload can abandon the transfer (stopped-
+		// transfer timeout, error on the side channel) while the transport is
+		// still running, and the transport may then report 100-continue, a
+		// first response byte, or having drained enough request body. Claiming
+		// the flag here means that later signal is a no-op instead of a second
+		// starving decrement, which would release some other in-flight
+		// transfer's slot.
+		stillStarving := firstByteFired.CompareAndSwap(false, true)
 		s.sendEvent(schedulerEvent{kind: evDone, tag: tag, stillStarving: stillStarving})
 	}
 }
@@ -368,17 +390,16 @@ func (s *TagScheduler) sendEvent(ev schedulerEvent) {
 	}
 }
 
+// starvingCap and activeCap convert the configured percentages into absolute
+// slot counts. Both round up, so a small pool cannot produce a cap of zero
+// and wedge the tag entirely: workerCount is at least 1 (the constructor
+// clamps it) and pct is at least 1 here, so the result is at least 1.
 func (s *TagScheduler) starvingCap() int {
 	pct := s.cfg.PerTagStarvingPercent
 	if pct <= 0 || pct >= 100 {
 		return s.workerCount
 	}
-	// Ceiling division so small pools (say 4 workers, 25%) always allow at least 1.
-	cap := (s.workerCount*pct + 99) / 100
-	if cap < 1 {
-		cap = 1
-	}
-	return cap
+	return (s.workerCount*pct + 99) / 100
 }
 
 func (s *TagScheduler) activeCap() int {
@@ -386,17 +407,19 @@ func (s *TagScheduler) activeCap() int {
 	if pct <= 0 || pct >= 100 {
 		return s.workerCount
 	}
-	cap := (s.workerCount*pct + 99) / 100
-	if cap < 1 {
-		cap = 1
-	}
-	return cap
+	return (s.workerCount*pct + 99) / 100
 }
 
 // run is the scheduler goroutine. It multiplexes admissions, first-byte
 // / done events, and dispatch attempts, and periodically ticks the EMA.
 func (s *TagScheduler) run(ctx context.Context) {
 	defer close(s.stopped)
+	// Everything that waits on the scheduler — Submit, Snapshot, sendEvent —
+	// uses s.stop as its escape hatch, so it has to be closed however run()
+	// exits, not just when Stop() is the thing that ended it. Without this a
+	// ctx-driven exit would leave those waiters relying on a later Stop() call
+	// to release them.
+	defer s.stopOnce.Do(func() { close(s.stop) })
 	// On exit, hand every admitted-but-undispatched transfer to onDrop so
 	// its job still observes a completion (otherwise the owning job's
 	// active-transfer count never drains and its results channel never

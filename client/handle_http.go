@@ -970,11 +970,17 @@ func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFi
 }
 
 // deriveSchedulerTag chooses the tag under which a transfer is admitted.
-// For now we tag by the hostname of the first attempt (the primary
-// upstream origin). We deliberately do not retag on failover: if the
-// transfer moves from origin A to origin B mid-flight, it keeps A's
-// slot for the duration of the transfer. This is a small fairness leak
-// bounded by the transfer's lifetime.
+// The tag is the hostname of the first attempt (the primary upstream
+// origin); the key is opaque to the scheduler, so a username or prefix can
+// be composed into it later without a scheduler change. We deliberately do
+// not retag on failover: if the transfer moves from origin A to origin B
+// mid-flight, it keeps A's slot for the duration of the transfer. This is a
+// small fairness leak bounded by the transfer's lifetime.
+//
+// A transfer with no usable attempt URL falls back to the empty tag. Every
+// such transfer then shares one tag and therefore one set of caps, so log
+// it: callers are expected to have resolved at least one attempt by now, and
+// silently collapsing them together would look like unexplained throttling.
 func deriveSchedulerTag(file *clientTransferFile) string {
 	if file == nil || file.file == nil {
 		return ""
@@ -982,6 +988,7 @@ func deriveSchedulerTag(file *clientTransferFile) string {
 	if len(file.file.attempts) > 0 && file.file.attempts[0].Url != nil {
 		return file.file.attempts[0].Url.Host
 	}
+	log.Warningln("Transfer has no attempt URL to derive a scheduler tag from; it will share the fallback tag's share of the worker pool")
 	return ""
 }
 
@@ -2737,6 +2744,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 
 	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
+	// totalXfer must be counted before submission: a scheduler rejection
+	// pushes a synthetic failure result for this file, and runMux treats
+	// totalXfer == 0 as "job created no transfers" and closes the results
+	// channel — racing the synthetic result's delivery.
 	job.job.totalXfer += 1
 	job.job.activeXfer.Add(1)
 	submitErr := te.submitFile(job.job.ctx, &clientTransferFile{
@@ -2766,13 +2777,20 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		},
 	})
 	if submitErr != nil {
-		// ErrTooManyRequests already reported to te.results by submitFile;
-		// other errors (ctx cancellation) are surfaced by the caller.
 		if errors.Is(submitErr, ErrTooManyRequests) {
+			// submitFile already pushed a synthetic failure result for this
+			// file, so the counts above are matched and the job completes
+			// normally with a 429 result.
 			log.Debugln("Scheduler rejected transfer for", remoteUrl.String(), ":", submitErr)
-		} else {
-			log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
+			return
 		}
+		// Nothing was queued and no result will ever be produced, so undo the
+		// bookkeeping above; leaving it in place would keep activeXfer
+		// permanently non-zero and the client's results channel open forever.
+		job.job.totalXfer -= 1
+		job.job.activeXfer.Add(-1)
+		err = submitErr
+		return
 	}
 
 	return
@@ -4602,7 +4620,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
-	responseChan := make(chan *http.Response)
+	// Buffered: the loop below abandons the upload on several paths (stopped
+	// transfer, error on the side channel) without ever receiving here, and an
+	// unbuffered channel would wedge runPut's goroutine — and with it the
+	// transport still reading the source file — for the life of the process.
+	responseChan := make(chan *http.Response, 1)
 	reader := &progressReader{reader: ioreader, sizer: sizer, closed: closed}
 	// This will write to the checksum hashes as we read from the file
 	tee := io.TeeReader(reader, hashesWriter)
@@ -4668,7 +4690,20 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 
 	useProxy := transfer.attempts[0].Proxy
 
-	go runPut(request, responseChan, errorChan, useProxy)
+	putDone := make(chan struct{})
+	go func() {
+		defer close(putDone)
+		runPut(request, responseChan, errorChan, useProxy)
+	}()
+	// The transport reads the source file until the request finishes, so the
+	// PUT has to be stopped and joined before the deferred file.Close() above
+	// can run; otherwise abandoning the upload early turns a clean abort into
+	// a read from a closed file. Registered after `defer cancel()`, so it runs
+	// before it -- cancel here to make the join prompt.
+	defer func() {
+		cancel()
+		<-putDone
+	}()
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -4905,7 +4940,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 		close(errorChan)
 		return
 	}
-	dump, _ = httputil.DumpResponse(response, true)
+	// Headers only: dumping the body would io.ReadAll it into memory, which
+	// defeats the bounded read below and hands a hostile destination an
+	// unbounded allocation per upload worker. Error bodies are logged (and
+	// bounded) a few lines down.
+	dump, _ = httputil.DumpResponse(response, false)
 	log.Debugf("Dumping response: %s", dump)
 	// Note: XRootD used to always return 200 (OK) on upload, even when it was supposed to turn
 	// HTTP 201 (Created).  Check for both here; in the future we may want to remove the 200 check
@@ -5827,6 +5866,16 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return
+				} else if gowebdav.IsErrCode(err, http.StatusTooManyRequests) {
+					// The endpoint shed the request. Classify it so it is
+					// retryable rather than falling through to the generic
+					// (non-retryable) bucket below; the WebDAV client does not
+					// surface the response, so there is no reason or
+					// Retry-After hint to carry.
+					err = newThrottleErrorNoResponse(endpoint.Host,
+						fmt.Sprintf("stat of %s was throttled at endpoint %s", dest.String(), endpoint.String()))
+					resultsChan <- statResults{FileInfo{}, err}
+					return
 				} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 					// 500 is NOT "not found"; report it as a server error so
 					// callers (e.g. uploadObject) can distinguish a genuine
@@ -5971,7 +6020,14 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	} else if headResponse.StatusCode == http.StatusTooManyRequests {
 		// Throttled: classify as the retryable throttle type, carrying the
 		// Retry-After hint (no body is available on this path).
+		//
+		// Return rather than falling through to the HEAD retry below. The
+		// cache answers HEAD without going through its fair scheduler, so a
+		// HEAD would likely succeed and overwrite this error, reporting the
+		// object's cache status as authoritative when in fact the request
+		// that would tell us was shed.
 		err = newThrottleErrorFromResponse(headResponse, "", objectUrl.Host)
+		return
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{

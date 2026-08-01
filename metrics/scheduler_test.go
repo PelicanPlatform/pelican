@@ -26,19 +26,23 @@ import (
 )
 
 // The scheduler metrics are package-level collectors on the default
-// Prometheus registry and the delta bookkeeping lives in the
-// package-level schedulerTracker, so state survives from one test to
-// the next. Every test below therefore uses origin label values unique
-// to itself and never assumes the tracker (or the registry) started out
-// empty. The one label value that is inherently shared is the synthetic
-// origin="*" series, so assertions on it are written as deltas.
+// Prometheus registry and the delta bookkeeping lives in the package-level
+// schedulerTracker, so state would otherwise survive from one test to the
+// next. Each test starts from a clean slate instead, which is also what a
+// cache shutting down does.
+func resetSchedulerMetrics(t *testing.T) {
+	t.Helper()
+	ResetCacheSchedulerMetrics()
+	t.Cleanup(ResetCacheSchedulerMetrics)
+}
 
 // TestPublishCacheSchedulerSnapshotGauges pins that the gauges are a
 // straight mirror of the snapshot: whatever the scheduler reported for a
 // tag is what the per-origin gauges read, and the GlobalStats fields land
 // on the pool-wide gauges.
 func TestPublishCacheSchedulerSnapshotGauges(t *testing.T) {
-	const origin = "TestPublishCacheSchedulerSnapshotGauges.example.com"
+	resetSchedulerMetrics(t)
+	const origin = "gauges.example.com"
 
 	global := SchedulerGlobalStats{
 		WorkerCount:  16,
@@ -85,28 +89,76 @@ func TestPublishCacheSchedulerSnapshotGauges(t *testing.T) {
 // idle between two scrapes of the same counter values) must not
 // double-count.
 func TestPublishCacheSchedulerSnapshotCounterDeltas(t *testing.T) {
-	const origin = "TestPublishCacheSchedulerSnapshotCounterDeltas.example.com"
+	resetSchedulerMetrics(t)
+	const origin = "deltas.example.com"
 	global := SchedulerGlobalStats{WorkerCount: 4, StarvingCap: 1, ActiveCap: 2, TotalTags: 1}
 
 	first := map[string]SchedulerPerTagStats{origin: {Active: 1, Admits: 5, Rejects: 5}}
 	PublishCacheSchedulerSnapshot(global, first)
 	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	// The per-origin snapshot carries no cause breakdown, so the whole
-	// per-origin reject total shows up under reason="any".
-	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin, "any")))
+	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
 
 	// Republishing the identical totals is a no-op.
 	PublishCacheSchedulerSnapshot(global, first)
 	PublishCacheSchedulerSnapshot(global, first)
 	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin, "any")))
+	assert.Equal(t, float64(5), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
 
 	// Growing the totals adds exactly the delta.
 	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{
 		origin: {Active: 1, Admits: 8, Rejects: 8},
 	})
 	assert.Equal(t, float64(8), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(8), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin, "any")))
+	assert.Equal(t, float64(8), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
+}
+
+// TestPublishCacheSchedulerSnapshotCounterRestart pins the behavior when the
+// totals a snapshot reports are *lower* than the ones already published,
+// which happens whenever a scheduler is replaced by a fresh one in the same
+// process: the new instance starts counting from zero while the package-level
+// tracker still holds the dead instance's high-water marks.
+//
+// The totals are unsigned, so subtracting them blind wraps to something near
+// 2^64 and feeds Prometheus a garbage increment. The pool-wide series are
+// especially unforgiving because nothing ever prunes them, so a single bad
+// Add corrupts them for the life of the process.
+func TestPublishCacheSchedulerSnapshotCounterRestart(t *testing.T) {
+	resetSchedulerMetrics(t)
+	const origin = "restart.example.com"
+	high := SchedulerGlobalStats{
+		WorkerCount:        4,
+		TotalTags:          1,
+		TotalRejects:       30,
+		TotalRejectsGlobal: 20,
+		TotalRejectsPerTag: 10,
+	}
+	PublishCacheSchedulerSnapshot(high, map[string]SchedulerPerTagStats{
+		origin: {Active: 1, Admits: 40, Rejects: 30},
+	})
+	assert.Equal(t, float64(40), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(20), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(10), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
+
+	// A brand-new scheduler reports much smaller totals for the same origin,
+	// with no intervening publish that would have pruned the tracker.
+	low := SchedulerGlobalStats{
+		WorkerCount:        4,
+		TotalTags:          1,
+		TotalRejects:       3,
+		TotalRejectsGlobal: 2,
+		TotalRejectsPerTag: 1,
+	}
+	PublishCacheSchedulerSnapshot(low, map[string]SchedulerPerTagStats{
+		origin: {Active: 1, Admits: 4, Rejects: 3},
+	})
+
+	// The restart is counted as new activity on top of what came before.
+	// What must not happen is a decrease, or a jump of ~1.8e19 from an
+	// unsigned wrap.
+	assert.Equal(t, float64(44), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(33), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(22), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(11), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 }
 
 // TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins pins that an
@@ -120,30 +172,22 @@ func TestPublishCacheSchedulerSnapshotCounterDeltas(t *testing.T) {
 // than by reading a value: ToFloat64(vec.WithLabelValues(...)) would
 // create the very series whose absence is under test.
 func TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins(t *testing.T) {
-	const origin = "TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins.example.com"
-	const other = "TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins.other.example.com"
+	resetSchedulerMetrics(t)
+	const origin = "prunes.example.com"
+	const other = "prunes.other.example.com"
 	global := SchedulerGlobalStats{WorkerCount: 4, StarvingCap: 1, ActiveCap: 2, TotalTags: 1}
-
-	// The synthetic origin="*" reject series are never pruned, and they
-	// only come into existence once the pool has actually rejected
-	// something. Whether they are already present depends on what ran
-	// before, so count them once and treat that as the floor for the
-	// rejects collector.
-	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{})
-	poolRejectSeries := testutil.CollectAndCount(CacheSchedulerRejectsTotal)
 
 	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{
 		origin: {Pending: 1, Active: 2, Starving: 1, EMA: 2.5, Admits: 9, Rejects: 3},
 	})
 	// Only this origin is in the snapshot, so exactly one series per
-	// gauge exists.
+	// collector exists.
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerActive))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerStarving))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerPending))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerEMA))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerAdmitsTotal))
-	// One per-origin reason="any" series on top of the pool-wide floor.
-	assert.Equal(t, poolRejectSeries+1, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
 
 	// The origin drops out of the snapshot entirely: replaced by an
 	// unrelated origin so the publish is a realistic one rather than an
@@ -156,10 +200,9 @@ func TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins(t *testing.T) {
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerPending))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerEMA))
 	assert.Equal(t, float64(1), testutil.ToFloat64(CacheSchedulerActive.WithLabelValues(other)))
-	// "other" reported no admits or rejects, so the admits vec is now
-	// empty and the rejects vec is back down to the pool-wide floor.
+	// "other" reported no admits or rejects, so both counter vecs are empty.
 	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerAdmitsTotal))
-	assert.Equal(t, poolRejectSeries, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
 
 	// Dropping every origin empties the labeled collectors completely.
 	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{})
@@ -168,7 +211,7 @@ func TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins(t *testing.T) {
 	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerPending))
 	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerEMA))
 	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerAdmitsTotal))
-	assert.Equal(t, poolRejectSeries, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
 }
 
 // TestPublishCacheSchedulerSnapshotResetsAfterReappearance pins the
@@ -179,14 +222,15 @@ func TestPublishCacheSchedulerSnapshotPrunesVanishedOrigins(t *testing.T) {
 // totals at prune time too; otherwise the smaller total would look like a
 // negative delta (and Prometheus counters cannot go backwards).
 func TestPublishCacheSchedulerSnapshotResetsAfterReappearance(t *testing.T) {
-	const origin = "TestPublishCacheSchedulerSnapshotResetsAfterReappearance.example.com"
+	resetSchedulerMetrics(t)
+	const origin = "reappears.example.com"
 	global := SchedulerGlobalStats{WorkerCount: 4, StarvingCap: 1, ActiveCap: 2, TotalTags: 1}
 
 	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{
 		origin: {Active: 1, Admits: 10, Rejects: 10},
 	})
 	assert.Equal(t, float64(10), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(10), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin, "any")))
+	assert.Equal(t, float64(10), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
 
 	// Idle long enough to be evicted.
 	PublishCacheSchedulerSnapshot(global, map[string]SchedulerPerTagStats{})
@@ -198,25 +242,25 @@ func TestPublishCacheSchedulerSnapshotResetsAfterReappearance(t *testing.T) {
 		})
 	})
 	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin, "any")))
+	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
 	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerAdmitsTotal))
 }
 
 // TestPublishCacheSchedulerSnapshotPoolRejectBreakdown pins the cause
-// breakdown for rejections. The per-tag snapshot cannot say why a fetch
-// was rejected, so the "global pending buffer was full" versus "this
-// origin's own queue was full" split is published only on the synthetic
-// origin="*" series, and like the per-origin counters it is fed the
-// difference between successive snapshots.
+// breakdown for rejections. The per-tag snapshot cannot say why a fetch was
+// rejected, so the "global pending buffer was full" versus "this origin's own
+// queue was full" split is published pool-wide on its own metric, and like
+// the per-origin counters it is fed the difference between successive
+// snapshots.
 //
-// The "*" series is shared by the whole package (it has no per-test label
-// to make unique), so the assertions below compare against the value read
-// just before the incrementing publish instead of an absolute total.
+// The breakdown deliberately does not share a metric name with the
+// per-origin rejections: publishing both views under one name would make
+// sum(rate(...)) over that name double every rejection.
 func TestPublishCacheSchedulerSnapshotPoolRejectBreakdown(t *testing.T) {
-	const origin = "TestPublishCacheSchedulerSnapshotPoolRejectBreakdown.example.com"
-	tags := map[string]SchedulerPerTagStats{origin: {Active: 1}}
+	resetSchedulerMetrics(t)
+	const origin = "breakdown.example.com"
+	tags := map[string]SchedulerPerTagStats{origin: {Active: 1, Rejects: 30}}
 
-	// Establish a baseline for the tracker's last-seen totals.
 	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
 		WorkerCount:        4,
 		StarvingCap:        1,
@@ -226,9 +270,8 @@ func TestPublishCacheSchedulerSnapshotPoolRejectBreakdown(t *testing.T) {
 		TotalRejectsGlobal: 20,
 		TotalRejectsPerTag: 10,
 	}, tags)
-
-	beforeGlobal := testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "global"))
-	beforePerTag := testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "per_tag"))
+	assert.Equal(t, float64(20), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(10), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 
 	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
 		WorkerCount:        4,
@@ -238,10 +281,10 @@ func TestPublishCacheSchedulerSnapshotPoolRejectBreakdown(t *testing.T) {
 		TotalRejects:       37,
 		TotalRejectsGlobal: 23,
 		TotalRejectsPerTag: 14,
-	}, tags)
+	}, map[string]SchedulerPerTagStats{origin: {Active: 1, Rejects: 37}})
 
-	assert.Equal(t, beforeGlobal+3, testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "global")))
-	assert.Equal(t, beforePerTag+4, testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "per_tag")))
+	assert.Equal(t, float64(23), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(14), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 
 	// Unchanged pool totals add nothing.
 	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
@@ -252,11 +295,65 @@ func TestPublishCacheSchedulerSnapshotPoolRejectBreakdown(t *testing.T) {
 		TotalRejects:       37,
 		TotalRejectsGlobal: 23,
 		TotalRejectsPerTag: 14,
-	}, tags)
-	assert.Equal(t, beforeGlobal+3, testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "global")))
-	assert.Equal(t, beforePerTag+4, testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues("*", "per_tag")))
+	}, map[string]SchedulerPerTagStats{origin: {Active: 1, Rejects: 37}})
+	assert.Equal(t, float64(23), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(14), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 
-	// An origin reporting no rejections of its own gets no per-origin
-	// series, so the breakdown stands alone in the rejects collector.
-	assert.Equal(t, 2, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	// The two views live in separate metrics, so summing either one alone
+	// gives the true count rather than twice it.
+	assert.Equal(t, float64(37), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
+	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	assert.Equal(t, 2, testutil.CollectAndCount(CacheSchedulerRejectsByCauseTotal))
+}
+
+// TestResetCacheSchedulerMetrics pins that shutting a scheduler down clears
+// the exposition. The gauges describe instantaneous state, so leaving the
+// last pre-shutdown values in place would report a scheduler that no longer
+// exists as though it were still holding transfers.
+func TestResetCacheSchedulerMetrics(t *testing.T) {
+	resetSchedulerMetrics(t)
+	const origin = "reset.example.com"
+
+	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
+		WorkerCount:        8,
+		StarvingCap:        2,
+		ActiveCap:          7,
+		TotalPending:       3,
+		TotalTags:          1,
+		TotalRejectsGlobal: 5,
+		TotalRejectsPerTag: 6,
+	}, map[string]SchedulerPerTagStats{
+		origin: {Pending: 3, Active: 4, Starving: 1, EMA: 2.0, Admits: 11, Rejects: 11},
+	})
+	assert.Equal(t, 1, testutil.CollectAndCount(CacheSchedulerActive))
+
+	ResetCacheSchedulerMetrics()
+
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerActive))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerStarving))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerPending))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerEMA))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerAdmitsTotal))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerRejectsTotal))
+	assert.Equal(t, 0, testutil.CollectAndCount(CacheSchedulerRejectsByCauseTotal))
+	assert.Equal(t, float64(0), testutil.ToFloat64(CacheSchedulerPoolSize))
+	assert.Equal(t, float64(0), testutil.ToFloat64(CacheSchedulerPoolPending))
+	assert.Equal(t, float64(0), testutil.ToFloat64(CacheSchedulerPoolTags))
+	assert.Equal(t, float64(0), testutil.ToFloat64(CacheSchedulerPoolStarvingCap))
+	assert.Equal(t, float64(0), testutil.ToFloat64(CacheSchedulerPoolActiveCap))
+
+	// The delta bookkeeping was reset too, so a scheduler created afterwards
+	// counts from zero rather than being diffed against the dead instance.
+	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
+		WorkerCount:        8,
+		TotalTags:          1,
+		TotalRejectsGlobal: 1,
+		TotalRejectsPerTag: 1,
+	}, map[string]SchedulerPerTagStats{
+		origin: {Active: 1, Admits: 2, Rejects: 2},
+	})
+	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(1), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(1), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 }

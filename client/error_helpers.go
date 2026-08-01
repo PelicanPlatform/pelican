@@ -91,29 +91,48 @@ func throttleErrorForReason(reason string, err error) error {
 	}
 }
 
-// parseThrottleReason extracts the machine-parseable reason from a cache's 429
-// JSON body of the form {"error": "<reason>", "detail": "..."}. The value is
-// validated against the known ShedReason constants — the body comes from a
-// remote peer, and an arbitrary string must not flow into logs or error
-// messages. Returns "" if the body is not JSON, has no "error" field, or
-// carries an unrecognized reason; callers then fall back to the generic
-// throttle classification.
-func parseThrottleReason(body string) string {
+// parseThrottleBody extracts the machine-parseable reason and the
+// human-readable detail from a cache's 429 JSON body of the form
+// {"error": "<reason>", "detail": "..."}.
+//
+// The reason is validated against the known ShedReason constants — the body
+// comes from a remote peer, and an arbitrary string must not flow into logs,
+// HTCondor ClassAds, or error messages. It is "" when the body is not JSON,
+// has no "error" field, or carries an unrecognized reason; callers then fall
+// back to the generic throttle classification.
+//
+// The detail is free-form server text and is not validated (it is bounded by
+// truncateErrorDetail and quoted at display time). A body that is not the
+// expected JSON shape is passed through whole as the detail so an error
+// message from some other kind of server is not silently dropped.
+func parseThrottleBody(body string) (reason, detail string) {
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return ""
+		return "", ""
 	}
 	var parsed struct {
-		Error string `json:"error"`
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
 	}
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
-		return ""
+		return "", body
+	}
+	if parsed.Detail != "" {
+		detail = parsed.Detail
+	} else {
+		detail = body
 	}
 	switch ShedReason(parsed.Error) {
 	case ShedOriginUnresponsive, ShedOriginSlow, ShedCacheOverloaded:
-		return parsed.Error
+		return parsed.Error, detail
 	}
-	return ""
+	return "", detail
+}
+
+// parseThrottleReason returns just the validated reason from a 429 body.
+func parseThrottleReason(body string) string {
+	reason, _ := parseThrottleBody(body)
+	return reason
 }
 
 // truncateErrorDetail bounds a server-provided message before it is retained
@@ -133,14 +152,21 @@ func truncateErrorDetail(detail string) string {
 // if absent or unparsable; values are clamped to maxRetryAfter.
 func parseRetryAfter(v string) time.Duration {
 	v = strings.TrimSpace(v)
-	var d time.Duration
 	if v == "" {
 		return 0
-	} else if secs, err := strconv.Atoi(v); err == nil {
+	}
+	var d time.Duration
+	// ParseInt rather than Atoi: Atoi is int-wide, so on a 32-bit build a
+	// perfectly ordinary "3000000000" would be a range error. On overflow
+	// ParseInt still returns the saturated bound, which the clamps below turn
+	// into maxRetryAfter (or 0) instead of falling through to the date parse
+	// and yielding no hint at all.
+	secs, err := strconv.ParseInt(v, 10, 64)
+	if err == nil || errors.Is(err, strconv.ErrRange) {
 		if secs < 0 {
 			return 0
 		}
-		if secs > int(maxRetryAfter/time.Second) {
+		if secs > int64(maxRetryAfter/time.Second) {
 			return maxRetryAfter
 		}
 		d = time.Duration(secs) * time.Second
@@ -510,9 +536,19 @@ func (e *CacheThrottleError) Is(target error) bool {
 // hint from the Retry-After header. body may be empty when the response
 // body was unavailable (e.g. HEAD).
 func newThrottleErrorFromResponse(resp *http.Response, body, endpoint string) *CacheThrottleError {
-	reason := parseThrottleReason(body)
+	reason, detail := parseThrottleBody(body)
 	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-	return newCacheThrottleError(reason, strings.TrimSpace(body), endpoint, retryAfter)
+	return newCacheThrottleError(reason, detail, endpoint, retryAfter)
+}
+
+// newThrottleErrorNoResponse builds the structured throttle error for a 429
+// observed through a library that does not expose the response, so neither the
+// body's reason nor the Retry-After header is available (the WebDAV client used
+// for stat is the case in point). The result still classifies as retryable and
+// still satisfies errors.Is(err, ErrTooManyRequests); it just carries no reason
+// or backoff hint.
+func newThrottleErrorNoResponse(endpoint, detail string) *CacheThrottleError {
+	return newCacheThrottleError("", detail, endpoint, 0)
 }
 
 // newCacheThrottleError builds a CacheThrottleError from a cache's 429

@@ -167,9 +167,14 @@ func DoEvict(ctx context.Context, remoteObject string, immediate bool, options .
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	// Bound the read: the body comes from a remote cache, and an unbounded
+	// ReadAll here would be an allocation primitive for a hostile peer.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 	bodyStr := strings.TrimSpace(string(body))
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", newThrottleErrorFromResponse(resp, bodyStr, apiUrl.Host)
+	}
 	if resp.StatusCode >= 300 {
 		return "", errors.Errorf("eviction failed (%d): %s", resp.StatusCode, bodyStr)
 	}
