@@ -570,15 +570,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 			}
-			existingStatus, err := getRegistrationStatusById(ns.ID)
+			existingNs, err := getRegistrationById(ns.ID)
 			if err != nil {
-				log.Error("Error checking namespace status: ", err)
+				log.Error("Error loading existing registration: ", err)
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    "Error checking namespace status"})
+					Msg:    fmt.Sprintf("Error loading existing registration: %v", err)})
 				return
 			}
-			if existingStatus == server_structs.RegApproved {
+			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
 				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
@@ -588,19 +588,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 			// If non-admin user accesses a namespace with user_id != user but with access_token
 			if !isAdmin && !belongsTo && accessToken != "" {
-				jwks, err := jwk.Parse([]byte(ns.Pubkey))
+				jwks, err := jwk.Parse([]byte(existingNs.Pubkey))
 				if err != nil {
-					log.Errorf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err)
+					log.Errorf("Error parsing the stored public key of the namespace %s with ID %d: %v", existingNs.Prefix, ns.ID, err)
 					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
-						Msg:    fmt.Sprintf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err),
+						Msg:    fmt.Sprintf("Error parsing the stored public key of the namespace %s with ID %d: %v", existingNs.Prefix, existingNs.ID, err),
 					})
 					return
 				}
 
 				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
 				if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
-					log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
+					log.Errorf("Failed to verify access token for namespace %q (ID %d) by user %q: %v", existingNs.Prefix, ns.ID, user, err)
 					ctx.JSON(http.StatusForbidden,
 						server_structs.SimpleApiResp{
 							Status: server_structs.RespFailed,
@@ -609,7 +609,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 
-				if ns.AdminMetadata.UserID == "" {
+				// A key-holder may claim an UNOWNED registration, but must never seize
+				// ownership from an existing owner. Decide based on the stored record.
+				if existingNs.AdminMetadata.UserID == "" {
 					ns.AdminMetadata.UserID = user
 				}
 			}

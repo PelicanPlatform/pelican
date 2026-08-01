@@ -33,6 +33,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1408,6 +1411,125 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
 		assert.Equal(t, updatedPubKeyStr, nss[0].Pubkey)
+	})
+}
+
+// TestUpdateNamespaceAccessTokenProofOfPossession is a regression test for the
+// registration-takeover vulnerability:
+// the access-token edit path must authenticate the caller against the STORED public
+// key of the registration, never against a key supplied in the request body.
+func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(func() { server_utils.ResetTestState() })
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mockInsts := []registrationFieldOption{{ID: "1000"}}
+	require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+
+	router := gin.Default()
+	router.PUT("/namespaces/:id", func(ctx *gin.Context) {
+		ctx.Set("User", "mockUser")
+		createUpdateNamespace(ctx, true)
+	})
+
+	// mintEditToken returns a registry.edit_registration token signed by privKey.
+	mintEditToken := func(t *testing.T, privKey jwk.Key) string {
+		tok, err := jwt.NewBuilder().
+			Claim("scope", token_scopes.Registry_EditRegistration.String()).
+			Build()
+		require.NoError(t, err)
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, privKey))
+		require.NoError(t, err)
+		return string(signed)
+	}
+
+	// The attack: a non-owner presents their OWN JWKS in the body plus a token
+	// signed by the matching private key. Verifying against the stored key must
+	// reject it, and the stored record must be untouched.
+	t.Run("attacker-body-key-cannot-take-over", func(t *testing.T) {
+		resetMockRegistryDB(t)
+
+		_, _, storedJWKS, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		stored := server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				UserID:      "victimOwner",
+				Status:      server_structs.RegPending,
+				SiteName:    "test-site-name",
+			},
+		}
+		require.NoError(t, insertMockDBData([]server_structs.Registration{stored}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		attackerPriv, _, attackerJWKS, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		attackerToken := mintEditToken(t, attackerPriv)
+
+		poisoned := stored
+		poisoned.Pubkey = attackerJWKS
+		poisoned.AdminMetadata.UserID = "mockUser"
+		body, err := json.Marshal(poisoned)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		target := "/namespaces/" + strconv.Itoa(id) + "?access_token=" + url.QueryEscape(attackerToken)
+		req, _ := http.NewRequest("PUT", target, bytes.NewReader(body))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, storedJWKS, got.Pubkey, "stored pubkey must not be overwritten")
+		assert.Equal(t, "victimOwner", got.AdminMetadata.UserID, "owner must not be seized")
+	})
+
+	// The legitimate flow: the holder of the private key matching the stored public
+	// key may claim an as-yet-unowned registration.
+	t.Run("legitimate-key-holder-can-claim-unowned", func(t *testing.T) {
+		resetMockRegistryDB(t)
+
+		privA, _, storedJWKS, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		stored := server_structs.Registration{
+			Prefix: "/bar",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				UserID:      "",
+				Status:      server_structs.RegPending,
+				SiteName:    "test-site-name",
+			},
+		}
+		require.NoError(t, insertMockDBData([]server_structs.Registration{stored}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		editToken := mintEditToken(t, privA)
+		body, err := json.Marshal(stored)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		target := "/namespaces/" + strconv.Itoa(id) + "?access_token=" + url.QueryEscape(editToken)
+		req, _ := http.NewRequest("PUT", target, bytes.NewReader(body))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "mockUser", got.AdminMetadata.UserID, "unowned registration should be claimable")
+		assert.Equal(t, storedJWKS, got.Pubkey)
 	})
 }
 
