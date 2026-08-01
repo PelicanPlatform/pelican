@@ -2770,9 +2770,9 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				return errors.Wrap(err, "failed to parse remote URL for recursive download")
 			}
 			if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
-				statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+				statInfo, statErr = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
 			} else {
-				statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
+				statInfo, statErr = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			}
 			if statErr != nil {
 				return errors.Wrap(statErr, "failed to stat remote path for recursive download")
@@ -2790,9 +2790,9 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			}
 			var statInfo FileInfo
 			if job.job.srcDirResp.XPelNsHdr.CollectionsUrl != nil {
-				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
+				statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
 			} else {
-				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
+				statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
 			}
 			if err != nil {
 				return errors.Wrap(err, "failed to stat source path for recursive copy")
@@ -2812,7 +2812,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			if err != nil {
 				return
 			}
-			statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			statInfo, err = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
 			if err != nil {
 				err = errors.Wrap(err, "failed to stat object to prestage")
 				return
@@ -2836,9 +2836,9 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		}
 		var statInfo FileInfo
 		if job.job.srcDirResp.XPelNsHdr.CollectionsUrl != nil {
-			statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
+			statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
 		} else {
-			statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
+			statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
 		}
 		if err != nil {
 			return error_codes.NewResolutionError(
@@ -4684,7 +4684,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Skip this check if Client.EnableOverwrites is enabled
 	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel == SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
-		_, statErr := statHttp(remoteUrl, dirResp, token, nil)
+		_, statErr := statHttp(transfer.ctx, remoteUrl, dirResp, token, nil)
 		if statErr == nil {
 			// Object exists, abort upload
 			transferResult.Error = error_codes.NewSpecification_FileAlreadyExistsError(
@@ -5256,7 +5256,7 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 		return false
 	}
 
-	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token, nil)
+	remoteInfo, err := statHttp(job.ctx, remoteUrl, job.dirResp, job.token, nil)
 	if err != nil {
 		return false
 	}
@@ -5962,9 +5962,14 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // there is no collectionsUrl the origin has indicated it does not support
 // PROPFIND, so we must not attempt to stat against it directly.
 // preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
-func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+//
+// ctx bounds the work. The PROPFINDs fan out across every stat host and are
+// waited on together, so without it a single unresponsive object server holds
+// the caller for as long as the transport allows -- and the cache calls this
+// on the path of every miss it fills.
+func statHttp(ctx context.Context, dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
 	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
-	return statHttpImpl(dest, dirResp, token, fedToken, useCollectionsOnly, false)
+	return statHttpImpl(ctx, dest, dirResp, token, fedToken, useCollectionsOnly, false)
 }
 
 // statHttpImpl is the recursion-safe internals of statHttp.  The
@@ -5974,7 +5979,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 // triggers back-to-back would otherwise recurse forever.  After a
 // single fallback we have tried both modes and any remaining failure
 // is reported to the caller.
-func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, useCollectionsOnly bool, alreadyFellBack bool) (info FileInfo, err error) {
+func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, useCollectionsOnly bool, alreadyFellBack bool) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
@@ -6007,7 +6012,6 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 		err  error
 	}
 	resultsChan := make(chan statResults)
-	transport := config.GetTransport()
 
 	// When a federation token is present but no user token (public
 	// namespace), we wrap the federation token in a tokenGenerator so
@@ -6061,6 +6065,12 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 		destCopy := statUrl
 		destCopy.Path = propfindPath
 
+		// gowebdav takes no context, so the caller's deadline is attached to
+		// each request as the library is about to send it.
+		client.SetInterceptor(func(_ string, r *http.Request) {
+			*r = *r.WithContext(ctx)
+		})
+
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
@@ -6068,16 +6078,30 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 
 			var info FileInfo
 			for {
+				// Local to this goroutine: every stat host runs one of these
+				// concurrently, and the proxy decision below is per-host.
+				var transport http.RoundTripper
 				if disableProxy {
 					log.Debugln("Performing request (without proxy)", endpoint.String())
 					transport = config.GetTransportNoProxy()
 				} else {
 					log.Debugln("Performing request", endpoint.String())
+					transport = config.GetTransport()
 				}
-				client.SetTransport(transport)
+				client.SetTransport(boundPropfindBody(transport))
 
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
+					// gowebdav reports "nothing I could use in that 207" as a
+					// nil *File and no error, tucked inside a non-nil
+					// os.FileInfo whose methods take a value receiver -- so
+					// reading one panics, on this goroutine, where nothing
+					// recovers. Treat it as the failure it is.
+					if file, ok := fsinfo.(*gowebdav.File); fsinfo == nil || (ok && file == nil) {
+						err = errors.Errorf("PROPFIND response from %s described nothing usable for %s", endpoint.Host, endpoint.Path)
+						resultsChan <- statResults{FileInfo{}, err}
+						return
+					}
 					info = FileInfo{
 						Size:         fsinfo.Size(),
 						IsCollection: fsinfo.IsDir(),
@@ -6180,14 +6204,14 @@ func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorR
 		// Retry without preferCollectionsUrlOnly; mark the retry as
 		// already-fell-back so the sibling fallback below cannot then
 		// flip us back to collections-only and ping-pong.
-		return statHttpImpl(dest, dirResp, token, fedToken, false, true)
+		return statHttpImpl(ctx, dest, dirResp, token, fedToken, false, true)
 	}
 	// Fallback: if no host succeeded, at least one stat host was a cache
 	// that returned 409 on what is likely a collection, and the director
 	// gave us a collections URL, retry via the collections URL (origin
 	// WebDAV endpoint) which does serve directory listings.
 	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil && !alreadyFellBack {
-		return statHttpImpl(dest, dirResp, token, fedToken, true, true)
+		return statHttpImpl(ctx, dest, dirResp, token, fedToken, true, true)
 	}
 	// Past both fallbacks, a 409 is still an answer rather than just a failure:
 	// it is how an XRootD cache says "collection" to a PROPFIND. Reaching here
@@ -6279,6 +6303,67 @@ func propfindObject(ctx context.Context, objectUrl *url.URL, unixSocket string, 
 // probeDrainLimit caps how much of an endpoint probe's response body is read
 // before the rest is abandoned. The probe wants headers, not content.
 const probeDrainLimit = 32 * 1024
+
+// propfindBodyLimit bounds a Depth-0 PROPFIND response.
+//
+// Every PROPFIND this package sends to learn about a single path asks with
+// Depth: 0, so a conforming answer describes exactly one resource: one href
+// and a handful of properties, a few kilobytes at the outside. The limit is
+// far above that because it is not a budget, it is a backstop -- gowebdav
+// decodes the body into memory with no bound of its own, so without one a
+// server that streams an endless href grows the heap until something dies,
+// and these run on goroutines the caller does not wait on.
+//
+// Depth: 1 listings are a different matter and do not come through here; see
+// walkDirDownload and friends, which stream a whole collection on purpose.
+const propfindBodyLimit = 256 * 1024
+
+// errPropfindTooLarge is what a reader gets for the part of a PROPFIND
+// response past propfindBodyLimit.
+var errPropfindTooLarge = errors.Errorf("PROPFIND response exceeded %d bytes", propfindBodyLimit)
+
+// boundedBodyTransport caps the response bodies of everything sent through it.
+// gowebdav offers no hook for this, so it goes in at the transport.
+type boundedBodyTransport struct {
+	base  http.RoundTripper
+	limit int64
+}
+
+func (t *boundedBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp == nil || resp.Body == nil {
+		return resp, err
+	}
+	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: t.limit}
+	return resp, nil
+}
+
+// boundedBody fails the read rather than truncating it. A short read would
+// leave gowebdav's parser holding a half-document, and it discards decode
+// errors silently, so the caller would be told "nothing here" for what is
+// really "too much here".
+type boundedBody struct {
+	io.ReadCloser
+	remaining int64
+}
+
+func (b *boundedBody) Read(p []byte) (int, error) {
+	if b.remaining <= 0 {
+		return 0, errPropfindTooLarge
+	}
+	if int64(len(p)) > b.remaining {
+		p = p[:b.remaining]
+	}
+	n, err := b.ReadCloser.Read(p)
+	b.remaining -= int64(n)
+	return n, err
+}
+
+// boundPropfindBody wraps a transport so a Depth-0 PROPFIND cannot read an
+// unbounded response into memory.
+func boundPropfindBody(base http.RoundTripper) http.RoundTripper {
+	return &boundedBodyTransport{base: base, limit: propfindBodyLimit}
+}
 
 // probeToken picks the credential the endpoint probe should present.
 //

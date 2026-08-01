@@ -277,7 +277,7 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 		token = nil
 	}
 
-	statInfo, err := statHttp(pUrl, dirResp, token, fedToken)
+	statInfo, err := statHttp(ctx, pUrl, dirResp, token, fedToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	}

@@ -26,14 +26,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -615,4 +619,100 @@ func TestCollectionProbeMultistatusWithoutUsableProps(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.False(t, collection.answered, "a 207 that describes nothing is not an answer")
 	assert.False(t, collection.isCollection)
+}
+
+// statHttpTestDirResp points statHttp at a single object server.
+func statHttpTestDirResp(t *testing.T, svrUrl *url.URL) server_structs.DirectorResponse {
+	t.Helper()
+	return server_structs.DirectorResponse{ObjectServers: []*url.URL{svrUrl}}
+}
+
+// TestStatHttpHonorsContext: statHttp fans PROPFINDs out across every stat
+// host and waits for all of them, so a hung object server used to hold the
+// caller for as long as the transport allowed.  The cache calls this on the
+// path of every miss it fills, so it must be the caller's deadline that
+// decides.
+func TestStatHttpHonorsContext(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	released := make(chan struct{})
+	_, svrUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		<-released // never answers until the test lets it
+	})
+	t.Cleanup(func() { close(released) })
+
+	pUrl, err := pelican_url.Parse("pelican://example.com/path", nil, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, statErr := statHttp(ctx, pUrl, statHttpTestDirResp(t, svrUrl), probeTestToken(), nil)
+		done <- statErr
+	}()
+
+	select {
+	case statErr := <-done:
+		require.Error(t, statErr, "a stat whose context expired must not report success")
+	case <-time.After(15 * time.Second):
+		t.Fatal("statHttp ignored the context and hung on an unresponsive endpoint")
+	}
+}
+
+// TestStatHttpBoundsResponseBody: a Depth-0 PROPFIND describes one resource,
+// so an endless response body is a server misbehaving.  gowebdav decodes into
+// memory with no bound of its own, and this runs on a goroutine the caller
+// does not wait on, so the bound is enforced at the transport.
+func TestStatHttpBoundsResponseBody(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	stop := make(chan struct{})
+	_, svrUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		w.WriteHeader(http.StatusMultiStatus)
+		// A well-formed prologue followed by an href that never ends.
+		if _, err := w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:"><D:response><D:href>/`)); err != nil {
+			return
+		}
+		flusher, _ := w.(http.Flusher)
+		chunk := strings.Repeat("A", 4096)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	})
+	t.Cleanup(func() { close(stop) })
+
+	pUrl, err := pelican_url.Parse("pelican://example.com/path", nil, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, statErr := statHttp(ctx, pUrl, statHttpTestDirResp(t, svrUrl), probeTestToken(), nil)
+		done <- statErr
+	}()
+
+	select {
+	case statErr := <-done:
+		require.Error(t, statErr, "an unbounded multistatus must fail the stat, not be accepted")
+		assert.NotContains(t, statErr.Error(), "context deadline exceeded",
+			"the body limit should stop this, not the timeout standing in for it")
+	case <-time.After(25 * time.Second):
+		t.Fatal("statHttp read an unbounded PROPFIND body without stopping")
+	}
 }
