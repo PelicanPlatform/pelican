@@ -250,6 +250,14 @@ type persistentDownload struct {
 	noStoreReader io.ReadCloser
 	noStoreMeta   *CacheMetadata
 
+	// forceNoStore streams the response through without persisting it, for
+	// reasons of our own rather than the origin's. A collection is the case
+	// that matters: an export with Listings enabled answers a collection GET
+	// with an index, which is worth showing a user but must never be written
+	// to disk as that path's object -- once stored, every later request for
+	// the path is served the index instead.
+	forceNoStore bool
+
 	// Background completion tracking (for non-blocking downloads)
 	completionDone chan struct{} // Closed when background finalization completes
 	completionErr  atomic.Value  // Stores error from background finalization (type error)
@@ -1443,7 +1451,7 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
-	statInfo, err := client.DoStat(context.Background(), dUrl.String(), opts...)
+	statInfo, err := pc.te.Stat(context.Background(), dUrl.String(), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1560,7 +1568,7 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
-	statInfo, err := client.DoStat(context.Background(), dUrl.String(), opts...)
+	statInfo, err := pc.te.Stat(context.Background(), dUrl.String(), opts...)
 	if err != nil {
 		return 0, err
 	}
@@ -1619,9 +1627,14 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	if ft := pc.getFedToken(); ft != "" {
 		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
 	}
-	statInfo, err := client.DoStat(ctx, dUrl.String(), opts...)
+	statInfo, err := pc.te.Stat(ctx, dUrl.String(), opts...)
 	if err != nil {
 		return nil, errors.Wrap(err, "stat failed for range-on-miss")
+	}
+	// The stat already knows; refusing here costs nothing and keeps a
+	// collection from being initialised as an object on disk.
+	if statInfo.IsCollection {
+		return nil, errors.Errorf("%s is a collection and cannot be cached as an object", pelicanURL)
 	}
 
 	etag := statInfo.ETag
@@ -1835,6 +1848,17 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL string
 	pc.activeDownloads[objectHash] = dl
 	pc.activeDownloadsMu.Unlock()
 
+	// Find out whether the source is a collection, because the answer decides
+	// whether what comes back may be written to disk. An export with Listings
+	// enabled serves an index for a collection, which is worth passing on to
+	// whoever asked but must never become this path's stored object --
+	// every later request would then be served the index.
+	//
+	// Deliberately after the mutex is released: this is a round trip to the
+	// origin, and holding the download registry across it would stall every
+	// other cache miss in the process behind one stat.
+	dl.forceNoStore = pc.sourceIsCollection(ctx, pelicanURL, token)
+
 	// Perform download (this will set dl.instanceHash and dl.etag)
 	err := pc.performDownload(ctx, dl, token)
 
@@ -2027,7 +2051,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		ccDirectives := ParseCacheControl(dl.cacheControl)
 
 		// Check if object with this ETag already exists (only relevant for storable responses)
-		if ccDirectives.ShouldStore() {
+		if ccDirectives.ShouldStore() && !dl.forceNoStore {
 			existingMeta, err := pc.storage.GetMetadata(dl.instanceHash)
 			if err != nil {
 				log.Warnf("Failed to check existing metadata: %v", err)
@@ -2049,7 +2073,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			// Origin says not to store — stream directly to the caller via
 			// an io.Pipe instead of buffering the entire response in memory
 			// (which could OOM on large objects).
-			log.Debugf("performDownload: Origin sent Cache-Control %q — will not persist", dl.cacheControl)
+			if dl.forceNoStore {
+				log.Debugln("performDownload: source is a collection — serving it through without persisting")
+			} else {
+				log.Debugf("performDownload: Origin sent Cache-Control %q — will not persist", dl.cacheControl)
+			}
 
 			pr, pw := io.Pipe()
 			buffered := dw.SetPipeMode(pw)
@@ -2129,7 +2157,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				if fedTP != nil {
 					statOpts = append(statOpts, client.WithFedToken(fedTP))
 				}
-				if statInfo, statErr := client.DoStat(ctx, sourceURL.String(), statOpts...); statErr == nil && statInfo.Size > 0 {
+				if statInfo, statErr := pc.te.Stat(ctx, sourceURL.String(), statOpts...); statErr == nil && statInfo.Size > 0 {
 					// Verify that the HEAD and GET responses refer to the
 					// same object version before trusting the reported size.
 					if statInfo.ETag != "" && dl.etag != "" && statInfo.ETag != dl.etag {
@@ -2888,4 +2916,29 @@ type PersistentCacheStats struct {
 	DirStats         map[StorageID]DirEvictionStats
 	NamespaceUsage   map[string]int64
 	ConsistencyStats ConsistencyStats
+}
+
+// sourceIsCollection reports whether the object being fetched is a collection.
+//
+// A false answer covers both "it is an object" and "the origin would not say",
+// which is the right default here: the consequence of being wrong is that a
+// response gets cached that should not have been, and refusing to serve
+// anything an origin declined to describe would be a far larger blast radius
+// than the defect this guards against.
+func (pc *PersistentCache) sourceIsCollection(ctx context.Context, pelicanURL, token string) bool {
+	// pelicanURL is already a complete pelican:// URL (normalizePath returns
+	// one), unlike the bare object paths the other stat sites are handed.
+	opts := []client.TransferOption{
+		client.WithToken(token),
+		client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()),
+	}
+	if ft := pc.getFedToken(); ft != "" {
+		opts = append(opts, client.WithFedToken(pc.fedTokenAsProvider()))
+	}
+	statInfo, err := pc.te.Stat(ctx, pelicanURL, opts...)
+	if err != nil {
+		log.Debugln("Could not determine whether", pelicanURL, "is a collection:", err)
+		return false
+	}
+	return statInfo.IsCollection
 }
