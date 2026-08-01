@@ -37,10 +37,10 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// transferSemanticsOriginConfig sets up a POSIXv2 origin (no XRootD
-// dependency) with recursive-listable public reads AND writes. This lets
-// one federation power every row of the object-transfer semantics
-// matrix that TestObjectTransferSemantics locks in.
+// transferSemanticsOriginConfig sets up a POSIXv2 origin with listable
+// public reads AND writes, so a single federation can serve every row
+// TestObjectTransferSemantics covers -- reads, writes, and the directory
+// listings the collection-vs-object checks depend on.
 const transferSemanticsOriginConfig = `
 Origin:
   StorageType: posixv2
@@ -52,12 +52,18 @@ Director:
   MaxStatResponse: 1
 `
 
-// TestObjectTransferSemantics locks in the current get/put source/dest
-// x file/collection x recursive matrix.  Subtests are named after row
-// IDs (G1..G7, P1..P7) so a failure points directly at the expectation
-// that regressed.  The PR that introduces or changes any row should
-// also update this table and the "Uploading to a Collection" section
-// of docs/app/getting-data-with-pelican/client/page.mdx.
+// TestObjectTransferSemantics pins the library-level (client.DoGet /
+// client.DoPut) rows of the get/put source × file-or-collection ×
+// recursive matrix documented in docs/object-transfer-semantics.md.
+// Subtests are named after the row IDs defined there -- G1 through G6 and
+// P1 through P6 -- so a failure names the expectation that regressed.
+//
+// The CLI-level rows (filename inference, multiple sources: P3, P8, P9,
+// P10) are covered by TestObjectPutSemanticsCLI in object_put_test.go,
+// because they are implemented in cmd/object_put.go rather than in the
+// client library.  Changing any row means updating this file, the
+// document, and the "Uploading to a Collection" section of
+// docs/app/getting-data-with-pelican/client/page.mdx together.
 func TestObjectTransferSemantics(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -117,11 +123,11 @@ func TestObjectTransferSemantics(t *testing.T) {
 	})
 
 	t.Run("G4_get_collection_nonrecursive_errors", func(t *testing.T) {
-		// After this PR: non-recursive get of a collection errors
-		// with a message symmetric to the put-side "directory but
-		// recursive is not enabled" guard. Previously it silently
-		// wrote the origin's WebDAV listing to a local file named
-		// after the collection.
+		// A non-recursive get of a collection must error, with a
+		// message symmetric to the put-side "directory but recursive
+		// is not enabled" guard (row P4).  The alternative is writing
+		// the origin's WebDAV listing into a local file named after
+		// the collection.
 		subdir := filepath.Join(storage, "g4-dir")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "inside.txt"), []byte("inside"), 0o644))
@@ -142,9 +148,11 @@ func TestObjectTransferSemantics(t *testing.T) {
 		// Recursive get of `remote/g5-src` into an existing local dir
 		// `LOCAL` places entries FLAT under `LOCAL/…` -- entries keep
 		// their names but the collection basename is NOT interposed.
-		// Matches `rsync -a remote/ local/` and the design decision
-		// for `pelican object sync` recorded in discussion #1638
-		// (rows 2 & 3 of the sync table).
+		// Matches `rsync -a remote/ local/` and the layout agreed for
+		// `pelican object sync` in PelicanPlatform discussion 1638
+		// (https://github.com/orgs/PelicanPlatform/discussions/1638),
+		// which puts the contents of a synced collection directly into
+		// the named local directory.
 		subdir := filepath.Join(storage, "g5-src")
 		require.NoError(t, os.MkdirAll(subdir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(subdir, "a.txt"), []byte("A"), 0o644))
@@ -168,7 +176,7 @@ func TestObjectTransferSemantics(t *testing.T) {
 			"G5: must NOT nest under basename(remote); would regress sync/client_agent callers")
 	})
 
-	t.Run("G6_get_collection_recursive_to_nonexistent_path_creates_and_nests", func(t *testing.T) {
+	t.Run("G6_get_collection_recursive_to_nonexistent_path_creates_dest_and_lays_flat", func(t *testing.T) {
 		// When the destination doesn't yet exist, we treat that path
 		// itself as the target container (destination string is the
 		// collection name); entries land directly under it. This
@@ -220,27 +228,26 @@ func TestObjectTransferSemantics(t *testing.T) {
 			"P2: error must mention already-exists so callers can distinguish this case")
 	})
 
-	// P3 is the library-level pin for the row PR #2970 targets. Note
-	// that PR #2970 only adds the inference at the CLI level
-	// (cmd/object_put.go); client.DoPut still errors "already exists"
-	// even after the PR. So this test's expectation does NOT change
-	// when the PR is applied. The CLI side is pinned by
-	// TestObjectPutToDirectoryInfersFilename in object_put_test.go
-	// (shipped as part of the PR).
-	t.Run("P3_put_file_to_existing_remote_collection_currently_errors", func(t *testing.T) {
+	// P3-lib: client.DoPut performs no filename inference of its own.  A
+	// collection destination surfaces the origin's write-once "already
+	// exists", and library callers get that error rather than a silent
+	// rewrite of the path they asked for.  Filename inference is a CLI
+	// affordance implemented in cmd/object_put.go and pinned as row P3-cli
+	// by TestObjectPutSemanticsCLI in object_put_test.go.
+	t.Run("P3_lib_put_file_to_existing_remote_collection_errors", func(t *testing.T) {
 		// Seed the remote with a collection.
 		require.NoError(t, os.MkdirAll(filepath.Join(storage, "p3-dir"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(storage, "p3-dir", "sentinel"), []byte("keep"), 0o644))
 
 		localSrc := filepath.Join(t.TempDir(), "p3.txt")
-		require.NoError(t, os.WriteFile(localSrc, []byte("SHOULD NOT LAND ON MAIN"), 0o644))
+		require.NoError(t, os.WriteFile(localSrc, []byte("SHOULD NOT LAND"), 0o644))
 
 		_, err := client.DoPut(ft.Ctx, localSrc, remoteBase+"/p3-dir", false)
 		require.Error(t, err,
-			"P3 (current main): DoPut has no filename inference for a collection dest -- fails already-exists")
+			"P3-lib: DoPut has no filename inference for a collection dest -- fails already-exists")
 		// The exact wording is origin-driven; assert the core token.
 		assert.Contains(t, strings.ToLower(err.Error()), "already exists",
-			"P3 (current main): error surfaces the collection-vs-object conflict as already-exists")
+			"P3-lib: error surfaces the collection-vs-object conflict as already-exists")
 		// The sentinel must be untouched -- the failed upload should not
 		// have overwritten anything.
 		got, err := os.ReadFile(filepath.Join(storage, "p3-dir", "sentinel"))
@@ -285,10 +292,13 @@ func TestObjectTransferSemantics(t *testing.T) {
 		// Recursive put of a local directory into an existing remote
 		// collection lays entries FLAT under the collection -- the
 		// local dir's basename is NOT interposed. Symmetric with G5
-		// and matches the design decision for `pelican object sync`
-		// in discussion #1638 (row 7). The CLI (cmd/object_put.go)
-		// pre-flights the destination and skips filename inference
-		// for recursive uploads to preserve this layout.
+		// and matching the sync layout agreed in PelicanPlatform
+		// discussion 1638
+		// (https://github.com/orgs/PelicanPlatform/discussions/1638),
+		// where syncing a local directory to a namespace prefix places
+		// its files directly under that prefix.  The CLI
+		// (cmd/object_put.go) skips filename inference for recursive
+		// uploads to preserve this layout.
 		remoteColl := filepath.Join(storage, "p6-coll")
 		require.NoError(t, os.MkdirAll(remoteColl, 0o755))
 

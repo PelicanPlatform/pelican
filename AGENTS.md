@@ -354,6 +354,7 @@ API endpoints are documented using OpenAPI V2.0 (Swagger). The specification liv
 - Parameter reference: `docs/parameters.yaml`
 - HTTP headers: `docs/pelican-http-headers.md`
 - Error codes: `docs/error_codes.yaml`
+- `object get` / `object put` source and destination semantics: `docs/object-transfer-semantics.md`
 
 ## Common Gotchas
 
