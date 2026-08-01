@@ -264,11 +264,13 @@ func TestCollectionProbeContentRangeShortCircuit(t *testing.T) {
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
+	var gotRange string
 	_, svrUrl, counter := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			gotRange = r.Header.Get("Range")
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/1234")
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 			return
@@ -279,12 +281,71 @@ func TestCollectionProbeContentRangeShortCircuit(t *testing.T) {
 	size, collection, results := sortAttempts(ctx, "/path", []transferAttemptDetails{{Url: svrUrl}}, probeTestToken(), true)
 
 	require.Len(t, results, 1)
+	assert.Equal(t, "bytes=0-0", gotRange,
+		"the probe must ask in RFC 7233 syntax, or a compliant server will not satisfy it")
 	assert.True(t, collection.answered, "serving a byte range answers the question")
 	assert.False(t, collection.isCollection)
 	assert.Equal(t, int64(1234), size, "the size comes from the Content-Range")
 	assert.Zero(t, counter.get("PROPFIND"),
 		"a satisfied byte range must short-circuit the PROPFIND entirely, so servers that speak no WebDAV still work")
 	assert.Zero(t, counter.get(http.MethodHead), "and no HEAD either -- the range answered both questions")
+}
+
+// TestCollectionProbeContentRangeNeedsPartialStatus: a 200 carrying a
+// Content-Range is a server contradicting itself.  Since this value decides
+// whether a download is refused, it is taken only when the status agrees, and
+// the probe goes on to ask properly.
+func TestCollectionProbeContentRangeNeedsPartialStatus(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	_, svrUrl, counter := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Range", "bytes 0-0/1234")
+			w.WriteHeader(http.StatusOK)
+		case "PROPFIND":
+			writeMultistatus(t, w, "/path", false, 99)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	size, collection, _ := sortAttempts(ctx, "/path", []transferAttemptDetails{{Url: svrUrl}}, probeTestToken(), true)
+
+	assert.Equal(t, 1, counter.get("PROPFIND"), "the contradictory response must not short-circuit")
+	assert.True(t, collection.answered)
+	assert.False(t, collection.isCollection)
+	assert.Equal(t, int64(99), size, "the size must come from the PROPFIND, not the disputed header")
+}
+
+// TestCollectionProbeRangeNotSatisfiable: a 416 says the endpoint would not
+// serve the range asked for, which is not the same as the endpoint being
+// broken.  It must not be recorded as a failure, or a strict server that
+// answers the collection question correctly gets sorted behind one that does
+// not answer at all.
+func TestCollectionProbeRangeNotSatisfiable(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	_, strictUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		case "PROPFIND":
+			writeMultistatus(t, w, "/path", true, 0)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	_, collection, results := sortAttempts(ctx, "/path", []transferAttemptDetails{{Url: strictUrl}}, probeTestToken(), true)
+
+	require.Len(t, results, 1)
+	assert.True(t, collection.answered, "the endpoint answered by PROPFIND; the 416 was only about the range")
+	assert.True(t, collection.isCollection)
 }
 
 // TestCollectionProbeMixedAnswersRefuseWins: when two endpoints both answer and

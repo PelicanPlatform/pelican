@@ -6335,7 +6335,13 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
-	headRequest.Header.Set("Range", "0-0")
+	// RFC 7233 syntax. The unit prefix used to be missing, which XRootD
+	// tolerates -- it skips whatever precedes the `=` without checking it --
+	// but every standards-compliant server rejects, answering either with the
+	// whole object or with a 416. That made the one request this probe is
+	// supposed to cost into two everywhere except XRootD, and against a server
+	// that answers 416 it made the endpoint look broken.
+	headRequest.Header.Set("Range", "bytes=0-0")
 	if token != nil {
 		if tokenContents, err := token.Get(); err == nil && tokenContents != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
@@ -6365,12 +6371,21 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	}
 	headResponse.Body.Close()
 	gotContentRange := false
-	if headResponse.StatusCode <= 300 {
+	if headResponse.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+		// Not an unhealthy endpoint, just one that would not serve the range
+		// asked for. Nothing was learned, but nothing is wrong either: fall
+		// through to the request below, which asks without a range.
+		log.Debugln("Endpoint", objectUrl.Host, "did not satisfy the probe's byte range")
+	} else if headResponse.StatusCode <= 300 {
 		if contentRangeStr := headResponse.Header.Get("Content-Range"); contentRangeStr != "" {
 			if after, found := strings.CutPrefix(contentRangeStr, "bytes 0-0/"); found {
 				if afterParsed, err := strconv.Atoi(after); err == nil {
 					size = int64(afterParsed)
-					gotContentRange = true
+					// Only a 206 means the range was actually served. A 200
+					// carrying a Content-Range is a server contradicting
+					// itself, and this value decides whether a download is
+					// refused, so take it only when the status agrees.
+					gotContentRange = headResponse.StatusCode == http.StatusPartialContent
 				} else {
 					log.Warningf("Ignoring invalid content range value (%s) due to parsing error: %s", after, err.Error())
 				}

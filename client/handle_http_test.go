@@ -779,7 +779,10 @@ func TestSortAttempts(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
@@ -851,7 +854,10 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
