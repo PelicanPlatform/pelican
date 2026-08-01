@@ -132,9 +132,12 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 		return nil, errors.Wrap(err, "failed to parse remote path")
 	}
 
-	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
+	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director.
+	// Unknown query params are allowed through (with a warning) for the same reason DoGet and DoPut allow them:
+	// an older client must keep working against a newer director/origin/cache that has added a parameter it does
+	// not recognize.  Callers also feed URLs from GetRawUrl() back through here, which preserves the raw query.
 	client := config.GetClient()
-	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
+	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOptions); err != nil {
@@ -153,7 +156,18 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	return pUrl, nil
 }
 
-// Check the size of a remote file in an origin
+// DoStat returns metadata about a single remote object or collection.
+//
+// The path is treated as something to be read unless the caller passes
+// WithStatUploadDestination(true), in which case it is treated as the
+// destination of a pending upload: the Director is queried with PUT and
+// destination-role token options apply.  Either way the role-specific token
+// options override the generic ones, exactly as they do for a transfer, so a
+// caller's --source-token or --dest-token is honored here too.
+//
+// No TransferEngine is built: a stat needs only the Director response, a
+// token, and statHttp's own gowebdav client, so callers can pre-flight a
+// path without paying for a worker pool and its goroutines.
 func DoStat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
 
 	defer func() {
@@ -166,52 +180,52 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
+	// Without an initialized client the transport is whatever the defaults
+	// happen to be, so any CA bundle or proxy the caller configured would
+	// silently not apply to the requests below.  NewTransferEngine enforces
+	// this for every other entry point; DoStat builds no engine, so it has
+	// to check for itself.
+	if !config.IsClientInitialized() {
+		return nil, errors.New("client has not been initialized, unable to stat")
+	}
+
 	pUrl, err := ParseRemoteAsPUrl(ctx, destination)
 	if err != nil {
 		return
 	}
 
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
-
-	// Pre-scan options for cacheMode which affects the director query.
-	var cacheMode bool
+	// Pre-scan the options that decide how the Director is queried.
+	var cacheMode, uploadDestination bool
 	for _, option := range options {
-		if _, ok := option.Ident().(identTransferOptionCacheEmbeddedClientMode); ok {
+		switch option.Ident() {
+		case identTransferOptionCacheEmbeddedClientMode{}:
 			cacheMode = true
-			break
+		case identTransferOptionStatUploadDestination{}:
+			uploadDestination = option.Value().(bool)
 		}
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", cacheMode)
+	// An upload destination is stat'ed against the origins that accept the
+	// write, not against caches: caches serve no listings for a
+	// writes-without-reads namespace, and a GET-flavored query would hand
+	// the caller's write credential to every cache in the response.
+	directorMethod, tokenOperation := http.MethodGet, config.TokenRead
+	if uploadDestination {
+		directorMethod, tokenOperation = http.MethodPut, config.TokenWrite
+	}
+
+	dirResp, err := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
 	if err != nil {
 		return nil, err
 	}
 
 	var requestedChecksums []ChecksumType
 
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, tokenOperation, true)
+	applyTokenOptions(token, nil, uploadDestination, options)
 	var fedToken TokenProvider
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionTokenLocation{}:
-			token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			token.SetToken(option.Value().(string))
-		case identTransferOptionTokenProvider{}:
-			if p, ok := option.Value().(TokenProvider); ok && p != nil {
-				token.SetExternalProvider(p)
-			}
 		case identTransferOptionFedToken{}:
 			fedToken = option.Value().(TokenProvider)
 		case identTransferOptionChecksums{}:
@@ -222,8 +236,11 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	var tokenContents string
 	if dirResp.XPelNsHdr.RequireToken {
 		tokenContents, err = token.Get()
-		if err != nil || tokenContents == "" {
+		if err != nil {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
+		}
+		if tokenContents == "" {
+			return nil, errors.New("failed to get token for transfer: no token found for a namespace that requires one")
 		}
 	} else {
 		token = nil
@@ -962,11 +979,41 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		// Note that we use the pUrl.Path, as this will have stripped any query params for us
+		// The destination is an existing directory -- a "container
+		// target".  Rows G2, G4, and G5 of docs/object-transfer-semantics.md
+		// all live in this branch:
+		//
+		//   * G2: a non-recursive get of an object infers the local
+		//     filename from the source basename.
+		//   * G4: a non-recursive get of a collection is an error.
+		//     Symmetric with the put-side P4 guard.
+		//   * G5: a recursive get of a collection lays entries FLAT
+		//     under LOCAL/ -- basename(source) is NOT interposed.
+		//     `pelican object sync` and client_agent/transfer_manager
+		//     depend on that layout, so nothing may be appended to
+		//     localDestination on the recursive path.
+		//
+		// Telling G2 from G4 requires knowing whether the source is a
+		// collection, so the non-recursive path stats it.  The
+		// recursive path needs no such decision and deliberately skips
+		// the stat, keeping the extra round trip off the sync hot path.
+		//
+		// ErrObjectNotFound is left alone: the transfer machinery
+		// surfaces a missing source with a better error than anything
+		// that can be said here.  Every other stat failure is fatal,
+		// because a G4 collection that stats as unknown would silently
+		// build the G2 layout and write a directory listing to a file.
 		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
+				return nil, errors.Wrapf(statErr,
+					"failed to stat remote source %q while deciding destination layout", remoteObject)
+			}
+			if stat != nil && stat.IsCollection {
+				return nil, errors.Errorf(
+					"remote object %q is a collection but recursive is not enabled", remoteObject)
+			}
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}

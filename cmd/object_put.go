@@ -30,7 +30,10 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +45,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -130,6 +134,31 @@ func verifyFileChecksum(filePath, expectedChecksum string, alg client.ChecksumTy
 	}
 
 	return nil
+}
+
+// inferRemoteObjectName joins the base name of a local source onto a remote
+// collection URL, producing the per-source destination used by rows P3, P8,
+// and P9 of docs/object-transfer-semantics.md.
+//
+// The base name is validated rather than trusted.  path.Join cleans its
+// result, so a source named "/data/tree/.." would otherwise resolve to the
+// parent of the collection the caller asked for and upload there without
+// saying so.  Refusing is the only safe answer: there is no object name to
+// infer, and the caller has to name the destination object explicitly.
+func inferRemoteObjectName(destURL *url.URL, localSource string) (string, error) {
+	name := filepath.Base(localSource)
+	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) ||
+		strings.ContainsAny(name, `/\`) {
+		return "", errors.Errorf("cannot infer a remote object name from local source %q; "+
+			"name the destination object explicitly", localSource)
+	}
+
+	inferred := *destURL
+	inferred.Path = path.Join(destURL.Path, name)
+	// Path no longer matches the escaped form parsed out of the original
+	// string, so the stale RawPath has to go or String() would emit it.
+	inferred.RawPath = ""
+	return inferred.String(), nil
 }
 
 func putMain(cmd *cobra.Command, args []string) {
@@ -382,9 +411,82 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	finalResults := make([][]client.TransferResults, 0)
 
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	multipleObjects := len(source) > 1
+
+	// client.DoPut also enables recursion from a `?recursive` query
+	// parameter, so the destination has to be consulted for it here as well.
+	// A recursive upload requested that way must not take the
+	// filename-inference branch below, or the tree would land nested under
+	// basename(src) instead of flat under the collection (row P6 of
+	// docs/object-transfer-semantics.md).
+	destURL, destParseErr := url.Parse(dest)
+	packRequested := false
+	if destParseErr == nil {
+		destQuery := destURL.Query()
+		if _, exists := destQuery[pelican_url.QueryRecursive]; exists {
+			isRecursive = true
+		}
+		packRequested = destQuery.Get(pelican_url.QueryPack) != ""
+	}
+
+	// Object-name inference is off the table entirely for a recursive upload
+	// (P6 lays entries flat), for an archive request (`--pack` names the
+	// archive from the source), and for a destination that would not parse
+	// (DoPut reports that error).
+	canInferNames := !isRecursive && !packRequested && destParseErr == nil
+
+	// Pre-flight the destination once, outside the source loop, to learn
+	// whether it names an existing collection.  Several sources mean the
+	// destination has to be a container no matter what the stat says or
+	// whether it ran at all, so that is the starting point (row P9) -- which
+	// also keeps `--dry-run`, where the stat is skipped so nothing touches
+	// the network, printing the paths a real run would use.
+	//
+	// A stat failure is soft (row P10): uploads legitimately succeed against
+	// namespaces where the stat cannot -- a write-only token, no `listings`
+	// capability, a transient collections-endpoint outage -- so the
+	// destination is used as given and DoPut makes the real decision.
+	destIsDir := canInferNames && multipleObjects
+	if canInferNames && !dryRun {
+		// The pre-flight is a convenience: it must never block a scripted
+		// upload on an interactive token acquisition, and it has to be
+		// told this is a write destination so that --dest-token applies
+		// and the Director hands back origins rather than caches.
+		statOptions := make([]client.TransferOption, 0, len(options)+2)
+		statOptions = append(statOptions, options...)
+		statOptions = append(statOptions,
+			client.WithStatUploadDestination(true),
+			client.WithAcquireToken(false))
+
+		statInfo, statErr := client.DoStat(ctx, dest, statOptions...)
+		if statErr != nil {
+			if !errors.Is(statErr, client.ErrObjectNotFound) {
+				log.Debugf("Stat of destination %q failed (%v); using the destination as given", dest, statErr)
+			}
+		} else if statInfo != nil {
+			// A successful stat is authoritative in both directions: a
+			// collection takes the container reading, and anything else
+			// takes the literal one even when several sources were named.
+			destIsDir = statInfo.IsCollection
+		}
+	}
+
 	for _, src := range source {
-		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, options...)
+		actualDest := dest
+		if destIsDir {
+			inferredDest, err := inferRemoteObjectName(destURL, src)
+			if err != nil {
+				log.Errorln("Failed to infer destination object name:", err)
+				result = err
+				lastSrc = src
+				break
+			}
+			actualDest = inferredDest
+			log.Debugf("Inferred destination for %s: %s", src, actualDest)
+		}
+
+		transferResults, err := client.DoPut(ctx, src, actualDest, isRecursive, options...)
 		result = err
 		if result != nil {
 			lastSrc = src

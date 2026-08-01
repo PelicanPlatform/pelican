@@ -695,7 +695,10 @@ Director:
 	// Create a local directory for downloads
 	downloadDir := t.TempDir()
 
-	// Test recursive download - download entire directory structure
+	// Test recursive download - download entire directory structure.
+	// Recursive get of a remote collection into an existing local dir lays
+	// entries flat under downloadDir (row G5 of
+	// docs/object-transfer-semantics.md).
 	_, err = client.DoGet(ft.Ctx, uploadURL, downloadDir, true, client.WithToken(testToken))
 	require.NoError(t, err, "Should be able to recursively download directory")
 

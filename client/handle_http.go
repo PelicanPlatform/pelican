@@ -83,6 +83,13 @@ var (
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
 
+	// errStatOnCollectionAtCache is an internal sentinel for the case where a
+	// stat host (typically an XRootD cache) returns 409 for a PROPFIND on what
+	// is actually a directory. Caches do not serve directory listings; statHttp
+	// uses this to decide whether to fall back to the collections URL (origin
+	// WebDAV endpoint), which does serve them.
+	errStatOnCollectionAtCache = errors.New("stat host returned 409 (likely a collection at a cache)")
+
 	// maxWebDavRetries is the maximum number of attempts (including the initial attempt)
 	// for WebDAV operations that encounter idle connection errors.
 	maxWebDavRetries = 2
@@ -408,6 +415,7 @@ type (
 	identTransferOptionTokenProvider            struct{}
 	identTransferOptionSourceTokenProvider      struct{}
 	identTransferOptionNonInteractive           struct{}
+	identTransferOptionStatUploadDestination    struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -922,6 +930,21 @@ func WithDestinationToken(token string) TransferOption {
 // no-op; for put operations it behaves identically to WithTokenLocation.
 func WithDestinationTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionDestinationTokenLocation{}, location)
+}
+
+// WithStatUploadDestination tells DoStat that the path being stat'ed is the
+// destination of a pending upload rather than a source to be read.  This
+// changes two things: the Director is queried with PUT, so the stat runs
+// against origins that accept writes instead of against caches, and
+// destination-role token options (WithDestinationToken,
+// WithDestinationTokenLocation) apply instead of source-role ones.
+//
+// Callers pre-flighting an upload destination must set this.  A GET-flavored
+// stat would send the caller's write credential to every cache in the
+// Director's response, and caches cannot answer for a namespace that grants
+// writes without reads.
+func WithStatUploadDestination(enable bool) TransferOption {
+	return option.New(identTransferOptionStatUploadDestination{}, enable)
 }
 
 // Create an option to specify the checksums to request for a given
@@ -5391,10 +5414,21 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // PROPFIND, so we must not attempt to stat against it directly.
 // preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
 func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
+	return statHttpImpl(dest, dirResp, token, fedToken, useCollectionsOnly, false)
+}
+
+// statHttpImpl is the recursion-safe internals of statHttp.  The
+// alreadyFellBack flag stops the two fallback branches at the bottom
+// from ping-ponging: one branch flips useCollectionsOnly false->true,
+// the other flips it true->false, so an initial call that hits both
+// triggers back-to-back would otherwise recurse forever.  After a
+// single fallback we have tried both modes and any remaining failure
+// is reported to the caller.
+func statHttpImpl(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, useCollectionsOnly bool, alreadyFellBack bool) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
 	if useCollectionsOnly {
 		if collectionsUrl != nil {
 			statHosts = append(statHosts, *collectionsUrl)
@@ -5410,6 +5444,14 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		} else if collectionsUrl != nil {
 			statHosts = append(statHosts, *collectionsUrl)
 		}
+	}
+	// With nothing to ask, the loop below would report success on zero
+	// results and hand back a zero-valued FileInfo -- an object of size 0
+	// that is not a collection.  Callers use IsCollection to decide where a
+	// transfer lands, so a fabricated answer is worse than an error.
+	if len(statHosts) == 0 {
+		return FileInfo{}, errors.Errorf("no endpoint available to stat %s: "+
+			"the director returned neither object servers nor a collections URL", dest.String())
 	}
 	type statResults struct {
 		info FileInfo
@@ -5515,10 +5557,11 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrCode(err, http.StatusConflict) {
 					// 409 Conflict — XRootD caches return this for PROPFIND
-					// on directories.  Report as an error so the collections
-					// URL fallback can still succeed.
+					// on directories.  Wrap the sentinel so the loop that
+					// collects these results can decide to fall back to
+					// the collections URL.
 					log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
-					err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
+					err = errors.Wrapf(errStatOnCollectionAtCache, "stat of %s at endpoint %s", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
@@ -5554,6 +5597,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	}
 	success := false
 	notFound := false
+	sawConflict := false
 	for ctr := 0; ctr < len(statHosts); ctr++ {
 		result := <-resultsChan
 		if result.err == nil {
@@ -5568,11 +5612,23 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 				notFound = true
 			}
 		}
+		if result.err != nil && errors.Is(result.err, errStatOnCollectionAtCache) {
+			sawConflict = true
+		}
 	}
 	// Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
-	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
-		// Recursively call statHttp without preferCollectionsUrlOnly
-		return statHttp(dest, dirResp, token, fedToken)
+	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 && !alreadyFellBack {
+		// Retry without preferCollectionsUrlOnly; mark the retry as
+		// already-fell-back so the sibling fallback below cannot then
+		// flip us back to collections-only and ping-pong.
+		return statHttpImpl(dest, dirResp, token, fedToken, false, true)
+	}
+	// Fallback: if no host succeeded, at least one stat host was a cache
+	// that returned 409 on what is likely a collection, and the director
+	// gave us a collections URL, retry via the collections URL (origin
+	// WebDAV endpoint) which does serve directory listings.
+	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil && !alreadyFellBack {
+		return statHttpImpl(dest, dirResp, token, fedToken, true, true)
 	}
 	if success {
 		err = nil
