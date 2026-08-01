@@ -24,7 +24,7 @@
 // with an HTML index. Nothing about that response says "this is not an
 // object", so the risk is that the cache stores the index and thereafter
 // serves it as though it were the object the user named -- which is how the
-// confusing downloads that motivated this behavior were first reported.
+// confusing downloads reported in issue #1706 were produced.
 
 package fed_tests
 
@@ -32,10 +32,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	_ "github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -74,8 +72,8 @@ func makeCollectionInOrigin(t *testing.T, ft *fed_test_utils.FedTest, name strin
 	return "/test/" + name
 }
 
-// TestCacheCollectionNotStoredAsObject is the regression this behavior exists
-// for: fetching a collection through a V2 cache must not leave the cache
+// TestCacheCollectionNotStoredAsObject is the regression guarded against here:
+// fetching a collection through a V2 cache must not leave the cache
 // holding a directory index under the collection's name, because every later
 // request for that path -- including ones for the object a user believes is
 // there -- would then be served the index.
@@ -97,11 +95,11 @@ func TestCacheCollectionNotStoredAsObject(t *testing.T) {
 	t.Logf("cache answered a collection GET with status %d, %d bytes, content-type %q",
 		resp.statusCode, len(resp.body), resp.headers.Get("Content-Type"))
 
-	// Whatever the cache chose to answer with, it must not have been recorded
-	// as the object's contents. Fetching a real object from inside the
-	// collection is the check that matters: if the index had been stored under
-	// the collection's name, the cache's view of this namespace is already
-	// wrong.
+	// The cache keys objects by path, so storing something under the
+	// collection's name cannot corrupt the entry for an object inside it. This
+	// is here to show the namespace is still usable after the collection was
+	// requested, not to detect the storage itself -- the Age check below is
+	// what does that.
 	memberURL := waitForCacheRedirectURL(t, ft, collection+"/member.txt", token)
 	member := fetchFromCache(t, ft, memberURL, nil)
 	require.Equal(t, 200, member.statusCode,
@@ -205,7 +203,7 @@ func TestCacheXrootdCollectionNotStoredAsObject(t *testing.T) {
 }
 
 // TestCacheServesButDoesNotStoreXrootdCollectionListing covers the cache half
-// of this branch. An export with Listings enabled answers a collection GET
+// of the fix. An export with Listings enabled answers a collection GET
 // with an index, and users want to see it, so the cache still serves it -- but
 // it must never be written to disk as that path's object. Once stored, every
 // later request for the path is answered with the index instead, from any
@@ -230,21 +228,23 @@ func TestCacheServesButDoesNotStoreXrootdCollectionListing(t *testing.T) {
 		resp.statusCode, len(resp.body), resp.headers.Get("Content-Type"))
 	assert.Equal(t, 200, resp.statusCode,
 		"the listing is still worth showing a user; only storing it is the problem")
+	// The cache does not record what the origin called the response, so it must
+	// not let net/http guess either: an index typed as HTML would run as a
+	// document on the same web origin as the cache's UI.
+	assert.Equal(t, "application/octet-stream", resp.headers.Get("Content-Type"),
+		"a passed-through listing must be typed opaquely, not sniffed as HTML")
 
-	// Age never climbing is what says it was passed through rather than kept.
-	for i := 0; i < 6; i++ {
-		time.Sleep(500 * time.Millisecond)
+	// A stored object is served with an Age header (see TestCacheControl_NoStore
+	// for the same signal used the other way round). The absence of one on every
+	// repeat is what says the listing was passed through rather than kept, and
+	// it is true from the first fetch onward, so no waiting is involved.
+	require.Empty(t, resp.headers.Get("Age"),
+		"a collection index must not be stored and aged as this path's object")
+	for i := 0; i < 3; i++ {
 		again := fetchFromCache(t, ft, cacheURL, nil)
-		ageStr := again.headers.Get("Age")
-		t.Logf("collection GET poll %d: status %d, Age=%q", i, again.statusCode, ageStr)
-		if ageStr == "" {
-			continue
-		}
-		age, convErr := strconv.Atoi(ageStr)
-		if convErr != nil {
-			continue
-		}
-		assert.LessOrEqual(t, age, 0,
-			"poll %d: a collection index must not be stored and aged as this path's object", i)
+		t.Logf("collection GET repeat %d: status %d, Age=%q", i, again.statusCode, again.headers.Get("Age"))
+		require.Equal(t, 200, again.statusCode, "repeat %d", i)
+		require.Empty(t, again.headers.Get("Age"),
+			"repeat %d: the cache started serving the listing from storage", i)
 	}
 }
