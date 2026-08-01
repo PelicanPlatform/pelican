@@ -30,8 +30,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // newSubmitTestEngine builds the smallest TransferEngine that
@@ -188,7 +190,9 @@ func TestSchedulerShutdownDrainsQueuedFilesToResults(t *testing.T) {
 		EMAWindow:             time.Second,
 	})
 	te.scheduler = sched
-	// Wire the same drain hook NewTransferEngine installs.
+	// Stands in for the hook NewTransferEngine installs; that the engine
+	// actually installs it is asserted separately, by
+	// TestTransferEngineInstallsSchedulerDrainHook.
 	sched.onDrop = func(file *clientTransferFile) {
 		select {
 		case te.results <- synthesizeRejectionResult(file, errors.New("transfer engine shut down before the transfer could be dispatched")):
@@ -198,8 +202,8 @@ func TestSchedulerShutdownDrainsQueuedFilesToResults(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	sched.Start(ctx, egrp, te.files)
 
-	// Queue several files for a job. Nothing reads te.files, so at most one
-	// can be in flight and the rest stay in the FIFO.
+	// Queue several files for a job. Nothing reads te.files, so the scheduler
+	// parks on its first dispatch and the rest stay in the FIFO.
 	job := newSubmitTestJob(ctx, "origin.example.com")
 	const queued = 5
 	for i := 0; i < queued; i++ {
@@ -216,12 +220,12 @@ func TestSchedulerShutdownDrainsQueuedFilesToResults(t *testing.T) {
 	sched.Stop()
 	require.NoError(t, egrp.Wait())
 
-	// Every file that was still queued produced a result. One file may have
-	// been handed to te.files instead, so the drained count is the remainder.
+	// Every file the scheduler was still holding owes its job a result. The
+	// one it had parked on mid-dispatch is not in the FIFO any more, so it is
+	// the only one that does not come back this way.
 	drained := len(te.results)
-	assert.Positive(t, drained, "queued transfers must not vanish without a result")
-	assert.Equal(t, queued, drained+len(te.files),
-		"every submitted file is accounted for, either dispatched or drained")
+	assert.GreaterOrEqual(t, drained, queued-1,
+		"queued transfers must not vanish without a result; their job would wait on them forever")
 	for i := 0; i < drained; i++ {
 		res := <-te.results
 		assert.Equal(t, job.job.uuid, res.results.JobId)
@@ -229,4 +233,34 @@ func TestSchedulerShutdownDrainsQueuedFilesToResults(t *testing.T) {
 		assert.NotNil(t, res.results.Attempts,
 			"a drained transfer still needs the fields job status displays read")
 	}
+}
+
+// TestTransferEngineInstallsSchedulerDrainHook pins the wiring the test above
+// stands in for: without it, transfers still queued when the engine shuts down
+// are dropped silently and the jobs waiting on them never complete.
+func TestTransferEngineInstallsSchedulerDrainHook(t *testing.T) {
+	// The real constructor refuses to build an engine until the client is
+	// initialized; without this the test only passes when some earlier test in
+	// the package happened to do it.
+	test_utils.InitClient(t, map[param.Param]any{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sched := NewTagScheduler(1, SchedulerConfig{
+		PerTagStarvingPercent: 50,
+		PerTagActivePercent:   50,
+		PendingBufferSize:     10,
+		PerTagPendingSize:     10,
+		EMAWindow:             time.Second,
+	})
+	te, err := NewTransferEngine(ctx, WithWorkerCount(1), WithScheduler(sched))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cancel()
+		_ = te.Shutdown()
+	})
+
+	require.Same(t, sched, te.scheduler, "the configured scheduler must be the one the engine uses")
+	require.NotNil(t, sched.onDrop,
+		"the engine must give the scheduler somewhere to hand undispatched transfers at shutdown")
 }

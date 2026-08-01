@@ -326,3 +326,81 @@ func TestUploadObject429(t *testing.T) {
 	assert.Equal(t, 60*time.Second, throttled.RetryAfter)
 	assert.True(t, ShouldRetry(transferResult.Error), "a throttled upload must be retryable")
 }
+
+// TestParseRetryAfterSaturates pins the out-of-range path. A value too large
+// for a 64-bit integer must still yield the clamp: parsing it as an error and
+// falling through to the date parser would drop the hint entirely, so a server
+// could suppress the backoff advice with a nonsense number rather than an
+// absurd one.
+func TestParseRetryAfterSaturates(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{"BeyondInt64", "99999999999999999999", maxRetryAfter},
+		{"FarBeyondInt64", "1" + strings.Repeat("0", 40), maxRetryAfter},
+		{"NegativeBeyondInt64", "-99999999999999999999", 0},
+		{"MaxInt64", "9223372036854775807", maxRetryAfter},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseRetryAfter(tt.value))
+		})
+	}
+}
+
+// TestParseThrottleBodyDetail pins which text is kept as the human-readable
+// detail. It is rendered into error messages, so a body that is not the shape
+// the cache emits must not be silently dropped, and the reason must not be
+// repeated as its own detail.
+func TestParseThrottleBodyDetail(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantReason string
+		wantDetail string
+	}{
+		{
+			name:       "ReasonAndDetail",
+			body:       `{"error":"origin_slow","detail":"origin already holds its share"}`,
+			wantReason: "origin_slow",
+			wantDetail: "origin already holds its share",
+		},
+		{
+			// The reason is reported on its own, so echoing the raw body here
+			// would just print it twice.
+			name:       "ReasonWithoutDetail",
+			body:       `{"error":"origin_slow"}`,
+			wantReason: "origin_slow",
+			wantDetail: "",
+		},
+		{
+			// Not the shape we emit, but a person still needs to see it.
+			name:       "NonJSONPassedThroughWhole",
+			body:       "upstream proxy refused the connection",
+			wantReason: "",
+			wantDetail: "upstream proxy refused the connection",
+		},
+		{
+			name:       "UnknownReasonKeepsDetail",
+			body:       `{"error":"please_stop","detail":"go away"}`,
+			wantReason: "",
+			wantDetail: "go away",
+		},
+		{
+			name:       "JSONWithNeitherField",
+			body:       `{"something":"else"}`,
+			wantReason: "",
+			wantDetail: `{"something":"else"}`,
+		},
+		{"Empty", "   ", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, detail := parseThrottleBody(tt.body)
+			assert.Equal(t, tt.wantReason, reason)
+			assert.Equal(t, tt.wantDetail, detail)
+		})
+	}
+}

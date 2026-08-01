@@ -34,8 +34,7 @@ import (
 //
 // Every mux channel is unbuffered on purpose: a send that completes proves
 // runMux has already taken the previous message and finished acting on it,
-// since it services them one at a time. That is what makes the ordering in
-// these tests exact without waiting on the clock.
+// since it services them one at a time.
 func newMuxTestEngine(ctx context.Context) *TransferEngine {
 	return &TransferEngine{
 		ctx:           ctx,
@@ -120,6 +119,10 @@ func TestRunMuxPartialLookupFailureKeepsInFlightResults(t *testing.T) {
 
 	select {
 	case r := <-resultsChan:
+		// A nil here means the channel was closed rather than delivered on --
+		// which is the regression. Fail on it rather than dereferencing, so a
+		// broken runMux reports instead of taking down the whole package.
+		require.NotNil(t, r, "results channel was closed while a transfer was still in flight")
 		assert.Equal(t, job.uuid, r.JobId)
 	case p := <-muxPanic:
 		t.Fatalf("runMux panicked routing an in-flight result: %v", p)
@@ -135,6 +138,7 @@ func TestRunMuxPartialLookupFailureKeepsInFlightResults(t *testing.T) {
 	}
 	select {
 	case r := <-resultsChan:
+		require.NotNil(t, r, "results channel was closed before the final result")
 		assert.Equal(t, job.uuid, r.JobId)
 	case p := <-muxPanic:
 		t.Fatalf("runMux panicked routing the final result: %v", p)

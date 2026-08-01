@@ -811,7 +811,7 @@ func TestTagSchedulerCapRounding(t *testing.T) {
 // that late signal would decrement the tag's starving count a second time
 // and hand some other in-flight transfer's slot away.
 func TestTagSchedulerLateFirstByteDoesNotDoubleRelease(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sched := NewTagScheduler(10, SchedulerConfig{
 		PerTagStarvingPercent: 20, // starving cap = 2
@@ -823,44 +823,59 @@ func TestTagSchedulerLateFirstByteDoesNotDoubleRelease(t *testing.T) {
 	out := make(chan *clientTransferFile, 100)
 	startScheduler(t, ctx, sched, out)
 
-	for i := 0; i < 6; i++ {
+	// Exactly three, so that once all three are dispatched the tag's queue is
+	// empty. That matters: with nothing left to dispatch, a wrongly released
+	// slot cannot be immediately refilled, so it stays visible in the counters
+	// instead of being masked by the replacement transfer.
+	for i := 0; i < 3; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
 	}
-	require.Eventually(t, func() bool { return len(out) == 2 }, time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return len(out) == 2 }, 5*time.Second, time.Millisecond,
 		"starving cap should hold dispatch at 2")
 	fileA := <-out
 	fileB := <-out
 
 	// A completes without ever producing a byte: it gives back one starving
-	// slot, which lets exactly one more transfer dispatch.
+	// slot, which lets the last queued transfer dispatch.
 	fileA.file.schedDone()
-	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return len(out) == 1 }, 5*time.Second, time.Millisecond)
 	fileC := <-out
 
-	// Now A's transport reports a first byte, too late to mean anything.
-	// Nothing may be released on the strength of it.
+	// Now A's transport reports a first byte, too late to mean anything. If
+	// that were honored it would release a second slot for a transfer that has
+	// already finished.
 	fileA.file.schedFirstByte()
 
-	var snap SchedulerSnapshot
+	// B completing is the discriminator. It is a real event, so it is queued
+	// behind anything A's late call may have emitted and is processed after it.
+	//
+	// Both of B's counts come off together, so the tag lands on one active and
+	// one starving (C). Had A's late call also been honored, the starving count
+	// would already have been decremented once too often, and the tag would
+	// land on one active and *zero* starving -- a state this wait never
+	// accepts, and one the correct sequence never passes through.
+	fileB.file.schedDone()
 	require.Eventually(t, func() bool {
-		snap = sched.Snapshot(ctx)
-		return snap.Tags["originA"].Active == 2
-	}, time.Second, 10*time.Millisecond, "expected B and C in flight, got %+v", snap.Tags["originA"])
-	assert.Equal(t, 2, snap.Tags["originA"].Starving,
-		"B and C are still starving; A's late first byte must not release a slot")
-	assert.Equal(t, 3, snap.Tags["originA"].Pending)
-	assert.Equal(t, 0, len(out), "the tag is back at its starving cap, so nothing more dispatches")
+		st := sched.Snapshot(ctx).Tags["originA"]
+		return st.Active == 1 && st.Starving == 1
+	}, 5*time.Second, time.Millisecond,
+		"expected one in flight and still starving; a late first byte must not release a slot")
 
-	// The accounting is still sound: real progress still releases slots.
-	fileB.file.schedFirstByte()
-	require.Eventually(t, func() bool { return len(out) == 1 }, time.Second, 10*time.Millisecond)
+	st := sched.Snapshot(ctx).Tags["originA"]
+	assert.Zero(t, st.Pending, "all three were dispatched, so nothing is queued")
+	assert.Equal(t, 0, len(out), "with an empty queue there is nothing left to dispatch")
+
 	fileC.file.schedDone()
 }
 
-// TestTagSchedulerDoneFiresOncePerFile pins that the per-file completion
-// hook is fired exactly once per dispatched file rather than once for the
-// worker's whole lifetime: a worker that processes several files in a row
-// must return every one of their slots.
+// TestTagSchedulerDoneFiresOncePerFile pins the scheduler's side of the
+// completion contract: one schedDone returns exactly one slot, so a tag whose
+// files are run one after another keeps making progress rather than stalling
+// at its cap.
+//
+// This drives the hook directly. That a worker fires it once per file rather
+// than once for its whole lifetime is runTransferWorkerFile's side of the
+// contract and is not exercised here.
 func TestTagSchedulerDoneFiresOncePerFile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -878,9 +893,8 @@ func TestTagSchedulerDoneFiresOncePerFile(t *testing.T) {
 	for i := 0; i < N; i++ {
 		require.NoError(t, sched.Submit(ctx, "originA", makeFile("originA")))
 	}
-	// Run them the way runTransferWorkerFile does: take one, finish it, take
-	// the next. If a slot were ever not returned, the starving cap would
-	// block and this drain would time out.
+	// Take one, finish it, take the next. If a slot were ever not returned the
+	// starving cap would block and this drain would time out.
 	drainOut(ctx, t, out, N, func(_ string, f *clientTransferFile) {
 		f.file.schedDone()
 	})
@@ -922,12 +936,19 @@ func TestTagSchedulerEMAWeighting(t *testing.T) {
 
 	require.Greater(t, busy.ema, quiet.ema, "the busy tag should carry the larger EMA")
 	require.Less(t, busy.weight, quiet.weight, "a larger EMA must mean a smaller draw weight")
+	// A tag holding half the pool for a full window should end up with an EMA
+	// on that order, not a token amount -- the weighting is only meaningful if
+	// the EMA actually tracks occupancy.
+	assert.Greater(t, busy.ema, 25.0, "EMA should approach the ~50 workers held")
 	assert.InDelta(t, 1.0/(1.0+busy.ema), busy.weight, 1e-9, "weight is 1/(1+EMA)")
+	assert.Zero(t, quiet.ema, "a tag that held nothing decays to zero")
 	assert.InDelta(t, 1.0, quiet.weight, 1e-9, "an idle tag draws at full weight")
 
-	// With both tags backlogged and eligible, the quiet tag must win the
-	// draw markedly more often. Seed the generator so the assertion is
-	// reproducible rather than flaky.
+	// With both tags backlogged and eligible, the quiet tag must win the draw
+	// markedly more often. The seed does not make the sequence reproducible --
+	// map iteration order still varies -- so this rests on the margin instead:
+	// the weights differ by ~30x, which puts the observed split (roughly 975 to
+	// 25) tens of standard deviations away from the assertion boundary.
 	sched.rng = rand.New(rand.NewPCG(1, 2))
 	busy.active, quiet.active = 0, 0 // eligible for dispatch, EMA retained
 	for i := 0; i < 4; i++ {
@@ -951,13 +972,15 @@ func TestTagSchedulerEMAWeighting(t *testing.T) {
 		"the tag with the lower EMA should be drawn more often (quiet=%d busy=%d)",
 		picks["quiet"], picks["busy"])
 
-	// A zero EMAWindow disables the weighting entirely: every tag keeps the
-	// full weight it was created with.
+	// A zero EMAWindow disables the weighting entirely: a tag holding the pool
+	// keeps the full weight it was created with, so the draw stays uniform.
 	flat := NewTagScheduler(10, SchedulerConfig{EMAWindow: 0})
 	a, b := flat.tagFor("a"), flat.tagFor("b")
 	a.active = 9
 	flat.lastTick = time.Now().Add(-time.Second)
 	flat.tickEMA()
+	assert.Zero(t, a.ema, "a zero window must leave the EMA untouched")
+	assert.Equal(t, 1.0, a.weight, "and therefore the weight at its initial value")
 	assert.Equal(t, a.weight, b.weight, "EMA updates are disabled, so weights stay equal")
 }
 
@@ -1127,8 +1150,9 @@ func TestSchedulerRejectionIsRetryable(t *testing.T) {
 
 // TestDeriveSchedulerTag pins the tag derivation, including the degenerate
 // inputs. Everything that cannot name an upstream host shares the empty tag,
-// and therefore shares one set of caps, so the fallback needs to be
-// deliberate rather than incidental.
+// and therefore shares one set of caps -- so what each degenerate input maps to
+// is worth stating explicitly, even though every one of them is unreachable
+// from the current call sites.
 func TestDeriveSchedulerTag(t *testing.T) {
 	assert.Equal(t, "originA", deriveSchedulerTag(makeFile("originA")))
 

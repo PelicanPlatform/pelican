@@ -968,6 +968,25 @@ func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFi
 	}
 }
 
+// workerFailureResult builds the result a transfer worker reports for a file it
+// declines to run.
+//
+// The job pointer matters: runMux dereferences it on every result it routes, to
+// decrement the job's active-transfer count and decide whether the job is
+// finished. A result without it is a nil dereference on the runMux goroutine,
+// which takes the process down -- and does so *after* the result has already
+// been handed to the client, so the crash does not even look related to the
+// transfer that caused it.
+func workerFailureResult(file *clientTransferFile, err error) TransferResults {
+	if file.file == nil || file.file.job == nil {
+		return TransferResults{JobId: file.jobId, Error: err}
+	}
+	res := newTransferResults(file.file.job)
+	res.JobId = file.jobId
+	res.Error = err
+	return res
+}
+
 // uncountSubmission undoes the activeXfer increment a caller made just before
 // a submission that then failed for a reason other than a scheduler shed.
 //
@@ -1508,7 +1527,12 @@ func (te *TransferEngine) Close() {
 
 // If we've detected a job is done, clean up the active job state map
 func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) {
-	if len((*activeJobs)[id]) == 1 {
+	// Retiring the client's last job -- or being handed a job that is no longer
+	// in the list at all -- has to leave no entry behind. Storing an
+	// empty-but-non-nil slice would make the client look permanently active:
+	// the close-time check tests that entry against nil, so the results channel
+	// would never close and Shutdown() would wait forever.
+	if len((*activeJobs)[id]) <= 1 {
 		log.Debugln("Job", job.ID(), "is done for client", id.String(), "which has no active jobs remaining")
 		// Delete the job from the list of active jobs
 		delete(*activeJobs, id)
@@ -2844,11 +2868,8 @@ func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, result
 		case <-ctx.Done():
 			return ctx.Err()
 		case results <- &clientTransferResults{
-			id: file.uuid,
-			results: TransferResults{
-				JobId: file.jobId,
-				Error: file.file.ctx.Err(),
-			},
+			id:      file.uuid,
+			results: workerFailureResult(file, file.file.ctx.Err()),
 		}:
 		}
 		return nil
@@ -2858,11 +2879,8 @@ func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, result
 		case <-ctx.Done():
 			return ctx.Err()
 		case results <- &clientTransferResults{
-			id: file.uuid,
-			results: TransferResults{
-				JobId: file.jobId,
-				Error: file.file.err,
-			},
+			id:      file.uuid,
+			results: workerFailureResult(file, file.file.err),
 		}:
 		}
 		return nil

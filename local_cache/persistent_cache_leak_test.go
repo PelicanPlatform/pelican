@@ -67,6 +67,11 @@ func TestPersistentCacheFailedInitDrainsErrgroup(t *testing.T) {
 	})
 	require.Error(t, err, "expected construction to fail without a configured federation")
 	require.Nil(t, pc)
+	// Pin where it failed. The point is that construction gets *past* the
+	// storage manager before giving up; if it ever started failing earlier the
+	// errgroup would drain trivially and this test would pass while covering
+	// nothing.
+	require.ErrorContains(t, err, "failed to get federation info")
 
 	// Cancelling the context is the only shutdown lever the caller has left:
 	// the failure returned no handle to close.
@@ -114,6 +119,8 @@ func TestStorageManagerCloseIsSafeWithoutEvictionLoops(t *testing.T) {
 	// variant loads actually exist.
 	writable, err := NewStorageManager(db, []string{tmpDir}, InlineThreshold, egrp)
 	require.NoError(t, err)
+	// First close stops the eviction loops; the goroutine below closes it a
+	// second time.
 	writable.Close()
 
 	readOnly, err := NewStorageManagerReadOnly(tmpDir, db)
@@ -126,6 +133,12 @@ func TestStorageManagerCloseIsSafeWithoutEvictionLoops(t *testing.T) {
 		// A second Close must be safe too: the eviction loops are gone either
 		// way, and a caller that closes defensively should not hang.
 		readOnly.Close()
+		// And on a manager whose loops *were* started: the first Close stopped
+		// them, so the second finds no reader for its stop signal. This is the
+		// case the claim on Close is really about -- the read-only pair above
+		// never had the loops running, so both of its calls are declined by the
+		// same condition.
+		writable.Close()
 	}()
 
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)

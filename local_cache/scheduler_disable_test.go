@@ -75,6 +75,33 @@ func TestCacheSchedulerEnabledInServerMode(t *testing.T) {
 	assert.Equal(t, 4, workers, "the pool the scheduler shares is Cache.WorkerCount")
 }
 
+// TestCacheSchedulerConfigMapping pins which parameter feeds which scheduler
+// setting.
+//
+// A scheduler handed the wrong knob still constructs and still looks perfectly
+// healthy -- it just enforces the wrong limit -- so nothing downstream would
+// notice. Transposing the starving and active percentages, for instance, would
+// silently invert the two caps. Every value here is distinct so a swapped pair
+// cannot go unnoticed.
+func TestCacheSchedulerConfigMapping(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+	require.NoError(t, param.Cache_WorkerCount.Set(64))
+	require.NoError(t, param.Cache_Throttle_PerOriginStarvingPercent.Set(11))
+	require.NoError(t, param.Cache_Throttle_PerOriginActivePercent.Set(22))
+	require.NoError(t, param.Cache_Throttle_PendingBufferSize.Set(33))
+	require.NoError(t, param.Cache_Throttle_PerOriginPendingSize.Set(44))
+	require.NoError(t, param.Cache_Throttle_EMAWindow.Set(55*time.Second))
+
+	workers, cfg := cacheSchedulerConfig(CacheModeServer)
+	assert.Equal(t, 64, workers, "Cache.WorkerCount")
+	assert.Equal(t, 11, cfg.PerTagStarvingPercent, "Cache.Throttle.PerOriginStarvingPercent")
+	assert.Equal(t, 22, cfg.PerTagActivePercent, "Cache.Throttle.PerOriginActivePercent")
+	assert.Equal(t, 33, cfg.PendingBufferSize, "Cache.Throttle.PendingBufferSize")
+	assert.Equal(t, 44, cfg.PerTagPendingSize, "Cache.Throttle.PerOriginPendingSize")
+	assert.Equal(t, 55*time.Second, cfg.EMAWindow, "Cache.Throttle.EMAWindow")
+}
+
 // TestCacheSchedulerWorkerCountFallback pins that an unset or nonsensical
 // Cache.WorkerCount does not produce a zero-worker pool, which would deadlock
 // every transfer rather than merely running them slowly.

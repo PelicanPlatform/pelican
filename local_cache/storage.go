@@ -613,7 +613,11 @@ func (sm *StorageManager) Close() {
 	// waits for it to be received, so it blocks forever if the loop is not
 	// running -- which is the case for a read-only manager (it never starts
 	// them) and for a second Close(). Only signal loops that are live, and
-	// claim them so a concurrent or repeated Close() cannot signal again.
+	// claim them so a repeated Close() cannot signal again.
+	//
+	// This makes Close repeatable, not concurrency-safe: the work below the CAS
+	// is unguarded, and ristretto's Close is itself not safe to call twice at
+	// once. Every caller today closes from a single goroutine.
 	if sm.evictionRunning.CompareAndSwap(true, false) {
 		sm.blockStates.Stop()
 		sm.diskCrypto.Stop()

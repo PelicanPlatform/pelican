@@ -751,24 +751,36 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 // turning the scheduler off; the engine then runs on the plain
 // first-come-first-served channel.
 func newCacheScheduler(mode CacheMode) (workers int, sched *client.TagScheduler) {
+	workers, schedCfg := cacheSchedulerConfig(mode)
+	if workers <= 0 || schedCfg.PendingBufferSize <= 0 {
+		return workers, nil
+	}
+	return workers, client.NewTagScheduler(workers, schedCfg)
+}
+
+// cacheSchedulerConfig reads the worker count and the fair-scheduler settings
+// for `mode` out of the Cache.* parameters. Split out from newCacheScheduler
+// so the parameter-to-field mapping can be asserted directly: a scheduler that
+// has been handed the wrong knob still constructs and still looks healthy, so
+// nothing downstream would notice a transposed pair.
+//
+// A zero worker count means this mode runs unscheduled on the engine's own
+// default.
+func cacheSchedulerConfig(mode CacheMode) (workers int, cfg client.SchedulerConfig) {
 	if mode != CacheModeServer {
-		return 0, nil
+		return 0, client.SchedulerConfig{}
 	}
 	workers = param.Cache_WorkerCount.GetInt()
 	if workers <= 0 {
 		workers = 100
 	}
-	schedCfg := client.SchedulerConfig{
+	return workers, client.SchedulerConfig{
 		PerTagStarvingPercent: param.Cache_Throttle_PerOriginStarvingPercent.GetInt(),
 		PerTagActivePercent:   param.Cache_Throttle_PerOriginActivePercent.GetInt(),
 		PendingBufferSize:     param.Cache_Throttle_PendingBufferSize.GetInt(),
 		PerTagPendingSize:     param.Cache_Throttle_PerOriginPendingSize.GetInt(),
 		EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
 	}
-	if schedCfg.PendingBufferSize <= 0 {
-		return workers, nil
-	}
-	return workers, client.NewTagScheduler(workers, schedCfg)
 }
 
 // schedulerMetricsPublishInterval is how often the fair-scheduler

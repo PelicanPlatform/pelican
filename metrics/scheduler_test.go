@@ -344,16 +344,21 @@ func TestResetCacheSchedulerMetrics(t *testing.T) {
 
 	// The delta bookkeeping was reset too, so a scheduler created afterwards
 	// counts from zero rather than being diffed against the dead instance.
+	//
+	// The totals here are deliberately LARGER than the dead instance's. Smaller
+	// ones would prove nothing: counterDelta already treats a decrease as a
+	// restart, so they would come out right whether or not the tracker was
+	// cleared. Diffing 20 against a retained 11 would yield 9.
 	PublishCacheSchedulerSnapshot(SchedulerGlobalStats{
 		WorkerCount:        8,
 		TotalTags:          1,
-		TotalRejectsGlobal: 1,
-		TotalRejectsPerTag: 1,
+		TotalRejectsGlobal: 9,
+		TotalRejectsPerTag: 12,
 	}, map[string]SchedulerPerTagStats{
-		origin: {Active: 1, Admits: 2, Rejects: 2},
+		origin: {Active: 1, Admits: 20, Rejects: 20},
 	})
-	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(2), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
-	assert.Equal(t, float64(1), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
-	assert.Equal(t, float64(1), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
+	assert.Equal(t, float64(20), testutil.ToFloat64(CacheSchedulerAdmitsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(20), testutil.ToFloat64(CacheSchedulerRejectsTotal.WithLabelValues(origin)))
+	assert.Equal(t, float64(9), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("global")))
+	assert.Equal(t, float64(12), testutil.ToFloat64(CacheSchedulerRejectsByCauseTotal.WithLabelValues("per_tag")))
 }
