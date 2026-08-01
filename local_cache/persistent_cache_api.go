@@ -191,7 +191,7 @@ func retryAfterValue() string {
 
 // onlyThrottled reports whether err represents throttling and nothing else.
 //
-// A cache fetch accumulates one error per object server it tried
+// A download accumulates one error per object server it tried
 // (client.TransferErrors implements Unwrap() []error), so a plain
 // errors.Is(err, ErrTooManyRequests) is true when *any* single attempt was
 // shed. Answering 429 on that basis would let one throttled origin mask a
@@ -199,6 +199,12 @@ func retryAfterValue() string {
 // A returns 404 and B is throttled would be reported to the client as "retry
 // later", and it would retry forever for an object that does not exist. Only
 // take the throttle path when there is no more specific failure to report.
+//
+// Note this only helps where the errors are actually accumulated. statHttp
+// keeps just the first error across its endpoints rather than building a
+// multi-error, so on the HEAD/stat path a throttle from whichever endpoint
+// answered first still hides another endpoint's not-found. Fixing that means
+// changing how stat aggregates, not how the result is classified here.
 func onlyThrottled(err error) bool {
 	if err == nil {
 		return false
@@ -238,6 +244,10 @@ func onlyThrottled(err error) bool {
 // origin was throttled and another answered "not found", that ordering decides
 // whether the client is told 404 or something far less useful, so the
 // definitive answer is searched for explicitly instead.
+//
+// This only ranks not-found above the *unclassified* remainder. A status code
+// relayed from upstream, and an authorization failure, still win: they say
+// something about the object that a sibling's 404 does not.
 func anyAttemptNotFound(err error) bool {
 	for cur := err; cur != nil; {
 		if pe, ok := cur.(*error_codes.PelicanError); ok && pe.Code() == fileNotFoundErrorCode {
@@ -342,22 +352,24 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	var sce *client.StatusCodeError
 	var pe *error_codes.PelicanError
 	var netErr net.Error
-	if anyAttemptNotFound(getErr) {
-		// A definitive "the object is not here" from any object server beats
-		// the transient failures the other attempts may have reported: a 404
-		// tells the client to stop, where a 429 or 500 tells it to come back
-		// for an object that will never exist.
-		writeJSON(http.StatusNotFound, "not_found", getErr.Error())
-	} else if errors.As(getErr, &sce) {
+	if errors.As(getErr, &sce) {
 		code := int(*sce)
 		writeJSON(code, http.StatusText(code), getErr.Error())
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
 		switch {
-		case pe.Code() == fileNotFoundErrorCode:
-			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
+			// Ranked above not-found: "you may not read this" is actionable
+			// (refresh a credential) and, unlike a sibling's 404, does not
+			// claim the object is absent.
 			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())
+		case pe.Code() == fileNotFoundErrorCode || anyAttemptNotFound(getErr):
+			// A definitive "the object is not here" from any attempt beats a
+			// sibling attempt's transient failure, whichever one errors.As
+			// happened to reach first. Without the second test, a throttle
+			// recorded ahead of the not-found decides the response and the
+			// client is told to come back for an object that will never exist.
+			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		default:
 			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())
 		}

@@ -300,7 +300,6 @@ type (
 		lookupDone         atomic.Bool
 		lookupErr          error
 		activeXfer         atomic.Int64
-		totalXfer          int
 		skipped403         sync.Mutex // Protects skipped403Objs slice
 		skipped403Objs     []string   // List of object paths skipped due to 403 during sync
 		localPath          string
@@ -969,20 +968,17 @@ func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFi
 	}
 }
 
-// uncountSubmission undoes the totalXfer/activeXfer increment a caller made
-// just before a submission that then failed for a reason other than a
-// scheduler shed.
+// uncountSubmission undoes the activeXfer increment a caller made just before
+// a submission that then failed for a reason other than a scheduler shed.
 //
-// Those counts have to be taken before submitting, because a shed produces a
-// synthetic result immediately and runMux reads totalXfer == 0 as "this job
-// created no transfers". Any other failure produces no result at all, so the
-// counts have to come back off: a job whose active count never drains is never
-// finished, and the client's results channel stays open forever.
-//
-// Only safe to call from the goroutine that owns the job's lookup, since
-// totalXfer is a plain int written only there.
+// The count has to be taken before submitting: a shed produces a synthetic
+// result immediately, and runMux both decrements on every result and retires
+// the job when the count reaches zero, so counting afterwards would let the
+// result be processed against a count that had not been taken yet. Any other
+// failure produces no result at all, so the count has to come back off -- a
+// job whose active count never drains is never finished, and the client's
+// results channel stays open forever.
 func (tj *TransferJob) uncountSubmission() {
-	tj.totalXfer -= 1
 	tj.activeXfer.Add(-1)
 }
 
@@ -2755,11 +2751,9 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 
 	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
-	// totalXfer must be counted before submission: a scheduler rejection
-	// pushes a synthetic failure result for this file, and runMux treats
-	// totalXfer == 0 as "job created no transfers" and closes the results
-	// channel — racing the synthetic result's delivery.
-	job.job.totalXfer += 1
+	// Counted before submission: a scheduler rejection produces a synthetic
+	// result right away, and runMux decrements on every result, so counting
+	// afterwards would race that result's delivery.
 	job.job.activeXfer.Add(1)
 	submitErr := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
@@ -4704,14 +4698,31 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		defer close(putDone)
 		runPut(request, responseChan, errorChan, useProxy)
 	}()
-	// The transport reads the source file until the request finishes, so the
-	// PUT has to be stopped and joined before the deferred file.Close() above
-	// can run; otherwise abandoning the upload early turns a clean abort into
-	// a read from a closed file. Registered after `defer cancel()`, so it runs
-	// before it -- cancel here to make the join prompt.
+	// The transport reads the source file until the request finishes, so cancel
+	// the PUT and join its goroutine before the deferred file.Close() above can
+	// run. Registered after `defer cancel()`, so it runs before it -- cancelling
+	// here is what makes the join prompt.
+	//
+	// This narrows rather than eliminates the overlap: client.Do returns once
+	// response headers arrive, so on an early server response the transport's
+	// write loop can still be reading the body when runPut returns, and
+	// cancellation is asynchronous. os.File tolerates that (the read fails with
+	// ErrFileClosing rather than hitting a reused descriptor) and the transfer
+	// has already latched its error, so the remaining window is benign.
+	//
+	// Also drain the response the abandoned PUT may have deposited: nothing
+	// else is going to receive it, and its body holds a connection open until
+	// the cancel tears it down.
 	defer func() {
 		cancel()
 		<-putDone
+		select {
+		case resp := <-responseChan:
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+		default:
+		}
 	}()
 	var lastError error = nil
 
@@ -5134,12 +5145,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						transferAttempts[i].Url = fileURL
 						log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 					}
-					// totalXfer must be counted before submission: a scheduler
-					// rejection pushes a synthetic failure result for this
-					// file, and runMux treats totalXfer == 0 as "job created
-					// no transfers" and closes the results channel — racing
-					// the synthetic result's delivery.
-					job.job.totalXfer += 1
+					// Counted before submission: a scheduler rejection produces a
+					// synthetic result right away, and runMux decrements on every
+					// result, so counting afterwards would race its delivery.
 					job.job.activeXfer.Add(1)
 					if err := te.submitFile(job.job.ctx, &clientTransferFile{
 						uuid:  job.uuid,
@@ -5225,10 +5233,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				transferAttempts[i].Url = fileURL
 				log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 			}
-			// totalXfer is counted before submission so a scheduler
-			// rejection's synthetic result cannot race runMux's
-			// "no transfers created" close of the results channel.
-			job.job.totalXfer += 1
+			// Counted before submission: a scheduler rejection produces a
+			// synthetic result right away, and runMux decrements on every
+			// result, so counting afterwards would race its delivery.
 			job.job.activeXfer.Add(1)
 			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
@@ -5284,10 +5291,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(localPath, job.job.localPath)); skipUpload(job.job, localPath, job.job.remoteURL) {
 				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 			} else if info.Mode().Type().IsRegular() {
-				// totalXfer is counted before submission so a scheduler
-				// rejection's synthetic result cannot race runMux's
-				// "no transfers created" close of the results channel.
-				job.job.totalXfer += 1
+				// Counted before submission: a scheduler rejection produces a
+				// synthetic result right away, and runMux decrements on every
+				// result, so counting afterwards would race its delivery.
 				job.job.activeXfer.Add(1)
 				if err := te.submitFile(job.job.ctx, &clientTransferFile{
 					uuid:  job.uuid,
@@ -5336,10 +5342,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		} else if skipUpload(job.job, newPath, remoteUrl) {
 			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
-			// totalXfer is counted before submission so a scheduler
-			// rejection's synthetic result cannot race runMux's
-			// "no transfers created" close of the results channel.
-			job.job.totalXfer += 1
+			// Counted before submission: a scheduler rejection produces a
+			// synthetic result right away, and runMux decrements on every
+			// result, so counting afterwards would race its delivery.
 			job.job.activeXfer.Add(1)
 			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
@@ -6010,11 +6015,18 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
-	// The probe wants headers, but an error response's body carries the
+	// The probe wants headers, but an *error* response's body carries the
 	// structured reason that tells a throttle apart from any other refusal, so
-	// keep a bounded prefix of it. Reading is allowed to fail; whatever is left
-	// is drained so the connection can be reused.
-	bodyPrefix, _ := io.ReadAll(io.LimitReader(headResponse.Body, maxErrorBodySize))
+	// keep a bounded prefix in that case only. On the success path the body is
+	// streamed to Discard through a reusable buffer instead, which matters
+	// because this request's "Range: 0-0" omits the required "bytes=" unit --
+	// servers routinely ignore it and send the whole object, and retaining
+	// 64 KiB of that per probe would be a needless cost. Reading is allowed to
+	// fail; whatever is left is drained so the connection can be reused.
+	var bodyPrefix []byte
+	if headResponse.StatusCode >= 400 {
+		bodyPrefix, _ = io.ReadAll(io.LimitReader(headResponse.Body, maxErrorBodySize))
+	}
 	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
 		log.Debugln("Failure when reading the one-byte-response body - expected because the body is discarded:", err)
 	}

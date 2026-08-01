@@ -401,3 +401,90 @@ func TestHandleErrorShedReasonIsValidated(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleErrorNotFoundDoesNotMaskSpecificFailures pins the other side of the
+// precedence rule: preferring a definitive not-found must not let it swallow an
+// answer that says something more useful about the object.
+//
+// A namespace served by two origins where one holds the object but rejects the
+// caller's token, and the other simply does not have it, has to report the
+// authorization failure. Reporting 404 there tells the client the object does
+// not exist, so it stops rather than refreshing its credential -- the mirror of
+// the masking the not-found preference exists to prevent.
+func TestHandleErrorNotFoundDoesNotMaskSpecificFailures(t *testing.T) {
+	reqLog := log.NewEntry(log.New())
+
+	accumulate := func(errs ...error) error {
+		te := client.NewTransferErrors()
+		for _, err := range errs {
+			te.AddError(err)
+		}
+		return te
+	}
+	notFound := func() error {
+		return error_codes.NewSpecification_FileNotFoundError(errors.New("object does not exist at origin"))
+	}
+	// relayed builds the shape a download produces for an upstream status code:
+	// a StatusCodeError wrapped by the transfer machinery.
+	relayed := func(code int) error {
+		sce := client.StatusCodeError(code)
+		return error_codes.NewTransferError(&client.HttpErrResp{
+			Code: code,
+			Str:  fmt.Sprintf("request failed (HTTP status %d)", code),
+			Err:  &sce,
+		})
+	}
+	unauthorized := func() error {
+		return error_codes.NewAuthorizationError(errors.New("token rejected by origin"))
+	}
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{
+			// The object exists behind an origin that refused the token.
+			name:       "RelayedForbiddenBeatsNotFound",
+			err:        accumulate(relayed(http.StatusForbidden), notFound()),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "RelayedServerErrorBeatsNotFound",
+			err:        accumulate(relayed(http.StatusInternalServerError), notFound()),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "RelayedRangeNotSatisfiableBeatsNotFound",
+			err:        accumulate(relayed(http.StatusRequestedRangeNotSatisfiable), notFound()),
+			wantStatus: http.StatusRequestedRangeNotSatisfiable,
+		},
+		{
+			// Ordering must not decide it either way.
+			name:       "NotFoundRecordedFirstStillYieldsForbidden",
+			err:        accumulate(notFound(), relayed(http.StatusForbidden)),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// An authorization failure carried as a Pelican error, not a
+			// relayed status code, also outranks a sibling's not-found.
+			name:       "AuthorizationBeatsNotFound",
+			err:        accumulate(unauthorized(), notFound()),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// And with nothing more specific to say, the not-found stands.
+			name:       "NotFoundAloneIsStillNotFound",
+			err:        accumulate(notFound()),
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleError(rec, tt.err, false, reqLog)
+			assert.Equal(t, tt.wantStatus, rec.Code)
+		})
+	}
+}

@@ -124,10 +124,17 @@ var schedulerTracker = newSchedulerCounterTracker()
 // previously published total and the current one.
 //
 // Both are unsigned, so the subtraction must not be done blind: a current
-// total below the previous one means the source counters restarted (a fresh
-// TagScheduler begins at zero, e.g. a cache re-created in the same process),
-// and `current - last` would wrap to something near 2^64. Treat that case as
-// a reset and count the current value as entirely new.
+// total below the previous one means the source counters restarted, and
+// `current - last` would wrap to something near 2^64. Treat that case as a
+// reset and count the current value as entirely new. Per-origin totals restart
+// whenever the scheduler evicts an idle tag and the origin later returns;
+// pool-wide totals restart when a whole scheduler is replaced in-process.
+//
+// This detects a reset only by the total going down, so it relies on the reset
+// being observed while the new total is still below the old one. For per-origin
+// counters that holds because the eviction grace period is comfortably longer
+// than the publish interval, so the tag's absence is always sampled in between
+// and its tracked total forgotten (see the prune below).
 func counterDelta(current, last uint64) float64 {
 	if current < last {
 		return float64(current)

@@ -108,7 +108,6 @@ func TestRunMuxPartialLookupFailureKeepsInFlightResults(t *testing.T) {
 
 	// The walk submitted two files and then failed listing a subdirectory.
 	// Both transfers are in flight and will report back.
-	job.totalXfer = 2
 	job.activeXfer.Store(2)
 	job.lookupErr = errors.New("failed to read remote collection")
 	te.jobLookupDone <- &clientTransferJob{uuid: clientID, job: job}

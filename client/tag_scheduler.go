@@ -669,9 +669,16 @@ func (s *TagScheduler) tickEMA() {
 //
 // The grace period is at least the EMA window so the metrics publisher
 // (which samples every few seconds) reliably observes a tag's final
-// admit/reject totals before the tag disappears. Evicted tags that
-// return start their per-tag counters from zero; the metrics layer
-// treats per-tag totals as delta sources and handles the reset.
+// admit/reject totals before the tag disappears, and then observes the
+// tag's absence and forgets its last-published totals. Evicted tags that
+// return start their per-tag counters from zero.
+//
+// That ordering is what keeps the published counters honest, not the
+// metrics layer's reset handling on its own: it detects a reset by the
+// totals going *down*, so a tag that were to vanish and climb back past
+// its old total between two samples would have the difference counted as
+// if it were continuous activity. Keeping the grace period comfortably
+// longer than the publish interval is what makes that unreachable.
 func (s *TagScheduler) evictIdleTags(now time.Time) {
 	grace := s.cfg.EMAWindow
 	if grace < minEvictionGrace {

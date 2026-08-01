@@ -75,7 +75,7 @@ func newSubmitTestJob(ctx context.Context, host string) *clientTransferJob {
 // cancelled while the job handler is parked handing the file off.
 //
 // No result is ever produced for such a file. If the job kept the file in its
-// totalXfer/activeXfer counts and reported no lookup error, the job would
+// activeXfer count and reported no lookup error, the job would
 // never be considered finished: activeXfer would never reach zero, the
 // client's results channel would never close, and TransferClient.Shutdown()
 // would block forever. The cache hits this path per download, so the leak is
@@ -114,7 +114,6 @@ func TestCreateTransferFilesSubmitErrorDoesNotOrphanJob(t *testing.T) {
 	// And the bookkeeping has to be undone, because no result is coming for a
 	// file that was never queued.
 	assert.Zero(t, job.job.activeXfer.Load(), "active count must not outlive the failed submission")
-	assert.Zero(t, job.job.totalXfer, "total count must not outlive the failed submission")
 	assert.Empty(t, te.results, "a submission that never happened produces no result")
 }
 
@@ -157,7 +156,6 @@ func TestCreateTransferFilesSchedulerRejectionCompletesJob(t *testing.T) {
 	require.NoError(t, te.createTransferFiles(job),
 		"a shed is reported through the results channel, not as a lookup failure")
 
-	assert.Equal(t, 1, job.job.totalXfer, "the shed file is still one of the job's transfers")
 	assert.Equal(t, int64(1), job.job.activeXfer.Load(),
 		"the synthetic result has not been consumed yet, so it is still outstanding")
 
@@ -208,7 +206,6 @@ func TestSchedulerShutdownDrainsQueuedFilesToResults(t *testing.T) {
 		f := makeFile("origin.example.com")
 		f.jobId = job.job.uuid
 		f.file.job = job.job
-		job.job.totalXfer++
 		job.job.activeXfer.Add(1)
 		require.NoError(t, sched.Submit(ctx, "origin.example.com", f))
 	}

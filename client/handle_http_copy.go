@@ -640,11 +640,9 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 		log.Debugln("Constructed source attempt URL for TPC copy:", fileURL.String(), "file:", srcFilePath)
 	}
 
-	// totalXfer must be counted before submission: a scheduler rejection
-	// pushes a synthetic failure result for this file, and runMux treats
-	// totalXfer == 0 as "job created no transfers" and closes the results
-	// channel — racing the synthetic result's delivery.
-	job.job.totalXfer += 1
+	// Counted before submission: a scheduler rejection produces a
+	// synthetic result right away, and runMux decrements on every
+	// result, so counting afterwards would race its delivery.
 	job.job.activeXfer.Add(1)
 	if err := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,

@@ -117,16 +117,16 @@ func parseThrottleBody(body string) (reason, detail string) {
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		return "", body
 	}
-	if parsed.Detail != "" {
-		detail = parsed.Detail
-	} else {
-		detail = body
-	}
 	switch ShedReason(parsed.Error) {
 	case ShedOriginUnresponsive, ShedOriginSlow, ShedCacheOverloaded:
-		return parsed.Error, detail
+		// The reason is reported on its own, so falling back to the raw body
+		// here would just print it a second time.
+		return parsed.Error, parsed.Detail
 	}
-	return "", detail
+	if parsed.Detail != "" {
+		return "", parsed.Detail
+	}
+	return "", body
 }
 
 // parseThrottleReason returns just the validated reason from a 429 body.
@@ -556,7 +556,13 @@ func newThrottleErrorNoResponse(endpoint, detail string) *CacheThrottleError {
 // Retry-After header, the endpoint host, and the body detail (truncated
 // here; quoted at display time since it is server-controlled text).
 func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Duration) *CacheThrottleError {
-	base := fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
+	// Not every 429 carries a reason -- a HEAD response has no body, and the
+	// WebDAV client hides the response entirely -- so omit the parenthetical
+	// rather than rendering an empty one.
+	base := fmt.Errorf("cache %s throttled the request", endpoint)
+	if reason != "" {
+		base = fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
+	}
 	return &CacheThrottleError{
 		Reason:     reason,
 		RetryAfter: retryAfter,
