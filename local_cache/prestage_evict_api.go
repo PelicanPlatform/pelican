@@ -392,7 +392,7 @@ func (pc *PersistentCache) prestageHandler(w http.ResponseWriter, r *http.Reques
 
 	// Submit to the per-identity worker pool.
 	if !pc.prestageManager.Submit(ident, req) {
-		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Retry-After", retryAfterValue())
 		http.Error(w, "Too many prestage requests at server", http.StatusTooManyRequests)
 		return
 	}

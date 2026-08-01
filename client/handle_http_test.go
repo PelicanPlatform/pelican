@@ -251,7 +251,7 @@ func TestSlowTransfers(t *testing.T) {
 		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 		assert.NoError(t, err)
 		defer writer.Close()
-		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 		finishedChannel <- true
 	}()
 
@@ -341,7 +341,7 @@ func TestStoppedTransfer(t *testing.T) {
 		assert.NoError(t, err)
 		defer writer.Close()
 
-		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 		finishedChannel <- true
 	}()
 
@@ -392,7 +392,7 @@ func TestConnectionError(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	// downloadHTTP returns unwrapped ConnectionSetupError; wrapping happens in the download loop
@@ -506,7 +506,7 @@ func TestNetworkResetError(t *testing.T) {
 	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	// The error should be wrapped as Contact.ConnectionReset in the download loop
@@ -633,7 +633,7 @@ func TestTrailerError(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 
 	assert.NotNil(t, err)
 	// Check that it's wrapped in a PelicanError
@@ -992,7 +992,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -1040,7 +1040,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -1082,7 +1082,7 @@ func TestProjInUserAgent(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "test", nil)
+		fname, writer, 0, -1, -1, "", "test", nil, nil)
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
@@ -1769,7 +1769,7 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	require.Error(t, err, "Should have an error from invalid chunk length")
@@ -3009,7 +3009,7 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 
@@ -3048,7 +3048,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
@@ -4397,12 +4397,21 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 	tsURL, err := url.Parse(ts.URL)
 	require.NoError(t, err)
 
-	// Create a transfer engine and client
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	te, err := NewTransferEngine(ctx)
-	require.NoError(t, err)
+	// Build a minimal, worker-free transfer engine.  walkDirUpload hands
+	// each queued file to te.submitFile, which (with no scheduler
+	// configured) sends onto te.files.  We deliberately do NOT use
+	// NewTransferEngine here: its worker goroutines would drain te.files
+	// concurrently and actually perform the uploads, whereas this test
+	// wants to drive uploadObject by hand to observe the 403-skip
+	// bookkeeping.  A buffered te.files lets walkDirUpload complete
+	// without a consumer.
+	te := &TransferEngine{
+		ctx:   ctx,
+		files: make(chan *clientTransferFile, 10),
+	}
 
 	// Create a transfer job for recursive upload with sync enabled
 	remoteURL, err := pelican_url.Parse("pelican://"+tsURL.Host+"/test/dir", nil, nil)
@@ -4427,18 +4436,15 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 	// Manually create the transfer attempts
 	transfers := []transferAttemptDetails{{Url: tsURL, Proxy: false}}
 
-	// Create channel for files
-	files := make(chan *clientTransferFile, 10)
-
-	// Run walkDirUpload to queue files
-	err = te.walkDirUpload(&clientTransferJob{uuid: uuid.New(), job: tj}, transfers, files, tempDir)
+	// Run walkDirUpload to queue files onto te.files.
+	err = te.walkDirUpload(&clientTransferJob{uuid: uuid.New(), job: tj}, transfers, tempDir)
 	require.NoError(t, err)
 
-	close(files)
+	close(te.files)
 
 	// Process all queued files
 	var results []TransferResults
-	for file := range files {
+	for file := range te.files {
 		result, err := uploadObject(file.file)
 		require.NoError(t, err, "uploadObject should not return error")
 		results = append(results, result)
@@ -4518,7 +4524,7 @@ func TestDownloadHTTPETag(t *testing.T) {
 
 	downloaded, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(len(body)), downloaded)
@@ -4555,7 +4561,7 @@ func TestDownloadHTTPETagMissing(t *testing.T) {
 
 	_, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Empty(t, etag, "ETag should be empty when the server doesn't provide one")
@@ -4594,7 +4600,7 @@ func TestMetadataChannel(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", metadataChan,
+		fname, writer, 0, -1, -1, "", "", metadataChan, nil,
 	)
 	assert.NoError(t, err)
 
@@ -4636,7 +4642,7 @@ func TestMetadataChannelNil(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err, "downloadHTTP should not panic when metadataChan is nil")
 }
@@ -4679,7 +4685,7 @@ func TestDownloadHTTPByteRange(t *testing.T) {
 	// bytesSoFar=0, byteRangeEnd=9 → Range: bytes=0-9
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, rangeEnd, -1, "", "", nil,
+		fname, writer, 0, rangeEnd, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, rangeEnd+1, downloaded, "downloaded bytes should equal the range size")
@@ -4732,7 +4738,7 @@ func TestDownloadHTTPResume(t *testing.T) {
 
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, resumeOffset, -1, -1, "", "", nil,
+		fname, writer, resumeOffset, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(len(fullBody))-resumeOffset, downloaded, "should download remaining bytes after resume offset")
@@ -4841,7 +4847,7 @@ func TestMetadataChannelByteRange(t *testing.T) {
 
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		"", &buf, rangeStart, rangeEnd, -1, "", "", metadataChan,
+		"", &buf, rangeStart, rangeEnd, -1, "", "", metadataChan, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, rangeEnd-rangeStart+1, downloaded, "downloaded should be the range length")

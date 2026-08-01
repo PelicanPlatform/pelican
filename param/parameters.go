@@ -143,6 +143,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.SelfTestMaxAge": false,
 	"Cache.SentinelLocation": false,
 	"Cache.StorageLocation": false,
+	"Cache.Throttle.EMAWindow": false,
+	"Cache.Throttle.PendingBufferSize": false,
+	"Cache.Throttle.PerOriginActivePercent": false,
+	"Cache.Throttle.PerOriginPendingSize": false,
+	"Cache.Throttle.PerOriginStarvingPercent": false,
+	"Cache.Throttle.RetryAfter": false,
 	"Cache.Url": false,
 	"Cache.WorkerCount": false,
 	"Cache.XRootDPrefix": false,
@@ -885,6 +891,10 @@ var intAccessors = map[string]func(*Config) int{
 	"Cache.DataScanResampleInterval": func(c *Config) int { return c.Cache.DataScanResampleInterval },
 	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
 	"Cache.Port": func(c *Config) int { return c.Cache.Port },
+	"Cache.Throttle.PendingBufferSize": func(c *Config) int { return c.Cache.Throttle.PendingBufferSize },
+	"Cache.Throttle.PerOriginActivePercent": func(c *Config) int { return c.Cache.Throttle.PerOriginActivePercent },
+	"Cache.Throttle.PerOriginPendingSize": func(c *Config) int { return c.Cache.Throttle.PerOriginPendingSize },
+	"Cache.Throttle.PerOriginStarvingPercent": func(c *Config) int { return c.Cache.Throttle.PerOriginStarvingPercent },
 	"Cache.WorkerCount": func(c *Config) int { return c.Cache.WorkerCount },
 	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
 	"ClientAgent.MaxConcurrentJobs": func(c *Config) int { return c.ClientAgent.MaxConcurrentJobs },
@@ -1131,6 +1141,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
 	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
+	"Cache.Throttle.EMAWindow": func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
+	"Cache.Throttle.RetryAfter": func(c *Config) time.Duration { return c.Cache.Throttle.RetryAfter },
 	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
 	"ClientAgent.ProgressUpdateInterval": func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
 	"Client.SlowTransferRampupTime": func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
@@ -1336,6 +1348,12 @@ var allParameterNames = []string{
 	"Cache.SelfTestMaxAge",
 	"Cache.SentinelLocation",
 	"Cache.StorageLocation",
+	"Cache.Throttle.EMAWindow",
+	"Cache.Throttle.PendingBufferSize",
+	"Cache.Throttle.PerOriginActivePercent",
+	"Cache.Throttle.PerOriginPendingSize",
+	"Cache.Throttle.PerOriginStarvingPercent",
+	"Cache.Throttle.RetryAfter",
 	"Cache.Url",
 	"Cache.WorkerCount",
 	"Cache.XRootDPrefix",
@@ -1995,6 +2013,10 @@ var (
 	Cache_DataScanResampleInterval = IntParam{"Cache.DataScanResampleInterval"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
+	Cache_Throttle_PendingBufferSize = IntParam{"Cache.Throttle.PendingBufferSize"}
+	Cache_Throttle_PerOriginActivePercent = IntParam{"Cache.Throttle.PerOriginActivePercent"}
+	Cache_Throttle_PerOriginPendingSize = IntParam{"Cache.Throttle.PerOriginPendingSize"}
+	Cache_Throttle_PerOriginStarvingPercent = IntParam{"Cache.Throttle.PerOriginStarvingPercent"}
 	Cache_WorkerCount = IntParam{"Cache.WorkerCount"}
 	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
 	ClientAgent_MaxConcurrentJobs = IntParam{"ClientAgent.MaxConcurrentJobs"}
@@ -2148,6 +2170,8 @@ var (
 	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
+	Cache_Throttle_EMAWindow = DurationParam{"Cache.Throttle.EMAWindow"}
+	Cache_Throttle_RetryAfter = DurationParam{"Cache.Throttle.RetryAfter"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
 	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
@@ -2484,6 +2508,10 @@ func init() {
 		"Cache.DataScanResampleInterval": Cache_DataScanResampleInterval,
 		"Cache.EvictionMonitoringMaxDepth": Cache_EvictionMonitoringMaxDepth,
 		"Cache.Port": Cache_Port,
+		"Cache.Throttle.PendingBufferSize": Cache_Throttle_PendingBufferSize,
+		"Cache.Throttle.PerOriginActivePercent": Cache_Throttle_PerOriginActivePercent,
+		"Cache.Throttle.PerOriginPendingSize": Cache_Throttle_PerOriginPendingSize,
+		"Cache.Throttle.PerOriginStarvingPercent": Cache_Throttle_PerOriginStarvingPercent,
 		"Cache.WorkerCount": Cache_WorkerCount,
 		"ClientAgent.HistoryRetentionDays": ClientAgent_HistoryRetentionDays,
 		"ClientAgent.MaxConcurrentJobs": ClientAgent_MaxConcurrentJobs,
@@ -2628,6 +2656,8 @@ func init() {
 		"Cache.MinDirectorRefreshInterval": Cache_MinDirectorRefreshInterval,
 		"Cache.SelfTestInterval": Cache_SelfTestInterval,
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
+		"Cache.Throttle.EMAWindow": Cache_Throttle_EMAWindow,
+		"Cache.Throttle.RetryAfter": Cache_Throttle_RetryAfter,
 		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,
 		"ClientAgent.ProgressUpdateInterval": ClientAgent_ProgressUpdateInterval,
 		"Client.SlowTransferRampupTime": Client_SlowTransferRampupTime,

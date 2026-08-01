@@ -177,6 +177,117 @@ func (etr *errorTrackingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// retryAfterValue returns the whole-seconds Retry-After header value
+// advertised on shed (429) responses, from Cache.Throttle.RetryAfter.
+// Unset or non-positive values fall back to 60 seconds.
+func retryAfterValue() string {
+	d := param.Cache_Throttle_RetryAfter.GetDuration()
+	if d <= 0 {
+		d = 60 * time.Second
+	}
+	secs := int64((d + time.Second - 1) / time.Second)
+	return strconv.FormatInt(secs, 10)
+}
+
+// onlyThrottled reports whether err represents throttling and nothing else.
+//
+// A download accumulates one error per object server it tried
+// (client.TransferErrors implements Unwrap() []error), so a plain
+// errors.Is(err, ErrTooManyRequests) is true when *any* single attempt was
+// shed. Answering 429 on that basis would let one throttled origin mask a
+// definitive answer from another: a namespace served by origins A and B where
+// A returns 404 and B is throttled would be reported to the client as "retry
+// later", and it would retry forever for an object that does not exist. Only
+// take the throttle path when there is no more specific failure to report.
+//
+// Note this only helps where the errors are actually accumulated. statHttp
+// keeps just the first error across its endpoints rather than building a
+// multi-error, so on the HEAD/stat path a throttle from whichever endpoint
+// answered first still hides another endpoint's not-found. Fixing that means
+// changing how stat aggregates, not how the result is classified here.
+func onlyThrottled(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Walk down the single-error wrappers looking for an accumulator. The
+	// chain can be several links long -- github.com/pkg/errors.Wrap alone adds
+	// two -- so this has to loop rather than peek one level down, or a wrapped
+	// accumulator would collapse into the errors.Is below and lose the
+	// per-attempt detail this function exists to inspect.
+	for cur := err; cur != nil; {
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			children := multi.Unwrap()
+			if len(children) == 0 {
+				return false
+			}
+			for _, child := range children {
+				if !onlyThrottled(child) {
+					return false
+				}
+			}
+			return true
+		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		cur = single.Unwrap()
+	}
+	return errors.Is(err, client.ErrTooManyRequests)
+}
+
+// anyAttemptNotFound reports whether any attempt in err definitively found the
+// object missing.
+//
+// errors.As stops at the first PelicanError in tree order, which for an
+// accumulator is whatever the first object server happened to return. When one
+// origin was throttled and another answered "not found", that ordering decides
+// whether the client is told 404 or something far less useful, so the
+// definitive answer is searched for explicitly instead.
+//
+// This only ranks not-found above the *unclassified* remainder. A status code
+// relayed from upstream, and an authorization failure, still win: they say
+// something about the object that a sibling's 404 does not.
+func anyAttemptNotFound(err error) bool {
+	for cur := err; cur != nil; {
+		if pe, ok := cur.(*error_codes.PelicanError); ok && pe.Code() == fileNotFoundErrorCode {
+			return true
+		}
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			for _, child := range multi.Unwrap() {
+				if anyAttemptNotFound(child) {
+					return true
+				}
+			}
+			return false
+		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		cur = single.Unwrap()
+	}
+	return false
+}
+
+// fileNotFoundErrorCode is error_codes' Specification.FileNotFound.
+const fileNotFoundErrorCode = 5011
+
+// validShedReason returns reason if it is one of the known shed reasons, and
+// the generic "too_many_requests" otherwise.
+//
+// The value is written to the machine-parseable "error" field of a 429 body,
+// so it must come from a fixed vocabulary. Callers can reach here holding a
+// reason that arrived from an upstream server, and an arbitrary string echoed
+// to a client would flow onward into its logs and job ads.
+func validShedReason(reason string) string {
+	switch client.ShedReason(reason) {
+	case client.ShedOriginUnresponsive, client.ShedOriginSlow, client.ShedCacheOverloaded:
+		return reason
+	}
+	return "too_many_requests"
+}
+
 // handleError writes a structured JSON error response based on the error type.
 // The reqLog entry carries request-scoped fields (method, path, reqId) so that
 // every log line emitted here is correlated with the original request.
@@ -210,6 +321,31 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		reqLog.Warn("Upstream response timeout")
 		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream response timeout")
 		return
+	} else if onlyThrottled(getErr) {
+		// Either the cache's own fair scheduler refused to admit this
+		// upstream fetch (SchedulerRejection), or the upstream server
+		// answered the fetch with a 429 of its own (CacheThrottleError).
+		// Ask the client to retry after a moment, and surface the specific
+		// reason so the client can distinguish an unresponsive origin from a
+		// merely-slow one or a cache-wide overload.  The "error" field is the
+		// machine-parseable reason; the client maps it to a Pelican error code.
+		errCode := "too_many_requests"
+		var rej *client.SchedulerRejection
+		var throttled *client.CacheThrottleError
+		if errors.As(getErr, &rej) {
+			errCode = validShedReason(string(rej.Reason))
+		} else if errors.As(getErr, &throttled) && throttled.Reason != "" {
+			// This reason originated at whatever upstream answered our fetch.
+			// It is validated where the response is parsed, but it reaches here
+			// through an exported field on an exported type, so re-check it
+			// rather than trusting a caller elsewhere to have done so: it is
+			// about to be echoed to a client as a machine-parseable value.
+			errCode = validShedReason(throttled.Reason)
+		}
+		reqLog.Warnf("Rejecting fetch with 429 (%s): %v", errCode, getErr)
+		w.Header().Set("Retry-After", retryAfterValue())
+		writeJSON(http.StatusTooManyRequests, errCode, getErr.Error())
+		return
 	}
 
 	reqLog.Errorln("Failed to get file from cache:", getErr)
@@ -222,10 +358,18 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
 		switch {
-		case pe.Code() == 5011: // FileNotFound
-			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
+			// Ranked above not-found: "you may not read this" is actionable
+			// (refresh a credential) and, unlike a sibling's 404, does not
+			// claim the object is absent.
 			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())
+		case pe.Code() == fileNotFoundErrorCode || anyAttemptNotFound(getErr):
+			// A definitive "the object is not here" from any attempt beats a
+			// sibling attempt's transient failure, whichever one errors.As
+			// happened to reach first. Without the second test, a throttle
+			// recorded ahead of the not-found decides the response and the
+			// client is told to come back for an object that will never exist.
+			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		default:
 			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())
 		}

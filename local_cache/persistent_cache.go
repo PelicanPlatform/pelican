@@ -59,6 +59,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -176,6 +177,11 @@ type PersistentCache struct {
 
 	// Transfer engine for creating per-request clients
 	te *client.TransferEngine
+
+	// Optional fair scheduler installed on te. Held here so the
+	// per-origin monitoring publisher can Snapshot() it on a fixed
+	// cadence.  nil when Cache.Throttle.PendingBufferSize == 0.
+	scheduler *client.TagScheduler
 
 	// Federation configuration
 	directorURL *url.URL
@@ -526,6 +532,20 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize storage manager")
 	}
 
+	// From here on the storage manager owns eviction-loop goroutines running on
+	// the caller's errgroup, and those loops only exit on Close() -- cancelling
+	// the context does not reach them. Every failure past this point therefore
+	// has to shut the storage manager down as well as the database, or the
+	// errgroup never drains: the caller is left waiting on workers belonging to
+	// a cache that was never returned. In `pelican cache serve` that wait
+	// happens before the logs are flushed and the exit code is chosen, so a
+	// startup failure would wedge the process without reporting anything.
+	failInit := func(err error) (*PersistentCache, error) {
+		storage.Close()
+		db.Close()
+		return nil, err
+	}
+
 	// Build eviction dir configs now that we know storageID → path mapping.
 	// GetDirs() returns paths with /objects appended; strip the suffix to
 	// match against the original config paths.
@@ -535,8 +555,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		sd, ok := sdCfgByPath[basePath]
 		if !ok {
 			// Should not happen — every directory in GetDirs was passed in.
-			db.Close()
-			return nil, errors.Errorf("storage directory %q not found in config", basePath)
+			return failInit(errors.Errorf("storage directory %q not found in config", basePath))
 		}
 
 		// Resolve per-dir size.  0 means auto-detect from filesystem.
@@ -547,8 +566,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		if maxSz == 0 {
 			cs, err := getCacheSize(sd.Path, db, id)
 			if err != nil {
-				db.Close()
-				return nil, errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path)
+				return failInit(errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path))
 			}
 			maxSz = cs
 		}
@@ -596,14 +614,12 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// Get federation info
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to get federation info")
+		return failInit(errors.Wrap(err, "failed to get federation info"))
 	}
 
 	directorURL, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to parse director URL")
+		return failInit(errors.Wrap(err, "failed to parse director URL"))
 	}
 
 	// Derive the default federation identity from the discovery endpoint.
@@ -623,27 +639,23 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 
 	// Initialize transfer engine
 	if err := config.InitClient(); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to initialize client")
+		return failInit(errors.Wrap(err, "failed to initialize client"))
 	}
 
-	// The cache server serves many clients concurrently, so it needs far more
-	// transfer workers than the command-line client's small default
-	// (Client.WorkerCount).  Use Cache.WorkerCount for the server; the
-	// client-side local cache keeps the client default.
+	// Initialize the transfer engine, sized and (for a cache server) governed
+	// by newCacheScheduler.
 	var te *client.TransferEngine
-	if cfg.Mode == CacheModeServer {
-		workers := param.Cache_WorkerCount.GetInt()
-		if workers <= 0 {
-			workers = 100
-		}
-		te, err = client.NewTransferEngineWithWorkers(ctx, workers)
-	} else {
+	workers, pcScheduler := newCacheScheduler(cfg.Mode)
+	switch {
+	case workers <= 0:
 		te, err = client.NewTransferEngine(ctx)
+	case pcScheduler != nil:
+		te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers), client.WithScheduler(pcScheduler))
+	default:
+		te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers))
 	}
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to create transfer engine")
+		return failInit(errors.Wrap(err, "failed to create transfer engine"))
 	}
 
 	downloadCtx, downloadCancel := context.WithCancel(ctx)
@@ -657,6 +669,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		eviction:        eviction,
 		consistency:     consistency,
 		te:              te,
+		scheduler:       pcScheduler,
 		directorURL:     directorURL,
 		defaultFed:      defaultFed,
 		ac:              newAuthConfig(ctx, egrp),
@@ -695,6 +708,13 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil
 	})
 
+	// Publish per-origin fair-scheduler metrics to Prometheus on a fixed
+	// cadence. Snapshot() is a channel round-trip through the scheduler
+	// goroutine, so it costs one context switch every tick.
+	if pcScheduler != nil {
+		egrp.Go(func() error { return pc.runSchedulerMetricsPublisher(ctx) })
+	}
+
 	// Register with config's pre-cleanup hook so that the temp-directory
 	// errgroup goroutine waits for BadgerDB to flush before it calls
 	// os.RemoveAll.  pc.Close() is wait-safe: if the errgroup goroutine
@@ -711,6 +731,111 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	log.Infof("Persistent cache initialized: %s (%d storage dir(s))", cfg.BaseDir, len(storageDirs))
 
 	return pc, nil
+}
+
+// newCacheScheduler decides how the persistent cache's transfer engine is
+// sized and whether it gets a per-origin fair scheduler.
+//
+// A cache server serves many clients concurrently, so it needs far more
+// transfer workers than the command-line client's small default
+// (Client.WorkerCount); it uses Cache.WorkerCount instead. It also gets a
+// TagScheduler, so that one misbehaving upstream origin cannot hold the whole
+// worker pool on stalled connections and make the cache look unresponsive to
+// every client (see the Cache.Throttle.* parameters for the caps).
+//
+// The local (client-side) cache serves a single process rather than many
+// tenants, so it keeps the client defaults and runs unscheduled: a zero worker
+// count means "let the engine choose".
+//
+// Setting Cache.Throttle.PendingBufferSize to 0 is the operator's switch for
+// turning the scheduler off; the engine then runs on the plain
+// first-come-first-served channel.
+func newCacheScheduler(mode CacheMode) (workers int, sched *client.TagScheduler) {
+	workers, schedCfg := cacheSchedulerConfig(mode)
+	if workers <= 0 || schedCfg.PendingBufferSize <= 0 {
+		return workers, nil
+	}
+	return workers, client.NewTagScheduler(workers, schedCfg)
+}
+
+// cacheSchedulerConfig reads the worker count and the fair-scheduler settings
+// for `mode` out of the Cache.* parameters. Split out from newCacheScheduler
+// so the parameter-to-field mapping can be asserted directly: a scheduler that
+// has been handed the wrong knob still constructs and still looks healthy, so
+// nothing downstream would notice a transposed pair.
+//
+// A zero worker count means this mode runs unscheduled on the engine's own
+// default.
+func cacheSchedulerConfig(mode CacheMode) (workers int, cfg client.SchedulerConfig) {
+	if mode != CacheModeServer {
+		return 0, client.SchedulerConfig{}
+	}
+	workers = param.Cache_WorkerCount.GetInt()
+	if workers <= 0 {
+		workers = 100
+	}
+	return workers, client.SchedulerConfig{
+		PerTagStarvingPercent: param.Cache_Throttle_PerOriginStarvingPercent.GetInt(),
+		PerTagActivePercent:   param.Cache_Throttle_PerOriginActivePercent.GetInt(),
+		PendingBufferSize:     param.Cache_Throttle_PendingBufferSize.GetInt(),
+		PerTagPendingSize:     param.Cache_Throttle_PerOriginPendingSize.GetInt(),
+		EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
+	}
+}
+
+// schedulerMetricsPublishInterval is how often the fair-scheduler
+// snapshot gets pushed into Prometheus gauges. Kept short enough
+// that a Prometheus scrape (default 15 s) always sees a fresh value.
+const schedulerMetricsPublishInterval = 5 * time.Second
+
+// runSchedulerMetricsPublisher periodically snapshots pc.scheduler
+// and translates it into the pelican_cache_scheduler_* Prometheus
+// metrics. Exits on ctx cancellation.
+func (pc *PersistentCache) runSchedulerMetricsPublisher(ctx context.Context) error {
+	ticker := time.NewTicker(schedulerMetricsPublishInterval)
+	defer ticker.Stop()
+	// The scheduler gauges describe instantaneous state; once this cache is
+	// gone they would otherwise keep reporting whatever was true at the last
+	// tick. Clearing them also resets the counter-delta bookkeeping, which
+	// matters when another cache is created in the same process (tests do
+	// this routinely).
+	defer metrics.ResetCacheSchedulerMetrics()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			snap := pc.scheduler.Snapshot(ctx)
+			// Snapshot returns zero when the scheduler is stopping;
+			// don't clobber the last-published gauges with zeroes.
+			if snap.Tags == nil && snap.Global.WorkerCount == 0 {
+				continue
+			}
+			global := metrics.SchedulerGlobalStats{
+				WorkerCount:        snap.Global.WorkerCount,
+				StarvingCap:        snap.Global.StarvingCap,
+				ActiveCap:          snap.Global.ActiveCap,
+				TotalPending:       snap.Global.TotalPending,
+				TotalTags:          snap.Global.TotalTags,
+				TotalAdmits:        snap.Global.TotalAdmits,
+				TotalRejects:       snap.Global.TotalRejects,
+				TotalRejectsGlobal: snap.Global.TotalRejectsGlobal,
+				TotalRejectsPerTag: snap.Global.TotalRejectsPerTag,
+			}
+			tags := make(map[string]metrics.SchedulerPerTagStats, len(snap.Tags))
+			for tag, s := range snap.Tags {
+				tags[tag] = metrics.SchedulerPerTagStats{
+					Pending:  s.Pending,
+					Active:   s.Active,
+					Starving: s.Starving,
+					EMA:      s.EMA,
+					Admits:   s.Admits,
+					Rejects:  s.Rejects,
+				}
+			}
+			metrics.PublishCacheSchedulerSnapshot(global, tags)
+		}
+	}
 }
 
 // Config configures the cache and starts periodic updates

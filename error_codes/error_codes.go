@@ -318,6 +318,39 @@ func NewTransfer_ChecksumMissingError(err error) *PelicanError {
 	}
 }
 
+func NewTransfer_OriginUnresponsiveError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.OriginUnresponsive",
+		exitCode:    9,
+		code:        6008,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+		err:         err,
+	}
+}
+
+func NewTransfer_OriginSlowError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.OriginSlow",
+		exitCode:    9,
+		code:        6009,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+		err:         err,
+	}
+}
+
+func NewTransfer_CacheOverloadedError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.CacheOverloaded",
+		exitCode:    9,
+		code:        6010,
+		retryable:   true,
+		description: "A server rejected the request because it was at capacity. When a cache's fair scheduler reports this reason, its global pending buffer was full and the cache is saturated across all the origins it serves rather than being held up by any single one of them. This is also the generic classification for a 429 that carries no more specific reason, including one from a Pelican service other than a cache. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+		err:         err,
+	}
+}
+
 // function that maps the error to the exit code
 func (e *PelicanError) ExitCode() int {
 	return e.exitCode

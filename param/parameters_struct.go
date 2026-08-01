@@ -73,6 +73,14 @@ type Config struct {
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
+		Throttle struct {
+			EMAWindow time.Duration `mapstructure:"emawindow" yaml:"EMAWindow"`
+			PendingBufferSize int `mapstructure:"pendingbuffersize" yaml:"PendingBufferSize"`
+			PerOriginActivePercent int `mapstructure:"peroriginactivepercent" yaml:"PerOriginActivePercent"`
+			PerOriginPendingSize int `mapstructure:"peroriginpendingsize" yaml:"PerOriginPendingSize"`
+			PerOriginStarvingPercent int `mapstructure:"peroriginstarvingpercent" yaml:"PerOriginStarvingPercent"`
+			RetryAfter time.Duration `mapstructure:"retryafter" yaml:"RetryAfter"`
+		} `mapstructure:"throttle" yaml:"Throttle"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -592,6 +600,14 @@ type configWithType struct {
 		SelfTestMaxAge struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
+		Throttle struct {
+			EMAWindow struct { Type string; Value time.Duration }
+			PendingBufferSize struct { Type string; Value int }
+			PerOriginActivePercent struct { Type string; Value int }
+			PerOriginPendingSize struct { Type string; Value int }
+			PerOriginStarvingPercent struct { Type string; Value int }
+			RetryAfter struct { Type string; Value time.Duration }
+		}
 		Url struct { Type string; Value string }
 		WorkerCount struct { Type string; Value int }
 		XRootDPrefix struct { Type string; Value string }

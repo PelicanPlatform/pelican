@@ -2252,3 +2252,128 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateTransferErrorThrottle pins the HTCondor result-ad contract for a
+// transfer shed by a cache's fair scheduler (HTTP 429).
+//
+// The plugin protocol has no retry-delay field and the plugin must never sleep
+// (HTCondor is timing it), so the backoff hint and the machine-parseable shed
+// reason are only visible to external retriers and operators if they are
+// carried in DeveloperData. Dropping either one leaves the job ad saying
+// nothing more than "it failed", and a retrier has no way to distinguish an
+// overloaded cache from an origin that is genuinely broken.
+func TestCreateTransferErrorThrottle(t *testing.T) {
+	newThrottle := func(reason string, retryAfter time.Duration, inner error) *client.CacheThrottleError {
+		return &client.CacheThrottleError{
+			Reason:     reason,
+			RetryAfter: retryAfter,
+			Endpoint:   "cache.example.org:8443",
+			Err:        inner,
+		}
+	}
+
+	t.Run("ReasonAndBackoffSurfaced", func(t *testing.T) {
+		originSlow := error_codes.NewTransfer_OriginSlowError(errors.New("origin is over its share of the transfer pool"))
+		throttled := newThrottle(string(client.ShedOriginSlow), 30*time.Second, originSlow)
+
+		transferError := createTransferError(throttled)
+		devData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+
+		retryAfterSeconds, ok := classad.GetAs[int64](devData, "RetryAfterSeconds")
+		require.True(t, ok, "a throttled transfer must advertise its backoff hint")
+		assert.Equal(t, int64(30), retryAfterSeconds)
+
+		throttleReason, ok := classad.GetAs[string](devData, "ThrottleReason")
+		require.True(t, ok, "a throttled transfer must advertise the shed reason")
+		assert.Equal(t, string(client.ShedOriginSlow), throttleReason)
+
+		// The shed classification must survive as the Pelican error code, so
+		// the job ad distinguishes a slow origin from a generic transfer
+		// failure.
+		pelicanErrorCode, ok := classad.GetAs[int64](devData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(6009), pelicanErrorCode)
+		assert.Equal(t, int64(originSlow.Code()), pelicanErrorCode)
+
+		// A shed request is worth retrying; if the ad said otherwise HTCondor
+		// would give up on a transfer that would have succeeded moments later.
+		retryable, ok := classad.GetAs[bool](devData, "Retryable")
+		require.True(t, ok)
+		assert.True(t, retryable)
+
+		errorType, ok := classad.GetAs[string](devData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer.OriginSlow", errorType)
+		topErrorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", topErrorType)
+	})
+
+	t.Run("SubSecondBackoffRoundsUp", func(t *testing.T) {
+		// Retry-After is whole seconds. A sub-second hint truncated to 0 reads
+		// as "no hint given" rather than "retry almost immediately", so it must
+		// round up.
+		throttled := newThrottle(string(client.ShedCacheOverloaded), 500*time.Millisecond,
+			error_codes.NewTransfer_CacheOverloadedError(errors.New("cache is shedding load")))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(throttled), "DeveloperData")
+		require.True(t, ok)
+		retryAfterSeconds, ok := classad.GetAs[int64](devData, "RetryAfterSeconds")
+		require.True(t, ok)
+		assert.Equal(t, int64(1), retryAfterSeconds)
+	})
+
+	t.Run("NoHintMeansNoAttribute", func(t *testing.T) {
+		// A cache that shed the request without a Retry-After header leaves the
+		// attribute out entirely rather than claiming a zero-second backoff.
+		throttled := newThrottle(string(client.ShedOriginUnresponsive), 0,
+			error_codes.NewTransfer_OriginUnresponsiveError(errors.New("origin is not answering")))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(throttled), "DeveloperData")
+		require.True(t, ok)
+		_, ok = classad.GetAs[int64](devData, "RetryAfterSeconds")
+		assert.False(t, ok, "no backoff hint means no RetryAfterSeconds attribute")
+		throttleReason, ok := classad.GetAs[string](devData, "ThrottleReason")
+		require.True(t, ok)
+		assert.Equal(t, string(client.ShedOriginUnresponsive), throttleReason)
+	})
+
+	t.Run("NonThrottleErrorHasNoThrottleAttributes", func(t *testing.T) {
+		// The throttle attributes must be specific to a shed request; a
+		// retrier keying off them would otherwise back off on failures that
+		// have nothing to do with load.
+		notFound := error_codes.NewSpecification_FileNotFoundError(errors.New("object does not exist"))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(notFound), "DeveloperData")
+		require.True(t, ok)
+		_, ok = classad.GetAs[int64](devData, "RetryAfterSeconds")
+		assert.False(t, ok)
+		_, ok = classad.GetAs[string](devData, "ThrottleReason")
+		assert.False(t, ok)
+	})
+
+	t.Run("RetryableReachesTheExitCode", func(t *testing.T) {
+		// The retryable flag on the result ad is what the plugin turns into
+		// exit code 11, which is how HTCondor learns to reschedule the
+		// transfer instead of holding the job.
+		throttled := newThrottle(string(client.ShedOriginSlow), 30*time.Second,
+			error_codes.NewTransfer_OriginSlowError(errors.New("origin is over its share of the transfer pool")))
+
+		results := make(chan *classad.ClassAd, 1)
+		failTransfer("pelican://example.org/namespace/object.txt", "/path/to/local.txt", results, false, throttled)
+		resultAd := <-results
+
+		transferRetryable, ok := classad.GetAs[bool](resultAd, "TransferRetryable")
+		require.True(t, ok)
+		assert.True(t, transferRetryable)
+
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "results.ad"))
+		require.NoError(t, err)
+		defer tempFile.Close()
+		success, retryable, err := writeOutfile(nil, []*classad.ClassAd{resultAd}, tempFile)
+		require.NoError(t, err)
+		assert.False(t, success)
+		assert.True(t, retryable, "a shed transfer must be reported to HTCondor as retryable (exit code 11)")
+	})
+}

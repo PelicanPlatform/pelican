@@ -151,6 +151,18 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${Cache.StorageLocation}", v.GetString(param.Cache_StorageLocation.GetName()))
 		v.SetDefault(param.Cache_NamespaceLocation.GetName(), val)
 	}
+	// Cache.Throttle.EMAWindow
+	v.SetDefault(param.Cache_Throttle_EMAWindow.GetName(), "30s")
+	// Cache.Throttle.PendingBufferSize
+	v.SetDefault(param.Cache_Throttle_PendingBufferSize.GetName(), 200)
+	// Cache.Throttle.PerOriginActivePercent
+	v.SetDefault(param.Cache_Throttle_PerOriginActivePercent.GetName(), 90)
+	// Cache.Throttle.PerOriginPendingSize
+	v.SetDefault(param.Cache_Throttle_PerOriginPendingSize.GetName(), 50)
+	// Cache.Throttle.PerOriginStarvingPercent
+	v.SetDefault(param.Cache_Throttle_PerOriginStarvingPercent.GetName(), 25)
+	// Cache.Throttle.RetryAfter
+	v.SetDefault(param.Cache_Throttle_RetryAfter.GetName(), "60s")
 	// Cache.Url
 	{
 		val := "https://${Server.Hostname}:${Cache.Port}"

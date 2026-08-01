@@ -305,6 +305,11 @@ func (ct *chunkTracker) releaseAll() {
 type StorageManager struct {
 	db *CacheDB
 
+	// evictionRunning records whether the TTL caches' eviction loops were
+	// started, so Close knows whether there is anything to stop. Read-only
+	// managers never start them.
+	evictionRunning atomic.Bool
+
 	// dirs maps storageID → objects directory (e.g. "/data1/objects").
 	// StorageIDFirstDisk is always present; additional dirs have
 	// sequential IDs.
@@ -589,6 +594,7 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 	// Start the TTL cache eviction goroutines so idle entries are reaped
 	// automatically.  They are stopped when the StorageManager is closed.
 	// Launching through the errgroup prevents goroutine leaks in tests.
+	sm.evictionRunning.Store(true)
 	egrp.Go(func() error { sm.blockStates.Start(); return nil })
 	egrp.Go(func() error { sm.diskCrypto.Start(); return nil })
 	egrp.Go(func() error { sm.openFiles.Start(); return nil })
@@ -603,9 +609,20 @@ func (sm *StorageManager) GetDirs() map[StorageID]string {
 
 // Close stops TTL cache eviction goroutines and releases cached resources.
 func (sm *StorageManager) Close() {
-	sm.blockStates.Stop()
-	sm.diskCrypto.Stop()
-	sm.openFiles.Stop()
+	// Stop() hands the eviction loop a value over an unbuffered channel and
+	// waits for it to be received, so it blocks forever if the loop is not
+	// running -- which is the case for a read-only manager (it never starts
+	// them) and for a second Close(). Only signal loops that are live, and
+	// claim them so a repeated Close() cannot signal again.
+	//
+	// This makes Close repeatable, not concurrency-safe: the work below the CAS
+	// is unguarded, and ristretto's Close is itself not safe to call twice at
+	// once. Every caller today closes from a single goroutine.
+	if sm.evictionRunning.CompareAndSwap(true, false) {
+		sm.blockStates.Stop()
+		sm.diskCrypto.Stop()
+		sm.openFiles.Stop()
+	}
 	// Closing caches evicts all entries, triggering OnEviction which
 	// closes each file descriptor.
 	sm.openFiles.DeleteAll()
