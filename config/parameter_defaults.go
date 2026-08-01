@@ -736,6 +736,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), "1h")
 	// Origin.StorageCacheDefaultMaxAge
 	v.SetDefault(param.Origin_StorageCacheDefaultMaxAge.GetName(), "24h")
+	// Origin.StorageCacheMaxConcurrentFetches
+	v.SetDefault(param.Origin_StorageCacheMaxConcurrentFetches.GetName(), 32)
 	// Origin.StorageCacheRevalidationJitter
 	v.SetDefault(param.Origin_StorageCacheRevalidationJitter.GetName(), 10)
 	// Origin.StorageCacheSize

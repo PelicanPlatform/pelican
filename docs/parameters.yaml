@@ -1965,22 +1965,33 @@ components: ["origin"]
 name: Origin.StorageCacheLocation
 description: |+
   A directory on local disk where the origin caches objects fetched from a remote storage backend
-  (storage types `s3v2`, `https`, and `globusv2`), avoiding repeated egress from the remote provider.
+  (storage types `s3v2`, `httpsv2`, and `globusv2`), avoiding repeated egress from the remote
+  provider.
 
   Cache validity follows standard HTTP caching rules driven by the backend's Cache-Control
   information (an S3 object's Cache-Control metadata, or the Cache-Control response header from an
-  HTTPS backend).  While a copy is fresh it is served with no backend interaction at all; once
-  stale, the origin revalidates with a single metadata request (ETag comparison) and only refetches
-  when the object actually changed.  Backends that supply no Cache-Control fall under the
-  Origin.StorageCacheDefaultMaxAge policy; `no-store`/`private` objects are never cached.
+  HTTPS backend in plain-HTTP mode; WebDAV PROPFIND responses carry none).  While a copy is fresh
+  it is served with no backend interaction at all; once stale, the origin revalidates with a single
+  metadata request (ETag comparison) and only refetches when the object actually changed.  Backends
+  that supply no Cache-Control fall under the Origin.StorageCacheDefaultMaxAge policy.  Objects the
+  backend reports as `no-store` or `private` are not cached, and any copy already held is dropped
+  the next time the origin revalidates them.
 
   Object fetches triggered by a client read continue at full speed into the cache even when the
-  requesting client is slower, and complete even if the client disconnects.
+  requesting client is slower, and complete even if the client disconnects.  Two access patterns
+  deliberately read straight from the backend instead: content-type sniffing (so a HEAD request
+  costs no object egress) and byte-range requests that start beyond what has been fetched so far
+  (so a small ranged read never waits for a whole-object transfer).
 
-  The directory must be writable by the origin and should live on a filesystem large enough to hold
-  the working set; use Origin.StorageCacheSize to bound total usage.  Leaving this unset disables
-  the storage cache.  The setting has no effect for local (posix) storage types.
-type: string
+  The directory must be writable by the origin, must not be writable by other local users, and
+  should live on a filesystem large enough to hold the working set; use Origin.StorageCacheSize to
+  bound total usage.  Leaving this unset disables the storage cache.  The setting has no effect for
+  storage types that are not listed above.
+
+  This setting is incompatible with Origin.HttpAuthTokenPassthrough: passthrough makes the upstream
+  authorize each client's own token, whereas the cache is shared by all clients.  The origin refuses
+  to start if both are configured.
+type: filename
 default: none
 components: ["origin"]
 ---
@@ -1991,9 +2002,13 @@ description: |+
   information.  While fresh, cached objects are served without contacting the backend; after this
   lifetime, the origin revalidates the object's ETag with the backend before serving it again.
 
-  This mirrors LocalCache.DefaultMaxAge.  Setting this to 0 disables default freshness: every read
-  revalidates with the backend (a metadata-only request; no data egress) unless the backend's own
-  Cache-Control directives say otherwise.
+  This value also caps the freshness a backend may claim for itself: an object whose Cache-Control
+  requests a longer max-age is still revalidated after this lifetime, so whoever can write an
+  object's metadata cannot pin it in the cache indefinitely.
+
+  This mirrors LocalCache.DefaultMaxAge.  Setting this to 0 disables caching of read results
+  entirely: every read revalidates with the backend (a metadata-only request; no data egress)
+  regardless of what the backend's own Cache-Control directives say.
 type: duration
 default: 24h
 components: ["origin"]
@@ -2005,6 +2020,20 @@ description: |+
   LocalCache.RevalidationJitter.
 type: int
 default: 10
+hidden: true
+components: ["origin"]
+---
+name: Origin.StorageCacheMaxConcurrentFetches
+description: |+
+  The maximum number of objects the origin's storage cache (see Origin.StorageCacheLocation) will
+  copy from the backend at the same time.  Each in-flight copy holds a backend connection and a
+  1 MB buffer, so this bounds both the memory and the provider egress a burst of requests can
+  trigger.
+
+  Requests that arrive while every slot is busy are served directly from the backend and are not
+  cached, so the limit costs cache hit rate under load rather than availability.
+type: int
+default: 32
 components: ["origin"]
 ---
 name: Origin.StorageCacheSize
@@ -2014,7 +2043,9 @@ description: |+
   it is assumed to be in bytes.
 
   When usage exceeds the limit, the least-recently-accessed objects are evicted until usage falls
-  below 90% of the limit.  If not set (or 0), the cache size is unbounded.
+  below 90% of the limit.  If not set (or 0), the cache size is unbounded.  Note that eviction runs
+  periodically rather than admitting against the limit, so usage may briefly exceed it while many
+  objects are being fetched at once.
 type: string
 default: 0
 components: ["origin"]

@@ -449,6 +449,7 @@ type Config struct {
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		StorageCacheDefaultMaxAge time.Duration `mapstructure:"storagecachedefaultmaxage" yaml:"StorageCacheDefaultMaxAge"`
 		StorageCacheLocation string `mapstructure:"storagecachelocation" yaml:"StorageCacheLocation"`
+		StorageCacheMaxConcurrentFetches int `mapstructure:"storagecachemaxconcurrentfetches" yaml:"StorageCacheMaxConcurrentFetches"`
 		StorageCacheRevalidationJitter int `mapstructure:"storagecacherevalidationjitter" yaml:"StorageCacheRevalidationJitter"`
 		StorageCacheSize string `mapstructure:"storagecachesize" yaml:"StorageCacheSize"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
@@ -1042,6 +1043,7 @@ type configWithType struct {
 		SelfTestMaxAge struct { Type string; Value time.Duration }
 		StorageCacheDefaultMaxAge struct { Type string; Value time.Duration }
 		StorageCacheLocation struct { Type string; Value string }
+		StorageCacheMaxConcurrentFetches struct { Type string; Value int }
 		StorageCacheRevalidationJitter struct { Type string; Value int }
 		StorageCacheSize struct { Type string; Value string }
 		StoragePrefix struct { Type string; Value string }

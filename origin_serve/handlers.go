@@ -41,6 +41,7 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -693,8 +694,11 @@ func xrdMonitoringMiddleware() gin.HandlerFunc {
 	}
 }
 
-// InitializeHandlers initializes the WebDAV handlers for each export
-func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport) error {
+// InitializeHandlers initializes the WebDAV handlers for each export.  egrp
+// owns any background task the handlers start (currently the storage cache's
+// janitor) so it is awaited at shutdown; it may be nil in tests that do not
+// exercise those tasks.
+func InitializeHandlers(ctx context.Context, egrp *errgroup.Group, exports []server_utils.OriginExport) error {
 	// Validate that if DisableDirectClients is enabled, no exports have DirectReads
 	if param.Origin_DisableDirectClients.GetBool() {
 		for _, export := range exports {
@@ -828,24 +832,55 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	if loc := param.Origin_StorageCacheLocation.GetString(); loc != "" {
 		switch storageType {
 		case server_structs.OriginStorageS3v2, server_structs.OriginStorageHTTPSv2, server_structs.OriginStorageGlobusv2:
+			// With token passthrough the upstream, not Pelican, decides what
+			// each client may read, and it decides per credential.  A shared
+			// cache has no credential dimension: one user's copy would be
+			// served to every other user who clears the origin's own
+			// namespace check.  Refuse the combination rather than silently
+			// widening access.
+			if param.Origin_HttpAuthTokenPassthrough.GetBool() {
+				return fmt.Errorf("Origin.StorageCacheLocation cannot be used with Origin.HttpAuthTokenPassthrough: " +
+					"the cache is shared across clients, but passthrough makes the upstream authorize each client's " +
+					"token individually; unset one of the two")
+			}
 			var cacheSize int64
 			if sizeStr := param.Origin_StorageCacheSize.GetString(); sizeStr != "" && sizeStr != "0" {
 				parsed, err := units.ParseStrictBytes(sizeStr)
 				if err != nil {
 					return fmt.Errorf("failed to parse Origin.StorageCacheSize %q: %w", sizeStr, err)
 				}
+				if parsed < 0 {
+					return fmt.Errorf("Origin.StorageCacheSize %q is negative; use 0 for an unbounded cache", sizeStr)
+				}
 				cacheSize = parsed
 			}
+			jitter := param.Origin_StorageCacheRevalidationJitter.GetInt()
+			if jitter < 0 || jitter > 100 {
+				return fmt.Errorf("Origin.StorageCacheRevalidationJitter must be a percentage between 0 and 100, got %d", jitter)
+			}
+			maxAge := param.Origin_StorageCacheDefaultMaxAge.GetDuration()
+			if maxAge < 0 {
+				return fmt.Errorf("Origin.StorageCacheDefaultMaxAge must not be negative, got %s", maxAge)
+			}
+			concurrency := param.Origin_StorageCacheMaxConcurrentFetches.GetInt()
+			if concurrency <= 0 {
+				return fmt.Errorf("Origin.StorageCacheMaxConcurrentFetches must be positive, got %d", concurrency)
+			}
 			var err error
-			storageCacheMgr, err = newStorageCache(ctx, loc, cacheSize,
-				param.Origin_StorageCacheDefaultMaxAge.GetDuration(),
-				param.Origin_StorageCacheRevalidationJitter.GetInt())
+			storageCacheMgr, err = newStorageCache(ctx, loc, cacheSize, maxAge, jitter, concurrency)
 			if err != nil {
 				return err
 			}
-			log.Infof("Origin storage cache enabled at %s (max size: %d bytes; 0 means unbounded)", loc, cacheSize)
+			if egrp != nil {
+				egrp.Go(func() error {
+					storageCacheMgr.runJanitor()
+					return nil
+				})
+			}
+			log.Infof("Origin storage cache enabled at %s (max size: %d bytes, 0 means unbounded; up to %d concurrent fetches)",
+				loc, cacheSize, concurrency)
 		default:
-			log.Warningf("Origin.StorageCacheLocation is set but storage type %q reads local storage directly; ignoring the storage cache", storageType)
+			log.Warningf("Origin.StorageCacheLocation is set but storage type %q does not support the origin storage cache; ignoring it", storageType)
 		}
 	}
 
@@ -1132,8 +1167,15 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 		}
 
 		// Interpose the storage cache between the handler and the backend.
+		// The backend identity folded into the cache scope covers everything
+		// that changes which bytes a given object path resolves to, so
+		// repointing an export at other storage cannot serve entries cached
+		// from the previous one.
 		if storageCacheMgr != nil {
-			backend = newCachedBackend(backend, storageCacheMgr.newLayer(export.FederationPrefix, backend.FileSystem()))
+			backendID := fmt.Sprintf("%s\x00%s\x00%s\x00%s", storageType, export.StoragePrefix,
+				param.Origin_S3ServiceUrl.GetString()+param.Origin_HttpServiceUrl.GetString(),
+				export.S3Bucket+export.GlobusCollectionID)
+			backend = newCachedBackend(backend, storageCacheMgr.newLayer(export.FederationPrefix, backendID, backend.FileSystem()))
 			log.Infof("Storage cache layered over backend for %s", export.FederationPrefix)
 		}
 
