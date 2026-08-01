@@ -532,6 +532,20 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize storage manager")
 	}
 
+	// From here on the storage manager owns eviction-loop goroutines running on
+	// the caller's errgroup, and those loops only exit on Close() -- cancelling
+	// the context does not reach them. Every failure past this point therefore
+	// has to shut the storage manager down as well as the database, or the
+	// errgroup never drains: the caller is left waiting on workers belonging to
+	// a cache that was never returned. In `pelican cache serve` that wait
+	// happens before the logs are flushed and the exit code is chosen, so a
+	// startup failure would wedge the process without reporting anything.
+	failInit := func(err error) (*PersistentCache, error) {
+		storage.Close()
+		db.Close()
+		return nil, err
+	}
+
 	// Build eviction dir configs now that we know storageID → path mapping.
 	// GetDirs() returns paths with /objects appended; strip the suffix to
 	// match against the original config paths.
@@ -541,8 +555,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		sd, ok := sdCfgByPath[basePath]
 		if !ok {
 			// Should not happen — every directory in GetDirs was passed in.
-			db.Close()
-			return nil, errors.Errorf("storage directory %q not found in config", basePath)
+			return failInit(errors.Errorf("storage directory %q not found in config", basePath))
 		}
 
 		// Resolve per-dir size.  0 means auto-detect from filesystem.
@@ -553,8 +566,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		if maxSz == 0 {
 			cs, err := getCacheSize(sd.Path, db, id)
 			if err != nil {
-				db.Close()
-				return nil, errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path)
+				return failInit(errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path))
 			}
 			maxSz = cs
 		}
@@ -602,14 +614,12 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// Get federation info
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to get federation info")
+		return failInit(errors.Wrap(err, "failed to get federation info"))
 	}
 
 	directorURL, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to parse director URL")
+		return failInit(errors.Wrap(err, "failed to parse director URL"))
 	}
 
 	// Derive the default federation identity from the discovery endpoint.
@@ -629,8 +639,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 
 	// Initialize transfer engine
 	if err := config.InitClient(); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to initialize client")
+		return failInit(errors.Wrap(err, "failed to initialize client"))
 	}
 
 	// Initialize the transfer engine, sized and (for a cache server) governed
@@ -646,8 +655,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers))
 	}
 	if err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to create transfer engine")
+		return failInit(errors.Wrap(err, "failed to create transfer engine"))
 	}
 
 	downloadCtx, downloadCancel := context.WithCancel(ctx)
