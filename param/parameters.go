@@ -489,6 +489,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SelfTestMaxAge": false,
 	"Origin.StorageCacheDefaultMaxAge": false,
 	"Origin.StorageCacheLocation": false,
+	"Origin.StorageCacheMaxConcurrentFetches": false,
 	"Origin.StorageCacheRevalidationJitter": false,
 	"Origin.StorageCacheSize": false,
 	"Origin.StoragePrefix": false,
@@ -1031,6 +1032,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
 	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
+	"Origin.StorageCacheMaxConcurrentFetches": func(c *Config) int { return c.Origin.StorageCacheMaxConcurrentFetches },
 	"Origin.StorageCacheRevalidationJitter": func(c *Config) int { return c.Origin.StorageCacheRevalidationJitter },
 	"Plugin.DirectorDecisionPercentage": func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
 	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
@@ -1836,6 +1838,7 @@ var allParameterNames = []string{
 	"Origin.SelfTestMaxAge",
 	"Origin.StorageCacheDefaultMaxAge",
 	"Origin.StorageCacheLocation",
+	"Origin.StorageCacheMaxConcurrentFetches",
 	"Origin.StorageCacheRevalidationJitter",
 	"Origin.StorageCacheSize",
 	"Origin.StoragePrefix",
@@ -2295,6 +2298,7 @@ var (
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
+	Origin_StorageCacheMaxConcurrentFetches = IntParam{"Origin.StorageCacheMaxConcurrentFetches"}
 	Origin_StorageCacheRevalidationJitter = IntParam{"Origin.StorageCacheRevalidationJitter"}
 	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
@@ -2862,6 +2866,7 @@ func init() {
 		"Origin.Port": Origin_Port,
 		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
 		"Origin.SSH.Port": Origin_SSH_Port,
+		"Origin.StorageCacheMaxConcurrentFetches": Origin_StorageCacheMaxConcurrentFetches,
 		"Origin.StorageCacheRevalidationJitter": Origin_StorageCacheRevalidationJitter,
 		"Plugin.DirectorDecisionPercentage": Plugin_DirectorDecisionPercentage,
 		"Server.DatabaseBackup.MaxCount": Server_DatabaseBackup_MaxCount,
