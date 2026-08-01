@@ -1715,27 +1715,21 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a job has been processed into files (or failed)
 			job := recv.Interface().(*clientTransferJob)
 			job.job.lookupDone.Store(true)
-			// If no transfers were created or we have an error, the job is no
-			// longer active
-			if job.job.lookupErr != nil || job.job.totalXfer == 0 {
-				// Remove this job from the list of active jobs for the client.
-				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
-					return oldJob.uuid == job.job.uuid
-				})
-				if len(activeJobs[job.uuid]) == 0 {
-					func() {
-						te.clientLock.Lock()
-						defer te.clientLock.Unlock()
-						// If the client is closed and there are no remaining
-						// jobs for that client, we can close the results channel.
-						if te.workMap[job.uuid] == nil {
-							close(te.resultsMap[job.uuid])
-						}
-					}()
-				}
-			} else if job.job.activeXfer.Load() == 0 {
-				// Transfer jobs were created but they all completed before the recursive directory
-				// walk finished.
+			// A job is finished once its lookup is done AND every transfer the
+			// lookup handed to the workers has reported back.
+			//
+			// A lookup failure does not by itself end the job. A recursive walk
+			// can fail partway through, after it has already submitted files
+			// that are now in flight, and each of those still owes the client a
+			// result. Retiring the job here on the strength of lookupErr alone
+			// would close the client's results channel out from under them:
+			// the next result to arrive is then a send on a closed channel,
+			// which takes down the process.
+			//
+			// The same predicate is applied as each result arrives, so whichever
+			// happens last -- the lookup finishing or the final result landing --
+			// is what retires the job.
+			if job.job.activeXfer.Load() == 0 {
 				te.finishJob(&activeJobs, job.job, job.uuid)
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
