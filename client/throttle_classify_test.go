@@ -27,8 +27,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -193,4 +195,108 @@ func TestStatHttpNotFoundStillClassified(t *testing.T) {
 	assert.ErrorIs(t, err, ErrObjectNotFound)
 	assert.NotErrorIs(t, err, ErrTooManyRequests)
 	assert.False(t, IsRetryable(err), "a missing object is not worth retrying")
+}
+
+// newTPCTestToken returns a token generator with the value already set, so
+// nothing tries to acquire one from a federation that does not exist.
+func newTPCTestToken() *tokenGenerator {
+	tg := &tokenGenerator{Sync: new(singleflight.Group)}
+	tg.SetToken("test-token")
+	return tg
+}
+
+// newTPCTestTransfer builds the minimal transferFile copyHTTP needs: a source
+// to HEAD and a destination to COPY to.
+func newTPCTestTransfer(ctx context.Context, srcURL, destURL *url.URL) *transferFile {
+	return &transferFile{
+		ctx:       ctx,
+		remoteURL: &url.URL{Scheme: "pelican", Host: "example-federation.org", Path: "/ns/object"},
+		attempts:  []transferAttemptDetails{{Url: srcURL}},
+		token:     newTPCTestToken(),
+		job: &TransferJob{
+			uuid:     uuid.New(),
+			xferType: transferTypeCopy,
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   "example-federation.org",
+				Path:   "/ns/object",
+			},
+			destDirResp: server_structs.DirectorResponse{
+				ObjectServers: []*url.URL{destURL},
+			},
+		},
+	}
+}
+
+// TestCopyHTTPSourceThrottleIsClassified pins the third-party-copy source
+// probe. A copy starts by HEADing the source to learn its size; a source that
+// sheds that HEAD has not refused the copy permanently, it has asked for a
+// retry.
+func TestCopyHTTPSourceThrottleIsClassified(t *testing.T) {
+	test_utils.InitClient(t, map[param.Param]any{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "12")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer src.Close()
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the destination must not be contacted after the source shed the request")
+	}))
+	defer dest.Close()
+
+	srcURL, err := url.Parse(src.URL + "/ns/object")
+	require.NoError(t, err)
+	destURL, err := url.Parse(dest.URL + "/ns/object")
+	require.NoError(t, err)
+
+	_, err = copyHTTP(newTPCTestTransfer(ctx, srcURL, destURL))
+	require.Error(t, err)
+	var throttled *CacheThrottleError
+	require.ErrorAs(t, err, &throttled)
+	assert.Equal(t, 12*time.Second, throttled.RetryAfter)
+	// A response to HEAD carries no body, so there is no structured reason to
+	// report on this leg -- only that the source shed the request.
+	assert.Empty(t, throttled.Reason)
+	assert.Equal(t, srcURL.Host, throttled.Endpoint)
+	assert.ErrorIs(t, err, ErrTooManyRequests)
+	assert.True(t, IsRetryable(err))
+}
+
+// TestCopyHTTPDestinationThrottleIsClassified pins the other half: the source
+// is healthy, but the destination sheds the COPY itself.
+func TestCopyHTTPDestinationThrottleIsClassified(t *testing.T) {
+	test_utils.InitClient(t, map[param.Param]any{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "2048")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer src.Close()
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "45")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"cache_overloaded","detail":"pending buffer is full"}`))
+	}))
+	defer dest.Close()
+
+	srcURL, err := url.Parse(src.URL + "/ns/object")
+	require.NoError(t, err)
+	destURL, err := url.Parse(dest.URL + "/ns/object")
+	require.NoError(t, err)
+
+	_, err = copyHTTP(newTPCTestTransfer(ctx, srcURL, destURL))
+	require.Error(t, err)
+	var throttled *CacheThrottleError
+	require.ErrorAs(t, err, &throttled)
+	assert.Equal(t, string(ShedCacheOverloaded), throttled.Reason)
+	assert.Equal(t, 45*time.Second, throttled.RetryAfter)
+	assert.Equal(t, destURL.Host, throttled.Endpoint)
+	assert.True(t, IsRetryable(err),
+		"a shed copy must be retried rather than reported as a permanent failure")
 }

@@ -153,7 +153,9 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	// won't appear here.  Reject anything other than 200 OK.
 	if resp.StatusCode == http.StatusTooManyRequests {
 		// Source throttled the request; carry the Retry-After hint on the
-		// retryable throttle error (the body was not read on this path).
+		// retryable throttle error. A response to HEAD never carries a body,
+		// so there is no structured reason to read here -- the error is
+		// classified generically, which is still retryable.
 		err = newThrottleErrorFromResponse(resp, "", xfer.attempts[0].Url.Host)
 		return
 	}

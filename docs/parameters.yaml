@@ -2733,9 +2733,12 @@ components: ["cache"]
 ---
 name: Cache.Throttle.RetryAfter
 description: |+
-  The backoff duration advertised in the Retry-After header when the cache sheds a
-  request with HTTP 429. This is a hint for clients and external retriers; the cache
-  does not enforce it. Rounded up to whole seconds on the wire.
+  The backoff duration advertised in the Retry-After header on any HTTP 429 the cache
+  returns: a fair-scheduler shed, a 429 passed through from the upstream it was fetching
+  from, or a prestage request refused because the prestage queue is full.
+
+  This is a hint for clients and external retriers; the cache does not enforce it, and
+  the Pelican client does not sleep on it. Rounded up to whole seconds on the wire.
 type: duration
 default: 60s
 hidden: true

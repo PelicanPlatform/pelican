@@ -633,36 +633,17 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize client")
 	}
 
-	// The cache server serves many clients concurrently, so it needs far more
-	// transfer workers than the command-line client's small default
-	// (Client.WorkerCount).  Use Cache.WorkerCount for the server; the
-	// client-side local cache keeps the client default.
-	//
-	// The server-mode engine is also wired with a TagScheduler so that a
-	// single misbehaving upstream origin cannot monopolise the worker pool
-	// (see Cache.Throttle.* params for the caps).
+	// Initialize the transfer engine, sized and (for a cache server) governed
+	// by newCacheScheduler.
 	var te *client.TransferEngine
-	var pcScheduler *client.TagScheduler
-	if cfg.Mode == CacheModeServer {
-		workers := param.Cache_WorkerCount.GetInt()
-		if workers <= 0 {
-			workers = 100
-		}
-		schedCfg := client.SchedulerConfig{
-			PerTagStarvingPercent: param.Cache_Throttle_PerOriginStarvingPercent.GetInt(),
-			PerTagActivePercent:   param.Cache_Throttle_PerOriginActivePercent.GetInt(),
-			PendingBufferSize:     param.Cache_Throttle_PendingBufferSize.GetInt(),
-			PerTagPendingSize:     param.Cache_Throttle_PerOriginPendingSize.GetInt(),
-			EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
-		}
-		if schedCfg.PendingBufferSize > 0 {
-			pcScheduler = client.NewTagScheduler(workers, schedCfg)
-			te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers), client.WithScheduler(pcScheduler))
-		} else {
-			te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers))
-		}
-	} else {
+	workers, pcScheduler := newCacheScheduler(cfg.Mode)
+	switch {
+	case workers <= 0:
 		te, err = client.NewTransferEngine(ctx)
+	case pcScheduler != nil:
+		te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers), client.WithScheduler(pcScheduler))
+	default:
+		te, err = client.NewTransferEngine(ctx, client.WithWorkerCount(workers))
 	}
 	if err != nil {
 		db.Close()
@@ -742,6 +723,44 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	log.Infof("Persistent cache initialized: %s (%d storage dir(s))", cfg.BaseDir, len(storageDirs))
 
 	return pc, nil
+}
+
+// newCacheScheduler decides how the persistent cache's transfer engine is
+// sized and whether it gets a per-origin fair scheduler.
+//
+// A cache server serves many clients concurrently, so it needs far more
+// transfer workers than the command-line client's small default
+// (Client.WorkerCount); it uses Cache.WorkerCount instead. It also gets a
+// TagScheduler, so that one misbehaving upstream origin cannot hold the whole
+// worker pool on stalled connections and make the cache look unresponsive to
+// every client (see the Cache.Throttle.* parameters for the caps).
+//
+// The local (client-side) cache serves a single process rather than many
+// tenants, so it keeps the client defaults and runs unscheduled: a zero worker
+// count means "let the engine choose".
+//
+// Setting Cache.Throttle.PendingBufferSize to 0 is the operator's switch for
+// turning the scheduler off; the engine then runs on the plain
+// first-come-first-served channel.
+func newCacheScheduler(mode CacheMode) (workers int, sched *client.TagScheduler) {
+	if mode != CacheModeServer {
+		return 0, nil
+	}
+	workers = param.Cache_WorkerCount.GetInt()
+	if workers <= 0 {
+		workers = 100
+	}
+	schedCfg := client.SchedulerConfig{
+		PerTagStarvingPercent: param.Cache_Throttle_PerOriginStarvingPercent.GetInt(),
+		PerTagActivePercent:   param.Cache_Throttle_PerOriginActivePercent.GetInt(),
+		PendingBufferSize:     param.Cache_Throttle_PendingBufferSize.GetInt(),
+		PerTagPendingSize:     param.Cache_Throttle_PerOriginPendingSize.GetInt(),
+		EMAWindow:             param.Cache_Throttle_EMAWindow.GetDuration(),
+	}
+	if schedCfg.PendingBufferSize <= 0 {
+		return workers, nil
+	}
+	return workers, client.NewTagScheduler(workers, schedCfg)
 }
 
 // schedulerMetricsPublishInterval is how often the fair-scheduler

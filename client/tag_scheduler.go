@@ -148,6 +148,13 @@ type SchedulerConfig struct {
 	// PendingBufferSize — total number of pending transfers the
 	// scheduler will queue across all tags before shedding new admits
 	// with ErrTooManyRequests. 0 disables the cap (unbounded queue).
+	//
+	// Note that the cache-level knob of the same name,
+	// Cache.Throttle.PendingBufferSize, reads 0 as "do not build a
+	// scheduler at all" -- it never reaches this field. The two zeroes
+	// mean opposite things because they act at different layers: here
+	// there is a scheduler and its queue is unbounded; there, there is no
+	// scheduler.
 	PendingBufferSize int
 	// PerTagPendingSize — number of pending transfers the scheduler
 	// will queue for any single tag before rejecting new admits with

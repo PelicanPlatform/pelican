@@ -58,8 +58,10 @@ var shedReasonTypes = map[ShedReason]string{
 	ShedCacheOverloaded:    "Transfer.CacheOverloaded",
 }
 
-// wrapErrorByStatusCode maps HTTP 429 to a retryable Pelican error, so a cache
-// shed is no longer mis-classified as a fatal specification error.
+// wrapErrorByStatusCode maps HTTP 429 to a retryable Pelican error rather than
+// to the generic Specification bucket the other 4xx codes land in. A shed says
+// "come back later", so classifying it as a fatal client error would make the
+// caller give up on a server that was merely busy.
 func TestWrapStatusCode429IsRetryable(t *testing.T) {
 	wrapped := wrapErrorByStatusCode(http.StatusTooManyRequests, errors.New("shed"))
 	var pe *error_codes.PelicanError

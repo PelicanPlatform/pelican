@@ -346,7 +346,7 @@ func NewTransfer_CacheOverloadedError(err error) *PelicanError {
 		exitCode:    9,
 		code:        6010,
 		retryable:   true,
-		description: "A cache refused to admit the upstream fetch because its global pending buffer is full; the cache is saturated across all origins it is serving. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+		description: "A server rejected the request because it was at capacity. When a cache's fair scheduler reports this reason, its global pending buffer was full and the cache is saturated across all the origins it serves rather than being held up by any single one of them. This is also the generic classification for a 429 that carries no more specific reason, including one from a Pelican service other than a cache. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 		err:         err,
 	}
 }
