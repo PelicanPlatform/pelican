@@ -188,6 +188,21 @@ func init() {
 	server_utils.RegisterPOSIXv2Reset(ResetHandlers)
 }
 
+// BackendForPrefix returns the storage backend serving a federation prefix, or
+// nil if no export claims it.
+//
+// The backend is how this process reaches its own storage.  Anything that wants
+// to read an export -- listing it to measure disk usage, say -- should go
+// through here rather than addressing the origin over the network: the bytes
+// are already local, and a request that leaves the process needs a federation,
+// a credential, and an initialized client to come back.
+func BackendForPrefix(prefix string) server_utils.OriginBackend {
+	if backends == nil {
+		return nil
+	}
+	return backends[prefix]
+}
+
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
 	backends = nil

@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/webdav"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
@@ -40,6 +42,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/origin_serve"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -243,6 +246,72 @@ func calculateDiskUsagePelican(ctx context.Context, export server_utils.OriginEx
 	return totalBytes, totalCount, err
 }
 
+// calculateDiskUsageBackend measures an export by walking the storage backend
+// this process already serves it from, with no network involved.
+//
+// The native "v2" backends are served here, in-process, so their bytes are
+// reachable directly.  Measuring them by pointing the Pelican client at the
+// origin's own namespace -- as calculateDiskUsagePelican does -- means asking a
+// director where to find data this process is itself serving and reading it back
+// over HTTP.  That needs a federation, a credential, and an initialized client;
+// nothing on a serve path calls config.InitClient, so outside a test harness
+// that had called it the crawl could not build a transfer engine at all.
+func calculateDiskUsageBackend(ctx context.Context, export server_utils.OriginExport, fs webdav.FileSystem, limiter *rate.Limiter) (uint64, uint64, error) {
+	var totalBytes, totalCount uint64
+
+	// Paths are relative to the export, matching what the WebDAV handler passes
+	// this filesystem; "/" is the export root.
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if limiter != nil {
+			if err := limiter.Wait(ctx); err != nil {
+				return err
+			}
+		}
+
+		f, err := fs.OpenFile(ctx, dir, os.O_RDONLY, 0)
+		if err != nil {
+			return errors.Wrapf(err, "failed to open %s", dir)
+		}
+		entries, err := f.Readdir(-1)
+		if closeErr := f.Close(); closeErr != nil {
+			log.Debugf("Error closing %s after listing: %v", dir, closeErr)
+		}
+		if err != nil {
+			return errors.Wrapf(err, "failed to list %s", dir)
+		}
+
+		for _, entry := range entries {
+			child := path.Join(dir, entry.Name())
+			if entry.IsDir() {
+				// A failed subtree is reported and skipped: one unreadable
+				// directory should not discard the whole total.
+				if err := walk(child); err != nil {
+					if ctx.Err() != nil {
+						return err
+					}
+					PelicanOriginDiskUsageCrawlErrors.WithLabelValues(export.FederationPrefix).Inc()
+					log.Warnf("Error accessing %s: %v", child, err)
+				}
+				continue
+			}
+			totalBytes += uint64(entry.Size())
+			totalCount++
+		}
+		return nil
+	}
+
+	if err := walk("/"); err != nil {
+		return totalBytes, totalCount, err
+	}
+	return totalBytes, totalCount, nil
+}
+
 // calculateDiskUsageForExport calculates disk usage for a single export
 func calculateDiskUsageForExport(ctx context.Context, export server_utils.OriginExport, limiter *rate.Limiter, tokenPath string, forcePelican bool) (diskUsageResult, error) {
 	result := diskUsageResult{
@@ -251,6 +320,22 @@ func calculateDiskUsageForExport(ctx context.Context, export server_utils.Origin
 
 	storageType := param.Origin_StorageType.GetString()
 	if forcePelican || !usesLocalDiskUsageWalk(storageType) {
+		// Prefer the backend this process is already serving the export from.
+		// Only the XRootD-fronted backends (posix, s3, https, globus, xroot)
+		// have none -- XRootD holds their storage -- and those fall back to
+		// crawling the federation.  Standalone mode permits only the native
+		// backends, so it never needs the fallback.
+		if backend := origin_serve.BackendForPrefix(export.FederationPrefix); backend != nil && backend.FileSystem() != nil {
+			log.Debugf("Walking the %s backend directly for disk usage of %s", storageType, export.FederationPrefix)
+			bytes, count, err := calculateDiskUsageBackend(ctx, export, backend.FileSystem(), limiter)
+			if err != nil {
+				return result, errors.Wrapf(err, "failed to calculate disk usage for %s", export.FederationPrefix)
+			}
+			result.bytes = bytes
+			result.count = count
+			return result, nil
+		}
+
 		log.Debugf("Using PelicanFS for disk usage calculation of backend %s", storageType)
 		bytes, count, err := calculateDiskUsagePelican(ctx, export, limiter, tokenPath)
 		if err != nil {
