@@ -571,8 +571,14 @@ func (tm *TransferManager) executeTransfer(job *TransferJob, transfer *Transfer,
 		tm.publishJobProgress(job)
 	}
 
-	// Prepend callback to options so it's applied first
-	options = append([]client.TransferOption{client.WithCallback(progressCallback)}, options...)
+	// Prepend callback to options so it's applied first. Downloads run on a
+	// caller's behalf here just as they do from the command line, so they
+	// refuse collections on the same terms; the option is inert for uploads
+	// and prestage.
+	options = append([]client.TransferOption{
+		client.WithCallback(progressCallback),
+		client.WithRejectCollections(!transfer.Recursive),
+	}, options...)
 
 	var err error
 	var results []client.TransferResults

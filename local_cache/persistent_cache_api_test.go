@@ -20,10 +20,12 @@ package local_cache
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -487,4 +489,110 @@ func TestHandleErrorNotFoundDoesNotMaskSpecificFailures(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, rec.Code)
 		})
 	}
+}
+
+// The shapes below mirror just enough of RFC 4918 §14 to read back what
+// buildPropfindMultistatus emits.  A pointer for the collection element lets
+// the test tell "absent" from "present but empty".
+type testDavResourceType struct {
+	Collection *struct{} `xml:"DAV: collection"`
+}
+
+type testDavProp struct {
+	ResourceType  testDavResourceType `xml:"DAV: resourcetype"`
+	ContentLength int64               `xml:"DAV: getcontentlength"`
+	LastModified  string              `xml:"DAV: getlastmodified"`
+	ContentType   string              `xml:"DAV: getcontenttype"`
+	ETag          string              `xml:"DAV: getetag"`
+}
+
+type testDavPropstat struct {
+	Prop   testDavProp `xml:"DAV: prop"`
+	Status string      `xml:"DAV: status"`
+}
+
+type testDavResponse struct {
+	Href     string            `xml:"DAV: href"`
+	Propstat []testDavPropstat `xml:"DAV: propstat"`
+}
+
+type testDavMultistatus struct {
+	XMLName   xml.Name          `xml:"DAV: multistatus"`
+	Responses []testDavResponse `xml:"DAV: response"`
+}
+
+// TestBuildPropfindMultistatus checks that the multistatus body the cache
+// synthesizes from its own metadata cannot be steered by the origin that
+// supplied that metadata.  ContentType and ETag are copied verbatim out of the
+// upstream response headers, so a hostile origin controls them; unescaped,
+// either can close the element it sits in and forge sibling properties.  The
+// forged property that matters most is resourcetype/collection, which clients
+// now read to decide whether a path is a collection.
+func TestBuildPropfindMultistatus(t *testing.T) {
+	lastMod := time.Date(2026, time.February, 3, 4, 5, 6, 0, time.UTC)
+
+	t.Run("BenignValuesAreUnchanged", func(t *testing.T) {
+		meta := &CacheMetadata{
+			ETag:          "abc123",
+			ContentType:   "application/octet-stream",
+			ContentLength: 42,
+			LastModified:  lastMod,
+		}
+		expected := `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/test/object.txt</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>42</D:getcontentlength>
+        <D:getlastmodified>Tue, 03 Feb 2026 04:05:06 GMT</D:getlastmodified>
+        <D:getcontenttype>application/octet-stream</D:getcontenttype>
+        <D:getetag>abc123</D:getetag>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
+`
+		assert.Equal(t, expected, string(buildPropfindMultistatus("/test/object.txt", meta)))
+	})
+
+	t.Run("HostileOriginCannotForgeProperties", func(t *testing.T) {
+		// An ETag that tries to close its own element, declare the object a
+		// collection, and leave an element open for the rest of the document.
+		hostileETag := `"x"</D:getetag><D:resourcetype><D:collection/></D:resourcetype><D:x>`
+		hostileContentType := `text/plain</D:getcontenttype><D:getetag>forged & "spoofed"</D:getetag><D:y>`
+		hostilePath := `/test/a&b<c>/object.txt`
+
+		meta := &CacheMetadata{
+			ETag:          hostileETag,
+			ContentType:   hostileContentType,
+			ContentLength: 42,
+			LastModified:  lastMod,
+		}
+		body := buildPropfindMultistatus(hostilePath, meta)
+
+		// The document still parses, which an unescaped `<D:x>` would prevent.
+		var ms testDavMultistatus
+		require.NoError(t, xml.Unmarshal(body, &ms), "body is not well-formed XML: %s", body)
+
+		require.Len(t, ms.Responses, 1)
+		resp := ms.Responses[0]
+		require.Len(t, resp.Propstat, 1, "origin must not be able to add a propstat")
+		prop := resp.Propstat[0].Prop
+
+		// Every hostile value survives as literal text, in its own property.
+		assert.Equal(t, hostilePath, resp.Href)
+		assert.Equal(t, hostileETag, prop.ETag)
+		assert.Equal(t, hostileContentType, prop.ContentType)
+		assert.Equal(t, int64(42), prop.ContentLength)
+		assert.Equal(t, "Tue, 03 Feb 2026 04:05:06 GMT", prop.LastModified)
+		assert.Equal(t, "HTTP/1.1 200 OK", resp.Propstat[0].Status)
+
+		// The injected markup did not become elements: the resource is still
+		// reported as a plain object, not a collection.
+		assert.Nil(t, prop.ResourceType.Collection, "forged collection element was parsed: %s", body)
+		assert.NotContains(t, string(body), "<D:collection")
+	})
 }

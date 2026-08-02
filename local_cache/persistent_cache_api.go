@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"io/fs"
@@ -412,6 +413,17 @@ func requestOnlyIfCached(r *http.Request) bool {
 //   - No-store streaming (io.Copy) for non-seekable responses
 //   - Range requests via http.ServeContent for seekable responses
 func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
+	// Every response from here carries object bytes the cache did not author
+	// and whose type it does not know: the origin's Content-Type is not
+	// recorded anywhere, so both the stored path (http.ServeContent) and the
+	// pass-through path fall back to sniffing, which types anything
+	// HTML-shaped as a document. This handler is mounted on the same Gin
+	// engine as the web UI, so that document would run on the origin holding
+	// the admin session cookie -- reachable by anyone who can put a .html or
+	// .svg into a namespace this cache serves. Set once here, before any
+	// branch writes, so it covers GET, HEAD, and PROPFIND on both listeners.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
 	authzHeader := r.Header.Get("Authorization")
 	bearerToken := ""
 	if strings.HasPrefix(authzHeader, "Bearer ") {
@@ -684,6 +696,17 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", strconv.FormatInt(contentLen, 10))
 		}
 		w.Header().Set("Accept-Ranges", "none")
+		// The stored path gets its content type from http.ServeContent; this
+		// path has to say so itself. Without it net/http sniffs the body, and
+		// an origin's directory listing -- the reason this path exists -- is
+		// HTML, which would then be typed as such and run as a document on the
+		// cache's own web origin. What the origin sent is not recorded, so the
+		// honest answer is the opaque one.
+		contentType := meta.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(http.StatusOK)
 
 		var writeErr error
@@ -837,6 +860,39 @@ func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http
 		return false
 	}
 
+	body := buildPropfindMultistatus(objectPath, meta)
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusMultiStatus)
+	if _, err := w.Write(body); err != nil {
+		log.Errorln("Failed to write PROPFIND response:", err)
+	}
+	return true
+}
+
+// writeXMLText writes s to buf as XML character data, escaping anything that
+// would otherwise be read as markup.  xml.EscapeText can only fail when the
+// writer fails, and a bytes.Buffer never does, so the error is logged rather
+// than plumbed through the callers.
+func writeXMLText(buf *bytes.Buffer, s string) {
+	if err := xml.EscapeText(buf, []byte(s)); err != nil {
+		log.Errorln("Failed to escape XML text for PROPFIND response:", err)
+	}
+}
+
+// buildPropfindMultistatus renders the WebDAV multistatus body describing a
+// single cached object.
+//
+// Every interpolated value is escaped rather than concatenated: the path comes
+// from the client, and ContentType and ETag are copied verbatim from the
+// upstream origin's response headers.  A hostile origin that answers with an
+// ETag such as `</D:getetag><D:resourcetype><D:collection/></D:resourcetype>`
+// would otherwise forge properties in a document the cache serves to its own
+// clients under its own name — a forged resourcetype in particular now steers
+// client behaviour, since clients use it to decide whether a path is a
+// collection.
+func buildPropfindMultistatus(objectPath string, meta *CacheMetadata) []byte {
 	// Format Last-Modified per RFC 7232 §2.2 / HTTP-date.
 	var lastMod string
 	if !meta.LastModified.IsZero() {
@@ -849,32 +905,32 @@ func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http
 	buf.WriteString("\n")
 	buf.WriteString(`<D:multistatus xmlns:D="DAV:">`)
 	buf.WriteString("\n  <D:response>\n    <D:href>")
-	buf.WriteString(objectPath)
+	writeXMLText(&buf, objectPath)
 	buf.WriteString("</D:href>\n    <D:propstat>\n      <D:prop>\n")
 	buf.WriteString("        <D:resourcetype/>\n")
 	if meta.ContentLength > 0 {
 		fmt.Fprintf(&buf, "        <D:getcontentlength>%d</D:getcontentlength>\n", meta.ContentLength)
 	}
 	if lastMod != "" {
-		fmt.Fprintf(&buf, "        <D:getlastmodified>%s</D:getlastmodified>\n", lastMod)
+		buf.WriteString("        <D:getlastmodified>")
+		writeXMLText(&buf, lastMod)
+		buf.WriteString("</D:getlastmodified>\n")
 	}
 	if meta.ContentType != "" {
-		fmt.Fprintf(&buf, "        <D:getcontenttype>%s</D:getcontenttype>\n", meta.ContentType)
+		buf.WriteString("        <D:getcontenttype>")
+		writeXMLText(&buf, meta.ContentType)
+		buf.WriteString("</D:getcontenttype>\n")
 	}
 	if meta.ETag != "" {
-		fmt.Fprintf(&buf, "        <D:getetag>%s</D:getetag>\n", meta.ETag)
+		buf.WriteString("        <D:getetag>")
+		writeXMLText(&buf, meta.ETag)
+		buf.WriteString("</D:getetag>\n")
 	}
 	buf.WriteString("      </D:prop>\n")
 	buf.WriteString("      <D:status>HTTP/1.1 200 OK</D:status>\n")
 	buf.WriteString("    </D:propstat>\n  </D:response>\n</D:multistatus>\n")
 
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	w.WriteHeader(http.StatusMultiStatus)
-	if _, err := w.Write(buf.Bytes()); err != nil {
-		log.Errorln("Failed to write PROPFIND response:", err)
-	}
-	return true
+	return buf.Bytes()
 }
 
 // proxyPropfind forwards a PROPFIND request to the origin server.

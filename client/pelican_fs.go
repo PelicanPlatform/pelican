@@ -148,7 +148,7 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	// For O_RDWR, try to stat first. If file doesn't exist, switch to write-only mode.
 	var fileInfo *FileInfo
 	if readMode {
-		fi, err := statHttp(pUrl, dirResp, token, nil)
+		fi, err := statHttp(pfs.ctx, pUrl, dirResp, token, nil)
 		if err != nil {
 			if rdwrMode {
 				// File doesn't exist in RDWR mode - switch to write-only

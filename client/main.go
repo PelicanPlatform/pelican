@@ -169,6 +169,20 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 // token, and statHttp's own gowebdav client, so callers can pre-flight a
 // path without paying for a worker pool and its goroutines.
 func DoStat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
+	return stat(ctx, nil, destination, options...)
+}
+
+// Stat is DoStat for a caller that already holds an engine -- the cache, for
+// one, which stats before every miss it fills. It is the same lookup; the
+// difference is that the engine's director responses are reused rather than
+// re-queried, which is the whole of what an engine has to offer a stat.
+func (te *TransferEngine) Stat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
+	return stat(ctx, te, destination, options...)
+}
+
+// stat is the body of both. te may be nil, in which case the Director is
+// queried directly.
+func stat(ctx context.Context, te *TransferEngine, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -199,7 +213,11 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionCacheEmbeddedClientMode{}:
-			cacheMode = true
+			// The value, not merely the presence of the option: every caller
+			// in the cache passes useEmbeddedCacheMode(), which is false in
+			// site-local mode, and reading it as true there queries the
+			// Director with the wrong flavor.
+			cacheMode = option.Value().(bool)
 		case identTransferOptionStatUploadDestination{}:
 			uploadDestination = option.Value().(bool)
 		}
@@ -214,7 +232,20 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		directorMethod, tokenOperation = http.MethodPut, config.TokenWrite
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+	// Reuse the engine's director responses the way job creation does, when
+	// there is an engine. A cache stats before it downloads, so otherwise every
+	// miss spends two director queries on the same namespace. Only the read
+	// flavor is cached: an upload destination asks a different question and
+	// gets a different answer, and the cache is keyed only by prefix.
+	var dirResp server_structs.DirectorResponse
+	if te != nil && te.dirRespCache != nil && !uploadDestination {
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +277,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		token = nil
 	}
 
-	statInfo, err := statHttp(pUrl, dirResp, token, fedToken)
+	statInfo, err := statHttp(ctx, pUrl, dirResp, token, fedToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	}

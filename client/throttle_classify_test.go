@@ -80,7 +80,7 @@ func TestObjectCachedThrottleIsClassified(t *testing.T) {
 	require.NoError(t, err)
 	svrURL.Path = "/ns/object"
 
-	age, size, err := objectCached(ctx, svrURL, nil)
+	age, size, _, _, err := objectCached(ctx, svrURL, nil, false)
 
 	require.Error(t, err, "a shed cache-status probe must not be reported as an answer")
 	var throttled *CacheThrottleError
@@ -119,7 +119,7 @@ func TestObjectCachedHeadThrottleIsClassified(t *testing.T) {
 	require.NoError(t, err)
 	svrURL.Path = "/ns/object"
 
-	_, _, err = objectCached(ctx, svrURL, nil)
+	_, _, _, _, err = objectCached(ctx, svrURL, nil, false)
 	require.Error(t, err)
 	var throttled *CacheThrottleError
 	require.ErrorAs(t, err, &throttled)
@@ -156,7 +156,7 @@ func TestStatHttpThrottleIsClassified(t *testing.T) {
 		ObjectServers: []*url.URL{{Scheme: svrURL.Scheme, Host: svrURL.Host, Path: "/ns/object"}},
 	}
 
-	_, err = statHttp(dest, dirResp, nil, nil)
+	_, err = statHttp(context.Background(), dest, dirResp, nil, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrTooManyRequests,
 		"a shed stat must satisfy the same sentinel check as any other throttle")
@@ -190,7 +190,7 @@ func TestStatHttpNotFoundStillClassified(t *testing.T) {
 		ObjectServers: []*url.URL{{Scheme: svrURL.Scheme, Host: svrURL.Host, Path: "/ns/object"}},
 	}
 
-	_, err = statHttp(dest, dirResp, nil, nil)
+	_, err = statHttp(context.Background(), dest, dirResp, nil, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrObjectNotFound)
 	assert.NotErrorIs(t, err, ErrTooManyRequests)

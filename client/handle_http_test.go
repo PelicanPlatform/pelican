@@ -779,7 +779,10 @@ func TestSortAttempts(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
@@ -808,24 +811,24 @@ func TestSortAttempts(t *testing.T) {
 
 	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("aaa")
-	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
+	size, _, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, token, false)
 	assert.Equal(t, int64(-1), size)
 	assert.Equal(t, svr1.URL, results[0].Url.String())
 	assert.Equal(t, svr1.URL, results[1].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
@@ -851,7 +854,10 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
@@ -887,7 +893,7 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 
 	// sortAttempts must keep the preferred (non-responsive) cache before the
 	// working director cache, even though the director cache responds immediately.
-	_, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token)
+	_, _, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token, false)
 
 	require.Len(t, results, 2)
 	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
@@ -898,7 +904,7 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 	// Verify the same ordering is preserved when the preferred cache is listed
 	// after the director cache in the input slice (i.e., the Preferred flag, not
 	// input position, drives the sort).
-	_, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token)
+	_, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token, false)
 
 	require.Len(t, results, 2)
 	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
