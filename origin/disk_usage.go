@@ -166,11 +166,30 @@ func calculateDiskUsagePOSIX(ctx context.Context, storagePath string, limiter *r
 	return totalBytes, totalCount, err
 }
 
+// usesLocalDiskUsageWalk reports whether the export's data lives on a locally
+// mounted filesystem, so disk usage can be measured with a plain directory walk
+// (or the Ceph xattr fast path) instead of crawling the export through the
+// federation. Both POSIX-like backends qualify: "posixv2" is served in-process
+// but its StoragePrefix is still an ordinary local path.
+func usesLocalDiskUsageWalk(storageType string) bool {
+	return server_structs.OriginStorageType(storageType).IsPosixLike()
+}
+
 // calculateDiskUsagePelican calculates disk usage using the Pelican client FS interface
 // This is used for non-POSIX backends (e.g. XRootD, S3, etc.) where we can't walk the local filesystem
 func calculateDiskUsagePelican(ctx context.Context, export server_utils.OriginExport, limiter *rate.Limiter, tokenPath string) (uint64, uint64, error) {
 	var totalBytes uint64
 	var totalCount uint64
+
+	// This path walks the export through the federation (director-routed
+	// pelican:// URLs). A standalone origin has no director to route through, so
+	// there is no way to crawl a remote-protocol backend this way.
+	if config.IsStandaloneOrigin() {
+		return 0, 0, errors.Errorf("disk usage calculation for the %s backend requires a federation to crawl through, "+
+			"which is unavailable when %s is enabled; disable %s to silence this",
+			param.Origin_StorageType.GetString(), param.Origin_EnableStandaloneMode.GetName(),
+			param.Origin_EnableDiskUsageCalculation.GetName())
+	}
 
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
@@ -231,7 +250,7 @@ func calculateDiskUsageForExport(ctx context.Context, export server_utils.Origin
 	}
 
 	storageType := param.Origin_StorageType.GetString()
-	if forcePelican || storageType != string(server_structs.OriginStoragePosix) {
+	if forcePelican || !usesLocalDiskUsageWalk(storageType) {
 		log.Debugf("Using PelicanFS for disk usage calculation of backend %s", storageType)
 		bytes, count, err := calculateDiskUsagePelican(ctx, export, limiter, tokenPath)
 		if err != nil {
@@ -286,7 +305,7 @@ func CalculateDiskUsage(ctx context.Context, forcePelican bool) error {
 
 	// Setup disk usage token if needed (for non-POSIX backends or forced PelicanFS)
 	storageType := param.Origin_StorageType.GetString()
-	usePelican := forcePelican || storageType != string(server_structs.OriginStoragePosix)
+	usePelican := forcePelican || !usesLocalDiskUsageWalk(storageType)
 
 	var tokenPath string
 	if usePelican {

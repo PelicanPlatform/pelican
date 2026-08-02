@@ -854,6 +854,182 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	require.ErrorContains(t, err, "globus")
 }
 
+// standaloneOriginBase applies the minimum configuration a standalone origin
+// needs: a native backend and no federation to discover.
+func standaloneOriginBase(t *testing.T) {
+	t.Helper()
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+	require.NoError(t, param.Origin_StorageType.Set("posixv2"))
+	require.NoError(t, param.Origin_StoragePrefix.Set(t.TempDir()))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/standalone"))
+	require.NoError(t, param.Origin_EnableStandaloneMode.Set(true))
+}
+
+func TestInitServerStandaloneOrigin(t *testing.T) {
+	t.Run("needs-no-federation", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		// Deliberately no Federation.DiscoveryUrl and no mock federation root:
+		// the whole point of standalone mode is that neither is reachable.
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		require.True(t, IsStandaloneOrigin())
+
+		// The discovery endpoint doubles as the federation issuer and must be
+		// populated, but it should point at this origin -- and no director or
+		// registry should have been invented for it.
+		fedInfo, err := GetFederation(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, param.Server_ExternalWebUrl.GetString(), fedInfo.DiscoveryEndpoint)
+		assert.Empty(t, fedInfo.DirectorEndpoint)
+		assert.Empty(t, fedInfo.RegistryEndpoint)
+		assert.Empty(t, fedInfo.BrokerEndpoint)
+	})
+
+	t.Run("rejects-explicit-discovery-url", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		fedRoot := mockFederationRoot(t)
+		standaloneOriginBase(t)
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(fedRoot))
+
+		// Accepting both would leave the process holding two answers to "what
+		// federation is this?": GetFederation would report the remote one, while
+		// the document this origin publishes at its own root names itself and no
+		// director.
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, param.Federation_DiscoveryUrl.GetName())
+	})
+
+	t.Run("rejects-root-federation-prefix", func(t *testing.T) {
+		// A "/" export would be mounted at the bare root, colliding with the
+		// origin's own /api and /.well-known routes; gin panics on that collision
+		// mid-startup, so the operator has to be stopped here instead.
+		for _, tc := range []struct {
+			name  string
+			apply func(t *testing.T)
+			param string
+		}{
+			{
+				name:  "top-level",
+				apply: func(t *testing.T) { require.NoError(t, param.Origin_FederationPrefix.Set("/")) },
+				param: param.Origin_FederationPrefix.GetName(),
+			},
+			{
+				name: "exports-block",
+				apply: func(t *testing.T) {
+					require.NoError(t, param.Origin_Exports.Set([]map[string]any{{
+						"FederationPrefix": "/",
+						"StoragePrefix":    t.TempDir(),
+						"Capabilities":     []string{"PublicReads"},
+					}}))
+				},
+				param: param.Origin_Exports.GetName(),
+			},
+			{
+				name: "export-volume",
+				// Spelled out rather than built from t.TempDir(): the volume
+				// syntax splits on the first colon, and a Windows temp path
+				// carries its own in the drive letter.
+				apply: func(t *testing.T) { require.NoError(t, param.Origin_ExportVolumes.Set([]string{"/srv/data:/"})) },
+				param: param.Origin_ExportVolumes.GetName(),
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ResetConfig()
+				t.Cleanup(ResetConfig)
+
+				standaloneOriginBase(t)
+				tc.apply(t)
+
+				err := InitServer(context.Background(), server_structs.OriginType)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+				assert.ErrorContains(t, err, tc.param)
+			})
+		}
+	})
+
+	t.Run("disables-broker", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_EnableBroker.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		assert.False(t, param.Origin_EnableBroker.GetBool())
+	})
+
+	t.Run("rejects-xrootd-backend", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_StorageType.Set("posix"))
+
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, param.Origin_StorageType.GetName())
+	})
+
+	t.Run("rejects-colocated-federation-module", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+
+		modules := server_structs.OriginType
+		modules.Set(server_structs.DirectorType)
+		err := InitServer(context.Background(), modules)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, "director")
+	})
+
+	t.Run("rejects-disable-direct-clients", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_DisableDirectClients.Set(true))
+
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_DisableDirectClients.GetName())
+	})
+
+	t.Run("disables-director-test", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_DirectorTest.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		assert.False(t, param.Origin_DirectorTest.GetBool())
+	})
+
+	t.Run("does-not-apply-without-origin-module", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		// A shared config file may carry the origin knob even on a cache-only
+		// process; it must not disconnect the cache from the federation.
+		require.NoError(t, param.Origin_EnableStandaloneMode.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.CacheType))
+		assert.False(t, IsStandaloneOrigin())
+	})
+}
+
 func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
 	ResetConfig()
 	t.Cleanup(func() {

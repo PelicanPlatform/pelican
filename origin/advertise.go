@@ -107,6 +107,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		return nil, err
 	}
 
+	advertisedExports := make([]server_utils.OriginExport, 0, len(originExports))
 	for _, export := range originExports {
 		if isGlobusBackend {
 			// Do not include the export if it's an inactive Globus collection
@@ -115,50 +116,14 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 				continue
 			}
 		}
-		// PublicReads implies reads
-		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
+		advertisedExports = append(advertisedExports, export)
+	}
 
-		// Set up issuer URLs for the namespace. Note that this uses a single
-		// base path (the fed prefix) per issuer per export even if a single issuer
-		// at the origin is configured for multiple prefixes. This is because we have
-		// no global concept of issuers at the Director and we store this issuer info
-		// per namespace. It doesn't currently make much sense to construct the full list
-		// of potential base paths in this context.
-		issuerUrls := make([]server_structs.TokenIssuer, len(export.IssuerUrls))
-		for i, issUrlStr := range export.IssuerUrls {
-			issUrl, err := url.Parse(issUrlStr)
-			if err != nil {
-				return nil, errors.Wrap(err, "unable to parse issuer url")
-			}
-			issuerUrls[i] = server_structs.TokenIssuer{
-				IssuerUrl: *issUrl,
-				BasePaths: []string{export.FederationPrefix},
-			}
-		}
-
-		// Populate the struct for the namespace's "token generation" field
-		// TODO: It's not clear what the intended difference/abstraction between the
-		// "Generation" and the "Issuer" fields is... We should define these eventually
-		var tokGen server_structs.TokenGen
-		if len(issuerUrls) > 0 {
-			tokGen.Strategy = server_structs.OAuthStrategy
-			tokGen.MaxScopeDepth = 3
-			tokGen.CredentialIssuer = issuerUrls[0].IssuerUrl
-		}
-
-		nsAds = append(nsAds, server_structs.NamespaceAd{
-			Caps: server_structs.Capabilities{
-				PublicReads: export.Capabilities.PublicReads,
-				Reads:       reads,
-				Writes:      export.Capabilities.Writes,
-				Listings:    export.Capabilities.Listings,
-				DirectReads: export.Capabilities.DirectReads,
-				Copies:      export.Capabilities.Copies,
-			},
-			Path:       export.FederationPrefix,
-			Generation: []server_structs.TokenGen{tokGen},
-			Issuer:     issuerUrls,
-		})
+	nsAds, err = server_utils.NamespaceAdsFromExports(advertisedExports)
+	if err != nil {
+		return nil, err
+	}
+	for _, export := range advertisedExports {
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
@@ -190,7 +155,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		ost == server_structs.OriginStorageS3v2 || ost == server_structs.OriginStorageHTTPSv2 ||
 		ost == server_structs.OriginStorageGlobusv2) && config.IsServerEnabled(server_structs.DirectorType) {
 		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
-			parsedUrl.Path = "/api/v1.0/origin/data"
+			parsedUrl.Path = server_structs.OriginDataRoutePrefix
 			dataUrlToAdvertise = parsedUrl.String()
 		}
 	}

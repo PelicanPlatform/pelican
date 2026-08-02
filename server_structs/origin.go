@@ -18,11 +18,29 @@
 
 package server_structs
 
-import "github.com/pkg/errors"
+import (
+	"path"
+	"path/filepath"
+	"strings"
+
+	"github.com/pkg/errors"
+)
 
 type (
 	OriginStorageType string
 )
+
+// OriginDataRoutePrefix is where a native origin mounts its exports when it
+// shares a web server with a co-located director.  The director owns the root
+// path space (clients resolve an object by GETting
+// https://<director>/<ns>/<obj> and following the redirect), so the bytes have
+// to live somewhere else.  An origin running without a director -- including a
+// standalone one -- mounts its exports at their bare federation prefixes
+// instead; see origin_serve.RegisterHandlers.
+//
+// Both ends of that arrangement must agree on this string: the origin mounts
+// its handlers under it, and the ad it publishes has to point here.
+const OriginDataRoutePrefix = "/api/v1.0/origin/data"
 
 const (
 	OriginStoragePosix    OriginStorageType = "posix"
@@ -96,6 +114,32 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStorageGlobusv2
 	default:
 		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, s3v2, https, httpsv2, globus, globusv2, and xroot)", storageType)
+	}
+	return
+}
+
+// ParseExportVolume splits a docker-style export volume into the storage prefix
+// it exposes and the federation prefix it is served under.  A value with no
+// colon names the same path on both sides.
+//
+// The two sides are cleaned differently on purpose.  A storage prefix names a
+// location on this host, so it takes the platform's separator; a federation
+// prefix is the path half of a URL and is always slash-separated, so cleaning it
+// as a filesystem path would turn "/public" into "\public" on Windows and stop
+// it matching anything -- including the checks that reject a root prefix.
+//
+// The split is on the *first* colon, which means a storage prefix containing one
+// -- a Windows drive letter, say -- cannot be expressed in this syntax.  That is
+// a property of the syntax rather than a choice made here, and it is the reason
+// this lives in one place: config validation and export construction disagreeing
+// about where the federation prefix begins would let a prefix pass validation
+// and then be served under a different name.
+func ParseExportVolume(volume string) (storagePrefix, federationPrefix string) {
+	storagePrefix = filepath.Clean(volume)
+	federationPrefix = path.Clean(volume)
+	if parts := strings.SplitN(volume, ":", 2); len(parts) == 2 {
+		storagePrefix = filepath.Clean(parts[0])
+		federationPrefix = path.Clean(parts[1])
 	}
 	return
 }

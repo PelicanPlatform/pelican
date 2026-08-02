@@ -81,6 +81,16 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Determine if we should use XRootD or native HTTP server
 	useXRootD := originUsesXRootD()
 
+	// A standalone origin never contacts a director or registry; every federation
+	// touchpoint below is skipped.  config.InitServer has already rejected the
+	// configurations where this mode cannot work (XRootD backends, co-located
+	// federation modules, DisableDirectClients).
+	standalone := config.IsStandaloneOrigin()
+	if standalone {
+		log.Infof("Origin is running in standalone mode (%s); it will not register at a registry or advertise to a director",
+			param.Origin_EnableStandaloneMode.GetName())
+	}
+
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
 		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializing")
@@ -137,10 +147,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Register Origin APIs
 	baseAPIGroup := engine.Group("/api/v1.0")
 
-	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
-	if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
-		return nil, err
+	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now.
+	// A standalone origin has no director to report to, so the endpoint (and the
+	// timeout watchdog behind it, which would otherwise flip the origin's health
+	// status to critical) is skipped entirely.
+	if !standalone {
+		originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
+		if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
+			return nil, err
+		}
+	} else {
+		log.Debugf("Skipping origin director-test API registration because %s is enabled", param.Origin_EnableStandaloneMode.GetName())
 	}
 
 	// Set up the APIs for the origin UI
@@ -247,8 +264,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 	// POSIXv2-specific initialization is deferred to OriginServeFinish()
 
-	// Launch origin file test maintenance (not XRootD specific)
-	origin.LaunchOriginFileTestMaintenance(ctx)
+	// Launch origin file test maintenance (not XRootD specific). It only cleans up
+	// after director- and self-tests, neither of which runs in standalone mode.
+	if !standalone {
+		origin.LaunchOriginFileTestMaintenance(ctx)
+	}
 	origin.LaunchDiskUsageCalculator(ctx, egrp)
 
 	return originServer, nil
@@ -318,6 +338,9 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 			origin_serve.LaunchGlobusv2TokenRefresh(ctx, egrp)
 		}
 
+		// A standalone origin has no director sharing this web server, so its
+		// exports stay mounted at their federation prefix -- an object is served
+		// from the URL a client already knows, with nothing to redirect through.
 		directorEnabled := modules.IsEnabled(server_structs.DirectorType)
 		if err := origin_serve.RegisterHandlers(engine, directorEnabled); err != nil {
 			return errors.Wrap(err, "failed to register origin_serve handlers")
@@ -339,18 +362,43 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return errors.Wrap(err, "failed to register transfer API on origin")
 	}
 
-	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
-	log.Debug("Register Origin")
-	extUrlStr := param.Server_ExternalWebUrl.GetString()
-	extUrl, _ := url.Parse(extUrlStr)
-	// Only use hostname:port
-	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
-		return err
-	}
-	log.Debug("Origin is registered")
-	for _, export := range originExports {
-		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+	// A standalone origin owns its namespaces outright: there is no registry to
+	// claim them at, and no director that would need the registration to route
+	// clients here.  Skipping this also keeps the "registry" component out of the
+	// health status the web UI renders.
+	if config.IsStandaloneOrigin() {
+		log.Debugf("Skipping Origin registration because standalone mode is enabled (see %s)", param.Origin_EnableStandaloneMode.GetName())
+		// The local metadata record is normally written as a side effect of
+		// advertising. Write it here so the web UI can still show a server name
+		// (and downtime records still carry one) without a director in the loop.
+		metadata, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
+		if err != nil {
+			return errors.Wrap(err, "failed to determine the standalone origin's server name")
+		}
+		if err := database.UpsertServerLocalMetadata(metadata); err != nil {
+			return errors.Wrapf(err, "failed to record server name %s in the local database", metadata.Name)
+		}
+		// A pelican:// URL names a federation, so the client still begins by
+		// asking this origin what services the federation has.  It answers with
+		// a document naming no director, which is what tells the client to
+		// resolve objects against this origin directly.
+		if err := origin.RegisterStandaloneFederationMetadata(engine); err != nil {
+			return errors.Wrap(err, "failed to register the standalone origin's federation metadata")
+		}
+	} else {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
+		log.Debug("Register Origin")
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
 			return err
+		}
+		log.Debug("Origin is registered")
+		for _, export := range originExports {
+			if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+				return err
+			}
 		}
 	}
 

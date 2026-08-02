@@ -496,6 +496,24 @@ func IsServerEnabled(testServer server_structs.ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// IsStandaloneOrigin reports whether this process is running an origin that has
+// opted out of the federation entirely via Origin.EnableStandaloneMode.
+//
+// Every federation touchpoint the origin would otherwise use -- registering at
+// the registry, advertising to (and being tested by) the director, discovering
+// directors, brokering connections, mirroring downtime -- is skipped when this
+// is true.  Callers should prefer this helper over reading the parameter
+// directly so that the "origin module is actually enabled" half of the
+// condition can never be forgotten (a cache-only process must not be treated as
+// a standalone origin just because the origin knob is set in a shared config).
+//
+// This is the origin counterpart of Cache.EnableSiteLocalMode, but it is
+// stricter: a site-local cache still uses the director as a client, whereas a
+// standalone origin contacts no federation service at all.
+func IsStandaloneOrigin() bool {
+	return enabledServers.IsEnabled(server_structs.OriginType) && param.Origin_EnableStandaloneMode.GetBool()
+}
+
 // Returns the version of the current binary
 func GetVersion() string {
 	return version.GetVersion()
@@ -706,6 +724,19 @@ func validateDiscoveryUrl(discUrlStr string) (*url.URL, error) {
 func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.FederationDiscovery, err error) {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
+
+	// A standalone origin has no federation to discover, but a populated
+	// discovery endpoint is still required below -- it doubles as the federation
+	// issuer.  Stand in for it with our own external web URL, which makes the
+	// auto-discovery step below a no-op and leaves the director, registry, and
+	// broker endpoints empty.  This is resolved here rather than at InitServer
+	// time because Server.ExternalWebUrl is not final until the web engine has
+	// bound its port (Server.WebPort may be 0).
+	if federationStr == "" && IsStandaloneOrigin() {
+		log.Debugln("Origin is standalone; using its own external web URL as the federation discovery URL")
+		federationStr = externalUrlStr
+	}
+
 	defer func() {
 		// Set default guesses if these values are still unset.
 		if fedInfo.DirectorEndpoint == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
@@ -2453,6 +2484,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 	if currentServers.IsEnabled(server_structs.RegistryType) {
 		viper.SetDefault(param.Federation_RegistryUrl.GetName(), param.Server_ExternalWebUrl.GetString())
+	}
+
+	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_EnableStandaloneMode.GetBool() {
+		if err := validateStandaloneOrigin(currentServers); err != nil {
+			return err
+		}
+		// Note: the stand-in federation discovery URL is filled in lazily by
+		// discoverFederationImpl rather than here, because Server.ExternalWebUrl
+		// is not final until the web engine has bound its port.
 	}
 
 	if currentServers.IsEnabled(server_structs.BrokerType) {

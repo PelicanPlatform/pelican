@@ -311,6 +311,7 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePublicReads bool `mapstructure:"enablepublicreads" yaml:"EnablePublicReads"`
 		EnableReads bool `mapstructure:"enablereads" yaml:"EnableReads"`
+		EnableStandaloneMode bool `mapstructure:"enablestandalonemode" yaml:"EnableStandaloneMode"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableTransferAPI bool `mapstructure:"enabletransferapi" yaml:"EnableTransferAPI"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
@@ -838,6 +839,7 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
+		EnableStandaloneMode struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableTransferAPI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }

@@ -1396,6 +1396,27 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.EnableStandaloneMode
+description: |+
+  When true, the Origin runs without joining a federation at all. It will not register at a Registry, it will not
+  advertise to a Director, it will not perform Director-initiated file transfer tests, and it will not contact any
+  other federation service. Clients resolve objects against the Origin directly, so `pelican object get` and
+  anything else that speaks Pelican works against the Origin's own hostname. Every authorization decision is made
+  against tokens minted by the Origin's own embedded issuer.
+
+  This is the Origin counterpart of ${Cache.EnableSiteLocalMode}, and is intended for administrators who want
+  Pelican's managed authorization over a storage backend without operating (or belonging to) a federation.
+
+  Standalone mode requires one of the native "v2" storage backends -- `posixv2`, `s3v2`, `httpsv2`, `globusv2`, or
+  `ssh` -- because the XRootD-fronted backends derive their configuration from federation metadata. It also cannot
+  be combined with the Director, Registry, Cache, or Broker modules in the same process, and it is incompatible with
+  ${Origin.DisableDirectClients} (in standalone mode every client is a direct client). ${Origin.DirectorTest} is
+  force-disabled at startup, since no Director exists to run the test.
+
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.EnableIssuer
 description: |+
   Enable the built-in issuer daemon for the origin.
