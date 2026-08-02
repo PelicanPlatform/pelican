@@ -81,11 +81,19 @@ func getBearerToken(ctx *gin.Context) string {
 
 // verifyTokenSignedByAnyIssuer is a low-level signature primitive: it walks
 // the supplied issuer URL list, fetches each issuer's JWKS, and returns the
-// first parsed token whose signature verifies against one of those keys.
+// first parsed token whose `iss` claim names one of those issuers AND whose
+// signature verifies against that issuer's keys.
+//
+// Binding the token's `iss` claim to the candidate URL (in addition to the
+// signature check) is essential: in a single-host deployment the federation
+// root issuer and other local issuers can share a signing key, so a pure
+// signature check would accept a token minted by one issuer as though it
+// came from another (an issuer-confusion vulnerability). Requiring the
+// `iss` claim to match the candidate closes that gap.
 //
 // This function intentionally answers ONLY the question "is this token
-// signed by one of these issuers?". It is unaware of the operation being
-// authorized; the caller (requireAuth, requireAuthForPath,
+// issued and signed by one of these issuers?". It is unaware of the
+// operation being authorized; the caller (requireAuth, requireAuthForPath,
 // requireAuthForCreate) is responsible for picking the appropriate set of
 // candidate issuers (the lot's owners for modify, the path's parents'
 // owners for path-keyed reads, the parent lot's owners for create) and
@@ -97,7 +105,7 @@ func verifyTokenSignedByAnyIssuer(strToken string, candidateIssuers []string) (b
 			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
 			continue
 		}
-		tok, err := token.VerifyWithKeyset(strToken, *kSet)
+		tok, err := token.VerifyWithKeyset(strToken, *kSet, jwt.WithIssuer(owner))
 		if err != nil {
 			log.Debugf("Token verification failed with owner %s: %v -- skipping", owner, err)
 			continue

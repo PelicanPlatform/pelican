@@ -222,11 +222,10 @@ func TestCreateToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "testKeyDir")
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
 	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
-	err := config.InitServer(ctx, server_structs.DirectorType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.DirectorType)
 
 	// Generate a private key to use for the test
-	_, err = config.GetIssuerPublicJWKS()
+	_, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile works

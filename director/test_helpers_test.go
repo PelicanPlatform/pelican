@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -24,18 +24,18 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// initServerForTest wraps config.InitServer and restores the previous log level
-// after the test to avoid leaking debug logging into subsequent tests.
-func initServerForTest(t *testing.T, ctx context.Context, serverType server_structs.ServerType) error {
+// initServerForTest initializes the server for testing
+// and restores the previous log level afterward
+// to avoid leaking debug logging into subsequent tests.
+func initServerForTest(t *testing.T, ctx context.Context, serverType server_structs.ServerType) {
 	t.Helper()
 
 	originLevel := config.GetEffectiveLogLevel()
-	err := config.InitServer(ctx, serverType)
+	test_utils.InitServerForTest(t, ctx, serverType)
 	t.Cleanup(func() {
 		config.SetLogging(originLevel)
 	})
-
-	return err
 }
