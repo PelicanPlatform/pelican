@@ -636,6 +636,53 @@ func TestStorageCacheETagMatchesBackendShape(t *testing.T) {
 	}
 }
 
+// The cache directory must not be writable by other local users: anyone who
+// can write there can plant a sidecar and choose the bytes this origin serves.
+// A directory created under a permissive umask (or one that already existed
+// with loose permissions) is tightened rather than rejected, since the origin
+// owns it -- CI containers routinely run with umask 000, and refusing to start
+// would be a hard failure on something we can simply fix.
+func TestStorageCacheTightensDirectoryPermissions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	loc := path.Join(t.TempDir(), "cache")
+	require.NoError(t, os.MkdirAll(loc, 0777))
+	require.NoError(t, os.Chmod(loc, 0777)) // defeat the ambient umask
+	info, err := os.Stat(loc)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode().Perm()&0022, "test needs a world-writable directory to start from")
+
+	cache, err := newStorageCache(ctx, loc, 0, time.Hour, 0, 4)
+	require.NoError(t, err, "a loose cache directory should be tightened, not rejected")
+	require.NotNil(t, cache)
+
+	info, err = os.Stat(loc)
+	require.NoError(t, err)
+	assert.Zero(t, info.Mode().Perm()&0022, "directory should no longer be group- or world-writable")
+}
+
+// A cache location that is not a directory, or cannot be written, must fail at
+// startup rather than turning every later request into an error.
+func TestStorageCacheRejectsUnusableLocation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	notADir := path.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0600))
+	_, err := newStorageCache(ctx, notADir, 0, time.Hour, 0, 4)
+	require.Error(t, err)
+
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permissions")
+	}
+	readOnly := path.Join(t.TempDir(), "ro")
+	require.NoError(t, os.MkdirAll(readOnly, 0500))
+	t.Cleanup(func() { _ = os.Chmod(readOnly, 0700) })
+	_, err = newStorageCache(ctx, readOnly, 0, time.Hour, 0, 4)
+	require.Error(t, err, "an unwritable cache directory must fail at startup")
+}
+
 // A pure range read takes the backend-bypass path and never starts the shared
 // copy, so nothing else will ever clean up its registration.  It must release
 // its fetch-pool slot and the empty data file it reserved on close; otherwise
@@ -2029,7 +2076,11 @@ func TestStorageCacheEnumerationGuards(t *testing.T) {
 // FileInfo this layer hands out must answer.  Wrapping must not otherwise
 // change what the backend would have reported — in particular the ETag.
 func TestStorageCacheStatCarriesContentType(t *testing.T) {
-	require.NotEmpty(t, mime.TypeByExtension(".txt"), "test assumes a known MIME type for .txt")
+	// Register the extension this test relies on rather than trusting the
+	// host's MIME database: Go's builtin table does not cover .txt, so on a
+	// container without /etc/mime.types TypeByExtension(".txt") is empty.
+	const knownExt, knownType = ".pelican-known", "application/x-pelican-test"
+	require.NoError(t, mime.AddExtensionType(knownExt, knownType))
 
 	contentTypeOf := func(t *testing.T, info os.FileInfo) string {
 		t.Helper()
@@ -2042,35 +2093,35 @@ func TestStorageCacheStatCarriesContentType(t *testing.T) {
 
 	t.Run("uncached stat answers without opening the object", func(t *testing.T) {
 		upstream := newFakeUpstream()
-		upstream.put("/dir/file.txt", "hello", `"e-1"`)
+		upstream.put("/dir/file.pelican-known", "hello", `"e-1"`)
 		upstream.put("/dir/blob.pelican-unknown", "hello", `"e-2"`)
 		_, layer, _ := newTestCacheLayer(t, upstream, 0)
 
-		info, err := layer.Stat(context.Background(), "/dir/file.txt")
+		info, err := layer.Stat(context.Background(), "/dir/file.pelican-known")
 		require.NoError(t, err)
-		assert.Equal(t, mime.TypeByExtension(".txt"), contentTypeOf(t, info))
+		assert.Equal(t, knownType, contentTypeOf(t, info))
 
 		info, err = layer.Stat(context.Background(), "/dir/blob.pelican-unknown")
 		require.NoError(t, err)
 		assert.Equal(t, "application/octet-stream", contentTypeOf(t, info),
 			"an unknown extension must still get a type")
 
-		assert.Equal(t, 0, upstream.opens("/dir/file.txt"), "answering a content type must not open the object")
+		assert.Equal(t, 0, upstream.opens("/dir/file.pelican-known"), "answering a content type must not open the object")
 		assert.Equal(t, 0, upstream.opens("/dir/blob.pelican-unknown"))
 	})
 
 	t.Run("cached stat answers too", func(t *testing.T) {
 		upstream := newFakeUpstream()
-		upstream.put("/file.txt", "hello", `"e-1"`)
+		upstream.put("/file.pelican-known", "hello", `"e-1"`)
 		upstream.put("/blob.pelican-unknown", "hello", `"e-2"`)
 		_, layer, _ := newTestCacheLayer(t, upstream, 0)
 
-		require.Equal(t, "hello", readAllViaLayer(t, layer, "/file.txt"))
+		require.Equal(t, "hello", readAllViaLayer(t, layer, "/file.pelican-known"))
 		require.Equal(t, "hello", readAllViaLayer(t, layer, "/blob.pelican-unknown"))
 
-		info, err := layer.Stat(context.Background(), "/file.txt")
+		info, err := layer.Stat(context.Background(), "/file.pelican-known")
 		require.NoError(t, err)
-		assert.Equal(t, mime.TypeByExtension(".txt"), contentTypeOf(t, info))
+		assert.Equal(t, knownType, contentTypeOf(t, info))
 		info, err = layer.Stat(context.Background(), "/blob.pelican-unknown")
 		require.NoError(t, err)
 		assert.Equal(t, "application/octet-stream", contentTypeOf(t, info))
@@ -2078,8 +2129,8 @@ func TestStorageCacheStatCarriesContentType(t *testing.T) {
 
 	t.Run("listed entries answer too", func(t *testing.T) {
 		upstream := newFakeUpstream()
-		upstream.put("/dir/file.txt", "hello", `"e-1"`)
-		upstream.put("/dir/sub/nested.txt", "hello", `"e-2"`)
+		upstream.put("/dir/file.pelican-known", "hello", `"e-1"`)
+		upstream.put("/dir/sub/nested.pelican-known", "hello", `"e-2"`)
 		_, layer, _ := newTestCacheLayer(t, upstream, 0)
 
 		dir, err := layer.OpenFile(context.Background(), "/dir", os.O_RDONLY, 0)
@@ -2092,7 +2143,7 @@ func TestStorageCacheStatCarriesContentType(t *testing.T) {
 			if e.IsDir() {
 				continue // directories are never sniffed
 			}
-			assert.Equal(t, mime.TypeByExtension(".txt"), contentTypeOf(t, e))
+			assert.Equal(t, knownType, contentTypeOf(t, e))
 		}
 	})
 
@@ -2108,10 +2159,10 @@ func TestStorageCacheStatCarriesContentType(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				upstream := newFakeUpstream()
 				upstream.infoStyle = tc.style
-				upstream.put("/file.txt", "hello", `"e-1"`)
+				upstream.put("/file.pelican-known", "hello", `"e-1"`)
 				_, layer, _ := newTestCacheLayer(t, upstream, 0)
 
-				info, err := layer.Stat(context.Background(), "/file.txt")
+				info, err := layer.Stat(context.Background(), "/file.pelican-known")
 				require.NoError(t, err)
 				etager, ok := info.(webdav.ETager)
 				require.True(t, ok)

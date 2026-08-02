@@ -79,6 +79,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -249,9 +250,31 @@ func newStorageCache(ctx context.Context, location string, maxSize int64, defaul
 	if !info.IsDir() {
 		return nil, fmt.Errorf("storage cache location %s is not a directory", location)
 	}
-	if mode := info.Mode().Perm(); mode&0022 != 0 {
-		return nil, fmt.Errorf("storage cache directory %s is group- or world-writable (mode %04o); "+
-			"tighten it to 0700 so other local users cannot inject cache entries", location, mode)
+	// Windows permission bits don't carry this meaning, and os.Chmod there only
+	// toggles the read-only attribute, so the check is POSIX-only.
+	if runtime.GOOS != "windows" {
+		if mode := info.Mode().Perm(); mode&0022 != 0 {
+			// The directory already existed with loose permissions, or was
+			// created under a permissive umask.  Tighten it rather than trust
+			// it: anyone who can write here can plant a sidecar and choose the
+			// bytes this origin serves.  The origin owns this directory, so
+			// narrowing it is exactly what MkdirAll would have done had it
+			// been the one to create it.
+			if err := os.Chmod(location, 0700); err != nil {
+				return nil, fmt.Errorf("storage cache directory %s is group- or world-writable (mode %04o) "+
+					"and could not be tightened to 0700: %w", location, mode, err)
+			}
+			if info, err = os.Stat(location); err != nil {
+				return nil, fmt.Errorf("failed to stat storage cache directory %s: %w", location, err)
+			}
+			if newMode := info.Mode().Perm(); newMode&0022 != 0 {
+				return nil, fmt.Errorf("storage cache directory %s is still group- or world-writable "+
+					"(mode %04o) after tightening; refusing to cache where other local users can write",
+					location, newMode)
+			}
+			log.Warningf("Storage cache directory %s had mode %04o; tightened to 0700 so other local users "+
+				"cannot inject cache entries", location, mode)
+		}
 	}
 	// Fail at startup rather than turning every request into a 500 later.
 	probe := path.Join(location, ".pelican-storage-cache-probe")
