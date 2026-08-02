@@ -203,3 +203,131 @@ func TestServerBaseAdAfter(t *testing.T) {
 		assert.Equal(t, ad1.After(ad2), AdAfterUnknown)
 	})
 }
+
+func TestLongestNSMatch(t *testing.T) {
+	nsAd := func(path string) NamespaceAd { return NamespaceAd{Path: path} }
+
+	testCases := []struct {
+		name     string
+		reqPath  string
+		nsAds    []NamespaceAd
+		expected string // the Path of the ad expected back, or "" for no match
+	}{
+		{
+			name:     "prefers the deeper of two nested exports",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "ad order does not decide the winner",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar"), nsAd("/foo")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "falls back to the shallower export when the deeper one does not cover the path",
+			reqPath:  "/foo/other/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo",
+		},
+		{
+			name:     "matches a request path equal to the export prefix",
+			reqPath:  "/foo/bar",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "matches a request path equal to the export prefix with a trailing slash",
+			reqPath:  "/foo/bar/",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "matches an export prefix stored with a trailing slash",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar/")},
+			expected: "/foo/bar/",
+		},
+		{
+			// Path boundaries, not raw string prefixes: /foobar is a sibling of
+			// /foo, not a child of it.
+			name:     "does not match a sibling whose name merely starts the same",
+			reqPath:  "/foobar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo")},
+			expected: "",
+		},
+		{
+			name:     "a root export covers everything",
+			reqPath:  "/anything/at/all",
+			nsAds:    []NamespaceAd{nsAd("/")},
+			expected: "/",
+		},
+		{
+			name:     "a deeper export still beats a root export",
+			reqPath:  "/foo/bar",
+			nsAds:    []NamespaceAd{nsAd("/"), nsAd("/foo")},
+			expected: "/foo",
+		},
+		{
+			name:     "returns nil when nothing matches",
+			reqPath:  "/nowhere/object",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/bar")},
+			expected: "",
+		},
+		{
+			name:     "returns nil when there are no ads at all",
+			reqPath:  "/foo/bar",
+			nsAds:    nil,
+			expected: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LongestNSMatch(tc.reqPath, tc.nsAds)
+			if tc.expected == "" {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.expected, got.Path)
+		})
+	}
+}
+
+func TestSetXNamespaceHeaderWithCollections(t *testing.T) {
+	const collUrl = "https://origin.example.com:8443"
+
+	t.Run("AdvertisesCollectionsWhenListingsAllowed", func(t *testing.T) {
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{Reads: true, Listings: true},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=true, collections-url="+collUrl,
+			hdr.Get(XPelNs{}.GetName()))
+	})
+
+	t.Run("SuppressesCollectionsWhenListingsDenied", func(t *testing.T) {
+		// A collections-url the namespace will not answer PROPFIND for would
+		// send the client to a guaranteed error, so it is left out entirely.
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{Reads: true, Listings: false},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=true", hdr.Get(XPelNs{}.GetName()))
+		assert.NotContains(t, hdr.Get(XPelNs{}.GetName()), "collections-url")
+	})
+
+	t.Run("PublicReadsClearsRequireToken", func(t *testing.T) {
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{PublicReads: true, Reads: true, Listings: true},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=false, collections-url="+collUrl,
+			hdr.Get(XPelNs{}.GetName()))
+	})
+}
