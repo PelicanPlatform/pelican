@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import useSWR from 'swr';
 import { Box, Grid, Stack, Typography } from '@mui/material';
 import {
   CalendarMonth,
@@ -15,6 +16,7 @@ import {
 
 import FederationOverview from '@/components/FederationOverview';
 import ServerName from '@/components/ServerName';
+import { getServerInfo } from '@/helpers/util';
 
 type HealthState = 'loading' | 'ok' | 'degraded' | 'unavailable';
 
@@ -125,6 +127,8 @@ const QuickLink = ({
 };
 
 const NonAdminHome = () => {
+  const { data: serverInfo } = useSWR('getServerInfo', getServerInfo);
+
   return (
     <Box width={'100%'}>
       <ServerName defaultName={'Origin'} />
@@ -146,16 +150,22 @@ const NonAdminHome = () => {
               icon={<FolderOpen />}
             />
             <QuickLink href={'/groups/'} text={'Groups'} icon={<Groups />} />
-            <QuickLink
-              href={'/origin/downtime/'}
-              text={'Downtime'}
-              icon={<CalendarMonth />}
-            />
+            {/* Downtime is only consumed by a Director/Registry, so it has no
+                meaning on an origin that belongs to no federation. */}
+            {!serverInfo?.standaloneOrigin && (
+              <QuickLink
+                href={'/origin/downtime/'}
+                text={'Downtime'}
+                icon={<CalendarMonth />}
+              />
+            )}
           </Stack>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <FederationOverview />
-        </Grid>
+        {!serverInfo?.standaloneOrigin && (
+          <Grid size={{ xs: 12, lg: 6 }}>
+            <FederationOverview />
+          </Grid>
+        )}
       </Grid>
     </Box>
   );

@@ -239,7 +239,13 @@ func getEnabledServers(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(200, gin.H{"servers": enabledServers})
+	// standaloneOrigin tells the web UI that this server deliberately has no
+	// federation behind it, so it can drop the registration status, downtime, and
+	// federation-overview affordances instead of rendering them as broken.
+	ctx.JSON(200, gin.H{
+		"servers":          enabledServers,
+		"standaloneOrigin": config.IsStandaloneOrigin(),
+	})
 }
 
 func getVersionHandler(ctx *gin.Context) {

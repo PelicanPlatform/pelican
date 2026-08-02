@@ -142,7 +142,14 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Equalizer />,
       allowedRoles: ['admin'],
     },
-    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
+    // Origin downtime exists so the Director can route around this server and
+    // the Registry can persist the record; a standalone Origin has neither.
+    {
+      title: 'Downtime',
+      href: '/origin/downtime/',
+      icon: <CalendarMonth />,
+      federationOnly: true,
+    },
     {
       title: 'Globus Configurations',
       href: '/origin/globus/',
