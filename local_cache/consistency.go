@@ -1567,9 +1567,12 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, err
 	}
 
 	// S3-resident objects have no local data; verify existence and size
-	// against the bucket instead.
+	// against the bucket instead.  Bound the probe so a hung S3 endpoint
+	// cannot block VerifyObject indefinitely.
 	if target := cc.storage.getS3Target(meta.StorageID); target != nil {
-		size, exists, err := target.objectSize(context.Background(), instanceHash)
+		probeCtx, cancel := context.WithTimeout(context.Background(), s3SweepOpTimeout)
+		defer cancel()
+		size, exists, err := target.objectSize(probeCtx, instanceHash)
 		if err != nil {
 			return false, err
 		}

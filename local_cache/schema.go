@@ -42,7 +42,13 @@ type ObjectHash string
 // accidental confusion with ObjectHash or arbitrary strings.
 type InstanceHash string
 
-// Key prefixes for BadgerDB
+// Key prefixes for BadgerDB.
+//
+// This block is the authoritative registry of every key namespace used in
+// the cache database; when adding a new namespace, document it here (and add
+// a key constructor next to the others below).  Per-object keys must also be
+// removed in deleteObjectInTxn and PurgeStorageID or they will leak on
+// eviction / storage recycling.
 const (
 	// PrefixMeta stores CacheMetadata (headers, validation info, storage mode)
 	PrefixMeta = "m:"
@@ -661,10 +667,16 @@ type DiskMapping struct {
 type S3UploadIntent struct {
 	// TargetStorageID is the S3 storage target being uploaded to.
 	TargetStorageID StorageID `msgpack:"tid"`
-	// OriginalStorageID is the local (POSIX) storage the object lives on;
-	// used by crash recovery to clean up the local file when the upload
-	// committed but local deletion did not happen.
+	// OriginalStorageID is the local (POSIX) storage the object's base
+	// (chunk 0) lives on; used by crash recovery to clean up the local
+	// file(s) when the upload committed but local deletion did not happen.
 	OriginalStorageID StorageID `msgpack:"oid"`
+	// OriginalChunkSizeCode and OriginalChunkLocations capture the object's
+	// pre-relocation chunk layout so crash recovery can delete every local
+	// chunk file after relocation flattened the metadata to a single S3
+	// object.  Both are zero/empty for non-chunked objects.
+	OriginalChunkSizeCode  ChunkSizeCode   `msgpack:"ocsc,omitempty"`
+	OriginalChunkLocations []ChunkLocation `msgpack:"ocl,omitempty"`
 	// Key is the full object key inside the bucket (including prefix).
 	Key string `msgpack:"key"`
 	// Size is the object ContentLength at upload time.

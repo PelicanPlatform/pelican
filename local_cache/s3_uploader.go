@@ -20,6 +20,7 @@ package local_cache
 
 import (
 	"context"
+	rand "math/rand/v2"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ import (
 
 const (
 	// s3UploadWorkers is the number of concurrent tiering uploads.
-	s3UploadWorkers = 2
+	s3UploadWorkers = 4
 	// s3UploadQueueDepth bounds the pending-upload queue.  When full,
 	// candidates are dropped; the periodic S3 sweep re-enqueues eligible
 	// objects, so a drop only delays tiering.
@@ -39,6 +40,11 @@ const (
 	// s3RelocateRetries bounds retries of the relocation transaction on
 	// BadgerDB write conflicts (e.g. racing an LRU update).
 	s3RelocateRetries = 5
+	// s3RescanBaseInterval is the steady-state gap between backfill rescans.
+	s3RescanBaseInterval = 1 * time.Hour
+	// s3RescanMinInterval is the floor the adaptive rescan sleep halves
+	// toward while there is still deferred work to enqueue.
+	s3RescanMinInterval = 1 * time.Minute
 )
 
 // s3Uploader tiers completed objects from local storage directories to S3
@@ -100,21 +106,42 @@ func (u *s3Uploader) Start(ctx context.Context, egrp *errgroup.Group) error {
 // rescanLoop periodically re-enqueues eligible objects that were deferred
 // (queue full, no room on any target) and aborts multipart uploads that
 // outlived any plausible in-flight transfer.
+//
+// The sleep is adaptive: when a backfill pass leaves work behind (the queue
+// filled before every eligible object was enqueued), the next pass runs
+// sooner — the interval halves toward s3RescanMinInterval — so a large
+// backlog drains in minutes rather than hours.  Once a pass enqueues
+// everything eligible, the interval resets to the steady-state base.
 func (u *s3Uploader) rescanLoop(ctx context.Context) {
-	const rescanInterval = 1 * time.Hour
+	sleep := s3RescanBaseInterval
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(rescanInterval):
+		case <-time.After(sleep):
 		}
-		u.backfillScan(ctx)
-		for _, target := range u.storage.s3Targets {
-			if aborted, err := target.abortStaleMultipartUploads(ctx, 6*time.Hour); err != nil {
-				log.Warnf("Failed to abort stale multipart uploads on %s: %v", target.cfg.DisplayURL(), err)
-			} else if aborted > 0 {
-				log.Infof("Aborted %d stale multipart upload(s) on %s", aborted, target.cfg.DisplayURL())
+
+		_, deferred := u.backfillScan(ctx)
+
+		// Only reconcile stale multipart uploads on full-interval passes so
+		// catch-up cycles don't hammer the bucket's ListMultipartUploads.
+		if sleep >= s3RescanBaseInterval {
+			for _, target := range u.storage.s3Targets {
+				if aborted, err := target.abortStaleMultipartUploads(ctx, 6*time.Hour); err != nil {
+					log.Warnf("Failed to abort stale multipart uploads on %s: %v", target.cfg.DisplayURL(), err)
+				} else if aborted > 0 {
+					log.Infof("Aborted %d stale multipart upload(s) on %s", aborted, target.cfg.DisplayURL())
+				}
 			}
+		}
+
+		if deferred {
+			sleep /= 2
+			if sleep < s3RescanMinInterval {
+				sleep = s3RescanMinInterval
+			}
+		} else {
+			sleep = s3RescanBaseInterval
 		}
 	}
 }
@@ -143,29 +170,58 @@ func (u *s3Uploader) workerLoop(ctx context.Context) {
 	}
 }
 
-// eligible checks whether an object should be tiered right now.
+// eligible checks whether an object should be tiered right now.  Chunked
+// objects are eligible: large objects (the prime tiering candidates) are
+// exactly the ones chunking splits across directories, and relocation
+// flattens them into a single bucket blob.
 func (u *s3Uploader) eligible(meta *CacheMetadata) bool {
 	return meta != nil &&
 		!meta.Completed.IsZero() &&
-		!meta.IsChunked() &&
 		meta.StorageID != StorageIDInline &&
 		!u.storage.IsS3Backed(meta.StorageID) &&
 		meta.ContentLength >= u.threshold
 }
 
-// chooseTarget picks the S3 target with the most estimated free space that
-// can hold the object.  Returns nil when no target fits.
+// chooseTarget randomly selects an S3 target that can currently hold the
+// object, weighted by each target's estimated free space, so concurrent
+// uploads spread across targets instead of all piling onto the single
+// emptiest one.  Returns nil when no target fits.
+//
+// Concurrency: s3Targets is read-only after initialization and DirFree reads
+// lock-free atomic counters, so this is safe to call from every worker
+// without a lock.  The free-space figures are estimates that may be briefly
+// stale relative to concurrent charges, but the authoritative capacity guard
+// is the up-front usage charge in processObject (plus watermark eviction), so
+// a stale estimate can at worst cause a transient overshoot that eviction
+// corrects — never a lost or corrupted object.
 func (u *s3Uploader) chooseTarget(size int64) *s3Target {
-	var best *s3Target
-	var bestFree int64
+	type candidate struct {
+		target *s3Target
+		free   int64
+	}
+	var candidates []candidate
+	var totalFree int64
 	for id, target := range u.storage.s3Targets {
-		free := u.eviction.DirFree(id)
-		if free >= size && (best == nil || free > bestFree) {
-			best = target
-			bestFree = free
+		if free := u.eviction.DirFree(id); free >= size {
+			candidates = append(candidates, candidate{target: target, free: free})
+			totalFree += free
 		}
 	}
-	return best
+	if len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) == 1 || totalFree <= 0 {
+		return candidates[0].target
+	}
+	// Weighted pick: land in the slice proportional to each target's free.
+	r := rand.Int64N(totalFree)
+	for _, c := range candidates {
+		if r < c.free {
+			return c.target
+		}
+		r -= c.free
+	}
+	return candidates[len(candidates)-1].target
 }
 
 // processObject performs one tiering operation:
@@ -227,12 +283,14 @@ func (u *s3Uploader) processObject(ctx context.Context, instanceHash InstanceHas
 	}
 
 	intent := &S3UploadIntent{
-		TargetStorageID:   target.id,
-		OriginalStorageID: localID,
-		Key:               target.objectKey(instanceHash),
-		Size:              meta.ContentLength,
-		NamespaceID:       meta.NamespaceID,
-		StartedAt:         time.Now(),
+		TargetStorageID:        target.id,
+		OriginalStorageID:      localID,
+		OriginalChunkSizeCode:  meta.ChunkSizeCode,
+		OriginalChunkLocations: meta.ChunkLocations,
+		Key:                    target.objectKey(instanceHash),
+		Size:                   meta.ContentLength,
+		NamespaceID:            meta.NamespaceID,
+		StartedAt:              time.Now(),
 	}
 	if err := u.db.SetS3UploadIntent(instanceHash, intent); err != nil {
 		refund()
@@ -291,14 +349,17 @@ func (u *s3Uploader) processObject(ctx context.Context, instanceHash InstanceHas
 	}
 
 	// Release the local copy.  The relocation left usage charged on the
-	// original directory; move it out now that the authoritative copy is
-	// in the bucket.
-	if err := u.db.AddUsage(prev.StorageID, prev.NamespaceID, -fileSize); err != nil {
-		log.Warnf("Failed to release local usage for tiered object %s: %v", instanceHash, err)
+	// original directory (or, for a chunked object, on each directory that
+	// held a chunk); move it all out now that the authoritative copy is in
+	// the bucket.  prev still carries the pre-relocation chunk layout.
+	for sid, bytes := range prev.PerDirectoryBytes() {
+		if err := u.db.AddUsage(sid, prev.NamespaceID, -bytes); err != nil {
+			log.Warnf("Failed to release local usage for tiered object %s on storage %d: %v", instanceHash, sid, err)
+		}
+		u.eviction.NoteUsageDecrease(sid, bytes)
 	}
-	u.eviction.NoteUsageDecrease(prev.StorageID, fileSize)
-	u.storage.invalidateObjectCaches(instanceHash, 1)
-	u.storage.deleteChunkFiles(instanceHash, prev.ContentLength, prev.StorageID, ChunkingDisabled, nil)
+	u.storage.invalidateObjectCaches(instanceHash, prev.ChunkCount())
+	u.storage.deleteChunkFiles(instanceHash, prev.ContentLength, prev.StorageID, prev.ChunkSizeCode, prev.ChunkLocations)
 
 	if err := u.db.DeleteS3UploadIntent(instanceHash); err != nil {
 		log.Warnf("Failed to delete upload intent for %s: %v", instanceHash, err)
@@ -344,9 +405,11 @@ func (u *s3Uploader) recover(ctx context.Context) error {
 				log.Warnf("Failed to refund S3 usage for %s during recovery: %v", hash, err)
 			}
 		case meta.StorageID == intent.TargetStorageID:
-			// Relocation committed but local cleanup didn't finish —
-			// delete the leftover local file.
-			u.storage.deleteChunkFiles(hash, intent.Size, intent.OriginalStorageID, ChunkingDisabled, nil)
+			// Relocation committed but local cleanup didn't finish — delete
+			// the leftover local file(s).  The intent carries the original
+			// chunk layout so every chunk file is removed, not just chunk 0.
+			u.storage.deleteChunkFiles(hash, intent.Size, intent.OriginalStorageID,
+				intent.OriginalChunkSizeCode, intent.OriginalChunkLocations)
 		default:
 			// Upload did not commit.  Remove any partial/complete bucket
 			// copy, refund the up-front charge, and re-queue the object.
@@ -377,25 +440,34 @@ func (u *s3Uploader) recover(ctx context.Context) error {
 	return nil
 }
 
-// backfillScan walks existing metadata once at startup and enqueues any
-// completed local objects that meet the tiering threshold (e.g. objects
-// cached before an S3 target was configured).
-func (u *s3Uploader) backfillScan(ctx context.Context) {
-	count := 0
+// backfillScan walks existing metadata once and enqueues completed local
+// objects that meet the tiering threshold (e.g. objects cached before an S3
+// target was configured, or deferred when the queue was previously full).
+//
+// It returns the number of objects queued and whether any eligible object
+// could not be enqueued because the queue was full (deferred == true),
+// signalling to the caller that more work remains.
+func (u *s3Uploader) backfillScan(ctx context.Context) (queued int, deferred bool) {
 	err := u.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if u.eligible(meta) {
-			u.MaybeEnqueue(instanceHash)
-			count++
+		if !u.eligible(meta) {
+			return nil
+		}
+		select {
+		case u.queue <- instanceHash:
+			queued++
+		default:
+			deferred = true // queue full; a later rescan will pick it up
 		}
 		return nil
 	})
 	if err != nil && ctx.Err() == nil {
 		log.Warnf("S3 tiering backfill scan failed: %v", err)
 	}
-	if count > 0 {
-		log.Infof("S3 tiering backfill: queued %d candidate object(s)", count)
+	if queued > 0 {
+		log.Infof("S3 tiering backfill: queued %d candidate object(s)", queued)
 	}
+	return queued, deferred
 }

@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -31,7 +33,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -44,17 +45,24 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
+// setS3Targets configures the Cache.S3StorageTargets parameter through the
+// param API (rather than touching viper directly) for tests.
+func setS3Targets(t *testing.T, targets []interface{}) {
+	t.Helper()
+	require.NoError(t, param.Cache_S3StorageTargets.Set(targets))
+}
+
 func TestParseS3TargetsConfig(t *testing.T) {
 	t.Run("Unset", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		targets, err := ParseS3TargetsConfig()
 		require.NoError(t, err)
 		assert.Nil(t, targets)
 	})
 
 	t.Run("Valid", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("Cache.S3StorageTargets", []interface{}{
+		server_utils.ResetTestState()
+		setS3Targets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"Bucket":     "pelican-cache",
@@ -75,8 +83,8 @@ func TestParseS3TargetsConfig(t *testing.T) {
 	})
 
 	t.Run("MissingBucket", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("Cache.S3StorageTargets", []interface{}{
+		server_utils.ResetTestState()
+		setS3Targets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"MaxSize":    "10GB",
@@ -87,8 +95,8 @@ func TestParseS3TargetsConfig(t *testing.T) {
 	})
 
 	t.Run("MissingMaxSize", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("Cache.S3StorageTargets", []interface{}{
+		server_utils.ResetTestState()
+		setS3Targets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"Bucket":     "b",
@@ -99,8 +107,8 @@ func TestParseS3TargetsConfig(t *testing.T) {
 	})
 
 	t.Run("KeyfilesMustBePaired", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("Cache.S3StorageTargets", []interface{}{
+		server_utils.ResetTestState()
+		setS3Targets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl":    "https://s3.example.com",
 				"Bucket":        "b",
@@ -293,6 +301,133 @@ func TestS3TieringLifecycle(t *testing.T) {
 	assert.Nil(t, meta)
 }
 
+// TestS3TieringChunkedObject verifies that a large chunked object — whose
+// data is spread across multiple local directories in multiple chunk files —
+// migrates to S3 as a single flattened blob, with every local chunk file
+// removed and each contributing directory's usage released.  Large objects
+// are exactly the ones chunking splits up, so this is the primary tiering
+// case once chunking is enabled.
+func TestS3TieringChunkedObject(t *testing.T) {
+	test_utils.SkipIfNoMinio(t)
+	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "pelican-cache-chunked")
+	InitIssuerKeyForTests(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir1, dir2, dbDir := t.TempDir(), t.TempDir(), t.TempDir()
+	keyDir := t.TempDir()
+	accessKeyfile := filepath.Join(keyDir, "access")
+	secretKeyfile := filepath.Join(keyDir, "secret")
+	require.NoError(t, os.WriteFile(accessKeyfile, []byte(accessKey), 0600))
+	require.NoError(t, os.WriteFile(secretKeyfile, []byte(secretKey), 0600))
+
+	db, err := NewCacheDB(ctx, dbDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0, egrp)
+	require.NoError(t, err)
+	t.Cleanup(func() { storage.Close() })
+
+	registered, err := storage.RegisterS3Targets(ctx, []S3TargetConfig{{
+		ServiceUrl:    endpoint,
+		Region:        "us-east-1",
+		Bucket:        "pelican-cache-chunked",
+		Prefix:        "cache",
+		UrlStyle:      "path",
+		AccessKeyfile: accessKeyfile,
+		SecretKeyfile: secretKeyfile,
+		MaxSize:       1 << 30,
+	}})
+	require.NoError(t, err)
+	require.Len(t, registered, 1)
+	var s3ID StorageID
+	for id := range registered {
+		s3ID = id
+	}
+	target := storage.getS3Target(s3ID)
+	require.NotNil(t, target)
+
+	dirCfgs := map[StorageID]EvictionDirConfig{s3ID: {MaxSize: 1 << 30, NoPlacement: true}}
+	for id := range storage.GetDirs() {
+		dirCfgs[id] = EvictionDirConfig{MaxSize: 1 << 30}
+	}
+	eviction := NewEvictionManager(db, storage, EvictionConfig{DirConfigs: dirCfgs})
+	uploader := newS3Uploader(db, storage, eviction, 1024)
+
+	// A two-chunk object; the chunks round-robin across dir1 and dir2.
+	chunkSizeCode := BytesToChunkSizeCode(2 * 1024 * 1024)
+	chunkSize := int64(ChunkSizeCodeToBytes(chunkSizeCode))
+	objectSize := chunkSize*2 - 37 // just under two full chunks
+	data := make([]byte, objectSize)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	nsID := NamespaceID(7)
+	hash := InstanceHash(fmt.Sprintf("%064x", 0xC0FFEE))
+
+	meta, err := storage.InitLazyChunkedStorage(ctx, hash, objectSize, chunkSizeCode)
+	require.NoError(t, err)
+	chunkCount := CalculateChunkCount(objectSize, chunkSizeCode)
+	require.GreaterOrEqual(t, chunkCount, 2, "test needs a multi-chunk object")
+	for i := 0; i < chunkCount; i++ {
+		meta, err = storage.AllocateChunk(ctx, hash, meta, i)
+		require.NoError(t, err)
+	}
+	require.NoError(t, storage.WriteBlocks(hash, 0, data))
+	meta.Completed = time.Now().Add(-10 * time.Minute)
+	meta.NamespaceID = nsID
+	require.NoError(t, storage.SetMetadata(hash, meta))
+	require.True(t, meta.IsChunked())
+
+	// Record chunk file paths so we can confirm every one is removed.
+	var chunkPaths []string
+	for i := 0; i < chunkCount; i++ {
+		sid := meta.GetChunkStorageID(i)
+		chunkPaths = append(chunkPaths, storage.getChunkPath(sid, hash, i))
+	}
+
+	// Tier the chunked object.
+	require.NoError(t, uploader.processObject(ctx, hash))
+
+	// Metadata is now a single flattened S3 object.
+	got, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, s3ID, got.StorageID)
+	assert.False(t, got.IsChunked(), "relocation must flatten the chunk layout")
+	assert.Equal(t, objectSize, got.ContentLength)
+
+	// Every local chunk file is gone and each directory's usage is released.
+	for _, p := range chunkPaths {
+		_, statErr := os.Stat(p)
+		assert.Truef(t, os.IsNotExist(statErr), "chunk file should be deleted: %s", p)
+	}
+	for id := range storage.GetDirs() {
+		usage, err := db.GetUsage(id, nsID)
+		require.NoError(t, err)
+		assert.Zerof(t, usage, "disk usage should be released for storage %d", id)
+	}
+	s3Usage, err := db.GetUsage(s3ID, nsID)
+	require.NoError(t, err)
+	assert.Equal(t, CalculateFileSize(objectSize), s3Usage)
+
+	// The bucket holds the full contiguous plaintext object.
+	stream, err := target.openStream(ctx, hash, 0)
+	require.NoError(t, err)
+	fetched, err := io.ReadAll(stream)
+	stream.Close()
+	require.NoError(t, err)
+	assert.Equal(t, data, fetched)
+
+	// No upload intent left behind.
+	intents, err := db.ListS3UploadIntents()
+	require.NoError(t, err)
+	assert.Empty(t, intents)
+}
+
 func TestS3TieringSkipsSmallAndInlineObjects(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -478,7 +613,7 @@ func TestS3RedirectServing(t *testing.T) {
 	require.NoError(t, os.WriteFile(accessKeyfile, []byte(accessKey), 0600))
 	require.NoError(t, os.WriteFile(secretKeyfile, []byte(secretKey), 0600))
 
-	viper.Set("Cache.S3StorageTargets", []interface{}{
+	setS3Targets(t, []interface{}{
 		map[string]interface{}{
 			"ServiceUrl":    endpoint,
 			"Bucket":        "pelican-redirect-test",

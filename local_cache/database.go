@@ -1402,6 +1402,12 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 // SetS3UploadIntent records an in-progress upload to an S3 target.  Written
 // before the first byte reaches the bucket so that a crash never leaves an
 // untracked object in S3.
+//
+// This and DeleteS3UploadIntent perform a single blind Set/Delete with no
+// prior read, so their transaction read-set is empty and BadgerDB's
+// serializable-snapshot conflict detection can never flag them — no retry
+// loop is required (unlike RecordPresignIssued or RelocateObject, which read
+// before writing).
 func (cdb *CacheDB) SetS3UploadIntent(instanceHash InstanceHash, intent *S3UploadIntent) error {
 	data, err := msgpack.Marshal(intent)
 	if err != nil {
@@ -1452,16 +1458,53 @@ func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, err
 	return intents, err
 }
 
+// presignRecordRetries bounds retries of RecordPresignIssued on BadgerDB
+// write conflicts (the debounce read makes it a read-modify-write, so two
+// presigns racing on the same object can conflict).
+const presignRecordRetries = 5
+
 // RecordPresignIssued stamps the current time on an object's presign key.
 // Objects with a stamp newer than the configured presign hold window are
 // skipped by eviction, so a client holding a fresh pre-signed URL never has
 // the object deleted out from under it.
+//
+// The write is debounced: a redirect for a hot object arrives repeatedly,
+// but the stamp only has to stay within the (much larger) eviction-hold
+// window.  When a stamp already exists that is newer than a quarter of the
+// hold, the write is skipped — keeping this off the DB hot path while still
+// guaranteeing the stamp is comfortably fresh relative to the hold.
 func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
+	now := time.Now()
+	debounce := cdb.presignHold / 4
 	val := make([]byte, 8)
-	binary.BigEndian.PutUint64(val, uint64(time.Now().UnixNano()))
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(PresignKey(instanceHash), val)
-	})
+	binary.BigEndian.PutUint64(val, uint64(now.UnixNano()))
+
+	for attempt := 0; ; attempt++ {
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			if debounce > 0 {
+				if item, gErr := txn.Get(PresignKey(instanceHash)); gErr == nil {
+					var prev int64
+					_ = item.Value(func(v []byte) error {
+						if len(v) >= 8 {
+							prev = int64(binary.BigEndian.Uint64(v))
+						}
+						return nil
+					})
+					if prev > 0 && now.Sub(time.Unix(0, prev)) < debounce {
+						return nil // recent enough; skip the write
+					}
+				}
+			}
+			return txn.Set(PresignKey(instanceHash), val)
+		})
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, badger.ErrConflict) && attempt < presignRecordRetries {
+			continue
+		}
+		return err
+	}
 }
 
 // presignHeldInTxn reports whether the object's presign stamp is within the
@@ -1484,10 +1527,16 @@ func (cdb *CacheDB) presignHeldInTxn(txn *badger.Txn, instanceHash InstanceHash)
 	return issuedAt > 0 && time.Since(time.Unix(0, issuedAt)) < cdb.presignHold
 }
 
-// RelocateObject atomically moves a completed, non-chunked object's
-// metadata from one storage target to another: the StorageID is rewritten
-// (bypassing the set-once merge rule — this is the one sanctioned
-// transition) and the LRU index entry is moved to the new storage ID.
+// RelocateObject atomically moves a completed object's metadata onto the
+// given S3 storage target.  The StorageID is rewritten (bypassing the
+// set-once merge rule — this is the one sanctioned transition) and the LRU
+// index entry is moved from the object's base storage ID to the new one.
+//
+// Chunked objects are supported: because an S3 target holds the object as a
+// single contiguous blob, relocation flattens the chunk layout
+// (ChunkSizeCode / ChunkLocations are cleared).  The returned pre-relocation
+// metadata still carries the original chunk layout so the caller can delete
+// every local chunk file and refund each contributing directory's usage.
 //
 // The caller is responsible for moving the object *data* and for adjusting
 // usage counters after the transaction commits (AddUsage cannot run inside
@@ -1508,17 +1557,16 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 		if prev.Completed.IsZero() {
 			return errors.New("cannot relocate an incomplete object")
 		}
-		if prev.IsChunked() {
-			return errors.New("cannot relocate a chunked object")
-		}
-		if prev.StorageID == StorageIDInline {
+		if prev.StorageID == StorageIDInline && !prev.IsChunked() {
 			return errors.New("cannot relocate an inline object")
 		}
 		if prev.StorageID == newStorageID {
 			return errors.New("object already resides on the target storage")
 		}
 
-		// Move the LRU index entry, preserving the access timestamp.
+		// Move the LRU index entry, preserving the access timestamp.  The
+		// LRU is keyed by the object's base StorageID (chunk 0's directory
+		// for chunked objects), which is what deleteObjectInTxn also uses.
 		if !prev.LastAccessTime.IsZero() {
 			oldKey := LRUKey(prev.StorageID, prev.NamespaceID, prev.LastAccessTime, instanceHash)
 			if err := txn.Delete(oldKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
@@ -1532,6 +1580,10 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 
 		updated := prev
 		updated.StorageID = newStorageID
+		// The bucket holds one contiguous blob; drop the chunk layout so the
+		// object is a plain single-storage object on the S3 target.
+		updated.ChunkSizeCode = ChunkingDisabled
+		updated.ChunkLocations = nil
 		data, err := msgpack.Marshal(&updated)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal relocated metadata")

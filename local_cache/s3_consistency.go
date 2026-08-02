@@ -80,6 +80,16 @@ type s3BucketEntry struct {
 	modified time.Time
 }
 
+// s3MaxOrphansPerScan bounds how many orphan candidates (in either
+// direction) a single sweep collects before it stops accumulating and
+// defers the rest to the next sweep.  This caps the sweep's memory
+// regardless of how large or divergent the bucket is.
+const s3MaxOrphansPerScan = 4096
+
+// s3SweepOpTimeout bounds each individual S3 HeadObject / DeleteObject the
+// sweep issues while reconciling, so one hung request cannot stall the pass.
+const s3SweepOpTimeout = 2 * time.Minute
+
 func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, target *s3Target) error {
 	scanStart := time.Now()
 
@@ -91,11 +101,15 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	}
 
 	// Stream the bucket listing (lexicographic key order == instance-hash
-	// order thanks to the shared aa/bb/rest layout).
+	// order thanks to the shared aa/bb/rest layout).  The producer goroutine
+	// is bounded to this function: listCtx is cancelled on every return path
+	// (defer), which unblocks the goroutine if it is parked on a channel
+	// send, and listDone is buffered so its final send never blocks.  We
+	// also join on listDone before returning (see below), so the goroutine
+	// can never outlive scanS3Target — no errgroup needed.
 	listChan := make(chan s3BucketEntry, 256)
 	listDone := make(chan error, 1)
 	listCtx, cancelList := context.WithCancel(ctx)
-	defer cancelList()
 	go func() {
 		defer close(listChan)
 		listDone <- target.listObjects(listCtx, func(hash InstanceHash, size int64, modified time.Time) error {
@@ -108,8 +122,32 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		})
 	}()
 
+	// listErr is populated by the deferred join.  Guaranteeing the join on
+	// every return path is what makes the goroutine unable to escape.  The
+	// merge join below always consumes the listing to completion (it stops
+	// appending once the orphan cap is hit, but keeps draining), so under
+	// normal operation the producer finishes on its own and listErr carries
+	// its real result; cancelList()/the drain only matter on an early error
+	// return.
+	var listErr error
+	joined := false
+	joinList := func() {
+		if joined {
+			return
+		}
+		joined = true
+		cancelList()
+		// Drain any buffered entries so the producer is never blocked on a
+		// send while we wait for it to finish.
+		for range listChan {
+		}
+		listErr = <-listDone
+	}
+	defer joinList()
+
 	var orphanBucket []s3BucketEntry // in bucket, not in DB
 	var orphanDB []InstanceHash      // in DB, not in bucket (or size mismatch)
+	capped := false                  // hit s3MaxOrphansPerScan; more remains
 
 	// considerBucketOrphan applies the grace period and intent check
 	// before queuing a bucket object for deletion.
@@ -120,10 +158,17 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if cc.minAgeForCleanup > 0 && time.Since(e.modified) < cc.minAgeForCleanup {
 			return
 		}
+		if len(orphanBucket) >= s3MaxOrphansPerScan {
+			capped = true
+			return
+		}
 		orphanBucket = append(orphanBucket, e)
 	}
 
 	// Merge join: DB metadata (restricted to this storage ID) vs listing.
+	// The join always runs to completion so the listing producer finishes
+	// on its own; once an orphan list reaches the cap it simply stops
+	// appending (recording capped) rather than stopping the walk.
 	current, listOk := <-listChan
 	scanErr := cc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
 		select {
@@ -147,7 +192,11 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 			if !meta.Completed.IsZero() && meta.ContentLength != current.size {
 				log.Warnf("S3 object %s size mismatch (bucket %d, metadata %d); removing",
 					instanceHash, current.size, meta.ContentLength)
-				orphanDB = append(orphanDB, instanceHash)
+				if len(orphanDB) >= s3MaxOrphansPerScan {
+					capped = true
+				} else {
+					orphanDB = append(orphanDB, instanceHash)
+				}
 			}
 			current, listOk = <-listChan
 			return nil
@@ -161,16 +210,22 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
 			return nil
 		}
+		if len(orphanDB) >= s3MaxOrphansPerScan {
+			capped = true
+			return nil
+		}
 		orphanDB = append(orphanDB, instanceHash)
 		return nil
 	})
 
-	// Any remaining listing entries have no metadata at all.
+	// Any remaining listing entries have no metadata at all.  Drain them all
+	// (considerBucketOrphan stops appending once the cap is hit) so the
+	// producer goroutine finishes on its own.
 	for listOk {
 		considerBucketOrphan(current)
 		current, listOk = <-listChan
 	}
-	listErr := <-listDone
+	joinList()
 
 	if scanErr != nil {
 		return scanErr
@@ -186,7 +241,9 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	deletedBucket, deletedDB := 0, 0
 
 	// Delete bucket orphans, re-verifying against current metadata so a
-	// relocation that landed during the scan is not clobbered.
+	// relocation that landed during the scan is not clobbered.  Each S3
+	// operation is given a finite timeout so a single hung request cannot
+	// stall the sweep.
 	for _, e := range orphanBucket {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -200,7 +257,10 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 				continue
 			}
 		}
-		if err := target.deleteObject(ctx, e.hash); err != nil {
+		opCtx, cancel := context.WithTimeout(ctx, s3SweepOpTimeout)
+		err = target.deleteObject(opCtx, e.hash)
+		cancel()
+		if err != nil {
 			log.Warnf("Failed to delete orphaned S3 object %s: %v", e.hash, err)
 			continue
 		}
@@ -217,19 +277,26 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if err != nil || meta == nil || meta.StorageID != sid {
 			continue
 		}
-		exists, err := target.objectExists(ctx, hash)
+		opCtx, cancel := context.WithTimeout(ctx, s3SweepOpTimeout)
+		exists, err := target.objectExists(opCtx, hash)
 		if err != nil {
+			cancel()
 			log.Warnf("Failed to verify S3 object %s before cleanup: %v", hash, err)
 			continue
 		}
 		if exists && meta.ContentLength == 0 {
+			cancel()
 			continue
 		}
 		if exists {
 			// Present after all — only remove when the size disagrees.
-			if !cc.s3SizeMismatch(ctx, target, hash, meta) {
+			mismatch := cc.s3SizeMismatch(opCtx, target, hash, meta)
+			cancel()
+			if !mismatch {
 				continue
 			}
+		} else {
+			cancel()
 		}
 		if err := cc.storage.Delete(hash); err != nil {
 			log.Warnf("Failed to delete S3-orphaned DB entry %s: %v", hash, err)
@@ -241,6 +308,10 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	if deletedBucket > 0 || deletedDB > 0 {
 		log.Infof("S3 consistency sweep of %s: removed %d orphaned bucket object(s), %d orphaned DB entr(ies) in %s",
 			target.cfg.DisplayURL(), deletedBucket, deletedDB, time.Since(scanStart).Round(time.Millisecond))
+	}
+	if capped {
+		log.Infof("S3 consistency sweep of %s hit the %d-orphan cap; remaining divergence will be handled on the next sweep",
+			target.cfg.DisplayURL(), s3MaxOrphansPerScan)
 	}
 
 	cc.statsMu.Lock()

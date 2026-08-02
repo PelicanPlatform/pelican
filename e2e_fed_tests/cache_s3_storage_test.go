@@ -37,7 +37,6 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -95,7 +94,7 @@ func TestCacheS3StorageFederationE2E(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	require.NoError(t, param.Cache_S3UploadThreshold.Set("4KB"))
-	viper.Set("Cache.S3StorageTargets", []interface{}{
+	require.NoError(t, param.Cache_S3StorageTargets.Set([]interface{}{
 		map[string]interface{}{
 			"ServiceUrl":    endpoint,
 			"Bucket":        "pelican-cache-fed-e2e",
@@ -104,7 +103,7 @@ func TestCacheS3StorageFederationE2E(t *testing.T) {
 			"AccessKeyfile": accessKeyfile,
 			"SecretKeyfile": secretKeyfile,
 		},
-	})
+	}))
 
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 	token := getTempTokenForTest(t)
