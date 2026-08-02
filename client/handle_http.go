@@ -1961,10 +1961,22 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// is in a-priori.
 	var dirResp server_structs.DirectorResponse
 	directorFailed := false
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
+	// With no director in the federation, nothing has told us yet whether this
+	// namespace wants a credential -- the origin says so when it answers.  The
+	// transfer therefore keeps its token generator either way, so that a
+	// rejection carrying token hints has something to acquire onto.
+	directorless := copyUrl.FedInfo.DirectorEndpoint == "" && copyUrl.FedInfo.DiscoveryEndpoint != ""
+	// A download against a directorless federation resolves locally and pays no
+	// round trip: it addresses the object to the host the user named and lets
+	// the origin's own rejection say what credential the namespace wants.  An
+	// upload has no such second chance -- there is no hint retry on a PUT -- so
+	// it still asks first.
+	if directorless && !upload {
+		dirResp, err = resolveForRequest(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyUrlRef := &copyUrl
 		cacheMode := tj.cacheMode
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -1981,6 +1993,12 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				ObjectServers: []*url.URL{},
 			}
 			tj.dirResp = dirResp
+			// Assigned directly rather than through SetDirectorResponse: no
+			// director answered, so this placeholder carries no authorization
+			// metadata and must not be treated as though a director vouched
+			// for it.  The named object servers do not get to supply that
+			// metadata either -- they are not the federation's discovery host,
+			// so canApplyTokenHint refuses their hints.
 			tj.token.DirResp = &dirResp
 			err = nil // Clear the error since we're continuing with explicit caches
 		} else {
@@ -1995,16 +2013,16 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	} else {
 		tj.dirResp = dirResp
-		tj.token.DirResp = &dirResp
+		tj.token.SetDirectorResponse(&dirResp)
 	}
 
 	// For uploads or when director indicates token is required, get a token
 	// If director failed but we have explicit caches, try to get token anyway
-	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) {
+	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) || directorless {
 		contents, err := tj.token.Get()
 		if err != nil || contents == "" {
 			// If director failed, token errors are not fatal - we'll try without token
-			if directorFailed {
+			if directorFailed || directorless {
 				log.Debugln("Could not acquire token, will attempt transfer without token")
 			} else {
 				return nil, errors.Wrap(err, "failed to get token for transfer")
@@ -2012,8 +2030,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 
 		// The director response may change if it's given a token; let's repeat the query.
-		// Skip re-query if director already failed
-		if contents != "" && !directorFailed {
+		// Skip re-query if the director already failed, or if there is no
+		// director to re-query.
+		if contents != "" && !directorFailed && !directorless {
 			dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
 			if err != nil {
 				var sce *StatusCodeError
@@ -2025,10 +2044,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				return nil, err
 			}
 			tj.dirResp = dirResp
-			tj.token.DirResp = &dirResp
+			tj.token.SetDirectorResponse(&dirResp)
 			// Update the cache with the token-authenticated response.
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyUrl.Path, dirResp)
+				tc.engine.dirRespCache.Store(copyUrl.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, copyUrl.Path, dirResp)
 			}
 		}
 	} else {
@@ -2105,7 +2124,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	var dirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2118,7 +2137,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		return
 	}
 	tj.dirResp = dirResp
-	tj.token.DirResp = &dirResp
+	tj.token.SetDirectorResponse(&dirResp)
 
 	log.Debugln("Dir resp:", dirResp.XPelNsHdr)
 	if dirResp.XPelNsHdr.RequireToken {
@@ -2136,9 +2155,9 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 				return nil, err
 			}
 			tj.dirResp = dirResp
-			tj.token.DirResp = &dirResp
+			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
 	} else {
@@ -2229,7 +2248,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	destVerb := "COPY"
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyDestUrlRef := &copyDestUrl
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
 			if qErr != nil {
 				// Fall back to PUT if COPY is not supported by the director
@@ -2252,7 +2271,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 	tj.destDirResp = dirResp
-	tj.token.DirResp = &dirResp
+	tj.token.SetDirectorResponse(&dirResp)
 
 	// Acquire token for the destination if needed
 	if dirResp.XPelNsHdr.RequireToken {
@@ -2269,9 +2288,9 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 				return nil, err
 			}
 			tj.destDirResp = dirResp
-			tj.token.DirResp = &dirResp
+			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
 			}
 		}
 	}
@@ -2280,7 +2299,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	var srcDirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copySrcUrlRef := &copySrcUrl
-		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2293,7 +2312,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 	tj.srcDirResp = srcDirResp
-	tj.srcToken.DirResp = &srcDirResp
+	tj.srcToken.SetDirectorResponse(&srcDirResp)
 
 	if srcDirResp.XPelNsHdr.RequireToken {
 		contents, tErr := tj.srcToken.Get()
@@ -2309,9 +2328,9 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 				return nil, err
 			}
 			tj.srcDirResp = srcDirResp
-			tj.srcToken.DirResp = &srcDirResp
+			tj.srcToken.SetDirectorResponse(&srcDirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
 			}
 		}
 	} else {
@@ -2383,8 +2402,13 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	defer cancel()
 
 	var dirResp server_structs.DirectorResponse
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+	// The probe below is itself the question a metadata query would have asked,
+	// so a directorless federation is not asked twice.
+	directorless := pelicanURL.FedInfo.DirectorEndpoint == "" && pelicanURL.FedInfo.DiscoveryEndpoint != ""
+	if directorless {
+		dirResp, err = resolveForRequest(ctx, pelicanURL, http.MethodGet, "", false)
+	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2396,7 +2420,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 		return
 	}
-	token.DirResp = &dirResp
+	token.SetDirectorResponse(&dirResp)
 
 	if dirResp.XPelNsHdr.RequireToken {
 		var contents string
@@ -2414,12 +2438,14 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 				return
 			}
-			token.DirResp = &dirResp
+			token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
-	} else {
+	} else if !directorless {
+		// Nothing has asked yet, so "no token required" is not a fact; keep the
+		// generator so a refusal carrying hints can acquire onto it.
 		token = nil
 	}
 
@@ -3570,6 +3596,35 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
 			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
 		)
+
+		// If the endpoint returned a 403 with director-style token hints, learn
+		// what token is needed, acquire it, and retry this same endpoint once
+		// with the token.  A 403 is returned before any body is written, so
+		// retrying is safe.  canApplyTokenHint decides whether the hint is one
+		// this transfer may act on at all.
+		var hintErr *tokenHintError
+		if errors.As(err, &hintErr) && transfer.token.canApplyTokenHint(transferEndpoint.Url) {
+			// Acquire on a private generator, coalesced with any sibling file
+			// handed the same hint: the job's generator is shared with every
+			// other file in this transfer.
+			//
+			// Retrying with the credential just rejected would only earn the
+			// same 403, so a hint that yields nothing new ends the attempt.
+			if newTok, tErr := transfer.token.tokenForHint(&hintErr.dirResp); tErr == nil && newTok != "" && newTok != tokenContents {
+				log.WithFields(fields).Debugln("Retrying with token after 403 token hint from", transferEndpoint.Url.Host)
+				// Publish the credential to the job's generator so the sibling
+				// files and the checksum request that follows this download do
+				// not each repeat the acquisition.
+				transfer.token.cacheToken(newTok)
+				tokenContents = newTok
+				// The rejected attempt wrote no body, so the scheduler has not
+				// been told this endpoint is responsive; the retry is the
+				// attempt that will prove it.  schedFirstByte is idempotent.
+				attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err = downloadHTTP(
+					ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
+				)
+			}
+		}
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
 
@@ -3941,6 +3996,55 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 	return nil
 }
 
+// acquireFromTokenHint reads the token hints an origin attached to a response
+// that refused the request and, if tok may act on them, obtains the credential
+// they name and caches it so a retry carries it.  Reports whether it did.
+//
+// This is how an operation other than a download learns what it needs: a stat,
+// a listing, and a cache-age probe all ask their own question first and read
+// the answer off the refusal, rather than paying for a metadata query that the
+// request was about to make redundant.
+func acquireFromTokenHint(tok *tokenGenerator, resp *http.Response) bool {
+	if tok == nil || resp == nil || resp.Request == nil {
+		return false
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	if resp.Header.Get(server_structs.XPelNs{}.GetName()) == "" {
+		return false
+	}
+	if !tok.canApplyTokenHint(resp.Request.URL) {
+		return false
+	}
+	hint, err := ParseDirectorInfo(resp)
+	if err != nil || !hint.XPelNsHdr.RequireToken {
+		return false
+	}
+	contents, err := tok.tokenForHint(&hint)
+	if err != nil || contents == "" {
+		return false
+	}
+	// Publish it so the rest of the operation -- the other stat hosts, the rest
+	// of a recursive listing -- does not each repeat the acquisition.
+	tok.cacheToken(contents)
+	return true
+}
+
+// tokenHintError is returned by downloadHTTP when an object server responds
+// with 403 and director-style X-Pelican-* headers indicating that a token is
+// required.  The embedded dirResp carries the parsed token-hint information so
+// the caller can acquire the right token and retry the same endpoint.  It
+// unwraps to the underlying authorization error so existing error handling
+// continues to work if no retry is attempted (or the retry fails).
+type tokenHintError struct {
+	dirResp server_structs.DirectorResponse
+	err     error
+}
+
+func (e *tokenHintError) Error() string { return e.err.Error() }
+func (e *tokenHintError) Unwrap() error { return e.err }
+
 // Download a single object from a single HTTP server with no retries.
 //
 // The following information is required:
@@ -4127,6 +4231,36 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		bodyStr := string(bodyBytes)
 		log.WithFields(fields).Debugln("Error response body:", bodyStr)
 		serverVersion = resp.Header.Get("Server")
+		// A server that answers namespace questions about itself -- a standalone
+		// origin -- returns the same X-Pelican-* token-hint headers a director
+		// would, on the response that turns the request down.  Both codes carry
+		// them and both matter: 401 is what a client that sent nothing gets,
+		// which is the ordinary first request when no director was asked what
+		// this namespace wants, and 403 is what a presented-but-insufficient
+		// credential gets.  Surface either as a tokenHintError so the caller can
+		// obtain the right credential and retry this same endpoint, reusing the
+		// director-response parser.  Whether the hint may be acted on is decided
+		// by canApplyTokenHint, not here.
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			if resp.Header.Get(server_structs.XPelNs{}.GetName()) != "" {
+				if parsed, perr := ParseDirectorInfo(resp); perr == nil && parsed.XPelNsHdr.RequireToken {
+					// Keep the underlying error the shape each status already
+					// had, so nothing downstream sees a 401 become a 403.
+					var wrapped error
+					if resp.StatusCode == http.StatusForbidden {
+						pde := &PermissionDeniedError{}
+						if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
+							pde.message = "Permission denied: " + trimmed
+						}
+						wrapped = error_codes.NewAuthorizationError(pde)
+					} else {
+						sce := StatusCodeError(resp.StatusCode)
+						wrapped = wrapStatusCodeError(&sce)
+					}
+					return 0, 0, -1, serverVersion, "", &tokenHintError{dirResp: parsed, err: wrapped}
+				}
+			}
+		}
 		if resp.StatusCode == http.StatusForbidden {
 			// Preserve the origin's response body so operators can see why
 			// the request was rejected (e.g. scope mismatch, token issue).
@@ -4136,7 +4270,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
 				pde.message = "Permission denied: " + trimmed
 			}
-			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(pde)
+			authErr := error_codes.NewAuthorizationError(pde)
+			return 0, 0, -1, serverVersion, "", authErr
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			// The serving cache's fair scheduler shed this request. Parse the
@@ -6467,6 +6602,26 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	headResponse, err = headClient.Do(headRequest)
 	if err != nil {
 		return
+	}
+	// An origin that answers namespace questions about itself says on the
+	// refusal which credential would have worked.  Take it and ask once more,
+	// so this probe learns the same way the transfer it precedes does.
+	if acquireFromTokenHint(token, headResponse) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(headResponse.Body, probeDrainLimit))
+		headResponse.Body.Close()
+		retryRequest, retryErr := http.NewRequestWithContext(ctx, http.MethodGet, objectUrl.String(), nil)
+		if retryErr != nil {
+			err = retryErr
+			return
+		}
+		retryRequest.Header.Set("Range", "bytes=0-0")
+		if tokenContents, tokErr := token.Get(); tokErr == nil && tokenContents != "" {
+			retryRequest.Header.Set("Authorization", "Bearer "+tokenContents)
+		}
+		headResponse, err = headClient.Do(retryRequest)
+		if err != nil {
+			return
+		}
 	}
 	// The probe wants headers, but an *error* response's body carries the
 	// structured reason that tells a throttle apart from any other refusal, so
