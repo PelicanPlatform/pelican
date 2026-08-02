@@ -3150,6 +3150,12 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				collection.isCollection = true
 			}
 		}
+		// A shed probe is the one failure that says something about why the
+		// question went unanswered, so it is kept rather than flattened in
+		// with the rest. The first one is enough; they all mean "ask later".
+		if result.err != nil && collection.throttleErr == nil && errors.Is(result.err, ErrTooManyRequests) {
+			collection.throttleErr = result.err
+		}
 		if result.err != nil {
 			// If an attempt to contact the remote cache failed, log a message (unless we purposely
 			// canceled the attempt).
@@ -3244,6 +3250,15 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			return
 		}
 		if !collection.answered {
+			// A shed probe is why the question went unanswered here, and it is
+			// already classified as retryable with the cache's own Retry-After.
+			// Reporting the refusal below instead would turn "the cache asked
+			// you to wait" into a non-retryable resolution failure and send the
+			// caller away for good.
+			if collection.throttleErr != nil {
+				err = collection.throttleErr
+				return
+			}
 			// Downloading anyway is how the caller ends up with a directory
 			// listing saved as though it were their object. An endpoint that
 			// cannot answer a PROPFIND for the path it is about to serve is
@@ -6407,6 +6422,13 @@ func probeToken(token *tokenGenerator, fedToken TokenProvider) *tokenGenerator {
 type collectionAnswer struct {
 	answered     bool
 	isCollection bool
+	// throttleErr is a 429 seen while asking, kept because it changes what an
+	// unanswered question means. A caller that refuses collections refuses
+	// when nobody answered, and "every endpoint was too busy to say" is a
+	// retryable condition carrying a Retry-After, where "every endpoint
+	// declined to say" is not. Reporting the latter for the former would tell
+	// a client to give up on a cache that only asked it to wait.
+	throttleErr error
 }
 
 // objectCached checks if a given URL is present at the first cache in the

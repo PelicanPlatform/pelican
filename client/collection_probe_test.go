@@ -716,3 +716,39 @@ func TestStatHttpBoundsResponseBody(t *testing.T) {
 		t.Fatal("statHttp read an unbounded PROPFIND body without stopping")
 	}
 }
+
+// TestCollectionProbeThrottleSurvivesRefusal pins the seam between the
+// collection guard and the cache's fair scheduler.
+//
+// A shed probe answers nothing, so the guard's fail-closed rule fires and the
+// download is refused.  What it is refused *with* matters: the throttle is
+// retryable and carries the cache's Retry-After, while the guard's own refusal
+// is a resolution error, which is not retryable.  Reporting the latter would
+// tell a client to give up on a cache that only asked it to wait -- the same
+// mistake objectCached avoids one layer down when it declines to let a HEAD
+// overwrite the 429.
+func TestCollectionProbeThrottleSurvivesRefusal(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	_, svrUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "23")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"cache_overloaded","detail":"shed"}`))
+	})
+
+	_, collection, _ := sortAttempts(ctx, "/path", []transferAttemptDetails{{Url: svrUrl}}, probeTestToken(), true)
+
+	require.False(t, collection.answered, "a shed probe answers nothing, so the guard must still refuse")
+	require.NotNil(t, collection.throttleErr, "but the reason must survive for the caller to report")
+	assert.ErrorIs(t, collection.throttleErr, ErrTooManyRequests)
+	assert.True(t, IsRetryable(collection.throttleErr),
+		"a refusal caused by throttling must stay retryable")
+
+	var throttled *CacheThrottleError
+	require.ErrorAs(t, collection.throttleErr, &throttled)
+	assert.Equal(t, 23*time.Second, throttled.RetryAfter,
+		"the cache's own backoff hint must reach the caller")
+}
