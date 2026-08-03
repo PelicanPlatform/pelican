@@ -191,7 +191,11 @@ func (pc *PersistentCache) trimObjectCaps() error {
 			continue
 		}
 		objCap := view.MaxNumObjects
-		if objCap < 0 { // unbounded
+		// -1 is the unbounded sentinel. Treat any non-positive cap the same way:
+		// a lot permitted to hold zero objects is not a meaningful configuration,
+		// and honouring it literally would evict the lot's entire bucket on every
+		// tick, independent of disk pressure.
+		if objCap <= 0 {
 			continue
 		}
 		pc.namespaceMapMu.RLock()
