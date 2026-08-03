@@ -32,10 +32,16 @@ import (
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
 
-// lotmanVersion is the API version this shared library advertises. It matches
-// the C ABI the historical libLotMan published (and that the XRootD purge
-// plugin version-gates against).
-const lotmanVersion = "0.1.0"
+// lotmanVersion -- the API version this shared library advertises -- is defined
+// per ABI variant, in export_api_v1.go and export_api_legacy.go, so the string
+// can never contradict the signatures actually exported. A consumer that
+// version-gates on lotman_version() and then calls a differently-shaped entry
+// point gets shifted arguments and a crash.
+//
+// The value carries the leading "v" the original library published
+// ("v" + major.minor.patch); that prefix is also what makes it parse as a
+// semver, and Pelican's own historical gate used semver.IsValid, which rejects
+// an unprefixed "0.1.0".
 
 // defaultBusyTimeoutMs is the SQLite busy timeout used unless the caller
 // overrides it via the "db_timeout" integer context key.

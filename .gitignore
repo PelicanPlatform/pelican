@@ -33,3 +33,7 @@ e2e_fed_tests.test
 # `go build ./cmd/sample_metadata_server`.
 /sample_metadata_server
 /cmd/sample_metadata_server/sample_metadata_server
+
+# `go build ./lotman/cshared` drops its output here, named after the package
+# directory. The shared library is built via `make lotman-shared` instead.
+/lotman/cshared/cshared
