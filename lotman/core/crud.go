@@ -201,6 +201,13 @@ func (m *Manager) AddToLot(add LotAddition, caller string) error {
 		if err := m.authorizeModify(tx, *lot, caller); err != nil {
 			return err
 		}
+		// A parent that is already a descendant would close a cycle in
+		// lot_parents. Nothing downstream tolerates one: the hierarchy walkers
+		// would silently return a subtree that contains its own ancestor, and the
+		// recursive depth query behind eviction ordering would not terminate.
+		// Resolve the descendant set once, only when there is a real parent to
+		// check (a self-edge is the root marker and is always fine).
+		var descendants map[string]bool
 		for _, p := range add.Parents {
 			if p == "" {
 				return wrapf(ErrInvalidLot, "cannot add empty parent")
@@ -212,6 +219,19 @@ func (m *Manager) AddToLot(add LotAddition, caller string) error {
 				}
 				if pc == 0 {
 					return wrapf(ErrInvalidLot, "parent %q does not exist", p)
+				}
+				if descendants == nil {
+					names, err := descendantsVia(tx, add.LotName)
+					if err != nil {
+						return err
+					}
+					descendants = make(map[string]bool, len(names))
+					for _, n := range names {
+						descendants[n] = true
+					}
+				}
+				if descendants[p] {
+					return wrapf(ErrInvalidLot, "cannot make %q a parent of %q: it is already a descendant, which would create a cycle", p, add.LotName)
 				}
 			}
 			edge := LotParent{LotName: add.LotName, Parent: p}
@@ -469,10 +489,18 @@ func (m *Manager) authorizeCreate(tx *gorm.DB, spec LotSpec, caller string) erro
 	if caller == "" || m.opts.AdminOverride {
 		return nil
 	}
+	// A lot that is *only* its own parent is a new root: there is no existing lot
+	// to check ownership against. Naming yourself among several parents does not
+	// earn that exemption -- the other parents are still someone else's lots, and
+	// skipping the check for them lets any caller graft a lot (with its path
+	// claim, and with itself as owner) anywhere in the hierarchy.
+	if len(spec.Parents) == 1 && spec.Parents[0] == spec.LotName {
+		return nil
+	}
 	nonSelf := make([]string, 0, len(spec.Parents))
 	for _, p := range spec.Parents {
 		if p == spec.LotName {
-			return nil // self-parented: creating one's own root
+			continue
 		}
 		nonSelf = append(nonSelf, p)
 	}
