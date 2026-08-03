@@ -187,3 +187,60 @@ func resetStateForTest() {
 	ctxInt = map[string]int{}
 	ctxMu.Unlock()
 }
+
+// --- probes for the entry-point guarantees (B1/B2) ----------------------------
+
+// panicProbe mirrors the shape every C entry point uses, but panics in its body.
+// It exists so a test can assert the guard really converts a panic into the
+// library's error return rather than letting it unwind into the host process.
+func panicProbe(errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	panic("probe")
+}
+
+// panicGuardProbeGo returns the (return code, error message) a panicking entry
+// point produces.
+func panicGuardProbeGo() (int, string) {
+	var e *C.char
+	rc := panicProbe(&e)
+	msg := ""
+	if e != nil {
+		msg = C.GoString(e)
+		C.free(unsafe.Pointer(e))
+	}
+	return int(rc), msg
+}
+
+// listOutClearedOnFailureGo calls a string-list entry point that is guaranteed
+// to fail (no lot_home configured, so the manager cannot be built) with a
+// pre-poisoned output pointer, and reports whether the callee reset it to NULL.
+// A real consumer -- the XRootD purge plugin -- frees `output` before checking
+// the return code, so a non-NULL leftover means free()ing indeterminate data.
+func listOutClearedOnFailureGo() (rc int, cleared bool) {
+	poison := C.CString("poison")
+	defer C.free(unsafe.Pointer(poison))
+	list := (**C.char)(unsafe.Pointer(&poison))
+	var e *C.char
+	code := lotman_list_all_lots(&list, &e)
+	if e != nil {
+		C.free(unsafe.Pointer(e))
+	}
+	return int(code), list == nil
+}
+
+// strOutClearedOnFailureGo is listOutClearedOnFailureGo for a single-string
+// out-parameter.
+func strOutClearedOnFailureGo() (rc int, cleared bool) {
+	out := C.CString("poison")
+	defer C.free(unsafe.Pointer(out))
+	held := out
+	var e *C.char
+	name := C.CString("nosuchlot")
+	defer C.free(unsafe.Pointer(name))
+	code := lotman_get_lot_as_json(name, false, &held, &e)
+	if e != nil {
+		C.free(unsafe.Pointer(e))
+	}
+	return int(code), held == nil
+}
