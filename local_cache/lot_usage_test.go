@@ -390,23 +390,35 @@ func TestPriorityBuckets(t *testing.T) {
 	}
 
 	// Dir 3 holds both priority lots; expect priority order [expired(20), over(21)].
+	// The expired lot's lifetime is over, so all of it is reclaimable (-1);
+	// `over` holds 5000 against a 1000 dedicated quota, so 4000 is reclaimable
+	// lot-wide, capped here by the 2000 this directory actually holds.
 	mustSeed(t, cdb, 3, 20, 1000)
 	mustSeed(t, cdb, 3, 21, 2000)
 	got := pc.priorityBuckets(3)
-	if len(got) != 2 || got[0] != 20 || got[1] != 21 {
-		t.Errorf("priorityBuckets(3) = %v, want [20 21] (expired before over)", got)
+	if len(got) != 2 || got[0].bucket != 20 || got[1].bucket != 21 {
+		t.Errorf("priorityBuckets(3) = %v, want buckets [20 21] (expired before over)", got)
+	} else {
+		if got[0].maxBytes >= 0 {
+			t.Errorf("expired lot budget = %d, want unbounded (<0)", got[0].maxBytes)
+		}
+		if got[1].maxBytes != 2000 {
+			t.Errorf("over-quota lot budget = %d, want 2000 (capped by this directory's share)", got[1].maxBytes)
+		}
 	}
 
 	// Dir 1 holds only the over-quota lot; expired is filtered out (not present).
 	mustSeed(t, cdb, 1, 21, 500)
-	if got := pc.priorityBuckets(1); len(got) != 1 || got[0] != 21 {
-		t.Errorf("priorityBuckets(1) = %v, want [21]", got)
+	if got := pc.priorityBuckets(1); len(got) != 1 || got[0].bucket != 21 {
+		t.Errorf("priorityBuckets(1) = %v, want bucket [21]", got)
+	} else if got[0].maxBytes != 500 {
+		t.Errorf("over-quota lot budget in dir 1 = %d, want 500 (all this directory holds)", got[0].maxBytes)
 	}
 
 	// Dir 2 holds only the expired lot.
 	mustSeed(t, cdb, 2, 20, 500)
-	if got := pc.priorityBuckets(2); len(got) != 1 || got[0] != 20 {
-		t.Errorf("priorityBuckets(2) = %v, want [20]", got)
+	if got := pc.priorityBuckets(2); len(got) != 1 || got[0].bucket != 20 {
+		t.Errorf("priorityBuckets(2) = %v, want bucket [20]", got)
 	}
 
 	// No planner without a manager.
