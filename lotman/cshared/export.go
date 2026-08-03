@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"fmt"
 	"unsafe"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
@@ -40,6 +41,53 @@ func main() {}
 var versionC = C.CString(lotmanVersion)
 
 // --- C memory / error helpers -------------------------------------------------
+
+// guard converts a Go panic escaping a C entry point into the library's generic
+// error return. Without it a panic unwinds out of an //export function and, in
+// -buildmode=c-shared, terminates the *host* process -- which for the purge
+// plugin is xrootd itself. The C++ library this replaces wrapped every entry
+// point in try/catch; this is the equivalent. Pair with a named `rc` return:
+//
+//	func lotman_x(..., errMsg **C.char) (rc C.int) {
+//		defer guard(errMsg, &rc)
+//
+// Note this catches Go panics only: a fault from a bad C pointer is a runtime
+// throw, not a panic, and is not recoverable. Clearing out-params on entry (see
+// clearStr/clearList/clearInt) is what defends against that class.
+func guard(errMsg **C.char, rc *C.int) {
+	if r := recover(); r != nil {
+		if rc != nil {
+			*rc = -1
+		}
+		if errMsg != nil {
+			*errMsg = C.CString(fmt.Sprintf("panic in lotman: %v", r))
+		}
+	}
+}
+
+// clearStr, clearList and clearInt zero a caller-supplied out-parameter on entry
+// to a C entry point. The historical ABI leaves out-params untouched on failure,
+// and real consumers free them without first checking the return code (the
+// XRootD purge plugin wraps `output` in a freeing unique_ptr before testing rv),
+// so an untouched parameter means walking and free()ing indeterminate stack
+// data. Writing NULL up front makes that a no-op instead.
+func clearStr(out **C.char) {
+	if out != nil {
+		*out = nil
+	}
+}
+
+func clearList(out ***C.char) {
+	if out != nil {
+		*out = nil
+	}
+}
+
+func clearInt(out *C.int) {
+	if out != nil {
+		*out = 0
+	}
+}
 
 // fail stores err's message in *errMsg (newly C-allocated; caller frees) and
 // returns -1, the library's generic error code.
@@ -107,7 +155,9 @@ func lotman_version() *C.char {
 // --- lifecycle: create / update / add / remove --------------------------------
 
 //export lotman_add_lot
-func lotman_add_lot(lotmanJSON *C.char, errMsg **C.char) C.int {
+func lotman_add_lot(lotmanJSON *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -123,7 +173,9 @@ func lotman_add_lot(lotmanJSON *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_update_lot
-func lotman_update_lot(lotmanJSON *C.char, errMsg **C.char) C.int {
+func lotman_update_lot(lotmanJSON *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -184,7 +236,9 @@ func lotman_update_lot(lotmanJSON *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_add_to_lot
-func lotman_add_to_lot(additionsJSON *C.char, errMsg **C.char) C.int {
+func lotman_add_to_lot(additionsJSON *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -206,7 +260,9 @@ func lotman_add_to_lot(additionsJSON *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_remove_lot
-func lotman_remove_lot(lotName *C.char, assignLTBRParentToOrphans, assignLTBRParentToNonOrphans, assignPolicyToChildren, overridePolicy C._Bool, errMsg **C.char) C.int {
+func lotman_remove_lot(lotName *C.char, assignLTBRParentToOrphans, assignLTBRParentToNonOrphans, assignPolicyToChildren, overridePolicy C._Bool, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -220,7 +276,9 @@ func lotman_remove_lot(lotName *C.char, assignLTBRParentToOrphans, assignLTBRPar
 }
 
 //export lotman_remove_lots_recursive
-func lotman_remove_lots_recursive(lotName *C.char, errMsg **C.char) C.int {
+func lotman_remove_lots_recursive(lotName *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -232,7 +290,9 @@ func lotman_remove_lots_recursive(lotName *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_rm_parents_from_lot
-func lotman_rm_parents_from_lot(removeParentsJSON *C.char, errMsg **C.char) C.int {
+func lotman_rm_parents_from_lot(removeParentsJSON *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -248,7 +308,9 @@ func lotman_rm_parents_from_lot(removeParentsJSON *C.char, errMsg **C.char) C.in
 }
 
 //export lotman_rm_paths_from_lots
-func lotman_rm_paths_from_lots(removeDirsJSON *C.char, errMsg **C.char) C.int {
+func lotman_rm_paths_from_lots(removeDirsJSON *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -274,7 +336,9 @@ func lotman_rm_paths_from_lots(removeDirsJSON *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_reclaim_lot
-func lotman_reclaim_lot(lotName *C.char, reclaimedAt C.int64_t, reason *C.char, errMsg **C.char) C.int {
+func lotman_reclaim_lot(lotName *C.char, reclaimedAt C.int64_t, reason *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -289,7 +353,9 @@ func lotman_reclaim_lot(lotName *C.char, reclaimedAt C.int64_t, reason *C.char, 
 // --- predicates ---------------------------------------------------------------
 
 //export lotman_lot_exists
-func lotman_lot_exists(lotName *C.char, errMsg **C.char) C.int {
+func lotman_lot_exists(lotName *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -305,7 +371,9 @@ func lotman_lot_exists(lotName *C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_is_root
-func lotman_is_root(lotName *C.char, errMsg **C.char) C.int {
+func lotman_is_root(lotName *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -323,7 +391,10 @@ func lotman_is_root(lotName *C.char, errMsg **C.char) C.int {
 // --- name / relationship queries (string-list output) -------------------------
 
 //export lotman_get_owners
-func lotman_get_owners(lotName *C.char, recursive C._Bool, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_owners(lotName *C.char, recursive C._Bool, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -337,7 +408,10 @@ func lotman_get_owners(lotName *C.char, recursive C._Bool, output ***C.char, err
 }
 
 //export lotman_get_parent_names
-func lotman_get_parent_names(lotName *C.char, recursive, getSelf C._Bool, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_parent_names(lotName *C.char, recursive, getSelf C._Bool, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -351,7 +425,10 @@ func lotman_get_parent_names(lotName *C.char, recursive, getSelf C._Bool, output
 }
 
 //export lotman_get_children_names
-func lotman_get_children_names(lotName *C.char, recursive, getSelf C._Bool, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_children_names(lotName *C.char, recursive, getSelf C._Bool, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -365,7 +442,10 @@ func lotman_get_children_names(lotName *C.char, recursive, getSelf C._Bool, outp
 }
 
 //export lotman_list_all_lots
-func lotman_list_all_lots(output ***C.char, errMsg **C.char) C.int {
+func lotman_list_all_lots(output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -379,7 +459,10 @@ func lotman_list_all_lots(output ***C.char, errMsg **C.char) C.int {
 }
 
 //export lotman_get_lots_from_dir
-func lotman_get_lots_from_dir(dir *C.char, recursive C._Bool, queryTime C.int64_t, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_lots_from_dir(dir *C.char, recursive C._Bool, queryTime C.int64_t, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -392,18 +475,46 @@ func lotman_get_lots_from_dir(dir *C.char, recursive C._Bool, queryTime C.int64_
 	return 0
 }
 
+// Window-aware variant of lotman_get_lots_from_dir. The published contract is
+//
+//	int lotman_get_lots_for_path(const char *path, bool recursive,
+//	                             int64_t time_lo_ms, int64_t time_hi_ms,
+//	                             bool include_reclaimed, char **output, char **err_msg)
+//
+// where `output` is a *single* JSON array string whose elements are full lot
+// objects, each identical in shape to a lotman_get_lot_as_json(name, false)
+// result -- not a NULL-terminated string list. The caller free()s it.
+//
 //export lotman_get_lots_for_path
-func lotman_get_lots_for_path(path *C.char, recursive C._Bool, timeLoMs, timeHiMs C.int64_t, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_lots_for_path(path *C.char, recursive C._Bool, timeLoMs, timeHiMs C.int64_t, includeReclaimed C._Bool, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
 	}
-	lots, err := m.LotsForPath(C.GoString(path), bool(recursive), int64(timeLoMs), int64(timeHiMs), false)
+	// The window is half-open, [lo, hi); an empty or inverted one is a caller
+	// error rather than an empty result.
+	if timeHiMs <= timeLoMs {
+		return fail(errMsg, fmt.Errorf("time_hi_ms (%d) must be strictly greater than time_lo_ms (%d)", int64(timeHiMs), int64(timeLoMs)))
+	}
+	names, err := m.LotsForPath(C.GoString(path), bool(recursive), int64(timeLoMs), int64(timeHiMs), bool(includeReclaimed))
 	if err != nil {
 		return fail(errMsg, err)
 	}
-	putStringList(output, lots)
-	return 0
+	lots := make([]*lotjson.Lot, 0, len(names))
+	for _, name := range names {
+		// recursive=false: the winners (and, when the caller asked for it, their
+		// ancestors) are already enumerated in names; each element is the plain
+		// per-lot document.
+		lot, err := buildLotJSON(m, name, false)
+		if err != nil {
+			return fail(errMsg, err)
+		}
+		lots = append(lots, lot)
+	}
+	return putJSON(output, errMsg, lots)
 }
 
 // The eviction-priority queries (lotman_get_lots_past_*) and
@@ -452,7 +563,10 @@ func buildLotJSON(m *core.Manager, name string, recursive bool) (*lotjson.Lot, e
 }
 
 //export lotman_get_lot_as_json
-func lotman_get_lot_as_json(lotName *C.char, recursive C._Bool, output **C.char, errMsg **C.char) C.int {
+func lotman_get_lot_as_json(lotName *C.char, recursive C._Bool, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -465,7 +579,10 @@ func lotman_get_lot_as_json(lotName *C.char, recursive C._Bool, output **C.char,
 }
 
 //export lotman_get_lot_dirs
-func lotman_get_lot_dirs(lotName *C.char, recursive C._Bool, output **C.char, errMsg **C.char) C.int {
+func lotman_get_lot_dirs(lotName *C.char, recursive C._Bool, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -498,7 +615,10 @@ func lotman_get_lot_dirs(lotName *C.char, recursive C._Bool, output **C.char, er
 }
 
 //export lotman_get_lot_usage
-func lotman_get_lot_usage(usageJSON *C.char, output **C.char, errMsg **C.char) C.int {
+func lotman_get_lot_usage(usageJSON *C.char, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -515,7 +635,10 @@ func lotman_get_lot_usage(usageJSON *C.char, output **C.char, errMsg **C.char) C
 }
 
 //export lotman_get_policy_attributes
-func lotman_get_policy_attributes(policyJSON *C.char, output **C.char, errMsg **C.char) C.int {
+func lotman_get_policy_attributes(policyJSON *C.char, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -551,7 +674,10 @@ func lotman_get_policy_attributes(policyJSON *C.char, output **C.char, errMsg **
 }
 
 //export lotman_get_available_capacity
-func lotman_get_available_capacity(parentLot *C.char, startTime, endTime C.int64_t, output **C.char, errMsg **C.char) C.int {
+func lotman_get_available_capacity(parentLot *C.char, startTime, endTime C.int64_t, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -566,7 +692,9 @@ func lotman_get_available_capacity(parentLot *C.char, startTime, endTime C.int64
 // --- usage updates ------------------------------------------------------------
 
 //export lotman_update_lot_usage
-func lotman_update_lot_usage(updateJSON *C.char, deltaMode C._Bool, errMsg **C.char) C.int {
+func lotman_update_lot_usage(updateJSON *C.char, deltaMode C._Bool, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -634,26 +762,36 @@ func parseDirUsage(updateJSON string) ([]core.DirUsage, error) {
 // --- context ------------------------------------------------------------------
 
 //export lotman_set_context_str
-func lotman_set_context_str(key, value *C.char, errMsg **C.char) C.int {
+func lotman_set_context_str(key, value *C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	setContextStr(C.GoString(key), C.GoString(value))
 	return 0
 }
 
 //export lotman_get_context_str
-func lotman_get_context_str(key *C.char, output **C.char, errMsg **C.char) C.int {
+func lotman_get_context_str(key *C.char, output **C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearStr(output)
 	v, _ := getContextStr(C.GoString(key))
 	putString(output, v)
 	return 0
 }
 
 //export lotman_set_context_int
-func lotman_set_context_int(key *C.char, value C.int, errMsg **C.char) C.int {
+func lotman_set_context_int(key *C.char, value C.int, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	setContextInt(C.GoString(key), int(value))
 	return 0
 }
 
 //export lotman_get_context_int
-func lotman_get_context_int(key *C.char, output *C.int, errMsg **C.char) C.int {
+func lotman_get_context_int(key *C.char, output *C.int, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearInt(output)
 	v, _ := getContextInt(C.GoString(key))
 	if output != nil {
 		*output = C.int(v)

@@ -34,8 +34,14 @@ package main
 */
 import "C"
 
+// lotmanVersion is the current C ABI (see the file comment above).
+const lotmanVersion = "v0.1.0"
+
 //export lotman_get_lots_past_exp
-func lotman_get_lots_past_exp(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_lots_past_exp(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -49,7 +55,10 @@ func lotman_get_lots_past_exp(queryTime C.int64_t, recursive, includeReclaimed C
 }
 
 //export lotman_get_lots_past_del
-func lotman_get_lots_past_del(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) C.int {
+func lotman_get_lots_past_del(queryTime C.int64_t, recursive, includeReclaimed C._Bool, output ***C.char, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -63,7 +72,10 @@ func lotman_get_lots_past_del(queryTime C.int64_t, recursive, includeReclaimed C
 }
 
 //export lotman_get_lots_past_opp
-func lotman_get_lots_past_opp(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
+func lotman_get_lots_past_opp(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -77,7 +89,10 @@ func lotman_get_lots_past_opp(recursiveQuota, recursiveChildren, includeReclaime
 }
 
 //export lotman_get_lots_past_ded
-func lotman_get_lots_past_ded(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
+func lotman_get_lots_past_ded(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -91,7 +106,10 @@ func lotman_get_lots_past_ded(recursiveQuota, recursiveChildren, includeReclaime
 }
 
 //export lotman_get_lots_past_obj
-func lotman_get_lots_past_obj(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) C.int {
+func lotman_get_lots_past_obj(recursiveQuota, recursiveChildren, includeReclaimed C._Bool, output ***C.char, hierarchical C._Bool, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
+	clearList(output)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
@@ -105,7 +123,9 @@ func lotman_get_lots_past_obj(recursiveQuota, recursiveChildren, includeReclaime
 }
 
 //export lotman_update_lot_usage_by_dir
-func lotman_update_lot_usage_by_dir(updateJSON *C.char, deltaMode C._Bool, queryTime C.int64_t, errMsg **C.char) C.int {
+func lotman_update_lot_usage_by_dir(updateJSON *C.char, deltaMode C._Bool, queryTime C.int64_t, errMsg **C.char) (rc C.int) {
+	defer guard(errMsg, &rc)
+	clearStr(errMsg)
 	m, err := manager()
 	if err != nil {
 		return fail(errMsg, err)
