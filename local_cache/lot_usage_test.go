@@ -222,6 +222,72 @@ func TestTrimObjectCapsEvicts(t *testing.T) {
 	}
 }
 
+// TestTrimObjectCapsZeroCapIsNoOp pins the guard that keeps a non-positive
+// max_num_objects from being honoured literally. The auto-created `default` lot
+// (and any lot an operator leaves at the zero value) would otherwise have its
+// entire bucket evicted on every reconcile tick, independent of disk pressure --
+// for `default`, that is every unlotted object in the cache, once a minute.
+func TestTrimObjectCapsZeroCapIsNoOp(t *testing.T) {
+	m := newCoreTestManager(t)
+	mustAdd := func(s core.LotSpec) {
+		if err := m.AddLot(s, ""); err != nil {
+			t.Fatalf("add %s: %v", s.LotName, err)
+		}
+	}
+	mustAdd(core.LotSpec{LotName: "root", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: -1, OpportunisticBytes: -1, MaxNumObjects: -1}})
+	// Exactly the shape initLots gives the catch-all lot: no dedicated quota, so
+	// it is reclaimed first under disk pressure, but no object cap.
+	mustAdd(core.LotSpec{LotName: "default", Owner: "fed", Parents: []string{"root"},
+		MPA: core.MPA{DedicatedBytes: 0, OpportunisticBytes: 0, MaxNumObjects: 0}})
+
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	egrp, _ := errgroup.WithContext(context.Background())
+	sm, err := NewStorageManager(cdb, []string{t.TempDir()}, 0, egrp)
+	if err != nil {
+		t.Fatalf("storage manager: %v", err)
+	}
+
+	const bucket NamespaceID = 7
+	for i := 0; i < 6; i++ {
+		hash := InstanceHash(fmt.Sprintf("obj-%02d", i))
+		meta := &CacheMetadata{StorageID: StorageIDInline, NamespaceID: bucket, ContentLength: 100}
+		if err := cdb.SetMetadata(hash, meta); err != nil {
+			t.Fatalf("set metadata: %v", err)
+		}
+		if err := cdb.UpdateLRU(hash, 0); err != nil {
+			t.Fatalf("update lru: %v", err)
+		}
+	}
+	if err := cdb.SetObjectCount(StorageIDInline, bucket, 6); err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PersistentCache{
+		db:           cdb,
+		lotMgr:       m,
+		namespaceMap: map[string]NamespaceID{"default": bucket, "root": 8},
+		eviction:     &EvictionManager{db: cdb, storage: sm},
+	}
+
+	if err := pc.trimObjectCaps(); err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+
+	if c, _ := cdb.GetObjectCount(StorageIDInline, bucket); c != 6 {
+		t.Errorf("post-trim count = %d, want 6 (untouched)", c)
+	}
+	if n := countLRUEntriesForTest(t, cdb, StorageIDInline, bucket); n != 6 {
+		t.Errorf("remaining LRU entries = %d, want 6 (nothing evicted)", n)
+	}
+}
+
 // countLRUEntriesForTest counts LRU index entries for a (storage, bucket) pair.
 func countLRUEntriesForTest(t *testing.T, cdb *CacheDB, sid StorageID, ns NamespaceID) int {
 	t.Helper()
@@ -251,7 +317,7 @@ func computeObjectExcess(m *core.Manager, cdb *CacheDB, nsMap map[string]Namespa
 	out := map[string]int64{}
 	for _, name := range names {
 		view, err := m.GetLot(name)
-		if err != nil || view.MaxNumObjects < 0 {
+		if err != nil || view.MaxNumObjects <= 0 { // mirrors trimObjectCaps
 			continue
 		}
 		bucket, ok := nsMap[name]
