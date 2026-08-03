@@ -127,7 +127,9 @@ func TestEviction_TargetsOverQuotaLot_SparesProtected(t *testing.T) {
 	// The selection itself: only the over-quota lot's bucket is a priority target;
 	// the protected (and root) buckets are excluded.
 	require.NoError(t, pc.syncLotUsage())
-	require.Equal(t, []NamespaceID{overNS}, pc.priorityBuckets(StorageIDFirstDisk),
+	targets := pc.priorityBuckets(StorageIDFirstDisk)
+	require.Len(t, targets, 1, "only the over-quota lot should be selected for priority eviction")
+	require.Equal(t, overNS, targets[0].bucket,
 		"only the over-quota lot should be selected for priority eviction")
 
 	eviction.checkAndEvict()
