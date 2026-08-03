@@ -950,18 +950,21 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	return internalLots, nil
 }
 
-// lotmanDatabase returns the *gorm.DB the lot manager should use, choosing
-// between deployment models. V2 (the pure-Go persistent cache) has no separate
-// storage daemon, so lots live in the shared Pelican server database. V1
-// (XRootD) runs the purge plugin in a separate process as the xrootd user; that
-// plugin reaches lots through the (Go-built) libLotMan shared library opening a
-// dedicated SQLite database under Lotman.LotHome, so Pelican shares that same
-// on-disk file (SQLite WAL supports concurrent multi-process access) and widens
-// its ownership/permissions to the daemon user.
-// lotmanDatabase returns the lot database and whether lotman owns it (and must
-// therefore close it). The V2 cache shares the Pelican server database (not
-// owned; ownsDB=false); the V1 cache opens a dedicated lots.sqlite under
-// lot_home (owned; ownsDB=true).
+// lotmanDatabase returns the *gorm.DB the lot manager should use, together with
+// whether lotman owns that handle (and must therefore close it).
+//
+// The choice follows the deployment model. V2 (the pure-Go persistent cache) has
+// no separate storage daemon, so lots live in the shared Pelican server database
+// and the handle is *not* owned (ownsDB=false) -- closing it would take down the
+// rest of the server. V1 (XRootD) runs the purge plugin in a separate process as
+// the xrootd user; that plugin reaches lots through the (Go-built) libLotMan
+// shared library opening a dedicated SQLite database under Lotman.LotHome, so
+// Pelican opens that same on-disk file (SQLite WAL supports concurrent
+// multi-process access) and owns the handle (ownsDB=true).
+//
+// For V1 the file has to be reachable by both accounts. See secureSharedLotDB
+// for how that sharing is set up without handing an attacker a symlink-following
+// chown/chmod performed by root.
 func lotmanDatabase() (db *gorm.DB, ownsDB bool, err error) {
 	if param.Cache_EnableV2.GetBool() {
 		if database.ServerDatabase == nil {
@@ -983,24 +986,48 @@ func lotmanDatabase() (db *gorm.DB, ownsDB bool, err error) {
 	if err != nil {
 		return nil, false, errors.Wrap(err, "unable to determine daemon GID for the lot database directory")
 	}
-	if err := config.MkdirAll(lotHome, 0o777, uid, gid); err != nil {
+	if err := config.MkdirAll(lotHome, lotDBDirMode, uid, gid); err != nil {
 		return nil, false, errors.Wrap(err, "unable to create the lot database directory")
 	}
+
+	// When Pelican and the storage daemon are the same account there is nobody to
+	// share with, and adjusting ownership would only widen access for no benefit.
+	shared := uid != os.Getuid() || gid != os.Getgid()
+
 	dbPath := filepath.Join(lotHome, "lots.sqlite")
+	if shared {
+		// Create and secure the file *before* handing the path to SQLite, so it
+		// can never be opened through a symlink planted in lot_home.
+		if err := secureSharedLotDB(dbPath, uid, gid); err != nil {
+			return nil, false, err
+		}
+	}
 	db, err = dbutils.InitSQLiteDB(dbPath)
 	if err != nil {
 		return nil, false, errors.Wrap(err, "unable to open the lot database")
 	}
-	// Widen ownership/permissions so the xrootd-user purge plugin can also open
-	// the database file and its WAL/shared-memory siblings.
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		p := dbPath + suffix
-		if _, statErr := os.Stat(p); statErr == nil {
-			_ = os.Chown(p, uid, gid)
-			_ = os.Chmod(p, 0o666)
+	if shared {
+		// SQLite may have created the -wal/-shm sidecars during open; give them
+		// the same treatment. lot_home is setgid so they already carry the right
+		// group, but their mode still needs widening to group-writable.
+		if err := secureSharedLotDB(dbPath, uid, gid); err != nil {
+			closeGormDB(db)
+			return nil, false, err
 		}
 	}
 	return db, true, nil
+}
+
+// closeGormDB releases a *gorm.DB's underlying connection pool. Dropping the
+// handle without closing it leaks a connection -- and on Windows keeps the
+// SQLite file locked, so a supervised restart cannot reopen it.
+func closeGormDB(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
 }
 
 // federationQualifyAds prepends the configured federation prefix (set by the V2
@@ -1046,6 +1073,18 @@ func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 		log.Errorf("Error acquiring lot database: %v", err)
 		return false
 	}
+	// installManager takes over the handle's lifetime; until it does, a failure
+	// below has to release it here. A V1 database dropped without closing leaks a
+	// connection and, on Windows, keeps lots.sqlite locked so the next start
+	// cannot open it either.
+	dbInstalled := false
+	if ownsDB {
+		defer func() {
+			if !dbInstalled {
+				closeGormDB(db)
+			}
+		}()
+	}
 	m, err := core.New(db, core.Options{
 		StrictHierarchy:   true,
 		ContractionPolicy: core.ContractionAlways,
@@ -1060,6 +1099,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 		return false
 	}
 	installManager(m, ownsDB)
+	dbInstalled = true
 
 	initializedLots, err = initLots(adsFromFed)
 	if err != nil {
