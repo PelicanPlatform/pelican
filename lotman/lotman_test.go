@@ -215,7 +215,7 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, "default", defaultLot.LotName)
 		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
-		// default has literal-zero storage quotas (lotman PR #46 reserves -1
+		// default has literal-zero storage quotas (PelicanPlatform/lotman PR #46 reserves -1
 		// for unbounded). Any usage of default puts it over-quota and the
 		// purge plugin reclaims it on the next cycle.
 		require.Equal(t, float64(0), *(defaultLot.MPA.DedicatedGB))
@@ -237,7 +237,7 @@ func TestLotmanInit(t *testing.T) {
 		// disks are detected (as in this test) it falls back to
 		// Cache.HighWaterMark, which setupLotmanFromConf sets to "100g".
 		// Opportunistic and object quotas are unbounded (-1 sentinel,
-		// lotman PR #46).
+		// PelicanPlatform/lotman PR #46).
 		require.InDelta(t, float64(100), *(rootLot.MPA.DedicatedGB), 1e-6)
 		require.Equal(t, float64(-1), *(rootLot.MPA.OpportunisticGB))
 		require.Equal(t, int64(-1), rootLot.MPA.MaxNumObjects.Value)
@@ -439,7 +439,7 @@ func TestAddToLot(t *testing.T) {
 		Path:      "/a/new/path",
 		Recursive: true,
 	}
-	// default has zero storage MPAs (lotman PR #46), so we must explicitly
+	// default has zero storage MPAs (PelicanPlatform/lotman PR #46), so we must explicitly
 	// attribute 0 of test-1's quota to default; root absorbs the full
 	// child MPA (test-1 is configured with 1.11 / 2.22 / 42).
 	zeroDed := float64(0)
@@ -484,7 +484,7 @@ func TestRemoveLotParents(t *testing.T) {
 
 	// First add default lot as parent to test-1, then remove it. We do this
 	// because lotman won't let us remove _all_ parents.
-	// default has zero storage MPAs (lotman PR #46), so attribute 0 to it
+	// default has zero storage MPAs (PelicanPlatform/lotman PR #46), so attribute 0 to it
 	// and the full child MPA to root.
 	zeroDed := float64(0)
 	zeroOpp := float64(0)
@@ -1106,7 +1106,7 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	assert.InDelta(t, 50.0, *c.ParentAttributions["root"].DedicatedGB, 1e-9)
 
 	// Sentinel propagation (root.opportunistic = -1, root.max_num_objects = -1):
-	// lotman PR #46 accepts -1 verbatim as "unbounded" for both MPAs and
+	// PelicanPlatform/lotman PR #46 accepts -1 verbatim as "unbounded" for both MPAs and
 	// parent attributions.
 	require.NotNil(t, a.MPA.OpportunisticGB)
 	assert.Equal(t, float64(-1), *a.MPA.OpportunisticGB)
