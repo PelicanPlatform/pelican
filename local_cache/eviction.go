@@ -47,11 +47,22 @@ type lotEvictionPlanner interface {
 	// syncLotUsage pushes current cache usage into the lot store so the
 	// priority queries below reflect what the cache actually holds.
 	syncLotUsage() error
-	// priorityBuckets returns the accounting bucket ids to evict first within a
+	// priorityBuckets returns the accounting buckets to evict first within a
 	// storage directory, ordered past-deletion, past-expiration,
 	// over-opportunistic, then over-dedicated, restricted to lots with usage in
 	// that directory.
-	priorityBuckets(storageID StorageID) []NamespaceID
+	priorityBuckets(storageID StorageID) []lotEvictionTarget
+}
+
+// lotEvictionTarget is one bucket the eviction loop may drain, together with the
+// number of bytes it is allowed to take from it. maxBytes < 0 means unbounded:
+// the lot's lifetime is over (past deletion or expiration), so all of it is
+// reclaimable. A non-negative maxBytes is the lot's overage against the quota
+// that selected it -- draining past that would take bytes the lot is entitled
+// to keep, which for a dedicated quota is precisely the guarantee it represents.
+type lotEvictionTarget struct {
+	bucket   NamespaceID
+	maxBytes int64
 }
 
 // EvictionManager handles fairness-aware cache eviction.
@@ -467,16 +478,27 @@ func (em *EvictionManager) checkAndEvict() {
 
 			// Tier 1: drain over-quota / expired lots first, in priority order.
 			if em.planner != nil {
-				for _, bucket := range em.planner.priorityBuckets(sid) {
+				for _, target := range em.planner.priorityBuckets(sid) {
 					dirUsage = em.getDirUsage(sid)
 					if dirUsage <= 0 || dirUsage <= limits.lowWater {
 						break
 					}
-					overhead := dirUsage - limits.lowWater
-					bytes, count, skipped, conflicts, err := em.evictFromNamespace(rl, sid, bucket, 0, overhead)
+					// Take the smaller of what the directory still needs and what
+					// this lot may give up. Without the second bound, one lot
+					// marginally over quota absorbs the directory's entire
+					// overhead -- evicting data inside its guaranteed reservation
+					// while lots that are grossly over theirs go untouched.
+					budget := dirUsage - limits.lowWater
+					if target.maxBytes >= 0 && target.maxBytes < budget {
+						budget = target.maxBytes
+					}
+					if budget <= 0 {
+						continue
+					}
+					bytes, count, skipped, conflicts, err := em.evictFromNamespace(rl, sid, target.bucket, 0, budget)
 					totalConflicts.Add(int64(conflicts))
 					if err != nil {
-						rl.WithFields(log.Fields{"storageID": sid, "namespaceID": bucket}).WithError(err).Warn("Error evicting priority lot")
+						rl.WithFields(log.Fields{"storageID": sid, "namespaceID": target.bucket}).WithError(err).Warn("Error evicting priority lot")
 						continue
 					}
 					totalEvictedBytes.Add(bytes)
