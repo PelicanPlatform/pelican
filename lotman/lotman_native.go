@@ -16,8 +16,10 @@
 *
 ***************************************************************/
 
-// The LotMan library is used for managing storage in Pelican caches. For more information, see:
-// https://github.com/pelicanplatform/lotman
+// Package lotman is Pelican's adapter over the native storage-lot engine in
+// lotman/core. It replaces the external C++ LotMan library
+// (https://github.com/PelicanPlatform/lotman), whose JSON schema and C ABI it
+// stays compatible with -- see lotman/lotjson and lotman/cshared.
 package lotman
 
 import (
@@ -392,7 +394,7 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 
 	for name, lot := range *lotMap {
 		// root, default, and monitoring carry the all-zero non-expiring sentinel
-		// introduced in lotman PR #44. Skip them so their timestamps are not
+		// introduced in PelicanPlatform/lotman PR #44. Skip them so their timestamps are not
 		// overwritten with real values by the defaulting logic below.
 		if lot.LotName == "root" || lot.LotName == "default" || lot.LotName == "monitoring" {
 			continue
@@ -423,7 +425,7 @@ func configLotTimestamps(lotMap *map[string]Lot) {
 // the "/" path) afterwards and only need the discovered descendants here.
 //
 // Pure data transform: no lotman C calls. The tree pipeline lives in
-// lot_tree.go and is fully unit-tested without dlopen.
+// lot_tree.go and is fully unit-tested against synthetic ads.
 func configLotsFromFedPrefixesNested(nsAds []server_structs.NamespaceAd, federationIssuer string, rootDedGB float64) map[string]Lot {
 	out := make(map[string]Lot)
 
@@ -835,7 +837,7 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	// given an explicit lot. Its dedicated quota is a literal 0 -- it has no
 	// guaranteed capacity, so any usage immediately puts the lot over its
 	// dedicated quota and the purge plugin reclaims it on the next cycle.
-	// Note: lotman PR #46 reserves -1 (not 0) as the unbounded sentinel for
+	// Note: PelicanPlatform/lotman PR #46 reserves -1 (not 0) as the unbounded sentinel for
 	// storage MPAs, so 0 here means exactly what it says: zero capacity.
 	if _, exists := lotMap["default"]; !exists {
 		defDed := zero
@@ -857,7 +859,7 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 				// past-quota for LotsPastObj and would have the object-cap trim
 				// evict its whole bucket on every tick regardless of disk pressure.
 				MaxNumObjects: &Int64FromFloat{Value: -1},
-				// All-zero timestamps = non-expiring sentinel (lotman PR #44).
+				// All-zero timestamps = non-expiring sentinel (PelicanPlatform/lotman PR #44).
 				// configLotTimestamps skips root and default intentionally.
 				CreationTime:   &Int64FromFloat{Value: 0},
 				ExpirationTime: &Int64FromFloat{Value: 0},
@@ -881,13 +883,13 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 			MPA: &MPA{
 				// dedicatedGB equals the entire cache disk (or HWM in tests),
 				// so the root lot itself is never a purge target. Opportunistic
-				// and object quotas are unbounded (-1 sentinel, lotman PR #46):
+				// and object quotas are unbounded (-1 sentinel, PelicanPlatform/lotman PR #46):
 				// root is purely a metadata container and should never be the
 				// binding constraint on any axis besides dedicated bytes.
 				DedicatedGB:     &rootDedGB,
 				OpportunisticGB: &rootOpp,
 				MaxNumObjects:   &Int64FromFloat{Value: -1},
-				// All-zero timestamps = non-expiring sentinel (lotman PR #44).
+				// All-zero timestamps = non-expiring sentinel (PelicanPlatform/lotman PR #44).
 				// configLotTimestamps skips root and default intentionally.
 				CreationTime:   &Int64FromFloat{Value: 0},
 				ExpirationTime: &Int64FromFloat{Value: 0},
@@ -921,7 +923,7 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 					DedicatedGB:     &monDed,
 					OpportunisticGB: &monOpp,
 					MaxNumObjects:   &Int64FromFloat{Value: int64(param.Lotman_MonitoringLotMaxObjects.GetInt())},
-					// All-zero timestamps = non-expiring sentinel (lotman PR #44);
+					// All-zero timestamps = non-expiring sentinel (PelicanPlatform/lotman PR #44);
 					// configLotTimestamps skips it so these stay zero.
 					CreationTime:   &Int64FromFloat{Value: 0},
 					ExpirationTime: &Int64FromFloat{Value: 0},
@@ -1873,7 +1875,7 @@ func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*
 }
 
 // SetContextInt is retained for API compatibility. The native engine has no
-// runtime context variables (e.g. the C library's db_timeout), so this is a
+// runtime context variables (e.g. the shared library's db_timeout), so this is a
 // no-op.
 func SetContextInt(key string, value int) error {
 	return nil

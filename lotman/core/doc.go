@@ -29,6 +29,10 @@
 // a standalone repository. All Pelican-specific concerns (config, federation
 // discovery, token-scope auth, HTTP routing, cache integration) live in the
 // adapter layer outside this package.
+//
+// Where these docs say "the reference", they mean that original C++
+// implementation (https://github.com/PelicanPlatform/lotman), whose observable
+// behavior this package reproduces.
 package core
 
 // Unbounded marks a management-policy axis (dedicated bytes, opportunistic
