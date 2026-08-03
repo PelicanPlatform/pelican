@@ -111,11 +111,12 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 	if err != nil {
 		return
 	}
-	if isCache {
-		setCacheFds(result.fds)
-	} else {
-		setOriginFds(result.fds)
-	}
+	// Whether this launcher's pair becomes the process-wide control channel is
+	// the caller's decision (setOriginFds/setCacheFds). Registering it here
+	// would mean the cmsd launcher, built second, replaces the xrootd
+	// launcher's entry -- and those setters close the pair they replace, which
+	// is still the live one the xrootd launcher holds and its child is about to
+	// inherit. The privileged branch has always registered at the call site.
 
 	result.RunDir = xrootdRun
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
@@ -281,6 +282,14 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 		result, err = makeUnprivilegedXrootdLauncher("xrootd", xrootdRun, configPath, enableCache)
 		if err != nil {
 			return
+		}
+		// Only the xrootd launcher's pair is the control channel: sendChildFD
+		// pushes CA/cert updates over fds[0] and, under DropPrivileges, KillFunc
+		// signals the child over fds[1].
+		if enableCache {
+			setCacheFds(result.fds)
+		} else {
+			setOriginFds(result.fds)
 		}
 		launchers = append(launchers, result)
 		if useCMSD {
