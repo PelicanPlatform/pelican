@@ -262,6 +262,17 @@ func (m *Manager) AddToLot(add LotAddition, caller string) error {
 				return err
 			}
 		}
+		// New parents (and everything above them) gained this lot's subtree.
+		// Computed after the edges exist, so the new chain is included.
+		if len(add.Parents) > 0 {
+			affected, err := ancestorsVia(tx, add.LotName)
+			if err != nil {
+				return err
+			}
+			if err := refreshChildrenRollup(tx, affected); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -279,6 +290,18 @@ func (m *Manager) RemoveParents(rm LotParentRemoval, caller string) error {
 		}
 		if err := m.authorizeModify(tx, *lot, caller); err != nil {
 			return err
+		}
+		// The parents being detached, and everything above them, lose this
+		// lot's subtree. Their chains are captured before the delete; removing
+		// a lot->parent edge does not change the parent's own ancestors, but
+		// the parents themselves are only reachable from here beforehand.
+		var affected []string
+		for _, p := range rm.Parents {
+			chain, err := ancestorsAndSelf(tx, p)
+			if err != nil {
+				return err
+			}
+			affected = append(affected, chain...)
 		}
 		if err := tx.Where("lot_name = ? AND parent IN ?", rm.LotName, rm.Parents).Delete(&LotParent{}).Error; err != nil {
 			return wrap(err, "removing parent edges")
@@ -301,7 +324,7 @@ func (m *Manager) RemoveParents(rm LotParentRemoval, caller string) error {
 		if err := m.validateAxioms(tx, rm.LotName, false); err != nil {
 			return err
 		}
-		return nil
+		return refreshChildrenRollup(tx, affected)
 	})
 }
 
@@ -350,12 +373,27 @@ func (m *Manager) RemoveLot(name string, opts RemoveOptions, caller string) erro
 			if err != nil {
 				return err
 			}
+			// The surviving ancestors lose this whole subtree from their
+			// rollups. Their identity has to be captured before the delete
+			// cascades the edges that name them.
+			affected, err := ancestorsVia(tx, name)
+			if err != nil {
+				return err
+			}
 			// Deleting each lot row cascades its paths, usage, reclamation, and
 			// own parent edges via ON DELETE CASCADE.
 			if err := tx.Where("lot_name IN ?", victims).Delete(&Lot{}).Error; err != nil {
 				return wrap(err, "deleting lot subtree")
 			}
-			return nil
+			return refreshChildrenRollup(tx, affected)
+		}
+
+		// As above: capture the ancestors that will need a rollup refresh while
+		// the edges naming them still exist. The reparented children stay in the
+		// tree, but this lot's own self usage leaves it.
+		affected, err := ancestorsVia(tx, name)
+		if err != nil {
+			return err
 		}
 
 		// Non-recursive: reparent direct children to this lot's parents.
@@ -411,7 +449,7 @@ func (m *Manager) RemoveLot(name string, opts RemoveOptions, caller string) erro
 				return err
 			}
 		}
-		return nil
+		return refreshChildrenRollup(tx, affected)
 	})
 }
 

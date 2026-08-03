@@ -256,6 +256,48 @@ func newInt(current, val int64, delta bool) (int64, error) {
 	return val, nil
 }
 
+// refreshChildrenRollup recomputes the children_* aggregates for each named lot
+// that still exists. Callers pass the lots whose descendant set a hierarchy
+// mutation changed -- typically an affected lot's ancestors, captured before a
+// deletion, since the edges identifying them are gone afterwards.
+//
+// Every hierarchy mutation needs this. children_bytes/children_objects are what
+// the recursive-quota and hierarchical past-quota queries read, so a stale value
+// has the purge plugin acting on bytes that are not there. Self-usage updates
+// recompute the chain opportunistically, which hides the drift for any lot that
+// still has a live descendant -- but a parent left childless has nothing to
+// trigger it and stays wrong indefinitely.
+func refreshChildrenRollup(tx *gorm.DB, names []string) error {
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		var count int64
+		if err := tx.Model(&Lot{}).Where("lot_name = ?", name).Count(&count).Error; err != nil {
+			return wrap(err, "checking lot existence for rollup refresh")
+		}
+		if count == 0 { // removed by this same mutation
+			continue
+		}
+		if err := recalcChildren(tx, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ancestorsAndSelf returns name together with all of its recursive ancestors --
+// the set whose descendant totals change when name gains or loses a descendant.
+func ancestorsAndSelf(tx *gorm.DB, name string) ([]string, error) {
+	ancestors, err := ancestorsVia(tx, name)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{name}, ancestors...), nil
+}
+
 // recalcChildren sets a lot's children_* columns to the sum of its recursive
 // descendants' self_* values, excluding any descendant with a reclamation row
 // (matching the reference's "as of now" rollup semantics).
