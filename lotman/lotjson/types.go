@@ -208,7 +208,7 @@ func (i Int64FromFloat) MarshalJSON() ([]byte, error) {
 }
 
 // ExpirationTimeIsSentinel reports whether the lot uses the "non-expiring"
-// all-zero timestamp sentinel (lotman PR #44). Sentinel lots (root,
+// all-zero timestamp sentinel (PelicanPlatform/lotman PR #44). Sentinel lots (root,
 // default) must never be extended by the renewal scheduler.
 func (l Lot) ExpirationTimeIsSentinel() bool {
 	if l.MPA == nil {

@@ -43,7 +43,7 @@ func requireManager() (*core.Manager, error) {
 // This file holds the native lotman engine: a process-wide core.Manager plus
 // the mapping layer that converts the adapter's GB-based public types into the
 // core's byte-based specs (and back). The wrapper functions delegate to the
-// manager held here instead of the libLotMan.so binding.
+// manager held here instead of a binding to an external libLotMan.so.
 
 var (
 	mgr   *core.Manager
