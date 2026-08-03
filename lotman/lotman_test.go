@@ -220,7 +220,12 @@ func TestLotmanInit(t *testing.T) {
 		// purge plugin reclaims it on the next cycle.
 		require.Equal(t, float64(0), *(defaultLot.MPA.DedicatedGB))
 		require.Equal(t, float64(0), *(defaultLot.MPA.OpportunisticGB))
-		require.Equal(t, int64(0), defaultLot.MPA.MaxNumObjects.Value)
+		// The object count, by contrast, must be the unbounded sentinel. Being
+		// reclaimed-first is the job of the zero storage quotas above; a literal
+		// 0 here would instead make default permanently past its object quota
+		// and have the object-cap trim evict every unlotted object in the cache
+		// on every reconcile tick, regardless of disk pressure.
+		require.Equal(t, int64(-1), defaultLot.MPA.MaxNumObjects.Value)
 
 		rootLotPtr, err := GetLot("root", false)
 		require.NoError(t, err, "Error getting root lot")
