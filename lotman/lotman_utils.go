@@ -16,8 +16,6 @@
 *
 ***************************************************************/
 
-// The LotMan library is used for managing storage in Pelican caches. For more information, see:
-// https://github.com/pelicanplatform/lotman
 package lotman
 
 import (

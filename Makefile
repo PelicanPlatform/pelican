@@ -193,8 +193,9 @@ lotman-shared:
 	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and its C header"
 
 # Produce the libLotMan packages (RPM/DEB/APK). -buildmode=c-shared needs CGO
-# and a per-target toolchain, so unlike the CGO-free pelican packages this runs
-# on native per-arch runners in release CI rather than via cross-compile.
+# and a per-target toolchain, so unlike the CGO-free pelican packages this must
+# be built on a native runner per architecture rather than cross-compiled.
+# NOTE: no release-CI job invokes this yet; it is run by hand.
 .PHONY: lotman-package
 lotman-package:
 	@echo PACKAGE libLotMan

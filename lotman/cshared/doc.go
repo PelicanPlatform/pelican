@@ -18,7 +18,8 @@
 
 // Command cshared builds the libLotMan shared library: a C-ABI front end over
 // the native Go lot engine (lotman/core), re-exposing the historical libLotMan
-// interface (see reference/lotman/src/lotman.h) so external C consumers — most
+// interface (see src/lotman.h in https://github.com/PelicanPlatform/lotman) so
+// external C consumers — most
 // notably the XRootD pfc purge plugin — keep working without the original C++
 // library.
 //
