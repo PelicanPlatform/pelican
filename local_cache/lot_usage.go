@@ -52,7 +52,8 @@ func aggregateUsageByLot(usage map[StorageUsageKey]int64, idToName map[Namespace
 // reads the per-(StorageID, bucket) byte counters (the bucket is the lot when
 // lot tracking is on), aggregates across storage directories, and writes the
 // absolute self usage for every lot known to the core — lots with no cached
-// bytes are reset to 0. Object-count usage is not yet synced.
+// bytes are reset to 0. Object counts are synced alongside the bytes; they
+// come from the periodic metadata scan, so they are as fresh as the last scan.
 //
 // It is safe to call on demand (e.g. before an eviction pass) as well as on the
 // periodic schedule. A no-op when lot tracking is disabled.

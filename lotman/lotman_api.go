@@ -115,7 +115,7 @@ func lotToReservation(lot *Lot, nowMs int64) Reservation {
 }
 
 // mpaInputToInternal converts the camelCase MPAInput accepted on the wire
-// into the snake-cased lotman MPA struct used to talk to the C library.
+// into the snake-cased lotman MPA struct of the lotjson wire schema.
 // Nil-safe; nil in -> nil out.
 func mpaInputToInternal(in *MPAInput) *MPA {
 	if in == nil {

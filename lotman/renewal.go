@@ -221,7 +221,7 @@ type renewalConfig struct {
 // renewExpiringLots is the pure planner used by LaunchRenewalRoutine.
 // It receives the federation's current namespace ads and the full set of
 // existing lots (typically obtained via getActiveLotsForRenewal) and produces a
-// renewalProposal describing what should change. No FFI calls happen
+// renewalProposal describing what should change. No lot-store calls happen
 // here, so the planner is unit-testable with synthetic Lot slices.
 //
 // # Multi-fill semantics
@@ -705,7 +705,7 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 //	/a     existing            [-------------)  (would match rule 3)
 //	root   ──always covers──   [────────────)   (rule 4 fallback)
 //
-// Pure / data-only: no FFI calls, safe to unit-test.
+// Pure / data-only: no lot-store calls, safe to unit-test.
 func resolveSuccessorParent(path string, successorCreate int64, existing []Lot, planned map[string][]*Lot) string {
 	target := normaliseLotPath(path)
 
@@ -898,7 +898,7 @@ func LaunchLotGcRoutine(ctx context.Context) {
 
 // gcEligibleLots returns the names of lots that runGcTick would remove
 // if invoked at wall-clock `nowMs` with the supplied retention. Pure /
-// data-only so it can be unit-tested without an FFI surface.
+// data-only so it can be unit-tested without a lot store.
 //
 // Eligibility rules:
 //   - Skip the synthetic root and default lots (immutable bookkeeping
@@ -970,7 +970,7 @@ func gcEligibleLots(existing []Lot, nowMs int64, retention time.Duration) []stri
 //     future external lot writer (or a transient invariant violation)
 //     ever lands a non-past-deletion child under a past-deletion
 //     parent. The recursive form would happily sweep that child away.
-//     The defensive cost is a few extra FFI calls per tick on what is
+//     The defensive cost is a few extra lot-store queries per tick on what is
 //     already a daily cadence.
 //
 // If lotman ever exposes a "remove all lots whose deletion_time +

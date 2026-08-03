@@ -18,7 +18,7 @@
 
 // Nested-namespace lot tree construction and quota allocation. The
 // data-plane in this file is intentionally pure: no lotman C calls are
-// made here, so it can be unit-tested without dlopen'ing libLotMan.so.
+// made here, so it can be unit-tested without touching the lot store.
 //
 // The pipeline is:
 //
@@ -59,7 +59,7 @@
 //      without forcing a global reallocation of the entire subtree.
 //
 // Sentinel values are never divided:
-//   - -1 means "unbounded" (lotman PR #46); it propagates verbatim to all
+//   - -1 means "unbounded" (PelicanPlatform/lotman PR #46); it propagates verbatim to all
 //     descendants. Today, opportunistic_GB and max_num_objects are always
 //     -1 because the root carries -1 on both axes.
 //   - 0 means "zero capacity" (literal zero, not a sentinel for unbounded).

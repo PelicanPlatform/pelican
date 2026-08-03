@@ -2,11 +2,12 @@
 #
 # This is intentionally separate from .goreleaser.in.yml so the main
 # pelican / pelican-server builds stay CGO-free. -buildmode=c-shared requires
-# CGO and a per-target C toolchain, so this config is exercised on native
-# per-architecture runners in release CI rather than via pure cross-compile.
+# CGO and a per-target C toolchain, so it must be built on a native runner per
+# architecture rather than cross-compiled.
 #
-# Generated into .goreleaser.lotman.generated.yml by scripts/generate_goreleaser.sh
-# (which substitutes %VERSION%); build with `make lotman-package`.
+# NOTE: no release-CI job runs this config yet -- it is invoked by hand via
+# `make lotman-package`, which generates .goreleaser.lotman.generated.yml with
+# scripts/generate_goreleaser.sh.
 version: 2
 project_name: pelican-lotman
 
