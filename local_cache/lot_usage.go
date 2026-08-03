@@ -99,33 +99,74 @@ func (pc *PersistentCache) syncLotUsage() error {
 	return nil
 }
 
-// priorityBuckets returns the accounting bucket ids to evict first within a
-// storage directory, in priority order: lots past their deletion time, then
-// past expiration, then over their dedicated+opportunistic quota, then over
-// their dedicated quota. The result is restricted to lots that actually have
-// usage in the given directory and is de-duplicated, preserving priority order.
+// priorityBuckets returns the accounting buckets to evict first within a storage
+// directory, in priority order: lots past their deletion time, then past
+// expiration, then over their dedicated+opportunistic quota, then over their
+// dedicated quota. The result is restricted to lots that actually have usage in
+// the given directory and is de-duplicated, preserving priority order.
 // Implements lotEvictionPlanner.
-func (pc *PersistentCache) priorityBuckets(storageID StorageID) []NamespaceID {
+func (pc *PersistentCache) priorityBuckets(storageID StorageID) []lotEvictionTarget {
 	if pc.lotMgr == nil {
 		return nil
 	}
 	now := time.Now().UnixMilli()
 
-	var lotNames []string
-	appendLots := func(names []string, err error) {
-		if err != nil {
-			log.Warnf("lot eviction planning query failed: %v", err)
-			return
+	// A lot selected because its lifetime is over may be drained completely; one
+	// selected for being over a storage quota may only be drained back *to* that
+	// quota. Losing that distinction means a lot 1 GB over a 5 TB reservation can
+	// have terabytes taken from inside its guarantee -- which inverts the meaning
+	// of a dedicated quota -- while unlotted data sits untouched.
+	const unbounded int64 = -1
+	type candidate struct {
+		name    string
+		overage int64 // bytes reclaimable lot-wide; unbounded to drain it entirely
+	}
+	var candidates []candidate
+	appendLots := func(quotaOf func(core.LotView) int64) func([]string, error) {
+		return func(names []string, err error) {
+			if err != nil {
+				log.Warnf("lot eviction planning query failed: %v", err)
+				return
+			}
+			for _, name := range names {
+				over := unbounded
+				if quotaOf != nil {
+					view, err := pc.lotMgr.GetLot(name)
+					if err != nil {
+						log.Warnf("lot eviction planning: reading lot %q: %v", name, err)
+						continue
+					}
+					quota := quotaOf(*view)
+					if quota < 0 { // unbounded quota: the lot cannot be over it
+						continue
+					}
+					// Measure the overage against the lot's whole usage, not one
+					// directory's share of it: a lot spread over several
+					// directories is over quota as a whole, and each directory
+					// contributes at most what it holds (capped below).
+					over = view.Usage.SelfBytes - quota
+					if over <= 0 {
+						continue
+					}
+				}
+				candidates = append(candidates, candidate{name: name, overage: over})
+			}
 		}
-		lotNames = append(lotNames, names...)
 	}
 	// Recursive for the time-based passes so descendants of an expired/deleted
 	// lot are included; hierarchical for the quota passes so the deepest
 	// over-quota lots come first.
-	appendLots(pc.lotMgr.LotsPastDel(now, true, false))
-	appendLots(pc.lotMgr.LotsPastExp(now, true, false))
-	appendLots(pc.lotMgr.LotsPastOpp(false, false, false, true))
-	appendLots(pc.lotMgr.LotsPastDed(false, false, false, true))
+	appendLots(nil)(pc.lotMgr.LotsPastDel(now, true, false))
+	appendLots(nil)(pc.lotMgr.LotsPastExp(now, true, false))
+	appendLots(func(v core.LotView) int64 {
+		if v.DedicatedBytes < 0 || v.OpportunisticBytes < 0 {
+			return unbounded
+		}
+		return v.DedicatedBytes + v.OpportunisticBytes
+	})(pc.lotMgr.LotsPastOpp(false, false, false, true))
+	appendLots(func(v core.LotView) int64 {
+		return v.DedicatedBytes
+	})(pc.lotMgr.LotsPastDed(false, false, false, true))
 
 	// Restrict to lots present in this storage directory.
 	dirUsage, err := pc.db.GetDirUsage(storageID)
@@ -133,22 +174,33 @@ func (pc *PersistentCache) priorityBuckets(storageID StorageID) []NamespaceID {
 		log.Warnf("lot eviction planning: failed to read dir usage: %v", err)
 		return nil
 	}
-	present := make(map[NamespaceID]bool, len(dirUsage))
-	for id := range dirUsage {
-		present[id] = true
-	}
 
 	pc.namespaceMapMu.RLock()
 	defer pc.namespaceMapMu.RUnlock()
 	seen := make(map[NamespaceID]bool)
-	var out []NamespaceID
-	for _, name := range lotNames {
-		id, ok := pc.namespaceMap[name]
-		if !ok || seen[id] || !present[id] {
+	var out []lotEvictionTarget
+	for _, c := range candidates {
+		id, ok := pc.namespaceMap[c.name]
+		if !ok || seen[id] {
+			continue
+		}
+		usage, present := dirUsage[id]
+		if !present {
 			continue
 		}
 		seen[id] = true
-		out = append(out, id)
+		target := lotEvictionTarget{bucket: id, maxBytes: unbounded}
+		if c.overage >= 0 {
+			// This directory can give back at most what it holds of the lot; if
+			// that is not enough, the other directories holding the lot take the
+			// rest, and a later tick revisits it if it is still over.
+			budget := c.overage
+			if budget > usage {
+				budget = usage
+			}
+			target.maxBytes = budget
+		}
+		out = append(out, target)
 	}
 	return out
 }
