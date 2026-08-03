@@ -507,6 +507,12 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 		return nil
 	}
 
+	// A standalone origin has no registry to mirror to; downtime it records is
+	// purely local bookkeeping for its own operators.
+	if config.IsStandaloneOrigin() {
+		return nil
+	}
+
 	fed, err := config.GetFederation(ctx)
 	if err != nil || fed.RegistryEndpoint == "" {
 		return errors.Wrap(err, "failed to load federation configuration")

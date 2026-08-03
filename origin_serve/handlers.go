@@ -188,6 +188,21 @@ func init() {
 	server_utils.RegisterPOSIXv2Reset(ResetHandlers)
 }
 
+// BackendForPrefix returns the storage backend serving a federation prefix, or
+// nil if no export claims it.
+//
+// The backend is how this process reaches its own storage.  Anything that wants
+// to read an export -- listing it to measure disk usage, say -- should go
+// through here rather than addressing the origin over the network: the bytes
+// are already local, and a request that leaves the process needs a federation,
+// a credential, and an initialized client to come back.
+func BackendForPrefix(prefix string) server_utils.OriginBackend {
+	if backends == nil {
+		return nil
+	}
+	return backends[prefix]
+}
+
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
 	backends = nil
@@ -290,7 +305,7 @@ func authMiddleware() gin.HandlerFunc {
 		// This happens when the director is co-located with the origin
 		// Token scopes are always for the federation prefix (e.g., /test/...),
 		// not the HTTP route prefix
-		const apiPrefix = "/api/v1.0/origin/data"
+		const apiPrefix = server_structs.OriginDataRoutePrefix
 		resource = strings.TrimPrefix(resource, apiPrefix)
 		ac := GetAuthConfig()
 		if ac == nil {
@@ -300,6 +315,17 @@ func authMiddleware() gin.HandlerFunc {
 				"detail": "auth config not initialized",
 			})
 			return
+		}
+
+		// A standalone origin is the only thing a client can ask about its own
+		// namespaces: with no director in the federation, the client resolves an
+		// object by requesting it here and reading this metadata off the reply.
+		// It therefore has to ride on every response -- a success, a 404, or a
+		// rejection -- because the client's very first request for an object may
+		// be any of those. On a federated origin the director already supplied
+		// this, so the headers stay off.
+		if config.IsStandaloneOrigin() {
+			ac.SetTokenHintHeaders(c.Writer.Header(), resource)
 		}
 
 		// Check for public reads first
@@ -411,7 +437,28 @@ func authMiddleware() gin.HandlerFunc {
 		// For public reads, the authorizedContext may be nil
 		if !isPublicRead && authorizedContext == nil {
 			reqLog.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			// The namespace/issuer hints were already attached above for a
+			// standalone origin; a federated one deliberately sends none,
+			// because its director owns that answer.
+			//
+			// On a standalone origin, distinguish "you brought nothing" from
+			// "what you brought is not enough": a client that presented a
+			// token has already been told which issuer to use, so repeating
+			// the 401 would just loop, whereas the 403 drives the token-hint
+			// retry in client/handle_http.go.
+			//
+			// Federated origins keep answering 401 in both cases.  A 401 is
+			// what tells rclone and similar clients to re-run their
+			// bearer_token_command and try again -- the same reason the
+			// director returns 401 for an expired token (see
+			// validateClientToken in director/director.go).  Promoting it to
+			// 403 federation-wide would turn a refreshable rejection into a
+			// permanent one for every existing deployment.
+			status := http.StatusUnauthorized
+			if len(tokens) > 0 && config.IsStandaloneOrigin() {
+				status = http.StatusForbidden
+			}
+			c.AbortWithStatusJSON(status, gin.H{
 				"error":  "unauthorized",
 				"detail": fmt.Sprintf("authorization failed for %s %s; tried %d token(s)", action, resource, len(tokens)),
 			})
@@ -777,6 +824,11 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			Logger:     logger,
 		}
 
+		// Keyed by federation prefix, so two exports declaring the same one
+		// leave only the last standing -- silently, and with whichever storage
+		// prefix happened to be configured last.  Nothing upstream rejects the
+		// duplicate; if that is ever tightened, it belongs in export validation
+		// rather than here, and applies to federated origins just as much.
 		backends[export.FederationPrefix] = backend
 		webdavHandlers[export.FederationPrefix] = handler
 		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
@@ -809,7 +861,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		// This allows the director to distinguish between routing requests and origin file serving
 		var routePrefix string
 		if directorEnabled {
-			routePrefix = "/api/v1.0/origin/data" + prefix
+			routePrefix = server_structs.OriginDataRoutePrefix + prefix
 		} else {
 			routePrefix = prefix
 		}
@@ -1189,7 +1241,7 @@ func buildTransferEvent(c *gin.Context, method string, start time.Time) metrics.
 	requestPath := c.Request.URL.Path
 
 	// Strip the /api/v1.0/origin/data prefix if present (director co-located mode)
-	const apiPrefix = "/api/v1.0/origin/data"
+	const apiPrefix = server_structs.OriginDataRoutePrefix
 	requestPath = strings.TrimPrefix(requestPath, apiPrefix)
 
 	event := metrics.TransferEvent{

@@ -108,12 +108,22 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 		// https://github.com/PelicanPlatform/pelican/issues/1351
 		extUrlStr := param.Server_ExternalWebUrl.GetString()
 		extUrl, _ := url.Parse(extUrlStr)
-		// Only use hostname:port
-		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
-		if err != nil {
-			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
-			err = nil
+		if config.IsStandaloneOrigin() {
+			// A standalone origin never registered anywhere, so there is no
+			// registry to look a name up in and no federation-wide uniqueness to
+			// respect. Fall back to the external host the same way a director
+			// names itself, so admins aren't forced to set Xrootd.Sitename just
+			// to get a server name.
+			metadata.Name = extUrl.Host
+			metadata.IsOrigin = true
+		} else {
+			// Only use hostname:port
+			originPrefix := server_structs.GetOriginNs(extUrl.Host)
+			metadata, err = getServerMetadataFromReg(ctx, originPrefix)
+			if err != nil {
+				log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+				err = nil
+			}
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
@@ -126,14 +136,20 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 
 	// Prioritize the server name from the local configuration over the registry
 	if param.Xrootd_Sitename.GetString() != "" {
-		// Warn the user if the server name from the registry does not match the local configuration
 		if metadata.Name != param.Xrootd_Sitename.GetString() {
-			log.Warningf("Server name mismatch detected:\n"+
-				"  Registered server name: %q\n"+
-				"  Local sitename:      %q\n"+
-				"Pelican will use the local sitename as your server name.\n"+
-				"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
-				metadata.Name, param.Xrootd_Sitename.GetString())
+			// Warn the user if the server name from the registry does not match the
+			// local configuration.  A standalone origin has nothing registered to
+			// disagree with -- the name above is just its own external host -- so
+			// the mismatch is expected and the advice to contact a federation
+			// administrator has no one to address.
+			if !config.IsStandaloneOrigin() {
+				log.Warningf("Server name mismatch detected:\n"+
+					"  Registered server name: %q\n"+
+					"  Local sitename:      %q\n"+
+					"Pelican will use the local sitename as your server name.\n"+
+					"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
+					metadata.Name, param.Xrootd_Sitename.GetString())
+			}
 			metadata.Name = param.Xrootd_Sitename.GetString()
 		}
 	}

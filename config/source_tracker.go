@@ -73,6 +73,17 @@ func GetSourceTracker() *SourceTracker {
 	return globalSourceTracker
 }
 
+// isDefaultSource reports whether a parameter still holds the value the
+// generated defaults gave it -- that is, no config file, environment variable,
+// or programmatic override has touched it.  Use it before rejecting a
+// parameter's value: several defaults are non-empty (the osdf-flavored binary,
+// for one, ships a federation discovery URL), and an operator cannot unset
+// something they never set.
+func isDefaultSource(name string) bool {
+	src, ok := GetSourceTracker().Get(strings.ToLower(name))
+	return !ok || src.Type == SourceDefault
+}
+
 // Record stores the source for a config key. If the key was already recorded,
 // the new source overwrites the old one (later stages take precedence).
 func (st *SourceTracker) Record(key string, source ConfigSource) {

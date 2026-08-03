@@ -550,6 +550,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
 	// Origin.EnableReads
 	v.SetDefault(param.Origin_EnableReads.GetName(), true)
+	// Origin.EnableStandaloneMode
+	v.SetDefault(param.Origin_EnableStandaloneMode.GetName(), false)
 	// Origin.EnableTLSClientAuth
 	v.SetDefault(param.Origin_EnableTLSClientAuth.GetName(), false)
 	// Origin.EnableTransferAPI

@@ -185,7 +185,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 			return
 		}
 		servers = append(servers, server)
-		serversRequireAdvertisement = append(serversRequireAdvertisement, server)
+		// Standalone origins aren't part of any federation, so there is no
+		// director to advertise to.
+		if !config.IsStandaloneOrigin() {
+			serversRequireAdvertisement = append(serversRequireAdvertisement, server)
+		}
 
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
@@ -267,8 +271,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Launch director discovery.  This is done after the director modules are done
 	// (since they may provide some of the response information) and before the origin/cache
-	// are started (since we may forward ads based on discovered directors)
-	if err = server_utils.LaunchPeriodicDirectorDiscovery(ctx, modules.IsEnabled(server_structs.DirectorType)); err != nil {
+	// are started (since we may forward ads based on discovered directors).
+	// A standalone origin advertises to nobody, so it has no reason to go looking
+	// for directors in the first place.
+	if config.IsStandaloneOrigin() {
+		log.Debugf("Skipping director discovery because %s is enabled", param.Origin_EnableStandaloneMode.GetName())
+	} else if err = server_utils.LaunchPeriodicDirectorDiscovery(ctx, modules.IsEnabled(server_structs.DirectorType)); err != nil {
 		return
 	}
 	if modules.IsEnabled(server_structs.DirectorType) {
@@ -323,7 +331,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
-	if fedInfo.BrokerEndpoint != "" {
+	if fedInfo.BrokerEndpoint != "" && !config.IsStandaloneOrigin() {
 		if modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool() {
 			if err = origin.LaunchBrokerListener(ctx, egrp, engine); err != nil {
 				return
@@ -453,7 +461,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Launch periodic advertise BEFORE broker listener because the broker listener
 	// needs server metadata which is populated during the first advertisement.
-	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) && len(serversRequireAdvertisement) > 0 {
+	// The length check must gate the whole branch: a standalone origin (or a
+	// site-local cache) leaves the slice empty, and advertising an empty slice
+	// would still report a bogus "federation: OK" health component.
+	if len(serversRequireAdvertisement) > 0 {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
@@ -569,7 +580,11 @@ func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerTy
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "The server is shutting down")
 		// When the server is up again, the ShuttingDown status will be cleared
 
-		if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
+		// The final "I'm going away" ad only makes sense for servers a director
+		// knows about; a standalone origin has never advertised at all.
+		if config.IsStandaloneOrigin() {
+			log.Debug("Skipping shutdown advertisement because the origin is running in standalone mode")
+		} else if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
 			log.Errorf("Failed to advertise before shutdown: %v", advErr)
 		}
 		time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())

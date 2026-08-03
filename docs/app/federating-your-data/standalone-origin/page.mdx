@@ -1,0 +1,114 @@
+import { Callout } from 'nextra/components'
+
+# Running a Standalone Origin
+
+A **standalone Origin** is a Pelican Origin that belongs to no federation at all.
+When [`Origin.EnableStandaloneMode`](/parameters#Origin-EnableStandaloneMode) is set to `true`, the Origin will **not** register with a Registry, will **not** advertise itself to a Director, and will not contact any other federation service.
+Clients read and write objects by talking to the Origin's own URL directly, and every authorization decision is made against tokens minted by the Origin's own embedded issuer.
+
+This is the Origin counterpart of a [site-local Cache](/operating-a-federation/cache/site-local-cache), but it goes further: a site-local Cache still queries a Director as a client, whereas a standalone Origin makes no federation calls whatsoever.
+
+## Who Is This For?
+
+Standalone mode is intended for administrators who want Pelican's managed authorization over a storage backend without operating -- or belonging to -- a federation.
+Common scenarios include:
+
+- **A single group or lab** that wants token-based, per-namespace upload and download over an existing POSIX directory, S3 bucket, or HTTPS endpoint, served with Pelican's object browser and issuer.
+- **Testing and development** environments where you want to exercise an Origin's storage backend and authorization rules without standing up (or registering with) a Director and Registry.
+
+## Requirements
+
+Standalone mode requires one of Pelican's **native ("v2") storage backends**, which are served directly by the `pelican-server` process rather than by an XRootD subprocess:
+
+- `posixv2`
+- `s3v2`
+- `httpsv2`
+- `globusv2`
+- `ssh`
+
+The XRootD-fronted backends (`posix`, `s3`, `https`, `globus`, `xroot`) derive parts of their configuration from federation metadata, so they are rejected at startup with an explanatory error.
+
+Four further constraints are enforced when the Origin starts:
+
+- Standalone mode cannot be combined with the Director, Registry, Cache, or Broker modules in the same process, nor with [`Origin.DisableDirectClients`](/parameters#Origin-DisableDirectClients) -- a standalone Origin has only direct clients.
+- [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) must not be set: a standalone Origin belongs to no federation and publishes its own federation metadata, so naming a remote one would leave the process holding two different answers to "what federation is this?".
+- Each export must declare a non-root `FederationPrefix`: the Origin serves every export at its bare federation prefix, so an export of `/` would take over the paths the Origin's own API, issuer, web UI, and `/.well-known` metadata occupy.
+- [`Origin.DirectorTest`](/parameters#Origin-DirectorTest) is force-disabled, with a warning in the log, since no Director exists to run the test.
+
+## How It Works
+
+A standalone Origin does none of the things an Origin normally does with a federation: it does not register namespaces with a Registry, advertise to a Director, run Director health tests, discover Directors, use the connection broker, or mirror downtime anywhere.
+
+With no federation to discover, the Origin's own [`Server.ExternalWebUrl`](/parameters#Server-ExternalWebUrl) is the federation's identity -- that is the host clients name in a `pelican://` URL.
+Because no Director is involved, clients resolve objects against the Origin directly, and objects are served at their federation prefix: an export with `FederationPrefix: /my-data` serves `https://origin.example.com:8444/my-data/...`.
+
+## Configuration
+
+A minimal configuration file for a standalone Origin might look like:
+
+```yaml
+Origin:
+  EnableStandaloneMode: true
+  StorageType: posixv2
+  EnableIssuer: true
+  IssuerMode: embedded
+  Exports:
+    - FederationPrefix: /my-data
+      StoragePrefix: /mnt/data
+      Capabilities: ["Reads", "Writes", "Listings"]
+Server:
+  Hostname: origin.example.com
+```
+
+Then launch the Origin as usual:
+
+```bash
+pelican-server origin serve --config /path/to/pelican.yaml
+```
+
+With [`Origin.EnableIssuer`](/parameters#Origin-EnableIssuer) set, each non-public export gets its own OIDC issuer at `<Server.ExternalWebUrl>/api/v1.0/issuer/ns<FederationPrefix>` -- for the export above, `https://origin.example.com:8444/api/v1.0/issuer/ns/my-data`.
+That issuer is what mints the tokens clients present.
+
+<Callout type="warning">
+  Set [`Origin.IssuerMode`](/parameters#Origin-IssuerMode) to `embedded` explicitly.
+  The default is `oa4mp`, which proxies to a separate OA4MP service that the Origin expects to launch and reach; if it is not installed, the Origin fails to start while waiting on the issuer's OIDC configuration endpoint.
+  The embedded issuer is built into `pelican-server` and needs nothing else installed.
+</Callout>
+See [Generating Tokens](/federating-your-data/generating-tokens) for how to obtain one.
+
+## Reading and Writing Objects
+
+The Pelican CLI works unmodified -- point it at the Origin's own hostname as the federation:
+
+```bash
+pelican object get pelican://origin.example.com:8444/my-data/example.txt ./example.txt
+pelican object put ./example.txt pelican://origin.example.com:8444/my-data/example.txt
+pelican object ls  pelican://origin.example.com:8444/my-data
+```
+
+The same is true of anything else that speaks Pelican, including the HTCondor file-transfer plugin and PelicanFS.
+
+Plain HTTP clients work too, against the same URLs:
+
+```bash
+# Download an object.  The export above grants Reads but not PublicReads,
+# so the download needs a token from this Origin's issuer too.
+curl -O -H "Authorization: Bearer $TOKEN" \
+    https://origin.example.com:8444/my-data/example.txt
+
+# Upload with the same kind of token
+curl -X PUT --upload-file ./example.txt \
+    -H "Authorization: Bearer $TOKEN" \
+    https://origin.example.com:8444/my-data/example.txt
+```
+
+Add `PublicReads` to an export's capabilities to let unauthenticated clients download from it; writes always require a token.
+
+The Origin also serves WebDAV at those same paths, so `rclone` and similar tools can be pointed straight at the Origin URL.
+The web UI's **Object Browser** (under `/view/origin/client/`) browses and transfers objects the same way.
+
+## Joining a Federation Later
+
+Standalone mode is a single setting.
+To join a federation later, set [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl), remove `Origin.EnableStandaloneMode`, and restart; the Origin will then register its namespaces and begin advertising.
+Note that the namespaces you chose while standalone must be available in the federation's Registry -- see [Choosing a Namespace Prefix](/federating-your-data/choosing-namespaces).

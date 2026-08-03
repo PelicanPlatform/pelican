@@ -6,7 +6,19 @@ const stringToTime = (time: string) => {
   return new Date(Date.parse(time)).toLocaleString();
 };
 
-export const getEnabledServers = async (): Promise<ServerType[]> => {
+export interface ServerInfo {
+  servers: ServerType[];
+  /**
+   * True when this server runs an Origin with Origin.EnableStandaloneMode --
+   * it belongs to no federation, so there is no registry to register at, no
+   * director to advertise to, and nothing consuming its downtime records.
+   * Pages use this to hide federation-only affordances rather than render
+   * them as permanently broken.
+   */
+  standaloneOrigin: boolean;
+}
+
+export const getServerInfo = async (): Promise<ServerInfo> => {
   const response = await fetch('/api/v1.0/servers');
   if (response.ok) {
     const data = await response.json();
@@ -14,13 +26,17 @@ export const getEnabledServers = async (): Promise<ServerType[]> => {
 
     if (servers == undefined) {
       console.error('No servers found', response);
-      return [];
+      return { servers: [], standaloneOrigin: false };
     }
 
-    return servers;
+    return { servers, standaloneOrigin: !!data?.standaloneOrigin };
   }
 
-  return [];
+  return { servers: [], standaloneOrigin: false };
+};
+
+export const getEnabledServers = async (): Promise<ServerType[]> => {
+  return (await getServerInfo()).servers;
 };
 
 export const getOauthEnabledServers = async () => {

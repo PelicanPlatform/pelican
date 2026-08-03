@@ -2930,6 +2930,12 @@ paths:
                   type: string
                   minItems: 1
                 example: ["director", "origin", "registry"]
+              standaloneOrigin:
+                type: boolean
+                description: >
+                  True when this server runs an Origin with `Origin.EnableStandaloneMode`, i.e. it belongs to no
+                  federation. The web UI uses this to hide registration status, downtime, and federation links.
+                default: false
         "500":
           description: Server encountered error in reading institution configuration
           schema:

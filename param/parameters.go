@@ -351,6 +351,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.EnableOIDC": false,
 	"Origin.EnablePublicReads": false,
 	"Origin.EnableReads": false,
+	"Origin.EnableStandaloneMode": false,
 	"Origin.EnableTLSClientAuth": false,
 	"Origin.EnableTransferAPI": false,
 	"Origin.EnableVoms": false,
@@ -1070,6 +1071,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Origin.EnableOIDC": func(c *Config) bool { return c.Origin.EnableOIDC },
 	"Origin.EnablePublicReads": func(c *Config) bool { return c.Origin.EnablePublicReads },
 	"Origin.EnableReads": func(c *Config) bool { return c.Origin.EnableReads },
+	"Origin.EnableStandaloneMode": func(c *Config) bool { return c.Origin.EnableStandaloneMode },
 	"Origin.EnableTLSClientAuth": func(c *Config) bool { return c.Origin.EnableTLSClientAuth },
 	"Origin.EnableTransferAPI": func(c *Config) bool { return c.Origin.EnableTransferAPI },
 	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
@@ -1556,6 +1558,7 @@ var allParameterNames = []string{
 	"Origin.EnableOIDC",
 	"Origin.EnablePublicReads",
 	"Origin.EnableReads",
+	"Origin.EnableStandaloneMode",
 	"Origin.EnableTLSClientAuth",
 	"Origin.EnableTransferAPI",
 	"Origin.EnableVoms",
@@ -2127,6 +2130,7 @@ var (
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
+	Origin_EnableStandaloneMode = BoolParam{"Origin.EnableStandaloneMode"}
 	Origin_EnableTLSClientAuth = BoolParam{"Origin.EnableTLSClientAuth"}
 	Origin_EnableTransferAPI = BoolParam{"Origin.EnableTransferAPI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
@@ -2616,6 +2620,7 @@ func init() {
 		"Origin.EnableOIDC": Origin_EnableOIDC,
 		"Origin.EnablePublicReads": Origin_EnablePublicReads,
 		"Origin.EnableReads": Origin_EnableReads,
+		"Origin.EnableStandaloneMode": Origin_EnableStandaloneMode,
 		"Origin.EnableTLSClientAuth": Origin_EnableTLSClientAuth,
 		"Origin.EnableTransferAPI": Origin_EnableTransferAPI,
 		"Origin.EnableVoms": Origin_EnableVoms,

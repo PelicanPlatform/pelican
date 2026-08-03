@@ -670,13 +670,7 @@ func getVolumes() []exportVolume {
 	exportVolumes := make([]exportVolume, len(volumes))
 	for idx, volume := range volumes {
 		// Perform validation of the namespace
-		storagePrefix := filepath.Clean(volume)
-		federationPrefix := filepath.Clean(volume)
-		volumeMountInfo := strings.SplitN(volume, ":", 2)
-		if len(volumeMountInfo) == 2 {
-			storagePrefix = filepath.Clean(volumeMountInfo[0])
-			federationPrefix = filepath.Clean(volumeMountInfo[1])
-		}
+		storagePrefix, federationPrefix := server_structs.ParseExportVolume(volume)
 
 		exportVolumes[idx] = exportVolume{
 			storagePrefix:    storagePrefix,
@@ -776,4 +770,64 @@ func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 
 func ResetOriginExports() {
 	originExports = nil
+}
+
+// NamespaceAdsFromExports converts an origin's exports into the namespace ads
+// that describe them to the rest of the federation.
+//
+// Two callers depend on these being identical: the origin's advertisement to
+// the director, and the X-Pelican-* token hints a standalone origin returns on
+// its own responses (origin_serve.SetTokenHintHeaders), which are all a client
+// has to go on when there is no director to ask. Keeping the construction in
+// one place is what stops a standalone origin from describing its own
+// namespaces differently than a federated one would.
+func NamespaceAdsFromExports(exports []OriginExport) ([]server_structs.NamespaceAd, error) {
+	nsAds := make([]server_structs.NamespaceAd, 0, len(exports))
+	for _, export := range exports {
+		// PublicReads implies reads
+		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
+
+		// Set up issuer URLs for the namespace. Note that this uses a single
+		// base path (the fed prefix) per issuer per export even if a single issuer
+		// at the origin is configured for multiple prefixes. This is because we have
+		// no global concept of issuers at the Director and we store this issuer info
+		// per namespace. It doesn't currently make much sense to construct the full list
+		// of potential base paths in this context.
+		issuerUrls := make([]server_structs.TokenIssuer, len(export.IssuerUrls))
+		for i, issUrlStr := range export.IssuerUrls {
+			issUrl, err := url.Parse(issUrlStr)
+			if err != nil {
+				return nil, errors.Wrap(err, "unable to parse issuer url")
+			}
+			issuerUrls[i] = server_structs.TokenIssuer{
+				IssuerUrl: *issUrl,
+				BasePaths: []string{export.FederationPrefix},
+			}
+		}
+
+		// Populate the struct for the namespace's "token generation" field
+		// TODO: It's not clear what the intended difference/abstraction between the
+		// "Generation" and the "Issuer" fields is... We should define these eventually
+		var tokGen server_structs.TokenGen
+		if len(issuerUrls) > 0 {
+			tokGen.Strategy = server_structs.OAuthStrategy
+			tokGen.MaxScopeDepth = 3
+			tokGen.CredentialIssuer = issuerUrls[0].IssuerUrl
+		}
+
+		nsAds = append(nsAds, server_structs.NamespaceAd{
+			Caps: server_structs.Capabilities{
+				PublicReads: export.Capabilities.PublicReads,
+				Reads:       reads,
+				Writes:      export.Capabilities.Writes,
+				Listings:    export.Capabilities.Listings,
+				DirectReads: export.Capabilities.DirectReads,
+				Copies:      export.Capabilities.Copies,
+			},
+			Path:       export.FederationPrefix,
+			Generation: []server_structs.TokenGen{tokGen},
+			Issuer:     issuerUrls,
+		})
+	}
+	return nsAds, nil
 }

@@ -37,6 +37,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -44,7 +45,12 @@ import (
 
 type (
 	authConfig struct {
-		exports    atomic.Pointer[[]server_utils.OriginExport]
+		exports atomic.Pointer[[]server_utils.OriginExport]
+		// nsAds is exports rendered as namespace ads, derived once per config
+		// change rather than per request: SetTokenHintHeaders runs on every
+		// request a standalone origin serves, and rebuilding the ads there costs
+		// a url.Parse per issuer per request.  Swapped together with exports.
+		nsAds      atomic.Pointer[[]server_structs.NamespaceAd]
 		issuers    atomic.Pointer[map[string]bool]
 		audiences  []string // accepted audience values (origin URL + wildcards)
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
@@ -199,7 +205,16 @@ func (ac *authConfig) updateConfig(exports []server_utils.OriginExport) error {
 			issuers[issuer] = true
 		}
 	}
+	// An export whose issuer URL will not parse cannot produce token hints, but
+	// it can still be authorized against; keep the rest of the config current and
+	// leave the ads empty rather than refusing to serve.
+	nsAds, err := server_utils.NamespaceAdsFromExports(exports)
+	if err != nil {
+		log.Warningf("Unable to derive namespace ads from the origin's exports; token hint headers will be omitted: %v", err)
+		nsAds = nil
+	}
 	ac.issuers.Store(&issuers)
+	ac.nsAds.Store(&nsAds)
 	ac.exports.Store(&exports)
 	return nil
 }
@@ -320,6 +335,42 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 	scopes = token_scopes.ParseResourceScopeString(tok)
 
 	return
+}
+
+// SetTokenHintHeaders writes the director's X-Pelican-{Namespace,Authorization,
+// Token-Generation} headers describing how a caller could obtain a token for
+// resource, or does nothing if no export covers it.
+//
+// A federated origin never needs this: the director already told the client
+// which token to get before redirecting it here.  A standalone origin has no
+// director, so a client asking it for an object directly would otherwise get a
+// bare rejection with no way to discover the issuer.  Emitting the same headers
+// the director would lets the client (see the token-hint retry in
+// client/handle_http.go) acquire the right token and try again, and lets a human
+// with curl see where to authenticate.
+//
+// The hint is advisory: it names the credential this origin recommends, not the
+// only one it will accept.  LongestNSMatch reports the single most specific
+// export covering resource, while getAcls below grants access from every export
+// whose issuer matches the presented token.  With exports nested one inside
+// another under different issuers, a token from the outer export's issuer whose
+// scope reaches the inner path is still honored even though the hint pointed at
+// the inner issuer.  Narrowing that is an authorization change affecting
+// federated origins equally, so it does not belong to standalone mode; until
+// then, do not read these headers as a statement of what will be refused.
+func (ac *authConfig) SetTokenHintHeaders(hdr http.Header, resource string) {
+	nsAds := ac.nsAds.Load()
+	if nsAds == nil {
+		return
+	}
+	nsAd := server_structs.LongestNSMatch(resource, *nsAds)
+	if nsAd == nil {
+		return
+	}
+	// This origin serves its own listings, so it is its own collections URL.
+	server_structs.SetXNamespaceHeaderWithCollections(hdr, param.Origin_Url.GetString(), *nsAd)
+	server_structs.SetXAuthHeader(hdr, *nsAd)
+	server_structs.SetXTokenGenHeader(hdr, *nsAd)
 }
 
 // Given a token, calculate the corresponding access control list

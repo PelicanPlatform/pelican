@@ -71,28 +71,34 @@ func handleExports(ctx *gin.Context) {
 
 	res := exportsRes{Type: string(storageType)}
 
-	extUrlStr := param.Server_ExternalWebUrl.GetString()
-	extUrl, _ := url.Parse(extUrlStr)
-	// Only use hostname:port
-	originPrefix := server_structs.GetOriginNs(extUrl.Host)
-	if !registrationsStatus.Has(originPrefix) {
-		if err := FetchAndSetRegStatus(originPrefix); err != nil {
-			log.Errorf("Failed to fetch registration status from the registry: %v", err)
+	standalone := config.IsStandaloneOrigin()
+	if standalone {
+		res.Status = RegStandalone
+		res.StatusDescription = standaloneStatusDescription
+	} else {
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		originPrefix := server_structs.GetOriginNs(extUrl.Host)
+		if !registrationsStatus.Has(originPrefix) {
+			if err := FetchAndSetRegStatus(originPrefix); err != nil {
+				log.Errorf("Failed to fetch registration status from the registry: %v", err)
+				ctx.JSON(http.StatusInternalServerError,
+					server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
+				return
+			}
+		}
+		if rs := registrationsStatus.Get(originPrefix); rs == nil {
+			log.Error("Failed to fetch registration status from the registry: can't find registration status after querying registry")
 			ctx.JSON(http.StatusInternalServerError,
 				server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
 			return
+		} else {
+			// rs is not nil
+			res.Status = rs.Value().Status
+			res.StatusDescription = rs.Value().Msg
+			res.EditUrl = rs.Value().EditUrl
 		}
-	}
-	if rs := registrationsStatus.Get(originPrefix); rs == nil {
-		log.Error("Failed to fetch registration status from the registry: can't find registration status after querying registry")
-		ctx.JSON(http.StatusInternalServerError,
-			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
-		return
-	} else {
-		// rs is not nil
-		res.Status = rs.Value().Status
-		res.StatusDescription = rs.Value().Msg
-		res.EditUrl = rs.Value().EditUrl
 	}
 
 	exports, err := server_utils.GetOriginExports()
@@ -107,51 +113,54 @@ func handleExports(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the registration status for the exported prefixes: " + err.Error()})
 		return
 	}
-	// Create token for accessing registry edit page
-	issuerUrl, err := config.GetServerIssuerURL()
-	if err != nil {
-		log.Errorf("Failed to get server issuer url %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting server issuer url " + err.Error()})
-		return
-	}
-	fed, err := config.GetFederation(ctx)
-	if err != nil {
-		log.Error("handleExports: failed to get federaion:", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server error when getting federation information: " + err.Error(),
-		})
-		return
-	}
-	tc := token.NewWLCGToken()
-	tc.Issuer = issuerUrl
-	tc.Lifetime = 15 * time.Minute
-	tc.Subject = issuerUrl
-	tc.AddScopes(token_scopes.Registry_EditRegistration)
-	tc.AddAudiences(fed.RegistryEndpoint)
-	token, err := tc.CreateToken()
-	if err != nil {
-		log.Errorf("Failed to create access token for editing registration %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when creating token for access registry edit page " + err.Error()})
-		return
-	}
+	// Create token for accessing registry edit page. A standalone origin has no
+	// registry, hence no edit URLs to decorate and no audience to mint against.
+	if !standalone {
+		issuerUrl, err := config.GetServerIssuerURL()
+		if err != nil {
+			log.Errorf("Failed to get server issuer url %v", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting server issuer url " + err.Error()})
+			return
+		}
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			log.Error("handleExports: failed to get federaion:", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server error when getting federation information: " + err.Error(),
+			})
+			return
+		}
+		tc := token.NewWLCGToken()
+		tc.Issuer = issuerUrl
+		tc.Lifetime = 15 * time.Minute
+		tc.Subject = issuerUrl
+		tc.AddScopes(token_scopes.Registry_EditRegistration)
+		tc.AddAudiences(fed.RegistryEndpoint)
+		token, err := tc.CreateToken()
+		if err != nil {
+			log.Errorf("Failed to create access token for editing registration %v", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when creating token for access registry edit page " + err.Error()})
+			return
+		}
 
-	if res.EditUrl != "" {
-		res.EditUrl += "&access_token=" + token
-	}
+		if res.EditUrl != "" {
+			res.EditUrl += "&access_token=" + token
+		}
 
-	for idx, export := range wrappedExports {
-		if export.EditUrl != "" {
-			parsed, err := url.Parse(export.EditUrl)
-			if err != nil {
-				// current editUrl ends with "/?id=<x>"
-				wrappedExports[idx].EditUrl += "&access_token=" + token
-				continue
+		for idx, export := range wrappedExports {
+			if export.EditUrl != "" {
+				parsed, err := url.Parse(export.EditUrl)
+				if err != nil {
+					// current editUrl ends with "/?id=<x>"
+					wrappedExports[idx].EditUrl += "&access_token=" + token
+					continue
+				}
+				exQuery := parsed.Query()
+				exQuery.Add("access_token", token)
+				parsed.RawQuery = exQuery.Encode()
+				wrappedExports[idx].EditUrl = parsed.String()
 			}
-			exQuery := parsed.Query()
-			exQuery.Add("access_token", token)
-			parsed.RawQuery = exQuery.Encode()
-			wrappedExports[idx].EditUrl = parsed.String()
 		}
 	}
 

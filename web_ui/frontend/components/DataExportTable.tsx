@@ -29,7 +29,11 @@ type RegistrationStatus =
   | 'Not Supported'
   | 'Completed'
   | 'Incomplete'
-  | 'Registration Error';
+  | 'Registration Error'
+  // The Origin runs in standalone mode: there is no registry to register at,
+  // so registration is not pending, not failed, and not something the admin
+  // can act on. See origin.RegStandalone.
+  | 'Standalone';
 
 type ExportResCommon = {
   status: RegistrationStatus;
@@ -79,6 +83,7 @@ export const DataExportStatus = ({
 }) => {
   switch (status) {
     case 'Completed':
+    case 'Standalone':
       return null;
     case 'Incomplete':
       return (
@@ -378,6 +383,11 @@ export const getExportData = async (): Promise<ExportRes> => {
 };
 
 const generateEditUrl = (editUrl: string, fromUrl: string) => {
+  // A standalone Origin has no registry and therefore no edit URL; `new URL('')`
+  // would throw and log a spurious console error on every render.
+  if (!editUrl) {
+    return editUrl;
+  }
   try {
     let updatedFromUrl = new URL(fromUrl);
     if (updatedFromUrl.searchParams.get('from_registry') === null) {
@@ -444,9 +454,14 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       <Typography pb={1} variant={'h5'} component={'h3'}>
         Origin
       </Typography>
-      {dataEnhanced &&
-      dataEnhanced.status &&
-      dataEnhanced.status != 'Completed' ? (
+      {dataEnhanced?.status === 'Standalone' ? (
+        <Alert severity='info'>
+          {dataEnhanced.statusDescription ||
+            'This origin runs in standalone mode and is not registered with any federation registry.'}
+        </Alert>
+      ) : dataEnhanced &&
+        dataEnhanced.status &&
+        dataEnhanced.status != 'Completed' ? (
         <DataExportStatus
           status={dataEnhanced.status}
           statusDescription={dataEnhanced.statusDescription}

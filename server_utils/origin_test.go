@@ -23,6 +23,7 @@ package server_utils
 import (
 	_ "embed"
 	"fmt"
+	"net/http"
 	"os"
 	"os/user"
 	"strconv"
@@ -1023,5 +1024,81 @@ func TestValidatePosixPermissions(t *testing.T) {
 		assert.Contains(t, errStr, "uid=", "error should contain UID info")
 		assert.Contains(t, errStr, "gid=", "error should contain GID info")
 		assert.Contains(t, errStr, "permissions", "error should mention permissions")
+	})
+}
+
+func TestNamespaceAdsFromExports(t *testing.T) {
+	t.Run("PublicReadsImpliesReads", func(t *testing.T) {
+		// An export may declare PublicReads without also declaring Reads; the ad
+		// has to carry both, or the director (and a standalone origin's own token
+		// hints) would describe a publicly readable namespace as unreadable.
+		nsAds, err := NamespaceAdsFromExports([]OriginExport{{
+			FederationPrefix: "/public",
+			StoragePrefix:    "/srv/public",
+			Capabilities:     server_structs.Capabilities{PublicReads: true},
+		}})
+		require.NoError(t, err)
+		require.Len(t, nsAds, 1)
+		assert.True(t, nsAds[0].Caps.PublicReads)
+		assert.True(t, nsAds[0].Caps.Reads)
+	})
+
+	t.Run("IssuersCarryTheFederationPrefixAsBasePath", func(t *testing.T) {
+		nsAds, err := NamespaceAdsFromExports([]OriginExport{{
+			FederationPrefix: "/protected",
+			StoragePrefix:    "/srv/protected",
+			IssuerUrls:       []string{"https://issuer-a.example.com", "https://issuer-b.example.com"},
+			Capabilities:     server_structs.Capabilities{Reads: true, Writes: true},
+		}})
+		require.NoError(t, err)
+		require.Len(t, nsAds, 1)
+		require.Len(t, nsAds[0].Issuer, 2)
+		assert.Equal(t, "https://issuer-a.example.com", nsAds[0].Issuer[0].IssuerUrl.String())
+		assert.Equal(t, []string{"/protected"}, nsAds[0].Issuer[0].BasePaths)
+		assert.Equal(t, "https://issuer-b.example.com", nsAds[0].Issuer[1].IssuerUrl.String())
+		assert.Equal(t, []string{"/protected"}, nsAds[0].Issuer[1].BasePaths)
+
+		// Token generation is advertised from the first issuer only.
+		require.Len(t, nsAds[0].Generation, 1)
+		assert.Equal(t, server_structs.OAuthStrategy, nsAds[0].Generation[0].Strategy)
+		assert.Equal(t, "https://issuer-a.example.com", nsAds[0].Generation[0].CredentialIssuer.String())
+	})
+
+	t.Run("ZeroIssuersAdvertiseNoTokenGeneration", func(t *testing.T) {
+		// A truly public export needs no issuer; the generation entry must stay
+		// empty so that SetXTokenGenHeader emits nothing rather than a header
+		// pointing at the empty issuer.
+		nsAds, err := NamespaceAdsFromExports([]OriginExport{{
+			FederationPrefix: "/public",
+			StoragePrefix:    "/srv/public",
+			Capabilities:     server_structs.Capabilities{PublicReads: true, Listings: true},
+		}})
+		require.NoError(t, err)
+		require.Len(t, nsAds, 1)
+		assert.Empty(t, nsAds[0].Issuer)
+		require.Len(t, nsAds[0].Generation, 1)
+		assert.Empty(t, string(nsAds[0].Generation[0].Strategy))
+		assert.Zero(t, nsAds[0].Generation[0].MaxScopeDepth)
+
+		hdr := http.Header{}
+		server_structs.SetXTokenGenHeader(hdr, nsAds[0])
+		assert.Empty(t, hdr.Get(server_structs.XPelTokGen{}.GetName()))
+	})
+
+	t.Run("UnparsableIssuerUrlIsAnError", func(t *testing.T) {
+		_, err := NamespaceAdsFromExports([]OriginExport{{
+			FederationPrefix: "/protected",
+			StoragePrefix:    "/srv/protected",
+			IssuerUrls:       []string{"https://issuer.example.com:not-a-port"},
+			Capabilities:     server_structs.Capabilities{Reads: true},
+		}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to parse issuer url")
+	})
+
+	t.Run("EmptyExportsYieldEmptyAds", func(t *testing.T) {
+		nsAds, err := NamespaceAdsFromExports(nil)
+		require.NoError(t, err)
+		assert.Empty(t, nsAds)
 	})
 }

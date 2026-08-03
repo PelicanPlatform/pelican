@@ -22,6 +22,11 @@ export type StaticNavigationBaseItemProps = {
   // makes the item visible (logical OR with allowedRoles).
   anyScopes?: string[];
   allowedExportTypes?: ExportRes['type'][];
+  // federationOnly hides the item on a server that belongs to no federation
+  // (see ServerInfo.standaloneOrigin). Use it for pages whose only consumer is
+  // a Director or Registry -- rendering them standalone would offer the admin
+  // a control that can never take effect.
+  federationOnly?: boolean;
 };
 
 export type StaticNavigationChildItemProps = StaticNavigationBaseItemProps & {

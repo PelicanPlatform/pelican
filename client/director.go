@@ -310,6 +310,18 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 // than caches.
 func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string, cacheMode bool) (parsedResponse server_structs.DirectorResponse, err error) {
 	if pUrl.FedInfo.DirectorEndpoint == "" {
+		// A federation whose discovery document names no director has no
+		// matchmaking to do: the discovery host serves the objects itself (a
+		// standalone origin).  Ask it about the object rather than failing for
+		// want of a director.
+		//
+		// Callers here need the answer before they can act -- `token create`
+		// has to know the issuer, and a listing or a stat has no rejected
+		// response to learn from -- so this pays for a round trip.  A download
+		// does not; see resolveWithoutDirector.
+		if pUrl.FedInfo.DiscoveryEndpoint != "" {
+			return fetchNamespaceMetadata(ctx, pUrl, httpMethod, token)
+		}
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
 	}
@@ -358,6 +370,149 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	}
 
 	return
+}
+
+// resolveForRequest resolves an object for an operation that issues its own
+// request and can learn from being refused -- a download, a stat, a listing, a
+// cache-age probe.  In a federation with a director this is the ordinary query;
+// in one without, it costs no round trip, because the operation's own request
+// will carry back whatever a metadata query would have told it.
+//
+// Operations that cannot recover that way -- `token create`, or a write, which
+// would rather know before streaming a body than after being refused -- call
+// getDirectorInfoForPath instead.
+func resolveForRequest(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string, cacheMode bool) (server_structs.DirectorResponse, error) {
+	if pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != "" {
+		return resolveWithoutDirector(pUrl)
+	}
+	return getDirectorInfoForPath(ctx, pUrl, httpMethod, token, cacheMode)
+}
+
+// resolveWithoutDirector answers a federation that publishes no director,
+// without asking anyone.
+//
+// A director exists to answer two questions: which server holds the object, and
+// what credential it wants.  Neither needs asking here.  The server is the
+// discovery host from the user's own pelican:// URL -- in a federation of one
+// there is no other candidate and no Link headers to sort -- and the credential
+// is whatever the origin says when it turns the request down, on headers it
+// attaches to that very response.  So a download simply starts, carrying a
+// credential if the caller had one, and learns the rest from the answer (see
+// canApplyTokenHint); the metadata request that used to precede it was a round
+// trip spent asking what the transfer itself was about to reveal.
+//
+// Only callers that can recover from an incomplete answer may use this.  A
+// download can, because a rejection carries the hints and it retries.  A
+// listing, a stat, or `token create` cannot -- they have no second chance to
+// learn an issuer from -- and go through fetchNamespaceMetadata instead.
+//
+// Namespace and RequireToken are deliberately left zero.  Guessing them would
+// be worse than not knowing: the origin is about to say.
+func resolveWithoutDirector(pUrl *pelican_url.PelicanURL) (server_structs.DirectorResponse, error) {
+	objectServer, err := url.Parse(pUrl.FedInfo.DiscoveryEndpoint)
+	if err != nil {
+		return server_structs.DirectorResponse{},
+			errors.Wrapf(err, "failed to parse the federation's discovery endpoint %s as an object server", pUrl.FedInfo.DiscoveryEndpoint)
+	}
+	log.Debugln("Federation publishes no director; addressing", pUrl.Path, "to the object server at", objectServer.Host)
+
+	return server_structs.DirectorResponse{
+		ObjectServers: []*url.URL{objectServer},
+		XPelNsHdr: server_structs.XPelNs{
+			// An origin serving its own namespace is also its own listing
+			// endpoint, which is what it advertises as collections-url when
+			// asked; a recursive transfer needs that before it starts.
+			CollectionsUrl: objectServer,
+		},
+	}, nil
+}
+
+// fetchNamespaceMetadata asks the origin what it would tell a director about a
+// namespace: which prefix the path falls under, whether it wants a credential,
+// and which issuer mints one.
+//
+// This costs a round trip, and most callers should not need one -- a transfer
+// learns the same thing from the response to the request it was going to make
+// anyway (see resolveWithoutDirector).  It is for callers with nothing to learn
+// from: `token create` has to know the issuer before it mints anything, and a
+// write wants it before streaming a body rather than after being refused.
+//
+// A HEAD collects it, and works whether the object turns out to be public
+// (200), protected (401/403), or absent (404) -- the metadata describes the
+// namespace, not the object.
+//
+// This asks nothing new of the client's trust: the server being questioned is
+// the host from the user's own pelican:// URL, which already served the
+// discovery document that everything else in this federation is believed on
+// the strength of.
+func fetchNamespaceMetadata(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+	objectServer, err := url.Parse(pUrl.FedInfo.DiscoveryEndpoint)
+	if err != nil {
+		return server_structs.DirectorResponse{},
+			errors.Wrapf(err, "failed to parse the federation's discovery endpoint %s as an object server", pUrl.FedInfo.DiscoveryEndpoint)
+	}
+	log.Debugln("Federation publishes no director; resolving", pUrl.Path, "against the object server at", objectServer.Host)
+
+	probeUrl := *objectServer
+	probeUrl.Path = pUrl.Path
+	probeUrl.RawQuery = pUrl.RawQuery
+
+	// HEAD regardless of the caller's verb: this is a metadata lookup, and a
+	// GET would start streaming an object the caller has not asked for yet.
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, probeUrl.String(), nil)
+	if err != nil {
+		return server_structs.DirectorResponse{}, errors.Wrap(err, "failed to build a metadata request for the object server")
+	}
+	req.Header.Set("User-Agent", getUserAgent(""))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Follow redirects, unlike a director query: gin answers a request for a
+	// bare namespace prefix (what `object ls pelican://host/ns` asks for) with
+	// its own trailing-slash redirect, and that reply carries no metadata.  Only
+	// within this host, though -- the reply decides which issuer the client will
+	// authenticate against, and the bearer token above rides along on every hop
+	// Go considers same-origin, so a redirect elsewhere would both hand that
+	// token to a third party and let it name the issuer.
+	client := *config.GetClient()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !strings.EqualFold(req.URL.Host, objectServer.Host) {
+			return errors.Errorf("object server at %s redirected namespace metadata to another host (%s); refusing to follow",
+				objectServer.Host, req.URL.Host)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return server_structs.DirectorResponse{},
+			errors.Wrapf(error_codes.NewContact_DirectorError(err), "error while querying the object server at %s", objectServer.Host)
+	}
+	defer resp.Body.Close()
+	// The body is metadata-free; drain it so the connection can be reused.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	parsedResponse, err = ParseDirectorInfo(resp)
+	if err != nil {
+		return server_structs.DirectorResponse{}, errors.Wrap(err, "failed to parse the object server's namespace metadata")
+	}
+	// Whatever the object's own status, a server that serves the namespace
+	// describes it in these headers.  Their absence means something answered
+	// that is not a Pelican object server -- a proxy error page, say -- and
+	// continuing would start a transfer with no idea whether it needs a token.
+	if parsedResponse.XPelNsHdr.Namespace == "" {
+		return server_structs.DirectorResponse{},
+			errors.Errorf("the server at %s returned no namespace metadata for %s (HTTP %d); it does not appear to serve this federation",
+				objectServer.Host, pUrl.Path, resp.StatusCode)
+	}
+
+	// The object server named itself by answering; a federation of one has no
+	// other candidate, and no Link headers to sort.
+	parsedResponse.ObjectServers = []*url.URL{objectServer}
+	return parsedResponse, nil
 }
 
 // Given the Director response, parse the headers and construct the ordered list of object

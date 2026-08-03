@@ -238,8 +238,15 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 	// flavor is cached: an upload destination asks a different question and
 	// gets a different answer, and the cache is keyed only by prefix.
 	var dirResp server_structs.DirectorResponse
-	if te != nil && te.dirRespCache != nil && !uploadDestination {
-		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+	// A stat against a directorless federation is its own metadata query: the
+	// PROPFIND carries back whatever a preceding one would have said, so asking
+	// first would send the same request twice.  An upload destination still
+	// asks, since a write wants its credential settled before it starts.
+	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
+	if directorless && !uploadDestination {
+		dirResp, err = resolveForRequest(ctx, pUrl, directorMethod, "", cacheMode)
+	} else if te != nil && te.dirRespCache != nil && !uploadDestination {
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -273,9 +280,12 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 		if tokenContents == "" {
 			return nil, errors.New("failed to get token for transfer: no token found for a namespace that requires one")
 		}
-	} else {
+	} else if !directorless {
 		token = nil
 	}
+	// When nothing has been asked, "no token required" is not yet a fact, so the
+	// generator stays: a refusal carrying token hints needs somewhere to acquire
+	// onto (see bearerAuthenticator.Verify).
 
 	statInfo, err := statHttp(ctx, pUrl, dirResp, token, fedToken)
 	if err != nil {
@@ -573,10 +583,13 @@ func walkOn(ctx context.Context, _ *TransferEngine, remoteObject string, fn Walk
 		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
+	// A listing carries back what a metadata query would have said, so a
+	// directorless federation is not asked twice.
+	dirResp, err := resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
 	if err != nil {
 		return err
 	}
+	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
 
 	// Get our token if needed
 	token := NewTokenGenerator(pUrl, &dirResp, config.TokenRead, true)
@@ -612,7 +625,9 @@ func walkOn(ctx context.Context, _ *TransferEngine, remoteObject string, fn Walk
 		if err != nil || tokenContents == "" {
 			return errors.Wrap(err, "failed to get token for transfer")
 		}
-	} else {
+	} else if !directorless {
+		// With nothing having asked, "no token required" is not yet a fact; the
+		// generator stays so a refusal carrying hints can acquire onto it.
 		token = nil
 	}
 	if collectionsOverride != "" {

@@ -35,12 +35,13 @@ import { DataExportTable } from '@/components/DataExportTable';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import ServerName from '@/components/ServerName';
-import { getErrorMessage } from '@/helpers/util';
+import { getErrorMessage, getServerInfo } from '@/helpers/util';
 import { getUser } from '@/helpers/login';
 import NonAdminHome from './NonAdminHome';
 
 const AdminHome = () => {
   const [copied, setCopied] = useState(false);
+  const { data: serverInfo } = useSWR('getServerInfo', getServerInfo);
 
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -94,9 +95,11 @@ const AdminHome = () => {
             <DataExportTable />
           </Suspense>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <FederationOverview />
-        </Grid>
+        {!serverInfo?.standaloneOrigin && (
+          <Grid size={{ xs: 12, lg: 6 }}>
+            <FederationOverview />
+          </Grid>
+        )}
       </Grid>
     </Box>
   );

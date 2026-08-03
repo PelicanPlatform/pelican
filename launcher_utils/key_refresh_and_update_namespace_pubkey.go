@@ -131,8 +131,10 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modul
 			}
 
 			if keysChanged {
-				// Update public key registered with namespace in registry db when the private key(s) changed in an origin
-				if modules.IsEnabled(server_structs.OriginType) {
+				// Update public key registered with namespace in registry db when the private key(s) changed in an origin.
+				// A standalone origin never registered its namespaces anywhere, so
+				// there is no registry copy of the public key to keep in sync.
+				if modules.IsEnabled(server_structs.OriginType) && !config.IsStandaloneOrigin() {
 					if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
 						return err
 					}

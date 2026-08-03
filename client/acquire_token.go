@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,7 +81,12 @@ type (
 	// Thread-safe and will auto-renew the token throughout the lifetime
 	// of the process.  Satisfies the TokenProvider interface.
 	tokenGenerator struct {
-		DirResp                 *server_structs.DirectorResponse
+		DirResp *server_structs.DirectorResponse
+		// tokenIsExplicit reports whether the caller named the credential to use
+		// (WithToken, or a token option on the transfer).  A caller who picked a
+		// credential does not want it silently replaced by one acquired from an
+		// issuer some object server named.
+		tokenIsExplicit         bool
 		Destination             *pelican_url.PelicanURL
 		TokenLocation           string
 		TokenName               string
@@ -170,17 +176,147 @@ func (tg *tokenGenerator) SetToken(contents string) {
 		Expiry:   time.Now().Add(100 * 365 * 24 * time.Hour), // 100 years should be enough for "forever"
 	}
 	tg.Token.Store(&info)
+	// An empty value names no credential, so it does not count as the caller
+	// having chosen one; WithToken("") must not quietly disable token hints.
+	if contents != "" {
+		tg.tokenIsExplicit = true
+	}
 }
 
-// Copy the contents
-func (tg *tokenGenerator) Copy() *tokenGenerator {
-	return &tokenGenerator{
-		DirResp:       tg.DirResp,
-		Destination:   tg.Destination,
-		Operation:     tg.Operation,
-		EnableAcquire: tg.EnableAcquire,
-		Sync:          new(singleflight.Group),
+// cacheToken records a credential that an endpoint has just accepted, so the
+// rest of the job -- the sibling files sharing this generator, and the checksum
+// request that follows a completed download -- reuses it instead of acquiring
+// one of its own.  The credential is stored under its own expiry, not pinned
+// like SetToken's.
+func (tg *tokenGenerator) cacheToken(contents string) {
+	if tg == nil || contents == "" {
+		return
 	}
+	_, expiry := tokenIsValid(contents)
+	tg.Token.Store(&tokenInfo{Contents: contents, Expiry: expiry})
+}
+
+// SetDirectorResponse records the authorization metadata gathered for this
+// transfer, whether a director supplied it or the object server answered for
+// itself.  Which one it was does not decide whether a later token hint may be
+// acted on; see canApplyTokenHint.
+func (tg *tokenGenerator) SetDirectorResponse(dirResp *server_structs.DirectorResponse) {
+	tg.DirResp = dirResp
+}
+
+// canApplyTokenHint reports whether this generator may act on the token hints
+// that objectServer returned alongside a rejection.
+//
+// A hint feeds credential acquisition: honoring the wrong one lets a server
+// choose the issuer a client authenticates against, which can mean posting a
+// stored refresh token to that issuer, registering an OAuth client with it, or
+// showing the user an interactive login prompt it controls.
+//
+// A client may take credential advice only from a host its user named.  The
+// host in the pelican:// URL is such a host: it serves the discovery document,
+// which names the director, the JWKS, and the issuers, so everything the client
+// goes on to believe about the federation already rests on it, and Pelican
+// assumes throughout that the host a user typed is not compromised.  A claim it
+// makes about its own namespaces therefore asks the client to believe nothing
+// it has not already staked the federation on.
+//
+// A host the client was merely *sent* to is not named in that sense.  A cache a
+// director selected, or an HTTP redirect target, holds only trust delegated by
+// someone else, and its hints are refused however plausible they look.
+//
+// Note the distinction is who chose the host, not whether a director exists: a
+// cache the user selected themselves (Client.PreferredCaches, -c) is named as
+// squarely as the URL's host and belongs here too.  Admitting it is left to the
+// change that gives explicitly-chosen caches their own standing, since nothing
+// in standalone mode needs it.
+func (tg *tokenGenerator) canApplyTokenHint(objectServer *url.URL) bool {
+	if tg == nil || objectServer == nil || tg.Destination == nil {
+		return false
+	}
+	// A caller who named a credential, or who supplies its own, is not asking
+	// to be advised.
+	if tg.tokenIsExplicit || tg.externalProvider != nil {
+		return false
+	}
+	// The discovery endpoint is the host from the user's pelican:// URL: see
+	// pelican_url, which overwrites whatever a discovery document claims with
+	// the host actually contacted, so a document cannot nominate a third party
+	// as the trust anchor.
+	discovery, err := url.Parse(tg.Destination.FedInfo.DiscoveryEndpoint)
+	if err != nil || discovery.Host == "" {
+		return false
+	}
+	// Scheme is compared along with host: the assumption is about a host
+	// reached the way the user asked to reach it, and a plaintext endpoint is
+	// not that for an https discovery host.
+	return strings.EqualFold(discovery.Host, objectServer.Host) &&
+		strings.EqualFold(discovery.Scheme, objectServer.Scheme)
+}
+
+// withTokenHint returns a generator that acquires a credential according to the
+// token hints an object server returned, leaving the receiver untouched.
+//
+// The receiver is shared by every file in a transfer job and read concurrently
+// by the job's workers, so neither the hint -- which is specific to one attempt
+// against one endpoint -- nor the fields the receiver mutates while serving
+// those workers may be copied out of it.  In particular TokenName is assigned
+// inside getToken under the receiver's singleflight, so the derived generator
+// leaves it empty and recomputes it from Destination.
+func (tg *tokenGenerator) withTokenHint(dirResp *server_structs.DirectorResponse) *tokenGenerator {
+	return &tokenGenerator{
+		DirResp:        dirResp,
+		Destination:    tg.Destination,
+		TokenLocation:  tg.TokenLocation,
+		Operation:      tg.Operation,
+		EnableAcquire:  tg.EnableAcquire,
+		nonInteractive: tg.nonInteractive,
+		Sync:           new(singleflight.Group),
+	}
+}
+
+// tokenHintKey identifies a hint by what it asks the client to go and get, so
+// that two workers handed the same hint are recognized as wanting the same
+// credential.
+//
+// The issuers are sorted because nothing promises a server lists them in a
+// stable order, and the same set arriving two ways has to produce one key --
+// otherwise the coalescing in tokenForHint quietly stops working in exactly the
+// case it exists for, and a job acquires once per worker.
+func tokenHintKey(dirResp *server_structs.DirectorResponse) string {
+	issuers := make([]string, 0, len(dirResp.XPelTokGenHdr.Issuers))
+	for _, u := range dirResp.XPelTokGenHdr.Issuers {
+		if u != nil {
+			issuers = append(issuers, u.String())
+		}
+	}
+	sort.Strings(issuers)
+
+	var b strings.Builder
+	b.WriteString("hint:")
+	b.WriteString(dirResp.XPelNsHdr.Namespace)
+	for _, issuer := range issuers {
+		b.WriteString("|")
+		b.WriteString(issuer)
+	}
+	return b.String()
+}
+
+// tokenForHint obtains a credential matching a token hint.
+//
+// Every file in a transfer job shares the receiver, and a recursive transfer can
+// have many of them rejected at once.  Running the acquisition through the
+// job's singleflight -- under a key naming the hint rather than the empty key
+// getToken uses -- collapses that burst into one attempt, so a job does not
+// register an OAuth client, or raise an interactive login prompt, once per file.
+func (tg *tokenGenerator) tokenForHint(dirResp *server_structs.DirectorResponse) (string, error) {
+	contents, err, _ := tg.Sync.Do(tokenHintKey(dirResp), func() (interface{}, error) {
+		return tg.withTokenHint(dirResp).Get()
+	})
+	if err != nil {
+		return "", err
+	}
+	token, _ := contents.(string)
+	return token, nil
 }
 
 func (tg *tokenGenerator) recordAuthFailure(statusCode int) (bool, error) {
