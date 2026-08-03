@@ -248,15 +248,26 @@ func (m *Manager) sortByDepthDescending(names []string) []string {
 		LotName string `gorm:"column:lot_name"`
 		Depth   int    `gorm:"column:depth"`
 	}
+	// The depth bound is a safety net, not a policy: AddLot/AddToLot reject any
+	// edge that would close a cycle. But this query is on the purge path, and a
+	// cycle that reached it anyway -- a corrupted table, or another writer of the
+	// shared V1 database -- would make the recursion non-terminating, spilling
+	// sorter temp files and holding a pooled connection indefinitely. No real lot
+	// hierarchy comes close to this depth.
+	const maxHierarchyDepth = 64
 	const cte = "WITH RECURSIVE depth_cte(lot_name, depth) AS (" +
 		"  SELECT lot_name, 0 FROM lot_parents WHERE lot_name = parent " +
 		"  UNION ALL " +
 		"  SELECT p.lot_name, d.depth + 1 FROM lot_parents p JOIN depth_cte d ON p.parent = d.lot_name " +
-		"  WHERE p.lot_name != p.parent" +
+		"  WHERE p.lot_name != p.parent AND d.depth < ?" +
 		") SELECT lot_name, MAX(depth) AS depth FROM depth_cte GROUP BY lot_name;"
 	var rows []depthRow
-	if err := m.db.Raw(cte).Scan(&rows).Error; err != nil {
-		return names // on error, leave unsorted
+	if err := m.db.Raw(cte, maxHierarchyDepth).Scan(&rows).Error; err != nil {
+		// Leave the order alone rather than failing the purge, but say so: this
+		// function documents deepest-first, and silently evicting ancestors
+		// before their descendants is not something anyone would notice.
+		m.log.Warnf("lot depth query failed; evicting in unsorted order: %v", err)
+		return names
 	}
 	depth := make(map[string]int, len(rows))
 	for _, r := range rows {
