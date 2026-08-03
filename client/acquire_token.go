@@ -86,7 +86,13 @@ type (
 		// (WithToken, or a token option on the transfer).  A caller who picked a
 		// credential does not want it silently replaced by one acquired from an
 		// issuer some object server named.
-		tokenIsExplicit         bool
+		tokenIsExplicit bool
+		// namedObjServers are the object servers the user picked for this
+		// transfer (Client.PreferredCaches, -c, or WithCaches).  They are hosts
+		// the user named, so they may advise on credentials; see
+		// canApplyTokenHint.  Written once while the job is being built, read by
+		// the workers that run it.
+		namedObjServers         []*url.URL
 		Destination             *pelican_url.PelicanURL
 		TokenLocation           string
 		TokenName               string
@@ -224,11 +230,12 @@ func (tg *tokenGenerator) SetDirectorResponse(dirResp *server_structs.DirectorRe
 // director selected, or an HTTP redirect target, holds only trust delegated by
 // someone else, and its hints are refused however plausible they look.
 //
-// Note the distinction is who chose the host, not whether a director exists: a
-// cache the user selected themselves (Client.PreferredCaches, -c) is named as
-// squarely as the URL's host and belongs here too.  Admitting it is left to the
-// change that gives explicitly-chosen caches their own standing, since nothing
-// in standalone mode needs it.
+// The distinction is who chose the host, not whether a director exists.  A cache
+// the user selected themselves -- Client.PreferredCaches, -c, or the caches a
+// caller handed this transfer -- is named as squarely as the URL's host: the
+// user sent their request there on purpose, and having done so, they are asking
+// what that cache says about what it will accept.  A cache a director picked out
+// of the same list is not, and stays refused.
 func (tg *tokenGenerator) canApplyTokenHint(objectServer *url.URL) bool {
 	if tg == nil || objectServer == nil || tg.Destination == nil {
 		return false
@@ -242,15 +249,59 @@ func (tg *tokenGenerator) canApplyTokenHint(objectServer *url.URL) bool {
 	// pelican_url, which overwrites whatever a discovery document claims with
 	// the host actually contacted, so a document cannot nominate a third party
 	// as the trust anchor.
-	discovery, err := url.Parse(tg.Destination.FedInfo.DiscoveryEndpoint)
-	if err != nil || discovery.Host == "" {
-		return false
-	}
+	//
 	// Scheme is compared along with host: the assumption is about a host
 	// reached the way the user asked to reach it, and a plaintext endpoint is
 	// not that for an https discovery host.
-	return strings.EqualFold(discovery.Host, objectServer.Host) &&
-		strings.EqualFold(discovery.Scheme, objectServer.Scheme)
+	if discovery, err := url.Parse(tg.Destination.FedInfo.DiscoveryEndpoint); err == nil &&
+		discovery.Host != "" &&
+		strings.EqualFold(discovery.Host, objectServer.Host) &&
+		strings.EqualFold(discovery.Scheme, objectServer.Scheme) {
+		return true
+	}
+	for _, named := range tg.namedObjServers {
+		if namesEndpoint(named, objectServer) {
+			return true
+		}
+	}
+	return false
+}
+
+// namesEndpoint reports whether named -- an object server the user picked --
+// refers to the endpoint that just answered.
+//
+// Host must match exactly (port included): a cache on another port is another
+// service.  A user who wrote a scheme gets that scheme, so advice arriving in
+// the clear from a host they named as https is not from the host they named.  A
+// bare hostname commits to nothing and takes whatever scheme the transfer
+// settled on -- https whenever the namespace wants a token, which is the only
+// case a hint is acted on.
+func namesEndpoint(named, endpoint *url.URL) bool {
+	if named == nil || endpoint == nil || endpoint.Host == "" {
+		return false
+	}
+	host, scheme := named.Host, named.Scheme
+	if host == "" {
+		// A preferred cache may be written as a bare hostname, with or without
+		// a port, which url.Parse leaves anywhere but Host.  That is the form
+		// generateTransferDetails resolves into a host, so read it the same way
+		// rather than refusing the entry the transfer went on to use.
+		host, scheme = named.String(), ""
+	}
+	if !strings.EqualFold(host, endpoint.Host) {
+		return false
+	}
+	return scheme == "" || strings.EqualFold(scheme, endpoint.Scheme)
+}
+
+// setNamedObjServers records the object servers the user picked for this
+// transfer, whose token hints it may then act on.  Called while the job is
+// being built, before any worker reads them.
+func (tg *tokenGenerator) setNamedObjServers(servers []*url.URL) {
+	if tg == nil {
+		return
+	}
+	tg.namedObjServers = servers
 }
 
 // withTokenHint returns a generator that acquires a credential according to the
