@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/semver"
 )
 
 // TestCSharedRoundTrip drives the C-ABI surface the way an external consumer
@@ -91,6 +93,21 @@ func TestCSharedRoundTrip(t *testing.T) {
 
 	if versionGo() == "" {
 		t.Fatal("lotman_version returned empty string")
+	}
+}
+
+// TestVersionIsSemver pins the format of lotman_version()'s return. The original
+// library published "v" + major.minor.patch and consumers version-gate on it
+// with a semver comparison -- Pelican's own historical gate called
+// semver.IsValid, which rejects an unprefixed "0.1.0" and would have refused to
+// initialise lot management at all.
+func TestVersionIsSemver(t *testing.T) {
+	v := versionGo()
+	if !strings.HasPrefix(v, "v") {
+		t.Errorf("lotman_version() = %q, want the leading %q the original library published", v, "v")
+	}
+	if !semver.IsValid(v) {
+		t.Errorf("lotman_version() = %q, which semver.IsValid rejects", v)
 	}
 }
 
