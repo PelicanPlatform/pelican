@@ -832,9 +832,9 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	zero := float64(0)
 	unboundedGB := float64(-1)
 	// `default` is the catch-all parent for namespaces that have not been
-	// given an explicit lot. Its storage MPAs are literal 0 -- it has no
-	// protected quota at all, so any usage immediately puts the lot
-	// over-quota and the purge plugin reclaims it on the next cycle.
+	// given an explicit lot. Its dedicated quota is a literal 0 -- it has no
+	// guaranteed capacity, so any usage immediately puts the lot over its
+	// dedicated quota and the purge plugin reclaims it on the next cycle.
 	// Note: lotman PR #46 reserves -1 (not 0) as the unbounded sentinel for
 	// storage MPAs, so 0 here means exactly what it says: zero capacity.
 	if _, exists := lotMap["default"]; !exists {
@@ -851,7 +851,12 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 			MPA: &MPA{
 				DedicatedGB:     &defDed,
 				OpportunisticGB: &defOpp,
-				MaxNumObjects:   &Int64FromFloat{Value: 0},
+				// Unbounded object count: what makes unlotted data reclaimed-first
+				// is the zero storage quota above, not an object cap. A finite cap
+				// here (in particular 0) would make the default lot permanently
+				// past-quota for LotsPastObj and would have the object-cap trim
+				// evict its whole bucket on every tick regardless of disk pressure.
+				MaxNumObjects: &Int64FromFloat{Value: -1},
 				// All-zero timestamps = non-expiring sentinel (lotman PR #44).
 				// configLotTimestamps skips root and default intentionally.
 				CreationTime:   &Int64FromFloat{Value: 0},
