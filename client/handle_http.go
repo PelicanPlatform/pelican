@@ -1301,6 +1301,12 @@ func applyJobOptions(tj *TransferJob, options []TransferOption) {
 			tj.cacheMode = opt.Value().(bool)
 		}
 	}
+	// The object servers the user picked are the ones whose token hints this
+	// job may act on (see canApplyTokenHint).  Recorded after the loop, so a
+	// per-job WithCaches has already replaced whatever the client was created
+	// with.
+	tj.token.setNamedObjServers(tj.prefObjServers)
+	tj.srcToken.setNamedObjServers(tj.prefObjServers)
 }
 
 // Create an option to specify the object synchronization level
@@ -2397,6 +2403,9 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 			token.SetToken(option.Value().(string))
 		}
 	}
+	// The probe below runs against the first of these when the caller named
+	// any, so they are hosts whose token hints it may act on.
+	token.setNamedObjServers(prefObjServers)
 
 	ctx, cancel := mergeCancel(tc.ctx, ctx)
 	defer cancel()
