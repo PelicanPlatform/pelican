@@ -36,6 +36,9 @@ defaults:
     # bash-isms have a way of sneaking in unnoticed.
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
 
   # This first job determines the work to be done:

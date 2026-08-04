@@ -8,6 +8,9 @@ on:
     branches-ignore:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   check-rebase:
     runs-on: ubuntu-latest

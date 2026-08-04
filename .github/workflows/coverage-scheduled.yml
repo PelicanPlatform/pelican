@@ -15,6 +15,9 @@ on:
     - cron: "0 6 * * *"  # at 06:00 every day
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   collect:
     name: Collect coverage (${{ matrix.binary_name }})
@@ -106,6 +109,9 @@ jobs:
     if: ${{ !cancelled() }}
     needs: [collect]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # "gh run download" reads the Actions API
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

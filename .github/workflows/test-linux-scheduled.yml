@@ -10,6 +10,9 @@ on:
     - cron: "0 7 * * *"  # at 07:00 every day
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: Test
@@ -23,6 +26,11 @@ jobs:
     if: ${{ !cancelled() }}
     needs: [run-tests]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # download_junit_artifacts.sh runs "gh run list" and "gh run download"
+      # over the previous runs of this workflow.
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

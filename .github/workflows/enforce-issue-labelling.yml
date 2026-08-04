@@ -4,8 +4,15 @@ on:
   issues:
     types: [closed]
 
+permissions:
+  contents: read
+
 jobs:
   validate-issue:
+    permissions:
+      contents: read
+      issues: write  # the job reopens an unlabelled issue
+
     # 1. Don’t even start the job when the stale-bot did the closing **or**
     #    when the issue already bears the `stale` label.
     if: |

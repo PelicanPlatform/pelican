@@ -23,6 +23,9 @@ on:
         default: false
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: Windows (${{ matrix.binary_name }})

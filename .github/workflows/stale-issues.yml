@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: "00 00 * * *"
 
+permissions:
+  contents: read
+
 jobs:
   close-issues:
     runs-on: ubuntu-latest

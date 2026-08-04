@@ -11,13 +11,18 @@ on:
       - "v[1-9][0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   goreleaser:
     name: GoReleaser
     if: ${{ github.repository == 'PelicanPlatform/pelican' }}
     runs-on: ubuntu-latest
+    # Confined to this job: GoReleaser publishes the release artifacts.
+    # Notably, its "before" hook runs "make web-build" (npm ci) on the
+    # runner, so keep the write scope off every other job.
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
