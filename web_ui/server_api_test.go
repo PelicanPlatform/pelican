@@ -267,3 +267,48 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
+
+// TestDowntimeDeletionAuthorized is a regression test: at the Registry,
+// a downtime may be deleted only by its owner — the server whose
+// registered-server token subject matches the downtime's ServerID for
+// server-authored downtimes, or a federation admin for Registry-authored ones.
+func TestDowntimeDeletionAuthorized(t *testing.T) {
+	const victimID = "victim-server-id"
+	tests := []struct {
+		name         string
+		atRegistry   bool
+		source       string // downtime Source
+		authMethod   string
+		tokenSubject string
+		wantAllowed  bool
+	}{
+		// Off-Registry (an origin/cache's own web UI): the guard does not apply.
+		{"local-ui-not-checked", false, "origin", "", "anything", true},
+
+		// Registry-authored downtimes: admin cookie only.
+		{"registry-sourced-admin-cookie-allowed", true, "registry", "admin-cookie", "", true},
+		{"registry-sourced-server-token-denied", true, "registry", "registered-server-token", victimID, false},
+		{"registry-sourced-no-auth-denied", true, "registry", "", "", false},
+
+		// Server-authored downtimes: only the owning server token.
+		{"server-sourced-matching-token-allowed", true, "origin", "registered-server-token", victimID, true},
+		{"server-sourced-cache-matching-token-allowed", true, "cache", "registered-server-token", victimID, true},
+		// The attack: a different registered server tries to delete the victim's downtime.
+		{"attack-server-sourced-mismatched-token-denied", true, "origin", "registered-server-token", "attacker-server-id", false},
+		// A federation admin cannot delete a server's own downtime (parity with HandleUpdateDowntime).
+		{"server-sourced-admin-cookie-denied", true, "origin", "admin-cookie", "", false},
+		// Empty/unknown source fails closed into the owner branch.
+		{"empty-source-mismatched-token-denied", true, "", "registered-server-token", "attacker-server-id", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed, msg := downtimeDeletionAuthorized(tc.atRegistry, tc.source, tc.authMethod, tc.tokenSubject, victimID)
+			assert.Equal(t, tc.wantAllowed, allowed)
+			if tc.wantAllowed {
+				assert.Empty(t, msg)
+			} else {
+				assert.NotEmpty(t, msg)
+			}
+		})
+	}
+}
