@@ -122,7 +122,7 @@ jobs:
 
       - name: Publish JUnit summary
         if: always()
-        uses: test-summary/action@v2
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
@@ -131,7 +131,7 @@ jobs:
           make goreleaser-config
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
