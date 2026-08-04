@@ -1062,6 +1062,10 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	// Call out admin-list entries that can never match a username (e.g. CILogon
+	// OIDC subjects in Server.UIAdminUsers carried over from pre-v7.27 configs).
+	warnNonUsernameAdminEntries()
+
 	// start the cache for verified API keys
 	egrp.Go(func() error {
 		api_token.VerifiedKeysCache.Start()
