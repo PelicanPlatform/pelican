@@ -72,8 +72,8 @@ The object URL should be a pelican:// or osdf:// URL, or a bare path
 if the federation context is known.
 
 Example:
-  pelican cache introspect etags pelican://my-federation/data/file.dat
-  pelican cache introspect etags /data/file.dat`,
+  pelican-server cache introspect etags pelican://my-federation/data/file.dat
+  pelican-server cache introspect etags /data/file.dat`,
 		Args:         cobra.ExactArgs(1),
 		RunE:         runCacheIntrospectEtags,
 		SilenceUsage: true,
@@ -88,9 +88,9 @@ By default shows the latest cached version. Use --etag to specify
 a particular version, or --instance to specify by instance hash.
 
 Example:
-  pelican cache introspect metadata pelican://my-federation/data/file.dat
-  pelican cache introspect metadata /data/file.dat --etag="abc123"
-  pelican cache introspect metadata --instance=<hash>`,
+  pelican-server cache introspect metadata pelican://my-federation/data/file.dat
+  pelican-server cache introspect metadata /data/file.dat --etag="abc123"
+  pelican-server cache introspect metadata --instance=<hash>`,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runCacheIntrospectMetadata,
 		SilenceUsage: true,
@@ -105,8 +105,8 @@ This reads the entire object from disk, decrypts it, and verifies
 that stored checksums (if any) match the actual data.
 
 Example:
-  pelican cache introspect verify pelican://my-federation/data/file.dat
-  pelican cache introspect verify /data/file.dat --etag="abc123"`,
+  pelican-server cache introspect verify pelican://my-federation/data/file.dat
+  pelican-server cache introspect verify /data/file.dat --etag="abc123"`,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runCacheIntrospectVerify,
 		SilenceUsage: true,
@@ -128,10 +128,10 @@ Warning: For large caches, this may return many results. Use --limit
 to restrict the number of entries returned.
 
 Examples:
-  pelican cache introspect list
-  pelican cache introspect list '/chtc/staging/**'
-  pelican cache introspect list '*.bin'
-  pelican cache introspect list --limit=50 'pelican://origin.example.com/data/*'`,
+  pelican-server cache introspect list
+  pelican-server cache introspect list '/chtc/staging/**'
+  pelican-server cache introspect list '*.bin'
+  pelican-server cache introspect list --limit=50 'pelican://origin.example.com/data/*'`,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runCacheIntrospectList,
 		SilenceUsage: true,
@@ -147,8 +147,8 @@ entries, total bytes claimed by metadata, and per-storage-directory
 breakdown. This is a cheap operation that only scans metadata.
 
 Example:
-  pelican cache introspect stats
-  pelican cache introspect stats --json`,
+  pelican-server cache introspect stats
+  pelican-server cache introspect stats --json`,
 		RunE:         runCacheIntrospectStats,
 		SilenceUsage: true,
 	}
@@ -162,8 +162,8 @@ This is an EXPENSIVE operation that stats every file in the cache's
 storage directories. For large caches this may take significant time.
 
 Example:
-  pelican cache introspect disk-usage
-  pelican cache introspect disk-usage --json`,
+  pelican-server cache introspect disk-usage
+  pelican-server cache introspect disk-usage --json`,
 		RunE:         runCacheIntrospectDiskUsage,
 		SilenceUsage: true,
 	}
@@ -180,10 +180,10 @@ Use --metadata-only or --data-only to run only one scan type.
 The data scan is expensive as it reads and checksums every cached file.
 
 Example:
-  pelican cache introspect consistency
-  pelican cache introspect consistency --metadata-only
-  pelican cache introspect consistency --data-only
-  pelican cache introspect consistency --json`,
+  pelican-server cache introspect consistency
+  pelican-server cache introspect consistency --metadata-only
+  pelican-server cache introspect consistency --data-only
+  pelican-server cache introspect consistency --json`,
 		RunE:         runCacheIntrospectConsistency,
 		SilenceUsage: true,
 	}
@@ -364,13 +364,20 @@ func introspectHTTPPost(serverURL, apiPath string, query url.Values) ([]byte, er
 		return nil, errors.Wrap(err, "failed to read response")
 	}
 	if resp.StatusCode >= 300 {
+		// On 401, name the issuer of the token we minted: the most common
+		// cause is a mismatch with the server's local issuer URL, and a bare
+		// "401 Unauthorized" gives the operator nothing to act on.
+		hint := ""
+		if resp.StatusCode == http.StatusUnauthorized {
+			hint = adminTokenIssuerHint()
+		}
 		var errResp struct {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, errors.Errorf("server error (%d): %s", resp.StatusCode, errResp.Error)
+			return nil, errors.Errorf("server error (%d): %s%s", resp.StatusCode, errResp.Error, hint)
 		}
-		return nil, errors.Errorf("server error: %s", resp.Status)
+		return nil, errors.Errorf("server error: %s%s", resp.Status, hint)
 	}
 	return body, nil
 }
@@ -1073,7 +1080,11 @@ func runOnlineConsistencyCheck(serverURL string, query url.Values) (*local_cache
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, errors.Errorf("server responded with %s (body: %s)", resp.Status, strings.TrimSpace(string(body)))
+		hint := ""
+		if resp.StatusCode == http.StatusUnauthorized {
+			hint = adminTokenIssuerHint()
+		}
+		return nil, errors.Errorf("server responded with %s (body: %s)%s", resp.Status, strings.TrimSpace(string(body)), hint)
 	}
 
 	// Shared state for decorator closures (updated atomically by SSE loop).
