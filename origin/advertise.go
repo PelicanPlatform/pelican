@@ -150,10 +150,14 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	// to the right endpoint. When the origin is standalone, older clients cannot handle
 	// non-empty resource paths, so we advertise the base URL.
 	// WebURL stays as the base server URL for web browser access.
+	//
+	// This tracks UsesXRootD rather than an explicit list of storage types: the
+	// condition is exactly "served by the pelican process rather than XRootD",
+	// and a hand-maintained list silently omits each new native backend --
+	// which is how pstore first advertised a data URL with no route behind it,
+	// leaving the director redirecting into a loop.
 	dataUrlToAdvertise := originUrlStr
-	if (ost == server_structs.OriginStoragePosixv2 || ost == server_structs.OriginStorageSSH ||
-		ost == server_structs.OriginStorageS3v2 || ost == server_structs.OriginStorageHTTPSv2 ||
-		ost == server_structs.OriginStorageGlobusv2) && config.IsServerEnabled(server_structs.DirectorType) {
+	if !ost.UsesXRootD() && config.IsServerEnabled(server_structs.DirectorType) {
 		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
 			parsedUrl.Path = server_structs.OriginDataRoutePrefix
 			dataUrlToAdvertise = parsedUrl.String()

@@ -58,6 +58,21 @@ type OriginChecksummer interface {
 	GetDigests(relativePath string, wantDigest string) ([]string, error)
 }
 
+// CapacityReporter is optionally implemented by backends that enforce a fixed
+// size and can say up front whether a write will fit.
+//
+// A backend that cannot accept more data is better off refusing a PUT before
+// the client streams a body it will have to discard, and better off returning
+// 507 than whatever status the WebDAV handler infers from a mid-stream write
+// failure.  Backends that grow on demand simply do not implement this.
+type CapacityReporter interface {
+	// HasCapacityFor reports nil when a write of nBytes can currently be
+	// accepted, or an error (typically wrapping syscall.ENOSPC) when it
+	// cannot.  It is advisory: capacity may still be exhausted by a
+	// concurrent write, so the write path must enforce the limit too.
+	HasCapacityFor(nBytes int64) error
+}
+
 // HTTPStatusCoder is optionally implemented by errors returned from
 // CheckAvailability to control the HTTP status code sent to clients.
 type HTTPStatusCoder interface {

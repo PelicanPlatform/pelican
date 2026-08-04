@@ -116,7 +116,7 @@ func copyWithContext(dst io.Writer, src io.Reader) error {
 //
 // The client sends an HTTP COPY request to the destination origin with:
 //   - Source header: URL of the source object
-//   - Authorization header: bearer token authorising writes on this destination
+//   - Authorization header: bearer token authorizing writes on this destination
 //   - TransferHeader* headers: any header prefixed with "TransferHeader" is
 //     forwarded to the source GET with the prefix stripped (e.g.
 //     TransferHeaderAuthorization becomes Authorization).  Hop-by-hop and

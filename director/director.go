@@ -1378,7 +1378,7 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *serv
 	// Disable director test if the server isn't POSIX-like (posix / posixv2).
 	// Remote-protocol backends (S3, HTTPS, Globus, etc.) cannot accept the
 	// probe-file write/read that the director test relies on.
-	if !st.IsPosixLike() && !ad.DisableDirectorTest {
+	if !st.SupportsSelfTest() && !ad.DisableDirectorTest {
 		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, ad.Name, string(st))
 		ad.DisableDirectorTest = true
 	}

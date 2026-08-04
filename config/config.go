@@ -2107,7 +2107,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// POSIX-like backend (posix, posixv2). Disable them on remote-protocol backends.
 	if currentServers.IsEnabled(server_structs.OriginType) {
 		storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
-		if !storageType.IsPosixLike() {
+		if !storageType.SupportsSelfTest() {
 			updates := make(map[string]interface{})
 			if param.Origin_SelfTest.GetBool() {
 				log.Warningf("%s may not be enabled when the origin is configured with non-POSIX-like backends. Turning off...", param.Origin_SelfTest.GetName())

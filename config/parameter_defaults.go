@@ -612,6 +612,18 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Origin_MultiuserUmask.GetName(), -1)
 	// Origin.MultiuserVarlinkSocketPath
 	v.SetDefault(param.Origin_MultiuserVarlinkSocketPath.GetName(), "/run/systemd/userdb/io.systemd.UserDatabase")
+	// Origin.PStoreDataScanInterval
+	v.SetDefault(param.Origin_PStoreDataScanInterval.GetName(), "24h")
+	// Origin.PStoreDataScanRate
+	v.SetDefault(param.Origin_PStoreDataScanRate.GetName(), "100MB/s")
+	// Origin.PStoreIndexCheckInterval
+	v.SetDefault(param.Origin_PStoreIndexCheckInterval.GetName(), "1h")
+	// Origin.PStoreInlineMaxBytes
+	v.SetDefault(param.Origin_PStoreInlineMaxBytes.GetName(), 0)
+	// Origin.PStoreMetadataBackupInterval
+	v.SetDefault(param.Origin_PStoreMetadataBackupInterval.GetName(), "6h")
+	// Origin.PStoreMetadataBackupsToKeep
+	v.SetDefault(param.Origin_PStoreMetadataBackupsToKeep.GetName(), 24)
 	// Origin.Port
 	v.SetDefault(param.Origin_Port.GetName(), 8443)
 	// Origin.RunLocation

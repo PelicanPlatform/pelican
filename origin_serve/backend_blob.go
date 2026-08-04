@@ -329,7 +329,7 @@ type blobFileSystem struct {
 	bucket *blob.Bucket
 }
 
-// blobKey normalises a webdav path ("/foo/bar") to a blob key ("foo/bar").
+// blobKey normalizes a webdav path ("/foo/bar") to a blob key ("foo/bar").
 // Also cleans path traversal sequences as defense-in-depth.
 func blobKey(name string) string {
 	return strings.TrimPrefix(path.Clean("/"+name), "/")
@@ -371,7 +371,7 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 	if _, peekErr := peekIter.Next(ctx); peekErr == nil {
 		// It is a directory — return a lazy dir handle (a fresh iterator
 		// will be created when Readdir is called). Carry the request context
-		// so the deferred listing honours cancellation/deadlines.
+		// so the deferred listing honors cancellation/deadlines.
 		return &blobDirFile{name: name, bucket: fs.bucket, prefix: dirPrefix, ctx: ctx}, nil
 	}
 

@@ -40,6 +40,7 @@ VERIFIED_OBJECT_STRUCTURES = [
     "Issuer.AuthorizationTemplates",
     "Issuer.OIDCAuthenticationRequirements",
     "LocalCache.StorageDirs",
+    "Origin.PStoreStorageDirs",
     "Lotman.PolicyDefinitions",
     "Origin.Exports",
     "Registry.CustomRegistrationFields",

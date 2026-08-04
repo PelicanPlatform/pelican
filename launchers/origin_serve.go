@@ -346,6 +346,18 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 			return errors.Wrap(err, "failed to register origin_serve handlers")
 		}
 
+		// Administrative introspection for the storage backend.  Registers
+		// nothing unless the backend actually has such an interface, so an
+		// origin on any other backend simply has no such routes.
+		//
+		// AuthHandler establishes who the caller is; AdminAuthHandler decides
+		// whether they are an administrator.  The pair is required: nothing
+		// else in this engine authenticates, and AdminAuthHandler alone reads
+		// an empty "User" from the context and 401s every request, so the
+		// routes would exist but be reachable by no one.
+		origin_serve.RegisterStorageAPI(engine.Group("/api/v1.0"),
+			web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
 		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
 		// Update Origin.Url to use the external web URL which is now set to the correct port.
 		externalWebUrl := param.Server_ExternalWebUrl.GetString()

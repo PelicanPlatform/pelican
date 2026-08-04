@@ -358,6 +358,15 @@ type Config struct {
 		MultiuserVarlinkSocketPath string `mapstructure:"multiuservarlinksocketpath" yaml:"MultiuserVarlinkSocketPath"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		ObjectProviderURL string `mapstructure:"objectproviderurl" yaml:"ObjectProviderURL"`
+		PStoreDataScanInterval time.Duration `mapstructure:"pstoredatascaninterval" yaml:"PStoreDataScanInterval"`
+		PStoreDataScanRate byte_rate.ByteRate `mapstructure:"pstoredatascanrate" yaml:"PStoreDataScanRate"`
+		PStoreIndexCheckInterval time.Duration `mapstructure:"pstoreindexcheckinterval" yaml:"PStoreIndexCheckInterval"`
+		PStoreInlineMaxBytes int `mapstructure:"pstoreinlinemaxbytes" yaml:"PStoreInlineMaxBytes"`
+		PStoreLocation string `mapstructure:"pstorelocation" yaml:"PStoreLocation"`
+		PStoreMetadataBackupInterval time.Duration `mapstructure:"pstoremetadatabackupinterval" yaml:"PStoreMetadataBackupInterval"`
+		PStoreMetadataBackupLocation string `mapstructure:"pstoremetadatabackuplocation" yaml:"PStoreMetadataBackupLocation"`
+		PStoreMetadataBackupsToKeep int `mapstructure:"pstoremetadatabackupstokeep" yaml:"PStoreMetadataBackupsToKeep"`
+		PStoreStorageDirs any `mapstructure:"pstorestoragedirs" yaml:"PStoreStorageDirs"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
@@ -899,6 +908,15 @@ type configWithType struct {
 		MultiuserVarlinkSocketPath struct { Type string; Value string }
 		NamespacePrefix struct { Type string; Value string }
 		ObjectProviderURL struct { Type string; Value string }
+		PStoreDataScanInterval struct { Type string; Value time.Duration }
+		PStoreDataScanRate struct { Type string; Value byte_rate.ByteRate }
+		PStoreIndexCheckInterval struct { Type string; Value time.Duration }
+		PStoreInlineMaxBytes struct { Type string; Value int }
+		PStoreLocation struct { Type string; Value string }
+		PStoreMetadataBackupInterval struct { Type string; Value time.Duration }
+		PStoreMetadataBackupLocation struct { Type string; Value string }
+		PStoreMetadataBackupsToKeep struct { Type string; Value int }
+		PStoreStorageDirs struct { Type string; Value any }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
