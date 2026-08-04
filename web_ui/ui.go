@@ -48,6 +48,7 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
@@ -829,14 +830,26 @@ func waitUntilLogin(ctx context.Context) error {
 	}
 }
 
+// init hands the api_token package the live server database handle.
+// api_token deliberately does not import database -- that separation
+// keeps gorm and SQLite out of the client binary -- so it cannot read
+// the global itself.
+//
+// This is a function, resolved on every call, rather than the pointer
+// copy it replaces. The copy was made from ConfigureServerWebAPI, which
+// runs before every database.InitServerDatabase call site, so it only
+// ever captured nil and API-token verification panicked on the nil
+// handle. Resolving per call also survives InitServerDatabase
+// reassigning the global in a process running several modules.
+func init() {
+	api_token.DB = func() *gorm.DB { return database.ServerDatabase }
+}
+
 // Configure endpoints for server web APIs. This function does not configure any UI
 // specific paths but just redirect root path to /view.
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
-	// Give the API token package access to the server DB
-	api_token.ServerDatabase = database.ServerDatabase
-
 	// start the cache for verified API keys
 	egrp.Go(func() error {
 		api_token.VerifiedKeysCache.Start()
