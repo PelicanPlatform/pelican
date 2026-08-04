@@ -253,6 +253,15 @@ func originAndDirectorColocated() bool {
 // function must track it, and TestWebAPIAdminTokenIssuerMatchesVerifier pins
 // the two together so a change on either side fails the build.
 func webAPIAdminTokenIssuer(serverURLStr string) string {
+	// A running server records the issuer it will accept in its address file.
+	// That is authoritative and needs no inference, so prefer it: the module
+	// set a server was started with may exist only in its argv, where nothing
+	// this process can read will reveal it.  A server too old to write the key,
+	// or one that is not running, falls through to the derivation below.
+	if addr, err := config.ReadAddressFile(); err == nil && addr.LocalIssuerURL != "" {
+		return addr.LocalIssuerURL
+	}
+
 	// Mirror GetLocalIssuerUrl(): build off Server.ExternalWebUrl and
 	// deliberately do not consult Server.IssuerUrl.  Falling back to the URL
 	// the caller is dialing keeps the case of a client-only configuration
