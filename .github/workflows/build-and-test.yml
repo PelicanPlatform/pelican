@@ -76,6 +76,12 @@ jobs:
     steps:
       - name: Determine how to build and push container images
         id: params
+        env:
+          # This step needs to know only whether the credentials exist.
+          # Pass them through the environment rather than interpolating
+          # them into the script.
+          HARBOR_ROBOT_USER: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          HARBOR_ROBOT_PASSWORD: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
         run: |
           set -eu
 
@@ -104,8 +110,8 @@ jobs:
           PUSH_DEVTEST=false
           PUSH_RELEASE=false
 
-          if [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_USER }}' ] \
-             && [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}' ]
+          if [ -n "${HARBOR_ROBOT_USER:-}" ] \
+             && [ -n "${HARBOR_ROBOT_PASSWORD:-}" ]
           then
             if ${IS_PRIMARY_GITHUB_REPO}; then
               # For the PelicanPlatform/pelican repo, we push test and
