@@ -52,6 +52,10 @@ type (
 		RegistryEndpoint           string   `json:"namespace_registration_endpoint"`
 		JwksUri                    string   `json:"jwks_uri"`
 		BrokerEndpoint             string   `json:"broker_endpoint"`
+		// AnycastEndpoint is the federation-wide anycast endpoint served by anycast-enabled
+		// caches.  Clients may connect to it directly to reach a cache via TCP anycast,
+		// bypassing the director on the happy path.
+		AnycastEndpoint string `json:"anycast_endpoint,omitempty"`
 	}
 
 	discoveryOptions struct {
