@@ -75,8 +75,21 @@ var (
 
 	globalTransform *regexpTransformHook
 
-	// Track whether we've already configured the formatter to avoid resetting it
-	formatterConfigured bool
+	// Guards the one-time formatter setup. SetLogging is reachable
+	// concurrently -- the runtime log-level API calls it per request -- so
+	// the "have we done this yet" flag cannot be a plain bool.
+	formatterOnce sync.Once
+
+	// effectiveLogLevel is the fast-path cache for GetEffectiveLogLevel.
+	// shouldBuffer reads it on every incoming log line, so answering the
+	// query must stay a single atomic load: it cannot take
+	// globalTransformMu or walk the transform hook's LogLevels slice, which
+	// is what the level would otherwise have to be derived from. Keeping
+	// that true is the job of every level-changing site -- SetLogging
+	// (called by the param-callback registered via RegisterLoggingCallback),
+	// initFilterLogging, and ResetGlobalLoggingHooks -- each of which writes
+	// the new level here.
+	effectiveLogLevel atomic.Uint32
 )
 
 func (sw *syncWriter) Write(p []byte) (n int, err error) {
@@ -124,6 +137,10 @@ func init() {
 	globalTransform.hook.Store(initialHook)
 	initialRegex := regexp.MustCompile(bearerTokenRegexStr)
 	globalTransform.regex.Store(initialRegex)
+	// Seed the effective-level cache with logrus's boot default (info)
+	// so GetEffectiveLogLevel returns something sane between package
+	// init and the first SetLogging call.
+	effectiveLogLevel.Store(uint32(log.GetLevel()))
 }
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
@@ -167,19 +184,77 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 		return nil
 	}
 
-	regex := rt.regex.Load()
-	if regex != nil {
-		entry.Message = regex.ReplaceAllString(entry.Message, rt.template)
-		for key, value := range entry.Data {
-			if key != "url" {
-				continue
-			}
-			if s, ok := value.(string); ok {
-				entry.Data[key] = regex.ReplaceAllString(s, rt.template)
-			}
+	redactEntryInPlace(entry)
+	return hook.Fire(entry)
+}
+
+// redactEntryInPlace censors credentials in an entry's message and "url"
+// field. Mutating the caller's entry is what makes the censor effective for
+// logrus's own output path: this hook owns the writer, so every consumer
+// downstream of it sees the censored text.
+//
+// Any consumer that reads an entry WITHOUT going through this hook -- a hook
+// registered ahead of this one, or one that formats the entry itself -- sees
+// the raw credential and must call redactEntryCopy instead. Hook order is not
+// a durable guarantee: SetLogging rebuilds the hook set and re-appends the
+// global hooks last, so a hook installed earlier stays ahead of this one.
+func redactEntryInPlace(entry *log.Entry) {
+	regex := globalTransform.regex.Load()
+	if regex == nil {
+		return
+	}
+	entry.Message = regex.ReplaceAllString(entry.Message, globalTransform.template)
+	for key, value := range entry.Data {
+		if key != "url" {
+			continue
+		}
+		if s, ok := value.(string); ok {
+			entry.Data[key] = regex.ReplaceAllString(s, globalTransform.template)
 		}
 	}
-	return hook.Fire(entry)
+}
+
+// redactEntryCopy returns a censored copy of entry, leaving the caller's entry
+// untouched so hooks that run later still observe what logrus handed them.
+// The copy is shallow apart from Data, which is cloned only when it holds a
+// field the censor rewrites.
+//
+// Callers that format an entry into storage a user can read back -- rather
+// than into the writer redactEntryInPlace already covers -- must route it
+// through here first.
+func redactEntryCopy(entry *log.Entry) *log.Entry {
+	regex := globalTransform.regex.Load()
+	if regex == nil {
+		return entry
+	}
+	template := globalTransform.template
+
+	message := regex.ReplaceAllString(entry.Message, template)
+	// Rewrite "url" only when the censor actually changes it, so the common
+	// case (no credential in the entry) allocates nothing.
+	var data log.Fields
+	if raw, ok := entry.Data["url"].(string); ok {
+		if censored := regex.ReplaceAllString(raw, template); censored != raw {
+			data = make(log.Fields, len(entry.Data))
+			for k, v := range entry.Data {
+				data[k] = v
+			}
+			data["url"] = censored
+		}
+	}
+	if message == entry.Message && data == nil {
+		return entry
+	}
+
+	dup := *entry
+	dup.Message = message
+	if data != nil {
+		dup.Data = data
+	}
+	// The formatter writes into Buffer when it is non-nil; that buffer belongs
+	// to logrus's own write path and must not be shared with a copy.
+	dup.Buffer = nil
+	return &dup
 }
 
 func initFilterLogging() {
@@ -190,6 +265,14 @@ func initFilterLogging() {
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
 
+	// On the FIRST init pass, log.GetLevel() reflects the operator's
+	// configured level. On subsequent passes (unit-test reinit, config
+	// reload paths that re-enter this function) it reflects the pinned
+	// TraceLevel we set below -- reading it then would clobber the
+	// effective-level cache with Trace and cause the log buffer to
+	// silently capture trace lines the operator never asked for.
+	// Guard the cache update behind the same first-time-only gate that
+	// installs the hooks.
 	configLevel := log.GetLevel()
 	log.SetLevel(log.TraceLevel)
 	hookLevel := make([]log.Level, 0)
@@ -204,6 +287,7 @@ func initFilterLogging() {
 	globalTransformMu.Lock()
 	if !addedGlobalFilters {
 		addedGlobalFilters = true
+		effectiveLogLevel.Store(uint32(configLevel))
 		globalTransformMu.Unlock()
 		// Set the writer to what logrus has
 		newHook := &writer.Hook{
@@ -237,6 +321,11 @@ func ResetGlobalLoggingHooks() {
 		}
 		globalTransform.hook.Store(newHook)
 	}
+	// The hook was just widened back to AllLevels, so anything through
+	// TraceLevel is now nominally "effective". Match that in the cache
+	// so GetEffectiveLogLevel doesn't return a stale narrower level from
+	// the previous test.
+	effectiveLogLevel.Store(uint32(log.TraceLevel))
 }
 
 func AddFilter(newFilter *RegexpFilter) {
@@ -263,8 +352,13 @@ func RemoveFilter(name string) {
 }
 
 func SetLogging(logLevel log.Level) {
+	// Update the fast-path cache first so any log-buffer Fire that fires
+	// mid-reconfiguration reads at worst a slightly-early-but-still-valid
+	// value rather than a stale one from before this call.
+	effectiveLogLevel.Store(uint32(logLevel))
+
 	// Only configure the formatter once to preserve formatting across log level changes
-	if !formatterConfigured {
+	formatterOnce.Do(func() {
 		textFormatter := log.TextFormatter{}
 		textFormatter.DisableLevelTruncation = true
 		textFormatter.FullTimestamp = true
@@ -273,8 +367,7 @@ func SetLogging(logLevel log.Level) {
 		// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
 		textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
 		log.SetFormatter(&textFormatter)
-		formatterConfigured = true
-	}
+	})
 
 	// When global filters are active, we use hook-based filtering instead of logrus's
 	// internal level filtering. We set logrus to TraceLevel (the most permissive) so
@@ -332,31 +425,16 @@ func SetLogging(logLevel log.Level) {
 	}
 }
 
-// GetEffectiveLogLevel returns the effective log level based on the transform hook.
-// When global filters are active, logrus's log.GetLevel() is set to TraceLevel to allow
-// filters to see all messages, while the actual filtering happens via hooks. This function
-// returns the true effective level by examining what levels the hook is configured to output.
+// GetEffectiveLogLevel returns the effective log level -- the level the
+// operator asked for, as opposed to logrus's internal log.GetLevel()
+// which is pinned to TraceLevel whenever the hook-based filter tree is
+// active (so hooks see every entry). The value is served from an atomic
+// cache updated by SetLogging, initFilterLogging, and
+// ResetGlobalLoggingHooks; the hot path (LogRingBuffer.shouldBuffer,
+// invoked on every entry) is therefore a single atomic load with no
+// mutex contention or slice walk.
 func GetEffectiveLogLevel() log.Level {
-	globalTransformMu.Lock()
-	defer globalTransformMu.Unlock()
-	if addedGlobalFilters && globalTransform != nil {
-		hook := globalTransform.hook.Load()
-		if hook == nil {
-			return log.GetLevel()
-		}
-		// Find the highest (most verbose) level in the hook's configured levels.
-		// In logrus, higher numeric values = more verbose (Trace=6 > Debug=5 > ... > Panic=0).
-		// The hook's LogLevels contains all levels that should be output, so the max
-		// value represents the effective log level.
-		var maxLevel log.Level
-		for _, hookLvl := range hook.LogLevels {
-			if hookLvl > maxLevel {
-				maxLevel = hookLvl
-			}
-		}
-		return maxLevel
-	}
-	return log.GetLevel()
+	return log.Level(effectiveLogLevel.Load())
 }
 
 // Disable the logging censor functionality

@@ -1733,7 +1733,13 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 		return runtimeDir, false, nil
 	}
 
-	runtimeDir, err := os.MkdirTemp("", "pelican-xrootd-*")
+	// Base directory for the MkdirTemp'd runtime dir. Empty means "use
+	// os.TempDir()" (the standard behavior). Overridden per-OS in
+	// config_default.go: macOS's $TMPDIR resolves to a deeply-nested
+	// /var/folders/xx/yy/T/ path that eats most of the 104-byte AF_UNIX
+	// socket-path budget before XRootD gets to append "xrootd/<role>/.xrd/",
+	// so darwin steers this to a short alternate ("/tmp") instead.
+	runtimeDir, err := os.MkdirTemp(osShortRuntimeTempBase(), "pelican-xrootd-*")
 	if err != nil {
 		return "", false, errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
 	}
@@ -1862,10 +1868,25 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	// Create runtime directory (side effect: creates dirs on filesystem).
-	_, _, err := ensureRuntimeDir(v)
+	runtimeDir, _, err := ensureRuntimeDir(v)
 	if err != nil {
 		return err
 	}
+
+	// On platforms where the generated $XDG_RUNTIME_DIR-derived defaults
+	// expanded to a broken "/pelican/..." root path (macOS or Windows
+	// without XDG_RUNTIME_DIR set), rebase those sub-paths so they live
+	// under the RuntimeDir we just picked. This runs AFTER
+	// ensureRuntimeDir so it can piggyback on whatever cleanup
+	// behavior that function attached (MkdirTemp'd runtime dirs get
+	// scheduled for shutdown cleanup by cleanupDirOnShutdown; per-user
+	// XDG dirs don't need cleanup at all). Linux with a working
+	// XDG_RUNTIME_DIR sees no broken paths and this is a no-op.
+	//
+	// Called from SetServerDefaults (not SetBaseDefaultsInConfig) so the
+	// client, which does not need any of these paths and does not call
+	// ensureRuntimeDir, never even computes the alternate locations.
+	ApplyOSDefaultsOverride(v, runtimeDir)
 	// When Lotman manages the cache's space, xrootd's pfc.diskusage requires the
 	// "files" purge band (base < nominal < max). Rather than make operators hand-size
 	// three more values just to turn Lotman on, default them as percentages of total
@@ -2133,6 +2154,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Flush logs only after we potentially ingest changes from the web UI. This must
 	// be done in sequence because the web UI may change the log location.
 	logging.FlushLogs(true)
+
+	// The in-memory log ring buffer is server-only.
+	StartLogRingBuffer(ctx)
 
 	runtimeDir, cleanupRuntimeDir, err := ensureRuntimeDir(viper.GetViper())
 	if err != nil {
@@ -2771,6 +2795,11 @@ func ClearServerAds() {
 
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
+	// Detach the in-memory log ring buffer (hook + compression worker) so a
+	// subsequent InitServer installs a fresh one and tests don't accumulate
+	// hooks or leak the compression goroutine across cases.
+	StopLogRingBuffer()
+
 	// Close any open log files and reset logger output
 	logging.CloseLogger()
 	if err := param.Reset(); err != nil {

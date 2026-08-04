@@ -128,6 +128,19 @@ description: >-
 issuedBy: ["*"]
 acceptedBy: ["*"]
 ---
+name: pelican.log_read
+description: >-
+  Permits the reading of the server's buffer of recent log lines,
+  through the web UI's log viewer or the /api/v1.0/logs endpoints.
+  Granting it is equivalent to granting sight of everything the server
+  logs, which is why it is separable from server.admin rather than
+  implied by every lesser role. The scope is resolved from the user's
+  grants when a request arrives, so it governs what an account may
+  reach and not what any particular credential may do.
+issuedBy: ["web_ui"]
+acceptedBy: ["web_ui"]
+userGrantable: true
+---
 ############################
 #     Registry Scopes      #
 ############################

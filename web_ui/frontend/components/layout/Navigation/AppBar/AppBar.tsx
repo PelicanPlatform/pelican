@@ -20,6 +20,7 @@ function ResponsiveAppBar({
   config,
   exportType,
   role,
+  scopes,
   topOffset = 0,
 }: NavigationProps) {
   const [navOpen, setNavOpen] = React.useState(false);
@@ -106,6 +107,7 @@ function ResponsiveAppBar({
             config={config}
             exportType={exportType}
             role={role}
+            scopes={scopes}
             onClose={() => setNavOpen(false)}
           />
         </Collapse>

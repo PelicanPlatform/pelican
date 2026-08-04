@@ -90,7 +90,7 @@ const Navigation = ({
   const topOffset = isAdmin ? ADMIN_BANNER_HEIGHT_PX : 0;
 
   return (
-    <>
+    <Box id={'navigation'}>
       {isAdmin && (
         <Box
           sx={{
@@ -128,14 +128,15 @@ const Navigation = ({
         </Box>
       )}
       <Box
+        id={'header'}
         sx={{
-          display: 'flex',
           flexDirection: { xs: 'column', md: 'row' },
           // Push *non-fixed* descendants below the banner. The
           // sidebar and burger drawer manage their own offset via
           // the topOffset prop because they're position: fixed and
           // don't honor parent padding.
           pt: `${topOffset}px`,
+          width: '100%',
         }}
       >
         <Box
@@ -146,6 +147,7 @@ const Navigation = ({
           <Sidebar
             exportType={exports?.type}
             role={user?.role}
+            scopes={user?.scopes}
             config={config as StaticNavigationItemProps[]}
             topOffset={topOffset}
           />
@@ -158,13 +160,14 @@ const Navigation = ({
           <AppBar
             exportType={exports?.type}
             role={user?.role}
+            scopes={user?.scopes}
             config={config as StaticNavigationItemProps[]}
             topOffset={topOffset}
           />
         </Box>
         {children}
       </Box>
-    </>
+    </Box>
   );
 };
 
