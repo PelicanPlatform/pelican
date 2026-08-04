@@ -1078,6 +1078,62 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
+// resolveRegisteredServerName returns the server name registered under prefix at
+// the registry. It is a package variable so tests can stub it.
+var resolveRegisteredServerName = func(ctx context.Context, prefix string) (string, error) {
+	reg, err := server_utils.GetServerMetadataFromReg(ctx, prefix)
+	if err != nil {
+		return "", err
+	}
+	return reg.Name, nil
+}
+
+// registeredNameCache caches prefix → registered-name lookups so that
+// downtimeNameAuthorized doesn't cost a registry round-trip on every
+// advertisement. Registered names change rarely; lookup errors are not cached.
+var registeredNameCache = ttlcache.New(
+	ttlcache.WithTTL[string, string](10*time.Minute),
+	ttlcache.WithDisableTouchOnHit[string, string](),
+)
+
+// downtimeNameAuthorized guards the name-keyed downtime/routing filter against a
+// cross-server suppression attack: the advertise token only authenticates the
+// server's registry prefix, not its free-form Name, so a server holding a valid
+// token for its own prefix could otherwise advertise another server's name and
+// mutate the victim's filter state — suppress it with a shutdown status or
+// downtime entry, or just as bad, clear the victim's active downtime by
+// advertising its name with an empty downtime list.
+//
+// It returns false when the advertised Name does not match the server
+// registered under the token-verified prefix; the caller then ignores the
+// filter-mutating parts of the ad. It returns true (authorized) for
+// unverified/legacy servers and — to avoid turning a registry outage into a
+// loss of downtime propagation — when the registry lookup fails.
+func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix string, verifyServer bool) bool {
+	if !verifyServer || registryPrefix == "" {
+		return true
+	}
+	var registeredName string
+	if item := registeredNameCache.Get(registryPrefix); item != nil {
+		registeredName = item.Value()
+	} else {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		name, err := resolveRegisteredServerName(lookupCtx, registryPrefix)
+		if err != nil {
+			log.Warningf("Could not verify advertised name %q against the server registered under %q; applying its downtime/status anyway: %v", adName, registryPrefix, err)
+			return true
+		}
+		registeredNameCache.Set(registryPrefix, name, ttlcache.DefaultTTL)
+		registeredName = name
+	}
+	if registeredName != "" && registeredName != adName {
+		log.Warningf("Ignoring downtime/status in advertisement from %q: it does not match the name %q registered under prefix %q", adName, registeredName, registryPrefix)
+		return false
+	}
+	return true
+}
+
 func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
 	ctx.Set("serverType", sType.String())
 	tokens, present := ctx.Request.Header["Authorization"]
@@ -1319,36 +1375,48 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		ad.Version = "unknown"
 	}
 
+	// The downtime/routing filter below is keyed by the advertised server name,
+	// which the advertise token does not authenticate — it only authenticates the
+	// registry prefix. When the advertised name doesn't match the name registered
+	// under that prefix, still accept the ad (a legitimate server may have a local
+	// sitename that differs from its registration) but ignore downtimes, and the
+	// implicit "clear downtimes" of an empty list. So a server can't suppress or
+	// resurrect routing for a name it doesn't own.
 	sn := ad.Name
-	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
-	applyServerDowntimes(sn, ad.Downtimes)
+	if downtimeNameAuthorized(engineCtx, sn, registryPrefix, verifyServer) {
+		// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
+		applyServerDowntimes(sn, ad.Downtimes)
 
-	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
-	if ad.Status != "" { // For backward compatibility, we only process this if it is set
-		// If the server is about to shutdown, we silently put it into downtime.
-		// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
-		if metrics.ParseHealthStatus(ad.Status) == metrics.StatusShuttingDown {
-			filteredServersMutex.Lock()
-			// Inspect the existing downtime status for this server
-			existingFilterType, isServerFiltered := filteredServers[sn]
+		// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
+		if ad.Status != "" { // For backward compatibility, we only process this if it is set
+			// If the server is about to shutdown, we silently put it into downtime.
+			// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
+			if metrics.ParseHealthStatus(ad.Status) == metrics.StatusShuttingDown {
+				filteredServersMutex.Lock()
+				// Inspect the existing downtime status for this server
+				existingFilterType, isServerFiltered := filteredServers[sn]
 
-			// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
-			if !isServerFiltered || existingFilterType == tempAllowed {
-				filteredServers[sn] = shutdownFiltered
-				log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
-			}
-			filteredServersMutex.Unlock()
-		} else {
-			// If the server is back online, we flush out existing shutdown filter if it exists
-			filteredServersMutex.Lock()
-			if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
-				if existingFilterType == shutdownFiltered {
-					delete(filteredServers, sn)
-					log.Debugf("Removed the active downtime for server %s as it has come back online", sn)
+				// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
+				if !isServerFiltered || existingFilterType == tempAllowed {
+					filteredServers[sn] = shutdownFiltered
+					log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
 				}
+				filteredServersMutex.Unlock()
+			} else {
+				// If the server is back online, we flush out existing shutdown filter if it exists
+				filteredServersMutex.Lock()
+				if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
+					if existingFilterType == shutdownFiltered {
+						delete(filteredServers, sn)
+						log.Debugf("Removed the active downtime for server %s as it has come back online", sn)
+					}
+				}
+				filteredServersMutex.Unlock()
 			}
-			filteredServersMutex.Unlock()
 		}
+	} else {
+		// Strip the unauthorized downtime fields so they don't propagate downstream
+		ad.Downtimes = nil
 	}
 
 	// Forward to other directors, if applicable

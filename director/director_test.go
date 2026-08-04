@@ -2391,6 +2391,102 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 	})
 }
 
+// TestDowntimeNameAuthorized ensures the name-keyed downtime filter can only be
+// mutated under the name registered for the ad's token-verified prefix. Note the
+// check is deliberately unconditional on the ad's contents: even an ad with no
+// Status and no Downtimes mutates the filter (an empty list clears existing
+// server-set downtimes), so registerServerAd gates all of applyServerDowntimes
+// and the Status handling behind this single authorization.
+func TestDowntimeNameAuthorized(t *testing.T) {
+	ctx := context.Background()
+	prefix := "/origins/real-origin.example.edu:8443"
+
+	orig := resolveRegisteredServerName
+	t.Cleanup(func() { resolveRegisteredServerName = orig })
+	t.Cleanup(registeredNameCache.DeleteAll)
+
+	mustNotResolve := func(_ context.Context, _ string) (string, error) {
+		t.Fatal("registry name resolver should not be called in this case")
+		return "", nil
+	}
+
+	t.Run("unverified-server-is-not-checked", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = mustNotResolve
+		assert.True(t, downtimeNameAuthorized(ctx, "anything", prefix, false))
+	})
+
+	t.Run("empty-prefix-is-not-checked", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = mustNotResolve
+		assert.True(t, downtimeNameAuthorized(ctx, "anything", "", true))
+	})
+
+	t.Run("matching-name-is-authorized", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, p string) (string, error) {
+			assert.Equal(t, prefix, p)
+			return "real-site", nil
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "real-site", prefix, true))
+	})
+
+	t.Run("attack-mismatched-name-is-unauthorized", func(t *testing.T) {
+		// The attacker holds a valid token for its own prefix (registered as
+		// "attacker-site") but advertises the victim's name.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "attacker-site", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+	})
+
+	t.Run("registry-lookup-error-fails-open", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", errors.New("registry unreachable")
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+	})
+
+	t.Run("empty-registered-name-is-authorized", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", nil
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "any-site", prefix, true))
+	})
+
+	t.Run("second-lookup-is-served-from-cache", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		calls := 0
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			calls++
+			return "real-site", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+		// Same prefix again: the resolver must not be hit a second time, and the
+		// cached name still yields the same verdicts.
+		resolveRegisteredServerName = mustNotResolve
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+		assert.True(t, downtimeNameAuthorized(ctx, "real-site", prefix, true))
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("lookup-errors-are-not-cached", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", errors.New("registry unreachable")
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+		// Once the registry recovers, the next ad is verified again.
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "attacker-site", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix, true))
+	})
+}
+
 func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))
