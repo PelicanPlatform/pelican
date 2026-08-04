@@ -1106,13 +1106,10 @@ var registeredNameCache = ttlcache.New(
 //
 // It returns false when the advertised Name does not match the server
 // registered under the token-verified prefix; the caller then ignores the
-// filter-mutating parts of the ad. It returns true (authorized) for
-// unverified/legacy servers and — to avoid turning a registry outage into a
-// loss of downtime propagation — when the registry lookup fails.
-func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix string, verifyServer bool) bool {
-	if !verifyServer || registryPrefix == "" {
-		return true
-	}
+// filter-mutating parts of the ad. To avoid turning a registry outage into a
+// loss of downtime propagation, it returns true (authorized) when the
+// registry lookup fails.
+func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix string) bool {
 	var registeredName string
 	if item := registeredNameCache.Get(registryPrefix); item != nil {
 		registeredName = item.Value()
@@ -1271,16 +1268,17 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
 
 	registryPrefix := server_utils.RemoveTrailingSlash(ad.RegistryPrefix)
-	verifyServer := true
 	if registryPrefix == "" {
-		if sType == server_structs.OriginType {
-			// For origins < 7.9.0, they are not registered, and we skip the verification
-			verifyServer = false
-		} else {
-			// For caches <= 7.8.1, they don't have RegistryPrefix
-			// so we fall back to Name
-			registryPrefix = server_structs.GetCacheNs(ad.Name)
-		}
+		// Every supported server (Pelican >= 7.9.0 origins, >= 7.8.2 caches) registers
+		// itself and reports its registry prefix in the ad; without the prefix the
+		// advertise token cannot be verified.
+		log.Warningf("Rejecting %s advertisement from %q: no registry prefix present in the ad", sType.String(), ad.Name)
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%s advertisement rejected: no registry prefix present in the ad. Ensure the server runs a supported Pelican version and is registered at the federation registry", sType.String()),
+		})
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+		return
 	}
 
 	approvalErrMsg := "You may find more information on " + param.Server_ExternalWebUrl.GetString()
@@ -1293,33 +1291,31 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		approvalErrMsg = fmt.Sprintf("Visit %s for help.", param.Director_SupportContactUrl.GetString())
 	}
 
-	if verifyServer {
-		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
-		if err != nil {
-			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), ad.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
-				return
-			} else {
-				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), ad.Name, registryPrefix, err)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
-				})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
-				return
-			}
-		}
-		if !ok {
-			log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
+	ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
+	if err != nil {
+		if err == adminApprovalErr {
+			log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), ad.Name)
+			ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+			return
+		} else {
+			log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), ad.Name, registryPrefix, err)
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Authorization token verification failed. Token missing required scope",
+				Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 			})
 			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 			return
 		}
+	}
+	if !ok {
+		log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authorization token verification failed. Token missing required scope",
+		})
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+		return
 	}
 
 	// For origin, also verify namespace registrations
@@ -1383,7 +1379,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// implicit "clear downtimes" of an empty list. So a server can't suppress or
 	// resurrect routing for a name it doesn't own.
 	sn := ad.Name
-	if downtimeNameAuthorized(engineCtx, sn, registryPrefix, verifyServer) {
+	if downtimeNameAuthorized(engineCtx, sn, registryPrefix) {
 		// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
 		applyServerDowntimes(sn, ad.Downtimes)
 
