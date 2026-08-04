@@ -268,11 +268,12 @@ func TestDowntime(t *testing.T) {
 	})
 }
 
-// TestDowntimeDeletionAuthorized is a regression test: at the Registry,
-// a downtime may be deleted only by its owner — the server whose
+// TestDowntimeMutationAuthorized is a regression test: at the Registry, a
+// downtime may be updated or deleted only by its owner — the server whose
 // registered-server token subject matches the downtime's ServerID for
 // server-authored downtimes, or a federation admin for Registry-authored ones.
-func TestDowntimeDeletionAuthorized(t *testing.T) {
+// The rules are identical for both actions, so every case runs under each.
+func TestDowntimeMutationAuthorized(t *testing.T) {
 	const victimID = "victim-server-id"
 	tests := []struct {
 		name         string
@@ -293,22 +294,25 @@ func TestDowntimeDeletionAuthorized(t *testing.T) {
 		// Server-authored downtimes: only the owning server token.
 		{"server-sourced-matching-token-allowed", true, "origin", "registered-server-token", victimID, true},
 		{"server-sourced-cache-matching-token-allowed", true, "cache", "registered-server-token", victimID, true},
-		// The attack: a different registered server tries to delete the victim's downtime.
+		// The attack: a different registered server targets the victim's downtime.
 		{"attack-server-sourced-mismatched-token-denied", true, "origin", "registered-server-token", "attacker-server-id", false},
-		// A federation admin cannot delete a server's own downtime (parity with HandleUpdateDowntime).
+		// A federation admin cannot mutate a server's own downtime (read-only at the Registry).
 		{"server-sourced-admin-cookie-denied", true, "origin", "admin-cookie", "", false},
 		// Empty/unknown source fails closed into the owner branch.
 		{"empty-source-mismatched-token-denied", true, "", "registered-server-token", "attacker-server-id", false},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			allowed, msg := downtimeDeletionAuthorized(tc.atRegistry, tc.source, tc.authMethod, tc.tokenSubject, victimID)
-			assert.Equal(t, tc.wantAllowed, allowed)
-			if tc.wantAllowed {
-				assert.Empty(t, msg)
-			} else {
-				assert.NotEmpty(t, msg)
-			}
-		})
+	for _, action := range []string{"update", "delete"} {
+		for _, tc := range tests {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				allowed, msg := downtimeMutationAuthorized(tc.atRegistry, tc.source, tc.authMethod, tc.tokenSubject, victimID, action)
+				assert.Equal(t, tc.wantAllowed, allowed)
+				if tc.wantAllowed {
+					assert.Empty(t, msg)
+				} else {
+					assert.NotEmpty(t, msg)
+					assert.Contains(t, msg, action)
+				}
+			})
+		}
 	}
 }

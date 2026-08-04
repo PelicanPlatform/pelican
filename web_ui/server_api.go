@@ -325,20 +325,23 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	// Downtimes created by a server admin are read-only for federation admins
-	dtSourceServer := server_structs.NewServerType()
-	dtSourceServer.SetString(existingDowntime.Source)
-	if config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
-		// Allow updates from Origin/Cache on their own server
-		if ctx.GetString("AuthMethod") == "registered-server-token" && ctx.GetString("TokenSubject") == existingDowntime.ServerID {
-			// permitted
-		} else {
-			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Downtimes created by a server admin are read-only for federation admins",
-			})
-			return
-		}
+	// DowntimeAuthHandler only authenticates the caller (a federation admin or
+	// some registered server); it does not check who owns this downtime record.
+	// Enforce ownership here — otherwise any registered server could modify
+	// downtimes it does not own, including Registry-authored ones.
+	if allowed, msg := downtimeMutationAuthorized(
+		config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}),
+		existingDowntime.Source,
+		ctx.GetString("AuthMethod"),
+		ctx.GetString("TokenSubject"),
+		existingDowntime.ServerID,
+		"update",
+	); !allowed {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return
 	}
 
 	user, _, _, err := GetUserGroups(ctx)
@@ -389,18 +392,21 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, updatedDowntime)
 }
 
-// downtimeDeletionAuthorized decides whether a caller may delete a downtime
-// record. It is a pure function so the authorization logic can be unit-tested
-// without standing up a federation.
+// downtimeMutationAuthorized decides whether a caller may update or delete a
+// downtime record. It is a pure function so the authorization logic can be
+// unit-tested without standing up a federation; action ("update"/"delete") is
+// only interpolated into the denial message.
 //
 // The check only applies at the Registry (atRegistry), which is the sole
 // cross-tenant surface — on an Origin/Cache's own web UI the local admin manages
-// that server's downtimes and the deletion is mirrored up to the Registry. At
+// that server's downtimes and the mutation is mirrored up to the Registry. At
 // the Registry:
-//   - A Registry-authored  downtime may be deleted only via an admin cookie.
-//   - A server-authored downtime may be deleted only by that same server, i.e. a
+//   - A Registry-authored downtime may be mutated only via an admin cookie.
+//   - A server-authored downtime may be mutated only by that same server, i.e. a
 //     registered-server token whose subject matches the downtime's ServerID.
-func downtimeDeletionAuthorized(atRegistry bool, downtimeSource, authMethod, tokenSubject, downtimeServerID string) (bool, string) {
+//     Federation admins are deliberately excluded: server-authored downtimes are
+//     read-only at the Registry.
+func downtimeMutationAuthorized(atRegistry bool, downtimeSource, authMethod, tokenSubject, downtimeServerID, action string) (bool, string) {
 	if !atRegistry {
 		return true, ""
 	}
@@ -408,12 +414,12 @@ func downtimeDeletionAuthorized(atRegistry bool, downtimeSource, authMethod, tok
 	src.SetString(downtimeSource)
 	if src == server_structs.RegistryType {
 		if authMethod != "admin-cookie" {
-			return false, "Only a federation administrator may delete a Registry-authored downtime"
+			return false, "Only a federation administrator may " + action + " a Registry-authored downtime"
 		}
 		return true, ""
 	}
 	if authMethod != "registered-server-token" || tokenSubject != downtimeServerID {
-		return false, "You do not have permission to delete this server's downtime"
+		return false, "You do not have permission to " + action + " this server's downtime"
 	}
 	return true, ""
 }
@@ -436,16 +442,17 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 		return
 	}
 
-	// Authorize the deletion before it is mirrored to the Registry. Without this,
-	// any registered server could delete any other server's downtime: a
-	// registered-server token is self-issued and only scope-checked, so its
-	// subject is the sole per-resource authorization signal.
-	if allowed, msg := downtimeDeletionAuthorized(
+	// DowntimeAuthHandler only authenticates the caller (a federation admin or
+	// some registered server); it does not check who owns this downtime record.
+	// Enforce ownership here — otherwise any registered server could delete
+	// another server's downtime.
+	if allowed, msg := downtimeMutationAuthorized(
 		config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}),
 		existingDowntime.Source,
 		ctx.GetString("AuthMethod"),
 		ctx.GetString("TokenSubject"),
 		existingDowntime.ServerID,
+		"delete",
 	); !allowed {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
