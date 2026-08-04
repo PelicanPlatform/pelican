@@ -28,7 +28,7 @@ import (
 
 // fadviseSequential hints to the kernel that the given file descriptor
 // will be accessed sequentially, enabling readahead and write-back
-// optimisations.
+// optimizations.
 func fadviseSequential(f *os.File) error {
 	return unix.Fadvise(int(f.Fd()), 0, 0, unix.FADV_SEQUENTIAL)
 }

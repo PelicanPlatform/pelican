@@ -23,10 +23,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/url"
 	"path"
 	"strings"
 	"time"
+
+	"golang.org/x/net/idna"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -62,10 +65,85 @@ const (
 	PrefixETag = "e:"
 	// PrefixNamespace stores namespace prefix -> ID mappings: n:<prefix> -> uint32
 	PrefixNamespace = "n:"
+	// PrefixAppendIntent records that an AppendWriter is part-way through
+	// building an object: aw:<instance_hash> -> msgpack(AppendIntent).
+	//
+	// A streaming append charges capacity for every chunk it allocates but has
+	// no LRU entry until it finishes, so an interrupted one would otherwise be
+	// invisible to both eviction and the consistency checker -- it has metadata
+	// *and* files, so neither half of RunMetadataScan fires.  This marker is
+	// the reclamation handle: NewAppendWriter writes it, Finalize and Abort
+	// remove it, and anything left over belongs to a writer that did not
+	// survive.  See StorageManager.ReclaimAbandonedAppends.
+	PrefixAppendIntent = "aw:"
+	// The keys below describe the database as a whole rather than any one
+	// object.  They are single, underscore-prefixed keys, they are written at
+	// open before any consumer touches a record, and none of them is ever
+	// evicted; the prefixes above never collide with them.
+
 	// KeySalt is the single DB key that stores the random salt used when
 	// hashing object/instance names.  The salt prevents an attacker with
 	// DB access from correlating hashes with known URLs.
 	KeySalt = "_salt"
+
+	// KeyStoreMode records whether this database belongs to a cache or to a
+	// pstore-backed origin.  The two share this key space, so opening one as
+	// the other would silently corrupt it; both check this marker on open.
+	KeyStoreMode = "_mode"
+
+	// KeySchemaVersion records the layout of the records in this database:
+	// which keys exist, how their values are encoded, and how the hashes that
+	// name them are derived.  The value is the decimal ASCII form of a
+	// SchemaVersion, so a dump of the database reads plainly.
+	//
+	// KeyStoreMode says *who* owns the database; this says *what layout* the
+	// owner wrote.  See CurrentSchemaVersion and CacheDB.ensureSchemaVersion.
+	KeySchemaVersion = "_schema"
+)
+
+// SchemaVersion identifies one revision of the on-disk layout of a block store
+// database (both the cache and the pstore origin backend share it, since they
+// share the key space).
+type SchemaVersion uint32
+
+const (
+	// CurrentSchemaVersion is the layout this binary reads and writes.
+	//
+	// Bump it whenever a change makes records written by an older binary
+	// unreadable — or, worse, silently misread — by a newer one: a new or
+	// renamed key prefix, a different value encoding, or a change to how
+	// object/instance hashes are derived — normalizeURL, which decides which
+	// spellings of a URL name one object, is exactly that sort of key
+	// derivation, and a change there has no other way to announce itself.
+	// Purely additive changes that older binaries can ignore do not need a
+	// bump.
+	//
+	// Whoever bumps it is responsible for teaching migrateSchema how to bring
+	// a database written under every still-supported older version forward.
+	CurrentSchemaVersion SchemaVersion = 1
+)
+
+// Prefixes reserved by the pstore origin backend (see docs/pstore-design.md).
+// A pstore shares this key space but never opens a cache database and vice
+// versa (enforced via KeyStoreMode), so the prefixes cannot collide at
+// runtime.  They are declared here so that future cache features do not claim
+// them.
+const (
+	// PrefixDirent stores pstore directory entries, keyed by parent path and
+	// name: pd:<parent path>\x00<name>
+	PrefixDirent = "pd:"
+	// PrefixGarbage stores pstore instances and subtrees awaiting reclamation
+	PrefixGarbage = "pg:"
+)
+
+// StoreMode identifies which subsystem owns a database.
+type StoreMode string
+
+const (
+	// StoreModeCache marks a database owned by the local cache.
+	StoreModeCache StoreMode = "cache"
+	// StoreModePStore marks a database owned by a pstore origin backend.
+	StoreModePStore StoreMode = "pstore"
 )
 
 // StorageID identifies a storage location.  0 means inline (data in BadgerDB),
@@ -128,7 +206,16 @@ type StorageDirConfig struct {
 //
 // Returns nil (not an error) when the key is unset or empty.
 func ParseStorageDirsConfig() ([]StorageDirConfig, error) {
-	raw := param.LocalCache_StorageDirs.GetRaw()
+	return ParseStorageDirsValue(param.LocalCache_StorageDirs.GetRaw(), param.LocalCache_StorageDirs.GetName())
+}
+
+// ParseStorageDirsValue parses an already-fetched StorageDirs setting.  It
+// exists so another subsystem configuring the same block store -- the pstore
+// origin backend, via Origin.PStoreStorageDirs -- accepts exactly the same two
+// formats without duplicating the parsing.
+//
+// name identifies the setting in error messages.
+func ParseStorageDirsValue(raw any, name string) ([]StorageDirConfig, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -144,12 +231,12 @@ func ParseStorageDirsConfig() ([]StorageDirConfig, error) {
 			case string:
 				// Plain string path (backward-compat format)
 				if e == "" {
-					return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: empty path", i)
+					return nil, fmt.Errorf("%s[%d]: empty path", name, i)
 				}
 				configs = append(configs, StorageDirConfig{Path: e})
 			case map[string]interface{}:
 				// Structured entry
-				cfg, err := parseStorageDirEntry(i, e)
+				cfg, err := parseStorageDirEntry(name, i, e)
 				if err != nil {
 					return nil, err
 				}
@@ -160,13 +247,13 @@ func ParseStorageDirsConfig() ([]StorageDirConfig, error) {
 				for k, val := range e {
 					converted[fmt.Sprint(k)] = val
 				}
-				cfg, err := parseStorageDirEntry(i, converted)
+				cfg, err := parseStorageDirEntry(name, i, converted)
 				if err != nil {
 					return nil, err
 				}
 				configs = append(configs, cfg)
 			default:
-				return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: unsupported type %T", i, elem)
+				return nil, fmt.Errorf("%s[%d]: unsupported type %T", name, i, elem)
 			}
 		}
 		return configs, nil
@@ -178,18 +265,18 @@ func ParseStorageDirsConfig() ([]StorageDirConfig, error) {
 		configs := make([]StorageDirConfig, len(v))
 		for i, p := range v {
 			if p == "" {
-				return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: empty path", i)
+				return nil, fmt.Errorf("%s[%d]: empty path", name, i)
 			}
 			configs[i] = StorageDirConfig{Path: p}
 		}
 		return configs, nil
 	default:
-		return nil, fmt.Errorf("LocalCache.StorageDirs: unsupported type %T; expected list of paths or objects", raw)
+		return nil, fmt.Errorf("%s: unsupported type %T; expected list of paths or objects", name, raw)
 	}
 }
 
 // parseStorageDirEntry converts a map entry into a StorageDirConfig.
-func parseStorageDirEntry(idx int, m map[string]interface{}) (StorageDirConfig, error) {
+func parseStorageDirEntry(name string, idx int, m map[string]interface{}) (StorageDirConfig, error) {
 	var cfg StorageDirConfig
 
 	// Path (required)
@@ -203,7 +290,7 @@ func parseStorageDirEntry(idx int, m map[string]interface{}) (StorageDirConfig, 
 		}
 	}
 	if cfg.Path == "" {
-		return cfg, fmt.Errorf("LocalCache.StorageDirs[%d]: missing or empty Path", idx)
+		return cfg, fmt.Errorf("%s[%d]: missing or empty Path", name, idx)
 	}
 
 	// MaxSize (optional, string like "500GB" or number of bytes)
@@ -218,7 +305,7 @@ func parseStorageDirEntry(idx int, m map[string]interface{}) (StorageDirConfig, 
 			if s != "" && s != "0" {
 				n, err := utils.ParseBytes(s)
 				if err != nil {
-					return cfg, fmt.Errorf("LocalCache.StorageDirs[%d].MaxSize: %w", idx, err)
+					return cfg, fmt.Errorf("%s[%d].MaxSize: %w", name, idx, err)
 				}
 				cfg.MaxSize = n
 			}
@@ -574,7 +661,7 @@ func (m *CacheMetadata) ResponseCacheControl() string {
 	// If the origin specified Cache-Control, build the response header.
 	if cc := m.GetCacheControlHeader(); cc != "" {
 		// When the origin sets max-age, also advertise s-maxage with the
-		// same value so that downstream shared caches honour the
+		// same value so that downstream shared caches honor the
 		// directive (RFC 7234 §5.2.2.9).  Skip if s-maxage is already
 		// present or the response should not be stored.
 		if m.CCMaxAge > 0 && m.CCFlags&ccNoStore == 0 {
@@ -667,7 +754,15 @@ func ComputeInstanceHash(salt []byte, etag string, objectHash ObjectHash) Instan
 	return InstanceHash(hex.EncodeToString(h.Sum(nil)))
 }
 
-// normalizeURL normalizes a pelican URL for consistent hashing
+// normalizeURL normalizes a pelican URL for consistent hashing.
+//
+// Only the scheme and host are folded.  Those are case-insensitive per
+// RFC 3986 §6.2.2.1, so folding them makes equivalent URLs hash alike.  The
+// path is left exactly as written: object paths are case-sensitive on every
+// backend Pelican serves (POSIX, S3, HTTPS), so /ns/Data.txt and /ns/data.txt
+// are different objects, and folding them together would give them one cache
+// entry from which whichever was fetched last is served for both — a
+// collision nothing on the read path detects.  See docs/pstore-design.md §12.
 func normalizeURL(pelicanURL string) string {
 	// Parse the URL
 	u, err := url.Parse(pelicanURL)
@@ -677,8 +772,57 @@ func normalizeURL(pelicanURL string) string {
 	}
 
 	// Rebuild with normalized components
-	normalized := u.Scheme + "://" + u.Host + path.Clean(u.Path)
-	return strings.ToLower(normalized)
+	return strings.ToLower(u.Scheme) + "://" + normalizeHost(u.Host) + path.Clean(u.Path)
+}
+
+// normalizeHost folds the authority of a URL so that every spelling of one
+// host hashes to one object.
+//
+// strings.ToLower is the right fold only for an ASCII host.  A domain name may
+// be internationalized, and an IDN has two equally valid spellings — the
+// Unicode form and its punycode A-label — that no amount of lowercasing brings
+// together, with a case fold of its own that IDNA defines and ASCII does not.
+// idna.Lookup.ToASCII collapses all of them, so BÜCHER.example,
+// bücher.example, and xn--bcher-kva.example name the same cached object.
+//
+// Three things are deliberately kept away from IDNA:
+//
+//   - The port is not part of the domain name.  It is split off, left exactly
+//     as written, and reattached.
+//   - IP literals are not domain names.  A bracketed IPv6 literal in
+//     particular is rejected outright by IDNA (both the brackets and the
+//     colons are disallowed runes), so literals are only lowercased.
+//   - A host IDNA rejects for any other reason — an underscore, say — is
+//     lowercased instead.  This function has no error to return and must
+//     answer deterministically; a name that cannot be an IDN has no
+//     alternative spelling to collapse in the first place.
+func normalizeHost(host string) string {
+	if host == "" {
+		return ""
+	}
+
+	hostname, port := host, ""
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		hostname, port = h, ":"+p
+		// SplitHostPort strips the brackets from an IPv6 literal; the host
+		// is not spellable without them, so put them back.
+		if strings.ContainsRune(hostname, ':') {
+			return "[" + strings.ToLower(hostname) + "]" + port
+		}
+	} else if strings.HasPrefix(hostname, "[") {
+		// A bracketed IPv6 literal carrying no port.
+		return strings.ToLower(hostname)
+	}
+
+	if net.ParseIP(hostname) != nil {
+		return strings.ToLower(hostname) + port
+	}
+
+	ascii, err := idna.Lookup.ToASCII(hostname)
+	if err != nil {
+		return strings.ToLower(hostname) + port
+	}
+	return ascii + port
 }
 
 // GetInstanceStoragePath returns the 2-level directory path for storing a file
@@ -714,6 +858,19 @@ func ETagKey(objectHash ObjectHash) []byte {
 // NamespaceKey returns the BadgerDB key for a namespace prefix mapping
 func NamespaceKey(prefix string) []byte {
 	return []byte(PrefixNamespace + prefix)
+}
+
+// AppendIntentKey returns the BadgerDB key for an in-flight streaming append.
+func AppendIntentKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixAppendIntent + string(instanceHash))
+}
+
+// AppendIntent is the record written while an AppendWriter is building an
+// object.  StartedAt lets a reclamation pass leave very recent appends alone
+// even when it cannot consult the in-process registry of live writers.
+type AppendIntent struct {
+	StartedAt   time.Time   `msgpack:"started_at"`
+	NamespaceID NamespaceID `msgpack:"namespace_id"`
 }
 
 // LRUKey returns the BadgerDB key for LRU tracking

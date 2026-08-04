@@ -376,7 +376,7 @@ func TestChunkedObjectEvictByLRU(t *testing.T) {
 	}
 
 	// Evict the oldest object (first one)
-	evicted, totalFreed, err := storage.EvictByLRU(StorageIDFirstDisk, 1, 1, actualChunkSize*2)
+	evicted, totalFreed, _, err := storage.EvictByLRU(StorageIDFirstDisk, 1, 1, actualChunkSize*2)
 	require.NoError(t, err)
 	assert.Len(t, evicted, 1, "Should evict 1 object")
 	assert.Greater(t, totalFreed, uint64(0), "Should free some bytes")
@@ -983,7 +983,7 @@ func TestLazyChunkedEviction(t *testing.T) {
 
 	// Evict the object.  Only chunks 0 and 2 are allocated, so
 	// totalFreed should be the sum of their on-disk file sizes.
-	evicted, totalFreed, err := storage.EvictByLRU(meta.GetChunkStorageID(0), 1, 1, objectSize)
+	evicted, totalFreed, _, err := storage.EvictByLRU(meta.GetChunkStorageID(0), 1, 1, objectSize)
 	require.NoError(t, err)
 	assert.Len(t, evicted, 1)
 	expectedFreed := uint64(CalculateFileSize(chunkSize)) * 2 // 2 allocated chunks

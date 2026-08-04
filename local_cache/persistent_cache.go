@@ -91,7 +91,7 @@ func isEvictedError(err error) bool {
 
 // clientChecksumsToCache converts transfer-client checksums into the local
 // cache schema.  Server-supplied checksums are marked OriginVerified; client-
-// computed checksums are not.  Unrecognised algorithms are silently dropped.
+// computed checksums are not.  Unrecognized algorithms are silently dropped.
 func clientChecksumsToCache(result *client.TransferResults) []Checksum {
 	if result == nil {
 		return nil
@@ -135,7 +135,7 @@ func clientChecksumsToCache(result *client.TransferResults) []Checksum {
 // statChecksumsToCache converts the checksum map returned by client.DoStat
 // (HTTP digest name -> hex-encoded value) into the local cache schema.  These
 // come from the origin's HEAD response, so they are marked OriginVerified.
-// Unrecognised algorithms and malformed hex are silently skipped.
+// Unrecognized algorithms and malformed hex are silently skipped.
 func statChecksumsToCache(checksums map[string]string) []Checksum {
 	if len(checksums) == 0 {
 		return nil
@@ -533,6 +533,13 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize cache database")
 	}
 
+	// Claim the database for the cache so that a pstore origin pointed at the
+	// same directory refuses to open it rather than corrupting it.
+	if err := db.EnsureStoreMode(StoreModeCache); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	// Initialize storage manager — assigns storageIDs internally via UUIDs.
 	storage, err := NewStorageManager(db, dirPaths, cfg.InlineStorageMaxBytes, egrp)
 	if err != nil {
@@ -611,7 +618,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// integrity scan verifies each object's on-disk data a single time and
 	// then skips it, for deployments whose storage already guarantees at-rest
 	// integrity (e.g. ZFS).  Any value other than "once" keeps the default
-	// behaviour of re-verifying every object on each scan cycle.
+	// behavior of re-verifying every object on each scan cycle.
 	scanOnce := strings.EqualFold(param.Cache_DataScanMode.GetString(), "once")
 	consistency := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MinAgeForCleanup: -1, // Use default grace period
@@ -1198,8 +1205,24 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		dlClientDone = res.dl.RegisterClient()
 	}
 
+	// Pin the version for the life of the reader.  This is the cache's real
+	// serving path -- every HTTP GET arrives here via GetSeekableReader or
+	// GetRange -- so without a pin here the protection that
+	// StorageManager.EvictByLRU offers would only ever apply to the prestage
+	// worker's NewObjectReader.  Eviction removes an object's metadata, data
+	// key, and block state, none of which the open file descriptor replaces,
+	// so a reader that loses its object mid-stream fails the transfer.
+	//
+	// The release is chained into onClose below, and onClose is the same
+	// callback that already deregisters the download client and closes the
+	// lazy fetcher: if a caller leaks a RangeReader it leaks those too, so
+	// this adds no new lifetime requirement.  The pin's release function is
+	// idempotent, so a double Close is harmless.
+	unpin := pc.storage.PinObject(res.instanceHash)
+
 	rr, err := NewRangeReader(pc.storage, res.instanceHash, startByte, endByte, fetchCallback)
 	if err != nil {
+		unpin()
 		if dlClientDone != nil {
 			dlClientDone()
 		}
@@ -1232,6 +1255,7 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		// reused-fetcher path (fetcher != nil), lazyBf is always nil
 		// so closeLazy is a no-op.
 		closeLazy()
+		unpin()
 	}
 
 	return rr, nil
@@ -1241,7 +1265,7 @@ func (pc *PersistentCache) newFetchingRangeReader(
 // This is designed for use with http.ServeContent which handles Range requests internally.
 //
 // When rangeOnly is true and the object is not yet cached, GetSeekableReader
-// uses a lightweight HEAD request to initialise on-disk storage instead of
+// uses a lightweight HEAD request to initialize on-disk storage instead of
 // starting a full sequential download.  This allows BlockFetcherV2 to fetch
 // only the blocks the caller actually reads, avoiding a potentially expensive
 // full transfer.  Callers should set rangeOnly when they know the request is
@@ -1632,7 +1656,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 		return nil, errors.Wrap(err, "stat failed for range-on-miss")
 	}
 	// The stat already knows; refusing here costs nothing and keeps a
-	// collection from being initialised as an object on disk.
+	// collection from being initialized as an object on disk.
 	if statInfo.IsCollection {
 		return nil, errors.Errorf("%s is a collection and cannot be cached as an object", pelicanURL)
 	}

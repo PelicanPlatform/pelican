@@ -41,7 +41,10 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
@@ -58,15 +61,79 @@ const (
 
 // CacheDB wraps BadgerDB with cache-specific operations
 type CacheDB struct {
-	db        *badger.DB
-	encMgr    *EncryptionManager
-	baseDir   string
-	salt      []byte // random salt for hashing object/instance names
+	db      *badger.DB
+	encMgr  *EncryptionManager
+	baseDir string
+	// salt is the random salt for hashing object/instance names.  Reads are
+	// on the hot path (every ObjectHash and InstanceHash call, from arbitrary
+	// goroutines) while writes happen twice at most -- at open, and again if
+	// a catalog restore replaces the database underneath us -- so it is held
+	// as an atomic pointer rather than under a lock.  A write publishes a
+	// whole new slice; the slice a reader already loaded is never mutated,
+	// which is what lets Salt hand it out directly.
+	salt      atomic.Pointer[[]byte]
 	closeOnce sync.Once
 
 	// usageMu protects usageMergeOps for lazy creation of merge operators
 	usageMu       sync.RWMutex
 	usageMergeOps map[StorageUsageKey]*badger.MergeOperator
+
+	// skipBudget overrides evictionSkipBudget when non-zero.  Set only by
+	// tests, so that budget exhaustion can be exercised without building a
+	// thousand protected objects.
+	skipBudget int
+
+	// readOnly marks a handle opened for offline introspection.  The
+	// underlying BadgerDB is writable -- see OpenCacheDBReadOnly for why --
+	// so this flag is what actually keeps an inspection tool from modifying
+	// the database: every mutating entry point checks it first.
+	readOnly bool
+}
+
+// ErrReadOnly is returned by every mutating CacheDB method when the handle was
+// opened for introspection.  Callers can test for it with errors.Is.
+var ErrReadOnly = errors.New("the cache database is open read-only")
+
+// checkWritable reports an error when this handle may not write.
+func (cdb *CacheDB) checkWritable() error {
+	if cdb.readOnly {
+		return errors.Wrapf(ErrReadOnly, "refusing to modify the cache database at %s", cdb.baseDir)
+	}
+	return nil
+}
+
+// ReadOnly reports whether this handle refuses mutations.
+func (cdb *CacheDB) ReadOnly() bool { return cdb.readOnly }
+
+// cacheDBOptions builds the BadgerDB options shared by every way of opening a
+// cache database.  Both the writable open and the introspection open must use
+// identical settings: they differ in what Pelican allows, not in how the
+// on-disk database is interpreted.
+func cacheDBOptions(dbPath string, dbKey []byte) badger.Options {
+	opts := badger.DefaultOptions(dbPath)
+
+	// Performance: Disable synchronous writes for cache data
+	// Risk: Power loss may lose last few seconds of 'access history' or 'download state'
+	// Mitigation: Cache is self-healing; missing blocks will simply be re-downloaded
+	opts.SyncWrites = false
+
+	// Storage: Force small values into LSM tree
+	// Bitmaps and usage counters need fast merge speeds
+	opts.ValueThreshold = 4096
+
+	// Reduce logging noise
+	opts.Logger = newBadgerLogger()
+
+	// Encrypt BadgerDB at rest so that metadata (ETags, URLs, timestamps)
+	// stored in LSM tree and WAL files is not readable without the key.
+	// We derive a separate key from the master key using HKDF for proper
+	// key separation (the master key itself encrypts data blocks).
+	opts.EncryptionKey = dbKey
+	opts.EncryptionKeyRotationDuration = 0 // Disable rotation; we manage keys ourselves
+	// BadgerDB requires IndexCacheSize > 0 when encryption is enabled
+	opts.IndexCacheSize = 64 << 20 // 64 MB
+
+	return opts
 }
 
 // NewCacheDB creates and initializes a new cache database.
@@ -87,36 +154,14 @@ func NewCacheDB(ctx context.Context, baseDir string) (*CacheDB, error) {
 		return nil, errors.Wrap(err, "failed to initialize encryption manager")
 	}
 
-	// Configure BadgerDB with optimized settings for cache workload
-	opts := badger.DefaultOptions(dbPath)
-
-	// Performance: Disable synchronous writes for cache data
-	// Risk: Power loss may lose last few seconds of 'access history' or 'download state'
-	// Mitigation: Cache is self-healing; missing blocks will simply be re-downloaded
-	opts.SyncWrites = false
-
-	// Storage: Force small values into LSM tree
-	// Bitmaps and usage counters need fast merge speeds
-	opts.ValueThreshold = 4096
-
-	// Reduce logging noise
-	opts.Logger = newBadgerLogger()
-
-	// Encrypt BadgerDB at rest so that metadata (ETags, URLs, timestamps)
-	// stored in LSM tree and WAL files is not readable without the key.
-	// We derive a separate key from the master key using HKDF for proper
-	// key separation (the master key itself encrypts data blocks).
+	// Derive the database encryption key
 	dbKey, err := encMgr.DeriveDBKey()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to derive database encryption key")
 	}
-	opts.EncryptionKey = dbKey
-	opts.EncryptionKeyRotationDuration = 0 // Disable rotation; we manage keys ourselves
-	// BadgerDB requires IndexCacheSize > 0 when encryption is enabled
-	opts.IndexCacheSize = 64 << 20 // 64 MB
 
 	// Open the database
-	db, err := badger.Open(opts)
+	db, err := badger.Open(cacheDBOptions(dbPath, dbKey))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open BadgerDB")
 	}
@@ -128,14 +173,22 @@ func NewCacheDB(ctx context.Context, baseDir string) (*CacheDB, error) {
 		usageMergeOps: make(map[StorageUsageKey]*badger.MergeOperator),
 	}
 
+	// Settle the schema version before writing anything else: a database
+	// written by a newer binary must be refused untouched, not amended with a
+	// salt or a store-mode marker on the way to failing.
+	if err := cdb.ensureSchemaVersion(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	// Load or generate the hash salt.  The salt is persisted in the DB
 	// so that object/instance hashes are stable across restarts.
 	salt, err := cdb.loadOrCreateSalt()
 	if err != nil {
 		db.Close()
-		return nil, errors.Wrap(err, "failed to initialise hash salt")
+		return nil, errors.Wrap(err, "failed to initialize hash salt")
 	}
-	cdb.salt = salt
+	cdb.setSalt(salt)
 
 	log.Infof("Cache database initialized at %s", dbPath)
 	return cdb, nil
@@ -159,14 +212,60 @@ func (cdb *CacheDB) Close() error {
 	return closeErr
 }
 
-// OpenCacheDBReadOnly opens an existing cache database in read-only mode.
-// This is suitable for CLI introspection tools that need to inspect cache
-// contents without modifying anything.
+// OpenCacheDBReadOnly opens an existing cache database for introspection.
+// This is suitable for CLI tools that need to inspect cache contents without
+// modifying anything.
 //
 // Like NewCacheDB, this requires issuer keys to be available for decrypting
 // the database encryption key.
+//
+// "Read-only" is enforced by Pelican, not by BadgerDB.  BadgerDB's own
+// ReadOnly mode cannot be used here:
+//
+//   - On Linux and macOS it aborts the process.  Opening an *encrypted*
+//     database that has flushed at least one SST file read-only drives
+//     Table.fetchIndex into y.Check(err) -> log.Fatalf, which prints
+//     "err: invalid argument" and exits without returning an error or running
+//     a single defer.  Every database NewCacheDB creates is encrypted and
+//     every cache that has served an object has an SST, so this fired on
+//     every real cache.
+//   - On Windows it is refused outright ("Read-only mode is not supported on
+//     Windows").
+//
+// So the database is opened the ordinary way and mutation is refused in Go
+// instead, via the readOnly flag that checkWritable guards every writing entry
+// point with.  This is the same trade pstore.OpenMaintenance makes.
+//
+// What that costs is BadgerDB's exclusive directory lock, which an ordinary
+// open takes: introspection now fails while a cache is running rather than
+// opening alongside it.  That is acceptable -- offline introspection is only
+// reached when the cache is not running, since the CLI routes to the live
+// service otherwise -- and it is arguably better, because holding the lock
+// stops a cache from starting up underneath an introspection in progress.
+// A lock failure is translated into an explanation of exactly that, since
+// "another process is using this Badger database" is not something an operator
+// should have to decode.
+//
+// What it does not cost is the guarantee the read-only path exists for: this
+// open still never stamps a schema version (VerifySchemaVersion only checks)
+// and never claims a store mode (EnsureStoreMode is not called), so
+// inspecting a database leaves its header exactly as it was found.
 func OpenCacheDBReadOnly(baseDir string) (*CacheDB, error) {
 	dbPath := filepath.Join(baseDir, dbSubDir)
+
+	// An introspection open must not bring a database into existence.
+	// badger.Open would happily create the directory and an empty database in
+	// it, leaving the operator to wonder why their cache looks empty; a
+	// mistyped path should say so instead.
+	if info, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Errorf("no cache database at %s; check that this is a cache "+
+				"storage location (Cache.StorageLocation)", dbPath)
+		}
+		return nil, errors.Wrapf(err, "failed to inspect the cache database at %s", dbPath)
+	} else if !info.IsDir() {
+		return nil, errors.Errorf("%s is not a directory, so it does not hold a cache database", dbPath)
+	}
 
 	// Initialize encryption manager to get the database key
 	encMgr, err := NewEncryptionManager(baseDir)
@@ -174,55 +273,101 @@ func OpenCacheDBReadOnly(baseDir string) (*CacheDB, error) {
 		return nil, errors.Wrap(err, "failed to initialize encryption manager")
 	}
 
-	// Configure BadgerDB for read-only access
-	opts := badger.DefaultOptions(dbPath)
-	opts.ReadOnly = true
-	opts.Logger = newBadgerLogger()
-
 	// Derive the database encryption key
 	dbKey, err := encMgr.DeriveDBKey()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to derive database encryption key")
 	}
-	opts.EncryptionKey = dbKey
-	opts.EncryptionKeyRotationDuration = 0
-	opts.IndexCacheSize = 64 << 20 // 64 MB
 
-	// Open the database in read-only mode
-	db, err := badger.Open(opts)
+	db, err := badger.Open(cacheDBOptions(dbPath, dbKey))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open BadgerDB in read-only mode")
+		if locked := explainDirectoryLock(baseDir, err); locked != nil {
+			return nil, locked
+		}
+		return nil, errors.Wrap(err, "failed to open BadgerDB for introspection")
 	}
 
 	cdb := &CacheDB{
-		db:      db,
-		encMgr:  encMgr,
-		baseDir: baseDir,
+		db:            db,
+		encMgr:        encMgr,
+		baseDir:       baseDir,
+		readOnly:      true,
+		usageMergeOps: make(map[StorageUsageKey]*badger.MergeOperator),
 	}
 
-	// Load the hash salt (must exist for read operations to make sense)
+	// Refuse a database whose layout this binary does not understand before
+	// reading a single record out of it.  Unlike NewCacheDB this only
+	// verifies: an introspection tool must leave no fingerprints on a database
+	// it is merely looking at, so it neither stamps a version nor claims a
+	// store mode.  That is the same reasoning that keeps EnsureStoreMode out
+	// of this path.
+	if err := cdb.VerifySchemaVersion(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	// Load the hash salt.  Unlike loadOrCreateSalt this refuses to generate
+	// one: without the original salt no stored hash can be recomputed, so a
+	// fresh salt would make every object in the database unfindable while
+	// looking like success -- and writing it would be a modification besides.
 	err = db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(KeySalt))
 		if err != nil {
 			return err
 		}
 		return item.Value(func(val []byte) error {
-			cdb.salt = make([]byte, len(val))
-			copy(cdb.salt, val)
+			salt := make([]byte, len(val))
+			copy(salt, val)
+			cdb.setSalt(salt)
 			return nil
 		})
 	})
 	if err != nil {
 		db.Close()
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, errors.Errorf("the database at %s carries no hash salt, so it holds no "+
+				"cache contents to inspect", dbPath)
+		}
 		return nil, errors.Wrap(err, "failed to load hash salt")
 	}
 
-	log.Debugf("Cache database opened in read-only mode at %s", dbPath)
+	log.Debugf("Cache database opened for introspection at %s", dbPath)
 	return cdb, nil
 }
 
-// StartGC starts the background garbage collection goroutine
+// explainDirectoryLock recognizes BadgerDB's directory-lock failure and
+// restates it in terms an operator can act on.  It returns nil when err is
+// some other failure.
+//
+// BadgerDB reports this as "Cannot acquire directory lock on %q.  Another
+// process is using this Badger database." (dir_unix.go) or "Cannot create lock
+// file %q.  Another process is using this Badger database" (dir_windows.go),
+// wrapping the underlying EWOULDBLOCK or sharing violation.  Neither says the
+// one thing the operator needs to know: the cache server is running, and the
+// same information is available from it.
+func explainDirectoryLock(baseDir string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(err.Error(), "Another process is using this Badger database") {
+		return nil
+	}
+	return errors.Wrapf(err,
+		"the cache database at %s is locked by another process, which almost always means "+
+			"the cache server is running; offline introspection requires the cache to be "+
+			"stopped, so either stop it or let the command query the running cache instead "+
+			"-- drop --offline if you passed it, and otherwise the running cache could not "+
+			"be found automatically, which usually means its address file is unreadable",
+		baseDir)
+}
+
+// StartGC starts the background garbage collection goroutine.
+//
+// Value-log GC rewrites the value log, so a read-only handle starts nothing.
 func (cdb *CacheDB) StartGC(ctx context.Context, egrp *errgroup.Group) {
+	if cdb.readOnly {
+		return
+	}
 	egrp.Go(func() error {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -282,16 +427,299 @@ func (cdb *CacheDB) loadOrCreateSalt() ([]byte, error) {
 }
 
 // Salt returns the per-database random salt used for hashing.
-func (cdb *CacheDB) Salt() []byte { return cdb.salt }
+//
+// The returned slice is shared with every other caller and with the database
+// itself; callers must treat it as read-only.  Nothing in the tree writes
+// through it -- both consumers hand it straight to hmac.New, which copies --
+// and a caller that did would corrupt every hash computed concurrently.
+func (cdb *CacheDB) Salt() []byte {
+	if p := cdb.salt.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// setSalt publishes a new salt.
+func (cdb *CacheDB) setSalt(salt []byte) {
+	cdb.salt.Store(&salt)
+}
+
+// ReloadSalt re-reads the hash salt from the database.
+//
+// The salt is cached at open because it is on the hot path, which is fine
+// until something replaces the database's contents underneath it.  Restoring
+// a backup does exactly that: the restored salt is the one every instance
+// hash in that catalog was derived from, so a consumer still holding the salt
+// generated at open computes different hashes and finds none of its objects.
+func (cdb *CacheDB) ReloadSalt() error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	salt, err := cdb.loadOrCreateSalt()
+	if err != nil {
+		return errors.Wrap(err, "failed to reload the hash salt")
+	}
+	cdb.setSalt(salt)
+	return nil
+}
+
+// DB exposes the underlying BadgerDB handle.
+//
+// This exists for sibling subsystems that store their own records in this
+// key space and need transactional semantics the typed helpers above do not
+// provide — read-your-writes transactions spanning several keys, and prefix
+// iteration with seeks.  The pstore origin backend
+// (see docs/pstore-design.md) is the only such consumer today.
+//
+// Callers must confine themselves to prefixes they own, and must call
+// EnsureStoreMode first so that a cache and a pstore can never operate on the
+// same database.
+//
+// This is the one way past the read-only guard: the handle it returns is a
+// writable BadgerDB even when ReadOnly reports true (see OpenCacheDBReadOnly
+// for why the underlying database is not opened read-only).  A consumer that
+// honors read-only opens must consult ReadOnly before writing through it --
+// pstore does, in Store.checkWritable.
+func (cdb *CacheDB) DB() *badger.DB { return cdb.db }
+
+// EnsureStoreMode records which subsystem owns this database, or verifies that
+// a previously recorded owner matches.
+//
+// Caches and pstore origins share one key space (see the prefix constants in
+// schema.go), so opening one as the other would silently corrupt it.  Every
+// consumer must call this immediately after opening.
+//
+// A database with no marker is adopted when it is empty.  A non-empty database
+// with no marker is necessarily a legacy cache — pstore always writes the
+// marker — so adopting it is allowed only for StoreModeCache.
+//
+// The other half of the database header, the schema version, is settled by
+// NewCacheDB before this runs: a layout this binary cannot read is refused
+// before anyone asks who owns it, because the ownership marker is itself just
+// another record written under that layout.
+func (cdb *CacheDB) EnsureStoreMode(mode StoreMode) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(KeyStoreMode))
+		if err == nil {
+			var found StoreMode
+			if vErr := item.Value(func(val []byte) error {
+				found = StoreMode(val)
+				return nil
+			}); vErr != nil {
+				return errors.Wrap(vErr, "failed to read store mode marker")
+			}
+			if found != mode {
+				return errors.Errorf(
+					"database at %s belongs to a %q store but was opened as a %q store; "+
+						"refusing to continue because the two share a key space",
+					cdb.baseDir, string(found), string(mode))
+			}
+			return nil
+		}
+		if !errors.Is(err, badger.ErrKeyNotFound) {
+			return errors.Wrap(err, "failed to read store mode marker")
+		}
+
+		// No marker.  Adopt it only if that cannot mislabel existing data.
+		if mode != StoreModeCache {
+			empty, cErr := txnIsEmptyApartFromHeader(txn)
+			if cErr != nil {
+				return cErr
+			}
+			if !empty {
+				return errors.Errorf(
+					"database at %s holds data but no store mode marker, so it is a "+
+						"pre-existing cache; refusing to open it as a %q store",
+					cdb.baseDir, string(mode))
+			}
+		}
+		return txn.Set([]byte(KeyStoreMode), []byte(mode))
+	})
+}
+
+// ensureSchemaVersion records the schema version of this database, or verifies
+// that a previously recorded version is one this binary can work with.
+//
+// Called from NewCacheDB, so it covers every writable consumer of the block
+// store — the cache and the pstore origin backend alike — before either of
+// them interprets a record.
+//
+// Four cases:
+//
+//   - No version key.  Every database created before versioning existed is in
+//     this state, as is a brand new one.  Both are stamped with
+//     CurrentSchemaVersion: the layout an unversioned database holds is, by
+//     definition, the one the last unversioned binary wrote, which is the
+//     layout this binary reads.  Adopting rather than refusing is deliberate;
+//     the alternative would break every deployed cache on upgrade.  This
+//     mirrors how EnsureStoreMode adopts an unmarked database as a cache.
+//   - Version equals CurrentSchemaVersion.  Nothing to do.
+//   - Version is older.  Handed to migrateSchema, and re-stamped once that
+//     succeeds.  No release has ever written a version below the current one,
+//     so today this only happens to a hand-edited or damaged marker, and
+//     migrateSchema — having no migration to offer — refuses it.
+//   - Version is newer.  Refused: this binary would read the records with the
+//     wrong rules, which is precisely the corruption versioning exists to
+//     prevent.
+func (cdb *CacheDB) ensureSchemaVersion() error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		found, ok, err := readSchemaVersion(txn)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !ok:
+			empty, cErr := txnIsEmptyApartFromHeader(txn)
+			if cErr != nil {
+				return cErr
+			}
+			if !empty {
+				log.Infof("Block store database at %s predates schema versioning; "+
+					"adopting it as schema version %d", cdb.baseDir, CurrentSchemaVersion)
+			}
+		case found == CurrentSchemaVersion:
+			return nil
+		case found > CurrentSchemaVersion:
+			return cdb.errSchemaTooNew(found)
+		default:
+			if err := migrateSchema(txn, found); err != nil {
+				return errors.Wrapf(err, "failed to migrate the block store database at %s "+
+					"from schema version %d to %d", cdb.baseDir, found, CurrentSchemaVersion)
+			}
+			log.Infof("Migrated the block store database at %s from schema version %d to %d",
+				cdb.baseDir, found, CurrentSchemaVersion)
+		}
+		return txn.Set([]byte(KeySchemaVersion), formatSchemaVersion(CurrentSchemaVersion))
+	})
+}
+
+// VerifySchemaVersion is the read-only counterpart of ensureSchemaVersion: it
+// refuses a database written under a newer schema but never writes, so it can
+// run inside a read-only BadgerDB handle (see OpenCacheDBReadOnly).
+//
+// A database with no version key is accepted as CurrentSchemaVersion for the
+// same reason ensureSchemaVersion adopts one, minus the stamp — introspecting
+// a cache must not require write access to it.  An older version is likewise
+// accepted: the writable open is where migration happens, and refusing to
+// *look* at a database that a normal start would quietly upgrade helps nobody.
+//
+// It is exported for the same reason EnsureStoreMode is: a consumer that
+// replaces this database's contents wholesale — restoring a backup catalog
+// into it — has a database whose header keys came from wherever the backup did
+// and no longer describe what was checked at open, and should re-verify.
+func (cdb *CacheDB) VerifySchemaVersion() error {
+	return cdb.db.View(func(txn *badger.Txn) error {
+		found, ok, err := readSchemaVersion(txn)
+		if err != nil {
+			return err
+		}
+		if ok && found > CurrentSchemaVersion {
+			return cdb.errSchemaTooNew(found)
+		}
+		return nil
+	})
+}
+
+// errSchemaTooNew builds the error returned when the database was written by a
+// binary that understands a later layout than this one does.
+func (cdb *CacheDB) errSchemaTooNew(found SchemaVersion) error {
+	return errors.Errorf(
+		"database at %s uses block store schema version %d, but this build of Pelican "+
+			"supports up to version %d; refusing to open it because reading a newer "+
+			"layout with older rules would corrupt it -- upgrade Pelican to a release "+
+			"that supports schema version %d",
+		cdb.baseDir, found, CurrentSchemaVersion, found)
+}
+
+// readSchemaVersion reads the schema version marker.  ok is false when the
+// database carries no marker at all.
+func readSchemaVersion(txn *badger.Txn) (version SchemaVersion, ok bool, err error) {
+	item, err := txn.Get([]byte(KeySchemaVersion))
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, errors.Wrap(err, "failed to read the schema version marker")
+	}
+	if err = item.Value(func(val []byte) error {
+		parsed, pErr := strconv.ParseUint(string(val), 10, 32)
+		if pErr != nil {
+			return errors.Errorf("schema version marker holds %q, which is not a version number", string(val))
+		}
+		version = SchemaVersion(parsed)
+		return nil
+	}); err != nil {
+		return 0, false, errors.Wrap(err, "failed to read the schema version marker")
+	}
+	return version, true, nil
+}
+
+// formatSchemaVersion renders a version for storage, matching the plain-text
+// style of the other header keys.
+func formatSchemaVersion(v SchemaVersion) []byte {
+	return []byte(strconv.FormatUint(uint64(v), 10))
+}
+
+// migrateSchema brings a database written under schema version `from` up to
+// CurrentSchemaVersion.  Its caller re-stamps the marker once it returns.
+//
+// There is exactly one schema version today, so no database Pelican ever wrote
+// reaches this function and it has nothing to do but refuse; it is the seam a
+// future version hooks into.  Refusing rather than shrugging is the point of
+// the default: whoever bumps CurrentSchemaVersion without teaching this
+// function about the step gets a loud, specific failure instead of a binary
+// that reads old records under new rules.
+//
+// A migration to version N is expected to rewrite, in place, every record
+// whose layout changed between N-1 and N — and to be idempotent, since a crash
+// part-way through leaves the old stamp in place and the migration runs again
+// on the next open.  Handle each version step separately (`for v := from; v <
+// CurrentSchemaVersion; v++`) so that a database several versions behind is
+// carried forward one step at a time rather than needing a bespoke path per
+// starting point.
+//
+// A migration too large for one BadgerDB transaction should not be forced into
+// this txn: give it a method on CacheDB that batches its own writes, call that
+// from ensureSchemaVersion before the stamping transaction, and leave this
+// function for the cheap in-place cases.
+func migrateSchema(txn *badger.Txn, from SchemaVersion) error {
+	return errors.Errorf("no migration is available from schema version %d", from)
+}
+
+// txnIsEmptyApartFromHeader reports whether the database holds no records
+// other than the header keys that describe the database itself (the hash salt,
+// which NewCacheDB writes before any consumer runs, the schema version stamped
+// alongside it, and the store mode marker).  None of those says anything about
+// which subsystem's records the database holds, so a database carrying only
+// them is still up for adoption.
+func txnIsEmptyApartFromHeader(txn *badger.Txn) (bool, error) {
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	it := txn.NewIterator(opts)
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		switch string(it.Item().Key()) {
+		case KeySalt, KeySchemaVersion, KeyStoreMode:
+			continue
+		default:
+			return false, nil
+		}
+	}
+	return true, nil
+}
 
 // ObjectHash computes the salted SHA-256 hash for a pelican URL.
 func (cdb *CacheDB) ObjectHash(pelicanURL string) ObjectHash {
-	return ComputeObjectHash(cdb.salt, pelicanURL)
+	return ComputeObjectHash(cdb.Salt(), pelicanURL)
 }
 
 // InstanceHash computes the salted SHA-256 hash for (etag, objectHash).
 func (cdb *CacheDB) InstanceHash(etag string, objectHash ObjectHash) InstanceHash {
-	return ComputeInstanceHash(cdb.salt, etag, objectHash)
+	return ComputeInstanceHash(cdb.Salt(), etag, objectHash)
 }
 
 // --- Metadata Operations ---
@@ -326,6 +754,9 @@ func (cdb *CacheDB) GetMetadata(instanceHash InstanceHash) (*CacheMetadata, erro
 // metadata entry (e.g. InitDiskStorage, StoreInline); for subsequent updates
 // prefer MergeMetadata which applies field-level merge semantics.
 func (cdb *CacheDB) SetMetadata(instanceHash InstanceHash, meta *CacheMetadata) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	data, err := msgpack.Marshal(meta)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal metadata")
@@ -358,6 +789,9 @@ func (cdb *CacheDB) SetMetadata(instanceHash InstanceHash, meta *CacheMetadata) 
 // multiple concurrent callers merge metadata for the same instance (e.g.
 // concurrent range-on-miss initialization via initObjectFromStat).
 func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	const maxRetries = 20
 	backoff := 100 * time.Microsecond
 	for attempt := 0; ; attempt++ {
@@ -539,6 +973,9 @@ func mergeSetOnceComparable[T comparable](name string, existing *T, incoming T) 
 
 // DeleteMetadata removes metadata for a file
 func (cdb *CacheDB) DeleteMetadata(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(MetaKey(instanceHash))
 	})
@@ -579,6 +1016,9 @@ func (cdb *CacheDB) GetLatestETag(objectHash ObjectHash) (string, bool, error) {
 // prevents a slow download that finishes late from clobbering a newer
 // ETag written by a more recent request.
 func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt time.Time) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	key := ETagKey(objectHash)
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Read-modify-write: only update if newer.
@@ -601,6 +1041,9 @@ func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt
 
 // DeleteLatestETag removes the ETag entry for an object
 func (cdb *CacheDB) DeleteLatestETag(objectHash ObjectHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(ETagKey(objectHash))
 	})
@@ -631,6 +1074,9 @@ func decodeETagEntry(val []byte) (string, time.Time) {
 // to a numeric ID.  This ensures the IDs survive restarts so that LRU
 // keys and usage counters remain valid.
 func (cdb *CacheDB) SetNamespaceMapping(prefix string, id NamespaceID) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	val := make([]byte, 4)
 	binary.LittleEndian.PutUint32(val, uint32(id))
 	return cdb.db.Update(func(txn *badger.Txn) error {
@@ -689,6 +1135,9 @@ func DiskMappingKey(storageID StorageID) []byte {
 
 // SaveDiskMapping persists a single storageID → (UUID, directory) mapping.
 func (cdb *CacheDB) SaveDiskMapping(dm DiskMapping) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	data, err := msgpack.Marshal(&dm)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal disk mapping")
@@ -775,6 +1224,9 @@ func (cdb *CacheDB) GetBlockState(instanceHash InstanceHash) (*roaring.Bitmap, e
 
 // SetBlockState stores the bitmap of downloaded blocks
 func (cdb *CacheDB) SetBlockState(instanceHash InstanceHash, bitmap *roaring.Bitmap) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	data, err := bitmap.ToBytes()
 	if err != nil {
 		return errors.Wrap(err, "failed to serialize bitmap")
@@ -797,6 +1249,9 @@ func (cdb *CacheDB) SetBlockState(instanceHash InstanceHash, bitmap *roaring.Bit
 // The method retries on BadgerDB transaction conflicts, which can occur when
 // multiple concurrent block fetchers write to the same object's bitmap.
 func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash InstanceHash, newBlocks *roaring.Bitmap, storageID StorageID, namespaceID NamespaceID, contentLength int64) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	newData, err := newBlocks.ToBytes()
 	if err != nil {
 		return errors.Wrap(err, "failed to serialize new blocks bitmap")
@@ -974,6 +1429,9 @@ func (cdb *CacheDB) getUsageMergeOp(storageID StorageID, namespaceID NamespaceID
 // is append-only (no read-modify-write cycle) and cannot conflict with
 // concurrent transactions.
 func (cdb *CacheDB) AddUsage(storageID StorageID, namespaceID NamespaceID, delta int64) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	if delta == 0 {
 		return nil
 	}
@@ -1006,6 +1464,9 @@ func (cdb *CacheDB) MarkBlocksDownloaded(instanceHash InstanceHash, startBlock, 
 // will be re-fetched on the next read.  This is used during auto-repair when
 // corruption is detected.
 func (cdb *CacheDB) ClearBlocks(instanceHash InstanceHash, blocks []uint32) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -1058,6 +1519,9 @@ func (cdb *CacheDB) GetDownloadedBlockCount(instanceHash InstanceHash) (uint64, 
 
 // DeleteBlockState removes block state for a file
 func (cdb *CacheDB) DeleteBlockState(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(StateKey(instanceHash))
 	})
@@ -1096,8 +1560,90 @@ func (cdb *CacheDB) GetInlineData(instanceHash InstanceHash) ([]byte, error) {
 // The caller (StoreInline) is responsible for usage accounting via
 // ChargeUsage; this function does NOT adjust usage counters.
 func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byte) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(InlineKey(instanceHash), encryptedData)
+	})
+}
+
+// --- Append intent operations ---
+
+// SetAppendIntent records that a streaming append is in flight for the given
+// object version.  See PrefixAppendIntent for why the record exists.
+func (cdb *CacheDB) SetAppendIntent(instanceHash InstanceHash, intent AppendIntent) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	encoded, err := msgpack.Marshal(&intent)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode append intent")
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(AppendIntentKey(instanceHash), encoded)
+	})
+}
+
+// DeleteAppendIntent removes an append-in-flight record.
+func (cdb *CacheDB) DeleteAppendIntent(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete(AppendIntentKey(instanceHash))
+	})
+}
+
+// GetAppendIntent returns the append-in-flight record for an object version,
+// or nil when there is none.
+func (cdb *CacheDB) GetAppendIntent(instanceHash InstanceHash) (*AppendIntent, error) {
+	var intent AppendIntent
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(AppendIntentKey(instanceHash))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			return msgpack.Unmarshal(val, &intent)
+		})
+	})
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, errors.Wrap(err, "failed to read append intent")
+	}
+	return &intent, nil
+}
+
+// ScanAppendIntents calls fn for every append-in-flight record.  Returning an
+// error from fn stops the scan and is returned to the caller.
+func (cdb *CacheDB) ScanAppendIntents(fn func(InstanceHash, AppendIntent) error) error {
+	return cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixAppendIntent)
+		opts := badger.DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			hash := InstanceHash(string(item.Key())[len(PrefixAppendIntent):])
+			if hash == "" {
+				continue
+			}
+			var intent AppendIntent
+			if err := item.Value(func(val []byte) error {
+				return msgpack.Unmarshal(val, &intent)
+			}); err != nil {
+				log.Warnf("Skipping unreadable append intent for %s: %v", hash, err)
+				continue
+			}
+			if err := fn(hash, intent); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -1107,6 +1653,9 @@ func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byt
 // Uses debouncing: only updates if last access was more than debounceTime ago
 // This is optimized to avoid iteration by storing the last access time in metadata
 func (cdb *CacheDB) UpdateLRU(instanceHash InstanceHash, debounceTime time.Duration) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Get metadata to find prefixID and last access time
 		item, err := txn.Get(MetaKey(instanceHash))
@@ -1320,6 +1869,9 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 //
 // The next AddUsage call will lazily create a fresh MergeOperator.
 func (cdb *CacheDB) SetUsage(storageID StorageID, namespaceID NamespaceID, value int64) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	suk := StorageUsageKey{StorageID: storageID, NamespaceID: namespaceID}
 
 	cdb.usageMu.Lock()
@@ -1396,21 +1948,51 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 // salt is required to recompute the ObjectHash from SourceURL for
 // ETag-table cleanup.
 func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) (*CacheMetadata, error) {
-	var meta CacheMetadata
-	var hasMetadata bool
+	meta, err := readMetadataInTxn(txn, instanceHash)
+	if err != nil {
+		return nil, err
+	}
+	return deleteObjectWithMetaInTxn(txn, salt, instanceHash, meta)
+}
 
+// readMetadataInTxn decodes an object's metadata record inside an existing
+// transaction.  A missing or undecodable record yields (nil, nil): the object
+// still has keys and files worth reclaiming, and the deletion path is written
+// to proceed without metadata.  Only a genuine read failure is an error.
+func readMetadataInTxn(txn *badger.Txn, instanceHash InstanceHash) (*CacheMetadata, error) {
 	item, err := txn.Get(MetaKey(instanceHash))
-	if err == nil {
-		hasMetadata = true
-		err = item.Value(func(val []byte) error {
-			return msgpack.Unmarshal(val, &meta)
-		})
-		if err != nil {
-			log.Warnf("Failed to unmarshal metadata during object deletion: %v", err)
-			hasMetadata = false
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, nil
 		}
-	} else if !errors.Is(err, badger.ErrKeyNotFound) {
 		return nil, errors.Wrap(err, "failed to get metadata for deletion")
+	}
+	var meta CacheMetadata
+	if err := item.Value(func(val []byte) error {
+		return msgpack.Unmarshal(val, &meta)
+	}); err != nil {
+		log.Warnf("Failed to unmarshal metadata during object deletion: %v", err)
+		return nil, nil
+	}
+	return &meta, nil
+}
+
+// deleteObjectWithMetaInTxn is deleteObjectInTxn for a caller that has already
+// decoded the object's metadata.
+//
+// Every phase of EvictByLRU but the plain LRU walk reads that record first, to
+// decide whether the object touches the storage directory being freed.  Passing
+// it in spares a second Get and a second msgpack decode of the same key inside
+// the same transaction -- BadgerDB does not memoize reads, so it really is a
+// repeat of both.
+//
+// known may be nil, meaning there is no usable metadata for the object; the
+// keys that do not depend on it are still removed.
+func deleteObjectWithMetaInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash, known *CacheMetadata) (*CacheMetadata, error) {
+	var meta CacheMetadata
+	hasMetadata := known != nil
+	if hasMetadata {
+		meta = *known
 	}
 
 	// Delete LRU entry using metadata (before deleting metadata)
@@ -1422,15 +2004,25 @@ func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) 
 	}
 
 	// Clean up ETag table if this was the latest version.
+	//
 	// ObjectHash is derived from SourceURL + salt rather than stored
-	// redundantly in metadata.
+	// redundantly in metadata.  The record is needed anyway -- for the LRU key
+	// above and for the caller's usage accounting -- so this costs one HMAC
+	// and one read of the e: key, not a metadata lookup of its own.
+	//
+	// The e: entry is deleted only when it names the version being removed;
+	// an older version going away must leave the pointer to the current one
+	// alone.  That comparison has to decode the entry (see decodeETagEntry) --
+	// the raw value carries an 8-byte timestamp prefix, so comparing it to
+	// meta.ETag byte-for-byte matches nothing and would leave a dangling e:
+	// key behind for every object the cache ever evicts.
 	if hasMetadata && meta.SourceURL != "" {
 		objectHash := ComputeObjectHash(salt, meta.SourceURL)
 		etagItem, err := txn.Get(ETagKey(objectHash))
 		if err == nil {
 			var currentETag string
 			err = etagItem.Value(func(val []byte) error {
-				currentETag = string(val)
+				currentETag, _ = decodeETagEntry(val)
 				return nil
 			})
 			if err == nil && currentETag == meta.ETag {
@@ -1461,6 +2053,10 @@ func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) 
 	// Delete purge-first marker if present (best-effort, ignore not-found)
 	_ = txn.Delete(PurgeFirstKey(instanceHash))
 
+	// Likewise the append-in-flight marker: whatever removed the object also
+	// removed the thing the marker exists to let us reclaim.
+	_ = txn.Delete(AppendIntentKey(instanceHash))
+
 	if hasMetadata {
 		return &meta, nil
 	}
@@ -1473,10 +2069,13 @@ func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) 
 // counters.  Usage is decremented via AddUsage after the transaction
 // commits so that the write cannot conflict.
 func (cdb *CacheDB) DeleteObject(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	var meta *CacheMetadata
 	err := cdb.db.Update(func(txn *badger.Txn) error {
 		var txnErr error
-		meta, txnErr = deleteObjectInTxn(txn, cdb.salt, instanceHash)
+		meta, txnErr = deleteObjectInTxn(txn, cdb.Salt(), instanceHash)
 		return txnErr
 	})
 	if err != nil {
@@ -1507,6 +2106,23 @@ type evictedObject struct {
 	chunkLocations []ChunkLocation // Locations of chunks 1, 2, ...
 }
 
+// evictionSkipBudget bounds how many protected objects the LRU walk (phases 2
+// and 3) will step over before giving up.
+//
+// A skipped object frees nothing, so without a bound a long run of protected
+// objects at the head of the LRU index would turn a bounded eviction into a
+// full index scan.  Reaching this budget means something pathological is
+// happening -- readers do not normally accumulate on the least-recently-used
+// objects -- so the right response is to stop and let the next pass retry,
+// not to keep scanning.
+//
+// The budget deliberately does NOT gate the purge-first drain.  That phase
+// walks the pf: index, which is not the LRU order but an explicit list an
+// operator (or the emergency low-space purge) asked to be removed; its length
+// is bounded by that request, and stopping it because unrelated LRU candidates
+// were pinned would silently ignore the admin evict API.
+const evictionSkipBudget = 1024
+
 // EvictByLRU evicts objects from a storage+namespace combination, draining
 // purge-first items before walking the regular LRU index — all within a
 // single BadgerDB transaction.
@@ -1516,15 +2132,36 @@ type evictedObject struct {
 // either limit means "no limit on that dimension".  The method is allowed
 // to go one object over the byte threshold so that progress is always
 // made even when only large objects remain.
-func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) ([]evictedObject, error) {
+//
+// skip, when non-nil, is consulted for every candidate; returning true leaves
+// the object in place.  It is how a caller protects objects that must not
+// disappear right now -- see StorageManager.EvictByLRU, which uses it to spare
+// objects under a live reader.  A skipped object is not counted against
+// maxObjects, because skipping frees nothing and counting it would let
+// eviction report a full batch while returning under target.
+//
+// Returns the evicted objects and the number that were skipped.
+func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64, skip func(InstanceHash) bool) ([]evictedObject, int, error) {
+	if err := cdb.checkWritable(); err != nil {
+		return nil, 0, err
+	}
+
 	var evicted []evictedObject
+	// lruSkipped counts skips charged against evictionSkipBudget; pfSkipped
+	// counts purge-first skips, which are reported but never end a pass.
+	var lruSkipped, pfSkipped int
 	usageDeltas := make(map[StorageUsageKey]int64)
+
+	skipBudget := evictionSkipBudget
+	if cdb.skipBudget > 0 {
+		skipBudget = cdb.skipBudget
+	}
 
 	err := cdb.db.Update(func(txn *badger.Txn) error {
 		var freedBytes int64
 
-		// --- helper: returns true when we should stop evicting ---
-		limitReached := func() bool {
+		// --- helper: returns true when the caller's targets are met ---
+		quotaReached := func() bool {
 			if maxObjects > 0 && len(evicted) >= maxObjects {
 				return true
 			}
@@ -1534,9 +2171,29 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 			return false
 		}
 
+		// --- helper: returns true when the LRU walk should stop ---
+		limitReached := func() bool {
+			return lruSkipped >= skipBudget || quotaReached()
+		}
+
 		// --- helper: delete one object by hash, record results ---
-		evictOne := func(hash InstanceHash) {
-			meta, err := deleteObjectInTxn(txn, cdb.salt, hash)
+		//
+		// known is the object's metadata when the caller has already read it,
+		// and nil when it has not — in which case the record is read here.
+		evictOne := func(hash InstanceHash, known *CacheMetadata, skipCounter *int) {
+			// Checked before the metadata read: a protected object is not
+			// going anywhere this pass, so there is nothing to learn about it.
+			if skip != nil && skip(hash) {
+				*skipCounter++
+				return
+			}
+			var meta *CacheMetadata
+			var err error
+			if known != nil {
+				meta, err = deleteObjectWithMetaInTxn(txn, cdb.Salt(), hash, known)
+			} else {
+				meta, err = deleteObjectInTxn(txn, cdb.Salt(), hash)
+			}
 			if err != nil {
 				log.Warnf("Failed to delete object %s during eviction: %v", hash, err)
 				return
@@ -1593,7 +2250,9 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 			defer it.Close()
 
 			for it.Seek(pfPrefix); it.ValidForPrefix(pfPrefix); it.Next() {
-				if limitReached() {
+				// Only the caller's own targets end this phase; the skip
+				// budget is reserved for the LRU walk below.
+				if quotaReached() {
 					break
 				}
 				keyStr := string(it.Item().Key())
@@ -1602,25 +2261,25 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 					continue
 				}
 
-				// Peek at metadata to check storageID.
-				metaItem, err := txn.Get(MetaKey(hash))
+				// Peek at metadata to check storageID.  The same record
+				// decides what has to be deleted, so it is handed to
+				// evictOne rather than read again.
+				meta, err := readMetadataInTxn(txn, hash)
 				if err != nil {
-					// Object already gone — clean up stale marker.
+					return err
+				}
+				if meta == nil {
+					// Nothing this marker can act on -- the object is gone,
+					// or its record does not decode and the consistency
+					// checker owns it.  Either way the marker is stale.
 					_ = txn.Delete(it.Item().KeyCopy(nil))
 					continue
 				}
-				var meta CacheMetadata
-				err = metaItem.Value(func(val []byte) error {
-					return msgpack.Unmarshal(val, &meta)
-				})
-				if err != nil {
-					continue
-				}
-				if !objectUsesDir(&meta, storageID) {
+				if !objectUsesDir(meta, storageID) {
 					continue
 				}
 
-				evictOne(hash)
+				evictOne(hash, meta, &pfSkipped)
 			}
 		}
 
@@ -1639,7 +2298,10 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				if err != nil {
 					continue
 				}
-				evictOne(hash)
+				// This phase has no reason of its own to read the record:
+				// the LRU key already says the object's base chunk is in
+				// this storage+namespace.
+				evictOne(hash, nil, &lruSkipped)
 				if limitReached() {
 					break
 				}
@@ -1677,25 +2339,22 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 					continue // already covered by Phase 2
 				}
 
-				// Peek at metadata to check chunk locations.
-				metaItem, err := txn.Get(MetaKey(hash))
+				// Peek at metadata to check chunk locations.  As in phase 1,
+				// the record read here is the one the deletion needs.
+				meta, err := readMetadataInTxn(txn, hash)
 				if err != nil {
-					continue
+					return err
 				}
-				var meta CacheMetadata
-				err = metaItem.Value(func(val []byte) error {
-					return msgpack.Unmarshal(val, &meta)
-				})
-				if err != nil {
+				if meta == nil {
 					continue
 				}
 				if !meta.IsChunked() {
 					continue
 				}
-				if !objectUsesDir(&meta, storageID) {
+				if !objectUsesDir(meta, storageID) {
 					continue
 				}
-				evictOne(hash)
+				evictOne(hash, meta, &lruSkipped)
 			}
 		}
 
@@ -1711,7 +2370,7 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 		}
 	}
 
-	return evicted, err
+	return evicted, lruSkipped + pfSkipped, err
 }
 
 // badgerLogger adapts Pelican's logrus to BadgerDB's logger interface
@@ -1809,25 +2468,40 @@ func (cdb *CacheDB) HasMetadata(instanceHash InstanceHash) (bool, error) {
 // Batch allows batching multiple writes for efficiency
 type Batch struct {
 	wb *badger.WriteBatch
+	// cdb is retained so the batch inherits the handle's read-only status;
+	// NewBatch cannot report the refusal itself, having no error to return.
+	cdb *CacheDB
 }
 
-// NewBatch creates a new write batch
+// NewBatch creates a new write batch.
+//
+// A batch taken from a read-only handle refuses at Set, Delete, and Flush
+// rather than here, because there is no error to return from this call.
 func (cdb *CacheDB) NewBatch() *Batch {
-	return &Batch{wb: cdb.db.NewWriteBatch()}
+	return &Batch{wb: cdb.db.NewWriteBatch(), cdb: cdb}
 }
 
 // Set adds a key-value pair to the batch
 func (b *Batch) Set(key, value []byte) error {
+	if err := b.cdb.checkWritable(); err != nil {
+		return err
+	}
 	return b.wb.Set(key, value)
 }
 
 // Delete adds a delete operation to the batch
 func (b *Batch) Delete(key []byte) error {
+	if err := b.cdb.checkWritable(); err != nil {
+		return err
+	}
 	return b.wb.Delete(key)
 }
 
 // Flush commits the batch
 func (b *Batch) Flush() error {
+	if err := b.cdb.checkWritable(); err != nil {
+		return err
+	}
 	return b.wb.Flush()
 }
 
@@ -1840,6 +2514,9 @@ func (b *Batch) Cancel() {
 
 // MarkPurgeFirst marks a file hash for priority eviction
 func (cdb *CacheDB) MarkPurgeFirst(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Check if metadata exists first
 		_, err := txn.Get(MetaKey(instanceHash))
@@ -1856,6 +2533,9 @@ func (cdb *CacheDB) MarkPurgeFirst(instanceHash InstanceHash) error {
 
 // UnmarkPurgeFirst removes the purge first marker for a file hash
 func (cdb *CacheDB) UnmarkPurgeFirst(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(PurgeFirstKey(instanceHash))
 	})
@@ -1934,6 +2614,9 @@ func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[StorageID]string) (S
 // Objects are deleted in batches to avoid exceeding BadgerDB's
 // transaction size limit.
 func (cdb *CacheDB) PurgeStorageID(storageID StorageID) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	const batchSize = 500
 
 	lruPrefix := []byte(fmt.Sprintf("%s%d:", PrefixLRU, storageID))
@@ -1971,7 +2654,7 @@ func (cdb *CacheDB) PurgeStorageID(storageID StorageID) error {
 
 		err = cdb.db.Update(func(txn *badger.Txn) error {
 			for _, hash := range hashes {
-				if _, err := deleteObjectInTxn(txn, cdb.salt, hash); err != nil {
+				if _, err := deleteObjectInTxn(txn, cdb.Salt(), hash); err != nil {
 					log.Warnf("Failed to delete object %s during storage purge: %v", hash, err)
 				}
 			}

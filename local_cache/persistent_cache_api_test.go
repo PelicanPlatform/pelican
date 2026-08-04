@@ -100,7 +100,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 	t.Run("WrappedSentinel", func(t *testing.T) {
 		// The transfer engine wraps the sentinel with a per-origin
 		// context ("pending queue is full", "origin \"…\" pending
-		// queue is full", …); handleError must still recognise it
+		// queue is full", …); handleError must still recognize it
 		// via errors.Is.
 		rec := httptest.NewRecorder()
 		wrapped := errors.Wrapf(client.ErrTooManyRequests, "origin %q pending queue is full", "originA")

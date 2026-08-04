@@ -53,7 +53,7 @@ const (
 //   - dekWrapKey  – wraps/unwraps per-object data encryption keys (DEKs)
 //   - the DB key  – returned by DeriveDBKey for BadgerDB encryption
 //
-// The mu mutex protects only the on-disk serialisation in saveMasterKey
+// The mu mutex protects only the on-disk serialization in saveMasterKey
 // (called by UpdateMasterKeyEncryption); reader methods are lock-free
 // because the fields they touch are immutable after construction.
 type EncryptionManager struct {

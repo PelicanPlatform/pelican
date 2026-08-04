@@ -21,7 +21,6 @@ package local_cache
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -74,35 +73,7 @@ func requestLogger(r *http.Request, objectPath string) *log.Entry {
 // Digest header value.  If there are no checksums, it returns an empty string.
 // Example output: "md5=rL0Y20zC+Fzt72VPzMSk2A==, crc32c=abcd1234"
 func formatDigestHeader(checksums []Checksum) string {
-	if len(checksums) == 0 {
-		return ""
-	}
-
-	var parts []string
-	for _, ck := range checksums {
-		var algName, encodedVal string
-		switch ck.Type {
-		case ChecksumMD5:
-			algName = "md5"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumSHA1:
-			algName = "sha"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumSHA256:
-			algName = "sha-256"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumCRC32:
-			algName = "crc32"
-			encodedVal = hex.EncodeToString(ck.Value)
-		case ChecksumCRC32C:
-			algName = "crc32c"
-			encodedVal = hex.EncodeToString(ck.Value)
-		default:
-			continue // skip unknown checksum types
-		}
-		parts = append(parts, algName+"="+encodedVal)
-	}
-	return strings.Join(parts, ", ")
+	return FormatDigestHeader(checksums)
 }
 
 // isConnectionError checks if an error is a connection error (reset, refused, etc.)
@@ -890,7 +861,7 @@ func writeXMLText(buf *bytes.Buffer, s string) {
 // ETag such as `</D:getetag><D:resourcetype><D:collection/></D:resourcetype>`
 // would otherwise forge properties in a document the cache serves to its own
 // clients under its own name — a forged resourcetype in particular now steers
-// client behaviour, since clients use it to decide whether a path is a
+// client behavior, since clients use it to decide whether a path is a
 // collection.
 func buildPropfindMultistatus(objectPath string, meta *CacheMetadata) []byte {
 	// Format Last-Modified per RFC 7232 §2.2 / HTTP-date.
@@ -1055,7 +1026,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 // injection, and connection-error classification.  Switching to the transfer
 // engine would eliminate ~80 lines of manual HTTP plumbing here and in
 // proxyPropfind.  The trade-off is that proxyWrite needs cache-specific
-// behaviour the engine doesn't (yet) support: scope-aware authorization
+// behavior the engine doesn't (yet) support: scope-aware authorization
 // (storage.create vs storage.modify), streaming the origin's full response
 // back to the caller (status + headers + body), and post-success cache
 // invalidation with ETag-aware instance management.  Until the engine
