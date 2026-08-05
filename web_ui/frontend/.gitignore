@@ -5,6 +5,12 @@
 /.pnp
 .pnp.js
 
+# This project uses pnpm; pnpm-lock.yaml is the committed lockfile. Ignore the
+# other package managers' lockfiles so that an accidental `npm install` or
+# `yarn install` cannot commit a second, conflicting source of truth.
+/package-lock.json
+/yarn.lock
+
 # testing
 /coverage
 

@@ -1,0 +1,75 @@
+# pnpm settings for the web UI frontend.
+#
+# ── Supply-chain hardening ───────────────────────────────────────────────────
+#
+# Hold new releases for a week before we are willing to install them. Most
+# npm account-takeover attacks are caught and unpublished within hours, so a
+# cooldown means the malicious version is usually gone before we would pick it
+# up. pnpm 11 defaults to 1440 (24h); this raises it to 7 days.
+#
+# NOTE: the unit is MINUTES, not days. 7 * 24 * 60 = 10080.
+minimumReleaseAge: 10080
+
+# Our own first-party packages are exempt: the cooldown exists to protect us
+# from a compromised third-party publisher, and we control these. Without the
+# exemption a freshly published @pelicanplatform release cannot be consumed
+# here for a week, which would block coordinated frontend/library changes.
+# Matched by package name, so it applies to every version of these packages.
+minimumReleaseAgeExclude:
+  - '@pelicanplatform/*'
+
+# Refuse transitive dependencies that resolve to a git repo or a tarball URL
+# instead of a registry package. Those bypass registry-side scanning and are a
+# known attack vector. Set explicitly rather than relying on the default.
+blockExoticSubdeps: true
+
+# Fail the install when a dependency wants to run an install script that is not
+# listed in `allowBuilds` below, instead of silently skipping it. Default in
+# pnpm 11, pinned here so a future default change cannot quietly weaken it.
+strictDepBuilds: true
+
+# Reject a version whose publishing trust evidence is weaker than an earlier
+# version of the same package had (e.g. it used npm provenance / a trusted
+# publisher before and this release does not). That weakening is the signature
+# an account takeover leaves behind.
+trustPolicy: no-downgrade
+
+# ...but only enforce it on packages published within the last 180 days, which
+# is the window where a takeover is still worth catching. Older release lines
+# predate provenance/trusted publishing entirely, so without this every pinned
+# legacy transitive dep looks like a "downgrade". Two currently would:
+# semver@6.3.1 (pinned by @babel/core) and eslint-import-resolver-typescript@3.10.1
+# (pinned by eslint-config-next). Prefer raising this cutoff over adding
+# per-package entries to trustPolicyExclude, which need hand-maintenance.
+#
+# Unit is MINUTES: 180 * 24 * 60 = 259200.
+trustPolicyIgnoreAfter: 259200
+
+#
+# pnpm blocks dependency install/build scripts by default, and `strictDepBuilds`
+# (on by default in pnpm 11) fails the install if a package with a script is not
+# listed here. Every entry below is deliberately `false`: we build only on
+# mainstream platforms (linux-x64, linux-arm64, darwin-arm64), where each of
+# these packages ships its native code as a prebuilt optional dependency. That
+# keeps `pnpm install` from needing a C/C++ toolchain and makes it much faster.
+#
+# When a new dependency shows up in an ERR_PNPM_IGNORED_BUILDS error, add it
+# here rather than turning off `strictDepBuilds` — the error is the point, it
+# makes a newly introduced install script a deliberate review decision.
+allowBuilds:
+  # Image optimization for Next.js. Uses the prebuilt @img/sharp-* packages.
+  sharp: false
+
+  # Native resolver behind eslint-import-resolver-typescript (eslint-config-next).
+  # Uses the prebuilt @unrs/resolver-binding-* packages.
+  unrs-resolver: false
+
+  # Pulled in transitively by swagger-ui-react's apidom parsers, which fall back
+  # to a pure-JS parse path when the native grammars are absent.
+  tree-sitter: false
+  tree-sitter-json: false
+  '@tree-sitter-grammars/tree-sitter-yaml': false
+
+  # Post-install telemetry/funding notices only — nothing is built.
+  '@scarf/scarf': false
+  core-js-pure: false

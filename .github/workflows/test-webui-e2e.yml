@@ -26,7 +26,7 @@ jobs:
     name: Build Pelican binaries
     runs-on: ubuntu-latest
     container:
-      # pelican-dev has Go, Node.js, npm, GoReleaser, and XRootD pre-installed.
+      # pelican-dev has Go, Node.js, pnpm, GoReleaser, and XRootD pre-installed.
       image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
 
     steps:
@@ -42,23 +42,32 @@ jobs:
       - name: Install libatomic (Node.js >= 24 runtime dependency)
         run: dnf install -y libatomic
 
+      # Must precede setup-node: its "cache: pnpm" needs the pnpm binary on PATH
+      # to locate the store directory. The pnpm version comes from the
+      # "packageManager" field in the frontend's package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          package_json_file: "web_ui/frontend/package.json"
+
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "npm"
-          cache-dependency-path: "web_ui/frontend/package-lock.json"
+          cache: "pnpm"
+          cache-dependency-path: "web_ui/frontend/pnpm-lock.yaml"
 
       - name: Cache Next.js build output
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
+          # Only the Next.js build cache lives here; setup-node's "cache: pnpm"
+          # already handles the pnpm store.
           path: |
-            ~/.npm
             ${{ github.workspace }}/web_ui/frontend/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/package-lock.json') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/package-lock.json') }}-
+            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-
       - name: Build web UI
         run: |
           echo "::group::Building web UI"
@@ -128,12 +137,20 @@ jobs:
       - name: Install libatomic (Node.js >= 24 runtime dependency)
         run: dnf install -y libatomic
 
+      # Must precede setup-node: its "cache: pnpm" needs the pnpm binary on PATH
+      # to locate the store directory. The pnpm version comes from the
+      # "packageManager" field in the frontend's package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          package_json_file: "web_ui/frontend/package.json"
+
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "npm"
-          cache-dependency-path: "web_ui/frontend/package-lock.json"
+          cache: "pnpm"
+          cache-dependency-path: "web_ui/frontend/pnpm-lock.yaml"
 
       - name: Download Pelican binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -255,10 +272,10 @@ jobs:
             --claim "oidc_iss=${ISSUER}" \
             --claim "oidc_sub=admin")
           echo "PELICAN_E2E_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
-      - name: Install npm dependencies and Playwright browsers
+      - name: Install pnpm dependencies and Playwright browsers
         working-directory: web_ui/frontend
         run: |
-          npm ci
+          pnpm install --frozen-lockfile
           # pelican-dev is AlmaLinux-based; Playwright's --with-deps uses apt-get
           # and will fail. Install Chromium's system deps via dnf instead.
           dnf install -y \
@@ -280,7 +297,7 @@ jobs:
             nss \
             nspr \
             pango
-          npx playwright install chromium
+          pnpm exec playwright install chromium
       - name: Run Playwright e2e tests (${{ matrix.service }})
         working-directory: web_ui/frontend
         env:
@@ -296,14 +313,14 @@ jobs:
           TARGET_REGISTRY_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
           TARGET_TRANSFER_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
         run: |
-          # Verify the server is still alive after the npm/dnf install steps.
+          # Verify the server is still alive after the pnpm/dnf install steps.
           if ! kill -0 "$(cat /tmp/pelican-server.pid)" 2>/dev/null; then
             echo "::error::Pelican server is no longer running before Playwright tests started"
             echo "--- last 50 lines of server log ---"
             tail -50 /tmp/pelican-server.log || true
             exit 1
           fi
-          npx playwright test --project=${{ matrix.service }}
+          pnpm exec playwright test --project=${{ matrix.service }}
       - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

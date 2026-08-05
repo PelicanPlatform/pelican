@@ -53,26 +53,35 @@ jobs:
       - name: Install libatomic (Node.js >= 24 runtime dependency)
         run: dnf install -y libatomic
 
+      # Must precede setup-node: its "cache: pnpm" needs the pnpm binary on PATH
+      # to locate the store directory. The pnpm version comes from the
+      # "packageManager" field in the frontend's package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          package_json_file: "web_ui/frontend/package.json"
+
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "npm"
-          cache-dependency-path: "web_ui/frontend/package-lock.json"
+          cache: "pnpm"
+          cache-dependency-path: "web_ui/frontend/pnpm-lock.yaml"
           check-latest: true
 
       - name: Cache Next.js
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
+          # Only the Next.js build cache lives here; setup-node's "cache: pnpm"
+          # already handles the pnpm store.
           path: |
-            ~/.npm
             ${{ github.workspace }}/web_ui/frontend/.next/cache
           # Generate a new cache whenever packages or source files change.
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/package-lock.json') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
           # If source files changed but packages didn't, rebuild from a prior cache.
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/package-lock.json') }}-
+            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-
 
       - name: Set Go version
         # Determine the string to use in setup-go's "go-version" input.

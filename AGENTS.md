@@ -184,16 +184,18 @@ gofmt -w .
 
 ```bash
 cd web_ui/frontend
-npm run lint
+pnpm run lint
 ```
 
 **Frontend formatting:**
 
 ```bash
 cd web_ui/frontend
-npm run format        # Check formatting
-npm run format:fix    # Fix formatting
+pnpm run format        # Check formatting
+pnpm run format:fix    # Fix formatting
 ```
+
+The frontend uses pnpm, not npm; the version is pinned by the `packageManager` field in `web_ui/frontend/package.json`. Use `pnpm install --frozen-lockfile` (the `npm ci` equivalent) for a non-mutating install.
 
 ## Code Conventions
 
