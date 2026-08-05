@@ -644,7 +644,16 @@ func (tg *tokenGenerator) Get() (token string, err error) {
 func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
 	tok, err := token.UnsafeParseClaims(jwtSerialized)
 	if err != nil {
-		log.Warningln("Failed to parse token:", err)
+		// token.UnsafeParseClaims disables claim validation (jwt.WithValidate(false)),
+		// so in practice err here is never jwt.ErrTokenExpired -- only a structurally
+		// malformed token lands in this branch. The expired-token check is kept anyway
+		// as a defensive guard in case UnsafeParseClaims's validation behavior ever
+		// changes; today it's unreachable, so this always logs at Warning.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Failed to parse token:", err)
+		} else {
+			log.Warningln("Failed to parse token:", err)
+		}
 		return false
 	}
 
@@ -858,7 +867,17 @@ func isValidSciScope(authz string, operation config.TokenOperation) bool {
 func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 	tok, err := token.UnsafeParseClaims(jwtSerialized)
 	if err != nil {
-		log.Warningln("Failed to parse token:", err)
+		// token.UnsafeParseClaims disables claim validation (jwt.WithValidate(false)),
+		// so err here is never jwt.ErrTokenExpired in practice -- only a structurally
+		// malformed token reaches this branch (the real exp check happens below, via
+		// jwt.Validate). Kept as a defensive guard in case UnsafeParseClaims's
+		// validation behavior ever changes; today it's unreachable, so this always
+		// logs at Warning.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Failed to parse token:", err) // Only convert to debug message if it's indeed an expired token
+		} else {
+			log.Warningln("Failed to parse token:", err)
+		}
 		return
 	}
 
@@ -867,7 +886,13 @@ func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 	// that is just about to expire
 	// and might already be rejected by the server.
 	if err := jwt.Validate(tok); err != nil {
-		log.Warningln("Token is invalid:", err)
+		// Only report expired token in debug mode. It's very common.
+		// Report it every time as a warning message may scare users.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Token is invalid:", err)
+		} else {
+			log.Warningln("Token is invalid:", err)
+		}
 		return false, tok.Expiration()
 	}
 
@@ -1073,7 +1098,9 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
 		if err := refreshTokenEntry(prefixEntry, tokenToRefresh, issuer); err != nil {
-			log.Warningln("Failed to renew an expired token:", err)
+			// Only report expired token in debug mode. It's very common.
+			// Report it every time as a warning message may scare users.
+			log.Debugln("Failed to renew an expired token:", err)
 		} else {
 			if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 				log.Warningln("Failed to save new token to configuration file:", err)

@@ -22,6 +22,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -29,6 +32,9 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1192,4 +1198,224 @@ func TestTokenIsAcceptableIssuerValidation(t *testing.T) {
 		accepted := tokenIsAcceptable(tok, "/foo/bar", dirResp, opts)
 		assert.True(t, accepted, "expected token to be accepted when no issuers specified")
 	})
+}
+
+// buildRawToken constructs a signed JWT with only the time-related claims set,
+// bypassing token.NewTokenConfig (which refuses a non-positive Lifetime and so
+// cannot produce an already-expired token).
+func buildRawToken(t *testing.T, jwkKey jwk.Key, exp time.Time, nbf time.Time) string {
+	t.Helper()
+
+	builder := jwt.NewBuilder().
+		Issuer("https://issuer.example").
+		Expiration(exp)
+	if !nbf.IsZero() {
+		builder = builder.NotBefore(nbf)
+	}
+	tok, err := builder.Build()
+	require.NoError(t, err)
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwkKey.Algorithm(), jwkKey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// captureDebugLogs installs a global logrus test hook and raises the effective
+// log level to Debug (the default level would otherwise drop Debug entries
+// before the hook ever saw them), restoring the prior level on cleanup.
+func captureDebugLogs(t *testing.T) *logrustest.Hook {
+	t.Helper()
+	hook := logrustest.NewGlobal()
+	origLevel := config.GetEffectiveLogLevel()
+	config.SetLogging(logrus.DebugLevel)
+	t.Cleanup(func() { config.SetLogging(origLevel) })
+	return hook
+}
+
+func entriesAtLevel(entries []*logrus.Entry, level logrus.Level) []*logrus.Entry {
+	var out []*logrus.Entry
+	for _, e := range entries {
+		if e.Level == level {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TestTokenIsValidExpirationLogging exercises the logging behavior tokenIsValid
+// is supposed to have after the fix: an expired-but-otherwise-well-formed token
+// should only be reported at debug level (it's the common case and shouldn't
+// scare users), while any other validation failure or a structurally malformed
+// token should still surface as a warning.
+func TestTokenIsValidExpirationLogging(t *testing.T) {
+	jwkKey := createTestJWK(t)
+
+	t.Run("expired token logs at debug, not warning", func(t *testing.T) {
+		hook := captureDebugLogs(t)
+		hook.Reset()
+
+		expiredTok := buildRawToken(t, jwkKey, time.Now().Add(-1*time.Hour), time.Time{})
+
+		valid, _ := tokenIsValid(expiredTok)
+		assert.False(t, valid, "expired token must not be considered valid")
+
+		assert.Empty(t, entriesAtLevel(hook.AllEntries(), logrus.WarnLevel), "an expired token should not log at warning level")
+		debugEntries := entriesAtLevel(hook.AllEntries(), logrus.DebugLevel)
+		require.NotEmpty(t, debugEntries, "expected a debug entry for the expired token")
+		found := false
+		for _, e := range debugEntries {
+			if strings.Contains(e.Message, "not satisfied") {
+				found = true
+			}
+		}
+		assert.True(t, found, "expected a debug entry referencing the failed exp claim")
+	})
+
+	t.Run("not-yet-valid token still logs at warning", func(t *testing.T) {
+		hook := captureDebugLogs(t)
+		hook.Reset()
+
+		// nbf in the future (and exp further still) fails validation for a
+		// reason other than expiration, so it must not be silently downgraded.
+		notYetValidTok := buildRawToken(t, jwkKey, time.Now().Add(2*time.Hour), time.Now().Add(1*time.Hour))
+
+		valid, _ := tokenIsValid(notYetValidTok)
+		assert.False(t, valid, "not-yet-valid token must not be considered valid")
+
+		warnEntries := entriesAtLevel(hook.AllEntries(), logrus.WarnLevel)
+		require.NotEmpty(t, warnEntries, "a non-expiration validation failure should still log at warning level")
+	})
+
+	t.Run("malformed token logs at warning", func(t *testing.T) {
+		hook := captureDebugLogs(t)
+		hook.Reset()
+
+		valid, expiry := tokenIsValid("not-a-jwt")
+		assert.False(t, valid)
+		assert.True(t, expiry.IsZero())
+
+		warnEntries := entriesAtLevel(hook.AllEntries(), logrus.WarnLevel)
+		require.NotEmpty(t, warnEntries, "a structurally malformed token should still log at warning level")
+		assert.Contains(t, warnEntries[0].Message, "Failed to parse token")
+	})
+
+	t.Run("valid token logs nothing", func(t *testing.T) {
+		hook := captureDebugLogs(t)
+		hook.Reset()
+
+		validTok := buildRawToken(t, jwkKey, time.Now().Add(time.Hour), time.Time{})
+
+		valid, expiry := tokenIsValid(validTok)
+		assert.True(t, valid)
+		assert.False(t, expiry.IsZero())
+		assert.Empty(t, hook.AllEntries(), "a valid token should not produce any log entries")
+	})
+}
+
+// TestTokenIsAcceptableParseFailureLogging confirms tokenIsAcceptable's
+// existing behavior is unchanged: a structurally malformed token still logs a
+// warning (the errors.Is(err, jwt.ErrTokenExpired()) branch added alongside it
+// is for a case token.UnsafeParseClaims never produces, since it explicitly
+// disables claim validation -- see TestTokenIsAcceptableIgnoresExpiredToken).
+func TestTokenIsAcceptableParseFailureLogging(t *testing.T) {
+	hook := captureDebugLogs(t)
+	hook.Reset()
+
+	dirResp := server_structs.DirectorResponse{XPelNsHdr: server_structs.XPelNs{Namespace: "/foo"}}
+	opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+
+	accepted := tokenIsAcceptable("not-a-jwt", "/foo/bar", dirResp, opts)
+	assert.False(t, accepted)
+
+	warnEntries := entriesAtLevel(hook.AllEntries(), logrus.WarnLevel)
+	require.NotEmpty(t, warnEntries, "a structurally malformed token should still log at warning level")
+	assert.Contains(t, warnEntries[0].Message, "Failed to parse token")
+	assert.Empty(t, entriesAtLevel(hook.AllEntries(), logrus.DebugLevel))
+}
+
+// TestTokenIsAcceptableIgnoresExpiredToken documents that tokenIsAcceptable
+// never looks at the exp claim at all: token.UnsafeParseClaims disables claim
+// validation, so an expired-but-otherwise-acceptable token parses cleanly and
+// is judged solely on scope/issuer/namespace. Rejecting expired tokens is
+// tokenIsValid's job, exercised separately above.
+func TestTokenIsAcceptableIgnoresExpiredToken(t *testing.T) {
+	hook := captureDebugLogs(t)
+
+	issuerURL, err := url.Parse("https://issuer.example")
+	require.NoError(t, err)
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr:     server_structs.XPelNs{Namespace: "/foo"},
+		XPelTokGenHdr: server_structs.XPelTokGen{Issuers: []*url.URL{issuerURL}, BasePaths: []string{"/foo"}},
+	}
+	opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+
+	jwkKey := createTestJWK(t)
+	tc, err := token.NewTokenConfig(token.Scitokens2Profile{})
+	require.NoError(t, err)
+	tc.Lifetime = time.Hour
+	tc.Issuer = "https://issuer.example"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/bar"))
+	tokStr, err := tc.CreateTokenWithKey(jwkKey)
+	require.NoError(t, err)
+
+	// Re-sign the same claim set but with exp forced into the past.
+	parsed, err := jwt.Parse([]byte(tokStr), jwt.WithVerify(false), jwt.WithValidate(false))
+	require.NoError(t, err)
+	require.NoError(t, parsed.Set(jwt.ExpirationKey, time.Now().Add(-1*time.Hour)))
+	expiredTokBytes, err := jwt.Sign(parsed, jwt.WithKey(jwkKey.Algorithm(), jwkKey))
+	require.NoError(t, err)
+
+	hook.Reset()
+	accepted := tokenIsAcceptable(string(expiredTokBytes), "/foo/bar", dirResp, opts)
+	assert.True(t, accepted, "tokenIsAcceptable does not evaluate expiration, so an expired token with valid scopes is still accepted")
+	assert.Empty(t, hook.AllEntries(), "no parse-failure log is expected since UnsafeParseClaims never validates claims")
+}
+
+// TestRefreshTokenEntryInvalidGrant verifies the error propagated by
+// refreshTokenEntry when the issuer rejects a stale refresh token with
+// invalid_grant -- this is the error AcquireToken logs at debug level (rather
+// than warning) via log.Debugln("Failed to renew an expired token:", err).
+func TestRefreshTokenEntryInvalidGrant(t *testing.T) {
+	var tokenURL string
+	issuerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":                 tokenURL,
+				"token_endpoint":         tokenURL + "/token",
+				"authorization_endpoint": tokenURL + "/auth",
+			})
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_grant",
+				"error_description": "invalid refresh token",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer issuerSrv.Close()
+	tokenURL = issuerSrv.URL
+
+	prefixEntry := &config.PrefixEntry{
+		Prefix: "/foo",
+		ClientRegistration: config.ClientRegistration{
+			ClientID:     "test-client",
+			ClientSecret: "test-secret",
+		},
+	}
+	tokEntry := &config.TokenEntry{
+		AccessToken:  "expired-access-token",
+		RefreshToken: "stale-refresh-token",
+		Expiration:   time.Now().Add(-1 * time.Hour).Unix(),
+	}
+
+	err := refreshTokenEntry(prefixEntry, tokEntry, issuerSrv.URL)
+	require.Error(t, err, "expected the stale refresh token to be rejected")
+	assert.Contains(t, err.Error(), "invalid_grant")
+	assert.Contains(t, err.Error(), "invalid refresh token")
 }
