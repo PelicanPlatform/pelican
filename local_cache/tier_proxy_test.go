@@ -186,7 +186,7 @@ func (e *memTierCache) putObject(t *testing.T, path string, data []byte) (Instan
 	etag := "etag-" + path
 	hash := pc.db.InstanceHash(etag, objectHash)
 
-	_, err := pc.storage.InitDiskStorage(e.ctx, hash, int64(len(data)), e.diskID, pc.getNamespaceID(path))
+	_, err := pc.storage.InitDiskStorage(e.ctx, hash, int64(len(data)), e.diskID, pc.getNamespaceID(e.ctx, path))
 	require.NoError(t, err)
 	// Merged, not rewritten: once the object is complete the uploader may
 	// be relocating it.

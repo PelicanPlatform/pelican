@@ -19,10 +19,12 @@
 package local_cache
 
 import (
+	"context"
 	"net/url"
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pelicanplatform/pelican/lotman/core"
 )
@@ -44,6 +46,15 @@ type lotPathEntry struct {
 	path      string
 	recursive bool
 	exclude   bool
+
+	// The owning lot's lifecycle window, so resolution can ignore generations
+	// that are not live. Renewal mints a fresh-UUID successor lot on the same
+	// path rather than extending the old one, so at any moment several
+	// generations of a namespace exist side by side and only one of them is
+	// the one objects should be attributed to. All-zero means non-expiring.
+	creationMs   int64
+	expirationMs int64
+	deletionMs   int64
 }
 
 // lotIndex resolves object paths to owning lot names via longest-prefix
@@ -80,25 +91,42 @@ func (li *lotIndex) setEntries(entries []lotPathEntry) {
 // Resolve returns the name of the lot that owns objectPath, or DefaultLotName
 // if no lot matches.
 func (li *lotIndex) Resolve(objectPath string) string {
-	return li.resolveName(normalizeLotPath(objectPath))
+	return li.resolveNameAt(normalizeLotPath(objectPath), time.Now().UnixMilli())
+}
+
+// ResolveAt is Resolve at an explicit instant, for tests and for callers that
+// need to ask what owned a path at some other time.
+func (li *lotIndex) ResolveAt(objectPath string, atMs int64) string {
+	return li.resolveNameAt(normalizeLotPath(objectPath), atMs)
 }
 
 // resolveName returns the owning lot for a normalized query path, or the
 // default lot if none matches.
-func (li *lotIndex) resolveName(q string) string {
+func (li *lotIndex) resolveNameAt(q string, atMs int64) string {
 	li.mu.RLock()
 	defer li.mu.RUnlock()
 
-	// Per lot, track the longest covering inclusion and exclusion path lengths.
-	type agg struct{ maxIncl, maxExcl int }
+	// Per lot, track the longest covering inclusion and exclusion path lengths,
+	// plus the generation's creation time for tie-breaking.
+	type agg struct {
+		maxIncl, maxExcl int
+		creationMs       int64
+	}
 	byLot := map[string]*agg{}
 	for _, e := range li.entries {
 		if !pathCovers(e.path, e.recursive, q) {
 			continue
 		}
+		// Skip generations that are not live at this instant. Without this a
+		// retired generation stays in the running and, because ties used to
+		// break on the lexicographically smallest name, an expired UUID lot
+		// would usually win and stay pinned for the whole retention window.
+		if !core.LotActiveAt(e.creationMs, e.expirationMs, e.deletionMs, atMs) {
+			continue
+		}
 		a := byLot[e.lotName]
 		if a == nil {
-			a = &agg{maxIncl: -1, maxExcl: -1}
+			a = &agg{maxIncl: -1, maxExcl: -1, creationMs: e.creationMs}
 			byLot[e.lotName] = a
 		}
 		if e.exclude {
@@ -112,13 +140,24 @@ func (li *lotIndex) resolveName(q string) string {
 
 	best := DefaultLotName
 	bestLen := -1
+	var bestCreation int64
 	for name, a := range byLot {
 		if a.maxIncl < 0 || a.maxExcl > a.maxIncl {
 			continue // no covering inclusion, or suppressed by a longer exclusion
 		}
-		if a.maxIncl > bestLen || (a.maxIncl == bestLen && name < best) {
-			best = name
-			bestLen = a.maxIncl
+		if a.maxIncl > bestLen {
+			best, bestLen, bestCreation = name, a.maxIncl, a.creationMs
+			continue
+		}
+		if a.maxIncl != bestLen {
+			continue
+		}
+		// Same specificity: prefer the newer generation, then the lower name so
+		// the outcome stays deterministic. Preferring the newer one is what
+		// keeps a namespace's objects landing in its current lot rather than an
+		// arbitrary older sibling that happens to sort first.
+		if a.creationMs > bestCreation || (a.creationMs == bestCreation && name < best) {
+			best, bestLen, bestCreation = name, a.maxIncl, a.creationMs
 		}
 	}
 	return best
@@ -194,10 +233,13 @@ func buildLotEntries(mgr *core.Manager) ([]lotPathEntry, error) {
 		}
 		for _, p := range view.Paths {
 			entries = append(entries, lotPathEntry{
-				lotName:   n,
-				path:      normalizeLotPath(p.Path),
-				recursive: p.Recursive,
-				exclude:   p.Exclude,
+				lotName:      n,
+				path:         normalizeLotPath(p.Path),
+				recursive:    p.Recursive,
+				exclude:      p.Exclude,
+				creationMs:   view.CreationTime,
+				expirationMs: view.ExpirationTime,
+				deletionMs:   view.DeletionTime,
 			})
 		}
 	}
@@ -212,4 +254,32 @@ func (li *lotIndex) rebuildFromManager(mgr *core.Manager) error {
 	}
 	li.setEntries(entries)
 	return nil
+}
+
+// federationHostKey types the request-scoped federation discovery host so it
+// cannot collide with another package's context value.
+type federationHostKey struct{}
+
+// WithFederationHost tags ctx with the federation an object belongs to. The
+// multi-federation cache route (/api/v1.0/cache/data/:discovery/*path) strips
+// the discovery host out of the URL before the handler ever sees it, so without
+// carrying it forward every object would be attributed to the cache's primary
+// federation -- and two federations' copies of the same path would share one
+// lot's quota.
+func WithFederationHost(ctx context.Context, host string) context.Context {
+	if host == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, federationHostKey{}, host)
+}
+
+// FederationHostFrom returns the federation host tagged onto ctx, or "" when the
+// request did not name one (single-federation route), in which case callers fall
+// back to the cache's primary federation.
+func FederationHostFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	host, _ := ctx.Value(federationHostKey{}).(string)
+	return host
 }

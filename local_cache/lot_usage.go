@@ -154,11 +154,47 @@ func (pc *PersistentCache) priorityBuckets(storageID StorageID) []lotEvictionTar
 			}
 		}
 	}
+	// A retired lot may only be drained in full if the data it holds is really
+	// orphaned. Renewal retires a lot by minting a fresh-UUID successor on the
+	// same path, so a lot being past its expiration says nothing about whether
+	// the *namespace* is still wanted -- and the bytes sitting in the retired
+	// lot's bucket are ordinary cached objects of a live namespace. Treat those
+	// as ordinary eviction candidates instead of free-to-delete.
+	stillCovered := func(name string) bool {
+		if pc.lotIndex == nil {
+			return false
+		}
+		view, err := pc.lotMgr.GetLot(name)
+		if err != nil {
+			return false
+		}
+		for _, p := range view.Paths {
+			if owner := pc.lotIndex.ResolveAt(p.Path, now); owner != name && owner != DefaultLotName {
+				return true
+			}
+		}
+		return false
+	}
+	retired := func(names []string, err error) ([]string, error) {
+		if err != nil {
+			return nil, err
+		}
+		out := names[:0:0]
+		for _, n := range names {
+			if stillCovered(n) {
+				log.Debugf("lot eviction planning: %q is retired but its paths are covered by a live lot; not draining it wholesale", n)
+				continue
+			}
+			out = append(out, n)
+		}
+		return out, nil
+	}
+
 	// Recursive for the time-based passes so descendants of an expired/deleted
 	// lot are included; hierarchical for the quota passes so the deepest
 	// over-quota lots come first.
-	appendLots(nil)(pc.lotMgr.LotsPastDel(now, true, false))
-	appendLots(nil)(pc.lotMgr.LotsPastExp(now, true, false))
+	appendLots(nil)(retired(pc.lotMgr.LotsPastDel(now, true, false)))
+	appendLots(nil)(retired(pc.lotMgr.LotsPastExp(now, true, false)))
 	appendLots(func(v core.LotView) int64 {
 		if v.DedicatedBytes < 0 || v.OpportunisticBytes < 0 {
 			return unbounded
