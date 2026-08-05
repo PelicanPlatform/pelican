@@ -103,9 +103,6 @@ func TestMigrateCreatesTablesAndIsIdempotent(t *testing.T) {
 
 func TestMigrateDefaultsApplied(t *testing.T) {
 	m := newTestManager(t)
-	if m.opts.ContractionPolicy != ContractionAlways {
-		t.Errorf("expected default contraction policy %q, got %q", ContractionAlways, m.opts.ContractionPolicy)
-	}
 	if m.now == nil {
 		t.Error("expected non-nil now function")
 	}

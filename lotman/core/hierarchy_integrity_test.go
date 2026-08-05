@@ -358,3 +358,107 @@ func TestUpdateLotUsageBatchRollsUpOnce(t *testing.T) {
 		t.Errorf("root children_bytes = %d, want %d", got, aBytes+bBytes)
 	}
 }
+
+// TestHierarchicalQueriesHonourIncludeReclaimed pins M3: the reclamation filter
+// used to be baked into the hierarchical SQL unconditionally, and the pass that
+// applies includeReclaimed afterwards can only drop rows, never add them. So
+// asking for reclaimed lots returned fewer lots than the non-hierarchical form
+// of the same question -- the two modes silently disagreed.
+func TestHierarchicalQueriesHonourIncludeReclaimed(t *testing.T) {
+	m := newTestManager(t)
+	for _, spec := range []LotSpec{
+		{LotName: "root", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+		{LotName: "ns", Owner: "fed", Parents: []string{"root"},
+			MPA: MPA{DedicatedBytes: 10, OpportunisticBytes: 0, MaxNumObjects: -1}},
+	} {
+		if err := m.AddLot(spec, ""); err != nil {
+			t.Fatalf("add %s: %v", spec.LotName, err)
+		}
+	}
+	over := int64(50)
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: &over}, false, ""); err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+
+	contains := func(names []string, want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	got, err := m.LotsPastDed(false, false, true /*includeReclaimed*/, true /*hierarchical*/)
+	if err != nil {
+		t.Fatalf("before reclaim: %v", err)
+	}
+	if !contains(got, "ns") {
+		t.Fatalf("precondition: expected ns in %v", got)
+	}
+
+	if _, err := m.ReclaimLot("ns", m.nowMs()-1, "test", ""); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+
+	got, err = m.LotsPastDed(false, false, true, true)
+	if err != nil {
+		t.Fatalf("after reclaim: %v", err)
+	}
+	if !contains(got, "ns") {
+		t.Errorf("hierarchical query with includeReclaimed=true dropped the reclaimed lot: %v", got)
+	}
+
+	// And the default still excludes it.
+	got, err = m.LotsPastDed(false, false, false, true)
+	if err != nil {
+		t.Fatalf("after reclaim (exclude): %v", err)
+	}
+	if contains(got, "ns") {
+		t.Errorf("includeReclaimed=false must still exclude the reclaimed lot: %v", got)
+	}
+}
+
+// TestMPAUpdatePreservesExplicitAttributions pins M4. Recomputation clears and
+// rewrites a child's attribution rows, so an MPA edit that does not change the
+// totals used to redistribute the lot equally -- moving reservation between
+// parents that nobody asked to change.
+func TestMPAUpdatePreservesExplicitAttributions(t *testing.T) {
+	m := newTestManager(t)
+	for _, spec := range []LotSpec{
+		{LotName: "rootX", Owner: "fed", Parents: []string{"rootX"}, MPA: unboundedMPA()},
+		{LotName: "rootY", Owner: "fed", Parents: []string{"rootY"}, MPA: unboundedMPA()},
+	} {
+		if err := m.AddLot(spec, ""); err != nil {
+			t.Fatalf("add %s: %v", spec.LotName, err)
+		}
+	}
+	seventy, ten := int64(70), int64(10)
+	childMPA := MPA{DedicatedBytes: 80, OpportunisticBytes: -1, MaxNumObjects: -1}
+	if err := m.AddLot(LotSpec{
+		LotName: "child", Owner: "fed", Parents: []string{"rootX", "rootY"}, MPA: childMPA,
+		ParentAttributions: map[string]ParentAttribution{
+			"rootX": {DedicatedBytes: &seventy},
+			"rootY": {DedicatedBytes: &ten},
+		},
+	}, ""); err != nil {
+		t.Fatalf("add child: %v", err)
+	}
+
+	// A semantic no-op: same MPA, no attributions supplied.
+	same := childMPA
+	if err := m.UpdateLot(LotUpdate{LotName: "child", MPA: &same}, ""); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	attrs, err := m.Attributions("child")
+	if err != nil {
+		t.Fatalf("attributions: %v", err)
+	}
+	if got := attrs["rootX"][MpaKeyDedicatedBytes]; got != seventy {
+		t.Errorf("rootX dedicated attribution = %d, want %d (an MPA no-op must not redistribute)", got, seventy)
+	}
+	if got := attrs["rootY"][MpaKeyDedicatedBytes]; got != ten {
+		t.Errorf("rootY dedicated attribution = %d, want %d", got, ten)
+	}
+}
