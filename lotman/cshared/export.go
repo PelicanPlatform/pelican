@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -267,8 +268,25 @@ func lotman_remove_lot(lotName *C.char, assignLTBRParentToOrphans, assignLTBRPar
 	if err != nil {
 		return fail(errMsg, err)
 	}
-	// The native core preserves children by reparenting them to the removed
-	// lot's parents, matching the legacy reassignment flags' intent.
+	// The core implements exactly one of the reassignment behaviours this entry
+	// point can express: orphaned and non-orphaned children alike are reparented
+	// onto the removed lot's parents, and their policy attributes are left
+	// alone. Rather than accept the other combinations and quietly do something
+	// else -- an operator asking for orphans to fall back to `default` so their
+	// data becomes reclaimable would instead get children keeping their original
+	// quota, and a success return -- refuse what is not implemented.
+	//
+	// override_policy is documented upstream as "THIS FEATURE IS NOT YET
+	// IMPLEMENTED", so it is accepted and ignored, matching the reference.
+	if !bool(assignLTBRParentToOrphans) || !bool(assignLTBRParentToNonOrphans) {
+		return fail(errMsg, errors.New(
+			"assign_LTBR_parent_as_parent_to_orphans and assign_LTBR_parent_as_parent_to_non_orphans must both be true: "+
+				"this implementation always reparents children onto the removed lot's parents, and cannot reassign them to the default lot"))
+	}
+	if bool(assignPolicyToChildren) {
+		return fail(errMsg, errors.New(
+			"assign_policy_to_children is not implemented: the removed lot's management policy attributes are never copied onto its children"))
+	}
 	if err := m.RemoveLot(C.GoString(lotName), core.RemoveOptions{}, caller()); err != nil {
 		return fail(errMsg, err)
 	}
