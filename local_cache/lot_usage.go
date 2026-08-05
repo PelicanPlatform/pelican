@@ -84,18 +84,34 @@ func (pc *PersistentCache) syncLotUsage() error {
 
 	// Write absolute self usage for every lot, so lots with no cached bytes are
 	// reset to 0. Iterating the core's lots (rather than just the observed
-	// buckets) is what lets a lot drop back to zero. Each update also recomputes
-	// the affected ancestors' rollups.
+	// buckets) is what lets a lot drop back to zero.
 	names, err := pc.lotMgr.ListAllLots()
 	if err != nil {
 		return errors.Wrap(err, "listing lots for usage sync")
 	}
+	updates := make([]core.UsageUpdate, 0, len(names))
 	for _, name := range names {
 		bytes := perLotBytes[name]
 		objects := perLotObjects[name]
-		if err := pc.lotMgr.UpdateLotUsage(core.UsageUpdate{LotName: name, SelfBytes: &bytes, SelfObjects: &objects}, false, ""); err != nil {
-			log.Warnf("lot usage sync: failed to update lot %q: %v", name, err)
+		// Skip lots whose stored usage already matches. On a cache with many
+		// namespaces most lots are unchanged between ticks, and every update
+		// carries an ancestor-rollup recomputation, so this is the difference
+		// between a write proportional to churn and one proportional to the
+		// size of the federation.
+		if view, err := pc.lotMgr.GetLot(name); err == nil &&
+			view.Usage.SelfBytes == bytes && view.Usage.SelfObjects == objects {
+			continue
 		}
+		updates = append(updates, core.UsageUpdate{LotName: name, SelfBytes: &bytes, SelfObjects: &objects})
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	// One transaction for the whole reconcile. In V2 the lot store *is* the
+	// shared Pelican server database, and under the project DSN each separate
+	// transaction is a BEGIN IMMEDIATE holding the server-wide write lock.
+	if err := pc.lotMgr.UpdateLotUsageBatch(updates, false, ""); err != nil {
+		return errors.Wrap(err, "syncing lot usage")
 	}
 	return nil
 }
