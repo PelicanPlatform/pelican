@@ -31,10 +31,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -173,6 +175,8 @@ func handleDispatch(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationRead(provider)(ctx)
+	case action == ".well-known/issuer.jwks" && ctx.Request.Method == http.MethodGet:
+		handleNamespaceJWKS(provider)(ctx)
 	case action == ".well-known/openid-configuration":
 		handleIssuerDiscovery(provider)(ctx)
 	default:
@@ -220,6 +224,49 @@ func handleDispatchDelete(ctx *gin.Context) {
 	}
 }
 
+// handleNamespaceJWKS serves the public-key JWKS for a per-namespace
+// issuer endpoint. The response merges the server's exported public key
+// set with any extra public keys configured for this namespace via
+// OIDCProvider.ExtraJwksPath.
+func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// The extra file is optional; if it cannot be published, degrade to
+		// the server's base keys and log rather than failing the whole
+		// endpoint. Only a failure to load the base keys, which leaves no
+		// correct subset to serve, reaches the 500 below.
+		key, err := config.GetIssuerPublicJWKSForNamespace(provider.ExtraJwksPath,
+			func(e error) error {
+				log.Errorf("Namespace %s: serving base keys only; per-namespace "+
+					"IssuerJwks is currently unpublishable: %v", provider.Namespace, e)
+				return nil
+			})
+		if err != nil {
+			log.Errorf("Failed to load base JWKS for namespace %s: %v",
+				provider.Namespace, err)
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to load public key",
+			})
+			return
+		}
+		// This endpoint is what the per-namespace discovery document advertises
+		// as its jwks_uri, so a browser-based OIDC client fetches it right
+		// after reading discovery. The key material is public, so any origin
+		// may read it, matching the discovery action above and the server-level
+		// JWKS endpoint in server_utils/oidc.go. Without this, those clients
+		// fail on the fetch that follows discovery. Set here rather than in
+		// corsMiddleware so only the genuinely-dispatched JWKS action gets the
+		// wildcard: a credentialed endpoint can be reached via a URL that also
+		// ends in this suffix (e.g. a client-configuration read for an id
+		// ending in ".well-known/issuer.jwks").
+		ctx.Header("Access-Control-Allow-Origin", "*")
+
+		// GetIssuerPublicJWKSForNamespace already returns public keys, and this
+		// is a machine-facing endpoint, so serve the body inline.
+		server_utils.WriteJWKS(ctx, key)
+	}
+}
+
 // handleIssuerDiscovery returns the OIDC discovery document scoped to the issuer
 // prefix so that the health-check in launcher.go works identically for both
 // OA4MP and the embedded issuer.
@@ -246,7 +293,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":                      IssuerURL() + "/.well-known/issuer.jwks",
+			"jwks_uri":                      serviceURI + "/.well-known/issuer.jwks",
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
