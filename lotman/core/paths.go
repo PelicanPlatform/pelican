@@ -67,14 +67,24 @@ func ancestorPrefixesInclusive(q string) []string {
 	return out
 }
 
-// lotActiveAt reports whether a lot with the given lifecycle timestamps is
+// LotActiveAt reports whether a lot with the given lifecycle timestamps is
 // active at instant t. A non-expiring (all-zero) lot is always active;
 // otherwise the active window is the half-open interval [creation, expiration).
-func lotActiveAt(creation, expiration, deletion, t int64) bool {
+//
+// Exported because callers outside the core -- notably the cache's in-memory
+// path index -- have to agree with the core about which generation of a lot is
+// live at a given instant, and disagreeing means resolving objects to a lot the
+// core considers expired.
+func LotActiveAt(creation, expiration, deletion, t int64) bool {
 	if IsNonExpiring(creation, expiration, deletion) {
 		return true
 	}
 	return creation <= t && expiration > t
+}
+
+// lotActiveAt is the internal spelling; see LotActiveAt.
+func lotActiveAt(creation, expiration, deletion, t int64) bool {
+	return LotActiveAt(creation, expiration, deletion, t)
 }
 
 // isReclaimedAt reports whether the named lot is reclaimed as of instant t

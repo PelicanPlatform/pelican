@@ -79,7 +79,10 @@ func projectLotPaths(in []LotPath) []LotPathView {
 	}
 	out := make([]LotPathView, len(in))
 	for i, p := range in {
-		out[i] = LotPathView{Path: p.Path, Recursive: p.Recursive, LotName: p.LotName}
+		// Stored paths are federation-qualified; operators speak the bare
+		// namespace path. This is the single exit point for lot paths, so
+		// stripping here covers every handler that returns a Reservation.
+		out[i] = LotPathView{Path: unqualifyLotPath(p.Path), Recursive: p.Recursive, LotName: p.LotName}
 	}
 	return out
 }
@@ -319,9 +322,16 @@ func createLot(ctx *gin.Context) {
 		MPA:                mpaInputToInternal(req.ManagementPolicyAttrs),
 		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
+	// Authorization resolves the path against the Director, which knows only
+	// bare namespace paths, so it must see the request as submitted.
 	res, ok := requireAuthForCreate(ctx, &lot)
 	if !ok {
 		return
+	}
+	// Now move the path into the stored (federation-qualified) space, so the
+	// lot actually matches the keys the cache resolves objects against.
+	for i := range lot.Paths {
+		lot.Paths[i].Path = qualifyLotPath(lot.Paths[i].Path)
 	}
 	if err := CreateLot(&lot, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to create lot", err)
@@ -728,7 +738,7 @@ func listLotsByPath(ctx *gin.Context) {
 		return
 	}
 	from, to := normalizeWindow(q.FromMs, q.ToMs)
-	lots, err := GetLotsForPath(q.Path, q.Recursive, from, to, q.IncludeReclaimed)
+	lots, err := GetLotsForPath(qualifyLotPath(q.Path), q.Recursive, from, to, q.IncludeReclaimed)
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to enumerate lots for path", err)
 		return

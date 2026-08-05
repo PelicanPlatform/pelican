@@ -209,7 +209,7 @@ func (e *memTierCache) putObject(t *testing.T, path string, data []byte) (Instan
 	etag := "etag-" + path
 	hash := pc.db.InstanceHash(etag, objectHash)
 
-	_, err := pc.storage.InitDiskStorage(e.ctx, hash, int64(len(data)), e.diskID, pc.getNamespaceID(path))
+	_, err := pc.storage.InitDiskStorage(e.ctx, hash, int64(len(data)), e.diskID, pc.getNamespaceID(e.ctx, path))
 	require.NoError(t, err)
 	// Merged, not rewritten: once the object is complete the uploader may
 	// be relocating it.
@@ -397,7 +397,7 @@ func TestTierCacheCloseStopsUploadsFirst(t *testing.T) {
 	normalized := pc.normalizePath(path)
 	objectHash := pc.db.ObjectHash(normalized)
 	hash := pc.db.InstanceHash("etag-closing", objectHash)
-	_, err := pc.storage.InitDiskStorage(env.ctx, hash, int64(len(data)), env.diskID, pc.getNamespaceID(path))
+	_, err := pc.storage.InitDiskStorage(env.ctx, hash, int64(len(data)), env.diskID, pc.getNamespaceID(env.ctx, path))
 	require.NoError(t, err)
 	require.NoError(t, pc.db.MergeMetadata(hash, &CacheMetadata{ETag: "etag-closing", SourceURL: normalized}))
 	require.NoError(t, pc.db.SetLatestETag(objectHash, "etag-closing", time.Now()))
