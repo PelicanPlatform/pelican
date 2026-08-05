@@ -23,6 +23,9 @@ on:
         default: false
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: macOS (${{ matrix.binary_name }})
@@ -39,12 +42,12 @@ jobs:
             tags: server
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version-file: "web_ui/frontend/package.json"
           cache: "npm"
@@ -52,7 +55,7 @@ jobs:
           check-latest: true
 
       - name: Cache Next.js
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
           path: |
@@ -72,7 +75,7 @@ jobs:
           echo "version=${version}.x" >> $GITHUB_OUTPUT
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
@@ -111,7 +114,7 @@ jobs:
 
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: junit-${{ matrix.binary_name }}-${{ runner.os }}
           path: junit-${{ matrix.binary_name }}.xml
@@ -119,7 +122,7 @@ jobs:
 
       - name: Publish JUnit summary
         if: always()
-        uses: test-summary/action@v2
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
@@ -128,7 +131,7 @@ jobs:
           make goreleaser-config
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"

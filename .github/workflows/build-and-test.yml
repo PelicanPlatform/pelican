@@ -36,6 +36,9 @@ defaults:
     # bash-isms have a way of sneaking in unnoticed.
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
 
   # This first job determines the work to be done:
@@ -73,6 +76,12 @@ jobs:
     steps:
       - name: Determine how to build and push container images
         id: params
+        env:
+          # This step needs to know only whether the credentials exist.
+          # Pass them through the environment rather than interpolating
+          # them into the script.
+          HARBOR_ROBOT_USER: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          HARBOR_ROBOT_PASSWORD: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
         run: |
           set -eu
 
@@ -101,8 +110,8 @@ jobs:
           PUSH_DEVTEST=false
           PUSH_RELEASE=false
 
-          if [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_USER }}' ] \
-             && [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}' ]
+          if [ -n "${HARBOR_ROBOT_USER:-}" ] \
+             && [ -n "${HARBOR_ROBOT_PASSWORD:-}" ]
           then
             if ${IS_PRIMARY_GITHUB_REPO}; then
               # For the PelicanPlatform/pelican repo, we push test and
@@ -169,7 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set timestamp
         id: timestamp
@@ -255,11 +264,11 @@ jobs:
           echo "::endgroup::"
 
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -290,25 +299,25 @@ jobs:
       # The new attempt will automatically use its own, fresh caches.
 
       - name: Create a cache for Docker Buildx
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           path: ${{ runner.temp }}/.base-buildx-cache
           key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Create a cache for the GitHub workspace
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
         with:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -323,7 +332,7 @@ jobs:
       # these layers multiple times over.
 
       - name: Build and push origin
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           file: ./images/Dockerfile
           target: origin
@@ -369,7 +378,7 @@ jobs:
     steps:
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -379,27 +388,27 @@ jobs:
             type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest-${{ matrix.arch }}
 
       - name: Restore the cache for Docker Buildx
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           path: ${{ runner.temp }}/.base-buildx-cache
           key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true  # don't let cache-image-layers be for naught
 
       - name: Restore the cache for the GitHub workspace
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true  # don't let cache-image-layers be for naught
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
         with:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -407,7 +416,7 @@ jobs:
 
       - name: Build and push image
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           file: ./images/Dockerfile
           target: ${{ matrix.image }}
@@ -431,7 +440,7 @@ jobs:
 
       - name: Upload digest
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: digests-${{ matrix.image }}-${{ matrix.id }}
           path: ${{ runner.temp }}/digests/*
@@ -453,7 +462,7 @@ jobs:
     steps:
       - name: Set up metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -463,14 +472,14 @@ jobs:
             type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest
 
       - name: Log in to OSG Harbor
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
       - name: Download digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
