@@ -319,7 +319,12 @@ func validateLotsConfig(lots []Lot, totalDiskSpaceB uint64) error {
 		} else {
 			if lot.MPA.DedicatedGB == nil {
 				missingValues = append(missingValues, "ManagementPolicyAttrs.DedicatedGB")
-			} else {
+			} else if isDirectChildOfRoot(lot) {
+				// Only lots hanging directly off root consume cache capacity.
+				// A deeper lot's dedicated share is carved out of its parent's,
+				// so counting both double-counts it -- and strict-hierarchy
+				// axiom 1 already refuses a child that attributes more than its
+				// parent holds, which is what keeps the nested case honest.
 				totalDedicatedGB += *lot.MPA.DedicatedGB
 			}
 			if lot.MPA.OpportunisticGB == nil {
@@ -343,15 +348,27 @@ func validateLotsConfig(lots []Lot, totalDiskSpaceB uint64) error {
 			return errors.New(fmt.Sprintf("%s %v", errMsg, missingValues))
 		}
 
-		// We don't apply validation to the opportunistic GB, as it's not a hard limit and the user
-		// may wish to do something unexpected. However, the sum of dedicated GB should not exceed the HWM
-		// or the cache may expose some data to purging when it should be protected.
-		if totalDedicatedGB > bytesToGigabytes(hwm) {
-			return errors.New(fmt.Sprintf("the sum of all lots' dedicatedGB values exceeds the high watermark of %s. This would allow the cache to purge namespaces using less than their dedicated quota", hwmStr))
-		}
+	}
+
+	// We don't apply validation to the opportunistic GB, as it's not a hard limit and the user
+	// may wish to do something unexpected. However, the sum of dedicated GB should not exceed the HWM
+	// or the cache may expose some data to purging when it should be protected.
+	if totalDedicatedGB > bytesToGigabytes(hwm) {
+		return errors.New(fmt.Sprintf("the sum of the top-level lots' dedicatedGB values (%.2f GB) exceeds the high watermark of %s. This would allow the cache to purge namespaces using less than their dedicated quota", totalDedicatedGB, hwmStr))
 	}
 
 	return nil
+}
+
+// isDirectChildOfRoot reports whether a lot's capacity comes straight out of the
+// cache rather than out of another lot's reservation.
+func isDirectChildOfRoot(lot Lot) bool {
+	for _, p := range lot.Parents {
+		if p == "root" {
+			return true
+		}
+	}
+	return false
 }
 
 // HWM and LWM values may be a percentage (e.g. 95) indicating the amount of available disk
@@ -755,7 +772,14 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	}
 	policy := policies[policyName]
 
-	discoverPrefixes := policy.DiscoverPrefixes
+	// The policy's own DiscoverPrefixes is the per-policy switch; the
+	// Lotman.AutoCreateOnDiscover parameter is the site-wide one, and it is
+	// documented as the way a strict-reservations site says only explicitly
+	// configured or API-created lots should exist. Renewal honours it; this path
+	// did not, so every restart re-minted a lot for each advertised prefix and
+	// carved up the root quota again -- and renewal then kept those lots alive,
+	// because a prefix that already has a lot is renewed regardless.
+	discoverPrefixes := policy.DiscoverPrefixes && param.Lotman_AutoCreateOnDiscover.GetBool()
 	shouldMerge := policy.MergeLocalWithDiscovered
 	if shouldMerge && !discoverPrefixes {
 		return internalLots, errors.New("MergeLocalWithDiscovered is set to true, but DiscoverPrefixes is set to false. This is not a valid configuration")
@@ -938,15 +962,18 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	// Set up lot timestamps (creation, expiration, deletion) if needed
 	configLotTimestamps(&lotMap)
 
-	log.Tracef("Internal lot configuration: %+v", internalLots)
-	err = validateLotsConfig(internalLots, totalDiskSpaceB)
-	if err != nil {
-		return internalLots, errors.Wrap(err, "error validating deduced lot configuration")
-	}
-
 	internalLots, err = topoSort(lotMap)
 	if err != nil {
 		return internalLots, errors.Wrap(err, "error sorting lots prior to instantiation")
+	}
+
+	// Validate after the lots are collected. This used to run above, against an
+	// internalLots that topoSort had not yet assigned -- always an empty slice,
+	// so every check in it was a no-op, including the one that stops the
+	// configured dedicated quotas from over-subscribing the cache.
+	log.Tracef("Internal lot configuration: %+v", internalLots)
+	if err := validateLotsConfig(internalLots, totalDiskSpaceB); err != nil {
+		return internalLots, errors.Wrap(err, "error validating deduced lot configuration")
 	}
 
 	return internalLots, nil
@@ -1088,9 +1115,8 @@ func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 		}()
 	}
 	m, err := core.New(db, core.Options{
-		StrictHierarchy:   true,
-		ContractionPolicy: core.ContractionAlways,
-		Logger:            coreLogger{},
+		StrictHierarchy: true,
+		Logger:          coreLogger{},
 	})
 	if err != nil {
 		log.Errorf("Error initializing lot manager: %v", err)
