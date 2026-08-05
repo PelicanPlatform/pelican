@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -51,7 +49,7 @@ func makeAds(paths ...string) []server_structs.NamespaceAd {
 // rootSeed builds the synthetic "root" lot used to seed buildLotTree in
 // these unit tests. Quotas mirror what initLots installs in production:
 // dedicated_GB derived from the cache disk total, opportunistic_GB and
-// max_num_objects unbounded (-1 sentinel from lotman PR #46).
+// max_num_objects unbounded (-1 sentinel from PelicanPlatform/lotman PR #46).
 func rootSeed(dedGB float64) Lot {
 	ded := dedGB
 	opp := float64(-1)

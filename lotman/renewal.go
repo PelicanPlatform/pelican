@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -167,7 +165,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // renewalSawAdsOnce flips to true the first time runRenewalTick observes
@@ -215,12 +212,16 @@ type renewalConfig struct {
 	MaxLifetimeMs     int64
 	RootDedicatedGB   float64
 	FederationIssuer  string
+	// AutoCreateOnDiscover gates whether prefixes with no existing lot get an
+	// auto-derived lot this tick. When false, only already-covered prefixes are
+	// renewed; brand-new ones are left to the default lot.
+	AutoCreateOnDiscover bool
 }
 
 // renewExpiringLots is the pure planner used by LaunchRenewalRoutine.
 // It receives the federation's current namespace ads and the full set of
 // existing lots (typically obtained via getActiveLotsForRenewal) and produces a
-// renewalProposal describing what should change. No FFI calls happen
+// renewalProposal describing what should change. No lot-store calls happen
 // here, so the planner is unit-testable with synthetic Lot slices.
 //
 // # Multi-fill semantics
@@ -327,6 +328,17 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAd, e
 		// Existing-lots-only timeline for this path; planned successors
 		// are tracked via cursor advancement, not by re-injection.
 		ownTimeline := lotsForNamespace(p, existing)
+
+		// At strict-reservations sites, do not mint a lot for a prefix that has
+		// never had one. A path with an existing lot is still renewed so active
+		// reservations don't lapse.
+		if !cfg.AutoCreateOnDiscover && len(ownTimeline) == 0 {
+			prop.skips = append(prop.skips, skipReason{
+				NamespacePath: p,
+				Reason:        "Lotman.AutoCreateOnDiscover is false and no existing lot covers this prefix",
+			})
+			continue
+		}
 
 		cursor := cfg.NowMs
 		for cursor < horizonCreate {
@@ -598,7 +610,9 @@ func dedupeNamespacePaths(ads []server_structs.NamespaceAd) []string {
 // isMonitoringPath returns true for the cache's monitoring sub-namespace,
 // which Pelican intentionally excludes from lot tracking.
 func isMonitoringPath(p string) bool {
-	mon := normaliseLotPath(server_utils.MonitoringBaseNs)
+	// ad/lot paths may be federation-qualified (V2); compare against the
+	// correspondingly-qualified monitoring base.
+	mon := monitoringBasePath()
 	np := normaliseLotPath(p)
 	return np == mon || pathContains(mon, np)
 }
@@ -620,21 +634,6 @@ func issuerForPath(p string, ads []server_structs.NamespaceAd) string {
 	return ""
 }
 
-// ExpirationTimeIsSentinel reports whether the lot uses the "non-expiring"
-// all-zero timestamp sentinel (lotman PR #44). Sentinel lots (root,
-// default) must never be extended by the renewal scheduler.
-func (l Lot) ExpirationTimeIsSentinel() bool {
-	if l.MPA == nil {
-		return true
-	}
-	if l.MPA.CreationTime == nil || l.MPA.ExpirationTime == nil || l.MPA.DeletionTime == nil {
-		return false
-	}
-	return l.MPA.CreationTime.Value == 0 &&
-		l.MPA.ExpirationTime.Value == 0 &&
-		l.MPA.DeletionTime.Value == 0
-}
-
 // LaunchRenewalRoutine starts a background ticker that periodically calls
 // renewExpiringLots and applies the resulting proposal to the lotman DB.
 // It returns immediately; the goroutine exits when ctx is done.
@@ -645,6 +644,13 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 	interval := param.Lotman_RenewalCheckInterval.GetDuration()
 	if interval <= 0 {
 		interval = time.Hour
+	}
+	// Federation-qualify the ads the renewal planner sees (no-op for V1) so
+	// renewal successors share the same path space as the init lots and the
+	// persistent cache's resolution keys.
+	origAds := getNamespaceAds
+	getNamespaceAds = func() []server_structs.NamespaceAd {
+		return federationQualifyAds(origAds())
 	}
 	// SchedulingHorizon validation runs at config load
 	// (config/config.go); the runtime planner additionally clamps
@@ -699,7 +705,7 @@ func LaunchRenewalRoutine(ctx context.Context, getNamespaceAds func() []server_s
 //	/a     existing            [-------------)  (would match rule 3)
 //	root   ──always covers──   [────────────)   (rule 4 fallback)
 //
-// Pure / data-only: no FFI calls, safe to unit-test.
+// Pure / data-only: no lot-store calls, safe to unit-test.
 func resolveSuccessorParent(path string, successorCreate int64, existing []Lot, planned map[string][]*Lot) string {
 	target := normaliseLotPath(path)
 
@@ -791,15 +797,16 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAd, period 
 	}
 
 	cfg := renewalConfig{
-		NowMs:             nowMs,
-		PeriodMs:          period.Milliseconds(),
-		HorizonMs:         horizonMs,
-		MinFillerWidthMs:  param.Lotman_MinFillerWidth.GetDuration().Milliseconds(),
-		DefaultLifetimeMs: param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds(),
-		DefaultDeletionMs: param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds(),
-		MaxLifetimeMs:     param.Lotman_MaxLotLifetime.GetDuration().Milliseconds(),
-		RootDedicatedGB:   rootDedicatedGB(existing),
-		FederationIssuer:  federationIssuer,
+		NowMs:                nowMs,
+		PeriodMs:             period.Milliseconds(),
+		HorizonMs:            horizonMs,
+		MinFillerWidthMs:     param.Lotman_MinFillerWidth.GetDuration().Milliseconds(),
+		DefaultLifetimeMs:    param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds(),
+		DefaultDeletionMs:    param.Lotman_DefaultLotDeletionLifetime.GetDuration().Milliseconds(),
+		MaxLifetimeMs:        param.Lotman_MaxLotLifetime.GetDuration().Milliseconds(),
+		RootDedicatedGB:      rootDedicatedGB(existing),
+		FederationIssuer:     federationIssuer,
+		AutoCreateOnDiscover: param.Lotman_AutoCreateOnDiscover.GetBool(),
 	}
 
 	prop := renewExpiringLots(cfg, ads, existing)
@@ -891,7 +898,7 @@ func LaunchLotGcRoutine(ctx context.Context) {
 
 // gcEligibleLots returns the names of lots that runGcTick would remove
 // if invoked at wall-clock `nowMs` with the supplied retention. Pure /
-// data-only so it can be unit-tested without an FFI surface.
+// data-only so it can be unit-tested without a lot store.
 //
 // Eligibility rules:
 //   - Skip the synthetic root and default lots (immutable bookkeeping
@@ -963,7 +970,7 @@ func gcEligibleLots(existing []Lot, nowMs int64, retention time.Duration) []stri
 //     future external lot writer (or a transient invariant violation)
 //     ever lands a non-past-deletion child under a past-deletion
 //     parent. The recursive form would happily sweep that child away.
-//     The defensive cost is a few extra FFI calls per tick on what is
+//     The defensive cost is a few extra lot-store queries per tick on what is
 //     already a daily cadence.
 //
 // If lotman ever exposes a "remove all lots whose deletion_time +

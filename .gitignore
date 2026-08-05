@@ -7,6 +7,7 @@ local
 web_ui/frontend/app/api/docs/pelican-swagger.yaml
 .goreleaser.dev.yml
 .goreleaser.generated.yml
+.goreleaser.lotman.generated.yml
 .DS_Store
 .idea
 pelican.yaml
@@ -26,3 +27,7 @@ e2e_fed_tests.test
 
 # Compiled scope generator binary (source is generate/scope_generator.go)
 /generate/generate
+
+# `go build ./lotman/cshared` drops its output here, named after the package
+# directory. The shared library is built via `make lotman-shared` instead.
+/lotman/cshared/cshared

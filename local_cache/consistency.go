@@ -538,6 +538,15 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	// scan in reconcileUsage.
 	usageDuringScan := make(map[StorageUsageKey]int64)
 
+	// Accumulate object counts per (StorageID, NamespaceID) in the same pass so
+	// the object-cap trim reads a cheap counter instead of scanning the LRU
+	// index for every capped lot.
+	objectCountDuringScan := make(map[StorageUsageKey]int64)
+	// scanTruncated records that the walk stopped early, so the accumulators
+	// below describe only part of the keyspace and must not be treated as the
+	// authoritative picture.
+	scanTruncated := false
+
 	// Track where to resume DB scan after each transaction restart
 	lastDBKey := InstanceHash("")
 	transactionStartTime := time.Now()
@@ -581,6 +590,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 					usageDuringScan[uk] += CalculateFileSize(meta.ContentLength)
 				}
 			}
+
+			// Every metadata entry is one cached object instance; count it in
+			// its (storage, bucket) regardless of size, for object-cap enforcement.
+			objectCountDuringScan[StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}]++
 
 			// Only process entries old enough to avoid races
 			if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
@@ -864,6 +877,14 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 		if entriesThisTransaction == 0 || err == nil {
 			transactionComplete = true
 		}
+		// A transaction that ends with an error has not seen the rest of the
+		// keyspace. That includes context cancellation, which the per-entry
+		// callback surfaces as an error -- and if it lands on the first entry of
+		// a restart iteration, entriesThisTransaction is 0 and the loop below
+		// breaks as though the scan had finished normally.
+		if err != nil {
+			scanTruncated = true
+		}
 
 		if transactionComplete {
 			break // All DB entries processed
@@ -913,10 +934,65 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	// Reconcile the stored usage counters against the running totals
 	// accumulated during the metadata scan above.  This avoids a second
 	// full-table scan of the metadata and block-state tables.
-	if err := cc.reconcileUsage(ctx, sl, usageDuringScan); err != nil {
+	scanComplete := !scanTruncated && !hadWalkError.Load() && ctx.Err() == nil
+	if !scanComplete {
+		sl.Warn("Metadata scan did not cover the whole keyspace; reconciling only what was observed")
+	}
+	if err := cc.reconcileUsage(ctx, sl, usageDuringScan, scanComplete); err != nil {
 		sl.WithError(err).Warn("Usage reconciliation failed")
 	}
 
+	// Reconcile per-bucket object counts from the same scan so the object-cap
+	// trim has fresh counts without its own full scan.
+	if err := cc.reconcileObjectCounts(ctx, sl, objectCountDuringScan, scanComplete); err != nil {
+		sl.WithError(err).Warn("Object-count reconciliation failed")
+	}
+
+	return nil
+}
+
+// reconcileObjectCounts writes the per-(StorageID, NamespaceID) object counts
+// computed during the metadata scan to the stored object-count counters. The
+// scan is the authoritative source for object counts (they are not maintained
+// on the hot path), so every changed bucket is written and buckets absent from
+// the scan are zeroed.
+// reconcileObjectCounts writes the observed per-bucket object counts. It clears
+// buckets it did not observe only when the scan covered the whole keyspace:
+// absence of evidence is evidence of absence only for a complete scan, and a
+// truncated one would otherwise zero every bucket it never reached -- silently
+// disabling the object caps that read these counters, cache-wide, until the next
+// successful scan an hour later.
+func (cc *ConsistencyChecker) reconcileObjectCounts(ctx context.Context, sl *log.Entry, actual map[StorageUsageKey]int64, scanComplete bool) error {
+	stored, err := cc.db.GetAllObjectCounts()
+	if err != nil {
+		return errors.Wrap(err, "failed to read stored object counts")
+	}
+
+	for key, count := range actual {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if stored[key] == count {
+			continue
+		}
+		if err := cc.db.SetObjectCount(key.StorageID, key.NamespaceID, count); err != nil {
+			sl.WithError(err).WithFields(log.Fields{"storageID": key.StorageID, "namespaceID": key.NamespaceID}).Warn("Failed to set object count")
+		}
+	}
+	// Zero out buckets that no longer have any objects.
+	if !scanComplete {
+		return nil
+	}
+	for key, count := range stored {
+		if _, exists := actual[key]; exists || count == 0 {
+			continue
+		}
+		if err := cc.db.SetObjectCount(key.StorageID, key.NamespaceID, 0); err != nil {
+			sl.WithError(err).WithFields(log.Fields{"storageID": key.StorageID, "namespaceID": key.NamespaceID}).Warn("Failed to zero object count")
+		}
+	}
 	return nil
 }
 
@@ -929,7 +1005,12 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 //
 // This catches drift that can accumulate from crash recovery, orphan
 // cleanup, or bugs in the incremental usage tracking.
-func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, sl *log.Entry, actual map[StorageUsageKey]int64) error {
+// reconcileUsage corrects the stored per-bucket byte counters against what the
+// scan observed. As with reconcileObjectCounts, it may only zero the buckets it
+// did not observe when the scan covered the whole keyspace -- a truncated scan
+// would otherwise report every unreached bucket as empty and drive the cache's
+// idea of its own usage to near zero.
+func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, sl *log.Entry, actual map[StorageUsageKey]int64, scanComplete bool) error {
 	stored, err := cc.db.GetAllUsage()
 	if err != nil {
 		return errors.Wrap(err, "failed to read stored usage")
@@ -968,6 +1049,13 @@ func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, sl *log.Entry,
 	}
 
 	// Check keys that exist in stored but not in actual — they should be 0.
+	// Only a complete scan is entitled to draw that conclusion.
+	if !scanComplete {
+		if corrected > 0 {
+			sl.WithField("corrected", corrected).Info("Usage reconciliation corrected counters (partial scan)")
+		}
+		return nil
+	}
 	for key, storedBytes := range stored {
 		if _, exists := actual[key]; exists {
 			continue // Already handled above.
