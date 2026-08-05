@@ -28,6 +28,14 @@ builds:
       - amd64
       - arm64
       - ppc64le
+    # No build tags: this ships the current (v0.1.0) C ABI. The Makefile's
+    # LOTMAN_ABI auto-detection is for local builds against whatever
+    # xrootd-lotman is installed on the box; a package has to pick one, and a
+    # legacy-ABI package would be a separate build with
+    # `-tags lotman_legacy_api` and its own package name. Shipping the wrong one
+    # is not a soft failure: the argument lists differ, so a mismatched plugin
+    # faults on its first purge tick.
+    tags: []
     # The C ABI version is reported at runtime by lotman_version(); no Go
     # version metadata is linked into the library.
     ldflags:
@@ -68,12 +76,29 @@ nfpms:
       - deb
       - rpm
     release: 1
+    # This package installs /usr/lib64/libLotMan.so and /usr/include/lotman.h,
+    # both owned by the upstream `lotman` package it is a drop-in for. Without
+    # declaring that, installing it on a host that already has xrootd-lotman's
+    # dependency fails with a file conflict rather than replacing it.
+    provides:
+      - lotman
+    conflicts:
+      - lotman
+    # KNOWN GAP: Go's -buildmode=c-shared emits no DT_SONAME (the linker
+    # invocation adds -shared, -Wl,-z,nodelete and -Wl,-Bsymbolic, never
+    # -Wl,-soname). If libXrdPurgeLotMan.so records a versioned DT_NEEDED such
+    # as libLotMan.so.0, this file cannot satisfy it. Setting an soname via
+    # -extldflags has not been validated against a real plugin build, so it is
+    # deliberately not attempted here.
     # Place the shared library under the system library directory rather than the
     # default /usr/bin.
     bindir: /usr/lib64
     contents:
+      # cgo names the generated header after the package directory, but every
+      # consumer does #include "lotman.h", matching the upstream library this
+      # replaces. Install it under the name they expect.
       - src: "dist/lotman-shared_{{ .Os }}_{{ .Arch }}*/libLotMan.h"
-        dst: "/usr/include/libLotMan.h"
+        dst: "/usr/include/lotman.h"
         file_info:
           mode: 0644
       - src: LICENSE
