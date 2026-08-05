@@ -398,31 +398,18 @@ func (em *EvictionManager) SetLotPlanner(p lotEvictionPlanner) {
 // Directories are processed concurrently because they typically reside
 // on separate physical devices, so parallel I/O carries little penalty.
 func (em *EvictionManager) checkAndEvict() {
-	em.evictMu.Lock()
-	if em.evicting {
-		em.evictMu.Unlock()
-		return
-	}
-	em.evicting = true
-	em.evictMu.Unlock()
-
-	defer func() {
-		em.evictMu.Lock()
-		em.evicting = false
-		em.evictMu.Unlock()
-	}()
-
 	runID := em.evictRunCounter.Add(1)
 	rl := log.WithField("evictRun", runID)
-
-	startTime := time.Now()
-	var totalEvictedBytes atomic.Uint64
-	var totalEvictedObjects atomic.Int64
-	var totalConflicts atomic.Int64
 
 	// Lot-aware eviction refreshes the lot store's usage view before planning so
 	// the priority queries are accurate -- but only if some directory actually
 	// needs eviction, to avoid syncing on idle ticks.
+	//
+	// This runs *before* the evicting flag is raised, deliberately. The sync
+	// writes to the shared server database and can be slow under contention;
+	// holding the flag across it would make an administrator's emergency purge
+	// fail with "eviction already in progress" during precisely the window when
+	// the cache is over its high watermark and nothing has been freed yet.
 	if em.planner != nil {
 		needsEviction := false
 		for sid, limits := range em.dirLimits {
@@ -437,6 +424,25 @@ func (em *EvictionManager) checkAndEvict() {
 			}
 		}
 	}
+
+	em.evictMu.Lock()
+	if em.evicting {
+		em.evictMu.Unlock()
+		return
+	}
+	em.evicting = true
+	em.evictMu.Unlock()
+
+	defer func() {
+		em.evictMu.Lock()
+		em.evicting = false
+		em.evictMu.Unlock()
+	}()
+
+	startTime := time.Now()
+	var totalEvictedBytes atomic.Uint64
+	var totalEvictedObjects atomic.Int64
+	var totalConflicts atomic.Int64
 
 	var wg sync.WaitGroup
 	for sid, limits := range em.dirLimits {

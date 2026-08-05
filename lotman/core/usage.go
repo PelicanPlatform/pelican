@@ -68,23 +68,54 @@ type UsageReport struct {
 // caller must own the lot or a parent (empty caller = trusted/system, used by
 // the cache usage reconciler).
 func (m *Manager) UpdateLotUsage(u UsageUpdate, delta bool, caller string) error {
+	return m.UpdateLotUsageBatch([]UsageUpdate{u}, delta, caller)
+}
+
+// UpdateLotUsageBatch applies several usage updates as one unit: a single
+// transaction, and one rollup recomputation per affected ancestor no matter how
+// many of its descendants changed.
+//
+// Callers that hold usage for many lots -- the cache's periodic reconcile, and
+// the by-directory entry point -- should use this rather than looping over
+// UpdateLotUsage. Each individual call is its own transaction, which under the
+// project DSN means its own BEGIN IMMEDIATE on the *shared* Pelican server
+// database, plus an ancestor walk whose cost is proportional to the size of the
+// whole hierarchy. Looping therefore costs O(lots x hierarchy) queries while
+// holding the server-wide write lock, and a failure part-way through leaves the
+// earlier lots committed, so a retry double-counts them in delta mode.
+func (m *Manager) UpdateLotUsageBatch(updates []UsageUpdate, delta bool, caller string) error {
+	if len(updates) == 0 {
+		return nil
+	}
 	return m.db.Transaction(func(tx *gorm.DB) error {
-		lot, err := m.loadLot(tx, u.LotName)
-		if err != nil {
-			return err
+		affected := make([]string, 0, len(updates))
+		seen := map[string]bool{}
+		for _, u := range updates {
+			lot, err := m.loadLot(tx, u.LotName)
+			if err != nil {
+				return err
+			}
+			if err := m.authorizeModify(tx, *lot, caller); err != nil {
+				return err
+			}
+			if err := applySelfUsage(tx, u, delta); err != nil {
+				return err
+			}
+			// Only a lot's ancestors can have a changed children rollup.
+			ancestors, err := ancestorsVia(tx, u.LotName)
+			if err != nil {
+				return err
+			}
+			for _, a := range ancestors {
+				if !seen[a] {
+					seen[a] = true
+					affected = append(affected, a)
+				}
+			}
 		}
-		if err := m.authorizeModify(tx, *lot, caller); err != nil {
-			return err
-		}
-		if err := applySelfUsage(tx, u, delta); err != nil {
-			return err
-		}
-		// Only the lot's ancestors can have a changed children rollup.
-		ancestors, err := ancestorsVia(tx, u.LotName)
-		if err != nil {
-			return err
-		}
-		for _, a := range ancestors {
+		// recalcChildren re-sums a lot's whole descendant set, so one pass per
+		// affected ancestor covers every update that touched it.
+		for _, a := range affected {
 			if err := recalcChildren(tx, a); err != nil {
 				return err
 			}
@@ -117,6 +148,7 @@ func (m *Manager) UpdateLotUsageByDir(entries []DirUsage, delta bool, atMs int64
 		a.bytes += e.SizeBytes
 		a.obj += e.NumObjects
 	}
+	updates := make([]UsageUpdate, 0, len(perLot))
 	for lot, a := range perLot {
 		if lot == "default" {
 			// The default lot has no usage row unless it was created; skip if
@@ -128,11 +160,12 @@ func (m *Manager) UpdateLotUsageByDir(entries []DirUsage, delta bool, atMs int64
 			}
 		}
 		bytes, obj := a.bytes, a.obj
-		if err := m.UpdateLotUsage(UsageUpdate{LotName: lot, SelfBytes: &bytes, SelfObjects: &obj}, delta, caller); err != nil {
-			return err
-		}
+		updates = append(updates, UsageUpdate{LotName: lot, SelfBytes: &bytes, SelfObjects: &obj})
 	}
-	return nil
+	// One transaction: a failure part-way through this set would otherwise leave
+	// the earlier lots committed, and a caller retrying the same batch in delta
+	// mode would count them twice.
+	return m.UpdateLotUsageBatch(updates, delta, caller)
 }
 
 // GetLotUsage returns the self/children/total usage for a lot. The children
