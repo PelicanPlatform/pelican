@@ -235,3 +235,27 @@ func TestWriteAddressFile(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to read address file")
 	})
 }
+
+// TestAddressFileIgnoresUnknownKeys pins the property that makes this format
+// safe to extend: a reader older than the writer must skip what it does not
+// recognize rather than fail. Without it, adding a key would break every
+// deployed CLI reading a newer server's file.
+func TestAddressFileIgnoresUnknownKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set(param.RuntimeDir.GetName(), tmpDir)
+
+	contents := "SERVER_EXTERNAL_WEB_URL=https://example.com:8444\n" +
+		"SOME_FUTURE_KEY=whatever it holds\n" +
+		"# a comment\n" +
+		"\n" +
+		"malformed line with no equals sign\n" +
+		"LOCAL_ISSUER_URL=https://example.com:8444/api/v1.0/origin\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "pelican.addresses"), []byte(contents), 0600))
+
+	got, err := ReadAddressFile()
+	require.NoError(t, err, "an unknown key, a comment, and a malformed line must not make the file unreadable")
+	assert.Equal(t, "https://example.com:8444", got.ServerExternalWebURL)
+	assert.Equal(t, "https://example.com:8444/api/v1.0/origin", got.LocalIssuerURL)
+}

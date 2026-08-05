@@ -90,7 +90,7 @@
 #                      to "warn" for clients but "info" for servers.
 #
 #   server_default   - Applied after the base defaults for server commands only
-#                      (pelican origin serve, pelican cache serve, etc.). Use
+#                      (pelican-server origin serve, pelican cache serve, etc.). Use
 #                      this when a param needs a server-specific override.
 #                      Example: Logging.Level defaults to "info" for servers.
 #
@@ -1109,9 +1109,140 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", and "xroot".
+  The type of storage underpinning the origin. Currently supported types are "posix", "posixv2", "https", "httpsv2", "s3",
+  "s3v2", "globus", "globusv2", "ssh", "pstore", and "xroot".
 type: string
 default: "posix"
+components: ["origin"]
+---
+name: Origin.PStoreLocation
+description: |+
+  The directory holding a "pstore" origin's catalog and, unless Origin.PStoreStorageDirs is set, its object data.
+
+  Only used when Origin.StorageType is "pstore", but effectively required there: the default of "none" is not usable,
+  and configuration validation fails unless either this or Origin.PStoreStorageDirs is set. When only
+  Origin.PStoreStorageDirs is set, the catalog lives alongside the first directory listed there.
+
+  The Pelican store keeps object data in encrypted, block-structured files and its namespace in an encrypted embedded
+  database, both keyed off the origin's issuer keys. The directory is owned exclusively by this origin while it runs
+  and must not be shared with a cache; the two use the same key space and each refuses to open a database the other
+  claimed.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreStorageDirs
+description: |+
+  Directories a "pstore" origin spreads object data across, letting a store span several devices without LVM or RAID.
+
+  Accepts either a list of paths or a list of objects with a Path and an optional MaxSize, matching the format of
+  LocalCache.StorageDirs. When unset, Origin.PStoreLocation holds the data as well as the catalog.
+
+  A pstore never evicts: once the configured size is reached, writes fail with 507 Insufficient Storage until something
+  is deleted. A directory with no MaxSize is unbounded, which makes the store as a whole unbounded.
+type: object
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupLocation
+description: |+
+  Directory receiving periodic metadata backups of a "pstore" origin.
+
+  A metadata backup covers the catalog only -- the namespace and each object's bookkeeping. It does NOT contain object
+  data. Restoring one gives back the directory tree and every object's size, checksums, and location, but the objects
+  themselves come from the block files, which need backing up separately.
+
+  Unlike a cache, an origin cannot re-fetch what it loses: object data on disk is encrypted and named by hash, and
+  everything needed to interpret it lives in the catalog, so a store whose catalog is gone is a directory of unreadable
+  bytes. The catalog is small next to the data and can be copied consistently while the origin runs, so backing it up
+  often is cheap insurance.
+
+  A metadata backup restores only the catalog. It is useful only alongside the object data, which ordinary filesystem
+  backup tools handle, and the masterkey.json file in the store directory, which wraps the encryption key and is itself
+  protected by the origin's issuer keys.
+
+  Every backup is complete; there are no incrementals. Each one is a verified container, so a truncated or damaged file
+  is refused rather than restored as a silently smaller catalog. Note that a restore which fails part-way cannot be
+  undone: the target directory is left holding a partial catalog and must be discarded, with the restore retried into a
+  fresh directory. Always restore into a new directory rather than over an existing store.
+
+  Backups are always encrypted, and there is no key to configure: a snapshot is a logical dump holding every object
+  path and the salt that keeps on-disk filenames unguessable, so there is no setting under which one is written in the
+  clear. Each backup is encrypted under a key of its own, derived from the origin's backup key and a random salt stored
+  in that file; the backup key in turn is derived from the origin's issuer keys and travels inside every backup, sealed
+  to each issuer key that was current when it was written. Three things therefore open a backup, and any one of them is
+  enough: any of those issuer keys, the origin's backup key -- printed for escrow by "pelican-server origin pstore
+  metadata-backup-key" -- or that one file's own key, printed by "pelican-server origin pstore metadata-backup-key <file>".
+  The last is what to hand to someone who should be able to restore one archive and no others.
+
+  Empty (the default) disables metadata backups.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupInterval
+description: |+
+  How often a "pstore" origin writes a metadata backup to Origin.PStoreMetadataBackupLocation.
+
+  Each backup is complete rather than incremental, and objects smaller than Origin.PStoreInlineMaxBytes are stored in
+  the catalog itself rather than in a block file -- so a snapshot is not merely a list of names and can be
+  substantially larger than the namespace alone suggests. The default is spaced accordingly; shorten it only after
+  looking at what a snapshot of your store actually costs, and remember that Origin.PStoreMetadataBackupsToKeep copies
+  of it are retained.
+type: duration
+default: 6h
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupsToKeep
+description: |+
+  How many metadata backups a "pstore" origin retains, oldest pruned first.
+
+  Keeping several allows rolling back to a point before a corruption rather than only forward from the most recent
+  backup. Zero keeps every backup.
+type: int
+default: 24
+components: ["origin"]
+---
+name: Origin.PStoreIndexCheckInterval
+description: |+
+  How often a "pstore" origin checks its catalog for internal inconsistencies.
+
+  This pass reads only the catalog, so it is cheap. It reports and does not repair; repair stays a deliberate operator
+  action through "pelican-server origin pstore fsck --repair". Zero disables it.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.PStoreDataScanInterval
+description: |+
+  How often a "pstore" origin reads every object back and verifies it against the checksums recorded when it was
+  written.
+
+  This is the only check that detects at-rest corruption, and an origin needs it more than a cache does: a cache that
+  finds a corrupt object re-fetches it, while an origin has nowhere to re-fetch from.
+
+  The scan never modifies the store. A corrupt object is reported and left in place, because deleting it would destroy
+  the only copy along with the only record of its path, size, and checksums; restoring or re-ingesting it is an
+  operator decision, taken through "pelican-server origin pstore fsck". Zero disables the scan.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.PStoreDataScanRate
+description: |+
+  The rate at which a "pstore" origin's data scan reads, so verification does not compete with serving.
+type: byterate
+default: 100MB/s
+components: ["origin"]
+---
+name: Origin.PStoreInlineMaxBytes
+description: |+
+  The largest object a "pstore" origin keeps directly in its catalog rather than in a block file on disk.
+
+  Small objects cost a whole file each on a conventional filesystem; storing them inline avoids that. Zero selects the
+  built-in default of 4096 bytes.
+type: int
+default: 0
 components: ["origin"]
 ---
 name: Origin.FederationPrefix
@@ -1216,7 +1347,7 @@ description: |+
   - `"no-cache, must-revalidate"` — caches may store the content but must revalidate with the origin via ETags before every use.
   - `"max-age=3600"` — content is considered fresh for one hour.
   - `""` (the default) — no Cache-Control header is sent, which gives the downstream cache full discretion over freshness.
-    This matches the behaviour of a plain XRootD origin.
+    This matches the behavior of a plain XRootD origin.
 type: string
 default: ""
 components: ["origin"]
@@ -1406,7 +1537,7 @@ name: Origin.MultiuserUmask
 description: |+
   The file-creation mask (umask) applied to the process at startup when multiuser mode is enabled.
   This umask controls which permission bits are masked off from the requested mode for all filesystem operations.
-  The umask is set once when the multiuser filesystem is initialised and left in place for the lifetime of the process.
+  The umask is set once when the multiuser filesystem is initialized and left in place for the lifetime of the process.
   A value of -1 (the default) means the process inherits the umask from its parent and does not change it.
   A value of 0 means the exact permissions requested by the caller are applied (no bits masked).
   Specify the value in YAML octal notation (e.g. 0o0022 removes group-write and other-write).

@@ -23,8 +23,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
 	"database/sql"
 	"encoding/binary"
 	"encoding/pem"
@@ -43,12 +41,11 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/curve25519"
-	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/backup_keys"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/version"
@@ -223,30 +220,13 @@ func ReadBackupMetadata(backupPath string) (*BackupMetadata, error) {
 
 // deriveBackupKeyPair derives a Curve25519 key pair from an issuer JWK using
 // HKDF-SHA256.
+//
+// The derivation lives in backup_keys because the pstore origin needs the same
+// one; the label is what keeps the two subsystems' archives from opening with
+// each other's escrowed keys.  backup_keys.LabelDatabase is frozen -- it is
+// baked into every database backup ever written.
 func deriveBackupKeyPair(issuerKey jwk.Key) (privateKey, publicKey *[32]byte, err error) {
-	var rawKey any
-	if err := issuerKey.Raw(&rawKey); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to extract raw key from JWK")
-	}
-
-	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(rawKey)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to marshal private key to PKCS8")
-	}
-
-	// Use HKDF-SHA256 to derive a 32-byte Curve25519 private key.
-	// The info string binds the derived key to backup encryption usage.
-	hkdfReader := hkdf.New(sha256.New, derPrivateKey, nil, []byte("pelican-backup-encryption"))
-
-	privateKey = new([32]byte)
-	if _, err := io.ReadFull(hkdfReader, privateKey[:]); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to derive key via HKDF")
-	}
-
-	publicKey = new([32]byte)
-	curve25519.ScalarBaseMult(publicKey, privateKey)
-
-	return privateKey, publicKey, nil
+	return backup_keys.DeriveKeyPair(issuerKey, backup_keys.LabelDatabase)
 }
 
 // encryptedChunkWriter implements io.WriteCloser. Data written to it is

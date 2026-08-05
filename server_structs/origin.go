@@ -52,6 +52,7 @@ const (
 	OriginStorageS3v2     OriginStorageType = "s3v2"     // Native S3 backend (no XRootD)
 	OriginStorageHTTPSv2  OriginStorageType = "httpsv2"  // Native HTTPS/WebDAV backend (no XRootD)
 	OriginStorageGlobusv2 OriginStorageType = "globusv2" // Native Globus backend (no XRootD)
+	OriginStoragePStore   OriginStorageType = "pstore"   // Pelican store: encrypted block store on local disk (no XRootD)
 	OriginStorageXRoot    OriginStorageType = "xroot"    // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
 )
 
@@ -59,14 +60,33 @@ var (
 	ErrUnknownOriginStorageType = errors.New("unknown origin storage type")
 )
 
-// IsPosixLike reports whether the storage type is a "POSIX-like" backend whose
-// data lives on a locally-mounted filesystem (as opposed to a remote-protocol
-// backend such as S3, HTTPS, Globus, SSH, or XRoot). POSIX-like backends share
-// behavior in several places: the origin can run its own self-test and the
-// director can probe it; atomic uploads (POSC) work because rename(2) is
-// available; checksum xattrs can be stored on local files; etc. New POSIX-like
-// backends should be added here rather than growing the list of `==` checks
-// scattered across the codebase.
+// SupportsSelfTest reports whether the origin can accept the write-read probe
+// that the origin self-test and the director test rely on.
+//
+// The probe writes a small object and reads it back, so it needs a backend the
+// origin can write to directly and cheaply. That rules out the
+// remote-protocol backends (S3, HTTPS, Globus, SSH, XRoot), where the probe
+// would mean egress and credentials for every health check.
+//
+// Note that this is a different question from IsPosixLike: pstore is not a
+// POSIX filesystem and its StoragePrefix is not a host path, but it is local
+// and writable, so it can self-test.
+func (t OriginStorageType) SupportsSelfTest() bool {
+	switch t {
+	case OriginStoragePosix, OriginStoragePosixv2, OriginStoragePStore:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsPosixLike reports whether an export's StoragePrefix names a directory on
+// this host, so it can be walked, stat'd, or opened as an os.Root.
+//
+// pstore is deliberately excluded. Its StoragePrefix is a path inside the
+// store's own namespace, not on the filesystem -- "/" is a perfectly ordinary
+// value for it -- so resolving one against the local filesystem reads
+// something else entirely, or the host's root directory.
 func (t OriginStorageType) IsPosixLike() bool {
 	switch t {
 	case OriginStoragePosix, OriginStoragePosixv2:
@@ -82,7 +102,7 @@ func (t OriginStorageType) IsPosixLike() bool {
 // added here rather than duplicating the list of storage-type comparisons.
 func (t OriginStorageType) UsesXRootD() bool {
 	switch t {
-	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2:
+	case OriginStoragePosixv2, OriginStorageSSH, OriginStorageS3v2, OriginStorageHTTPSv2, OriginStorageGlobusv2, OriginStoragePStore:
 		return false
 	default:
 		return true
@@ -112,8 +132,10 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStorageHTTPSv2
 	case string(OriginStorageGlobusv2):
 		ost = OriginStorageGlobusv2
+	case string(OriginStoragePStore):
+		ost = OriginStoragePStore
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, s3v2, https, httpsv2, globus, globusv2, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, s3v2, https, httpsv2, globus, globusv2, pstore, and xroot)", storageType)
 	}
 	return
 }

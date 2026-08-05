@@ -22,10 +22,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -149,7 +151,7 @@ func (mrr *metricsRequestReader) Close() error {
 // and Cache-Control headers are set before response headers are flushed.
 // The Cache-Control value is driven by the Origin.CacheControl configuration
 // parameter.  When empty (the default), no Cache-Control header is set,
-// matching the behaviour of a plain XRootD origin.
+// matching the behavior of a plain XRootD origin.
 type etagResponseWriter struct {
 	http.ResponseWriter
 	etag         string
@@ -657,6 +659,16 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 			backend = sshBackend
 
+		case server_structs.OriginStoragePStore:
+			// Pelican store: an encrypted block store on local disk, served
+			// through the same afero adapter as the POSIX backend.
+			psBackend, psErr := newPStoreBackend(ctx, export, logger)
+			if psErr != nil {
+				return fmt.Errorf("failed to create pstore backend for %s: %w", export.FederationPrefix, psErr)
+			}
+			backend = psBackend
+			log.Infof("Initialized pstore backend for %s", export.FederationPrefix)
+
 		case server_structs.OriginStorageS3v2:
 			// Native blob backend (S3, GCS, Azure) via gocloud.dev/blob
 			blobURL := param.Origin_ObjectProviderURL.GetString()
@@ -841,6 +853,134 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	return nil
 }
 
+// exportRequestHandler builds the Gin handler that serves one export.
+//
+// It is a named function rather than a closure inside RegisterHandlers so that
+// the dispatch it performs -- path cleaning, the capacity and precondition
+// pre-flight, destination validation, and the choice of WebDAV entry point --
+// can be exercised on a test engine without standing up a federation.
+func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Handler,
+	federationPrefix, routePrefix string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Ask the backend whether it can serve requests right now.
+		if err := backend.CheckAvailability(); err != nil {
+			statusCode := http.StatusServiceUnavailable
+			if sc, ok := err.(server_utils.HTTPStatusCoder); ok {
+				statusCode = sc.HTTPStatusCode()
+			}
+			c.AbortWithStatusJSON(statusCode, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Get the path relative to the export (strip the federation prefix)
+		wildcardPath := c.Param("path")
+
+		// Clean the path to prevent traversal attacks via
+		// URL-encoded dot-dot sequences (%2e%2e). Without
+		// this, a request like /prefix/%2e%2e/secret reaches
+		// the backend with ".." intact, potentially escaping
+		// the storage root.
+		newPath := path.Clean(wildcardPath)
+		// path.Clean("") == "." and path.Clean("/") == "/"; collapse the
+		// degenerate "." back to "/" so the URL we hand the WebDAV
+		// handler stays well-formed.
+		if newPath == "." {
+			newPath = "/"
+		}
+
+		// path.Clean also strips a trailing separator, which the WebDAV
+		// handler does not care about but a directory URL does: the browser
+		// listing titles itself with this path and a client resolves relative
+		// links against it, so "/dir" and "/dir/" are not interchangeable.
+		// Restore the slash for the handlers that render it. Doing so cannot
+		// reintroduce traversal -- the dot-segments are already gone by here,
+		// and "/a/../b/" has become "/b/".
+		relPath := newPath
+		if newPath != "/" && strings.HasSuffix(wildcardPath, "/") {
+			relPath += "/"
+		}
+
+		// Create a shallow copy of the request and modify its URL.
+		// The WebDAV handler's stripPrefix relies on URL.Path still
+		// starting with handler.Prefix (= routePrefix), so put the
+		// route prefix back on. Keeping the prefix here also keeps
+		// PROPFIND href values aligned with the public URL.
+		modifiedReq := c.Request.Clone(c.Request.Context())
+		modifiedURL := *c.Request.URL
+		modifiedURL.Path = routePrefix + newPath
+		modifiedReq.URL = &modifiedURL
+
+		// Stash client tracing headers (X-Pelican-JobId,
+		// X-Pelican-Timeout) in the request context so backends
+		// that forward requests can propagate them.
+		modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
+
+		// For PUT requests, pass the Content-Length as a size hint
+		// so the blob backend can optimize upload part sizes.
+		if c.Request.Method == http.MethodPut && c.Request.ContentLength > 0 {
+			ctx := ContextWithContentLength(modifiedReq.Context(), c.Request.ContentLength)
+			modifiedReq = modifiedReq.WithContext(ctx)
+		}
+
+		// Every one of these is handed newPath, the cleaned path, rather
+		// than the raw wildcard: a request for "/%2e%2e/other" arrives
+		// with its dot-segments intact (Gin and net/http do not normalize
+		// them), and a backend that joins the path onto a storage prefix
+		// resolves them into a neighbouring export.
+		if isTPCRequest(c.Request) {
+			handleCopyTPC(c, backend, federationPrefix)
+		} else if c.Request.Method == http.MethodHead {
+			// For HEAD requests, pass the modified request to the WebDAV
+			// handler (it needs the full URL so its Prefix stripping works
+			// correctly). newPath is used only for checksum lookup.
+			handleHeadWithChecksum(c, handler, modifiedReq, relPath, backend)
+		} else if c.Request.Method == http.MethodGet {
+			// For GET requests, add ETag header based on file metadata
+			handleGetWithETag(c, handler, modifiedReq, relPath, backend, exportPrefixMap[federationPrefix])
+		} else if c.Request.Method == http.MethodPut {
+			// Refuse a PUT that cannot fit before the client streams a
+			// body the backend would only discard.  The WebDAV handler
+			// reports a mid-stream write failure as 405 Method Not
+			// Allowed, which tells the client nothing useful; catching it
+			// here yields a correct 507 with a reason.
+			if !checkBackendCapacity(c, backend) {
+				return
+			}
+			// Evaluate If-Match / If-None-Match, which the WebDAV
+			// handler does not implement. Ignoring them silently would
+			// leave a client believing it had compare-and-swap
+			// protection it never got.
+			cond, ok := checkPutPreconditions(c, backend, newPath)
+			if !ok {
+				return
+			}
+			if cond.isSet() {
+				// Carry the condition to the backend so it can re-check it
+				// at commit; the check above is only the fast path.
+				modifiedReq = modifiedReq.WithContext(
+					contextWithWriteCondition(modifiedReq.Context(), cond))
+			}
+			// For PUT requests, return ETag of the newly written file
+			handlePutWithETag(c, handler, modifiedReq, relPath, backend,
+				exportPrefixMap[federationPrefix], cond.isSet())
+		} else {
+			// COPY and MOVE name their target in a header the WebDAV
+			// handler neither cleans nor authorizes, so both have to
+			// happen here.
+			if c.Request.Method == "COPY" || c.Request.Method == "MOVE" {
+				if !checkCopyMoveDestination(c, routePrefix, federationPrefix) {
+					return
+				}
+			}
+			// For all other methods (including PROPFIND), pass the modified
+			// request to the WebDAV handler. The handler's Prefix field
+			// ensures it strips the route prefix for filesystem access
+			// while using it to construct correct href values in responses.
+			serveWebDAVMethod(c, handler, modifiedReq)
+		}
+	}
+}
+
 // RegisterHandlers registers the HTTP handlers with the Gin engine.
 // When the director is also running in the same server, handlers are registered
 // under /api/v1.0/origin/<prefix> so the director can distinguish between its routing
@@ -879,76 +1019,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		group.Use(xrdMonitoringMiddleware())
 
 		// Create a handler function for all requests
-		handleRequest := func(c *gin.Context) {
-			// Ask the backend whether it can serve requests right now.
-			if err := backend.CheckAvailability(); err != nil {
-				statusCode := http.StatusServiceUnavailable
-				if sc, ok := err.(server_utils.HTTPStatusCoder); ok {
-					statusCode = sc.HTTPStatusCode()
-				}
-				c.AbortWithStatusJSON(statusCode, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Get the path relative to the export (strip the federation prefix)
-			wildcardPath := c.Param("path")
-
-			// Clean the path to prevent traversal attacks via
-			// URL-encoded dot-dot sequences (%2e%2e). Without
-			// this, a request like /prefix/%2e%2e/secret reaches
-			// the backend with ".." intact, potentially escaping
-			// the storage root.
-			newPath := path.Clean(wildcardPath)
-			// path.Clean("") == "." and path.Clean("/") == "/"; collapse the
-			// degenerate "." back to "/" so the URL we hand the WebDAV
-			// handler stays well-formed.
-			if newPath == "." {
-				newPath = "/"
-			}
-
-			// Create a shallow copy of the request and modify its URL.
-			// The WebDAV handler's stripPrefix relies on URL.Path still
-			// starting with handler.Prefix (= routePrefix), so put the
-			// route prefix back on. Keeping the prefix here also keeps
-			// PROPFIND href values aligned with the public URL.
-			modifiedReq := c.Request.Clone(c.Request.Context())
-			modifiedURL := *c.Request.URL
-			modifiedURL.Path = routePrefix + newPath
-			modifiedReq.URL = &modifiedURL
-
-			// Stash client tracing headers (X-Pelican-JobId,
-			// X-Pelican-Timeout) in the request context so backends
-			// that forward requests can propagate them.
-			modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
-
-			// For PUT requests, pass the Content-Length as a size hint
-			// so the blob backend can optimize upload part sizes.
-			if c.Request.Method == http.MethodPut && c.Request.ContentLength > 0 {
-				ctx := ContextWithContentLength(modifiedReq.Context(), c.Request.ContentLength)
-				modifiedReq = modifiedReq.WithContext(ctx)
-			}
-
-			if isTPCRequest(c.Request) {
-				handleCopyTPC(c, backend, prefix)
-			} else if c.Request.Method == http.MethodHead {
-				// For HEAD requests, pass the original request to the WebDAV handler
-				// (it needs the full URL so its Prefix stripping works correctly).
-				// wildcardPath is used only for checksum lookup on the filesystem.
-				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, backend)
-			} else if c.Request.Method == http.MethodGet {
-				// For GET requests, add ETag header based on file metadata
-				handleGetWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
-			} else if c.Request.Method == http.MethodPut {
-				// For PUT requests, return ETag of the newly written file
-				handlePutWithETag(c, handler, modifiedReq, wildcardPath, exportPrefixMap[prefix])
-			} else {
-				// For all other methods (including PROPFIND), pass the original request
-				// to the WebDAV handler. The handler's Prefix field ensures it strips
-				// the route prefix for filesystem access while using it to construct
-				// correct href values in responses.
-				handler.ServeHTTP(c.Writer, modifiedReq)
-			}
-		}
+		handleRequest := exportRequestHandler(backend, handler, prefix, routePrefix)
 
 		// Register handler for standard HTTP methods
 		group.Any("/*path", handleRequest)
@@ -969,6 +1040,172 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 	handlersRegistered = true
 	return nil
+}
+
+// checkCopyMoveDestination validates and authorizes the Destination header of
+// a COPY or MOVE.  It returns true when the request should proceed and
+// otherwise writes the response itself.
+//
+// golang.org/x/net/webdav does neither. Its handleCopyMove takes the
+// destination's URL path, strips the handler's prefix with a bare
+// strings.TrimPrefix, and hands the remainder to Rename, OpenFile, and --
+// because RFC 4918 §9.9.3 requires MOVE to delete an existing destination
+// first -- RemoveAll. Nothing along that path cleans the dot-segments or asks
+// whether the caller may write where they point. A client holding
+// storage.modify on one export could therefore aim a MOVE at another export's
+// subtree and have it deleted, and COPY defaults to Overwrite: T so it needed
+// no header at all.
+//
+// aferoFileSystem.fullPath now refuses such a path outright, which is the
+// durable fix; this adds the two things only the handler knows. First, the
+// destination must lie inside this export's route, since the WebDAV handler is
+// bound to a single export's filesystem and a path outside it cannot be served
+// correctly under any interpretation. Second, the destination is authorized in
+// its own right: authMiddleware only ever authorized the request path, so a
+// token scoped to one subtree could write to another, including one whose
+// export is configured Writes: false.
+func checkCopyMoveDestination(c *gin.Context, routePrefix, federationPrefix string) bool {
+	hdr := c.GetHeader("Destination")
+	if hdr == "" {
+		// The WebDAV handler reports the missing header itself (400).
+		return true
+	}
+	u, err := url.Parse(hdr)
+	if err != nil || u.Path == "" {
+		// Likewise for an unparsable or empty destination (400 / 502).
+		return true
+	}
+	if u.Host != "" && u.Host != c.Request.Host {
+		// Likewise for a foreign host (502).
+		return true
+	}
+
+	dst := path.Clean(u.Path)
+	if !hasPathPrefix(dst, routePrefix) {
+		log.Warnf("Refusing %s to %q: destination is outside the export at %s",
+			c.Request.Method, hdr, routePrefix)
+		c.String(http.StatusForbidden, "Destination is outside the export")
+		return false
+	}
+
+	ac := GetAuthConfig()
+	if ac == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error":  "internal_error",
+			"detail": "auth config not initialized",
+		})
+		return false
+	}
+
+	// Token scopes are expressed against federation paths, so map the route
+	// path back before asking.
+	resource := path.Join(federationPrefix, strings.TrimPrefix(dst, routePrefix))
+	action := getActionFromMethod(c.Request.Method)
+	for _, tok := range extractTokens(c.Request) {
+		if ac.authorize(action, resource, tok) {
+			return true
+		}
+	}
+
+	log.Warnf("Refusing %s to %s: no token authorizes %s on the destination",
+		c.Request.Method, resource, action)
+	c.String(http.StatusForbidden, "Not authorized to write to the destination")
+	return false
+}
+
+// serveWebDAVMethod runs the WebDAV handler for a method other than GET, HEAD,
+// or PUT, correcting the status where the handler's own mapping is wrong.
+//
+// The correction is only applied to methods whose response body is small and
+// bounded. PROPFIND can enumerate an entire subtree and GET streams object
+// data, and neither can be buffered to hold the status open.
+func serveWebDAVMethod(c *gin.Context, handler *webdav.Handler, req *http.Request) {
+	switch req.Method {
+	case http.MethodDelete, "COPY", "MOVE", "MKCOL":
+		dw := &deferredHeaderWriter{ResponseWriter: c.Writer}
+		serveWebDAV(dw, handler, req, false)
+		dw.Flush()
+	default:
+		handler.ServeHTTP(c.Writer, req)
+	}
+}
+
+// serveWebDAV runs the WebDAV handler against a deferred writer and rewrites
+// the status when the underlying error carries a more specific one.
+//
+// webdav.Handler does not expose the error behind its status, but it does hand
+// it to Logger on the way out, which is enough: the handler is shallow-copied
+// per request so its Logger can capture the error without disturbing the
+// shared one. The status is then still open, because deferredHeaderWriter has
+// not flushed it.
+//
+// Without this, none of the origin's error mapping reached a client: ENOSPC
+// came out as 405 Method Not Allowed, ErrDraining as 404, and
+// ErrPreconditionFailed was unreachable.
+func serveWebDAV(dw *deferredHeaderWriter, handler *webdav.Handler, req *http.Request, conditional bool) {
+	var captured error
+	perRequest := *handler
+	perRequest.Logger = func(r *http.Request, err error) {
+		if err != nil {
+			captured = err
+		}
+		if handler.Logger != nil {
+			handler.Logger(r, err)
+		}
+	}
+
+	perRequest.ServeHTTP(dw, req)
+
+	if dw.code < 400 || captured == nil {
+		return
+	}
+	status := statusForBackendError(captured, conditional)
+	if status == 0 || status == dw.code {
+		return
+	}
+	log.Debugf("Reporting %d rather than the WebDAV handler's %d for %s %s: %v",
+		status, dw.code, req.Method, req.URL.Path, captured)
+	dw.code = status
+	// The handler wrote StatusText for the status it chose, which is now the
+	// wrong text for the wrong code.
+	dw.buf = []byte(http.StatusText(status))
+}
+
+// localRootProvider is implemented by a backend that can hand out an os.Root
+// for the export, because its storage really is a directory on this host.
+type localRootProvider interface {
+	LocalStorageRoot() (*os.Root, error)
+}
+
+// errNotHostFilesystem reports that an export's storage is not a directory on
+// this machine, so the host-filesystem fast paths do not apply to it.
+var errNotHostFilesystem = errors.New("the export's storage is not on the host filesystem")
+
+// openLocalStorageRoot opens the export's storage prefix as an os.Root, but
+// only when that prefix actually names a directory on this host.
+//
+// An export's StoragePrefix means whatever its backend says it means. For
+// POSIX it is a host path. For pstore it is a logical path inside the store's
+// namespace -- server_utils/origin_pstore.go says so explicitly -- and for the
+// S3, HTTPS, and Globus backends it names a remote subtree. Resolving those
+// against the local filesystem is not merely useless: "/" is the natural
+// StoragePrefix for a single-export pstore origin, and os.OpenRoot("/")
+// succeeds, which turned a browser GET into an HTML index of the origin host's
+// root directory and made ETag and Last-Modified an existence-and-mtime oracle
+// for host files. handlePutWithETag was worse still, running InvalidateChecksums
+// -- which opens O_RDWR and strips xattrs -- against unrelated local files.
+//
+// Backends opt in by implementing localRootProvider; the POSIX backend is
+// recognized directly, since its whole contract is that StoragePrefix is a
+// host path.
+func openLocalStorageRoot(backend server_utils.OriginBackend, storagePrefix string) (*os.Root, error) {
+	switch b := backend.(type) {
+	case localRootProvider:
+		return b.LocalStorageRoot()
+	case *localBackend:
+		return os.OpenRoot(storagePrefix)
+	}
+	return nil, errNotHostFilesystem
 }
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
@@ -1041,21 +1278,67 @@ func computeETag(info os.FileInfo) string {
 	return fmt.Sprintf(`"%x"`, sum[:8])
 }
 
+// checkBackendCapacity refuses a PUT the backend has already said will not
+// fit, writing 507 Insufficient Storage.  It returns true when the request
+// should proceed.
+//
+// Only fixed-size backends implement server_utils.CapacityReporter, and the
+// check needs a declared Content-Length: a chunked-encoding PUT has no length
+// to test, so it proceeds and is enforced by the write path instead.
+//
+// The check is advisory. A concurrent write may take the headroom between here
+// and the reservation, so the store enforces its own limit regardless; this
+// only improves the common case.
+func checkBackendCapacity(c *gin.Context, backend server_utils.OriginBackend) bool {
+	reporter, ok := backend.(server_utils.CapacityReporter)
+	if !ok || c.Request.ContentLength <= 0 {
+		return true
+	}
+	if err := reporter.HasCapacityFor(c.Request.ContentLength); err != nil {
+		log.Warnf("Refusing PUT of %d bytes to %s: %v", c.Request.ContentLength, c.Request.URL.Path, err)
+		c.String(http.StatusInsufficientStorage, "Insufficient storage: %v", err)
+		return false
+	}
+	return true
+}
+
 // handlePutWithETag handles PUT requests and returns the ETag of the newly
-// written file in the response headers.  The ETag is computed from the file's
-// mtime and size after the WebDAV handler finishes writing, using the same
-// formula as handleGetWithETag so that GET after PUT returns the same ETag.
+// written file in the response headers.  For a host-filesystem backend the
+// ETag is computed from the file's mtime and size after the WebDAV handler
+// finishes writing, using the same formula as handleGetWithETag so that GET
+// after PUT returns the same ETag; other backends mint their own, which the
+// WebDAV handler has already set from webdav.ETager.
 //
 // Because PUT responses are typically header-only (201 Created or 204 No
 // Content), we wrap the response writer to defer the header flush until after
 // we have had a chance to stat the new file.
-func handlePutWithETag(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string, storagePrefix string) {
+//
+// The request body is wrapped so that a read failure -- a client that
+// disconnects halfway through an overwrite, most often -- reaches the file
+// before it is closed.  webdav.handlePut closes the file before it examines
+// the error from io.Copy, so a backend that commits at Close (pstore) would
+// otherwise install the truncated body over a complete object.  See
+// writeGuard.
+func handlePutWithETag(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string,
+	backend server_utils.OriginBackend, storagePrefix string, conditional bool) {
+	guard := &writeGuard{}
+	req = req.WithContext(contextWithWriteGuard(req.Context(), guard))
+	req.Body = &guardedBody{ReadCloser: req.Body, guard: guard}
+
 	dw := &deferredHeaderWriter{ResponseWriter: c.Writer}
-	handler.ServeHTTP(dw, req)
+	serveWebDAV(dw, handler, req, conditional)
+
+	// A body that failed mid-stream must never be reported as a success, even
+	// if the backend could not be told to discard it.
+	if failed := guard.failed(); failed != nil && dw.code >= 200 && dw.code < 300 {
+		log.Warnf("PUT of %s failed while reading the request body: %v", req.URL.Path, failed)
+		dw.code = http.StatusBadRequest
+		dw.buf = []byte("Request body ended prematurely")
+	}
 
 	// On success (2xx), stat the written file and compute ETag.
 	if dw.code >= 200 && dw.code < 300 {
-		root, err := os.OpenRoot(storagePrefix)
+		root, err := openLocalStorageRoot(backend, storagePrefix)
 		if err == nil {
 			defer root.Close()
 			normalizedPath := strings.TrimPrefix(relativePath, "/")
@@ -1119,11 +1402,18 @@ func (d *deferredHeaderWriter) Flush() {
 // - If-None-Match takes precedence over If-Modified-Since when both are present
 // - If-None-Match compares ETags (strong or weak comparison depending on method)
 // - If-Modified-Since compares modification times (only for GET/HEAD)
-func handleGetWithETag(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string, storagePrefix string) {
+//
+// The ETag and directory-listing fast paths below read the host filesystem
+// directly, so they only apply to a backend whose storage really is on this
+// host.  Everything else -- pstore, S3, HTTPS, Globus -- falls through to the
+// WebDAV handler, whose findETag already asks the backend for its own entity
+// tag through webdav.ETager.
+func handleGetWithETag(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string,
+	backend server_utils.OriginBackend, storagePrefix string) {
 	// Use os.Root to prevent symlink attacks
-	root, err := os.OpenRoot(storagePrefix)
+	root, err := openLocalStorageRoot(backend, storagePrefix)
 	if err != nil {
-		log.Debugf("Failed to open storage root for ETag: %v", err)
+		log.Debugf("Not serving %s from a host-filesystem root: %v", relativePath, err)
 		handler.ServeHTTP(c.Writer, req)
 		return
 	}

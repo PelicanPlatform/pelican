@@ -211,6 +211,9 @@ const Field = ({
               keyGetter={(v) => v.policyname}
             />
           );
+        // Origin.PStoreStorageDirs takes the same shape as
+        // LocalCache.StorageDirs, so it reuses the same form.
+        case 'PStoreStorageDirs':
         case 'StorageDirs':
           return (
             <ObjectField

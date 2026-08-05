@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,10 +38,226 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 )
 
+// SizeHintFs is optionally implemented by an afero.Fs whose write path can do
+// better when the object's final size is known up front.
+//
+// afero.Fs has no context and no size argument, so a backend that would
+// benefit -- pstore picks its storage tier from the size, and buffers to
+// discover it otherwise -- cannot see the Content-Length the handler already
+// has. This carries it across that gap.
+//
+// A size of -1 means unknown, which is what a chunked-encoding PUT gives.
+type SizeHintFs interface {
+	OpenFileSized(name string, flag int, perm os.FileMode, size int64) (afero.File, error)
+}
+
+// ConditionalWriteFs is optionally implemented by an afero.Fs that can enforce
+// an HTTP conditional-write precondition (RFC 9110 §13.1) atomically, at the
+// moment the new version is installed.
+//
+// checkPutPreconditions evaluates If-Match / If-None-Match before the write
+// begins, which is inherently a stat-then-write race: two concurrent
+// "If-None-Match: *" PUTs both observe an absent object and both commit. A
+// backend that can re-check the condition inside its commit transaction --
+// pstore does -- closes that race, so the handler hands the parsed condition
+// down here rather than keeping it to itself.
+//
+// The condition is expressed with plain scalars rather than a shared struct so
+// that a backend package does not have to import origin_serve to implement it.
+// requireAbsent is "If-None-Match: *"; requireETag is a single-tag "If-Match",
+// carrying the entity tag exactly as the client sent it (the backend, which
+// minted it, is the only layer that knows how to interpret it). size is the
+// Content-Length hint, or -1 when unknown, matching SizeHintFs.
+type ConditionalWriteFs interface {
+	OpenFileConditional(name string, flag int, perm os.FileMode, size int64,
+		requireAbsent bool, requireETag string) (afero.File, error)
+}
+
+// writeCondition is a parsed conditional-write precondition on its way from
+// the PUT handler to a ConditionalWriteFs.
+type writeCondition struct {
+	// requireAbsent demands the object not exist (If-None-Match: *).
+	requireAbsent bool
+	// requireETag demands the object still carry this entity tag (If-Match
+	// with exactly one tag; a list or "*" cannot be expressed).
+	requireETag string
+}
+
+// isSet reports whether anything needs to be enforced at commit.
+func (wc writeCondition) isSet() bool {
+	return wc.requireAbsent || wc.requireETag != ""
+}
+
+type writeConditionKey struct{}
+
+// contextWithWriteCondition carries a precondition down to the filesystem.
+//
+// afero.Fs has neither a context nor a place for this, so it travels the same
+// way the content-length hint does (see ContextWithContentLength): the WebDAV
+// handler passes the request context straight to FileSystem.OpenFile.
+func contextWithWriteCondition(ctx context.Context, cond writeCondition) context.Context {
+	return context.WithValue(ctx, writeConditionKey{}, cond)
+}
+
+// writeConditionFromCtx returns the precondition attached to ctx, if any.
+func writeConditionFromCtx(ctx context.Context) (writeCondition, bool) {
+	cond, ok := ctx.Value(writeConditionKey{}).(writeCondition)
+	return cond, ok && cond.isSet()
+}
+
+// writeAborter is implemented by a backend file whose Close would otherwise
+// commit whatever bytes happened to arrive.
+//
+// golang.org/x/net/webdav's handlePut calls f.Close() before it looks at the
+// error from io.Copy, so a client that disconnects halfway through an
+// overwrite has its truncated body committed over the previous version. A
+// backend that builds a new version and swaps it in at Close -- pstore -- can
+// discard it instead, but only if it is told the write failed before Close
+// runs.
+type writeAborter interface {
+	// AbortWrite records that the data written so far is incomplete, so that
+	// Close discards the pending version rather than installing it.
+	AbortWrite(err error)
+}
+
+// writeGuard connects a failed request-body read to the open backend file.
+//
+// The failure is observed by the handler (reading r.Body) and has to be acted
+// on by the filesystem (closing the file), and neither has a reference to the
+// other: webdav.handlePut opens the file itself, from a context the handler
+// supplied. The guard is that reference, planted in the context on the way
+// down and populated by aferoFileSystem.OpenFile on the way back.
+type writeGuard struct {
+	mu   sync.Mutex
+	file writeAborter
+	err  error
+}
+
+// register records the file a PUT is writing to. A failure that arrived before
+// the file was opened is applied immediately, so the two orderings agree.
+func (g *writeGuard) register(f afero.File) {
+	aborter, ok := f.(writeAborter)
+	if !ok {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.file = aborter
+	if g.err != nil {
+		aborter.AbortWrite(g.err)
+	}
+}
+
+// fail marks the write as incomplete.
+func (g *writeGuard) fail(err error) {
+	if err == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.err == nil {
+		g.err = err
+	}
+	if g.file != nil {
+		g.file.AbortWrite(err)
+	}
+}
+
+// failed reports whether the body read failed.
+func (g *writeGuard) failed() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.err
+}
+
+type writeGuardKey struct{}
+
+// contextWithWriteGuard attaches a guard so the filesystem can register the
+// file it opens for this request.
+func contextWithWriteGuard(ctx context.Context, g *writeGuard) context.Context {
+	return context.WithValue(ctx, writeGuardKey{}, g)
+}
+
+// writeGuardFromCtx returns the guard attached to ctx, if any.
+func writeGuardFromCtx(ctx context.Context) *writeGuard {
+	g, _ := ctx.Value(writeGuardKey{}).(*writeGuard)
+	return g
+}
+
+// guardedBody records a request-body read failure on the guard, so that the
+// file the body was being copied into is discarded rather than committed.
+type guardedBody struct {
+	io.ReadCloser
+	guard *writeGuard
+}
+
+func (b *guardedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.guard.fail(err)
+	}
+	return n, err
+}
+
 // autoCreateDirFs wraps an afero.Fs to automatically create parent directories
 // when opening a file for writing
 type autoCreateDirFs struct {
 	afero.Fs
+}
+
+// OpenFileSized forwards the size hint to the wrapped filesystem, creating
+// parent directories on the same terms as OpenFile.
+//
+// Without this the wrapper would silently swallow the hint for every backend
+// it wraps, since a type assertion against autoCreateDirFs would fail.
+func (fs *autoCreateDirFs) OpenFileSized(name string, flag int, perm os.FileMode, size int64) (afero.File, error) {
+	inner, ok := fs.Fs.(SizeHintFs)
+	if !ok {
+		return fs.OpenFile(name, flag, perm)
+	}
+
+	file, err := inner.OpenFileSized(name, flag, perm, size)
+	if err != nil && os.IsNotExist(err) && (flag&os.O_CREATE != 0 || flag&os.O_WRONLY != 0 || flag&os.O_RDWR != 0) {
+		dir := filepath.Dir(name)
+		if dir != "" && dir != "." && dir != "/" {
+			if mkdirErr := fs.Fs.MkdirAll(dir, 0755); mkdirErr == nil {
+				file, err = inner.OpenFileSized(name, flag, perm, size)
+			}
+		}
+	}
+	return file, err
+}
+
+// OpenFileConditional forwards a conditional write, creating parent
+// directories on the same terms as OpenFile.
+//
+// As with OpenFileSized, the wrapper has to forward explicitly: a type
+// assertion against autoCreateDirFs would fail and the condition would be
+// silently dropped, which is the one outcome a conditional write must never
+// have.
+func (fs *autoCreateDirFs) OpenFileConditional(name string, flag int, perm os.FileMode, size int64,
+	requireAbsent bool, requireETag string) (afero.File, error) {
+	inner, ok := fs.Fs.(ConditionalWriteFs)
+	if !ok {
+		if size >= 0 {
+			return fs.OpenFileSized(name, flag, perm, size)
+		}
+		return fs.OpenFile(name, flag, perm)
+	}
+
+	open := func() (afero.File, error) {
+		return inner.OpenFileConditional(name, flag, perm, size, requireAbsent, requireETag)
+	}
+	file, err := open()
+	if err != nil && os.IsNotExist(err) && (flag&os.O_CREATE != 0 || flag&os.O_WRONLY != 0 || flag&os.O_RDWR != 0) {
+		dir := filepath.Dir(name)
+		if dir != "" && dir != "." && dir != "/" {
+			if mkdirErr := fs.Fs.MkdirAll(dir, 0755); mkdirErr == nil {
+				file, err = open()
+			}
+		}
+	}
+	return file, err
 }
 
 // newAutoCreateDirFs creates a new filesystem that auto-creates parent directories
@@ -185,14 +402,20 @@ func (afs *aferoFileSystem) Mkdir(ctx context.Context, name string, perm os.File
 		slowHistogram: metrics.StorageSlowMkdirTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return err
+	}
 	// Use webdav logger if available
 	return afs.fs.MkdirAll(fullPath, perm)
 }
 
 // OpenFile implements webdav.FileSystem
 func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fullPath := afs.fullPath(name)
+	fullPath, pathErr := afs.fullPath(name)
+	if pathErr != nil {
+		return nil, pathErr
+	}
 	username := usernameFromContext(ctx)
 	if afs.logger != nil {
 		afs.logger(nil, nil) // Use the logger provided by webdav
@@ -235,7 +458,10 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		}
 	}
 
-	file, err := afs.fs.OpenFile(fullPath, flag, perm)
+	// Hand the backend the expected size when the handler knows it and the
+	// filesystem can use it, and the conditional-write precondition when the
+	// handler parsed one.  Everything else behaves exactly as before.
+	file, err := afs.openBacking(ctx, fullPath, flag, perm)
 	if err != nil {
 		if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
 			metrics.StorageOpenErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2, username).Inc()
@@ -254,6 +480,14 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		if issuer, ok := ctx.Value(issuerContextKey{}).(string); ok && issuer != "" {
 			userID = fmt.Sprintf("%s@%s", userID, issuer)
 		}
+	}
+
+	// Let a failed request body reach this file, so a PUT that dies mid-stream
+	// is discarded instead of being committed by webdav's unconditional
+	// f.Close().  The raw backend file is registered rather than a wrapper:
+	// the wrappers below are this package's and know nothing about aborting.
+	if guard := writeGuardFromCtx(ctx); guard != nil {
+		guard.register(file)
 	}
 
 	// Wrap the file with metrics tracking
@@ -279,8 +513,34 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 		slowHistogram: metrics.StorageSlowUnlinkTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return err
+	}
 	return afs.fs.RemoveAll(fullPath)
+}
+
+// openBacking opens the underlying file, using the richest interface the
+// backend implements: a conditional write when the request carried a
+// precondition, a size-hinted write when the handler knows the length, and a
+// plain OpenFile otherwise.
+func (afs *aferoFileSystem) openBacking(ctx context.Context, fullPath string, flag int, perm os.FileMode) (afero.File, error) {
+	hint := contentLengthFromCtx(ctx)
+
+	if cond, ok := writeConditionFromCtx(ctx); ok {
+		if conditional, can := afs.fs.(ConditionalWriteFs); can {
+			return conditional.OpenFileConditional(fullPath, flag, perm, hint,
+				cond.requireAbsent, cond.requireETag)
+		}
+		// The backend cannot enforce the condition at commit; the handler's
+		// early check already rejected the common case, and there is nothing
+		// further this layer can do.
+	}
+
+	if sized, ok := afs.fs.(SizeHintFs); ok && hint >= 0 {
+		return sized.OpenFileSized(fullPath, flag, perm, hint)
+	}
+	return afs.fs.OpenFile(fullPath, flag, perm)
 }
 
 // Rename implements webdav.FileSystem
@@ -292,8 +552,14 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 		slowHistogram: metrics.StorageSlowRenameTime,
 	}, usernameFromContext(ctx))()
 
-	oldPath := afs.fullPath(oldName)
-	newPath := afs.fullPath(newName)
+	oldPath, err := afs.fullPath(oldName)
+	if err != nil {
+		return err
+	}
+	newPath, err := afs.fullPath(newName)
+	if err != nil {
+		return err
+	}
 	return afs.fs.Rename(oldPath, newPath)
 }
 
@@ -306,16 +572,55 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 		slowHistogram: metrics.StorageSlowStatTime,
 	}, usernameFromContext(ctx))()
 
-	fullPath := afs.fullPath(name)
+	fullPath, err := afs.fullPath(name)
+	if err != nil {
+		return nil, err
+	}
 	return afs.fs.Stat(fullPath)
 }
 
-// fullPath converts a webdav path to a full filesystem path
-func (afs *aferoFileSystem) fullPath(name string) string {
+// fullPath converts a WebDAV path to a full filesystem path, refusing any that
+// would leave the export's storage prefix.
+//
+// This is the containment boundary for every prefix-joined backend, and it has
+// to be, because there is nothing behind it: pstore's prefix is a logical
+// namespace path, so there is no os.Root to catch an escape the way the POSIX
+// backend has. golang.org/x/net/webdav cleans the request *path* but hands the
+// Destination header of a COPY or MOVE to Rename / RemoveAll / OpenFile after
+// no more than a strings.TrimPrefix, so "Destination: /<prefix>/../../other"
+// arrived here with its dot-segments intact and path.Join happily resolved it
+// into a neighbouring export -- with MOVE's RFC 4918 §9.9.3 "DELETE the
+// destination first" turning that into cross-tenant data loss.
+//
+// The check mirrors the one handleCopyTPC already applies to its own
+// destination (see tpc_handler.go): normalize, then require the result to
+// still lie under the prefix.
+func (afs *aferoFileSystem) fullPath(name string) (string, error) {
 	if afs.prefix == "" {
-		return name
+		// Nothing to escape: this filesystem is already rooted at the export
+		// (server_utils.NewOsRootFs, a BasePathFs, or a remote endpoint), and
+		// that root is what confines it.
+		return name, nil
 	}
-	return path.Join(afs.prefix, name)
+	return confineToPrefix(afs.prefix, name)
+}
+
+// confineToPrefix joins a request-relative path onto a storage prefix and
+// refuses any result that does not remain under it.
+//
+// It is shared by every place that maps an untrusted, request-supplied path
+// into a prefixed namespace -- the WebDAV filesystem above and the pstore
+// checksummer -- because "path.Join normalizes the dot-segments away and lands
+// somewhere else" is the same bug wherever it appears.
+func confineToPrefix(prefix, name string) (string, error) {
+	cleanPrefix := path.Clean("/" + strings.TrimPrefix(prefix, "/"))
+	joined := path.Join(cleanPrefix, name)
+	if !hasPathPrefix(joined, cleanPrefix) {
+		// os.ErrPermission rather than ErrNotExist: the path is refused, and
+		// saying "not found" for a path that may well exist invites probing.
+		return "", &os.PathError{Op: "open", Path: name, Err: os.ErrPermission}
+	}
+	return joined, nil
 }
 
 // aferoFile wraps an afero.File to implement webdav.File

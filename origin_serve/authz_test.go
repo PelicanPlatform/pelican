@@ -442,7 +442,7 @@ func TestAuthorizationWithDirtyPaths(t *testing.T) {
 		t.Run(dp.name, func(t *testing.T) {
 			_, authorized := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, dp.resource, tok)
 			assert.True(t, authorized,
-				"dirty path %q should be authorized after path.Clean normalisation", dp.resource)
+				"dirty path %q should be authorized after path.Clean normalization", dp.resource)
 		})
 	}
 

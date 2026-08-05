@@ -335,7 +335,7 @@ func TestGetNsAd(t *testing.T) {
 			expectPath:  readNs.Path,
 		},
 		{
-			name:        "matching namespace with trailing slash normalised",
+			name:        "matching namespace with trailing slash normalized",
 			nsAds:       []server_structs.NamespaceAdResponse{readNs},
 			namespace:   "/test/prefix/",
 			expectError: false,

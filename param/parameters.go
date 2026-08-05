@@ -394,6 +394,15 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.MultiuserVarlinkSocketPath": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.ObjectProviderURL": false,
+	"Origin.PStoreDataScanInterval": false,
+	"Origin.PStoreDataScanRate": false,
+	"Origin.PStoreIndexCheckInterval": false,
+	"Origin.PStoreInlineMaxBytes": false,
+	"Origin.PStoreLocation": false,
+	"Origin.PStoreMetadataBackupInterval": false,
+	"Origin.PStoreMetadataBackupLocation": false,
+	"Origin.PStoreMetadataBackupsToKeep": false,
+	"Origin.PStoreStorageDirs": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
@@ -722,6 +731,8 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
 	"Origin.ObjectProviderURL": func(c *Config) string { return c.Origin.ObjectProviderURL },
+	"Origin.PStoreLocation": func(c *Config) string { return c.Origin.PStoreLocation },
+	"Origin.PStoreMetadataBackupLocation": func(c *Config) string { return c.Origin.PStoreMetadataBackupLocation },
 	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
 	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
 	"Origin.S3Bucket": func(c *Config) string { return c.Origin.S3Bucket },
@@ -941,6 +952,8 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
 	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
 	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
+	"Origin.PStoreInlineMaxBytes": func(c *Config) int { return c.Origin.PStoreInlineMaxBytes },
+	"Origin.PStoreMetadataBackupsToKeep": func(c *Config) int { return c.Origin.PStoreMetadataBackupsToKeep },
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
 	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
@@ -990,6 +1003,7 @@ func (iP IntParam) Set(value int) error {
 }
 
 var byteRateAccessors = map[string]func(*Config) byte_rate.ByteRate{
+	"Origin.PStoreDataScanRate": func(c *Config) byte_rate.ByteRate { return c.Origin.PStoreDataScanRate },
 	"Origin.TransferRateLimit": func(c *Config) byte_rate.ByteRate { return c.Origin.TransferRateLimit },
 }
 
@@ -1202,6 +1216,9 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
 	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
 	"Origin.Globusv2TokenRefreshInterval": func(c *Config) time.Duration { return c.Origin.Globusv2TokenRefreshInterval },
+	"Origin.PStoreDataScanInterval": func(c *Config) time.Duration { return c.Origin.PStoreDataScanInterval },
+	"Origin.PStoreIndexCheckInterval": func(c *Config) time.Duration { return c.Origin.PStoreIndexCheckInterval },
+	"Origin.PStoreMetadataBackupInterval": func(c *Config) time.Duration { return c.Origin.PStoreMetadataBackupInterval },
 	"Origin.SSH.ChallengeTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
 	"Origin.SSH.ConnectTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
 	"Origin.SSH.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
@@ -1619,6 +1636,15 @@ var allParameterNames = []string{
 	"Origin.MultiuserVarlinkSocketPath",
 	"Origin.NamespacePrefix",
 	"Origin.ObjectProviderURL",
+	"Origin.PStoreDataScanInterval",
+	"Origin.PStoreDataScanRate",
+	"Origin.PStoreIndexCheckInterval",
+	"Origin.PStoreInlineMaxBytes",
+	"Origin.PStoreLocation",
+	"Origin.PStoreMetadataBackupInterval",
+	"Origin.PStoreMetadataBackupLocation",
+	"Origin.PStoreMetadataBackupsToKeep",
+	"Origin.PStoreStorageDirs",
 	"Origin.Port",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
@@ -1920,6 +1946,8 @@ var (
 	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_ObjectProviderURL = StringParam{"Origin.ObjectProviderURL"}
+	Origin_PStoreLocation = StringParam{"Origin.PStoreLocation"}
+	Origin_PStoreMetadataBackupLocation = StringParam{"Origin.PStoreMetadataBackupLocation"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
 	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
@@ -2083,6 +2111,8 @@ var (
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
 	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
+	Origin_PStoreInlineMaxBytes = IntParam{"Origin.PStoreInlineMaxBytes"}
+	Origin_PStoreMetadataBackupsToKeep = IntParam{"Origin.PStoreMetadataBackupsToKeep"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
@@ -2104,6 +2134,7 @@ var (
 )
 
 var (
+	Origin_PStoreDataScanRate = ByteRateParam{"Origin.PStoreDataScanRate"}
 	Origin_TransferRateLimit = ByteRateParam{"Origin.TransferRateLimit"}
 )
 
@@ -2251,6 +2282,9 @@ var (
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
 	Origin_Globusv2TokenRefreshInterval = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
+	Origin_PStoreDataScanInterval = DurationParam{"Origin.PStoreDataScanInterval"}
+	Origin_PStoreIndexCheckInterval = DurationParam{"Origin.PStoreIndexCheckInterval"}
+	Origin_PStoreMetadataBackupInterval = DurationParam{"Origin.PStoreMetadataBackupInterval"}
 	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
@@ -2290,6 +2324,7 @@ var (
 	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
+	Origin_PStoreStorageDirs = ObjectParam{"Origin.PStoreStorageDirs"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
@@ -2431,6 +2466,8 @@ func init() {
 		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
 		"Origin.ObjectProviderURL": Origin_ObjectProviderURL,
+		"Origin.PStoreLocation": Origin_PStoreLocation,
+		"Origin.PStoreMetadataBackupLocation": Origin_PStoreMetadataBackupLocation,
 		"Origin.RunLocation": Origin_RunLocation,
 		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
 		"Origin.S3Bucket": Origin_S3Bucket,
@@ -2588,6 +2625,8 @@ func init() {
 		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
 		"Origin.MultiuserMinID": Origin_MultiuserMinID,
 		"Origin.MultiuserUmask": Origin_MultiuserUmask,
+		"Origin.PStoreInlineMaxBytes": Origin_PStoreInlineMaxBytes,
+		"Origin.PStoreMetadataBackupsToKeep": Origin_PStoreMetadataBackupsToKeep,
 		"Origin.Port": Origin_Port,
 		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
 		"Origin.SSH.Port": Origin_SSH_Port,
@@ -2606,6 +2645,7 @@ func init() {
 		"Xrootd.MaxThreads": Xrootd_MaxThreads,
 		"Xrootd.Port": Xrootd_Port,
 		"Xrootd.SummaryMonitoringPort": Xrootd_SummaryMonitoringPort,
+		"Origin.PStoreDataScanRate": Origin_PStoreDataScanRate,
 		"Origin.TransferRateLimit": Origin_TransferRateLimit,
 		"Cache.DirectorTest": Cache_DirectorTest,
 		"Cache.DisableClientX509": Cache_DisableClientX509,
@@ -2747,6 +2787,9 @@ func init() {
 		"Origin.DiskUsageCalculationDelay": Origin_DiskUsageCalculationDelay,
 		"Origin.DiskUsageCalculationInterval": Origin_DiskUsageCalculationInterval,
 		"Origin.Globusv2TokenRefreshInterval": Origin_Globusv2TokenRefreshInterval,
+		"Origin.PStoreDataScanInterval": Origin_PStoreDataScanInterval,
+		"Origin.PStoreIndexCheckInterval": Origin_PStoreIndexCheckInterval,
+		"Origin.PStoreMetadataBackupInterval": Origin_PStoreMetadataBackupInterval,
 		"Origin.SSH.ChallengeTimeout": Origin_SSH_ChallengeTimeout,
 		"Origin.SSH.ConnectTimeout": Origin_SSH_ConnectTimeout,
 		"Origin.SSH.KeepaliveInterval": Origin_SSH_KeepaliveInterval,
@@ -2783,6 +2826,7 @@ func init() {
 		"LocalCache.StorageDirs": LocalCache_StorageDirs,
 		"Lotman.PolicyDefinitions": Lotman_PolicyDefinitions,
 		"Origin.Exports": Origin_Exports,
+		"Origin.PStoreStorageDirs": Origin_PStoreStorageDirs,
 		"Registry.CustomRegistrationFields": Registry_CustomRegistrationFields,
 		"Registry.Institutions": Registry_Institutions,
 		"Shoveler.IPMapping": Shoveler_IPMapping,

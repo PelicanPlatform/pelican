@@ -511,14 +511,51 @@ func TestSSHFileSystemInterface(t *testing.T) {
 	var _ server_utils.OriginBackend = fs
 
 	// Test URL construction
-	url := fs.makeHelperURL("/subdir/file.txt")
+	url, err := fs.makeHelperURL("/subdir/file.txt")
+	require.NoError(t, err)
 	assert.Equal(t, "http://helper/test/subdir/file.txt", url)
 
-	url = fs.makeHelperURL("")
+	url, err = fs.makeHelperURL("")
+	require.NoError(t, err)
 	assert.Equal(t, "http://helper/test", url)
 
-	url = fs.makeHelperURL("/")
+	url, err = fs.makeHelperURL("/")
+	require.NoError(t, err)
 	assert.Equal(t, "http://helper/test/", url)
+}
+
+// TestMakeHelperURLRefusesEscapingPaths pins the containment on makeHelperURL
+// itself.  The handler cleans the request path before it gets here, but the
+// Destination header of a MOVE or COPY is not cleaned by x/net/webdav, so a
+// name carrying "../" reaches this function intact and would otherwise
+// resolve onto another export's route on the helper.
+func TestMakeHelperURLRefusesEscapingPaths(t *testing.T) {
+	fs := NewSSHFileSystem(nil, "/exports/one", "/srv/one")
+
+	for _, name := range []string{
+		"/../two/secret.txt",
+		"/../../etc/passwd",
+		"/subdir/../../two",
+		"/..",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := fs.makeHelperURL(name)
+			require.Error(t, err, "a path resolving outside the federation prefix must be refused")
+			assert.Contains(t, err.Error(), "outside the export's federation prefix")
+		})
+	}
+
+	// A sibling prefix that merely shares a string prefix is not "under" it.
+	_, err := fs.makeHelperURL("/../one-secret/x")
+	require.Error(t, err)
+
+	// Dot-segments that stay inside the prefix remain legal.
+	url, err := fs.makeHelperURL("/subdir/../file.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "http://helper/exports/one/file.txt", url)
+
+	// Rename carries the destination through the same guard.
+	require.Error(t, fs.Rename(context.Background(), "/a.txt", "/../two/b.txt"))
 }
 
 // TestSSHFileInfo tests the sshFileInfo implementation

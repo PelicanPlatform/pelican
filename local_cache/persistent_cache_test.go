@@ -2239,7 +2239,7 @@ func TestPurgeStorageID(t *testing.T) {
 		require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
 
 		// Set ETag mapping
-		objectHash := ComputeObjectHash(db.salt, meta.SourceURL)
+		objectHash := ComputeObjectHash(db.Salt(), meta.SourceURL)
 		require.NoError(t, db.SetLatestETag(objectHash, meta.ETag, time.Now()))
 		// Usage is tracked automatically by WriteBlocks → MergeBlockStateWithUsage.
 		// Record LRU access

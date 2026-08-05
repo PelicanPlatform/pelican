@@ -161,8 +161,12 @@ func newTestGetServer(t *testing.T, storageDir string) *httptest.Server {
 		LockSystem: webdav.NewMemLS(),
 		Prefix:     "/test",
 	}
+	// The host-filesystem fast paths (ETag, conditional GET, browser
+	// directory listing) only run for a backend whose StoragePrefix really is
+	// a directory here, which is exactly what a POSIX backend is.
+	backend := newLocalBackend(wd.FileSystem, storageDir)
 	r.GET("/test/*path", func(c *gin.Context) {
-		handleGetWithETag(c, wd, c.Request, c.Param("path"), storageDir)
+		handleGetWithETag(c, wd, c.Request, c.Param("path"), backend, storageDir)
 	})
 	return httptest.NewServer(r)
 }

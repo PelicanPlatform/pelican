@@ -109,7 +109,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	// respectively) that must always be accepted.  In addition, the
 	// origin's own URL (Origin.TokenAudience, which defaults to
 	// Origin.Url) is accepted so that tokens scoped to this specific
-	// origin are honoured.
+	// origin are honored.
 	ac.audiences = []string{
 		"https://wlcg.cern.ch/jwt/v1/any", // WLCG wildcard
 		"ANY",                             // SciTokens wildcard
@@ -305,7 +305,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 	// Validate the audience claim.  The WLCG Common JWT Profile and
 	// SciTokens specifications require that the resource server check
 	// the "aud" claim against its own identity (Origin.TokenAudience)
-	// or the recognised wildcard values.
+	// or the recognized wildcard values.
 	tokenAuds := tok.Audience()
 	if len(tokenAuds) > 0 && len(ac.audiences) > 0 {
 		audOK := false

@@ -47,7 +47,7 @@ type EvictionManager struct {
 	storage *StorageManager
 
 	// Per-directory size limits, keyed by storageID.  The map is
-	// read-only after construction and requires no synchronisation.
+	// read-only after construction and requires no synchronization.
 	dirLimits map[StorageID]*dirEvictionLimits
 
 	// Per-directory usage estimates, keyed by storageID.  The map itself
@@ -176,10 +176,23 @@ func (em *EvictionManager) Start(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
+// appendReclaimInterval is how often the janitor looks for objects left
+// behind by interrupted streaming appends.  Orphans are rare and cost only
+// capacity, so a slow cadence is enough; on a cache (which has no AppendWriter
+// consumer at all) the scan is a single prefix seek that finds nothing.
+const appendReclaimInterval = 5 * time.Minute
+
 // evictionLoop runs the main eviction loop
 func (em *EvictionManager) evictionLoop(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	// Reclaim once at startup: any append record present before this process
+	// registered a writer is by definition from a run that did not finish.
+	em.reclaimAbandonedAppends()
+
+	reclaimTicker := time.NewTicker(appendReclaimInterval)
+	defer reclaimTicker.Stop()
 
 	for {
 		select {
@@ -187,9 +200,28 @@ func (em *EvictionManager) evictionLoop(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			em.checkAndEvict()
+		case <-reclaimTicker.C:
+			em.reclaimAbandonedAppends()
 		case <-em.evictChan:
 			em.checkAndEvict()
 		}
+	}
+}
+
+// reclaimAbandonedAppends releases capacity held by streaming appends whose
+// writer never finished.  See StorageManager.ReclaimAbandonedAppends.
+func (em *EvictionManager) reclaimAbandonedAppends() {
+	if em.storage == nil {
+		return
+	}
+	n, err := em.storage.ReclaimAbandonedAppends(appendReclaimGrace)
+	if err != nil {
+		log.Warnf("Failed to reclaim abandoned streaming appends: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Infof("Reclaimed %d object(s) left behind by interrupted streaming appends", n)
+		em.recalculateDirUsage()
 	}
 }
 
@@ -328,6 +360,7 @@ func (em *EvictionManager) checkAndEvict() {
 	startTime := time.Now()
 	var totalEvictedBytes atomic.Uint64
 	var totalEvictedObjects atomic.Int64
+	var totalSkipped atomic.Int64
 	var totalConflicts atomic.Int64
 
 	var wg sync.WaitGroup
@@ -367,7 +400,7 @@ func (em *EvictionManager) checkAndEvict() {
 					"needToFree":  utils.HumanBytes(overhead),
 				}).Debug("Evicting from namespace")
 
-				bytes, count, conflicts, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				bytes, count, skipped, conflicts, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
 				totalConflicts.Add(int64(conflicts))
 				if err != nil {
 					rl.WithFields(log.Fields{
@@ -379,6 +412,22 @@ func (em *EvictionManager) checkAndEvict() {
 
 				totalEvictedBytes.Add(bytes)
 				totalEvictedObjects.Add(int64(count))
+				totalSkipped.Add(int64(skipped))
+
+				// A pass that freed nothing will pick the same namespace and
+				// do the same thing again, so looping only burns CPU until the
+				// timeout below.  Stop and let the next cycle try, by which
+				// time whatever blocked this one has usually cleared.
+				if count == 0 {
+					if skipped > 0 {
+						rl.WithFields(log.Fields{
+							"storageID":   targetKey.StorageID,
+							"namespaceID": targetKey.NamespaceID,
+							"skipped":     skipped,
+						}).Debug("Eviction made no progress; every candidate was in use")
+					}
+					break
+				}
 
 				// Safety: don't run for too long
 				if time.Since(startTime) > 30*time.Second {
@@ -391,11 +440,13 @@ func (em *EvictionManager) checkAndEvict() {
 	wg.Wait()
 
 	evicted := totalEvictedObjects.Load()
+	skipped := totalSkipped.Load()
 	conflicts := totalConflicts.Load()
-	if evicted > 0 || conflicts > 0 {
+	if evicted > 0 || conflicts > 0 || skipped > 0 {
 		rl.WithFields(log.Fields{
 			"freedBytes":     utils.HumanBytes(totalEvictedBytes.Load()),
 			"evictedObjects": evicted,
+			"skippedInUse":   skipped,
 			"conflicts":      conflicts,
 			"elapsed":        time.Since(startTime).String(),
 		}).Info("Eviction pass complete")
@@ -434,9 +485,12 @@ func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID) (Sto
 //
 // On a BadgerDB transaction conflict the method retries with progressively
 // smaller batch sizes (50, then 10 objects) before giving up.
-// Returns total bytes freed, number of objects evicted, number of conflicts, and any
-// non-retryable error.
-func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) (totalFreed uint64, totalCount int, conflicts int, err error) {
+// Objects under a live reader are spared and reported separately; see
+// StorageManager.EvictByLRU.
+//
+// Returns total bytes freed, number of objects evicted, number spared, number
+// of conflicts, and any non-retryable error.
+func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) (totalFreed uint64, totalCount int, skipped int, conflicts int, err error) {
 	// batchCaps defines the decreasing batch sizes used on successive
 	// conflict retries.  The first attempt uses the caller's original
 	// limits; subsequent retries cap maxObjects to reduce the transaction
@@ -451,7 +505,7 @@ func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID
 
 		var evicted []evictedObject
 		var freed uint64
-		evicted, freed, err = em.storage.EvictByLRU(storageID, namespaceID, effMaxObjects, maxBytes)
+		evicted, freed, skipped, err = em.storage.EvictByLRU(storageID, namespaceID, effMaxObjects, maxBytes)
 
 		if err != nil && errors.Is(err, badger.ErrConflict) {
 			conflicts++
@@ -474,7 +528,7 @@ func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID
 			continue
 		}
 		if err != nil {
-			return 0, 0, conflicts, err
+			return 0, 0, skipped, conflicts, err
 		}
 
 		em.noteEvicted(evicted)
@@ -487,11 +541,11 @@ func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID
 			}).Debug("Evicted object")
 		}
 
-		return freed, len(evicted), conflicts, nil
+		return freed, len(evicted), skipped, conflicts, nil
 	}
 
 	// All retries exhausted
-	return 0, 0, conflicts, err
+	return 0, 0, skipped, conflicts, err
 }
 
 // noteEvicted adjusts the per-directory in-memory atomic counters after
@@ -499,7 +553,7 @@ func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID
 // counters were already decremented inside the transaction; this keeps
 // the in-memory estimates in sync.
 func (em *EvictionManager) noteEvicted(evicted []evictedObject) {
-	// Accumulate per-storageID totals to minimise atomic operations.
+	// Accumulate per-storageID totals to minimize atomic operations.
 	perDir := make(map[StorageID]int64, 2)
 	for _, obj := range evicted {
 		// For chunked objects, attribute bytes to each directory
@@ -780,7 +834,7 @@ func (em *EvictionManager) forcePurgeToTargets(label string, targets map[Storage
 				}
 
 				overhead := dirUsage - dirTarget
-				bytes, count, _, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				bytes, count, skipped, _, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
 				if err != nil {
 					rl.WithFields(log.Fields{
 						"storageID":   targetKey.StorageID,
@@ -791,6 +845,18 @@ func (em *EvictionManager) forcePurgeToTargets(label string, targets map[Storage
 
 				evictedBytes.Add(bytes)
 				evictedObjects.Add(int64(count))
+
+				// As in checkAndEvict: no progress means the next iteration
+				// would repeat this one exactly.
+				if count == 0 {
+					if skipped > 0 {
+						rl.WithFields(log.Fields{
+							"storageID": sid,
+							"skipped":   skipped,
+						}).Warnf("%s could not reach its target; every candidate was in use", label)
+					}
+					break
+				}
 
 				if time.Since(startTime) > 60*time.Second {
 					rl.Warn(label + " timeout - will continue next cycle")

@@ -51,6 +51,12 @@ func getServerRuntimeDir() (string, error) {
 //   - SERVER_EXTERNAL_WEB_URL: The main web UI/API endpoint
 //   - ORIGIN_URL: The origin's XRootD endpoint (if origin is enabled)
 //   - CACHE_URL: The cache's XRootD endpoint (if cache is enabled)
+//   - LOCAL_ISSUER_URL: The issuer this server accepts its own admin tokens
+//     under.  A CLI cannot derive this reliably: it depends on which modules
+//     the process was started with, which may exist only in its argv.
+//
+// Readers ignore keys they do not recognize, so adding one is backward
+// compatible in both directions.
 //
 // The file is written atomically using a temporary file and rename.
 func WriteAddressFile(modules server_structs.ServerType) error {
@@ -84,6 +90,13 @@ func WriteAddressFile(modules server_structs.ServerType) error {
 		}
 	}
 
+	// The issuer a token must carry to be accepted by this server's web API.
+	// Minting one is otherwise guesswork for a separate CLI process: the value
+	// depends on the module set, and `serve --module` leaves no trace on disk.
+	if localIssuer := GetLocalIssuerUrl(); localIssuer != "" {
+		content += fmt.Sprintf("LOCAL_ISSUER_URL=%s\n", localIssuer)
+	}
+
 	// Include cache URL if cache is enabled
 	if modules.IsEnabled(server_structs.CacheType) {
 		cacheUrl := param.Cache_Url.GetString()
@@ -113,6 +126,7 @@ type AddressFileContents struct {
 	ServerExternalWebURL string
 	OriginURL            string
 	CacheURL             string
+	LocalIssuerURL       string
 }
 
 // ReadAddressFile reads the pelican.addresses file from the runtime directory
@@ -154,6 +168,8 @@ func ReadAddressFile() (*AddressFileContents, error) {
 			result.OriginURL = value
 		case "CACHE_URL":
 			result.CacheURL = value
+		case "LOCAL_ISSUER_URL":
+			result.LocalIssuerURL = value
 		}
 	}
 
