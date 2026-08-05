@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -234,4 +235,33 @@ func TestAdminTokenIssuerHintNamesBothIssuers(t *testing.T) {
 		assert.Contains(t, hint, minted)
 		assert.NotContains(t, hint, param.Server_Modules.GetName())
 	})
+}
+
+// TestEvictTokenIssuerIsNotTheWebAPIIssuer pins that the two admin-token
+// paths stay distinct.
+//
+// They look interchangeable and are not. The web API pins a token's issuer to
+// the server's local issuer URL; eviction is authorized against the namespace
+// ACL, which requires an issuer the namespace trusts and whose JWKS the cache
+// can fetch. Unifying them would produce a token that one verifier accepts and
+// the other rejects, and the symptom would be a 403 from a command that had
+// been working.
+func TestEvictTokenIssuerIsNotTheWebAPIIssuer(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	// A co-located origin+director is the case where the web API's issuer grows
+	// the /api/v1.0/origin sub-path and the two answers visibly diverge.
+	viper.Set("Server.ExternalWebUrl", "https://cache.example.com:8444")
+	viper.Set("Server.Modules", []string{"origin", "director"})
+
+	webAPI := webAPIAdminTokenIssuer("https://cache.example.com:8444")
+	evict, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	require.NotEmpty(t, webAPI)
+	require.NotEmpty(t, evict)
+	assert.NotEqual(t, webAPI, evict,
+		"the web API and namespace-ACL paths require different issuers; if these have become "+
+			"equal, one of the two verifiers has changed and cache evict or the web API is about to break")
 }
