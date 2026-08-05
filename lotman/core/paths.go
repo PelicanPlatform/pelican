@@ -199,11 +199,21 @@ func (m *Manager) pathCandidates(q string) ([]lotPathCand, error) {
 func (m *Manager) LotForPath(path string) (string, error) {
 	q := normalizePath(path)
 	var names []string
-	if err := m.db.Model(&LotPath{}).Where("path = ?", q).Limit(1).Pluck("lot_name", &names).Error; err != nil {
+	// Ordered, because a path is not unique to a lot: lot_paths is keyed by
+	// (lot_name, path), and the renewal model deliberately puts a successor lot
+	// on the same path as the generation it replaces, so an overlap window is
+	// the normal steady state rather than an anomaly. An unordered LIMIT 1 hands
+	// back whichever row SQLite happens to yield, which for a caller that then
+	// mutates the result means mutating an arbitrary one of them.
+	if err := m.db.Model(&LotPath{}).Where("path = ?", q).Order("lot_name").Pluck("lot_name", &names).Error; err != nil {
 		return "", wrap(err, "looking up lot for path")
 	}
 	if len(names) == 0 {
 		return "", nil
+	}
+	if len(names) > 1 {
+		m.log.Warnf("path %q is held by %d lots (%v); returning %q -- callers that mutate by path should name the lot explicitly",
+			q, len(names), names, names[0])
 	}
 	return names[0], nil
 }

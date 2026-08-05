@@ -179,6 +179,75 @@ func (m *Manager) Attributions(childName string) (map[string]map[string]int64, e
 }
 
 // attributionValues returns parent -> {mpaKey -> attributed value} for a child.
+// reapplyAttributions recomputes a child's attribution rows, preferring to keep
+// the shares already stored and falling back to a fresh (equal-split)
+// computation when they no longer fit.
+//
+// Recomputation always clears and rewrites the rows, so a caller recomputing for
+// a reason other than the operator supplying a new split -- an MPA edit, a
+// parent removal -- would otherwise silently redistribute the lot and change
+// every parent's reservation without anyone asking. Keeping the stored shares
+// fixes that for the case that matters most, an MPA edit that leaves the totals
+// alone.
+//
+// The stored shares cannot always be kept: nothing records which of them the
+// operator supplied and which the equal split derived, so after a change of
+// total they may not sum to it, and there is no parent without an explicit share
+// left to absorb the difference. In that case fall back rather than fail, which
+// keeps ordinary "resize this lot" flows working. The cost is that resizing a
+// lot that does have an explicit split still redistributes it; distinguishing
+// explicit from derived shares needs a schema change.
+func reapplyAttributions(tx *gorm.DB, lotName string, mpa MPA, parents []string, supplied map[string]ParentAttribution) error {
+	if supplied != nil {
+		return computeAndStoreAttributions(tx, lotName, mpa, parents, supplied)
+	}
+	stored, err := storedAttributions(tx, lotName)
+	if err != nil {
+		return err
+	}
+	if len(stored) > 0 {
+		if err := computeAndStoreAttributions(tx, lotName, mpa, parents, stored); err == nil {
+			return nil
+		}
+	}
+	return computeAndStoreAttributions(tx, lotName, mpa, parents, nil)
+}
+
+// storedAttributions reads a child's persisted explicit attributions back into
+// the shape computeAndStoreAttributions accepts.
+//
+// Recomputation always clears and rewrites a child's attribution rows, so any
+// caller that recomputes for a reason *other* than the operator supplying a new
+// split has to seed it with what is already stored -- otherwise the parents that
+// had an explicit share silently fall back into the equal-split remainder, and
+// a parent's reservation changes without anyone asking for it.
+func storedAttributions(tx *gorm.DB, childName string) (map[string]ParentAttribution, error) {
+	raw, err := attributionValues(tx, childName)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]ParentAttribution, len(raw))
+	for parent, byKey := range raw {
+		var pa ParentAttribution
+		for key, v := range byKey {
+			value := v
+			switch key {
+			case MpaKeyDedicatedBytes:
+				pa.DedicatedBytes = &value
+			case MpaKeyOpportunisticBytes:
+				pa.OpportunisticBytes = &value
+			case MpaKeyMaxNumObjects:
+				pa.MaxNumObjects = &value
+			}
+		}
+		out[parent] = pa
+	}
+	return out, nil
+}
+
 func attributionValues(tx *gorm.DB, childName string) (map[string]map[string]int64, error) {
 	var rows []LotParentAttribution
 	if err := tx.Where("child_lot_name = ?", childName).Find(&rows).Error; err != nil {

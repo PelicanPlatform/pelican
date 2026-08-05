@@ -178,7 +178,7 @@ func (m *Manager) UpdateLot(update LotUpdate, caller string) error {
 			if err != nil {
 				return err
 			}
-			if err := computeAndStoreAttributions(tx, update.LotName, mpaOf(*updated), parentNames, update.ParentAttributions); err != nil {
+			if err := reapplyAttributions(tx, update.LotName, mpaOf(*updated), parentNames, update.ParentAttributions); err != nil {
 				return err
 			}
 			if err := m.validateAxioms(tx, update.LotName, true); err != nil {
@@ -313,12 +313,14 @@ func (m *Manager) RemoveParents(rm LotParentRemoval, caller string) error {
 		if remaining == 0 {
 			return wrapf(ErrInvalidLot, "lot %q must retain at least one parent", rm.LotName)
 		}
-		// Parents changed: recompute attributions over the remaining parents.
+		// Parents changed: recompute attributions over the remaining parents,
+		// preserving the explicit shares of the ones that survive. Only the
+		// departing parents' shares are released into the equal-split remainder.
 		parentNames, err := allParentNames(tx, rm.LotName)
 		if err != nil {
 			return err
 		}
-		if err := computeAndStoreAttributions(tx, rm.LotName, mpaOf(*lot), parentNames, nil); err != nil {
+		if err := reapplyAttributions(tx, rm.LotName, mpaOf(*lot), parentNames, nil); err != nil {
 			return err
 		}
 		if err := m.validateAxioms(tx, rm.LotName, false); err != nil {
