@@ -37,24 +37,17 @@ const migrationsDir = "migrations"
 // colliding with other components' migration bookkeeping.
 const gooseTableName = "lotman_goose_db_version"
 
-// ContractionPolicy controls whether MPA reductions that would drop a parent's
-// capacity below its children's reserved shares are permitted.
-type ContractionPolicy string
-
-const (
-	// ContractionNone places no restrictions on MPA reductions.
-	ContractionNone ContractionPolicy = "none"
-	// ContractionAlways blocks reductions that violate children's reserved shares.
-	ContractionAlways ContractionPolicy = "always"
-)
-
 // Options configures a Manager.
 type Options struct {
 	// StrictHierarchy enables the parent/child MPA axioms on mutation.
 	StrictHierarchy bool
-	// ContractionPolicy governs MPA reductions; defaults to ContractionAlways.
-	ContractionPolicy ContractionPolicy
-	// AdminOverride bypasses contraction-policy checks (axioms still apply).
+	// AdminOverride disables ownership authorization for every caller of this
+	// manager: authorizeCreate and authorizeModify return without checking who
+	// owns what. The capacity axioms still apply.
+	//
+	// This is not a per-call escalation -- it is process-wide for the manager it
+	// is set on -- so it belongs only to a trusted in-process caller that has
+	// already done its own authorization. Nothing in Pelican sets it today.
 	AdminOverride bool
 	// Now supplies the current time; defaults to time.Now. Injectable for tests.
 	Now func() time.Time
@@ -77,9 +70,6 @@ type Manager struct {
 func New(db *gorm.DB, opts Options) (*Manager, error) {
 	if db == nil {
 		return nil, ErrNilDB
-	}
-	if opts.ContractionPolicy == "" {
-		opts.ContractionPolicy = ContractionAlways
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now

@@ -87,7 +87,7 @@ func TestReconcileObjectCounts(t *testing.T) {
 		{StorageID: 0, NamespaceID: 7}: 3, // corrected down
 		{StorageID: 0, NamespaceID: 8}: 5, // new
 	}
-	if err := cc.reconcileObjectCounts(context.Background(), log.WithField("t", "test"), scan); err != nil {
+	if err := cc.reconcileObjectCounts(context.Background(), log.WithField("t", "test"), scan, true); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if c, _ := cdb.GetObjectCount(0, 7); c != 3 {
@@ -512,5 +512,38 @@ func TestSyncLotUsage(t *testing.T) {
 	rootU, _ = m.GetLotUsage("root")
 	if rootU.ChildrenBytes != 3000 {
 		t.Errorf("after drain, root children = %d, want 3000 (sub only)", rootU.ChildrenBytes)
+	}
+}
+
+// TestReconcileObjectCountsPartialScanDoesNotZero pins the guard on a truncated
+// scan. The scan is restartable and its per-entry callback surfaces context
+// cancellation as an error, so a shutdown or reconfigure part-way through leaves
+// the accumulator describing only the keyspace it reached. Treating that as
+// authoritative zeroed every bucket it never got to -- which silently disables
+// the object caps that read these counters, cache-wide, until the next
+// successful scan an hour later.
+func TestReconcileObjectCountsPartialScanDoesNotZero(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	cdb, err := NewCacheDB(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open cache db: %v", err)
+	}
+	defer cdb.Close()
+
+	_ = cdb.SetObjectCount(0, 7, 10)
+	_ = cdb.SetObjectCount(0, 9, 4) // never reached by the truncated scan
+
+	cc := &ConsistencyChecker{db: cdb}
+	scan := map[StorageUsageKey]int64{
+		{StorageID: 0, NamespaceID: 7}: 3,
+	}
+	if err := cc.reconcileObjectCounts(context.Background(), log.WithField("t", "test"), scan, false); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if c, _ := cdb.GetObjectCount(0, 7); c != 3 {
+		t.Errorf("(0,7) = %d, want 3 -- observed buckets are still corrected", c)
+	}
+	if c, _ := cdb.GetObjectCount(0, 9); c != 4 {
+		t.Errorf("(0,9) = %d, want 4 -- an unobserved bucket must not be zeroed by a partial scan", c)
 	}
 }

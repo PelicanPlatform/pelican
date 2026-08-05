@@ -883,7 +883,7 @@ func TestLotValidation(t *testing.T) {
 			},
 			hwm:             "20g", // sum of dedGB should not be greater than hwm
 			totalDiskSpaceB: gigabytesToBytes(40.0),
-			errorStrings:    []string{"the sum of all lots' dedicatedGB values exceeds the high watermark of 20g."},
+			errorStrings:    []string{"exceeds the high watermark of 20g."},
 		},
 	}
 

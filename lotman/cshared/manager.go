@@ -137,7 +137,7 @@ func manager() (*core.Manager, error) {
 		}
 	}()
 
-	m, err := core.New(db, core.Options{StrictHierarchy: true, ContractionPolicy: core.ContractionAlways})
+	m, err := core.New(db, core.Options{StrictHierarchy: true})
 	if err != nil {
 		return nil, err
 	}
