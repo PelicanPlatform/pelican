@@ -244,3 +244,14 @@ func strOutClearedOnFailureGo() (rc int, cleared bool) {
 	}
 	return int(code), held == nil
 }
+
+// removeLotGo drives lotman_remove_lot with its four reassignment flags.
+func removeLotGo(lotName string, orphans, nonOrphans, policyToChildren, overridePolicy bool) error {
+	var err error
+	withCStr(lotName, func(c *C.char) {
+		var e *C.char
+		rc := lotman_remove_lot(c, C._Bool(orphans), C._Bool(nonOrphans), C._Bool(policyToChildren), C._Bool(overridePolicy), &e)
+		err = errFromMsg(rc, e)
+	})
+	return err
+}
