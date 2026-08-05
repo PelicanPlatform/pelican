@@ -121,3 +121,66 @@ func TestCSharedRequiresLotHome(t *testing.T) {
 		t.Fatalf("expected an error without lot_home, got rc=%d err=%v", rc, err)
 	}
 }
+
+// TestRemoveLotRejectsUnimplementedFlags covers the reassignment flags this
+// implementation cannot honour. The core reparents every child onto the removed
+// lot's parents and never copies the removed lot's policy down; the other
+// combinations the C ABI can express mean materially different things. An
+// operator retiring an intermediate lot with orphans=false expects that lot's
+// children to fall back to `default`, which has no quota, so their data becomes
+// reclaimable — accepting the call and reparenting them with their original
+// quota intact, then returning success, is the worst outcome available.
+func TestRemoveLotRejectsUnimplementedFlags(t *testing.T) {
+	resetStateForTest()
+	defer resetStateForTest()
+
+	setContextStrGo("lot_home", t.TempDir())
+	setContextStrGo("caller", "https://fed.example")
+
+	rootJSON := `{"lot_name":"root","owner":"https://fed.example","parents":["root"],` +
+		`"paths":[{"path":"/","recursive":false}],` +
+		`"management_policy_attrs":{"dedicated_GB":100,"opportunistic_GB":-1,"max_num_objects":-1,` +
+		`"creation_time":0,"expiration_time":0,"deletion_time":0}}`
+	if err := addLotGo(rootJSON); err != nil {
+		t.Fatalf("add_lot root: %v", err)
+	}
+	childJSON := `{"lot_name":"child","owner":"https://fed.example","parents":["root"],` +
+		`"paths":[{"path":"/child","recursive":true}],` +
+		`"management_policy_attrs":{"dedicated_GB":10,"opportunistic_GB":-1,"max_num_objects":-1,` +
+		`"creation_time":0,"expiration_time":0,"deletion_time":0}}`
+	if err := addLotGo(childJSON); err != nil {
+		t.Fatalf("add_lot child: %v", err)
+	}
+
+	for _, c := range []struct {
+		name                                            string
+		orphans, nonOrphans, policyToChildren, override bool
+		wantErr                                         string
+	}{
+		{"orphans to default", false, true, false, false, "orphans"},
+		{"non-orphans detached", true, false, false, false, "orphans"},
+		{"policy copied to children", true, true, true, false, "assign_policy_to_children"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := removeLotGo("child", c.orphans, c.nonOrphans, c.policyToChildren, c.override)
+			if err == nil {
+				t.Fatal("expected an error rather than a silent divergence from the requested behaviour")
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("error %q does not name the unsupported flag (%q)", err, c.wantErr)
+			}
+			if exists, _ := lotExistsGo("child"); exists != 1 {
+				t.Error("the lot must be left alone when the request is refused")
+			}
+		})
+	}
+
+	// The combination the core does implement still works, and override_policy
+	// is accepted and ignored, as upstream documents it unimplemented.
+	if err := removeLotGo("child", true, true, false, true); err != nil {
+		t.Fatalf("supported flag combination was rejected: %v", err)
+	}
+	if exists, _ := lotExistsGo("child"); exists != 0 {
+		t.Error("lot should have been removed")
+	}
+}
