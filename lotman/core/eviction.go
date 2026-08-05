@@ -169,14 +169,20 @@ func (m *Manager) finishPastQuery(names []string, recursive, includeReclaimed bo
 // Unbounded and reclaimed parents are excluded. Results are deepest-first.
 func (m *Manager) lotsPastThresholdHierarchical(selfCol, childUsageExpr, childThreshExpr, parentThreshExpr, parentUnb, childUnb string, includeReclaimed bool) ([]string, error) {
 	now := m.nowMs()
+	// includeReclaimed has to be honoured *inside* the query, not only by the
+	// filterReclaimed pass below: that pass can drop rows, never add them, so
+	// excluding reclaimed parents here made includeReclaimed=true silently
+	// return fewer lots than the non-hierarchical form of the same question.
+	// The bound parameter is compared against reclaimed_at, so passing it as a
+	// flag keeps the statement itself constant.
 	query := "SELECT p_usage.lot_name FROM lot_usage p_usage " +
 		"JOIN lots p_mpa ON p_usage.lot_name = p_mpa.lot_name " +
 		"LEFT JOIN lot_reclamations p_rec ON p_rec.lot_name = p_usage.lot_name " +
 		"WHERE NOT (" + parentUnb + ") " +
-		"AND (p_rec.lot_name IS NULL OR p_rec.reclaimed_at > ?) " +
+		"AND (? OR p_rec.lot_name IS NULL OR p_rec.reclaimed_at > ?) " +
 		"AND p_usage." + selfCol + " + COALESCE(" +
 		"  (SELECT SUM(CASE WHEN (" + childUnb + ") THEN 0 " +
-		"                   WHEN (c_rec.lot_name IS NOT NULL AND c_rec.reclaimed_at <= ?) THEN 0 " +
+		"                   WHEN (NOT ? AND c_rec.lot_name IS NOT NULL AND c_rec.reclaimed_at <= ?) THEN 0 " +
 		"                   ELSE MAX(0, (" + childUsageExpr + ") - (" + childThreshExpr + ")) END) " +
 		"   FROM lot_parents c_par " +
 		"   JOIN lot_usage c_usage ON c_par.lot_name = c_usage.lot_name " +
@@ -186,7 +192,7 @@ func (m *Manager) lotsPastThresholdHierarchical(selfCol, childUsageExpr, childTh
 		") >= " + parentThreshExpr + ";"
 
 	var names []string
-	if err := m.db.Raw(query, now, now).Scan(&names).Error; err != nil {
+	if err := m.db.Raw(query, includeReclaimed, now, includeReclaimed, now).Scan(&names).Error; err != nil {
 		return nil, wrap(err, "querying hierarchical past-threshold lots")
 	}
 	names = m.sortByDepthDescending(names)
