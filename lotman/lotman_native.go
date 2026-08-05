@@ -1903,3 +1903,58 @@ func RemoveLot(lotName string, assignLTBRParentsToOrphans, assignLTBRParentsToNo
 	// the legacy reassignment flags.
 	return m.RemoveLot(lotName, core.RemoveOptions{}, caller)
 }
+
+// --- operator-facing path boundary --------------------------------------------
+//
+// Lots are stored federation-qualified ("/osg-htc.org:8443/atlas") so that the
+// same namespace in two federations resolves to two different lots, and so that
+// resolution stays a pure longest-prefix match against the keys the persistent
+// cache builds. Operators, the REST API, the CLI, and the Director all speak the
+// *bare* namespace path ("/atlas").
+//
+// qualifyLotPath and unqualifyLotPath are that boundary. Apply qualifyLotPath to
+// anything on its way into the lot store, and unqualifyLotPath to any path on
+// its way back out to a caller. Both are no-ops when no prefix is configured,
+// which is the V1 (XRootD) case.
+//
+// Ordering matters where authorization is involved: authorization resolves the
+// path against the Director, which knows only bare paths, so it must run before
+// qualification.
+
+// qualifyLotPath maps an operator-facing namespace path into the stored space.
+func qualifyLotPath(p string) string {
+	prefix := getFederationPrefix()
+	if prefix == "" || p == "" {
+		return p
+	}
+	if isQualifiedLotPath(p) {
+		return p // already qualified; never double-prefix
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return normaliseLotPath(prefix + p)
+}
+
+// unqualifyLotPath maps a stored path back to the operator-facing space.
+func unqualifyLotPath(p string) string {
+	prefix := getFederationPrefix()
+	if prefix == "" || !isQualifiedLotPath(p) {
+		return p
+	}
+	bare := strings.TrimPrefix(p, prefix)
+	if bare == "" {
+		return "/"
+	}
+	return bare
+}
+
+// isQualifiedLotPath reports whether p already carries the federation prefix,
+// requiring a segment boundary so "/osg-htc.orgX/..." is not mistaken for it.
+func isQualifiedLotPath(p string) bool {
+	prefix := getFederationPrefix()
+	if prefix == "" {
+		return false
+	}
+	return p == prefix || strings.HasPrefix(p, prefix+"/")
+}
