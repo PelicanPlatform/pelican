@@ -74,6 +74,7 @@
 package lotman
 
 import (
+	"path"
 	"sort"
 	"strings"
 
@@ -95,10 +96,23 @@ type lotTreeNode struct {
 // root path) so that path-prefix containment checks behave consistently
 // regardless of whether the source ad uses /foo or /foo/.
 func normaliseLotPath(p string) string {
+	if p == "" {
+		return p
+	}
+	// path.Clean collapses "." and ".." segments and duplicate slashes, so the
+	// planner's notion of a path matches what the core stores (core.normalizePath
+	// cleans too). Without it "/x", "/./x" and "/x/y/.." are three distinct paths
+	// to the dedup and fair-share arithmetic here but one path once stored.
+	// It also matters for the federation boundary, which builds qualified paths
+	// by concatenation.
 	if p == "/" {
 		return p
 	}
-	return strings.TrimRight(p, "/")
+	cleaned := path.Clean(p)
+	if cleaned == "." {
+		return p
+	}
+	return strings.TrimRight(cleaned, "/")
 }
 
 // pathContains reports whether `parent` is a strict ancestor of `child`

@@ -606,6 +606,10 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		if requestId != "" {
 			dlCtx = client.ContextWithRequestId(dlCtx, requestId)
 		}
+		// Same reason as the request ID: this context is not derived from
+		// r.Context(), so anything the request carries has to be re-attached
+		// explicitly or lot attribution falls back to the primary federation.
+		dlCtx = WithFederationHost(dlCtx, FederationHostFrom(r.Context()))
 		rd, md, err := pc.GetSeekableReader(dlCtx, objectPath, bearerToken, r.Header.Get("Range") != "")
 		resCh <- readerResult{rd, md, err}
 	}()
@@ -1569,6 +1573,48 @@ func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 // a NoRoute fallback is also registered so that bare object paths (without the /api
 // prefix) are served.  The /api namespace is always reserved and never served by the
 // NoRoute fallback.
+// setupDiscoveryContext validates the federation named in a multi-federation
+// request, records it on the request context, and rewrites the URL to the bare
+// object path. It reports whether the request may proceed; on rejection it has
+// already written the response.
+func (pc *PersistentCache) setupDiscoveryContext(c *gin.Context) bool {
+
+	encodedDiscovery := c.Param("discovery")
+	pathParam := c.Param("path")
+	discoveryHost, err := decodeDiscoveryHost(encodedDiscovery)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
+		return false
+	}
+
+	// Validate the discovery host against the federation allow-list.
+	// Default (empty list): only the primary federation is allowed.
+	// A list containing "*" means all federations are accepted (open proxy).
+	allowed := param.Cache_AllowedFederations.GetStringSlice()
+	if !isFederationAllowed(discoveryHost, pc.defaultFed, allowed) {
+		log.WithFields(log.Fields{
+			"discovery": discoveryHost,
+			"primary":   pc.defaultFed,
+		}).Warn("Rejected request for non-allowed federation")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":  "federation_not_allowed",
+			"reason": fmt.Sprintf("federation %q is not in the cache allow-list; this cache serves federation %q by default", discoveryHost, pc.defaultFed),
+		})
+		return false
+	}
+
+	// Store discovery host in context for use by handlers. It goes on the
+	// *request* context as well as gin's: serveObject is a plain
+	// http.Handler and never sees the gin context, and the discovery host
+	// is about to be stripped out of the URL below -- so the request
+	// context is the only thing that carries it to the lot resolution.
+	c.Set("discoveryHost", discoveryHost)
+	c.Request = c.Request.WithContext(WithFederationHost(c.Request.Context(), discoveryHost))
+	// Set the object path (strip the discovery prefix)
+	c.Request.URL.Path = pathParam
+	return true
+}
+
 func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEnabled bool) error {
 	log.Info("Registering persistent cache HTTP handlers")
 
@@ -1577,67 +1623,34 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 		pc.serveObject(c.Writer, c.Request)
 	}
 
-	// Helper to extract discovery host and set up context
-	setupDiscoveryContext := func(c *gin.Context) bool {
-		encodedDiscovery := c.Param("discovery")
-		pathParam := c.Param("path")
-		discoveryHost, err := decodeDiscoveryHost(encodedDiscovery)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
-			return false
-		}
-
-		// Validate the discovery host against the federation allow-list.
-		// Default (empty list): only the primary federation is allowed.
-		// A list containing "*" means all federations are accepted (open proxy).
-		allowed := param.Cache_AllowedFederations.GetStringSlice()
-		if !isFederationAllowed(discoveryHost, pc.defaultFed, allowed) {
-			log.WithFields(log.Fields{
-				"discovery": discoveryHost,
-				"primary":   pc.defaultFed,
-			}).Warn("Rejected request for non-allowed federation")
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error":  "federation_not_allowed",
-				"reason": fmt.Sprintf("federation %q is not in the cache allow-list; this cache serves federation %q by default", discoveryHost, pc.defaultFed),
-			})
-			return false
-		}
-
-		// Store discovery host in context for use by handlers
-		c.Set("discoveryHost", discoveryHost)
-		// Set the object path (strip the discovery prefix)
-		c.Request.URL.Path = pathParam
-		return true
-	}
-
 	// Always register the /api/v1.0/cache/data routes regardless of
 	// director state.  The /api namespace is reserved.
 	group := engine.Group("/api/v1.0/cache/data")
 	group.GET("/:discovery/*path", func(c *gin.Context) {
-		if setupDiscoveryContext(c) {
+		if pc.setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
 	})
 	group.HEAD("/:discovery/*path", func(c *gin.Context) {
-		if setupDiscoveryContext(c) {
+		if pc.setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
 	})
 	// Register PROPFIND for directory listings (passthrough to origin)
 	group.Handle("PROPFIND", "/:discovery/*path", func(c *gin.Context) {
-		if setupDiscoveryContext(c) {
+		if pc.setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
 	})
 	// Register PUT for write-through caching (proxy to origin)
 	group.PUT("/:discovery/*path", func(c *gin.Context) {
-		if setupDiscoveryContext(c) {
+		if pc.setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
 	})
 	// Register DELETE for write-through deletion (proxy to origin)
 	group.DELETE("/:discovery/*path", func(c *gin.Context) {
-		if setupDiscoveryContext(c) {
+		if pc.setupDiscoveryContext(c) {
 			handleCacheRequest(c)
 		}
 	})

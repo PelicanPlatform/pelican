@@ -1034,7 +1034,7 @@ func (pc *PersistentCache) resolveObject(
 		return nil, newAuthorizationDenied(reason)
 	}
 
-	namespaceID := pc.getNamespaceID(objectPath)
+	namespaceID := pc.getNamespaceID(ctx, objectPath)
 
 	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
@@ -1536,7 +1536,7 @@ func (pc *PersistentCache) IsFullyCached(ctx context.Context, objectPath, token 
 	// objects without directives (uses DefaultFreshness / Expires).
 	ccDirectives := meta.GetCacheDirectives()
 	if ccDirectives.IsStale(meta.LastValidated) {
-		namespaceID := pc.getNamespaceID(objectPath)
+		namespaceID := pc.getNamespaceID(ctx, objectPath)
 		newHash, _, rv, rErr := pc.revalidateObject(ctx, instanceHash, objectHash, pelicanURL, namespaceID, token, meta)
 		if rErr != nil {
 			return false
@@ -2834,17 +2834,22 @@ func (pc *PersistentCache) RebuildLotIndex() error {
 // lotman is disabled. Either way the bucket key is a string mapped to a stable,
 // persisted id (reusing the namespace-mapping table), so usage/LRU keys survive
 // restarts.
-func (pc *PersistentCache) getNamespaceID(objectPath string) NamespaceID {
+func (pc *PersistentCache) getNamespaceID(ctx context.Context, objectPath string) NamespaceID {
 	bucketKey := extractNamespacePrefix(objectPath)
 	if pc.lotIndex != nil {
-		// Qualify the path with the cache's federation (defaultFed) so the
-		// resolution key matches the federation-qualified lot paths. A bare path
-		// falls back to defaultFed; a full pelican:// URL (multi-federation cache)
-		// carries its own host. Deliberately do NOT route through normalizePath:
-		// that stamps the director host, which is a different host:port from the
-		// federation/discovery host the lots are qualified with, so objects would
-		// resolve to the default lot and per-lot usage would never accrue.
-		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(objectPath, pc.defaultFed))
+		// Qualify the path with the object's federation so the resolution key
+		// matches the federation-qualified lot paths. The multi-federation route
+		// tags the request context with its discovery host; everything else is
+		// this cache's primary federation. Deliberately do NOT route through
+		// normalizePath: that stamps the director host, which is a different
+		// host:port from the federation/discovery host the lots are qualified
+		// with, so objects would resolve to the default lot and per-lot usage
+		// would never accrue.
+		fedHost := FederationHostFrom(ctx)
+		if fedHost == "" {
+			fedHost = pc.defaultFed
+		}
+		bucketKey = pc.lotIndex.Resolve(federationQualifiedKey(objectPath, fedHost))
 	}
 
 	pc.namespaceMapMu.RLock()
