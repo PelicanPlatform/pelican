@@ -120,12 +120,23 @@ func manager() (*core.Manager, error) {
 		busy = v
 	}
 	dbPath := filepath.Join(lotHome, "lots.sqlite")
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", dbPath, busy)
 
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+	db, err := gorm.Open(sqlite.Open(lotDBDSN(dbPath, busy)), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
 	if err != nil {
 		return nil, fmt.Errorf("unable to open lot database %q: %w", dbPath, err)
 	}
+	// Everything below can fail, and gorm has already opened a connection pool.
+	// This function is called from every C entry point, so a persistently
+	// failing migration -- a lot_home on a read-only mount, or a database left
+	// behind by the original C++ library, whose schema differs -- would
+	// otherwise leak a pool per call inside a long-lived xrootd.
+	ok = false
+	defer func() {
+		if !ok {
+			closeGormDB(db)
+		}
+	}()
+
 	m, err := core.New(db, core.Options{StrictHierarchy: true, ContractionPolicy: core.ContractionAlways})
 	if err != nil {
 		return nil, err
@@ -134,7 +145,44 @@ func manager() (*core.Manager, error) {
 		return nil, fmt.Errorf("unable to migrate lot database: %w", err)
 	}
 
+	// Replacing a manager built over a different lot_home: release the old
+	// one's pool rather than dropping it on the floor.
+	if mgr != nil {
+		_ = mgr.Close()
+	}
 	mgr = m
 	mgrLotHome = lotHome
+	ok = true
 	return mgr, nil
+}
+
+// lotDBDSN builds the connection string for the shared lot database.
+//
+// _txlock=immediate is the load-bearing part. Every core mutation is a
+// read-then-write inside one transaction, and this database is shared with
+// pelican-server, which opens it with the same flag. Without it SQLite takes a
+// deferred read lock and tries to upgrade on the first write; when the other
+// process commits in between, the upgrade fails with SQLITE_BUSY_SNAPSHOT
+// *immediately* -- busy_timeout cannot retry it, because waiting cannot resolve
+// the conflict. The purge plugin then reports an error and recovers no bytes
+// that cycle.
+//
+// This mirrors database/utils.SQLiteDSN, which is the canonical definition;
+// it is restated here rather than imported so the shared library does not pull
+// in Pelican's config package and everything behind it. TestDSNMatchesPelican
+// asserts the two cannot drift apart.
+func lotDBDSN(dbPath string, busyTimeoutMs int) string {
+	return fmt.Sprintf(
+		"%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate",
+		dbPath, busyTimeoutMs)
+}
+
+// closeGormDB releases a *gorm.DB's underlying connection pool.
+func closeGormDB(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
 }
