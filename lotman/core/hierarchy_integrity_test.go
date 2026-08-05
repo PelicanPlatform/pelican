@@ -290,3 +290,71 @@ func TestChildrenRollupSurvivesHierarchyMutations(t *testing.T) {
 		}
 	})
 }
+
+// TestUpdateLotUsageBatchIsAtomic covers the batch entry point's failure
+// behaviour. Looping over UpdateLotUsage gives each update its own transaction,
+// so a failure part-way through leaves the earlier lots committed -- and a
+// caller retrying the same batch in delta mode counts them a second time.
+func TestUpdateLotUsageBatchIsAtomic(t *testing.T) {
+	m := newTestManager(t)
+	for _, spec := range []LotSpec{
+		{LotName: "root", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+		{LotName: "ns", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+	} {
+		if err := m.AddLot(spec, ""); err != nil {
+			t.Fatalf("add %s: %v", spec.LotName, err)
+		}
+	}
+	start := int64(10)
+	if err := m.UpdateLotUsage(UsageUpdate{LotName: "ns", SelfBytes: &start}, false, ""); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+
+	// First entry is fine; the second drives usage negative, which is rejected.
+	good, bad := int64(5), int64(-100)
+	err := m.UpdateLotUsageBatch([]UsageUpdate{
+		{LotName: "ns", SelfBytes: &good},
+		{LotName: "ns", SelfBytes: &bad},
+	}, true, "")
+	if err == nil {
+		t.Fatal("expected the batch to fail on the negative delta")
+	}
+
+	view, err := m.GetLot("ns")
+	if err != nil {
+		t.Fatalf("get ns: %v", err)
+	}
+	if view.Usage.SelfBytes != start {
+		t.Errorf("ns self_bytes = %d after a failed batch, want %d (the batch must not half-apply)",
+			view.Usage.SelfBytes, start)
+	}
+}
+
+// TestUpdateLotUsageBatchRollsUpOnce checks that the shared ancestor of several
+// updated lots ends up with the right total -- the batch recomputes each
+// affected ancestor once rather than once per update, so an error there would
+// show as a wrong rollup rather than a slow one.
+func TestUpdateLotUsageBatchRollsUpOnce(t *testing.T) {
+	m := newTestManager(t)
+	for _, spec := range []LotSpec{
+		{LotName: "root", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+		{LotName: "a", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+		{LotName: "b", Owner: "fed", Parents: []string{"root"}, MPA: unboundedMPA()},
+	} {
+		if err := m.AddLot(spec, ""); err != nil {
+			t.Fatalf("add %s: %v", spec.LotName, err)
+		}
+	}
+
+	aBytes, bBytes := int64(7), int64(11)
+	if err := m.UpdateLotUsageBatch([]UsageUpdate{
+		{LotName: "a", SelfBytes: &aBytes},
+		{LotName: "b", SelfBytes: &bBytes},
+	}, false, ""); err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+
+	if got := childrenBytesOf(t, m, "root"); got != aBytes+bBytes {
+		t.Errorf("root children_bytes = %d, want %d", got, aBytes+bBytes)
+	}
+}
