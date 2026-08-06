@@ -37,7 +37,7 @@
 			]
 		}
 	},
-	"postCreateCommand": "go install github.com/go-delve/delve/cmd/dlv@latest",
+	"postCreateCommand": "sudo chown -R $(id -u):$(id -g) $HOME/.claude && go install github.com/go-delve/delve/cmd/dlv@latest",
 	"remoteEnv": {
 		"GOPATH": "/home/vscode/go",
 		"PATH": "/usr/local/go/bin:/home/vscode/go/bin:${containerEnv:PATH}"
