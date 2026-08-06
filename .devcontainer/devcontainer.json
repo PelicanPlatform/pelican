@@ -55,5 +55,6 @@
 		"ghcr.io/devcontainers/features/git:1": {
 			"version": "latest"
 		}
-	}
+	},
+	"mounts": [ "source=claude-code-config,target=/home/vscode/.claude,type=volume" ]
 }
