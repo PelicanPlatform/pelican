@@ -588,6 +588,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 			// If non-admin user accesses a namespace with user_id != user but with access_token
 			if !isAdmin && !belongsTo && accessToken != "" {
+				// This path allows the holder of a registration's key to claim an unowned
+				// registration after origin/cache's initial auto-registration. A non-owner
+				// can never edit a registration that already has an owner, even with a key/token.
+				// Legitimate edit flows are preserved: owner via the belongsTo path,
+				// federation admin via the isAdmin path.
+				if existingNs.AdminMetadata.UserID != "" {
+					log.Errorf("Access denied: user %q attempted to modify namespace %q owned by %q via access token", user, existingNs.Prefix, existingNs.AdminMetadata.UserID)
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "You do not have permission to modify a registration that already belongs to another user"})
+					return
+				}
+
 				jwks, err := jwk.Parse([]byte(existingNs.Pubkey))
 				if err != nil {
 					log.Errorf("Error parsing the stored public key of the namespace %s with ID %d: %v", existingNs.Prefix, ns.ID, err)
@@ -609,11 +622,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 
-				// A key-holder may claim an UNOWNED registration, but must never seize
-				// ownership from an existing owner. Decide based on the stored record.
-				if existingNs.AdminMetadata.UserID == "" {
-					ns.AdminMetadata.UserID = user
-				}
+				// Proof of possession succeeded on an unowned registration: the
+				// key-holder claims it. The request-body user_id is ignored.
+				ns.AdminMetadata.UserID = user
 			}
 		}
 
