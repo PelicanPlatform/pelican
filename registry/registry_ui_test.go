@@ -1449,9 +1449,10 @@ func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
 		return string(signed)
 	}
 
-	// The attack: a non-owner presents their OWN JWKS in the body plus a token
-	// signed by the matching private key. Verifying against the stored key must
-	// reject it, and the stored record must be untouched.
+	// Wrong-key variant: a non-owner presents their OWN JWKS in the body plus a
+	// token signed by the matching private key. Verification is against the STORED
+	// key, so this is rejected at token verification (it never reaches the
+	// ownership guard) and the stored record is left untouched.
 	t.Run("attacker-body-key-cannot-take-over", func(t *testing.T) {
 		resetMockRegistryDB(t)
 
@@ -1490,8 +1491,57 @@ func TestUpdateNamespaceAccessTokenProofOfPossession(t *testing.T) {
 
 		got, err := getRegistrationById(id)
 		require.NoError(t, err)
-		assert.Equal(t, storedJWKS, got.Pubkey, "stored pubkey must not be overwritten")
-		assert.Equal(t, "victimOwner", got.AdminMetadata.UserID, "owner must not be seized")
+		assert.Equal(t, storedJWKS, got.Pubkey, "a rejected (wrong-key) request must write nothing")
+		assert.Equal(t, "victimOwner", got.AdminMetadata.UserID, "a rejected (wrong-key) request must write nothing")
+	})
+
+	// Correct-key variant (reaches the ownership guard): a non-owner presents a
+	// token signed by the key that MATCHES the stored JWKS, so proof-of-possession
+	// succeeds. Because the registration already has an owner, the request must
+	// still be rejected — the key-holder may claim an unowned registration but may
+	// not edit or take over one owned by someone else. This is the input the
+	// wrong-key subtest can never exercise.
+	t.Run("correct-key-cannot-take-over-owned-registration", func(t *testing.T) {
+		resetMockRegistryDB(t)
+
+		privStored, _, storedJWKS, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		stored := server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				UserID:      "victimOwner",
+				Status:      server_structs.RegPending,
+				SiteName:    "victim-site",
+			},
+		}
+		require.NoError(t, insertMockDBData([]server_structs.Registration{stored}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// Token signed by the private key matching the STORED public key: this is
+		// the only input that gets past token verification to the ownership guard.
+		validToken := mintEditToken(t, privStored)
+
+		// Body attempts to seize ownership and rewrite metadata.
+		poisoned := stored
+		poisoned.AdminMetadata.UserID = "mockUser"
+		poisoned.AdminMetadata.SiteName = "attacker-site"
+		body, err := json.Marshal(poisoned)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		target := "/namespaces/" + strconv.Itoa(id) + "?access_token=" + url.QueryEscape(validToken)
+		req, _ := http.NewRequest("PUT", target, bytes.NewReader(body))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "victimOwner", got.AdminMetadata.UserID, "owner must not be reassigned")
+		assert.Equal(t, "victim-site", got.AdminMetadata.SiteName, "metadata must not be rewritten")
 	})
 
 	// The legitimate flow: the holder of the private key matching the stored public
