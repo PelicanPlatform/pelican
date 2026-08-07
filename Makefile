@@ -90,17 +90,17 @@ endif
 
 web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES) swagger/pelican-swagger.yaml
 ifeq ($(USE_DOCKER),0)
-	@cd $(WEBSITE_SRC_PATH) && npm ci && npm run build
+	@cd $(WEBSITE_SRC_PATH) && pnpm install --frozen-lockfile && pnpm run build
 else
-	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp origin-ui npm run build
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run build'
 endif
 
 .PHONY: web-serve
 web-serve:
 ifeq ($(USE_DOCKER),0)
-	@cd $(WEBSITE_SRC_PATH) && npm install && npm run dev
+	@cd $(WEBSITE_SRC_PATH) && pnpm install && pnpm run dev
 else
-	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 origin-ui npm run dev
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run dev'
 endif
 
 
