@@ -575,7 +575,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				log.Error("Error loading existing registration: ", err)
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Error loading existing registration: %v", err)})
+					Msg:    "Error loading existing registration"})
 				return
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
@@ -606,7 +606,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					log.Errorf("Error parsing the stored public key of the namespace %s with ID %d: %v", existingNs.Prefix, ns.ID, err)
 					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
-						Msg:    fmt.Sprintf("Error parsing the stored public key of the namespace %s with ID %d: %v", existingNs.Prefix, existingNs.ID, err),
+						Msg:    "Error parsing the stored public key of the registration",
 					})
 					return
 				}
