@@ -45,21 +45,39 @@ jobs:
       - name: Install libatomic (Node.js >= 24 runtime dependency)
         run: dnf install -y libatomic
 
-      # Must precede setup-node: its "cache: pnpm" needs the pnpm binary on PATH
-      # to locate the store directory. The pnpm version comes from the
-      # "packageManager" field in the frontend's package.json.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
-        with:
-          package_json_file: "web_ui/frontend/package.json"
-
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "pnpm"
-          cache-dependency-path: "web_ui/frontend/pnpm-lock.yaml"
           check-latest: true
+
+      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
+      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
+      # container-based jobs, where the Actions-provided Node.js is not
+      # co-located with an npm. Installing pnpm with the npm that setup-node has
+      # just put on PATH sidesteps that. The version comes from the
+      # "packageManager" field, so it always matches the lockfile.
+      - name: Set up pnpm
+        id: pnpm
+        working-directory: web_ui/frontend
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          # Resolve the store path in its own assignment rather than inline in
+          # the echo, so that a failure aborts the step instead of quietly
+          # caching an empty path. pnpm chooses the store location based on the
+          # working directory's filesystem, so resolve it where installs run.
+          store="$(pnpm store path)"
+          echo "store=${store}" >> "$GITHUB_OUTPUT"
+
+      # Replaces setup-node's "cache: pnpm", which cannot be used because it
+      # requires pnpm to already be installed when setup-node runs.
+      - name: Cache the pnpm store
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Set Go version
         id: go-version
