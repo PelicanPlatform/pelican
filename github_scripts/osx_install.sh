@@ -90,7 +90,7 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHttpPelican-5.so" "$xrootd_libdir"
 popd
 
-git clone --recurse-submodules --branch v0.6.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.9 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 # xrootd-s3-http builds with -Wall -Werror and bundles nlohmann/json 3.11.2,
 # whose `operator "" _json` (a space before the literal suffix) trips the
