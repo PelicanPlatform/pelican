@@ -460,7 +460,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         else
           git checkout ${!VER}
         fi
-        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' rpm/${REPO}.spec
+        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' --with xrootd6 rpm/${REPO}.spec
       )
       # Install the package in case its a dependency of a later package.
       dnf install -y --enablerepo=osg-upcoming-testing /xrootd-build/RPMS/*/${REPO}-*.rpm
@@ -525,9 +525,9 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     elif [ -n "${!RELEASE-}" ]; then
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-upcoming-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-upcoming-development --enablerepo=osg-upcoming-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
     fi
   }
 
