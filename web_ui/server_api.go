@@ -202,6 +202,33 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		}
 	}
 
+	// At the Registry, a create from a registered server is a mirror push from an
+	// origin/cache. Bind the record to the authenticated caller so it can't be
+	// attributed to — nor, via the ownership guard, later "owned" by — another
+	// server, and so a server can't forge a federation-authored downtime. (The
+	// mirror already sets the token subject to its own ServerID, so this does not
+	// affect legitimate pushes.)
+	if config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) &&
+		ctx.GetString("AuthMethod") == "registered-server-token" {
+		if strings.EqualFold(downtimeInput.Source, server_structs.RegistryType.String()) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "A registered Origin/Cache server may not create a Registry-authored downtime",
+			})
+			return
+		}
+		downtimeInput.ServerID = ctx.GetString("TokenSubject")
+		// Resolve the display name from the registration DB by the authenticated
+		// server ID; never trust a body-supplied name that could target another
+		// server. (The Director resolves names itself in formatServerDowntimes,
+		// but the Registry web UI displays what is stored here.)
+		serverName, err := database.GetServerNameByID(downtimeInput.ServerID)
+		if err != nil {
+			log.Warningf("Failed to resolve server name for ID %s while creating downtime: %v", downtimeInput.ServerID, err)
+		}
+		downtimeInput.ServerName = serverName
+	}
+
 	downtime := server_structs.Downtime{
 		UUID:        idStr,
 		CreatedBy:   user,
@@ -232,6 +259,13 @@ func HandleCreateDowntime(ctx *gin.Context) {
 					Status: server_structs.RespFailed,
 					Msg:    "Failed to load existing downtime with UUID " + idStr + " during create: " + getErr.Error(),
 				})
+				return
+			}
+
+			// This branch overwrites an existing record, so a POST to an existing
+			// UUID is an update in disguise. Enforce the same per-record ownership
+			// check as the update path against the STORED record before overwriting.
+			if denyIfUnauthorizedDowntimeMutation(ctx, existing, "update") {
 				return
 			}
 
@@ -329,18 +363,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	// some registered server); it does not check who owns this downtime record.
 	// Enforce ownership here — otherwise any registered server could modify
 	// downtimes it does not own, including Registry-authored ones.
-	if allowed, msg := downtimeMutationAuthorized(
-		config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}),
-		existingDowntime.Source,
-		ctx.GetString("AuthMethod"),
-		ctx.GetString("TokenSubject"),
-		existingDowntime.ServerID,
-		"update",
-	); !allowed {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    msg,
-		})
+	if denyIfUnauthorizedDowntimeMutation(ctx, existingDowntime, "update") {
 		return
 	}
 
@@ -457,6 +480,37 @@ func downtimeSourceOwnedLocally(downtimeSource string) bool {
 	return config.ValidateServerType([]server_structs.ServerType{src})
 }
 
+// denyIfUnauthorizedDowntimeMutation enforces per-record ownership for a downtime
+// mutation. If the caller is not allowed it logs the denial, writes a 403, and
+// returns true; otherwise it returns false and the caller proceeds.
+func denyIfUnauthorizedDowntimeMutation(ctx *gin.Context, dt *server_structs.Downtime, action string) bool {
+	atRegistry := config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType})
+	authMethod := ctx.GetString("AuthMethod")
+	tokenSubject := ctx.GetString("TokenSubject")
+	allowed, msg := downtimeMutationAuthorized(
+		atRegistry,
+		dt.Source,
+		authMethod,
+		tokenSubject,
+		dt.ServerID,
+		action,
+		downtimeSourceOwnedLocally(dt.Source),
+	)
+	if !allowed {
+		// The Registry is the cross-tenant surface, so a denial here is exactly the
+		// event an operator needs to see (a misconfigured/hostile server reaching for
+		// another tenant's downtime, or a rejected mirror push).
+		log.Warningf("Denied downtime %s at the Registry: uuid=%q source=%q serverID=%q authMethod=%q tokenSubject=%q clientIP=%q",
+			action, dt.UUID, dt.Source, dt.ServerID, authMethod, tokenSubject, ctx.ClientIP())
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return true
+	}
+	return false
+}
+
 func HandleDeleteDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
 	existingDowntime, err := database.GetDowntimeByUUID(uuid)
@@ -479,18 +533,7 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 	// some registered server); it does not check who owns this downtime record.
 	// Enforce ownership here — otherwise any registered server could delete
 	// another server's downtime.
-	if allowed, msg := downtimeMutationAuthorized(
-		config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}),
-		existingDowntime.Source,
-		ctx.GetString("AuthMethod"),
-		ctx.GetString("TokenSubject"),
-		existingDowntime.ServerID,
-		"delete",
-	); !allowed {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    msg,
-		})
+	if denyIfUnauthorizedDowntimeMutation(ctx, existingDowntime, "delete") {
 		return
 	}
 
