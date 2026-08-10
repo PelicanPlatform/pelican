@@ -404,24 +404,57 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 //   - A Registry-authored downtime may be mutated only via an admin cookie.
 //   - A server-authored downtime may be mutated only by that same server, i.e. a
 //     registered-server token whose subject matches the downtime's ServerID.
-//     Federation admins are deliberately excluded: server-authored downtimes are
+//     Federation admins are deliberately excluded: a remote server's downtime is
 //     read-only at the Registry.
-func downtimeMutationAuthorized(atRegistry bool, downtimeSource, authMethod, tokenSubject, downtimeServerID, action string) (bool, string) {
+//   - Exception (adminOwnsLocally): in a co-located deployment ("federation in a
+//     box") the Registry runs in the same process as the record's owning service
+//     (or the record has no source), so the local admin is the owner and may
+//     manage it via an admin cookie. Without this, a co-located admin would be
+//     locked out of the very downtimes they created.
+func downtimeMutationAuthorized(atRegistry bool, downtimeSource, authMethod, tokenSubject, downtimeServerID, action string, adminOwnsLocally bool) (bool, string) {
 	if !atRegistry {
 		return true, ""
 	}
 	src := server_structs.NewServerType()
 	src.SetString(downtimeSource)
 	if src == server_structs.RegistryType {
-		if authMethod != "admin-cookie" {
-			return false, "Only a federation administrator may " + action + " a Registry-authored downtime"
+		if authMethod == "admin-cookie" {
+			return true, ""
 		}
+		return false, "Only a federation administrator may " + action + " a Registry-authored downtime"
+	}
+	// Server-authored (origin/cache) or empty source.
+	if authMethod == "registered-server-token" && tokenSubject == downtimeServerID {
 		return true, ""
 	}
-	if authMethod != "registered-server-token" || tokenSubject != downtimeServerID {
-		return false, "You do not have permission to " + action + " this server's downtime"
+	if adminOwnsLocally && authMethod == "admin-cookie" {
+		return true, ""
 	}
-	return true, ""
+	if authMethod == "admin-cookie" {
+		return false, "This downtime is owned by its authoring server and is read-only for federation administrators; only that server may " + action + " it at the Registry"
+	}
+	return false, "You do not have permission to " + action + " this server's downtime"
+}
+
+// downtimeSourceOwnedLocally reports whether this process runs the service that
+// authored the downtime (or the source is unset), i.e. fed-in-a-box.
+func downtimeSourceOwnedLocally(downtimeSource string) bool {
+	if downtimeSource == "" {
+		return true
+	}
+	src := server_structs.NewServerType()
+	if !src.SetString(downtimeSource) {
+		// Unknown downtime source: treat as local so a co-located admin isn't locked out.
+		return true
+	}
+	// Registry-authored downtimes are never treated as locally owned: at a
+	// Registry the ValidateServerType check below would trivially pass, wrongly
+	// granting the fed-in-a-box exception. Who may mutate them is decided by the
+	// Registry branch of downtimeMutationAuthorized instead.
+	if src == server_structs.RegistryType {
+		return false
+	}
+	return config.ValidateServerType([]server_structs.ServerType{src})
 }
 
 func HandleDeleteDowntime(ctx *gin.Context) {
