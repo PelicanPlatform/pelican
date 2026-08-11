@@ -73,7 +73,7 @@ ARG TOMCAT_GID=10443
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
-ARG LOTMAN_SRC_BUILD=true
+ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.1.0
 ARG LOTMAN_RELEASE=
 # ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
@@ -81,15 +81,15 @@ ARG LOTMAN_RELEASE=
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.7.1
+ARG XRDCL_PELICAN_VER=1.8.0
 ARG XRDCL_PELICAN_RELEASE=
 # ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_LOTMAN_SRC_BUILD=true
+ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.1.0
 ARG XROOTD_LOTMAN_RELEASE=
 # ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.7
+ARG XROOTD_S3_HTTP_SRC_BUILD=false
+ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
@@ -322,8 +322,8 @@ ARG XROOTD_GID
 # We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.6"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="6.1.0"
+ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}up.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
@@ -350,7 +350,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     xrootd-scitokens \
     xrootd-selinux \
     xrootd-voms \
-    xrdcl-http \
     \
     xrootd-devel \
     xrootd-client-devel \
@@ -366,7 +365,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   done
 
   # Install the pinned packages from osg-testing.
-  dnf install -y --enablerepo=osg-testing "${package_names[@]}"
+  dnf install -y --enablerepo=osg-upcoming-testing --enablerepo=osg-testing "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
@@ -413,7 +412,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y \
             cmake3 \
             gcc-c++ \
             git \
@@ -461,10 +460,10 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         else
           git checkout ${!VER}
         fi
-        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' rpm/${REPO}.spec
+        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' --with xrootd6 rpm/${REPO}.spec
       )
       # Install the package in case its a dependency of a later package.
-      dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+      dnf install -y --enablerepo=osg-upcoming-testing /xrootd-build/RPMS/*/${REPO}-*.rpm
     fi
   }
 
@@ -526,9 +525,9 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     elif [ -n "${!RELEASE-}" ]; then
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-upcoming-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-upcoming-development --enablerepo=osg-upcoming-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
     fi
   }
 
@@ -864,7 +863,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
 
-  dnf install -y --enablerepo=osg-contrib \
+  dnf install -y \
         cmake3 \
         delve \
         docker \
