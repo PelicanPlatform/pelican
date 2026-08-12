@@ -652,6 +652,64 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	t.Run("name-mismatch-records-ad-but-cannot-mutate-filter", func(t *testing.T) {
+		// A server holding a valid advertise token for its own prefix advertises a
+		// DIFFERENT server's name along with a shutting-down status and a downtime.
+		// The ad is still accepted (200) and recorded, but because the advertised
+		// name doesn't match the name registered under the token-verified prefix,
+		// none of the filter-mutating parts take effect: no shutdownFiltered entry,
+		// no serverDowntimes entry, and the recorded ad carries no downtimes. This
+		// exercises the else (unauthorized) branch of the downtime-name gate.
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey)
+
+		// The registry reports a name different from the one the ad claims.
+		origResolver := resolveRegisteredServerName
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "the-real-owner", nil
+		}
+		registeredNameCache.DeleteAll()
+		defer func() {
+			resolveRegisteredServerName = origResolver
+			teardown()
+		}()
+
+		ad := server_structs.OriginAdvertise{
+			RegistryPrefix: "/origins/test",
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces:     []server_structs.NamespaceAd{},
+			Status:         "shutting down",
+			Downtimes:      []server_structs.Downtime{{UUID: "dt-1"}},
+		}
+		ad.Initialize("victim") // spoofed name, != "the-real-owner"
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+		r.ServeHTTP(w, c.Request)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, "Ad with a mismatched name should still be accepted")
+
+		get := serverAds.Get("https://data-url.org")
+		require.NotNil(t, get, "ad should be recorded")
+		assert.Empty(t, get.Value().Downtimes, "unauthorized downtimes must be stripped from the recorded ad")
+		// Status is intentionally retained (it is the server's own health report);
+		// it just cannot drive a filter entry under an unverified name.
+		assert.Equal(t, "shutting down", get.Value().Status, "status is retained on the recorded ad")
+
+		filteredServersMutex.RLock()
+		_, filtered := filteredServers["victim"]
+		_, hasDowntime := serverDowntimes["victim"]
+		filteredServersMutex.RUnlock()
+		assert.False(t, filtered, "spoofed name must not gain a filteredServers entry")
+		assert.False(t, hasDowntime, "spoofed name must not gain a serverDowntimes entry")
+	})
+
 	t.Run("origin-s3-type-and-disable-test", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
@@ -981,6 +1039,21 @@ func TestDirectorRegistration(t *testing.T) {
 		}
 		allowedPrefixesForCaches.Store(&allowed)
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+		// The director only honors a server's self-declared downtime when the
+		// advertised name matches the name registered under its prefix (see
+		// downtimeNameAuthorized, which now fails closed). Stub the registry lookup
+		// to return the advertised cache name so these downtime cases exercise the
+		// authorized path rather than depending on the mock registry's 404.
+		origResolver := resolveRegisteredServerName
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "test-cache", nil
+		}
+		registeredNameCache.DeleteAll()
+		t.Cleanup(func() {
+			resolveRegisteredServerName = origResolver
+			registeredNameCache.DeleteAll()
+		})
 
 		// helper to build a valid Downtime object
 		makeDT := func(start, end int64) server_structs.Downtime {
@@ -2449,20 +2522,30 @@ func TestDowntimeNameAuthorized(t *testing.T) {
 		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
 	})
 
-	t.Run("registry-lookup-error-fails-open", func(t *testing.T) {
+	t.Run("registry-lookup-error-fails-closed", func(t *testing.T) {
+		// A lookup error must not authorize an arbitrary name — fail closed.
 		registeredNameCache.DeleteAll()
 		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
 			return "", errors.New("registry unreachable")
 		}
-		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
 	})
 
-	t.Run("empty-registered-name-is-authorized", func(t *testing.T) {
+	t.Run("empty-registered-name-is-unauthorized", func(t *testing.T) {
+		// An empty registered name can't confirm ownership, so it must not authorize.
 		registeredNameCache.DeleteAll()
 		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
 			return "", nil
 		}
-		assert.True(t, downtimeNameAuthorized(ctx, "any-site", prefix))
+		assert.False(t, downtimeNameAuthorized(ctx, "any-site", prefix))
+	})
+
+	t.Run("non-server-prefix-is-unauthorized-without-lookup", func(t *testing.T) {
+		// A namespace prefix can never mutate a server filter; the resolver must not
+		// even be consulted.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = mustNotResolve
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", "/foo/bar"))
 	})
 
 	t.Run("second-lookup-is-served-from-cache", func(t *testing.T) {
@@ -2481,17 +2564,18 @@ func TestDowntimeNameAuthorized(t *testing.T) {
 		assert.Equal(t, 1, calls)
 	})
 
-	t.Run("lookup-errors-are-not-cached", func(t *testing.T) {
+	t.Run("failed-lookups-are-not-cached", func(t *testing.T) {
 		registeredNameCache.DeleteAll()
 		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
 			return "", errors.New("registry unreachable")
 		}
-		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
-		// Once the registry recovers, the next ad is verified again.
-		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
-			return "attacker-site", nil
-		}
 		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+		// Once the registry recovers with a matching name, the next ad authorizes —
+		// proving the failed lookup was not cached.
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "victim-site", nil
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
 	})
 }
 
