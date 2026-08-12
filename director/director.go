@@ -1097,19 +1097,22 @@ var registeredNameCache = ttlcache.New(
 )
 
 // downtimeNameAuthorized guards the name-keyed downtime/routing filter against a
-// cross-server suppression attack: the advertise token only authenticates the
+// cross-server manipulation attack: the advertise token only authenticates the
 // server's registry prefix, not its free-form Name, so a server holding a valid
 // token for its own prefix could otherwise advertise another server's name and
-// mutate the victim's filter state — suppress it with a shutdown status or
-// downtime entry, or just as bad, clear the victim's active downtime by
-// advertising its name with an empty downtime list.
-//
-// It returns false when the advertised Name does not match the server
-// registered under the token-verified prefix; the caller then ignores the
-// filter-mutating parts of the ad. To avoid turning a registry outage into a
-// loss of downtime propagation, it returns true (authorized) when the
-// registry lookup fails.
+// mutate the victim's filter state — suppress it with a shutdown status or a
+// downtime entry, or clear the victim's active downtime by advertising its name
+// with an empty downtime list.
 func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix string) bool {
+	// The downtime/routing filter is a server concept; only a genuine origin or
+	// cache prefix may touch it. A namespace prefix (e.g. /foo/bar) must never
+	// mutate a server's downtime state, even one the caller legitimately controls
+	// and holds a valid advertise token for
+	if !server_structs.IsOriginNS(registryPrefix) && !server_structs.IsCacheNS(registryPrefix) {
+		log.Warningf("Ignoring downtime/status in advertisement from %q: registry prefix %q is not a server (origin/cache) prefix", adName, registryPrefix)
+		return false
+	}
+
 	var registeredName string
 	if item := registeredNameCache.Get(registryPrefix); item != nil {
 		registeredName = item.Value()
@@ -1117,14 +1120,21 @@ func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix s
 		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		name, err := resolveRegisteredServerName(lookupCtx, registryPrefix)
-		if err != nil {
-			log.Warningf("Could not verify advertised name %q against the server registered under %q; applying its downtime/status anyway: %v", adName, registryPrefix, err)
-			return true
+		if err != nil || name == "" {
+			// Fail closed: without a positively-resolved registered name we cannot
+			// confirm the advertiser owns adName, so we do not let it mutate another
+			// server's filter state. Do not cache this non-result.
+			if err != nil {
+				log.Warningf("Ignoring downtime/status in advertisement from %q: could not resolve the server registered under %q: %v", adName, registryPrefix, err)
+			} else {
+				log.Warningf("Ignoring downtime/status in advertisement from %q: no server name is registered under %q", adName, registryPrefix)
+			}
+			return false
 		}
 		registeredNameCache.Set(registryPrefix, name, ttlcache.DefaultTTL)
 		registeredName = name
 	}
-	if registeredName != "" && registeredName != adName {
+	if registeredName != adName {
 		log.Warningf("Ignoring downtime/status in advertisement from %q: it does not match the name %q registered under prefix %q", adName, registeredName, registryPrefix)
 		return false
 	}
