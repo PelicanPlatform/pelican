@@ -283,6 +283,7 @@ func TestDirectorRegistration(t *testing.T) {
 	teardown := func() {
 		serverAds.DeleteAll()
 		namespaceKeys.DeleteAll()
+		registeredNameCache.DeleteAll()
 	}
 
 	t.Run("valid-token-V2", func(t *testing.T) {
