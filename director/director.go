@@ -1287,7 +1287,10 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("%s advertisement rejected: no registry prefix present in the ad. Ensure the server runs a supported Pelican version and is registered at the federation registry", sType.String()),
 		})
-		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+		// This rejection happens before the advertise token is verified, so ad.Name
+		// is unauthenticated and attacker-controllable. Record it under a fixed label
+		// to avoid unbounded Prometheus label cardinality from bogus advertisements.
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": "unverified"}).Inc()
 		return
 	}
 
