@@ -138,8 +138,12 @@ const (
 
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
-	minOriginVersion, _ = version.NewVersion("7.0.0")
-	minCacheVersion, _  = version.NewVersion("7.3.0")
+	// Origins >= 7.9.0 and caches >= 7.8.2 report their registry prefix in the
+	// advertisement; older versions do not and can no longer be verified, so the
+	// version gate rejects them here with an accurate "please update" message
+	// (the missing-registry-prefix check later is a defensive fallback).
+	minOriginVersion, _ = version.NewVersion("7.9.0")
+	minCacheVersion, _  = version.NewVersion("7.8.2")
 	// TODO: Consolidate the two maps into server_structs.Advertisement. [#1391]
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
@@ -1386,11 +1390,12 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 
 	// The downtime/routing filter below is keyed by the advertised server name,
 	// which the advertise token does not authenticate — it only authenticates the
-	// registry prefix. When the advertised name doesn't match the name registered
-	// under that prefix, still accept the ad (a legitimate server may have a local
-	// sitename that differs from its registration) but ignore downtimes, and the
-	// implicit "clear downtimes" of an empty list. So a server can't suppress or
-	// resurrect routing for a name it doesn't own.
+	// registry prefix. downtimeNameAuthorized gates BOTH the downtime handling and
+	// the Status-driven shutdownFiltered entry: when the advertised name doesn't
+	// match the name registered under that prefix, we still accept the ad (a
+	// legitimate server may have a local sitename that differs from its
+	// registration) but skip all filter mutation, so a server can neither suppress
+	// nor resurrect routing for a name it doesn't own.
 	sn := ad.Name
 	if downtimeNameAuthorized(engineCtx, sn, registryPrefix) {
 		// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
@@ -1424,7 +1429,11 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 			}
 		}
 	} else {
-		// Strip the unauthorized downtime fields so they don't propagate downstream
+		// Name unauthorized for this prefix: do not touch filteredServers/serverDowntimes
+		// above, and clear the ad's Downtimes so they aren't persisted or forwarded to
+		// peer directors. Note ad.Status is intentionally left intact — it is still the
+		// server's own health report and is forwarded/stored — it just cannot drive a
+		// shutdownFiltered entry under an unverified name (that path is skipped above).
 		ad.Downtimes = nil
 	}
 
