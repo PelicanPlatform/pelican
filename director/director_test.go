@@ -261,7 +261,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request.Header.Set("Content-Type", "application/json")
 		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
 		// we'll know that means it's time to update the min version in redirect.go
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.0")
 	}
 
 	// Configure the request context and Gin router to generate a redirect
@@ -270,7 +270,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/director/origin"+object, nil)
 		c.Request.Header.Set("X-Real-Ip", "1.1.1.1")
 		c.Request.Header.Set("Authorization", "Bearer "+token)
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.0")
 	}
 
 	setupJwksCache := func(t *testing.T, ns string, key jwk.Key) {
@@ -945,7 +945,8 @@ func TestDirectorRegistration(t *testing.T) {
 		get := serverAds.Get("https://or-url.org")
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
 		getAd := get.Value()
-		assert.Equal(t, "7.0.0", getAd.Version)
+		// No ad.Version was set, so the director falls back to the User-Agent version.
+		assert.Equal(t, "7.9.0", getAd.Version)
 		teardown()
 	})
 
@@ -1018,8 +1019,8 @@ func TestDirectorRegistration(t *testing.T) {
 
 		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
-		// 7.0.1 != 7.0.0
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.1")
+		// 7.9.1 (UA) != 7.0.0 (ad.Version); ad.Version wins
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.1")
 
 		r.ServeHTTP(w, c.Request)
 
