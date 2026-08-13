@@ -36,7 +36,7 @@ jobs:
             tags: server
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # actions/setup-node downloads its own Node.js binary, which (as of
       # Node 24) dynamically links libatomic.so.1. The AlmaLinux-based container
@@ -114,7 +114,7 @@ jobs:
       actions: read  # "gh run download" reads the Actions API
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Download coverage reports
         env:
