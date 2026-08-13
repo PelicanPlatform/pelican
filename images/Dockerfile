@@ -88,8 +88,8 @@ ARG XROOTD_LOTMAN_SRC_BUILD=true
 ARG XROOTD_LOTMAN_VER=0.1.0
 ARG XROOTD_LOTMAN_RELEASE=
 # ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.7
+ARG XROOTD_S3_HTTP_SRC_BUILD=false
+ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
@@ -413,7 +413,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y \
             cmake3 \
             gcc-c++ \
             git \
@@ -864,7 +864,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
 
-  dnf install -y --enablerepo=osg-contrib \
+  dnf install -y \
         cmake3 \
         delve \
         docker \
