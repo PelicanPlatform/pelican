@@ -268,6 +268,14 @@ const (
 	UserStatusInactive UserStatus = "inactive"
 )
 
+// BuiltinAdminUsername is the reserved username of the built-in
+// administrator that the htpasswd / init-code bootstrap creates and
+// that CheckAdmin in the web layer keys its bypass off of. It is the
+// ONLY account eligible for issuer-blind adoption (see
+// adoptBuiltinAdminByUsername); every other username is strictly keyed
+// on (sub, issuer).
+const BuiltinAdminUsername = "admin"
+
 // User is the canonical user record. Four concepts live on this row and
 // they are intentionally distinct — code that conflates them is a bug.
 //
@@ -1688,12 +1696,30 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, cr
 		return nil, err
 	}
 
+	// No (sub, issuer) linkage yet. For the built-in admin ONLY, the
+	// username may already have a live row that a sibling service
+	// created: several services sharing one server DB (the dev-container
+	// / e2e layout) each call this with their own ExternalWebUrl as
+	// issuer, and usernames are globally unique among live rows, so a
+	// second service must adopt the first's "admin" row instead of
+	// minting a per-issuer duplicate the unique index now forbids.
+	// Adoption is deliberately limited to "admin": for any other
+	// username we do NOT infer that two local-shaped rows are the same
+	// person, and the create below simply fails the collision (see
+	// adoptBuiltinAdminByUsername).
+	if adopted, ok, adoptErr := adoptBuiltinAdminByUsername(db, username, sub); adoptErr != nil {
+		return nil, adoptErr
+	} else if ok {
+		return adopted, nil
+	}
+
 	// User not found, create one.
 	created, createErr := CreateUser(db, username, sub, issuer, creator)
 	if createErr == nil {
 		return created, nil
 	}
-	// A concurrent request may have created the same (sub, issuer) user between
+	// A concurrent request may have created the same (sub, issuer) user
+	// (or, the built-in "admin" user under a sibling service's issuer) between
 	// our SELECT above and this INSERT, tripping a UNIQUE constraint. For a
 	// get-or-create that is not a failure: if the row now exists, return it so
 	// concurrent first-time authentications don't spuriously fail (a 500 on the
@@ -1702,7 +1728,50 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, cr
 	if getErr := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error; getErr == nil {
 		return user, nil
 	}
+	if adopted, ok, adoptErr := adoptBuiltinAdminByUsername(db, username, sub); adoptErr == nil && ok {
+		return adopted, nil
+	}
 	return nil, createErr
+}
+
+// adoptBuiltinAdminByUsername implements GetOrCreateUser's cross-issuer
+// adoption rule, restricted to the single built-in admin account. It
+// returns the live user row holding `username` iff ALL of:
+//
+//   - the username is the reserved BuiltinAdminUsername,
+//   - the requested account is local-shaped (sub == username, i.e. the
+//     htpasswd / init-code bootstrap shape, no IdP linkage), and
+//   - the existing live row is likewise local-shaped.
+//
+// ok is false otherwise, so the caller falls through to CreateUser and
+// a genuine collision surfaces the username-uniqueness error. The two
+// local-shape guards mean a password login can never take over an
+// OIDC-linked account that merely shares the name "admin"; that case is
+// treated exactly like CreateLocalUser and fails.
+//
+// Only "admin" is adoptable because it is the one account Pelican itself
+// bootstraps under a per-service issuer and verifies against a single
+// shared htpasswd credential; for every other username we make no such
+// same-person inference across issuers.
+func adoptBuiltinAdminByUsername(db *gorm.DB, username, sub string) (*User, bool, error) {
+	if username != BuiltinAdminUsername {
+		return nil, false, nil
+	}
+	if sub != username {
+		return nil, false, nil
+	}
+	user := &User{}
+	err := db.Where("username = ?", username).First(user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if user.Sub != user.Username {
+		return nil, false, nil
+	}
+	return user, true, nil
 }
 
 func GetUserByID(db *gorm.DB, id string) (*User, error) {
@@ -1842,13 +1911,21 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 		return nil
 	}
 
-	// 1. Ensure an admin user row exists. The admin "username" is
-	//    the literal string "admin"; CheckAdmin in the web layer keys
+	// 1. Ensure an admin user row exists. The admin "username" is the
+	//    reserved BuiltinAdminUsername; CheckAdmin in the web layer keys
 	//    its bypass off that username, and the htpasswd login path has
 	//    historically created the row with sub == username == "admin"
-	//    and issuer == externalURL — so we follow the same shape.
+	//    and issuer == externalURL, so we follow the same shape when
+	//    creating. The LOOKUP, however, is issuer-blind: username is
+	//    globally unique among live rows, and several services sharing
+	//    one server DB (the dev-container / e2e layout) each have their
+	//    own ExternalWebUrl, so a live "admin" bootstrapped by a sibling
+	//    service is the same built-in admin, and re-creating it
+	//    per-issuer would just trip the global unique index (surfaced as
+	//    "Post-migration bootstrap incomplete" at startup of every
+	//    service but the first).
 	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	err := db.Where("username = ?", BuiltinAdminUsername).First(&admin).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		slug, slugErr := generateSlug()
 		if slugErr != nil {
@@ -1856,23 +1933,34 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 		}
 		admin = User{
 			ID:        slug,
-			Username:  "admin",
-			Sub:       "admin",
+			Username:  BuiltinAdminUsername,
+			Sub:       BuiltinAdminUsername,
 			Issuer:    externalURL,
 			CreatedBy: CreatorSelfEnrolled,
 		}
 		if createErr := db.Create(&admin).Error; createErr != nil {
 			// A unique-constraint conflict here means another goroutine
-			// got there first; re-query and fall through.
+			// (or sibling service) got there first; re-query and fall
+			// through.
 			if !strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
 				return createErr
 			}
-			if reErr := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error; reErr != nil {
+			if reErr := db.Where("username = ?", BuiltinAdminUsername).First(&admin).Error; reErr != nil {
 				return reErr
 			}
 		}
 	} else if err != nil {
 		return err
+	} else if admin.Sub != admin.Username {
+		// A live "admin" row exists but is OIDC-linked (sub != username),
+		// not the local-shaped built-in admin. That can only happen if
+		// the built-in row was deleted and an IdP user later claimed the
+		// name. Do NOT backfill group ownership onto an IdP-backed
+		// account; surface the anomaly for the operator instead of
+		// silently treating it as the built-in admin.
+		return fmt.Errorf("username %q is held by an OIDC-linked account (sub=%q); "+
+			"the built-in admin row is absent, refusing to backfill ownership onto it",
+			BuiltinAdminUsername, admin.Sub)
 	}
 
 	// 2. Backfill ownerless groups onto the admin. Without this, the
