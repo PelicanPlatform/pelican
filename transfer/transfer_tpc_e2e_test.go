@@ -47,6 +47,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -264,6 +265,19 @@ func setupFedForTransferTPC(t testing.TB, storageType string) (ft *fed_test_util
 	originConfig = strings.Replace(originConfig, "StorageType: posixv2", "StorageType: "+storageType, 1)
 	ft = fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
+
+	// The device-code login creates testuser under the web-login issuer, but
+	// the transfer tokens it mints carry the origin issuer. When the transfer
+	// middleware first saw such a token it tried to enroll a second "testuser"
+	// row and 500ed on the unique-username index. Pre-register that bearer
+	// identity (sub=testuser, origin issuer) under its own username in the
+	// shared test setup so the middleware's (sub, issuer) lookup hits instead.
+	// Once the server handles the collision, this workaround can be removed.
+	issuerURL, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	_, err = database.CreateUser(database.ServerDatabase,
+		"testuser-transfer", "testuser", issuerURL, database.CreatorSelf())
+	require.NoError(t, err)
 	return
 }
 
