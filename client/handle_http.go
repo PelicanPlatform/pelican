@@ -986,6 +986,8 @@ func workerFailureResult(file *clientTransferFile, err error) TransferResults {
 	}
 	res := newTransferResults(file.file.job)
 	res.JobId = file.jobId
+	res.Scheme = file.file.remoteURL.Scheme
+	res.Source = file.file.remoteURL.String()
 	res.Error = err
 	return res
 }
@@ -3007,10 +3009,12 @@ func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, result
 	}
 	transferResults.JobId = file.jobId
 	transferResults.Scheme = file.file.remoteURL.Scheme
+	transferResults.Source = file.file.remoteURL.String()
 	if err != nil {
 		log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
 		transferResults = newTransferResults(file.file.job)
 		transferResults.Scheme = file.file.remoteURL.Scheme
+		transferResults.Source = file.file.remoteURL.String()
 		transferResults.Error = err
 	}
 	if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
@@ -5512,7 +5516,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							callback:           job.job.callback,
 							job:                job.job,
 							engine:             te,
-							remoteURL:          &url.URL{Path: remotePath},
+							remoteURL:          &url.URL{Scheme: job.job.remoteURL.Scheme, Path: remotePath},
 							requestedChecksums: job.job.requestedChecksums,
 							requireChecksum:    job.job.requireChecksum,
 							packOption:         transfers[0].PackOption,
@@ -5600,7 +5604,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					callback:           job.job.callback,
 					job:                job.job,
 					engine:             te,
-					remoteURL:          &url.URL{Path: newPath},
+					remoteURL:          &url.URL{Scheme: job.job.remoteURL.Scheme, Path: newPath},
 					requestedChecksums: job.job.requestedChecksums,
 					requireChecksum:    job.job.requireChecksum,
 					packOption:         transfers[0].PackOption,
