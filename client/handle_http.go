@@ -622,6 +622,11 @@ func createAllChecksumHashes() (writers []io.Writer, types []ChecksumType) {
 	return
 }
 
+// checksumFallbacksSeen tracks which fallback checksum algorithms have
+// already produced a warning this process, so repeated fallbacks (one per
+// transfer in bulk workloads) log at debug level instead.
+var checksumFallbacksSeen sync.Map
+
 // verifyTransferChecksums compares server-provided checksums against locally-computed ones.
 //
 // It tries to match any server-provided checksum against the computed values. If the match
@@ -666,9 +671,20 @@ func verifyTransferChecksums(
 			return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 		}
 		if !requestedSet[serverCk.Algorithm] {
-			log.WithFields(fields).Warnf(
-				"Requested checksum type(s) not provided by server; verified transfer using %s instead",
-				HttpDigestFromChecksum(serverCk.Algorithm))
+			// This fires for every transfer against a server that lacks the
+			// requested digest (e.g. an origin that only computes MD5 when
+			// CRC32C was requested) -- warn once per process per algorithm,
+			// then drop to debug so bulk workloads aren't flooded.
+			if _, seen := checksumFallbacksSeen.LoadOrStore(serverCk.Algorithm, struct{}{}); !seen {
+				log.WithFields(fields).Warnf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead"+
+						" (subsequent fallbacks will be logged at debug level)",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			} else {
+				log.WithFields(fields).Debugf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			}
 		} else {
 			log.WithFields(fields).Debugf("Checksum %s matches: %s",
 				HttpDigestFromChecksum(serverCk.Algorithm),
