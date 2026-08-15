@@ -456,6 +456,7 @@ type (
 	identTransferOptionSourceTokenProvider      struct{}
 	identTransferOptionNonInteractive           struct{}
 	identTransferOptionStatUploadDestination    struct{}
+	identTransferOptionLazyStat                 struct{}
 	identTransferOptionRejectCollections        struct{}
 	identTransferOptionObjectMetadata           struct{}
 	identTransferOptionObjectMetadataFile       struct{}
@@ -1208,6 +1209,21 @@ func WithDestinationToken(token string) TransferOption {
 // no-op; for put operations it behaves identically to WithTokenLocation.
 func WithDestinationTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionDestinationTokenLocation{}, location)
+}
+
+// WithLazyStat defers the metadata lookup a read-mode OpenFile would
+// otherwise perform before returning the handle. A reader that only asks for
+// byte ranges never needs the object's size: end-of-file arrives as the
+// server's own 416, and the operations that do need a size (Stat, Seek from
+// the end, ReadDir) fetch one on demand.
+//
+// This trades a fail-fast open for a round trip per open. A caller reading
+// many objects it already knows exist -- a filesystem walking its own block
+// store, say -- wants that trade; one that opens a path a user typed
+// probably does not. PelicanFS.Open ignores this option and always stats,
+// because io/fs requires opening a missing file to fail.
+func WithLazyStat(enable bool) TransferOption {
+	return option.New(identTransferOptionLazyStat{}, enable)
 }
 
 // WithStatUploadDestination tells DoStat that the path being stat'ed is the
