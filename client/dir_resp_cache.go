@@ -21,6 +21,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -31,6 +32,64 @@ import (
 
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// DirRespFlavor identifies which question was put to the director.  A
+// response answers exactly one of them and must never be handed to a caller
+// who asked another: the object servers for a read are caches, for a write
+// the origins that accept it, and for a ?directread read the origins again.
+// Answering a writer with a read's response would both address the write to
+// caches that reject it and disclose the write credential to every one of
+// them -- the thing the rest of the client is careful not to do.
+type DirRespFlavor struct {
+	// Verb is the HTTP method the director was asked about: GET for a
+	// read, PUT for a write, COPY for a third-party copy destination.
+	Verb string
+	// CacheMode routes the query through the director's origin endpoint,
+	// which answers with origins instead of caches.  Set by callers that
+	// are themselves a cache.
+	CacheMode bool
+	// Query is the normalized query string of the object URL.  Parameters
+	// including directread and prefercached steer matchmaking, so a
+	// response obtained under one set does not answer for another.
+	Query string
+}
+
+// NewDirRespFlavor builds a flavor from the verb, the cache-embedded-client
+// mode, and the object URL's raw query.  The query is normalized so that
+// orderings of the same parameters share one entry.
+func NewDirRespFlavor(verb string, cacheMode bool, rawQuery string) DirRespFlavor {
+	if verb == "" {
+		verb = http.MethodGet
+	}
+	return DirRespFlavor{Verb: verb, CacheMode: cacheMode, Query: normalizeQuery(rawQuery)}
+}
+
+// normalizeQuery sorts a raw query string so equivalent orderings agree.
+// An unparsable query is kept verbatim: it then keys only itself, which
+// is the safe direction.
+func normalizeQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return rawQuery
+	}
+	return values.Encode()
+}
+
+// String renders the flavor for use inside a cache key.
+func (f DirRespFlavor) String() string {
+	routing := "via-caches"
+	if f.CacheMode {
+		routing = "via-origins"
+	}
+	verb := f.Verb
+	if verb == "" {
+		verb = http.MethodGet
+	}
+	return verb + " " + routing + " " + f.Query
+}
 
 // dirRespCacheEntry is a single cached director response with an expiry.
 type dirRespCacheEntry struct {
@@ -139,10 +198,12 @@ func reconstitutePaths(resp server_structs.DirectorResponse, objectPath string) 
 }
 
 // cacheKey qualifies a namespace prefix with the federation it was learned
-// from.  Neither a discovery endpoint nor a path can contain a newline, so one
-// federation's entries cannot be made to answer for another's.
-func cacheKey(federation, prefix string) string {
-	return federation + "\n" + prefix
+// from and the flavor of question that produced it.  None of a discovery
+// endpoint, a rendered flavor, or a path can contain a newline, so one
+// federation's entries cannot be made to answer for another's, nor one
+// flavor's for another's.
+func cacheKey(federation string, flavor DirRespFlavor, prefix string) string {
+	return federation + "\n" + flavor.String() + "\n" + prefix
 }
 
 // Store saves a DirectorResponse under the given prefix within federation.  Any
@@ -159,7 +220,7 @@ func cacheKey(federation, prefix string) string {
 // that was used to obtain this response from the director.  It is
 // stripped from each ObjectServer URL so the cached entry contains
 // only the server-side base path.  Pass "" if no stripping is needed.
-func (c *DirRespCache) Store(federation string, prefix string, objectPath string, resp server_structs.DirectorResponse) {
+func (c *DirRespCache) Store(federation string, flavor DirRespFlavor, prefix string, objectPath string, resp server_structs.DirectorResponse) {
 	prefix = path.Clean(prefix)
 	if !strings.HasPrefix(prefix, "/") {
 		log.Debugf("DirRespCache: skipping non-absolute prefix %q", prefix)
@@ -173,11 +234,11 @@ func (c *DirRespCache) Store(federation string, prefix string, objectPath string
 	resp = stripFederationPaths(resp, objectPath)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[cacheKey(federation, prefix)] = dirRespCacheEntry{
+	c.entries[cacheKey(federation, flavor, prefix)] = dirRespCacheEntry{
 		resp:   resp,
 		expiry: time.Now().Add(c.ttl),
 	}
-	log.Debugf("DirRespCache: stored entry for prefix %q in federation %q (TTL %s)", prefix, federation, c.ttl)
+	log.Debugf("DirRespCache: stored entry for prefix %q in federation %q, flavor %q (TTL %s)", prefix, federation, flavor, c.ttl)
 }
 
 // Lookup finds the longest cached prefix within federation that matches
@@ -189,7 +250,7 @@ func (c *DirRespCache) Store(federation string, prefix string, objectPath string
 //
 // Returns the cached DirectorResponse and true if a valid (non-expired)
 // entry was found, or the zero value and false otherwise.
-func (c *DirRespCache) Lookup(federation string, objectPath string) (server_structs.DirectorResponse, bool) {
+func (c *DirRespCache) Lookup(federation string, flavor DirRespFlavor, objectPath string) (server_structs.DirectorResponse, bool) {
 	objectPath = path.Clean(objectPath)
 	if federation == "" {
 		return server_structs.DirectorResponse{}, false
@@ -203,9 +264,9 @@ func (c *DirRespCache) Lookup(federation string, objectPath string) (server_stru
 	// for the longest matching prefix within this federation.
 	candidate := objectPath
 	for {
-		if entry, ok := c.entries[cacheKey(federation, candidate)]; ok {
+		if entry, ok := c.entries[cacheKey(federation, flavor, candidate)]; ok {
 			if now.Before(entry.expiry) {
-				log.Debugf("DirRespCache: hit for path %q → prefix %q", objectPath, candidate)
+				log.Debugf("DirRespCache: hit for path %q (flavor %q) → prefix %q", objectPath, flavor, candidate)
 				return reconstitutePaths(entry.resp, objectPath), true
 			}
 			// Entry expired — don't return it, but continue looking
@@ -221,7 +282,7 @@ func (c *DirRespCache) Lookup(federation string, objectPath string) (server_stru
 		candidate = parent
 	}
 
-	log.Debugf("DirRespCache: miss for path %q", objectPath)
+	log.Debugf("DirRespCache: miss for path %q (flavor %q)", objectPath, flavor)
 	return server_structs.DirectorResponse{}, false
 }
 
@@ -241,16 +302,17 @@ type DirRespLoader func(ctx context.Context) (resp server_structs.DirectorRespon
 //
 // On success the response is automatically stored in the cache under
 // the prefix returned by the loader.
-func (c *DirRespCache) LookupOrLoad(ctx context.Context, federation string, objectPath string, loader DirRespLoader) (server_structs.DirectorResponse, error) {
+func (c *DirRespCache) LookupOrLoad(ctx context.Context, federation string, flavor DirRespFlavor, objectPath string, loader DirRespLoader) (server_structs.DirectorResponse, error) {
 	// Fast path: cache hit.
-	if resp, ok := c.Lookup(federation, objectPath); ok {
+	if resp, ok := c.Lookup(federation, flavor, objectPath); ok {
 		return resp, nil
 	}
 
 	objectPath = path.Clean(objectPath)
-	// Coalescing is per federation too: two federations asking about the same
-	// path are asking different questions.
-	inflightKey := cacheKey(federation, objectPath)
+	// Coalescing is per federation and per flavor too: two federations -- or
+	// a reader and a writer -- asking about the same path are asking
+	// different questions and must not receive one another's answer.
+	inflightKey := cacheKey(federation, flavor, objectPath)
 
 	// Check for an in-flight request for this path.
 	c.sfMu.Lock()
@@ -281,7 +343,7 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, federation string, obje
 		// On success, store in cache (stripping the federation
 		// object path from ObjectServer URLs).
 		if err == nil && prefix != "" {
-			c.Store(federation, prefix, objectPath, resp)
+			c.Store(federation, flavor, prefix, objectPath, resp)
 		}
 
 		// Store the stripped version; waitForCall callers will
@@ -327,11 +389,11 @@ func (c *DirRespCache) waitForCall(ctx context.Context, cl *call) (server_struct
 }
 
 // Invalidate removes the entry for the given prefix within federation.
-func (c *DirRespCache) Invalidate(federation string, prefix string) {
+func (c *DirRespCache) Invalidate(federation string, flavor DirRespFlavor, prefix string) {
 	prefix = path.Clean(prefix)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.entries, cacheKey(federation, prefix))
+	delete(c.entries, cacheKey(federation, flavor, prefix))
 }
 
 // InvalidateAll removes all cached entries.

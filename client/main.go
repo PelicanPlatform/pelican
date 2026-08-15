@@ -234,9 +234,10 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 
 	// Reuse the engine's director responses the way job creation does, when
 	// there is an engine. A cache stats before it downloads, so otherwise every
-	// miss spends two director queries on the same namespace. Only the read
-	// flavor is cached: an upload destination asks a different question and
-	// gets a different answer, and the cache is keyed only by prefix.
+	// miss spends two director queries on the same namespace. Cache entries
+	// are keyed by flavor -- verb, cache-mode routing, and the URL query --
+	// so an upload destination is cached too and can never be answered with a
+	// read's caches.
 	var dirResp server_structs.DirectorResponse
 	// A stat against a directorless federation is its own metadata query: the
 	// PROPFIND carries back whatever a preceding one would have said, so asking
@@ -245,8 +246,9 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
 	if directorless && !uploadDestination {
 		dirResp, err = resolveForRequest(ctx, pUrl, directorMethod, "", cacheMode)
-	} else if te != nil && te.dirRespCache != nil && !uploadDestination {
-		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+	} else if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(directorMethod, cacheMode, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
