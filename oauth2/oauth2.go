@@ -110,14 +110,31 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 	}
 
 	storageScopes := []string{}
-	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
-		storageScopes = append(storageScopes, "storage.create:"+pathCleaned)
-	}
-	if opts.Operation.IsEnabled(config.TokenDelete) {
-		storageScopes = append(storageScopes, "storage.modify:"+pathCleaned)
-	}
-	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
-		storageScopes = append(storageScopes, "storage.read:"+pathCleaned)
+	if opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead) {
+		// Shared tokens are handed to third parties: request exactly the
+		// scopes asked for and nothing more.
+		if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+			storageScopes = append(storageScopes, "storage.create:"+pathCleaned)
+		}
+		if opts.Operation.IsEnabled(config.TokenDelete) {
+			storageScopes = append(storageScopes, "storage.modify:"+pathCleaned)
+		}
+		if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
+			storageScopes = append(storageScopes, "storage.read:"+pathCleaned)
+		}
+	} else {
+		// This is the interactive device-code flow -- the expensive step,
+		// with a human in a browser -- reached only after wallet reuse and
+		// refresh have both failed. Request the full set of storage scopes
+		// the client registration already permits, so a single approval
+		// covers the whole session; otherwise every operation needing a
+		// scope the stored token lacks (read, then create, then modify)
+		// launches yet another device flow. The user still sees and
+		// approves the full scope list at the issuer.
+		storageScopes = append(storageScopes,
+			"storage.read:"+pathCleaned,
+			"storage.create:"+pathCleaned,
+			"storage.modify:"+pathCleaned)
 	}
 	storageScope := strings.Join(storageScopes, " ")
 	log.Debugln("Requesting a credential with the following scope:", storageScope)
