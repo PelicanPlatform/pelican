@@ -119,9 +119,25 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		operation = config.TokenWrite
 	}
 
-	dirResp, err := getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
-	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	// Reads reuse the engine's cached director response (5 min TTL):
+	// block/filesystem-oriented callers open many objects under one
+	// namespace in quick succession and should neither pay a director
+	// round trip per open nor couple every read to the director's
+	// availability. Writes keep asking directly -- an upload destination
+	// asks the director a different question, and only the read flavor is
+	// cached.
+	var dirResp server_structs.DirectorResponse
+	var err2 error
+	if !writeMode && pfs.transferEngine != nil && pfs.transferEngine.dirRespCache != nil {
+		dirResp, err2 = pfs.transferEngine.dirRespCache.LookupOrLoad(pfs.ctx, pUrl.FedInfo.DiscoveryEndpoint, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pUrl, httpMethod, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err2 = getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
+	}
+	if err2 != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err2}
 	}
 
 	token := newTokenGenerator(pUrl, &dirResp, operation, true)
