@@ -300,6 +300,54 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		populateEWMAStatusWeight(&sAd, nil)
 	}
 
+	// A shutting-down server's final ad removes its cache entry outright.
+	// The name-keyed downtime filter alone is not enough: when a replacement
+	// server shares the name (the normal rollout case), the replacement's
+	// next healthy ad clears that filter — which used to resurrect the old
+	// server's still-cached ad for the remainder of its TTL.
+	if metrics.ParseHealthStatus(sAd.Status) == metrics.StatusShuttingDown {
+		log.Infof("Server %s (%s) advertised it is shutting down; removing it from matchmaking", sAd.Name, sAd.URL.String())
+		serverAds.Delete(rawURL)
+		serverAds.Delete(httpURL)
+		serverAds.Delete(httpsURL)
+		return
+	}
+
+	// Recognize replacements: a registration name identifies one logical
+	// server, so when an ad arrives for a name that is already cached at a
+	// DIFFERENT endpoint (an operator moved the origin — new host, port, or
+	// scheme), the two ads must not compete as if they were independent
+	// servers. StartTime orders the instances; without it on both sides
+	// (older Pelican versions) we cannot tell a replacement from an
+	// intentional multi-instance setup and leave both ads alone.
+	if !sAd.FromTopology && sAd.GetStartTime() > 0 {
+		for key, item := range serverAds.Items() {
+			if key == rawURL || key == httpURL || key == httpsURL {
+				continue
+			}
+			sib := item.Value()
+			if sib == nil || sib.FromTopology || sib.Name != sAd.Name || sib.Type != sAd.Type {
+				continue
+			}
+			if sib.GetStartTime() <= 0 {
+				continue
+			}
+			if sAd.GetStartTime() > sib.GetStartTime() {
+				log.Infof("Server %s moved from %s to %s; evicting the ad for the old endpoint", sAd.Name, key, sAd.URL.String())
+				serverAds.Delete(key)
+			} else if sAd.GetStartTime() < sib.GetStartTime() {
+				// A straggler heartbeat from the instance that was replaced
+				// (e.g. the old origin is still running during a rollout).
+				// Refusing it keeps the stale endpoint from re-inserting
+				// itself between the replacement's heartbeats. If this is a
+				// deliberate rollback, the rejection self-heals once the
+				// newer ad expires.
+				log.Infof("Ignoring ad for server %s at %s: a newer instance of this server is registered at %s", sAd.Name, sAd.URL.String(), sib.URL.String())
+				return
+			}
+		}
+	}
+
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
 
 	adTTL := time.Until(sAd.Expiration)

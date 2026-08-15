@@ -648,3 +648,109 @@ func TestGetCachedDowntimesDedup(t *testing.T) {
 
 	assert.ElementsMatch(t, []string{"dup-id", "registry-id"}, []string{downtimes[0].UUID, downtimes[1].UUID})
 }
+
+// TestRecordAdServerRelocation covers what happens when an operator moves a
+// server to a new endpoint (new host, port, or scheme) without changing its
+// registration name. The director keys advertisements by URL but keys
+// downtime/filtering by name, so without explicit handling the old and new
+// ads compete as if they were two independent servers -- and each request
+// can be matchmade to either, serving whichever namespace metadata (issuer,
+// collections URL) that instance advertised.
+func TestRecordAdServerRelocation(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+	})
+	resetHealthTests()
+	shutdownStatUtils()
+
+	serverAds.DeleteAll()
+	go serverAds.Start()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+		serverAds.Stop()
+	})
+
+	const name = "OSDF-TUTORIAL-ORIGIN"
+	oldURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org:8443"}
+	newURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org"}
+
+	mkAd := func(u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
+		ad := server_structs.ServerAd{
+			URL:    u,
+			Type:   server_structs.OriginType.String(),
+			Status: status,
+		}
+		ad.Name = srvName
+		ad.StartTime = startTime
+		return ad
+	}
+	nsAds := []server_structs.NamespaceAd{}
+
+	t.Run("replacement-evicts-old-endpoint", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds)
+		require.True(t, serverAds.Has(oldURL.String()))
+
+		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds)
+		assert.True(t, serverAds.Has(newURL.String()), "replacement must be recorded")
+		assert.False(t, serverAds.Has(oldURL.String()), "old endpoint must not linger and compete for matchmaking")
+	})
+
+	t.Run("straggler-ad-from-replaced-instance-is-ignored", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds)
+		// The old origin is still running and heartbeating during the rollout.
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds)
+		assert.True(t, serverAds.Has(newURL.String()))
+		assert.False(t, serverAds.Has(oldURL.String()), "an older instance must not re-insert itself")
+	})
+
+	t.Run("shutdown-ad-removes-entry-and-replacement-does-not-resurrect-it", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds)
+		require.True(t, serverAds.Has(oldURL.String()))
+
+		// Graceful shutdown: the final ad carries the shutdown status.
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, "shutting down"), &nsAds)
+		assert.False(t, serverAds.Has(oldURL.String()), "a shutting-down server must leave matchmaking immediately")
+
+		// The replacement's healthy ad clears the name-keyed downtime filter;
+		// that must not bring the old endpoint's ad back.
+		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds)
+		assert.True(t, serverAds.Has(newURL.String()))
+		assert.False(t, serverAds.Has(oldURL.String()))
+	})
+
+	t.Run("distinct-servers-coexist", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		other := url.URL{Scheme: "https", Host: "other-origin.example.org"}
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds)
+		recordAd(context.Background(), mkAd(other, "SOME-OTHER-ORIGIN", 2000, ""), &nsAds)
+		assert.True(t, serverAds.Has(oldURL.String()), "different names are different servers")
+		assert.True(t, serverAds.Has(other.String()))
+	})
+
+	t.Run("same-name-different-server-type-coexists", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		cacheURL := url.URL{Scheme: "https", Host: "tutorial-cache.example.org"}
+		cacheAd := mkAd(cacheURL, name, 2000, "")
+		cacheAd.Type = server_structs.CacheType.String()
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds)
+		recordAd(context.Background(), cacheAd, &nsAds)
+		assert.True(t, serverAds.Has(oldURL.String()), "an origin and a cache sharing a name are distinct servers")
+		assert.True(t, serverAds.Has(cacheURL.String()))
+	})
+
+	t.Run("without-start-times-both-ads-are-kept", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		// Older Pelican versions do not report StartTime; we cannot tell a
+		// replacement from a deliberate multi-instance deployment, so leave
+		// the existing behavior (both ads live out their TTLs) alone.
+		recordAd(context.Background(), mkAd(oldURL, name, 0, ""), &nsAds)
+		recordAd(context.Background(), mkAd(newURL, name, 0, ""), &nsAds)
+		assert.True(t, serverAds.Has(oldURL.String()))
+		assert.True(t, serverAds.Has(newURL.String()))
+	})
+}
