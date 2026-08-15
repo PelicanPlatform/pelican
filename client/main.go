@@ -574,12 +574,50 @@ func Walk(ctx context.Context, remoteObject string, fn WalkFunc, options ...Tran
 	return walkOn(ctx, te, remoteObject, fn, options...)
 }
 
+// Walk is the package-level Walk for a caller that already holds an engine.
+// It skips the per-call engine setup and teardown, and the listing reuses
+// the engine's director responses instead of asking again.
+func (te *TransferEngine) Walk(ctx context.Context, remoteObject string, fn WalkFunc, options ...TransferOption) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform Walk:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			err = errors.Errorf("Unrecoverable error (panic) captured in Walk: %v", r)
+		}
+	}()
+	return walkOn(ctx, te, remoteObject, fn, options...)
+}
+
+// List is DoList for a caller that already holds an engine.
+func (te *TransferEngine) List(ctx context.Context, remoteObject string, options ...TransferOption) ([]FileInfo, error) {
+	return collectList(func(fn WalkFunc) error {
+		return te.Walk(ctx, remoteObject, fn, options...)
+	})
+}
+
+// collectList buffers a walk into a slice, aborting on the first error --
+// the historical DoList shape, shared by both entry points.
+func collectList(walk func(WalkFunc) error) ([]FileInfo, error) {
+	var fileInfos []FileInfo
+	err := walk(func(info FileInfo, emitErr error) error {
+		if emitErr != nil {
+			return emitErr
+		}
+		fileInfos = append(fileInfos, info)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fileInfos, nil
+}
+
 // walkOn is Walk without the transfer-engine dance; the caller owns the
 // TransferEngine (te is currently unused at the listing layer, but WalkMany
 // forwards a shared one anyway so the resource story matches what callers
 // expect). Panic recovery, options parsing, and SkipAll unwrapping happen
 // here, since they must apply to every Walk-shaped listing.
-func walkOn(ctx context.Context, _ *TransferEngine, remoteObject string, fn WalkFunc, options ...TransferOption) error {
+func walkOn(ctx context.Context, te *TransferEngine, remoteObject string, fn WalkFunc, options ...TransferOption) error {
 	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
@@ -587,7 +625,21 @@ func walkOn(ctx context.Context, _ *TransferEngine, remoteObject string, fn Walk
 
 	// A listing carries back what a metadata query would have said, so a
 	// directorless federation is not asked twice.
-	dirResp, err := resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
+	//
+	// When the caller owns an engine, take the director response from its
+	// cache: walking many collections under one namespace -- listing a
+	// directory of directories, say -- otherwise asks the director once per
+	// collection for an answer that is the same every time.
+	var dirResp server_structs.DirectorResponse
+	if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(http.MethodGet, false, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := resolveForRequest(lCtx, pUrl, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
+	}
 	if err != nil {
 		return err
 	}
@@ -753,17 +805,9 @@ func fanOutWalk(ctx context.Context, roots []string, parallelism int, fn WalkMan
 // partial results are discarded. Prefer Walk or WalkSeq when you want to
 // keep going past per-subtree failures.
 func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
-	err = Walk(ctx, remoteObject, func(info FileInfo, emitErr error) error {
-		if emitErr != nil {
-			return emitErr
-		}
-		fileInfos = append(fileInfos, info)
-		return nil
-	}, options...)
-	if err != nil {
-		return nil, err
-	}
-	return fileInfos, nil
+	return collectList(func(fn WalkFunc) error {
+		return Walk(ctx, remoteObject, fn, options...)
+	})
 }
 
 // errStopIter is returned from the callback inside walkAsSeq to unwind the
@@ -822,6 +866,20 @@ func WalkSeq(ctx context.Context, remoteObject string, options ...TransferOption
 
 // DoDelete queries the director using the DELETE HTTP method, retrieves the token, and initializes the delete operation.
 func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
+	return deleteObj(ctx, nil, remoteDestination, recursive, options...)
+}
+
+// Delete is DoDelete for a caller that already holds an engine; the director
+// response is taken from the engine's cache rather than re-queried. Removing
+// many objects from one namespace otherwise spends a director round trip on
+// each.
+func (te *TransferEngine) Delete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
+	return deleteObj(ctx, te, remoteDestination, recursive, options...)
+}
+
+// deleteObj is the body of both. te may be nil, in which case the Director is
+// queried directly.
+func deleteObj(ctx context.Context, te *TransferEngine, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Debugln("Panic occurred while attempting to perform delete operation (DoDelete):", r)
@@ -840,7 +898,16 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		recursive = true
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
+	var dirResp server_structs.DirectorResponse
+	if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(http.MethodDelete, false, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(lCtx, pUrl, http.MethodDelete, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
+	}
 	if err != nil {
 		return err
 	}
