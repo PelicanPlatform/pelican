@@ -20,6 +20,8 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -52,6 +54,30 @@ type DirRespFlavor struct {
 	// including directread and prefercached steer matchmaking, so a
 	// response obtained under one set does not answer for another.
 	Query string
+	// Credential fingerprints the bearer token the response was obtained
+	// with, empty for an unauthenticated query.  A director may answer a
+	// credentialed request differently -- that is the whole reason the
+	// transfer paths re-ask once they hold a token -- so such a response
+	// must not be handed to a caller bearing a different credential, or to
+	// one bearing none.  It is a digest, never the token: cache keys reach
+	// debug logs.
+	Credential string
+}
+
+// WithCredential returns a copy of the flavor scoped to one bearer token.
+func (f DirRespFlavor) WithCredential(token string) DirRespFlavor {
+	f.Credential = tokenFingerprint(token)
+	return f
+}
+
+// tokenFingerprint reduces a bearer token to a short tag that identifies it
+// without disclosing it.
+func tokenFingerprint(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:8])
 }
 
 // NewDirRespFlavor builds a flavor from the verb, the cache-embedded-client
@@ -88,7 +114,11 @@ func (f DirRespFlavor) String() string {
 	if verb == "" {
 		verb = http.MethodGet
 	}
-	return verb + " " + routing + " " + f.Query
+	rendered := verb + " " + routing + " " + f.Query
+	if f.Credential != "" {
+		rendered += " cred:" + f.Credential
+	}
+	return rendered
 }
 
 // dirRespCacheEntry is a single cached director response with an expiry.

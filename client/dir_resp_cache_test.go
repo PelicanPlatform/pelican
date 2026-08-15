@@ -617,3 +617,45 @@ func TestDirRespCacheSingleflightIsPerFlavor(t *testing.T) {
 	assert.Equal(t, "cache.example.com", readResp.ObjectServers[0].Host)
 	assert.Equal(t, "origin.example.com", writeResp.ObjectServers[0].Host, "the writer must keep its own answer")
 }
+
+// A director may answer differently once it sees a credential, so a
+// response obtained with one token must not be handed to a caller bearing a
+// different token -- or none.  The credential is carried as a digest so that
+// cache keys, which reach debug logs, never contain the token itself.
+func TestDirRespCacheCredentialScoping(t *testing.T) {
+	base := NewDirRespFlavor(http.MethodGet, false, "")
+	alice := base.WithCredential("alice-token")
+	bob := base.WithCredential("bob-token")
+
+	t.Run("AnotherTokenDoesNotSeeIt", func(t *testing.T) {
+		cache := NewDirRespCache(5 * time.Minute)
+		cache.Store(testFederation, alice, "/ns", "", makeDirResp("/ns"))
+
+		_, ok := cache.Lookup(testFederation, bob, "/ns/file.txt")
+		assert.False(t, ok, "one caller's authenticated answer must not serve another's token")
+
+		_, ok = cache.Lookup(testFederation, base, "/ns/file.txt")
+		assert.False(t, ok, "an authenticated answer must not serve an anonymous lookup")
+
+		_, ok = cache.Lookup(testFederation, alice, "/ns/file.txt")
+		assert.True(t, ok, "the same credential reuses its own answer")
+	})
+
+	t.Run("SameTokenSharesAcrossObjects", func(t *testing.T) {
+		cache := NewDirRespCache(5 * time.Minute)
+		cache.Store(testFederation, alice, "/ns", "/ns/first.txt", makeDirResp("/ns"))
+
+		// This is the property that keeps a token-protected namespace from
+		// spending a director round trip on every object.
+		_, ok := cache.Lookup(testFederation, alice, "/ns/second.txt")
+		assert.True(t, ok)
+	})
+
+	t.Run("KeyDoesNotContainTheToken", func(t *testing.T) {
+		const secret = "super-secret-bearer-token"
+		rendered := base.WithCredential(secret).String()
+		assert.NotContains(t, rendered, secret, "the token must not appear in a cache key")
+		assert.NotEmpty(t, base.WithCredential(secret).Credential)
+		assert.Empty(t, base.WithCredential("").Credential, "no token means no credential scoping")
+	})
+}
