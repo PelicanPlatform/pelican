@@ -3788,9 +3788,23 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		fileWriter = io.Discard
 	}
 
-	// Close the custom writer at the end if provided
+	// Close the custom writer at the end if provided. A pipe-backed writer
+	// (WithWriter — the io/fs read path) must learn about a failed transfer
+	// at Read time: a plain Close hands the reader a clean EOF, and a
+	// failed download becomes indistinguishable from an empty object (the
+	// error only surfaces through the results channel, which the reader may
+	// race). CloseWithError propagates the failure into the reader's Read;
+	// with a nil error it behaves exactly like Close.
 	if fileCloser != nil {
 		defer func() {
+			xferErr := err
+			if xferErr == nil && transferResults.Error != nil {
+				xferErr = transferResults.Error
+			}
+			if cwe, ok := fileCloser.(interface{ CloseWithError(error) error }); ok {
+				_ = cwe.CloseWithError(xferErr)
+				return
+			}
 			if closeErr := fileCloser.Close(); closeErr != nil && err == nil {
 				err = closeErr
 			}
