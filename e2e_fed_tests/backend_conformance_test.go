@@ -55,7 +55,8 @@ type conformanceBackend struct {
 	name string
 	// originConfig returns the origin YAML, standing up whatever external
 	// service the backend fronts (all of which are local: a WebDAV server on
-	// httptest, minio, mock Globus APIs).
+	// httptest, minio, mock Globus APIs). May call t.Skip when a backend's
+	// dependency is unavailable.
 	originConfig func(t *testing.T) string
 	// afterFed runs once the federation is up. NewFedTest rewrites
 	// StoragePrefix to a temp path, so backends that front a separate service
@@ -82,6 +83,43 @@ Director:
   MaxStatResponse: 1
 `
 			},
+		},
+		{
+			name: "pstore",
+			originConfig: func(t *testing.T) string {
+				return pstoreOriginConfig(t.TempDir())
+			},
+			token: getPStoreToken,
+		},
+		{
+			name: "s3v2",
+			originConfig: func(t *testing.T) string {
+				// Skips the subtest when minio is unavailable, leaving the
+				// rest of the matrix to run.
+				test_utils.SkipIfNoMinio(t)
+				endpoint, accessKey, secretKey := test_utils.StartMinio(t, "test-bucket")
+				credDir := t.TempDir()
+				akFile := filepath.Join(credDir, "access-key")
+				skFile := filepath.Join(credDir, "secret-key")
+				require.NoError(t, os.WriteFile(akFile, []byte(accessKey), 0600))
+				require.NoError(t, os.WriteFile(skFile, []byte(secretKey), 0600))
+				return fmt.Sprintf(`
+Origin:
+  StorageType: s3v2
+  S3ServiceUrl: %s
+  S3Region: us-east-1
+  S3Bucket: test-bucket
+  S3AccessKeyfile: %s
+  S3SecretKeyfile: %s
+  Exports:
+    - FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "Listings"]
+Director:
+  MinStatResponse: 1
+  MaxStatResponse: 1
+`, endpoint, akFile, skFile)
+			},
+			token: getS3v2Token,
 		},
 		func() conformanceBackend {
 			// Captured so afterFed can mirror the rewritten StoragePrefix
