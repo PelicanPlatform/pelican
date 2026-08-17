@@ -63,10 +63,10 @@ repos:
   #
   - repo: local
     hooks:
-      - id: npm-format-fix
+      - id: pnpm-format-fix
         name: reformat web frontend code
         language: system
-        entry: bash -c "cd web_ui/frontend && npm run format:fix"
+        entry: bash -c "cd web_ui/frontend && pnpm run format:fix"
         pass_filenames: false
         files: web_ui/frontend/.*
         # Web developer's personal preference.

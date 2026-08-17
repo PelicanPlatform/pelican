@@ -117,7 +117,7 @@ export default defineConfig({
         baseURL,
         // Auth precedence:
         //  1. E2E_STORAGE_STATE — an explicitly captured session file
-        //     (`npm run playwright:save-auth`), for real interactive logins.
+        //     (`pnpm run playwright:save-auth`), for real interactive logins.
         //  2. the service token, injected as the `login` cookie so both API
         //     requests and in-browser login flows are authenticated.
         ...(process.env.E2E_STORAGE_STATE

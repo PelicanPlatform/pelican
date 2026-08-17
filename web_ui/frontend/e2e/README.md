@@ -7,7 +7,7 @@ Tests are organized by Pelican service: `origin`, `cache`, `director`, and `regi
 Install Playwright browsers (first-time only):
 
 ```bash
-npx playwright install
+pnpm exec playwright install
 ```
 
 ### Example `.env`
@@ -37,7 +37,7 @@ TARGET_REGISTRY_TOKEN=
 **Finding input locators:**
 
 ```bash
-npx playwright codegen https://localhost:8444
+pnpm exec playwright codegen https://localhost:8444
 ```
 
 **Test Tags:**
@@ -60,34 +60,34 @@ npx playwright codegen https://localhost:8444
 
 ```bash
 cd web_ui/frontend
-npm run e2e
+pnpm run e2e
 ```
 
 **Run a single service:**
 
 ```bash
-npx playwright test --project=origin
-npx playwright test --project=cache
-npx playwright test --project=director
-npx playwright test --project=registry
+pnpm exec playwright test --project=origin
+pnpm exec playwright test --project=cache
+pnpm exec playwright test --project=director
+pnpm exec playwright test --project=registry
 ```
 
 **Run only read-only tests (no mutations):**
 
 ```bash
-npx playwright test --grep-invert @mutating
+pnpm exec playwright test --grep-invert @mutating
 ```
 
 **Run only a specific tag across all services:**
 
 ```bash
-npx playwright test --grep @smoke
+pnpm exec playwright test --grep @smoke
 ```
 
 **View the HTML report after a run:**
 
 ```bash
-npx playwright show-report
+pnpm exec playwright show-report
 ```
 
 ## Folder structure
@@ -148,7 +148,7 @@ Set service URLs and tokens as CI secrets, then run:
 E2E_EXTERNAL=1 \
 TARGET_ORIGIN_URL=https://origin.example.org \
 TARGET_ORIGIN_TOKEN=$ORIGIN_TOKEN \
-npm run e2e
+pnpm run e2e
 ```
 
 `@mutating` tests are skipped automatically when `E2E_EXTERNAL=1`.

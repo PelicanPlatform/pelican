@@ -171,6 +171,13 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   dnf remove -y npm
   npm install -g npm@latest
   n prune
+
+  # The web UI is built with pnpm. Install the exact version pinned by the
+  # "packageManager" field so this image, CI, and the lockfile all agree.
+  # Corepack used to provide this shim but is no longer bundled with current
+  # Node releases, so install it through npm instead.
+
+  npm install -g "$(jq < /context/package.json -r .packageManager)"
 ENDRUN
 
 # Make sure that the version of Go we just installed comes first.
@@ -197,7 +204,7 @@ COPY . .
 
 RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
     --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked \
-    --mount=type=cache,id=npm-${TARGETPLATFORM},target=/root/.npm,sharing=locked \
+    --mount=type=cache,id=pnpm-store-${TARGETPLATFORM},target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=cache,id=node-modules-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/node_modules,sharing=locked \
     --mount=type=cache,id=nextjs-cache-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/.next/cache,sharing=locked \
     <<ENDRUN
@@ -855,6 +862,13 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   dnf remove -y npm
   npm install -g npm@latest
   n prune
+
+  # The web UI is built with pnpm. Install the exact version pinned by the
+  # "packageManager" field so this image, CI, and the lockfile all agree.
+  # Corepack used to provide this shim but is no longer bundled with current
+  # Node releases, so install it through npm instead.
+
+  npm install -g "$(jq < /context/package.json -r .packageManager)"
 
   # Install gotestsum for better test output formatting.
   # Make a copy of the binary so that non-root users can use it.
