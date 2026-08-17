@@ -617,7 +617,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					ctx.JSON(http.StatusForbidden,
 						server_structs.SimpleApiResp{
 							Status: server_structs.RespFailed,
-							Msg:    fmt.Sprint("Invalid access token: ", err),
+							Msg:    "Invalid access token",
 						})
 					return
 				}
