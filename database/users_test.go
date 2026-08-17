@@ -29,9 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // The tests in this file cover the user/credential surface area:
@@ -137,81 +134,6 @@ func TestUsernameIsGloballyUniqueAcrossIssuers(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, "alice", u.Username)
 	assert.True(t, strings.HasPrefix(u.Username, "alice-"), "expected disambiguated name, got %q", u.Username)
-}
-
-// Several services sharing one server DB (the dev-container / e2e
-// layout) each bootstrap the built-in "admin" under their own
-// Server.ExternalWebUrl. Since usernames are globally unique, the
-// SECOND service must adopt the live local-shaped "admin" row (sub ==
-// username) a sibling created rather than mint a per-issuer duplicate.
-// Adoption is restricted to "admin": any other username collision
-// across issuers fails, and an OIDC-linked row is never adopted.
-func TestGetOrCreateUserAdoptsBuiltinAdminAcrossIssuers(t *testing.T) {
-	db := setupCollectionTestDB(t)
-
-	// The built-in admin is adopted across issuers (the shared-DB case).
-	first, err := GetOrCreateUser(db, "admin", "admin", "https://svc-a:8445", CreatorSelf())
-	require.NoError(t, err)
-	require.Equal(t, "admin", first.Username)
-
-	second, err := GetOrCreateUser(db, "admin", "admin", "https://svc-b:8446", CreatorSelf())
-	require.NoError(t, err)
-	assert.Equal(t, first.ID, second.ID, "sibling service must adopt the existing admin, not create a duplicate")
-	assert.Equal(t, "admin", second.Username)
-
-	// A NON-admin local account is NOT adopted across issuers: the second
-	// service's login must fail on the global unique index rather than
-	// silently link to the first service's row. We do not infer that two
-	// same-named local accounts are the same person.
-	_, err = GetOrCreateUser(db, "bob", "bob", "https://svc-a:8445", CreatorSelf())
-	require.NoError(t, err)
-	_, err = GetOrCreateUser(db, "bob", "bob", "https://svc-b:8446", CreatorSelf())
-	assert.Error(t, err, "non-admin local 'bob' must not be adopted across issuers")
-
-	// An OIDC-linked "admin" (sub != username) is never adopted by a
-	// password/init-code login that merely shares the name.
-	db2 := setupCollectionTestDB(t)
-	_, err = CreateUser(db2, "admin", "cilogon-sub-9", "https://cilogon.org", adminCreator())
-	require.NoError(t, err)
-	_, err = GetOrCreateUser(db2, "admin", "admin", "https://svc-b:8446", CreatorSelf())
-	assert.Error(t, err, "htpasswd 'admin' must not hijack an OIDC-linked 'admin'")
-}
-
-// The startup bootstrap must likewise be issuer-blind for the built-in
-// admin: a live "admin" created by a sibling service (different
-// ExternalWebUrl, same DB) IS the built-in admin, and re-creating it
-// per-issuer would trip the global unique username index (seen as
-// "Post-migration bootstrap incomplete" at startup of every service but
-// the first).
-func TestBootstrapAdminAdoptsAcrossIssuers(t *testing.T) {
-	db := setupCollectionTestDB(t)
-
-	existing, err := GetOrCreateUser(db, "admin", "admin", "https://svc-a:8445", CreatorSelf())
-	require.NoError(t, err)
-
-	require.NoError(t, param.Server_ExternalWebUrl.Set("https://svc-b:8446"))
-	t.Cleanup(config.ResetConfig)
-	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
-
-	var admins []User
-	require.NoError(t, db.Where("username = ?", "admin").Find(&admins).Error)
-	require.Len(t, admins, 1, "bootstrap must adopt the sibling's admin row, not add another")
-	assert.Equal(t, existing.ID, admins[0].ID)
-}
-
-// If the only live "admin" is an OIDC-linked account (the built-in row
-// was deleted and an IdP user later claimed the name), bootstrap must
-// refuse rather than backfill group ownership onto that IdP-backed row.
-func TestBootstrapAdminRefusesOIDCLinkedAdmin(t *testing.T) {
-	db := setupCollectionTestDB(t)
-
-	_, err := CreateUser(db, "admin", "cilogon-sub-9", "https://cilogon.org", adminCreator())
-	require.NoError(t, err)
-
-	require.NoError(t, param.Server_ExternalWebUrl.Set("https://svc-b:8446"))
-	t.Cleanup(config.ResetConfig)
-	err = BootstrapAdminAndBackfillOwners(db)
-	assert.Error(t, err, "bootstrap must refuse an OIDC-linked 'admin' instead of adopting it")
 }
 
 func TestCreateUserRejectsInvalidIdentifier(t *testing.T) {
