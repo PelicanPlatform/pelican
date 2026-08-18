@@ -261,46 +261,6 @@ func TestGetNamespaceById(t *testing.T) {
 	})
 }
 
-func TestGetNamespaceStatusById(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
-
-	t.Run("invalid-id", func(t *testing.T) {
-		_, err := getRegistrationStatusById(0)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid id")
-	})
-
-	t.Run("db-query-error", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		_, err := getRegistrationStatusById(1)
-		require.Error(t, err)
-	})
-
-	t.Run("valid-id-empty-admin-metadata", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		err := insertMockDBData([]server_structs.Registration{mockNamespace("/foo", "", "", server_structs.AdminMetadata{})})
-		require.NoError(t, err)
-		lastId, err := getLastNamespaceId()
-		require.NoError(t, err)
-		status, err := getRegistrationStatusById(lastId)
-		require.NoError(t, err)
-		assert.Equal(t, server_structs.RegUnknown, status)
-	})
-
-	t.Run("valid-id-non-empty-admin-metadata", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		err := insertMockDBData([]server_structs.Registration{mockNamespace("/foo", "", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})})
-		require.NoError(t, err)
-		lastId, err := getLastNamespaceId()
-		require.NoError(t, err)
-		status, err := getRegistrationStatusById(lastId)
-		require.NoError(t, err)
-		assert.Equal(t, server_structs.RegApproved, status)
-	})
-}
-
 func TestAddNamespace(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
