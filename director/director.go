@@ -1298,6 +1298,29 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		return
 	}
 
+	// The advertise token only proves the caller holds an approved key for the
+	// prefix it named; it does not prove that registry prefix is a server prefix. 
+	// This ensures a caller cannot enroll an origin/cache with a namespace prefix, 
+	// also cannot cross-register origin using cache's identity (or vice versa). 
+	var prefixTypeOK bool
+	switch sType {
+	case server_structs.OriginType:
+		prefixTypeOK = server_structs.IsOriginNS(registryPrefix)
+	case server_structs.CacheType:
+		prefixTypeOK = server_structs.IsCacheNS(registryPrefix)
+	}
+	if !prefixTypeOK {
+		log.Warningf("Rejecting %s advertisement from %q: registry prefix %q is not a %s server prefix", sType.String(), ad.Name, registryPrefix, sType.String())
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%s advertisement rejected: registry prefix %q is not a valid %s registration prefix", sType.String(), registryPrefix, sType.String()),
+		})
+		// Reached before the advertise token is verified, so ad.Name is
+		// unauthenticated; use a fixed label to bound Prometheus cardinality.
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": "unverified"}).Inc()
+		return
+	}
+
 	approvalErrMsg := "You may find more information on " + param.Server_ExternalWebUrl.GetString()
 	// Prepare the admin approval error message
 	if param.Director_SupportContactEmail.GetString() != "" && param.Director_SupportContactUrl.GetString() != "" {

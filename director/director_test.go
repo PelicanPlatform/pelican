@@ -652,6 +652,92 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	t.Run("non-server-prefix-is-rejected", func(t *testing.T) {
+		// The advertise token only proves the caller holds an approved key for the
+		// prefix it named. A plain data namespace (/foo/bar) — which every namespace
+		// owner holds a key for — must not be accepted as a cache or origin identity,
+		// and one server kind must not be registered using the other's prefix.
+		cases := []struct {
+			name          string
+			sType         server_structs.ServerType
+			registryPfx   string
+			jwksPfx       string
+			dataURL       string
+			rejectPrefix  string
+			expectMissing string
+		}{
+			{
+				// data-namespace key trying to enroll a cache
+				name:          "data-namespace-as-cache",
+				sType:         server_structs.CacheType,
+				registryPfx:   "/foo/bar",
+				jwksPfx:       "/foo/bar",
+				dataURL:       "https://rogue-cache.org",
+				rejectPrefix:  "/foo/bar",
+				expectMissing: "https://rogue-cache.org",
+			},
+			{
+				// data-namespace key trying to enroll an origin
+				name:          "data-namespace-as-origin",
+				sType:         server_structs.OriginType,
+				registryPfx:   "/foo/bar",
+				jwksPfx:       "/foo/bar",
+				dataURL:       "https://rogue-origin.org",
+				rejectPrefix:  "/foo/bar",
+				expectMissing: "https://rogue-origin.org",
+			},
+			{
+				// cache identity trying to register through the origin endpoint
+				name:          "cache-prefix-on-origin-endpoint",
+				sType:         server_structs.OriginType,
+				registryPfx:   "/caches/test",
+				jwksPfx:       "/caches/test",
+				dataURL:       "https://cross-kind.org",
+				rejectPrefix:  "/caches/test",
+				expectMissing: "https://cross-kind.org",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				c, r, w := setupContext()
+				pKey, token, _ := generateToken()
+				publicKey, err := jwk.PublicKeyOf(pKey)
+				assert.NoError(t, err, "Error creating public key from private key")
+				setupJwksCache(t, tc.jwksPfx, publicKey)
+
+				isurl := url.URL{}
+				isurl.Path = ts.URL
+
+				ad := server_structs.OriginAdvertise{
+					RegistryPrefix: tc.registryPfx,
+					DataURL:        tc.dataURL,
+					WebURL:         "https://localhost:8844",
+					Namespaces: []server_structs.NamespaceAd{{
+						Path:   "/foo/bar",
+						Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+					}}}
+				ad.Initialize("rogue-name")
+
+				jsonad, err := json.Marshal(ad)
+				assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+				// Ensure the cache allow-list gate does not reject first.
+				allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+				setupRequest(c, r, jsonad, token, tc.sType)
+
+				r.ServeHTTP(w, c.Request)
+
+				assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected status code of 403")
+				body, _ := io.ReadAll(w.Result().Body)
+				assert.Contains(t, string(body), tc.rejectPrefix, "Rejection should name the offending prefix")
+				assert.Nil(t, serverAds.Get(tc.expectMissing), "Ad must not be registered with a non-server prefix")
+				teardown()
+			})
+		}
+	})
+
 	t.Run("name-mismatch-records-ad-but-cannot-mutate-filter", func(t *testing.T) {
 		// A server holding a valid advertise token for its own prefix advertises a
 		// DIFFERENT server's name along with a shutting-down status and a downtime.
