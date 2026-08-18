@@ -267,3 +267,178 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
+
+// TestDowntimeMutationAuthorized is a regression test: at the Registry, a
+// downtime may be updated or deleted only by its owner — the server whose
+// registered-server token subject matches the downtime's ServerID for
+// server-authored downtimes, or a federation admin for Registry-authored ones.
+// The rules are identical for both actions, so every case runs under each.
+func TestDowntimeMutationAuthorized(t *testing.T) {
+	const victimID = "victim-server-id"
+	tests := []struct {
+		name             string
+		atRegistry       bool
+		source           string // downtime Source
+		authMethod       string
+		tokenSubject     string
+		adminOwnsLocally bool // co-located deployment: this process runs the source service that created the downtime
+		wantAllowed      bool
+	}{
+		// Off-Registry (an origin/cache's own web UI): the guard does not apply.
+		{"local-ui-not-checked", false, "origin", "", "anything", false, true},
+
+		// Registry-authored downtimes: admin cookie only.
+		{"registry-sourced-admin-cookie-allowed", true, "registry", "admin-cookie", "", false, true},
+		{"registry-sourced-server-token-denied", true, "registry", "registered-server-token", victimID, false, false},
+		{"registry-sourced-no-auth-denied", true, "registry", "", "", false, false},
+
+		// Server-authored downtimes: only the owning server token.
+		{"server-sourced-matching-token-allowed", true, "origin", "registered-server-token", victimID, false, true},
+		{"server-sourced-cache-matching-token-allowed", true, "cache", "registered-server-token", victimID, false, true},
+		// The attack: a different registered server targets the victim's downtime.
+		{"attack-server-sourced-mismatched-token-denied", true, "origin", "registered-server-token", "attacker-server-id", false, false},
+		// A federation admin cannot mutate a *remote* server's downtime (read-only at the Registry).
+		{"remote-server-sourced-admin-cookie-denied", true, "origin", "admin-cookie", "", false, false},
+		// Empty/unknown source from a non-owning token still fails closed.
+		{"empty-source-mismatched-token-denied", true, "", "registered-server-token", "attacker-server-id", false, false},
+
+		// Co-located "federation in a box": the process also runs the source service
+		// (or the source is unset), so the local admin owns the record.
+		{"colocated-server-sourced-admin-allowed", true, "origin", "admin-cookie", "", true, true},
+		{"colocated-empty-sourced-admin-allowed", true, "", "admin-cookie", "", true, true},
+		// But a co-located admin still cannot claim a record whose token owner differs.
+		{"colocated-still-blocks-mismatched-token", true, "origin", "registered-server-token", "attacker-server-id", true, false},
+	}
+	for _, action := range []string{"update", "delete"} {
+		for _, tc := range tests {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				allowed, msg := downtimeMutationAuthorized(tc.atRegistry, tc.source, tc.authMethod, tc.tokenSubject, victimID, action, tc.adminOwnsLocally)
+				assert.Equal(t, tc.wantAllowed, allowed)
+				if tc.wantAllowed {
+					assert.Empty(t, msg)
+				} else {
+					assert.NotEmpty(t, msg)
+					assert.Contains(t, msg, action)
+				}
+			})
+		}
+	}
+}
+
+// TestDowntimeRegistryCreateOwnership exercises the create/upsert path at the
+// Registry: a registered server's create is bound to its own identity (it cannot
+// attribute a downtime to a victim or forge a Registry-authored one), and a POST
+// to an existing UUID it does not own is rejected rather than silently rewriting
+// the record.
+func TestDowntimeRegistryCreateOwnership(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	config.ResetConfig()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		config.ResetConfig()
+	})
+
+	database.SetupMockDowntimeDB(t)
+	defer database.TeardownMockDowntimeDB(t)
+
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://registry.example.org"))
+	dirName := t.TempDir()
+	require.NoError(t, param.ConfigBase.Set(dirName))
+	require.NoError(t, param.Logging_Level.Set("debug"))
+
+	// InitServer needs federation discovery resolved.
+	mockRegistry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	t.Cleanup(mockRegistry.Close)
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{RegistryEndpoint: mockRegistry.URL}, nil)
+
+	// Run as a Registry so the ownership binding/guard apply.
+	require.NoError(t, config.InitServer(ctx, server_structs.RegistryType))
+
+	// Router that authenticates the caller as a registered server.
+	serverRouter := func(subject string) *gin.Engine {
+		gin.SetMode(gin.TestMode)
+		r := gin.Default()
+		r.Use(func(c *gin.Context) {
+			c.Set("AuthMethod", "registered-server-token")
+			c.Set("TokenSubject", subject)
+			c.Next()
+		})
+		r.POST("/api/v1.0/downtime", HandleCreateDowntime)
+		r.POST("/api/v1.0/downtime/:uuid", HandleCreateDowntime)
+		return r
+	}
+
+	validInput := func() DowntimeInput {
+		return DowntimeInput{
+			Source:    "origin",
+			Class:     server_structs.SCHEDULED,
+			Severity:  server_structs.Outage,
+			StartTime: time.Now().UTC().Add(1 * time.Hour).UnixMilli(),
+			EndTime:   time.Now().UTC().Add(2 * time.Hour).UnixMilli(),
+		}
+	}
+
+	t.Run("create-binds-serverid-and-clears-name", func(t *testing.T) {
+		in := validInput()
+		in.ServerID = "victim-id"     // attacker-supplied
+		in.ServerName = "victim-name" // attacker-supplied
+		body, _ := json.Marshal(in)
+		req, _ := http.NewRequest("POST", "/api/v1.0/downtime", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serverRouter("server-A").ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp server_structs.Downtime
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "server-A", resp.ServerID, "ServerID must be bound to the authenticated token subject")
+		assert.Empty(t, resp.ServerName, "body-supplied ServerName must be cleared")
+	})
+
+	t.Run("server-cannot-forge-registry-source", func(t *testing.T) {
+		in := validInput()
+		in.Source = "registry"
+		body, _ := json.Marshal(in)
+		req, _ := http.NewRequest("POST", "/api/v1.0/downtime", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serverRouter("server-A").ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("cannot-upsert-another-servers-downtime", func(t *testing.T) {
+		victim := server_structs.Downtime{
+			UUID:      "0195aaaa-0000-7000-8000-000000000001",
+			ServerID:  "server-B",
+			Source:    "origin",
+			CreatedBy: "b", UpdatedBy: "b",
+			Class:     server_structs.SCHEDULED,
+			Severity:  server_structs.Outage,
+			StartTime: time.Now().UTC().Add(1 * time.Hour).UnixMilli(),
+			EndTime:   time.Now().UTC().Add(2 * time.Hour).UnixMilli(),
+		}
+		require.NoError(t, database.InsertMockDowntime(victim))
+
+		in := validInput()
+		in.Description = "hijacked"
+		body, _ := json.Marshal(in)
+		req, _ := http.NewRequest("POST", "/api/v1.0/downtime/"+victim.UUID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serverRouter("server-A").ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code, "server-A must not overwrite server-B's downtime")
+
+		got, err := database.GetDowntimeByUUID(victim.UUID)
+		require.NoError(t, err)
+		assert.Equal(t, "server-B", got.ServerID, "victim record owner unchanged")
+		assert.NotEqual(t, "hijacked", got.Description, "victim record content unchanged")
+	})
+}
