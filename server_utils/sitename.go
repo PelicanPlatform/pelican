@@ -45,7 +45,7 @@ var (
 //
 // Here, the "prefix" is typically /origins/<hostname> or similar,
 // not the namespace prefix for an object.
-func getServerMetadataFromReg(ctx context.Context, prefix string) (server server_structs.ServerRegistration, err error) {
+func GetServerMetadataFromReg(ctx context.Context, prefix string) (server server_structs.ServerRegistration, err error) {
 	fed, err := config.GetFederation(ctx)
 	if err != nil {
 		return
@@ -59,7 +59,7 @@ func getServerMetadataFromReg(ctx context.Context, prefix string) (server server
 		return
 	}
 	tr := config.GetTransport()
-	res, err := utils.MakeRequest(context.Background(), tr, requestUrl, http.MethodGet, nil, nil)
+	res, err := utils.MakeRequest(ctx, tr, requestUrl, http.MethodGet, nil, nil)
 	if err != nil {
 		return
 	}
@@ -108,30 +108,36 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 		extUrl, _ := url.Parse(extUrlStr)
 		// Only use hostname:port
 		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
+		metadata, err = GetServerMetadataFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+			err = nil
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-		metadata, err = getServerMetadataFromReg(ctx, cachePrefix)
+		metadata, err = GetServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
 		}
 	}
 
-	if metadata.Name == "" {
-		log.Infof("Server name from the registry is empty, fall back to %s: %s", param.Xrootd_Sitename.GetName(), param.Xrootd_Sitename.GetString())
-		metadata.Name = param.Xrootd_Sitename.GetString()
-	} else {
-		// Warn the user if the server name from the registry does not match the local configuration
-		if metadata.Name != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
+	// Prioritize the server name from the local configuration over the registry
+	if param.Xrootd_Sitename.GetString() != "" {
+		if metadata.Name != param.Xrootd_Sitename.GetString() {
+			// Warn the user if the server name from the registry does not match the
+			// local configuration.  A standalone origin has nothing registered to
+			// disagree with -- the name above is just its own external host -- so
+			// the mismatch is expected and the advice to contact a federation
+			// administrator has no one to address.
 			log.Warningf("Server name mismatch detected:\n"+
 				"  Registered server name: %q\n"+
 				"  Local sitename:      %q\n"+
-				"Pelican will use the registered server name as your server name.\n"+
+				"Pelican will use the local sitename as your server name.\n"+
+				"Due to this mismatch, the director will IGNORE any downtimes you set for this server: "+
+				"the server cannot place itself into downtime, and a graceful shutdown will not stop the director from sending it new transfer requests.\n"+
 				"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
 				metadata.Name, param.Xrootd_Sitename.GetString())
+			metadata.Name = param.Xrootd_Sitename.GetString()
 		}
 	}
 	if metadata.Name == "" {

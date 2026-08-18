@@ -101,6 +101,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go clientIpRandAssignmentCache.Start()
 	go clientIpGeoOverrideCache.Start()
 	go directorAds.Start()
+	go registeredNameCache.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		serverAd := i.Value().ServerAd
@@ -178,6 +179,8 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		directorAds.DeleteAll()
 		directorAds.Stop()
 		directorAdMutex.Unlock()
+		registeredNameCache.DeleteAll()
+		registeredNameCache.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
