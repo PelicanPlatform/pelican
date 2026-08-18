@@ -203,24 +203,6 @@ func getRegistrationJwksByPrefix(prefix string) (jwk.Set, *server_structs.AdminM
 	return set, &result.AdminMetadata, nil
 }
 
-func getRegistrationStatusById(id int) (server_structs.RegistrationStatus, error) {
-	if id < 1 {
-		return "", errors.New("Invalid id. id must be a positive integer")
-	}
-	var result server_structs.Registration
-	query := database.ServerDatabase.Select("admin_metadata").Where("id = ?", id).Last(&result)
-	err := query.Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return server_structs.RegUnknown, errors.Errorf("registration with id %d not found in database", id)
-	} else if err != nil {
-		return server_structs.RegUnknown, errors.Wrap(err, "error retrieving pubkey")
-	}
-	if result.AdminMetadata.Status == "" {
-		return server_structs.RegUnknown, nil
-	}
-	return result.AdminMetadata.Status, nil
-}
-
 // Helper to construct a ServerRegistration from a server and its services,
 // filtering out services whose preloaded Registration is missing. Returns an
 // error if, after filtering, there are no valid registrations remaining.
