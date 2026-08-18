@@ -455,6 +455,16 @@ func GetDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
 	return &downtime, nil
 }
 
+// Retrieve the registered server name for a server ID from the servers table.
+// Only meaningful on a Registry, which owns that table.
+func GetServerNameByID(serverID string) (string, error) {
+	var server server_structs.Server
+	if err := ServerDatabase.Select("name").First(&server, "id = ?", serverID).Error; err != nil {
+		return "", err
+	}
+	return server.Name, nil
+}
+
 func ShutdownDB() error {
 	if ServerDatabase == nil {
 		return nil
