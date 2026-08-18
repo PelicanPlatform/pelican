@@ -473,12 +473,28 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	}
 
 	// One cookie should be used for all path.
-	// SetSameSite must be called BEFORE SetCookie: gin reads the
-	// configured SameSite mode at SetCookie time, so setting it
-	// afterwards would emit the login cookie with no SameSite attribute
-	// (falling back to the browser default) instead of the intended
-	// Strict.
-	ctx.SetSameSite(http.SameSiteStrictMode)
+	//
+	// SetSameSite must be called BEFORE SetCookie: gin reads the mode at
+	// SetCookie time, so setting it afterwards emits no SameSite
+	// attribute at all and the browser default applies.
+	//
+	// Lax, NOT Strict — load-bearing for OIDC. This cookie is issued by
+	// the OAuth callback, reached via a redirect chain starting at the
+	// identity provider. Browsers compute SameSite context across the
+	// whole chain, so a cross-site hop withholds Strict cookies on every
+	// later hop (a server-side redirect can't launder it): the cookie is
+	// set but not sent on the navigation into the post-login page, which
+	// then bounces to /view/login/ in a loop. Lax is sent on top-level
+	// navigations, which is what the OIDC return needs.
+	//
+	// Lax's main CSRF cost over Strict is that the cookie may ride a
+	// cross-site top-level GET, exploitable only via a
+	// cookie-authenticated GET that mutates state — there are none, and
+	// cross-origin responses aren't readable by the initiator. Non-safe
+	// methods are equally protected either way, with isSameOriginRequest
+	// below as an independent Origin/Referer check. If you add a mutating
+	// GET, guard it explicitly rather than reaching for Strict here.
+	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
 
 	// Track last login time
@@ -506,17 +522,20 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 //     letting the real UI through — with no token plumbing on the
 //     client.
 //
-// This is defense-in-depth on top of the login cookie's SameSite=Strict
-// (which already stops modern browsers from attaching the cookie
-// cross-site); it also covers the SameSite gaps (very old browsers,
-// certain same-site sub-origin scenarios).
+// This is defense-in-depth on top of the login cookie's SameSite=Lax,
+// which already stops modern browsers from attaching the cookie to
+// cross-site non-safe-method requests and to cross-site subresource/XHR
+// requests of any method. It also covers the SameSite gaps (very old
+// browsers, some same-site sub-origin cases, Chrome's brief "Lax+POST"
+// allowance for a freshly-set cookie).
 //
 // Returns true (allow) for safe methods, Bearer-authenticated requests,
-// same-origin requests, and requests with no Origin/Referer at all (not
-// a browser-driven cross-site POST — SameSite=Strict is the backstop and
-// this keeps non-browser cookie clients and tests working). Returns
-// false ONLY when a cookie-authenticated, state-changing request carries
-// an Origin/Referer that does not match this server.
+// same-origin requests, and requests with no Origin/Referer at all —
+// that last case keeps non-browser cookie clients and tests working, and
+// isn't a browser-driven cross-site mutation, since browsers always send
+// Origin on those and Lax withholds the cookie anyway. Returns false
+// ONLY when a cookie-authenticated, state-changing request carries an
+// Origin/Referer that does not match this server.
 func isSameOriginRequest(ctx *gin.Context) bool {
 	switch ctx.Request.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
@@ -1180,8 +1199,6 @@ func resetLoginHandler(ctx *gin.Context) {
 }
 
 func logoutHandler(ctx *gin.Context) {
-	// SetSameSite before SetCookie (see setLoginCookie for why).
-	ctx.SetSameSite(http.SameSiteStrictMode)
 	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
 	ctx.Set("User", "")
 	ctx.JSON(http.StatusOK,
