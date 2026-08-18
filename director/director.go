@@ -1361,9 +1361,9 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	// The advertise token only proves the caller holds an approved key for the
-	// prefix it named; it does not prove that registry prefix is a server prefix. 
-	// This ensures a caller cannot enroll an origin/cache with a namespace prefix, 
-	// also cannot cross-register origin using cache's identity (or vice versa). 
+	// prefix it named; it does not prove that registry prefix is a server prefix.
+	// This ensures a caller cannot enroll an origin/cache with a namespace prefix,
+	// also cannot cross-register origin using cache's identity (or vice versa).
 	var prefixTypeOK bool
 	switch sType {
 	case server_structs.OriginType:
