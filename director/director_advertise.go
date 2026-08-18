@@ -670,4 +670,8 @@ func ResetState() {
 		ttlcache.WithTTL[string, *directorInfo](15*time.Minute),
 		ttlcache.WithDisableTouchOnHit[string, *directorInfo](),
 	)
+	// Clear the prefix->registered-name cache so a stale entry (10-minute TTL)
+	// can't leak across test federations that reuse a prefix (e.g. a fixed cache
+	// sitename), which would otherwise silently disable downtime-name checks.
+	registeredNameCache.DeleteAll()
 }

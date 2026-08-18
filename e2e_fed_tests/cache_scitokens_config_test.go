@@ -140,12 +140,18 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 	issuerUrl, err := url.Parse(issuerUrlStr)
 	require.NoError(t, err)
 
+	// Derive the origin's registry prefix the same way origin/advertise.go does,
+	// so the advertisement carries the prefix the director now requires.
+	extWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+
 	// Create advertisement with empty namespace list
 	emptyAd := server_structs.OriginAdvertise{
-		ServerID:   metadata.ID,
-		DataURL:    param.Origin_Url.GetString(),
-		WebURL:     param.Server_ExternalWebUrl.GetString(),
-		Namespaces: []server_structs.NamespaceAd{},
+		ServerID:       metadata.ID,
+		RegistryPrefix: server_structs.GetOriginNs(extWebUrl.Host),
+		DataURL:        param.Origin_Url.GetString(),
+		WebURL:         param.Server_ExternalWebUrl.GetString(),
+		Namespaces:     []server_structs.NamespaceAd{},
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: *issuerUrl,
 		}},
