@@ -45,7 +45,7 @@ func TestGetServerMetadataFromReg(t *testing.T) {
 	t.Run("no-registry-url", func(t *testing.T) {
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{})
-		server, err := getServerMetadataFromReg(context.Background(), "/foo")
+		server, err := GetServerMetadataFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset", err.Error())
 		assert.Empty(t, server.Name)
@@ -59,7 +59,7 @@ func TestGetServerMetadataFromReg(t *testing.T) {
 		defer ts.Close()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
-		server, err := getServerMetadataFromReg(context.Background(), "/foo")
+		server, err := GetServerMetadataFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "replied with status code 404")
 		assert.Empty(t, server.Name)
@@ -81,7 +81,7 @@ func TestGetServerMetadataFromReg(t *testing.T) {
 		defer ts.Close()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
-		server, err := getServerMetadataFromReg(context.Background(), "/foo")
+		server, err := GetServerMetadataFromReg(context.Background(), "/foo")
 		require.NoError(t, err)
 		assert.Equal(t, "bar", server.Name)
 	})
@@ -100,7 +100,7 @@ func TestGetServerMetadataFallbackOnRegistryError(t *testing.T) {
 		ResetTestState()
 	})
 
-	// Registry that always responds with 500 so getServerMetadataFromReg
+	// Registry that always responds with 500 so GetServerMetadataFromReg
 	// returns an error, exercising the fallback path.
 	failingRegistry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -45,7 +45,7 @@ var (
 //
 // Here, the "prefix" is typically /origins/<hostname> or similar,
 // not the namespace prefix for an object.
-func getServerMetadataFromReg(ctx context.Context, prefix string) (server server_structs.ServerRegistration, err error) {
+func GetServerMetadataFromReg(ctx context.Context, prefix string) (server server_structs.ServerRegistration, err error) {
 	fed, err := config.GetFederation(ctx)
 	if err != nil {
 		return
@@ -59,7 +59,7 @@ func getServerMetadataFromReg(ctx context.Context, prefix string) (server server
 		return
 	}
 	tr := config.GetTransport()
-	res, err := utils.MakeRequest(context.Background(), tr, requestUrl, http.MethodGet, nil, nil)
+	res, err := utils.MakeRequest(ctx, tr, requestUrl, http.MethodGet, nil, nil)
 	if err != nil {
 		return
 	}
@@ -108,16 +108,26 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 		// https://github.com/PelicanPlatform/pelican/issues/1351
 		extUrlStr := param.Server_ExternalWebUrl.GetString()
 		extUrl, _ := url.Parse(extUrlStr)
-		// Only use hostname:port
-		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
-		if err != nil {
-			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
-			err = nil
+		if config.IsStandaloneOrigin() {
+			// A standalone origin never registered anywhere, so there is no
+			// registry to look a name up in and no federation-wide uniqueness to
+			// respect. Fall back to the external host the same way a director
+			// names itself, so admins aren't forced to set Xrootd.Sitename just
+			// to get a server name.
+			metadata.Name = extUrl.Host
+			metadata.IsOrigin = true
+		} else {
+			// Only use hostname:port
+			originPrefix := server_structs.GetOriginNs(extUrl.Host)
+			metadata, err = GetServerMetadataFromReg(ctx, originPrefix)
+			if err != nil {
+				log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+				err = nil
+			}
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-		metadata, err = getServerMetadataFromReg(ctx, cachePrefix)
+		metadata, err = GetServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
 			err = nil
@@ -128,12 +138,21 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (m
 	if param.Xrootd_Sitename.GetString() != "" {
 		// Warn the user if the server name from the registry does not match the local configuration
 		if metadata.Name != param.Xrootd_Sitename.GetString() {
-			log.Warningf("Server name mismatch detected:\n"+
-				"  Registered server name: %q\n"+
-				"  Local sitename:      %q\n"+
-				"Pelican will use the local sitename as your server name.\n"+
-				"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
-				metadata.Name, param.Xrootd_Sitename.GetString())
+			// Warn the user if the server name from the registry does not match the
+			// local configuration.  A standalone origin has nothing registered to
+			// disagree with -- the name above is just its own external host -- so
+			// the mismatch is expected and the advice to contact a federation
+			// administrator has no one to address.
+			if !config.IsStandaloneOrigin() {
+				log.Warningf("Server name mismatch detected:\n"+
+					"  Registered server name: %q\n"+
+					"  Local sitename:      %q\n"+
+					"Pelican will use the local sitename as your server name.\n"+
+					"Due to this mismatch, the director will IGNORE any downtimes you set for this server: "+
+					"the server cannot place itself into downtime, and a graceful shutdown will not stop the director from sending it new transfer requests.\n"+
+					"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
+					metadata.Name, param.Xrootd_Sitename.GetString())
+			}
 			metadata.Name = param.Xrootd_Sitename.GetString()
 		}
 	}

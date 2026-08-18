@@ -261,7 +261,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request.Header.Set("Content-Type", "application/json")
 		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
 		// we'll know that means it's time to update the min version in redirect.go
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.0")
 	}
 
 	// Configure the request context and Gin router to generate a redirect
@@ -270,7 +270,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/director/origin"+object, nil)
 		c.Request.Header.Set("X-Real-Ip", "1.1.1.1")
 		c.Request.Header.Set("Authorization", "Bearer "+token)
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.0")
 	}
 
 	setupJwksCache := func(t *testing.T, ns string, key jwk.Key) {
@@ -283,6 +283,7 @@ func TestDirectorRegistration(t *testing.T) {
 	teardown := func() {
 		serverAds.DeleteAll()
 		namespaceKeys.DeleteAll()
+		registeredNameCache.DeleteAll()
 	}
 
 	t.Run("valid-token-V2", func(t *testing.T) {
@@ -291,14 +292,16 @@ func TestDirectorRegistration(t *testing.T) {
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -333,12 +336,13 @@ func TestDirectorRegistration(t *testing.T) {
 
 		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", wrongPublicKey)
+		setupJwksCache(t, "/origins/test", wrongPublicKey) // for origin
+		setupJwksCache(t, "/foo/bar", wrongPublicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertise{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{
+		ad := server_structs.OriginAdvertise{RegistryPrefix: "/origins/test", DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -365,12 +369,13 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertise{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAd{{
+		ad := server_structs.OriginAdvertise{RegistryPrefix: "/origins/test", DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAd{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -393,12 +398,13 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertise{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{Path: "/foo/bar",
+		ad := server_structs.OriginAdvertise{RegistryPrefix: "/origins/test", DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAd{{Path: "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}}}}}
 
 		jsonad, err := json.Marshal(ad)
@@ -421,7 +427,8 @@ func TestDirectorRegistration(t *testing.T) {
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -429,8 +436,9 @@ func TestDirectorRegistration(t *testing.T) {
 		brokerUrl := "https://broker-url.org/some/path?origin=foo"
 
 		ad := server_structs.OriginAdvertise{
-			DataURL:   "https://or-url.org",
-			BrokerURL: brokerUrl,
+			RegistryPrefix: "/origins/test",
+			DataURL:        "https://or-url.org",
+			BrokerURL:      brokerUrl,
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -607,7 +615,10 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
-	t.Run("cache-without-registry-name", func(t *testing.T) { // For Pelican <7.8.1
+	t.Run("server-without-registry-prefix-is-rejected", func(t *testing.T) {
+		// Pelican servers < 7.9.0 don't send a RegistryPrefix; such ads used to be
+		// accepted (with weakened or skipped verification) but are now rejected as
+		// those versions are no longer supported.
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
@@ -618,7 +629,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			RegistryPrefix: "", // For Pelican <7.8.1, there's no such field
+			RegistryPrefix: "",
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAd{{
@@ -634,10 +645,155 @@ func TestDirectorRegistration(t *testing.T) {
 
 		r.ServeHTTP(w, c.Request)
 
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected status code of 403")
+		body, _ := io.ReadAll(w.Result().Body)
+		assert.Contains(t, string(body), "no registry prefix", "Rejection should explain the missing registry prefix")
+		assert.Nil(t, serverAds.Get("https://data-url.org"), "Server ad must not be registered without a registry prefix")
 		teardown()
+	})
+
+	t.Run("non-server-prefix-is-rejected", func(t *testing.T) {
+		// The advertise token only proves the caller holds an approved key for the
+		// prefix it named. A plain data namespace (/foo/bar) — which every namespace
+		// owner holds a key for — must not be accepted as a cache or origin identity,
+		// and one server kind must not be registered using the other's prefix.
+		cases := []struct {
+			name          string
+			sType         server_structs.ServerType
+			registryPfx   string
+			jwksPfx       string
+			dataURL       string
+			rejectPrefix  string
+			expectMissing string
+		}{
+			{
+				// data-namespace key trying to enroll a cache
+				name:          "data-namespace-as-cache",
+				sType:         server_structs.CacheType,
+				registryPfx:   "/foo/bar",
+				jwksPfx:       "/foo/bar",
+				dataURL:       "https://rogue-cache.org",
+				rejectPrefix:  "/foo/bar",
+				expectMissing: "https://rogue-cache.org",
+			},
+			{
+				// data-namespace key trying to enroll an origin
+				name:          "data-namespace-as-origin",
+				sType:         server_structs.OriginType,
+				registryPfx:   "/foo/bar",
+				jwksPfx:       "/foo/bar",
+				dataURL:       "https://rogue-origin.org",
+				rejectPrefix:  "/foo/bar",
+				expectMissing: "https://rogue-origin.org",
+			},
+			{
+				// cache identity trying to register through the origin endpoint
+				name:          "cache-prefix-on-origin-endpoint",
+				sType:         server_structs.OriginType,
+				registryPfx:   "/caches/test",
+				jwksPfx:       "/caches/test",
+				dataURL:       "https://cross-kind.org",
+				rejectPrefix:  "/caches/test",
+				expectMissing: "https://cross-kind.org",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				c, r, w := setupContext()
+				pKey, token, _ := generateToken()
+				publicKey, err := jwk.PublicKeyOf(pKey)
+				assert.NoError(t, err, "Error creating public key from private key")
+				setupJwksCache(t, tc.jwksPfx, publicKey)
+
+				isurl := url.URL{}
+				isurl.Path = ts.URL
+
+				ad := server_structs.OriginAdvertise{
+					RegistryPrefix: tc.registryPfx,
+					DataURL:        tc.dataURL,
+					WebURL:         "https://localhost:8844",
+					Namespaces: []server_structs.NamespaceAd{{
+						Path:   "/foo/bar",
+						Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+					}}}
+				ad.Initialize("rogue-name")
+
+				jsonad, err := json.Marshal(ad)
+				assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+				// Ensure the cache allow-list gate does not reject first.
+				allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+				setupRequest(c, r, jsonad, token, tc.sType)
+
+				r.ServeHTTP(w, c.Request)
+
+				assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected status code of 403")
+				body, _ := io.ReadAll(w.Result().Body)
+				assert.Contains(t, string(body), tc.rejectPrefix, "Rejection should name the offending prefix")
+				assert.Nil(t, serverAds.Get(tc.expectMissing), "Ad must not be registered with a non-server prefix")
+				teardown()
+			})
+		}
+	})
+
+	t.Run("name-mismatch-records-ad-but-cannot-mutate-filter", func(t *testing.T) {
+		// A server holding a valid advertise token for its own prefix advertises a
+		// DIFFERENT server's name along with a shutting-down status and a downtime.
+		// The ad is still accepted (200) and recorded, but because the advertised
+		// name doesn't match the name registered under the token-verified prefix,
+		// none of the filter-mutating parts take effect: no shutdownFiltered entry,
+		// no serverDowntimes entry, and the recorded ad carries no downtimes. This
+		// exercises the else (unauthorized) branch of the downtime-name gate.
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey)
+
+		// The registry reports a name different from the one the ad claims.
+		origResolver := resolveRegisteredServerName
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "the-real-owner", nil
+		}
+		registeredNameCache.DeleteAll()
+		defer func() {
+			resolveRegisteredServerName = origResolver
+			teardown()
+		}()
+
+		ad := server_structs.OriginAdvertise{
+			RegistryPrefix: "/origins/test",
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces:     []server_structs.NamespaceAd{},
+			Status:         "shutting down",
+			Downtimes:      []server_structs.Downtime{{UUID: "dt-1"}},
+		}
+		ad.Initialize("victim") // spoofed name, != "the-real-owner"
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+		r.ServeHTTP(w, c.Request)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, "Ad with a mismatched name should still be accepted")
+
+		get := serverAds.Get("https://data-url.org")
+		require.NotNil(t, get, "ad should be recorded")
+		assert.Empty(t, get.Value().Downtimes, "unauthorized downtimes must be stripped from the recorded ad")
+		// Status is intentionally retained (it is the server's own health report);
+		// it just cannot drive a filter entry under an unverified name.
+		assert.Equal(t, "shutting down", get.Value().Status, "status is retained on the recorded ad")
+
+		filteredServersMutex.RLock()
+		_, filtered := filteredServers["victim"]
+		_, hasDowntime := serverDowntimes["victim"]
+		filteredServersMutex.RUnlock()
+		assert.False(t, filtered, "spoofed name must not gain a filteredServers entry")
+		assert.False(t, hasDowntime, "spoofed name must not gain a serverDowntimes entry")
 	})
 
 	t.Run("origin-s3-type-and-disable-test", func(t *testing.T) {
@@ -807,14 +963,16 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -844,14 +1002,16 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -871,7 +1031,8 @@ func TestDirectorRegistration(t *testing.T) {
 		get := serverAds.Get("https://or-url.org")
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
 		getAd := get.Value()
-		assert.Equal(t, "7.0.0", getAd.Version)
+		// No ad.Version was set, so the director falls back to the User-Agent version.
+		assert.Equal(t, "7.9.0", getAd.Version)
 		teardown()
 	})
 
@@ -880,14 +1041,16 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -919,14 +1082,16 @@ func TestDirectorRegistration(t *testing.T) {
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertise{
-			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
 			Namespaces: []server_structs.NamespaceAd{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
@@ -940,8 +1105,8 @@ func TestDirectorRegistration(t *testing.T) {
 
 		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
-		// 7.0.1 != 7.0.0
-		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.1")
+		// 7.9.1 (UA) != 7.0.0 (ad.Version); ad.Version wins
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.9.1")
 
 		r.ServeHTTP(w, c.Request)
 
@@ -961,6 +1126,21 @@ func TestDirectorRegistration(t *testing.T) {
 		}
 		allowedPrefixesForCaches.Store(&allowed)
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+		// The director only honors a server's self-declared downtime when the
+		// advertised name matches the name registered under its prefix (see
+		// downtimeNameAuthorized, which now fails closed). Stub the registry lookup
+		// to return the advertised cache name so these downtime cases exercise the
+		// authorized path rather than depending on the mock registry's 404.
+		origResolver := resolveRegisteredServerName
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "test-cache", nil
+		}
+		registeredNameCache.DeleteAll()
+		t.Cleanup(func() {
+			resolveRegisteredServerName = origResolver
+			registeredNameCache.DeleteAll()
+		})
 
 		// helper to build a valid Downtime object
 		makeDT := func(start, end int64) server_structs.Downtime {
@@ -2391,6 +2571,101 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 	})
 }
 
+// TestDowntimeNameAuthorized ensures the name-keyed downtime filter can only be
+// mutated under the name registered for the ad's token-verified prefix. Note the
+// check is deliberately unconditional on the ad's contents: even an ad with no
+// Status and no Downtimes mutates the filter (an empty list clears existing
+// server-set downtimes), so registerServerAd gates all of applyServerDowntimes
+// and the Status handling behind this single authorization.
+func TestDowntimeNameAuthorized(t *testing.T) {
+	ctx := context.Background()
+	prefix := "/origins/real-origin.example.edu:8443"
+
+	orig := resolveRegisteredServerName
+	t.Cleanup(func() { resolveRegisteredServerName = orig })
+	t.Cleanup(registeredNameCache.DeleteAll)
+
+	mustNotResolve := func(_ context.Context, _ string) (string, error) {
+		t.Fatal("registry name resolver should not be called in this case")
+		return "", nil
+	}
+
+	t.Run("matching-name-is-authorized", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, p string) (string, error) {
+			assert.Equal(t, prefix, p)
+			return "real-site", nil
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "real-site", prefix))
+	})
+
+	t.Run("attack-mismatched-name-is-unauthorized", func(t *testing.T) {
+		// The attacker holds a valid token for its own prefix (registered as
+		// "attacker-site") but advertises the victim's name.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "attacker-site", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+	})
+
+	t.Run("registry-lookup-error-fails-closed", func(t *testing.T) {
+		// A lookup error must not authorize an arbitrary name — fail closed.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", errors.New("registry unreachable")
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+	})
+
+	t.Run("empty-registered-name-is-unauthorized", func(t *testing.T) {
+		// An empty registered name can't confirm ownership, so it must not authorize.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "any-site", prefix))
+	})
+
+	t.Run("non-server-prefix-is-unauthorized-without-lookup", func(t *testing.T) {
+		// A namespace prefix can never mutate a server filter; the resolver must not
+		// even be consulted.
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = mustNotResolve
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", "/foo/bar"))
+	})
+
+	t.Run("second-lookup-is-served-from-cache", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		calls := 0
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			calls++
+			return "real-site", nil
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+		// Same prefix again: the resolver must not be hit a second time, and the
+		// cached name still yields the same verdicts.
+		resolveRegisteredServerName = mustNotResolve
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+		assert.True(t, downtimeNameAuthorized(ctx, "real-site", prefix))
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("failed-lookups-are-not-cached", func(t *testing.T) {
+		registeredNameCache.DeleteAll()
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "", errors.New("registry unreachable")
+		}
+		assert.False(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+		// Once the registry recovers with a matching name, the next ad authorizes —
+		// proving the failed lookup was not cached.
+		resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) {
+			return "victim-site", nil
+		}
+		assert.True(t, downtimeNameAuthorized(ctx, "victim-site", prefix))
+	})
+}
+
 func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -2400,6 +2675,54 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	serverDowntimes = make(map[string][]server_structs.Downtime)
 	filteredServersMutex.Unlock()
 	serverAds.DeleteAll()
+	// Discard any federation metadata cached by earlier tests so the mock
+	// registry below is actually consulted
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	// Mock registry that 404s everything: checkNamespaceStatus treats 404 as
+	// approved (legacy-registry fallback), so token verification only depends on
+	// the JWKS cache seeded below.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL}, nil)
+
+	serverName := "TEST_CACHE_DOWNTIME"
+	registryPrefix := "/origins/" + serverName
+
+	// Create an advertise token and trust its key for the server's registry prefix
+	privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	require.NoError(t, err)
+	pKey, err := jwk.FromRaw(privateKey)
+	require.NoError(t, err)
+	require.NoError(t, jwk.AssignKeyID(pKey))
+	require.NoError(t, pKey.Set(jwk.AlgorithmKey, jwa.ES256))
+	tok, err := jwt.NewBuilder().
+		Issuer(ts.URL).
+		Claim("scope", token_scopes.Pelican_Advertise.String()).
+		Audience([]string{"director.test"}).
+		Subject("origin").
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
+	require.NoError(t, err)
+	advToken := string(signed)
+
+	publicKey, err := jwk.PublicKeyOf(pKey)
+	require.NoError(t, err)
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(publicKey))
+	namespaceKeys.Set(ts.URL+"/api/v1.0/registry"+registryPrefix+"/.well-known/issuer.jwks", jwks, ttlcache.DefaultTTL)
+	t.Cleanup(namespaceKeys.DeleteAll)
+
+	// Pin the registered name so the downtime-name authorization passes deterministically
+	origResolver := resolveRegisteredServerName
+	resolveRegisteredServerName = func(_ context.Context, _ string) (string, error) { return serverName, nil }
+	t.Cleanup(func() { resolveRegisteredServerName = origResolver })
+	registeredNameCache.DeleteAll()
+	t.Cleanup(registeredNameCache.DeleteAll)
 
 	// Setup Gin context and router
 	w := httptest.NewRecorder()
@@ -2408,14 +2731,14 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	engineCtx := context.Background()
 	r.POST("/", func(gctx *gin.Context) { registerServerAd(engineCtx, gctx, server_structs.OriginType) })
 
-	serverName := "TEST_CACHE_DOWNTIME"
 	now := time.Now().UTC().UnixMilli()
 
 	// 1) Post an ad with an active downtime -> should set serverFiltered
 	adWithActive := map[string]interface{}{
-		"name":     serverName,
-		"data-url": "https://example.org:8443",
-		"web-url":  "https://example.org:8444",
+		"name":            serverName,
+		"registry-prefix": registryPrefix,
+		"data-url":        "https://example.org:8443",
+		"web-url":         "https://example.org:8444",
 		"downtimes": []map[string]interface{}{
 			{
 				"id":        "uuid-1",
@@ -2431,7 +2754,7 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	}
 	body, _ := json.Marshal(adWithActive)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
-	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Authorization", "Bearer "+advToken)
 	c.Request.Header.Set("Content-Type", "application/json")
 	// Use a user-agent that passes compat checks
 	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
@@ -2448,13 +2771,14 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
 	adWithoutDowntimes := map[string]interface{}{
-		"name":     serverName,
-		"data-url": "https://example.org:8443",
-		"web-url":  "https://example.org:8444",
+		"name":            serverName,
+		"registry-prefix": registryPrefix,
+		"data-url":        "https://example.org:8443",
+		"web-url":         "https://example.org:8444",
 	}
 	body, _ = json.Marshal(adWithoutDowntimes)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
-	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Authorization", "Bearer "+advToken)
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
 	r.ServeHTTP(w, c.Request)
@@ -2470,7 +2794,7 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	c, _ = gin.CreateTestContext(w)
 	body, _ = json.Marshal(adWithActive)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
-	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Authorization", "Bearer "+advToken)
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
 	r.ServeHTTP(w, c.Request)
@@ -2484,14 +2808,15 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
 	adWithEmpty := map[string]interface{}{
-		"name":      serverName,
-		"data-url":  "https://example.org:8443",
-		"web-url":   "https://example.org:8444",
-		"downtimes": []interface{}{},
+		"name":            serverName,
+		"registry-prefix": registryPrefix,
+		"data-url":        "https://example.org:8443",
+		"web-url":         "https://example.org:8444",
+		"downtimes":       []interface{}{},
 	}
 	body, _ = json.Marshal(adWithEmpty)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
-	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Authorization", "Bearer "+advToken)
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
 	r.ServeHTTP(w, c.Request)
