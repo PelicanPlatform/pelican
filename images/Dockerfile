@@ -152,7 +152,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   #   - https://github.com/golang/go/issues/34864
 
   GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
-  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  GO_TOOLCHAIN_VER=$(curl 'https://go.dev/dl/?mode=json&include=all' | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
   rm -rf /usr/local/go
   curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
 
@@ -844,7 +844,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   #   - https://github.com/golang/go/issues/34864
 
   GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
-  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  GO_TOOLCHAIN_VER=$(curl 'https://go.dev/dl/?mode=json&include=all' | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
   rm -rf /usr/local/go
   curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
 
