@@ -5,8 +5,9 @@ name: Build and Test
 # running the test suite. Much of its length and complexity is a consequence
 # of trying to keep build times short by taking advantage of caching.
 #
-# The intended behavior is that all container images are always built.
-# However:
+# The intended behavior is that all container images are always built,
+# except for the dev image, because it matters only on `main` and anything
+# that might reach `main`. As for when container images are pushed:
 #
 #   - For pull requests: We never push images to a registry. In fact,
 #     we can't, because the credentials aren't available.
@@ -53,25 +54,11 @@ jobs:
       # NOTE: While some of the outputs below are intended to be treated
       # as booleans, they are actually strings. In conditionals, test their
       # values using "== 'true'" or "== 'false'".
-      images-to-build: |
-        [
-          "client",
-          "cache",
-          "director",
-          "origin",
-          "registry",
-          "osdf-cache",
-          "osdf-director",
-          "osdf-origin",
-          "osdf-registry",
-          "pelican-dev",
-          "pelican-test"
-        ]
+      images-to-build: ${{ steps.params.outputs.IMAGES_TO_BUILD }}
       architectures: ${{ steps.params.outputs.ARCHITECTURES }}
       platforms: ${{ steps.params.outputs.PLATFORMS }}
       images-to-push: ${{ steps.params.outputs.IMAGES }}
       registry-repo: ${{ steps.params.outputs.REGISTRY_REPO }}
-      registry-cache: ${{ steps.params.outputs.REGISTRY_REPO }}/pelican-dev:buildcache
     runs-on: ubuntu-latest
     steps:
       - name: Determine how to build and push container images
@@ -86,6 +73,7 @@ jobs:
           set -eu
 
           IS_PRIMARY_GITHUB_REPO=false
+          IS_TAG_BUILD=${{ startsWith(github.ref, 'refs/tags/') }}
 
           case '${{ github.repository }}' in
             PelicanPlatform/pelican)
@@ -118,29 +106,61 @@ jobs:
               # dev images built off of 'main', and release images built
               # off of semver tags.
               PUSH_DEVTEST=${{ github.ref == 'refs/heads/main' }}
-              PUSH_RELEASE=${{ startsWith(github.ref, 'refs/tags/') }}
+              PUSH_RELEASE=${IS_TAG_BUILD}
             else
               # For forks, we push only the release images.
               PUSH_DEVTEST=false
-              PUSH_RELEASE=${{ startsWith(github.ref, 'refs/tags/') }}
+              PUSH_RELEASE=${IS_TAG_BUILD}
             fi
           fi
 
-          # Having determined which sets of images to push, turn those
-          # sets into a JSON list.
+          # Define the images that we know how to build, grouped by the
+          # circumstances under which they are pushed.
+
+          RELEASE_IMAGES=(
+            client
+            cache director origin registry
+            osdf-cache osdf-director osdf-origin osdf-registry
+          )
+          TEST_IMAGES=(pelican-test)
+          DEV_IMAGES=(pelican-dev)
+
+          # Define which images to push.
 
           IMAGES=()
           if ${PUSH_RELEASE}; then
-            IMAGES+=(client)
-            IMAGES+=(cache director origin registry)
-            IMAGES+=(osdf-cache osdf-director osdf-origin osdf-registry)
-            IMAGES+=(pelican-test)  # for testing semver tags
+            IMAGES+=("${RELEASE_IMAGES[@]}")
+            IMAGES+=("${TEST_IMAGES[@]}")  # for testing semver tags
           fi
           if ${PUSH_DEVTEST}; then
-            IMAGES+=(pelican-dev pelican-test)
+            IMAGES+=("${DEV_IMAGES[@]}")
+            IMAGES+=("${TEST_IMAGES[@]}")
           fi
-          # Turn a space-delimited list into a JSON list.
-          IMAGES="$(jq -cr '. | split(" ") | unique' <<< '"'"${IMAGES[*]}"'"')"
+
+          # Define which images to build. Start from the images that we
+          # are pushing.
+
+          IMAGES_TO_BUILD=("${IMAGES[@]}")
+
+          # Beyond that, always build release and test images. Skip the
+          # dev image for semver tags, because it matters only on `main`
+          # and anything that might reach `main`.
+
+          IMAGES_TO_BUILD+=("${RELEASE_IMAGES[@]}")
+          IMAGES_TO_BUILD+=("${TEST_IMAGES[@]}")
+          if ! ${IS_TAG_BUILD}; then
+            IMAGES_TO_BUILD+=("${DEV_IMAGES[@]}")
+          fi
+
+          # Turn a list of image names into a sorted, deduplicated
+          # JSON list.
+
+          to_json_list () {
+            jq -cr '. | split(" ") | unique' <<< '"'"$*"'"'
+          }
+
+          IMAGES="$(to_json_list "${IMAGES[@]}")"
+          IMAGES_TO_BUILD="$(to_json_list "${IMAGES_TO_BUILD[@]}")"
 
           # In order to form the matrix in build-images below, we need
           # the list of architectures being targeted so that we can take
@@ -164,10 +184,11 @@ jobs:
             ]'
           fi
 
-          printf 'ARCHITECTURES=%s\n'        "${ARCHITECTURES}" >> $GITHUB_OUTPUT
-          printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}"     >> $GITHUB_OUTPUT
-          printf 'IMAGES=%s\n'               "${IMAGES}"        >> $GITHUB_OUTPUT
-          printf 'REGISTRY_REPO=%s\n'        "${REGISTRY_REPO}" >> $GITHUB_OUTPUT
+          printf 'ARCHITECTURES=%s\n'        "${ARCHITECTURES}"   >> $GITHUB_OUTPUT
+          printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}"       >> $GITHUB_OUTPUT
+          printf 'IMAGES=%s\n'               "${IMAGES}"          >> $GITHUB_OUTPUT
+          printf 'IMAGES_TO_BUILD=%s\n'      "${IMAGES_TO_BUILD}" >> $GITHUB_OUTPUT
+          printf 'REGISTRY_REPO=%s\n'        "${REGISTRY_REPO}"   >> $GITHUB_OUTPUT
 
   tags:
     name: Set image tags
