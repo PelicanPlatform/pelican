@@ -56,6 +56,7 @@ A group has the following properties:
 
 - For most web UI actions, authorization to perform an action should be based on the calculated scopes from the user and associated group records.
 - Deleted users have no authorizations.
-- Users may generate an API key with a subset of their authorizations.
+- API keys are intended for the long-lived credential use case (no renewal but revocation), not as the primary access path. For accessing objects and collections, users should rely on OAuth2-issued tokens from a normal web login, which already carry their permitted scopes.
+  - API key creation is admin-only: the web UI’s API-key endpoints require the server-admin privilege.
   - Actions from API keys must be distinguishable (for creators / deleters, etc) from those done by the web UI. At least the key ID must be recorded if a key was used.
   - Users can lose authorizations after the API key was used. Thus, when an API key is used, its scopes must be intersected with the current scopes for the user.
