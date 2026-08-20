@@ -1644,7 +1644,7 @@ func GetComponentConfig(component string) (map[string]interface{}, error) {
 // filterConfigRecursive is a helper function for GetComponentConfig.
 // It recursively creates a nested config map of the parameters that relate to the given component.
 func filterConfigRecursive(v reflect.Value, currentPath string, component string) (*interface{}, bool) {
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 

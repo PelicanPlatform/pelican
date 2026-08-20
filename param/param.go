@@ -393,10 +393,10 @@ func setField(fieldType reflect.Type, value any) reflect.Value {
 // Helper function to convert config struct to configWithType struct using reflection
 func convertStruct(srcVal, destVal reflect.Value) {
 	// If the source or destination is a pointer, get the underlying element
-	if srcVal.Kind() == reflect.Ptr {
+	if srcVal.Kind() == reflect.Pointer {
 		srcVal = srcVal.Elem()
 	}
-	if destVal.Kind() == reflect.Ptr {
+	if destVal.Kind() == reflect.Pointer {
 		destVal = destVal.Elem()
 	}
 
