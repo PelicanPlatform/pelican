@@ -56,7 +56,7 @@ jobs:
       # Replaces setup-node's "cache: pnpm", which cannot be used because it
       # requires pnpm to already be installed when setup-node runs.
       - name: Cache the pnpm store
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
