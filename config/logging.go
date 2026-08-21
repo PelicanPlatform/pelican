@@ -257,24 +257,69 @@ func redactEntryCopy(entry *log.Entry) *log.Entry {
 	return &dup
 }
 
+// logrusLevelFor returns the level logrus itself should run at: the
+// operator's configured level, raised only as far as any registered
+// RegexpFilter needs to observe. logrus's level gate sits in front of all
+// entry construction (formatting, hook dispatch, and three acquisitions of
+// the logger's global mutex), so keeping the level as low as possible is
+// what makes suppressed Tracef/Debugf calls on hot request paths cost a
+// single atomic load instead of a serialized walk of the whole pipeline.
+//
+// A filter that does not declare Levels is assumed to need everything,
+// which restores the historical pin to TraceLevel while it is registered.
+func logrusLevelFor(configured log.Level) log.Level {
+	needed := configured
+	if filters := globalFilters.filters.Load(); filters != nil {
+		for _, filter := range *filters {
+			if len(filter.Levels) == 0 {
+				return log.TraceLevel
+			}
+			for _, lvl := range filter.Levels {
+				if lvl > needed {
+					needed = lvl
+				}
+			}
+		}
+	}
+	return needed
+}
+
+// syncLogrusLevel re-derives logrus's internal level after a change to the
+// registered filter set. Only meaningful when hook-based filtering is
+// active; otherwise logrus's level already equals the configured level and
+// raising it would leak filter-only lines straight to the output.
+func syncLogrusLevel() {
+	globalTransformMu.Lock()
+	hooked := addedGlobalFilters
+	globalTransformMu.Unlock()
+	if hooked {
+		log.SetLevel(logrusLevelFor(GetEffectiveLogLevel()))
+	}
+}
+
 func initFilterLogging() {
-	// Our filters may want to see every log message, even those that
-	// are not otherwise printed.  Have the log levels printed via a hook
-	// (instead of the typical output mechanism) so we can crank up the
-	// global log.
+	// Our filters may want to see log messages that are not otherwise
+	// printed. Printing happens via a hook (instead of the typical output
+	// mechanism), so logrus's own level only controls which entries the
+	// hooks get to see -- raise it no further than the filters require.
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
 
 	// On the FIRST init pass, log.GetLevel() reflects the operator's
 	// configured level. On subsequent passes (unit-test reinit, config
-	// reload paths that re-enter this function) it reflects the pinned
-	// TraceLevel we set below -- reading it then would clobber the
-	// effective-level cache with Trace and cause the log buffer to
-	// silently capture trace lines the operator never asked for.
-	// Guard the cache update behind the same first-time-only gate that
-	// installs the hooks.
+	// reload paths that re-enter this function) it may reflect a level
+	// raised for a still-registered filter -- so guard the effective-level
+	// cache update behind the same first-time-only gate that installs the
+	// hooks.
+	//
+	// Historically the level was pinned to TraceLevel here so the filter
+	// hooks could see every message. That forced every suppressed
+	// Tracef/Debugf in the codebase to pay full logrus entry construction
+	// (three global-mutex acquisitions and a formatting pass) on hot
+	// request paths; now the level is raised only as far as registered
+	// filters actually need (see logrusLevelFor).
 	configLevel := log.GetLevel()
-	log.SetLevel(log.TraceLevel)
+	log.SetLevel(logrusLevelFor(configLevel))
 	hookLevel := make([]log.Level, 0)
 	for _, lvl := range log.AllLevels {
 		if lvl <= configLevel {
@@ -338,6 +383,9 @@ func AddFilter(newFilter *RegexpFilter) {
 	}
 	newFilters = append(newFilters, newFilter)
 	globalFilters.filters.Store(&newFilters)
+	// The new filter may need to observe levels below the configured one;
+	// raise logrus's level accordingly for as long as it is registered.
+	syncLogrusLevel()
 }
 
 func RemoveFilter(name string) {
@@ -349,6 +397,8 @@ func RemoveFilter(name string) {
 		}
 	}
 	globalFilters.filters.Store(&result)
+	// Drop logrus's level back down if this filter was what held it up.
+	syncLogrusLevel()
 }
 
 func SetLogging(logLevel log.Level) {
@@ -370,13 +420,13 @@ func SetLogging(logLevel log.Level) {
 	})
 
 	// When global filters are active, we use hook-based filtering instead of logrus's
-	// internal level filtering. We set logrus to TraceLevel (the most permissive) so
-	// that ALL log messages pass through to our hooks; the hooks then filter based on
-	// the user's configured level via hookLevel. This approach allows our RegexpFilterHook
-	// to see all messages regardless of the configured output level.
+	// internal level filtering: the hooks decide what is written via hookLevel. logrus's
+	// own level then only controls which entries reach the hooks, so run it at the
+	// configured level, raised just far enough for any registered RegexpFilter to see
+	// the messages it declared interest in (see logrusLevelFor).
 	globalTransformMu.Lock()
 	if addedGlobalFilters {
-		log.SetLevel(log.TraceLevel)
+		log.SetLevel(logrusLevelFor(logLevel))
 		hookLevel := make([]log.Level, 0, len(log.AllLevels))
 
 		// Atomically get current hooks
