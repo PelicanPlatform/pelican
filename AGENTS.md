@@ -149,7 +149,7 @@ go test -tags client ./...
 To run the widest possible set of unit tests locally (a superset of both CI passes), use:
 
 ```bash
-go test -tags "client server" ./...
+go test -tags "client,server" ./...
 ```
 
 **Test individual modules (use whichever tags apply to that module):**
@@ -172,6 +172,13 @@ npm test
 
 ```bash
 golangci-lint run
+```
+
+The `client` and `server` build tags come from `.golangci.yaml`, so the command above already covers all of package `cmd`. CI additionally lints the platform-specific files, which are invisible on Linux. The whole-program `unused` linter is turned off there because a symbol's only callers often sit in files that the other GOOS excludes:
+
+```bash
+GOOS=darwin golangci-lint run --disable=unused
+GOOS=windows golangci-lint run --disable=unused
 ```
 
 **Go formatting:**
