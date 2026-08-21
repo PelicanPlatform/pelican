@@ -454,6 +454,59 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	})
 }
 
+// TestLoginCookieSameSite pins the login cookie to SameSite=Lax.
+//
+// Lax is required for OIDC. The OAuth callback issues this cookie at the
+// end of a redirect chain that starts at the identity provider, and
+// browsers compute SameSite context across the whole chain — so a chain
+// containing a cross-site hop withholds Strict cookies on every later
+// hop. A Strict cookie is set correctly but never SENT on the navigation
+// into the post-login page, so the server sees an anonymous request and
+// bounces the user back to /view/login/ in a loop.
+//
+// Asserting on the parsed SameSite field catches both regressions this
+// has hit before: the mode changed to Strict, and the attribute missing
+// entirely (SetSameSite called AFTER SetCookie, which gin ignores) — an
+// absent attribute parses as SameSiteDefaultMode, not Lax.
+func TestLoginCookieSameSite(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	setupWebUIEnv(t)
+
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err, "Error setting up mock DB")
+	database.ServerDatabase = mockDB
+	migrateTestDB(t)
+
+	_, err = tempPasswdFile.WriteString("admin:password\n")
+	require.NoError(t, err, "Error writing to temp password file")
+	require.NoError(t, configureAuthDB())
+	require.NoError(t, WritePasswordEntry("user", "password"), "error writing a user")
+
+	req, err := http.NewRequest("POST", "/api/v1.0/auth/login",
+		strings.NewReader(`{"user": "user", "password": "password"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusOK, recorder.Code,
+		fmt.Sprintf("login failed, body: %s", recorder.Body.String()))
+
+	var loginCookie *http.Cookie
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == "login" {
+			loginCookie = cookie
+		}
+	}
+	require.NotNil(t, loginCookie, "no login cookie was issued")
+
+	assert.Equal(t, http.SameSiteLaxMode, loginCookie.SameSite,
+		"login cookie must be SameSite=Lax or OIDC login loops back to /view/login/; see setLoginCookie")
+	assert.True(t, loginCookie.HttpOnly, "login cookie must be HttpOnly")
+	assert.True(t, loginCookie.Secure, "login cookie must be Secure")
+}
+
 func TestWhoamiAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
