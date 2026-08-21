@@ -420,7 +420,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y --enablerepo=osg-testing \
             cmake3 \
             gcc-c++ \
             git \
