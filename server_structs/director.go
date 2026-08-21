@@ -610,24 +610,30 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 
 	var bestFedPrefix string
 	var bestNamespace *NamespaceAd
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
-
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
+	for idx := range namespaceAds {
+		// Normalize stored namespace paths. Compare without allocating: a
+		// path lacking the trailing "/" must be a proper prefix of reqPath
+		// with a "/" as the next byte (reqPath is already "/"-terminated).
+		nsPath := namespaceAds[idx].Path
+		nsLen := len(nsPath)
+		if strings.HasSuffix(nsPath, "/") {
+			if !strings.HasPrefix(reqPath, nsPath) {
+				continue
+			}
+		} else {
+			if len(reqPath) <= nsLen || reqPath[nsLen] != '/' || reqPath[:nsLen] != nsPath {
+				continue
+			}
+			nsLen++ // account for the implied trailing "/"
 		}
 
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
-			continue
-		}
-
-		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
+		if bestFedPrefix == "" || nsLen > len(bestFedPrefix) {
+			if strings.HasSuffix(nsPath, "/") {
+				bestFedPrefix = nsPath
+			} else {
+				bestFedPrefix = nsPath + "/"
+			}
+			bestNamespace = &namespaceAds[idx]
 		}
 	}
 
