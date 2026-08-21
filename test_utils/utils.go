@@ -562,6 +562,12 @@ func SetupTestLogging(t testing.TB) func() {
 	logrus.SetOutput(io.Discard)
 	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
+	// The test hook wants to observe every entry regardless of the configured
+	// level: tests assert on debug/trace lines. Production code no longer pins
+	// logrus to TraceLevel (see config.initFilterLogging), so the test harness
+	// must request the verbosity itself.
+	originalLevel := logrus.GetLevel()
+	logrus.SetLevel(logrus.TraceLevel)
 	hook := NewTestLogHook(t)
 	logrus.AddHook(hook)
 
@@ -583,6 +589,7 @@ func SetupTestLogging(t testing.TB) func() {
 		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
+		logrus.SetLevel(originalLevel)
 		globalHookEnabled.Store(previousGlobalHookState)
 	}
 }
