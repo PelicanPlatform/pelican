@@ -1021,12 +1021,11 @@ func TestGroupManagementAPI(t *testing.T) {
 	migrateTestDB(t)
 	// AuthHandler revalidates the user record on every cookie read;
 	// the tests below mint cookies for the owner-user / other-user /
-	// admin-user / new-member subjects, so the matching User rows
-	// have to exist before AuthHandler runs.
+	// admin-user subjects, so the matching User rows have to exist
+	// before AuthHandler runs.
 	ensureTestUserRow(t, "admin-user")
 	ensureTestUserRow(t, "owner-user")
 	ensureTestUserRow(t, "other-user")
-	ensureTestUserRow(t, "new-member")
 
 	t.Run("test-group-lifecycle", func(t *testing.T) {
 		// 1. Create a group as 'owner-user'
