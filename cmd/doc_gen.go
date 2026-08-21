@@ -59,6 +59,23 @@ var hiddenFromDocs = map[string]bool{
 	"rclone": true,
 }
 
+// clientDocBinaryName and serverDocBinaryName are registered by the client
+// and server builds respectively; see doc_gen_client.go and doc_gen_server.go.
+var (
+	clientDocBinaryName string
+	serverDocBinaryName string
+)
+
+// docBinaryName is the canonical name used when generating CLI documentation.
+// It controls the root command name in generated pages and the URL prefix
+// under commands-reference/. A build carrying both tags uses the client name.
+func docBinaryName() string {
+	if clientDocBinaryName != "" {
+		return clientDocBinaryName
+	}
+	return serverDocBinaryName
+}
+
 // generateCLIDocs creates per-command docs under the given directory. If the path
 // is relative, it is resolved against the repository root (directory containing go.mod).
 func generateCLIDocs(outputDir string) error {
@@ -73,7 +90,8 @@ func generateCLIDocs(outputDir string) error {
 
 	// Override rootCmd.Use so Cobra names generated files correctly (e.g.
 	// "pelican-server_origin_serve.md" rather than a temp-binary path).
-	rootCmd.Use = docBinaryName
+	binName := docBinaryName()
+	rootCmd.Use = binName
 
 	// docPathRoot is the site-relative path used in generated hyperlinks.
 	// Strip the leading "docs/app/" prefix so that e.g.
@@ -86,10 +104,10 @@ func generateCLIDocs(outputDir string) error {
 		// Cobra passes names like "pelican-server_origin_serve.md"; strip the
 		// binary-name prefix so only the subcommand path remains.
 		base := strings.TrimSuffix(name, filepath.Ext(name))
-		if base == docBinaryName {
+		if base == binName {
 			base = ""
 		} else {
-			base = strings.TrimPrefix(base, docBinaryName+"_")
+			base = strings.TrimPrefix(base, binName+"_")
 		}
 		path := strings.ReplaceAll(base, "_", "/")
 		// Must be an absolute path from the site root
@@ -184,7 +202,7 @@ func enforceAppRouterLayout(dir string) error {
 		base := strings.TrimSuffix(name, ".mdx")
 		// Build nested path from underscore-delimited tokens
 		segments := strings.Split(base, "_")
-		if len(segments) > 0 && segments[0] == docBinaryName {
+		if len(segments) > 0 && segments[0] == docBinaryName() {
 			segments = segments[1:]
 		}
 		// Create nested directory path
@@ -283,7 +301,7 @@ func generateMetaFiles(dir string) error {
 				return err
 			}
 
-			commandPrefix := docBinaryName
+			commandPrefix := docBinaryName()
 			if relPath != "." {
 				commandPrefix += " " + strings.ReplaceAll(relPath, string(filepath.Separator), " ")
 			}
