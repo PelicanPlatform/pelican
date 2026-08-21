@@ -121,10 +121,8 @@ func setupWebUIEnv(t *testing.T) {
 	require.NoError(t, param.ConfigBase.Set(dirname))
 	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
-		t.Fatal("Failed to initialize server config:", err)
-	}
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	//Get keys
 	_, err = config.GetIssuerPublicJWKS()
@@ -751,9 +749,8 @@ func TestApiToken(t *testing.T) {
 	dirName := t.TempDir()
 	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
-	test_utils.MockFederationRoot(t, nil, nil)
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 
 	// Create a token to pass auth middlewares
 	cookieValue := generateTestAdminUserToken(t)
@@ -1009,9 +1006,8 @@ func TestGroupManagementAPI(t *testing.T) {
 	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
-	test_utils.MockFederationRoot(t, nil, nil)
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
 	// set up database
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

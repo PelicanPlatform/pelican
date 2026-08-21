@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -205,4 +205,11 @@ func setupTransport() {
 	transportNoProxy = transport.Clone()
 	transportNoProxy.Proxy = nil
 	clientNoProxy = &http.Client{Transport: transportNoProxy}
+}
+
+// ResetTransport clears the transport sync.Once so that the next call
+// to GetTransport, GetClient, etc. re-runs setupTransport with the current
+// configuration.
+func ResetTransport() {
+	onceTransport = sync.Once{}
 }

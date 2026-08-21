@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -20,7 +20,6 @@ package pelican_url
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -84,10 +83,7 @@ func TestDiscoverFederation(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("TestVanilla", func(t *testing.T) {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
+		client := discServer.Client()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -102,10 +98,7 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("TestMalformedDiscUrls", func(t *testing.T) {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
+		client := discServer.Client()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -130,16 +123,12 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
-
 		// Create a server that sleeps for a longer duration than the timeout
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
 		}))
 		defer server.Close()
+		client := server.Client()
 		timeoutUrl, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
@@ -159,13 +148,6 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("TestMetadataDiscoveryTimeoutRetry", func(t *testing.T) {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			// Set response header timeout to make sure we timeout as expected in the test
-			ResponseHeaderTimeout: 300 * time.Millisecond,
-		}
-		client := &http.Client{Transport: tr}
-
 		// Initialize the logger and add a test hook
 		hook := test.NewGlobal()
 		logrus.SetLevel(logrus.WarnLevel)
@@ -188,6 +170,9 @@ func TestDiscoverFederation(t *testing.T) {
 			assert.NoError(t, err)
 		}))
 		defer server.Close()
+		transport := server.Client().Transport.(*http.Transport).Clone()
+		transport.ResponseHeaderTimeout = 300 * time.Millisecond
+		client := &http.Client{Transport: transport}
 		timeoutUrl, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
@@ -217,10 +202,7 @@ func TestDiscoverFederation(t *testing.T) {
 		discUrl, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
+		client := &http.Client{}
 
 		// Create a context and cancel it immediately
 		ctx, cancel := context.WithCancel(context.Background())
@@ -247,10 +229,7 @@ func TestDiscoverFederation(t *testing.T) {
 				discUrl, err := url.Parse(server.URL)
 				require.NoError(t, err)
 
-				tr := &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				}
-				client := &http.Client{Transport: tr}
+				client := server.Client()
 
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -281,10 +260,7 @@ func TestDiscoverFederation(t *testing.T) {
 				discUrl, err := url.Parse(server.URL)
 				require.NoError(t, err)
 
-				tr := &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				}
-				client := &http.Client{Transport: tr}
+				client := server.Client()
 
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -315,10 +291,7 @@ func (c *CustomRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func TestStartMetadataQuery(t *testing.T) {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
+	client := &http.Client{}
 
 	t.Run("SuccessfulRequest", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -361,13 +334,7 @@ func TestStartMetadataQuery(t *testing.T) {
 		discUrl, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{
-			Transport: tr,
-			Timeout:   1 * time.Second,
-		}
+		client := &http.Client{Timeout: 1 * time.Second}
 
 		ctx := context.Background()
 		_, err = startMetadataQuery(ctx, client, "test-ua", discUrl)

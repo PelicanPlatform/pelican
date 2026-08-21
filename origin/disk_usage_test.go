@@ -98,6 +98,7 @@ func TestCalculateDiskUsageErrors(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
+	test_utils.InitClientForTest(t)
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	export := server_utils.OriginExport{

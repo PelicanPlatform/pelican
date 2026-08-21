@@ -478,10 +478,9 @@ func TestSSHWebSocketAuthRequired(t *testing.T) {
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-origin.example.com"))
 	require.NoError(t, param.Origin_Port.Set(0))
-	test_utils.MockFederationRoot(t, nil, nil)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
+	test_utils.InitServerForTest(t, ctx, server_structs.OriginType,
+		test_utils.WithLazyFederationMock(nil, nil))
+	err := config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 
 	// Create router with SSH WebSocket handler protected by auth middleware

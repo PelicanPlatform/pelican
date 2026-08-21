@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -34,7 +34,7 @@ import (
 func TestGetCacheHostnameFromToken(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	test_utils.InitClient(t, nil)
+	test_utils.InitClientForTest(t)
 
 	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
 		RegistryEndpoint: "https://your-registry.com",
