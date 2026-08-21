@@ -4,8 +4,9 @@ package local_cache
 
 import (
 	"github.com/alecthomas/units"
-	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func getCacheSize(_ string, _ *CacheDB, _ StorageID) (cacheSize uint64, err error) {
@@ -14,8 +15,11 @@ func getCacheSize(_ string, _ *CacheDB, _ StorageID) (cacheSize uint64, err erro
 		log.Warningln("Cache size is unset and Pelican is unable to determine filesystem size; using 10GB as the default")
 		sizeStr = "10GB"
 	}
-	if signedCacheSize, err := units.ParseStrictBytes(param.LocalCache_Size.GetString()); err == nil {
-		cacheSize = uint64(signedCacheSize)
+	var signedCacheSize int64
+	signedCacheSize, err = units.ParseStrictBytes(sizeStr)
+	if err != nil {
+		return
 	}
+	cacheSize = uint64(signedCacheSize)
 	return
 }

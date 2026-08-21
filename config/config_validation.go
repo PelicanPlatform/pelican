@@ -68,7 +68,7 @@ func validateConfigKeys() []string {
 
 	// Convert the config struct to a map
 	configValue := reflect.ValueOf(possibleCfg)
-	if configValue.Kind() == reflect.Ptr {
+	if configValue.Kind() == reflect.Pointer {
 		configValue = configValue.Elem()
 	}
 	configType := configValue.Type()
