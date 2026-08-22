@@ -1431,7 +1431,12 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// registration) but skip all filter mutation, so a server can neither suppress
 	// nor resurrect routing for a name it doesn't own.
 	sn := ad.Name
-	if downtimeNameAuthorized(engineCtx, sn, registryPrefix) {
+	// Computed once: it also decides whether recordAd may act on this ad's
+	// name below (retiring a shutting-down server, or evicting the ad of one
+	// that appears to have moved), which is name-keyed for the same reason
+	// and unsafe on an unverified claim for the same reason.
+	nameAuthorized := downtimeNameAuthorized(engineCtx, sn, registryPrefix)
+	if nameAuthorized {
 		// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
 		applyServerDowntimes(sn, ad.Downtimes)
 
@@ -1484,11 +1489,13 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 	ad.Now = time.Time{}
 
-	finishRegisterServeAd(engineCtx, ctx, &ad, sType)
+	finishRegisterServeAd(engineCtx, ctx, &ad, sType, nameAuthorized)
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
-func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType) {
+// nameAuthorized is passed through to recordAd: see its doc comment for why
+// anything keyed by the advertised name may not act on an unverified claim.
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType, nameAuthorized bool) {
 	log.Debugf("finishRegisterServeAd received %+v", ad)
 	st := ad.StorageType
 	// Defaults to POSIX
@@ -1553,7 +1560,7 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *serv
 	}
 	sAd.CopyFrom(ad)
 
-	recordAd(engineCtx, sAd, &ad.Namespaces)
+	recordAd(engineCtx, sAd, &ad.Namespaces, nameAuthorized)
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }

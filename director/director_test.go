@@ -2086,7 +2086,7 @@ func TestRedirects(t *testing.T) {
 		}
 
 		cSlice := []server_structs.NamespaceAd{nsAd}
-		recordAd(context.Background(), pelCacheAd, &cSlice)
+		recordAd(context.Background(), pelCacheAd, &cSlice, true)
 
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
