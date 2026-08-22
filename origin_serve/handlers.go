@@ -981,6 +981,40 @@ func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Ha
 	}
 }
 
+// registerRootOptions answers OPTIONS on the server root with the WebDAV verbs
+// this origin supports.
+//
+// Clients probe an endpoint's capabilities once per host and cache the answer
+// for every path on it -- xrdcl-curl keys its verbs cache by scheme, host and
+// port, and probes exactly scheme://host:port. Serving 405 there told such a
+// client "this origin does not do PROPFIND", even though every namespace route
+// advertises it, because the root carries no export and so matched no route.
+//
+// The reply is deliberately unauthenticated: OPTIONS asks what the server can
+// do, not what the caller may do, and a 401 is as useless to a capability
+// probe as a 405. Per-path authorization is unaffected.
+func registerRootOptions(engine *gin.Engine) {
+	verbs := []string{
+		"OPTIONS", "GET", "HEAD", "PUT", "DELETE",
+		"PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "LOCK", "UNLOCK",
+	}
+	// COPY is per-export, so advertise it only when some export allows it.
+	for _, enabled := range copyEnabledPrefixes {
+		if enabled {
+			verbs = append(verbs, "COPY")
+			break
+		}
+	}
+	sort.Strings(verbs)
+
+	allow := strings.Join(verbs, ", ")
+	engine.Handle(http.MethodOptions, "/", func(c *gin.Context) {
+		c.Header("Allow", allow)
+		c.Header("DAV", "1, 2")
+		c.Status(http.StatusOK)
+	})
+}
+
 // RegisterHandlers registers the HTTP handlers with the Gin engine.
 // When the director is also running in the same server, handlers are registered
 // under /api/v1.0/origin/<prefix> so the director can distinguish between its routing
@@ -1037,6 +1071,8 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		log.Infof("Registered HTTP handlers for prefix: %s (route: %s)", prefix, routePrefix)
 	}
+
+	registerRootOptions(engine)
 
 	handlersRegistered = true
 	return nil
