@@ -268,12 +268,12 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 // When generating error messages, `description` will be used to describe the task.
 func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, description string, sleepTime time.Duration, maintenanceFunc func(notifyEvent bool) error) {
 	select_count := 4
+	uniquePaths := map[string]bool{}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Warningf("%s routine failed to create new watcher", description)
 		select_count -= 2
 	} else {
-		uniquePaths := map[string]bool{}
 		for _, dirPath := range dirPaths {
 			uniquePaths[dirPath] = true
 		}
@@ -304,6 +304,14 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 	egrp.Go(func() error {
 		defer func() {
 			if watcher != nil {
+				// Explicitly remove each watch before closing. On macOS
+				// (kqueue) fsnotify holds an open FD per watched file, and in
+				// this version Close() alone does not release them all; without
+				// the Remove()s these FDs leak on every server/fed teardown,
+				// exhausting the process open-file limit across many tests.
+				for dirPath := range uniquePaths {
+					_ = watcher.Remove(dirPath)
+				}
 				watcher.Close()
 			}
 		}()

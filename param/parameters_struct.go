@@ -351,6 +351,39 @@ type Config struct {
 		HttpAuthTokenPassthrough bool `mapstructure:"httpauthtokenpassthrough" yaml:"HttpAuthTokenPassthrough"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
+		Metadata struct {
+			AccessFlushInterval time.Duration `mapstructure:"accessflushinterval" yaml:"AccessFlushInterval"`
+			AllowMultipart bool `mapstructure:"allowmultipart" yaml:"AllowMultipart"`
+			BatchBufferSize int `mapstructure:"batchbuffersize" yaml:"BatchBufferSize"`
+			BatchFlushInterval time.Duration `mapstructure:"batchflushinterval" yaml:"BatchFlushInterval"`
+			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+			Endpoint string `mapstructure:"endpoint" yaml:"Endpoint"`
+			ErrorAfter time.Duration `mapstructure:"errorafter" yaml:"ErrorAfter"`
+			EtagPolicy string `mapstructure:"etagpolicy" yaml:"EtagPolicy"`
+			History struct {
+				PruneBatchSize int `mapstructure:"prunebatchsize" yaml:"PruneBatchSize"`
+				PruneInterval time.Duration `mapstructure:"pruneinterval" yaml:"PruneInterval"`
+				RetentionDays int `mapstructure:"retentiondays" yaml:"RetentionDays"`
+			} `mapstructure:"history" yaml:"History"`
+			MaxBackoff time.Duration `mapstructure:"maxbackoff" yaml:"MaxBackoff"`
+			MaxInflight int `mapstructure:"maxinflight" yaml:"MaxInflight"`
+			MaxMetadataBytes int `mapstructure:"maxmetadatabytes" yaml:"MaxMetadataBytes"`
+			MaxQueuedBytesPerNamespace int `mapstructure:"maxqueuedbytespernamespace" yaml:"MaxQueuedBytesPerNamespace"`
+			MaxQueuedPerNamespace int `mapstructure:"maxqueuedpernamespace" yaml:"MaxQueuedPerNamespace"`
+			MetadataPartName string `mapstructure:"metadatapartname" yaml:"MetadataPartName"`
+			MinBackoff time.Duration `mapstructure:"minbackoff" yaml:"MinBackoff"`
+			Mode string `mapstructure:"mode" yaml:"Mode"`
+			ObjectPartName string `mapstructure:"objectpartname" yaml:"ObjectPartName"`
+			RatePerSecond int `mapstructure:"ratepersecond" yaml:"RatePerSecond"`
+			ReconcileEnabled bool `mapstructure:"reconcileenabled" yaml:"ReconcileEnabled"`
+			ReconcileInterval time.Duration `mapstructure:"reconcileinterval" yaml:"ReconcileInterval"`
+			ReconcileSettleWindow time.Duration `mapstructure:"reconcilesettlewindow" yaml:"ReconcileSettleWindow"`
+			RequestTimeout time.Duration `mapstructure:"requesttimeout" yaml:"RequestTimeout"`
+			TokenLifetime time.Duration `mapstructure:"tokenlifetime" yaml:"TokenLifetime"`
+			TrackAccess bool `mapstructure:"trackaccess" yaml:"TrackAccess"`
+			TrackExtra bool `mapstructure:"trackextra" yaml:"TrackExtra"`
+			WarnAfter time.Duration `mapstructure:"warnafter" yaml:"WarnAfter"`
+		} `mapstructure:"metadata" yaml:"Metadata"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		MultiuserMinID int `mapstructure:"multiuserminid" yaml:"MultiuserMinID"`
@@ -368,6 +401,12 @@ type Config struct {
 		PStoreMetadataBackupsToKeep int `mapstructure:"pstoremetadatabackupstokeep" yaml:"PStoreMetadataBackupsToKeep"`
 		PStoreStorageDirs any `mapstructure:"pstorestoragedirs" yaml:"PStoreStorageDirs"`
 		Port int `mapstructure:"port" yaml:"Port"`
+		Posc struct {
+			Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+			FileTimeout time.Duration `mapstructure:"filetimeout" yaml:"FileTimeout"`
+			KeepaliveInterval time.Duration `mapstructure:"keepaliveinterval" yaml:"KeepaliveInterval"`
+			Prefix string `mapstructure:"prefix" yaml:"Prefix"`
+		} `mapstructure:"posc" yaml:"Posc"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
 		S3Bucket string `mapstructure:"s3bucket" yaml:"S3Bucket"`
@@ -901,6 +940,39 @@ type configWithType struct {
 		HttpAuthTokenPassthrough struct { Type string; Value bool }
 		HttpServiceUrl struct { Type string; Value string }
 		IssuerMode struct { Type string; Value string }
+		Metadata struct {
+			AccessFlushInterval struct { Type string; Value time.Duration }
+			AllowMultipart struct { Type string; Value bool }
+			BatchBufferSize struct { Type string; Value int }
+			BatchFlushInterval struct { Type string; Value time.Duration }
+			Enabled struct { Type string; Value bool }
+			Endpoint struct { Type string; Value string }
+			ErrorAfter struct { Type string; Value time.Duration }
+			EtagPolicy struct { Type string; Value string }
+			History struct {
+				PruneBatchSize struct { Type string; Value int }
+				PruneInterval struct { Type string; Value time.Duration }
+				RetentionDays struct { Type string; Value int }
+			}
+			MaxBackoff struct { Type string; Value time.Duration }
+			MaxInflight struct { Type string; Value int }
+			MaxMetadataBytes struct { Type string; Value int }
+			MaxQueuedBytesPerNamespace struct { Type string; Value int }
+			MaxQueuedPerNamespace struct { Type string; Value int }
+			MetadataPartName struct { Type string; Value string }
+			MinBackoff struct { Type string; Value time.Duration }
+			Mode struct { Type string; Value string }
+			ObjectPartName struct { Type string; Value string }
+			RatePerSecond struct { Type string; Value int }
+			ReconcileEnabled struct { Type string; Value bool }
+			ReconcileInterval struct { Type string; Value time.Duration }
+			ReconcileSettleWindow struct { Type string; Value time.Duration }
+			RequestTimeout struct { Type string; Value time.Duration }
+			TokenLifetime struct { Type string; Value time.Duration }
+			TrackAccess struct { Type string; Value bool }
+			TrackExtra struct { Type string; Value bool }
+			WarnAfter struct { Type string; Value time.Duration }
+		}
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		MultiuserMinID struct { Type string; Value int }
@@ -918,6 +990,12 @@ type configWithType struct {
 		PStoreMetadataBackupsToKeep struct { Type string; Value int }
 		PStoreStorageDirs struct { Type string; Value any }
 		Port struct { Type string; Value int }
+		Posc struct {
+			Enabled struct { Type string; Value bool }
+			FileTimeout struct { Type string; Value time.Duration }
+			KeepaliveInterval struct { Type string; Value time.Duration }
+			Prefix struct { Type string; Value string }
+		}
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }

@@ -489,8 +489,8 @@ func GenerateCert() error {
 			tlsCertPrivateKeyExists = true
 			// Check that CA is also present
 			caCert := param.Server_TLSCACertificateFile.GetString()
-			if _, err := os.Open(caCert); err == nil {
-				file.Close()
+			if caFile, err := os.Open(caCert); err == nil {
+				caFile.Close()
 				// Check that the CA is a valid CA
 				if _, err := LoadCertificate(caCert); err != nil {
 					return errors.Wrap(err, "failed to load CA cert")

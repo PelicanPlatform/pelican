@@ -220,7 +220,13 @@ func TestAcquireServerLock_ShortTimeout(t *testing.T) {
 
 	require.Error(t, err, "Should fail with short timeout when lock is held")
 	assert.Nil(t, fd2, "Second lock file descriptor should be nil")
-	assert.Less(t, elapsed, 200*time.Millisecond, "Should fail relatively quickly with short timeout")
+	// The meaningful checks above are that the second acquisition FAILS and
+	// returns a nil handle. The elapsed-time bound only guards against the
+	// timeout being ignored and the call blocking indefinitely; keep it
+	// generous so scheduler jitter on a loaded CI runner (observed ~320ms for
+	// a 10ms timeout) does not flake it. A real hang would trip the test
+	// binary's own timeout long before this.
+	assert.Less(t, elapsed, 2*time.Second, "Short timeout should not block indefinitely")
 }
 
 func TestAcquireServerLock_SymlinkDetection(t *testing.T) {

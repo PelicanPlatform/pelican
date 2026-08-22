@@ -284,6 +284,10 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		log.WithFields(logFields).Debug("Cache callback gin context cancelled before passing to handler")
 		ginCtx.AbortWithStatus(http.StatusBadGateway)
 		return
+	case <-pendingRev.done:
+		log.WithFields(logFields).Debug("Broker state reset before passing callback to handler")
+		ginCtx.AbortWithStatus(http.StatusBadGateway)
+		return
 	case pendingRev.channel <- ginCtx.Writer:
 		break
 	}
@@ -293,6 +297,9 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	// written back.
 	select {
 	case <-pendingRev.channel:
+		return
+	case <-pendingRev.done:
+		log.WithFields(logFields).Debug("Broker state reset while waiting for handler")
 		return
 	case <-ctx.Done():
 		log.WithFields(logFields).Debug("Cache callback context cancelled while waiting for handler")
