@@ -676,15 +676,21 @@ func TestRecordAdServerRelocation(t *testing.T) {
 	oldURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org:8443"}
 	newURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org"}
 
-	mkAd := func(u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
+	const registryPrefix = "/origins/tutorial-origin.example.org"
+
+	mkAdIn := func(prefix string, u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
 		ad := server_structs.ServerAd{
-			URL:    u,
-			Type:   server_structs.OriginType.String(),
-			Status: status,
+			URL:            u,
+			Type:           server_structs.OriginType.String(),
+			Status:         status,
+			RegistryPrefix: prefix,
 		}
 		ad.Name = srvName
 		ad.StartTime = startTime
 		return ad
+	}
+	mkAd := func(u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
+		return mkAdIn(registryPrefix, u, srvName, startTime, status)
 	}
 	nsAds := []server_structs.NamespaceAd{}
 
@@ -730,6 +736,40 @@ func TestRecordAdServerRelocation(t *testing.T) {
 		recordAd(context.Background(), mkAd(other, "SOME-OTHER-ORIGIN", 2000, ""), &nsAds, true)
 		assert.True(t, serverAds.Has(oldURL.String()), "different names are different servers")
 		assert.True(t, serverAds.Has(other.String()))
+	})
+
+	t.Run("co-hosted servers sharing a hostname-derived name coexist", func(t *testing.T) {
+		// Name falls back to the hostname when Xrootd.Sitename is unset, so
+		// two origins on one host advertise under the same name at different
+		// ports. They are separate registrations and both must stay: this is
+		// how the cross-origin TPC tests are built, and treating one as a
+		// relocation of the other silently removed an origin mid-test.
+		defer serverAds.DeleteAll()
+		const sharedName = "co-hosted.example.org"
+		first := url.URL{Scheme: "https", Host: "co-hosted.example.org:34233"}
+		second := url.URL{Scheme: "https", Host: "co-hosted.example.org:43335"}
+
+		recordAd(context.Background(), mkAdIn("/origins/first", first, sharedName, 1000, ""), &nsAds, true)
+		recordAd(context.Background(), mkAdIn("/origins/second", second, sharedName, 2000, ""), &nsAds, true)
+
+		assert.True(t, serverAds.Has(first.String()),
+			"a co-hosted origin must not be evicted as though the other had moved")
+		assert.True(t, serverAds.Has(second.String()), "the second origin must be recorded")
+	})
+
+	t.Run("relocation still applies within one registration", func(t *testing.T) {
+		// The guard above keys on the registry prefix, so a genuine move --
+		// same registration, new endpoint -- must still collapse to one ad.
+		defer serverAds.DeleteAll()
+		const sharedName = "co-hosted.example.org"
+		before := url.URL{Scheme: "https", Host: "co-hosted.example.org:34233"}
+		after := url.URL{Scheme: "https", Host: "co-hosted.example.org:43335"}
+
+		recordAd(context.Background(), mkAdIn("/origins/same", before, sharedName, 1000, ""), &nsAds, true)
+		recordAd(context.Background(), mkAdIn("/origins/same", after, sharedName, 2000, ""), &nsAds, true)
+
+		assert.True(t, serverAds.Has(after.String()), "the new endpoint must be recorded")
+		assert.False(t, serverAds.Has(before.String()), "the endpoint it moved off must not linger")
 	})
 
 	t.Run("same-name-different-server-type-coexists", func(t *testing.T) {

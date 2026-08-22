@@ -337,6 +337,19 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			if sib == nil || sib.FromTopology || sib.Name != sAd.Name || sib.Type != sAd.Type {
 				continue
 			}
+			// A shared name is not enough to conclude these are the same
+			// server. Name falls back to the hostname when Xrootd.Sitename
+			// is unset, so two origins on one host -- different ports,
+			// different exports, both perfectly legitimate -- advertise
+			// under the same name and would otherwise evict each other.
+			// The registry prefix is what actually identifies the
+			// registration: a server that moves endpoints keeps it, and two
+			// co-hosted servers do not share one. Without it on both sides
+			// there is nothing to distinguish the two cases, so leave them
+			// alone.
+			if sib.RegistryPrefix == "" || sAd.RegistryPrefix == "" || sib.RegistryPrefix != sAd.RegistryPrefix {
+				continue
+			}
 			if sib.GetStartTime() <= 0 {
 				continue
 			}
