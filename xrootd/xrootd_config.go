@@ -543,10 +543,33 @@ func enableSqliteWAL(dbPath string) error {
 	return nil
 }
 
+// serverLaunchesXrootd reports whether this server will actually start an
+// XRootD process. The native backends (posixv2, pstore, s3v2, httpsv2,
+// globusv2, ssh) and the v2 cache are served in-process by pelican and
+// never spawn the daemon.
+func serverLaunchesXrootd(server server_structs.XRootDServer) bool {
+	switch st := server.GetServerType(); {
+	case st.IsEnabled(server_structs.CacheType):
+		return !param.Cache_EnableV2.GetBool()
+	case st.IsEnabled(server_structs.OriginType):
+		return server_structs.OriginStorageType(param.Origin_StorageType.GetString()).UsesXRootD()
+	default:
+		// Unrecognized server kind: keep the conservative behavior and
+		// require the binary.
+		return true
+	}
+}
+
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
-	// Check XRootD version before proceeding with environment setup
-	if err := CheckXrootdVersion(); err != nil {
-		return err
+	// Only require the XRootD binary when this server will run one.
+	// CheckDefaults calls this for every server, so an unconditional
+	// version probe made XRootD a hard startup dependency of deployments
+	// that never launch it — a native-backend origin or a v2 cache would
+	// refuse to start on a host without it.
+	if serverLaunchesXrootd(server) {
+		if err := CheckXrootdVersion(); err != nil {
+			return err
+		}
 	}
 
 	uid, err := config.GetDaemonUID()
