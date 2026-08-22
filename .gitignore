@@ -37,3 +37,8 @@ e2e_fed_tests.test
 # `go build ./lotman/cshared` drops its output here, named after the package
 # directory. The shared library is built via `make lotman-shared` instead.
 /lotman/cshared/cshared
+
+# On-disk queue segments and their lock file, left in the package directory by
+# a test that opens its queue with a relative path.
+/local_cache/*.dque
+/local_cache/lock.lock
