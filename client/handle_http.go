@@ -456,6 +456,7 @@ type (
 	identTransferOptionSourceTokenProvider      struct{}
 	identTransferOptionNonInteractive           struct{}
 	identTransferOptionStatUploadDestination    struct{}
+	identTransferOptionLazyStat                 struct{}
 	identTransferOptionRejectCollections        struct{}
 	identTransferOptionObjectMetadata           struct{}
 	identTransferOptionObjectMetadataFile       struct{}
@@ -1208,6 +1209,21 @@ func WithDestinationToken(token string) TransferOption {
 // no-op; for put operations it behaves identically to WithTokenLocation.
 func WithDestinationTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionDestinationTokenLocation{}, location)
+}
+
+// WithLazyStat defers the metadata lookup a read-mode OpenFile would
+// otherwise perform before returning the handle. A reader that only asks for
+// byte ranges never needs the object's size: end-of-file arrives as the
+// server's own 416, and the operations that do need a size (Stat, Seek from
+// the end, ReadDir) fetch one on demand.
+//
+// This trades a fail-fast open for a round trip per open. A caller reading
+// many objects it already knows exist -- a filesystem walking its own block
+// store, say -- wants that trade; one that opens a path a user typed
+// probably does not. PelicanFS.Open ignores this option and always stats,
+// because io/fs requires opening a missing file to fail.
+func WithLazyStat(enable bool) TransferOption {
+	return option.New(identTransferOptionLazyStat{}, enable)
 }
 
 // WithStatUploadDestination tells DoStat that the path being stat'ed is the
@@ -2038,6 +2054,19 @@ func (te *TransferEngine) runJobHandler() error {
 	}
 }
 
+// uploadTokenOperation returns the token operation used when acquiring a
+// credential for an upload. By default only object creation is needed
+// (storage.create); when Client.EnableOverwrites is set, an upload may
+// replace an existing object — an action that causes data loss and therefore
+// requires storage.modify, requested via the delete operation bit.
+func uploadTokenOperation() config.TokenOperation {
+	operation := config.TokenWrite
+	if param.Client_EnableOverwrites.GetBool() {
+		operation.Set(config.TokenDelete)
+	}
+	return operation
+}
+
 // Create a new transfer job for the client
 //
 // The returned object can be further customized as desired.
@@ -2062,7 +2091,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 	operation := config.TokenRead
 	if upload {
-		operation = config.TokenWrite
+		operation = uploadTokenOperation()
 	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
@@ -3759,9 +3788,23 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		fileWriter = io.Discard
 	}
 
-	// Close the custom writer at the end if provided
+	// Close the custom writer at the end if provided. A pipe-backed writer
+	// (WithWriter — the io/fs read path) must learn about a failed transfer
+	// at Read time: a plain Close hands the reader a clean EOF, and a
+	// failed download becomes indistinguishable from an empty object (the
+	// error only surfaces through the results channel, which the reader may
+	// race). CloseWithError propagates the failure into the reader's Read;
+	// with a nil error it behaves exactly like Close.
 	if fileCloser != nil {
 		defer func() {
+			xferErr := err
+			if xferErr == nil && transferResults.Error != nil {
+				xferErr = transferResults.Error
+			}
+			if cwe, ok := fileCloser.(interface{ CloseWithError(error) error }); ok {
+				_ = cwe.CloseWithError(xferErr)
+				return
+			}
 			if closeErr := fileCloser.Close(); closeErr != nil && err == nil {
 				err = closeErr
 			}
