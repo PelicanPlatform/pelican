@@ -312,8 +312,11 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 	pf.transferStarted = true
 	pf.transferOffset = 0
 
-	// Create a transfer job with the pipe writer
-	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, WithWriter(pw))
+	// Create a transfer job with the pipe writer, forwarding the
+	// filesystem-level transfer options (checksum preferences, etc.).
+	opts := append([]TransferOption{}, pf.options...)
+	opts = append(opts, WithWriter(pw))
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, opts...)
 	if err != nil {
 		pw.Close()
 		return 0, err
@@ -556,8 +559,11 @@ func (pf *PelicanFile) startTransferWrite() error {
 	pf.transferStarted = true
 	pf.writePosition = 0
 
-	// Create a transfer job with the pipe reader
-	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, WithReader(pr))
+	// Create a transfer job with the pipe reader, forwarding the
+	// filesystem-level transfer options (checksum preferences, etc.).
+	opts := append([]TransferOption{}, pf.options...)
+	opts = append(opts, WithReader(pr))
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, opts...)
 	if err != nil {
 		pr.Close()
 		pw.Close()

@@ -622,15 +622,57 @@ func createAllChecksumHashes() (writers []io.Writer, types []ChecksumType) {
 	return
 }
 
+// checksumFallbacksSeen tracks which fallback checksum algorithms have
+// already produced a warning this process, so repeated fallbacks (one per
+// transfer in bulk workloads) log at debug level instead.
+var checksumFallbacksSeen sync.Map
+
+// serviceDigests remembers, per object-server host, which digest algorithms
+// the service most recently reported. When the caller requests no specific
+// checksum types, verification defaults to what this service is known to
+// provide; first contact still asks for the platform default (crc32c).
+var serviceDigests sync.Map // string (host) -> []ChecksumType
+
+// rememberServiceDigests records the digest algorithms a service reported so
+// later transfers to it can default their verification accordingly.
+func rememberServiceDigests(host string, infos []ChecksumInfo) {
+	if host == "" || len(infos) == 0 {
+		return
+	}
+	types := make([]ChecksumType, 0, len(infos))
+	for _, info := range infos {
+		types = append(types, info.Algorithm)
+	}
+	serviceDigests.Store(host, types)
+}
+
+// defaultChecksumTypesForService returns the checksum types to verify against
+// when the caller requested none: the set this service last reported, falling
+// back to the global default for services we have not heard from yet.
+func defaultChecksumTypesForService(host string) []ChecksumType {
+	if v, ok := serviceDigests.Load(host); ok {
+		if types, ok := v.([]ChecksumType); ok && len(types) > 0 {
+			return types
+		}
+	}
+	return []ChecksumType{AlgDefault}
+}
+
 // verifyTransferChecksums compares server-provided checksums against locally-computed ones.
 //
 // It tries to match any server-provided checksum against the computed values. If the match
 // is for a type the client didn't explicitly request (e.g., the server returned MD5 when
 // CRC32C was requested), a warning is logged about the fallback. Returns whether verification
 // succeeded and any error (e.g., checksum mismatch or missing required checksum).
+// quietFallbacks names algorithms whose use in place of the requested ones
+// should not be reported as a surprise: the caller expressed no preference
+// and this service is already known to provide these digests. It affects
+// logging only -- verification itself is unchanged, as is the set of
+// algorithms reported back to the caller in ClientChecksums.
 func verifyTransferChecksums(
 	allComputed map[ChecksumType][]byte,
 	requestedTypes []ChecksumType,
+	quietFallbacks []ChecksumType,
 	serverChecksums []ChecksumInfo,
 	requireChecksum bool,
 	fields log.Fields,
@@ -649,6 +691,10 @@ func verifyTransferChecksums(
 	for _, t := range requestedTypes {
 		requestedSet[t] = true
 	}
+	quietSet := make(map[ChecksumType]bool, len(quietFallbacks))
+	for _, t := range quietFallbacks {
+		quietSet[t] = true
+	}
 
 	for _, serverCk := range serverChecksums {
 		clientVal, ok := allComputed[serverCk.Algorithm]
@@ -666,9 +712,28 @@ func verifyTransferChecksums(
 			return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 		}
 		if !requestedSet[serverCk.Algorithm] {
-			log.WithFields(fields).Warnf(
-				"Requested checksum type(s) not provided by server; verified transfer using %s instead",
-				HttpDigestFromChecksum(serverCk.Algorithm))
+			if quietSet[serverCk.Algorithm] {
+				// Not what we asked for, but what this service is known to
+				// provide, and the caller expressed no preference.
+				log.WithFields(fields).Debugf("Checksum %s matches: %s",
+					HttpDigestFromChecksum(serverCk.Algorithm),
+					checksumValueToHttpDigest(serverCk.Algorithm, serverCk.Value))
+				return true, nil
+			}
+			// This fires for every transfer against a server that lacks the
+			// requested digest (e.g. an origin that only computes MD5 when
+			// CRC32C was requested) -- warn once per process per algorithm,
+			// then drop to debug so bulk workloads aren't flooded.
+			if _, seen := checksumFallbacksSeen.LoadOrStore(serverCk.Algorithm, struct{}{}); !seen {
+				log.WithFields(fields).Warnf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead"+
+						" (subsequent fallbacks will be logged at debug level)",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			} else {
+				log.WithFields(fields).Debugf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			}
 		} else {
 			log.WithFields(fields).Debugf("Checksum %s matches: %s",
 				HttpDigestFromChecksum(serverCk.Algorithm),
@@ -3712,6 +3777,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// entries from a failed prestage API call, or len(transferUrls),
 			// which is pre-allocated and may contain nil entries for unattempted URLs.
 			gotChecksum := false
+			checksumHost := ""
 			// Iterate through the various sources to fetch the checksums, starting with the successful one.
 			for idx := 0; idx < downloadAttemptCount; idx++ {
 				url := transferUrls[downloadAttemptCount-idx-1]
@@ -3727,6 +3793,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if checksums, err := fetchChecksum(ctx, KnownChecksumTypes(), url, tokenContents, transfer.project); err == nil {
 					transferResults.ServerChecksums = checksums
 					gotChecksum = true
+					checksumHost = url.Host
+					rememberServiceDigests(url.Host, checksums)
 				}
 			}
 			if !gotChecksum && transfer.requireChecksum {
@@ -3741,8 +3809,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 			// Populate ClientChecksums with the originally-requested types for backward compatibility
 			requestedTypes := transfer.requestedChecksums
+			var quietFallbacks []ChecksumType
 			if len(requestedTypes) == 0 {
 				requestedTypes = []ChecksumType{AlgDefault}
+				// The caller asked for nothing in particular, so a digest
+				// this service is known to provide is not a surprise worth
+				// warning about.
+				quietFallbacks = defaultChecksumTypesForService(checksumHost)
 			}
 			transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 			for _, t := range requestedTypes {
@@ -3761,7 +3834,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"job": transfer.job.ID(),
 			}
 			if _, verifyErr := verifyTransferChecksums(
-				allComputed, requestedTypes, transferResults.ServerChecksums,
+				allComputed, requestedTypes, quietFallbacks, transferResults.ServerChecksums,
 				transfer.requireChecksum, fields,
 			); verifyErr != nil {
 				transferResults.Error = verifyErr
@@ -5247,6 +5320,7 @@ Loop:
 			}
 		} else {
 			transferResult.ServerChecksums = result
+			rememberServiceDigests(dest.Host, result)
 		}
 
 		// Build map of all computed checksums for verification
@@ -5257,8 +5331,13 @@ Loop:
 
 		// Populate ClientChecksums with the originally-requested types for backward compatibility
 		requestedTypes := transfer.requestedChecksums
+		var quietFallbacks []ChecksumType
 		if len(requestedTypes) == 0 {
 			requestedTypes = []ChecksumType{AlgDefault}
+			// The caller asked for nothing in particular, so a digest this
+			// service is known to provide is not a surprise worth warning
+			// about.
+			quietFallbacks = defaultChecksumTypesForService(dest.Host)
 		}
 		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 		for _, t := range requestedTypes {
@@ -5276,7 +5355,7 @@ Loop:
 			"job": transfer.job.ID(),
 		}
 		if _, verifyErr := verifyTransferChecksums(
-			allComputed, requestedTypes, transferResult.ServerChecksums,
+			allComputed, requestedTypes, quietFallbacks, transferResult.ServerChecksums,
 			transfer.requireChecksum, fields,
 		); verifyErr != nil {
 			transferResult.Error = verifyErr
