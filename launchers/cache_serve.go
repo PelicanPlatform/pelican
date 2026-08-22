@@ -81,6 +81,14 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return cacheServeWithPersistentCache(ctx, engine, egrp, modules)
 	}
 
+	// S3 storage targets are implemented only by the V2 cache.  Silently
+	// ignoring them would leave an operator believing their objects are being
+	// tiered to a bucket that is never written to.
+	if param.Cache_S3StorageTargets.IsSet() {
+		log.Warningln("Cache.S3StorageTargets is configured but Cache.EnableV2 is false; " +
+			"S3 storage targets are only supported by the V2 cache and will be ignored")
+	}
+
 	return cacheServeWithXRootD(ctx, engine, egrp, modules)
 }
 
