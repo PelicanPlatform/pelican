@@ -321,54 +321,6 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		return
 	}
 
-	// Recognize replacements: a registration name identifies one logical
-	// server, so when an ad arrives for a name that is already cached at a
-	// DIFFERENT endpoint (an operator moved the origin — new host, port, or
-	// scheme), the two ads must not compete as if they were independent
-	// servers. StartTime orders the instances; without it on both sides
-	// (older Pelican versions) we cannot tell a replacement from an
-	// intentional multi-instance setup and leave both ads alone.
-	if nameAuthorized && !sAd.FromTopology && sAd.GetStartTime() > 0 {
-		for key, item := range serverAds.Items() {
-			if key == rawURL || key == httpURL || key == httpsURL {
-				continue
-			}
-			sib := item.Value()
-			if sib == nil || sib.FromTopology || sib.Name != sAd.Name || sib.Type != sAd.Type {
-				continue
-			}
-			// A shared name is not enough to conclude these are the same
-			// server. Name falls back to the hostname when Xrootd.Sitename
-			// is unset, so two origins on one host -- different ports,
-			// different exports, both perfectly legitimate -- advertise
-			// under the same name and would otherwise evict each other.
-			// The registry prefix is what actually identifies the
-			// registration: a server that moves endpoints keeps it, and two
-			// co-hosted servers do not share one. Without it on both sides
-			// there is nothing to distinguish the two cases, so leave them
-			// alone.
-			if sib.RegistryPrefix == "" || sAd.RegistryPrefix == "" || sib.RegistryPrefix != sAd.RegistryPrefix {
-				continue
-			}
-			if sib.GetStartTime() <= 0 {
-				continue
-			}
-			if sAd.GetStartTime() > sib.GetStartTime() {
-				log.Infof("Server %s moved from %s to %s; evicting the ad for the old endpoint", sAd.Name, key, sAd.URL.String())
-				serverAds.Delete(key)
-			} else if sAd.GetStartTime() < sib.GetStartTime() {
-				// A straggler heartbeat from the instance that was replaced
-				// (e.g. the old origin is still running during a rollout).
-				// Refusing it keeps the stale endpoint from re-inserting
-				// itself between the replacement's heartbeats. If this is a
-				// deliberate rollback, the rejection self-heals once the
-				// newer ad expires.
-				log.Infof("Ignoring ad for server %s at %s: a newer instance of this server is registered at %s", sAd.Name, sAd.URL.String(), sib.URL.String())
-				return
-			}
-		}
-	}
-
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
 
 	adTTL := time.Until(sAd.Expiration)

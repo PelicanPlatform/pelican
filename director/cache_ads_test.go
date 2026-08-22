@@ -656,7 +656,7 @@ func TestGetCachedDowntimesDedup(t *testing.T) {
 // ads compete as if they were two independent servers -- and each request
 // can be matchmade to either, serving whichever namespace metadata (issuer,
 // collections URL) that instance advertised.
-func TestRecordAdServerRelocation(t *testing.T) {
+func TestRecordAdShutdownAndCoexistence(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		shutdownHealthTests()
@@ -693,25 +693,6 @@ func TestRecordAdServerRelocation(t *testing.T) {
 		return mkAdIn(registryPrefix, u, srvName, startTime, status)
 	}
 	nsAds := []server_structs.NamespaceAd{}
-
-	t.Run("replacement-evicts-old-endpoint", func(t *testing.T) {
-		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds, true)
-		require.True(t, serverAds.Has(oldURL.String()))
-
-		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds, true)
-		assert.True(t, serverAds.Has(newURL.String()), "replacement must be recorded")
-		assert.False(t, serverAds.Has(oldURL.String()), "old endpoint must not linger and compete for matchmaking")
-	})
-
-	t.Run("straggler-ad-from-replaced-instance-is-ignored", func(t *testing.T) {
-		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds, true)
-		// The old origin is still running and heartbeating during the rollout.
-		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds, true)
-		assert.True(t, serverAds.Has(newURL.String()))
-		assert.False(t, serverAds.Has(oldURL.String()), "an older instance must not re-insert itself")
-	})
 
 	t.Run("shutdown-ad-removes-entry-and-replacement-does-not-resurrect-it", func(t *testing.T) {
 		defer serverAds.DeleteAll()
@@ -755,21 +736,6 @@ func TestRecordAdServerRelocation(t *testing.T) {
 		assert.True(t, serverAds.Has(first.String()),
 			"a co-hosted origin must not be evicted as though the other had moved")
 		assert.True(t, serverAds.Has(second.String()), "the second origin must be recorded")
-	})
-
-	t.Run("relocation still applies within one registration", func(t *testing.T) {
-		// The guard above keys on the registry prefix, so a genuine move --
-		// same registration, new endpoint -- must still collapse to one ad.
-		defer serverAds.DeleteAll()
-		const sharedName = "co-hosted.example.org"
-		before := url.URL{Scheme: "https", Host: "co-hosted.example.org:34233"}
-		after := url.URL{Scheme: "https", Host: "co-hosted.example.org:43335"}
-
-		recordAd(context.Background(), mkAdIn("/origins/same", before, sharedName, 1000, ""), &nsAds, true)
-		recordAd(context.Background(), mkAdIn("/origins/same", after, sharedName, 2000, ""), &nsAds, true)
-
-		assert.True(t, serverAds.Has(after.String()), "the new endpoint must be recorded")
-		assert.False(t, serverAds.Has(before.String()), "the endpoint it moved off must not linger")
 	})
 
 	t.Run("same-name-different-server-type-coexists", func(t *testing.T) {
