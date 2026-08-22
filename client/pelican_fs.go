@@ -72,6 +72,16 @@ func NewPelicanFSWithPrefix(ctx context.Context, urlPrefix string, options ...Tr
 	}
 }
 
+// Engine returns the transfer engine backing this filesystem.  Callers that
+// also make one-off client calls (Stat, List) can pass it to the engine-aware
+// variants so those share this filesystem's director-response cache instead
+// of querying the director again.
+func (pfs *PelicanFS) Engine() *TransferEngine {
+	pfs.mu.Lock()
+	defer pfs.mu.Unlock()
+	return pfs.transferEngine
+}
+
 // Open opens the named file for reading and returns a fs.File that also
 // implements io.ReaderAt, io.Seeker, io.Writer (for write mode), and
 // fs.ReadDirFile (for directories).
@@ -119,9 +129,26 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		operation = config.TokenWrite
 	}
 
-	dirResp, err := getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
-	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	// Opens reuse the engine's cached director response (5 min TTL):
+	// filesystem-oriented callers open many objects under one namespace in
+	// quick succession and should neither pay a director round trip per
+	// open nor couple every operation to the director's availability.
+	// Reads and writes cache separately -- the flavor carries the verb, so
+	// a writer is never handed the caches a read was told to use -- as does
+	// each distinct query (?directread and friends steer matchmaking).
+	var dirResp server_structs.DirectorResponse
+	var err2 error
+	if pfs.transferEngine != nil && pfs.transferEngine.dirRespCache != nil {
+		flavor := NewDirRespFlavor(httpMethod, false, pUrl.RawQuery)
+		dirResp, err2 = pfs.transferEngine.dirRespCache.LookupOrLoad(pfs.ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pUrl, httpMethod, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err2 = getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
+	}
+	if err2 != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err2}
 	}
 
 	token := newTokenGenerator(pUrl, &dirResp, operation, true)

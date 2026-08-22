@@ -2031,6 +2031,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// transfer therefore keeps its token generator either way, so that a
 	// rejection carrying token hints has something to acquire onto.
 	directorless := copyUrl.FedInfo.DirectorEndpoint == "" && copyUrl.FedInfo.DiscoveryEndpoint != ""
+	copyUrlRef := &copyUrl
+	dirFlavor := NewDirRespFlavor(httpMethod, tj.cacheMode, copyUrl.RawQuery)
 	// A download against a directorless federation resolves locally and pays no
 	// round trip: it addresses the object to the host the user named and lets
 	// the origin's own rejection say what credential the namespace wants.  An
@@ -2039,10 +2041,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if directorless && !upload {
 		dirResp, err = resolveForRequest(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
 	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
-		copyUrlRef := &copyUrl
-		cacheMode := tj.cacheMode
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, dirFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", tj.cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
 	} else {
@@ -2098,7 +2098,22 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		// Skip re-query if the director already failed, or if there is no
 		// director to re-query.
 		if contents != "" && !directorFailed && !directorless {
-			dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
+			// A director may answer differently once it sees a credential,
+			// so this asks again -- but the answer holds for every object
+			// in the namespace that this same credential reaches, and a
+			// token-protected namespace would otherwise spend a director
+			// round trip on every single transfer.  Cache it under a
+			// credential-scoped flavor: another token (or none) keys
+			// elsewhere and never receives this answer.
+			authFlavor := dirFlavor.WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, authFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, contents, tj.cacheMode)
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
+			}
 			if err != nil {
 				var sce *StatusCodeError
 				if errors.As(err, &sce) {
@@ -2110,10 +2125,6 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.dirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
-			// Update the cache with the token-authenticated response.
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copyUrl.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, copyUrl.Path, dirResp)
-			}
 		}
 	} else {
 		tj.token = nil
@@ -2189,7 +2200,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	var dirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2222,7 +2233,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			tj.dirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
 	} else {
@@ -2311,9 +2322,15 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
 	var dirResp server_structs.DirectorResponse
 	destVerb := "COPY"
+	// The TPC destination flavor, pinned to COPY even when the query below
+	// falls back to PUT: the fallback is part of answering "where may this
+	// third-party copy write?", and only this resolution asks that question.
+	// Pinning it keeps lookup and store on one key, and keeps the entry from
+	// ever answering a plain PUT -- which would be a different question.
+	destFlavor := NewDirRespFlavor(destVerb, false, copyDestUrl.RawQuery)
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyDestUrlRef := &copyDestUrl
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
 			if qErr != nil {
 				// Fall back to PUT if COPY is not supported by the director
@@ -2355,7 +2372,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			tj.destDirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor.WithCredential(contents), dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
 			}
 		}
 	}
@@ -2364,7 +2381,8 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	var srcDirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copySrcUrlRef := &copySrcUrl
-		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		srcFlavor := NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery)
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, srcFlavor, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2395,7 +2413,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			tj.srcDirResp = srcDirResp
 			tj.srcToken.SetDirectorResponse(&srcDirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery).WithCredential(contents), srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
 			}
 		}
 	} else {
@@ -2473,7 +2491,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	if directorless {
 		dirResp, err = resolveForRequest(ctx, pelicanURL, http.MethodGet, "", false)
 	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2505,7 +2523,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 			}
 			token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
 	} else if !directorless {
