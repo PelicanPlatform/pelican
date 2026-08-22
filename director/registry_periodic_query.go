@@ -49,6 +49,46 @@ func init() {
 	allowedPrefixesForCachesLastSetTimestamp.Store(0)
 }
 
+// allowedPrefixesInitWait bounds how long a cache advertisement will be held
+// waiting for the director's allowed-prefixes data to arrive.
+//
+// The bound only has to cover the registry becoming reachable, because
+// LaunchRegistryPeriodicQuery retries every second until it is. It is set well
+// above that so an ordinarily slow federation startup does not turn a cache
+// away, and the wait ends as soon as the data lands. In practice the caller's
+// own timeout is the tighter bound: waitForAllowedPrefixesForCaches also
+// returns when the request context is cancelled.
+const allowedPrefixesInitWait = 30 * time.Second
+
+// waitForAllowedPrefixesForCaches blocks until the director has fetched the
+// allowed prefixes for caches at least once, reporting whether it did.
+//
+// It returns immediately once the data is present, and gives up when the
+// caller's context is cancelled or allowedPrefixesInitWait elapses.
+func waitForAllowedPrefixesForCaches(ctx context.Context) bool {
+	if allowedPrefixesForCachesLastSetTimestamp.Load() != 0 {
+		return true
+	}
+
+	deadline := time.NewTimer(allowedPrefixesInitWait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if allowedPrefixesForCachesLastSetTimestamp.Load() != 0 {
+				return true
+			}
+		case <-deadline.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 // convertListToSet converts a map of string to list of strings into a map of string to set of strings.
 func convertMapOfListToMapOfSet(input map[string][]string) map[string]map[string]struct{} {
 	result := make(map[string]map[string]struct{})
