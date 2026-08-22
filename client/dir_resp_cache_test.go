@@ -659,3 +659,59 @@ func TestDirRespCacheCredentialScoping(t *testing.T) {
 		assert.Empty(t, base.WithCredential("").Credential, "no token means no credential scoping")
 	})
 }
+
+// TestLookupOrLoadLoaderOutlivesCancelledCaller pins the property that makes
+// what a loader closes over matter.
+//
+// LookupOrLoad runs its loader on a goroutine with cancellation detached, so a
+// caller that gives up does not waste a query other waiters want. The
+// consequence is that the loader can still be running after the call that
+// created it has returned -- so anything it reads must be a value snapshotted
+// beforehand, never a field of a variable the caller may since have
+// reassigned. NewTransferJob's `tj` is a named return, and a nil-returning
+// error path there once turned exactly this into a segfault.
+//
+// If someone later makes the loader inherit the caller's cancellation, this
+// test fails and the hazard is gone; if they keep the detachment, it stays
+// documented.
+func TestLookupOrLoadLoaderOutlivesCancelledCaller(t *testing.T) {
+	cache := NewDirRespCache(5 * time.Minute)
+
+	loaderStarted := make(chan struct{})
+	release := make(chan struct{})
+	loaderFinished := make(chan struct{})
+	var loaderCtxErr error
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_, _ = cache.LookupOrLoad(ctx, testFederation, testFlavor, "/outlive/file.txt",
+			func(loaderCtx context.Context) (server_structs.DirectorResponse, string, error) {
+				close(loaderStarted)
+				<-release
+				// Recorded rather than asserted here: this runs on a
+				// different goroutine than the test body.
+				loaderCtxErr = loaderCtx.Err()
+				close(loaderFinished)
+				return makeDirResp("/outlive"), "/outlive", nil
+			})
+	}()
+
+	<-loaderStarted
+	// The originating caller gives up while the loader is mid-flight.
+	cancel()
+	close(release)
+
+	select {
+	case <-loaderFinished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("loader did not run to completion after its caller was cancelled")
+	}
+
+	assert.NoError(t, loaderCtxErr,
+		"the loader's context must not be cancelled along with its caller's")
+
+	// And the work it did is still usable by everyone else.
+	resp, ok := cache.Lookup(testFederation, testFlavor, "/outlive/file.txt")
+	assert.True(t, ok, "the completed load should have been stored")
+	assert.NotNil(t, resp)
+}

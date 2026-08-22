@@ -2163,7 +2163,17 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// rejection carrying token hints has something to acquire onto.
 	directorless := copyUrl.FedInfo.DirectorEndpoint == "" && copyUrl.FedInfo.DiscoveryEndpoint != ""
 	copyUrlRef := &copyUrl
-	dirFlavor := NewDirRespFlavor(httpMethod, tj.cacheMode, copyUrl.RawQuery)
+	// Snapshot the routing mode for the director loaders below rather than
+	// reading it off tj inside them. Those loaders run on a goroutine that
+	// DirRespCache.LookupOrLoad deliberately lets outlive this call -- it
+	// detaches cancellation so a caller that goes away does not waste the
+	// query other waiters are relying on -- while tj is this function's
+	// *named return*. Every `return nil, err` below therefore assigns nil to
+	// the very variable such a goroutine would be dereferencing, and
+	// tj.cacheMode on a nil tj is a segfault at offset 0x318 rather than a
+	// read of `false`.
+	cacheMode := tj.cacheMode
+	dirFlavor := NewDirRespFlavor(httpMethod, cacheMode, copyUrl.RawQuery)
 	// A download against a directorless federation resolves locally and pays no
 	// round trip: it addresses the object to the host the user named and lets
 	// the origin's own rejection say what credential the namespace wants.  An
@@ -2173,7 +2183,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		dirResp, err = resolveForRequest(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
 	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
 		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, dirFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", tj.cacheMode)
+			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
 	} else {
@@ -2239,7 +2249,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			authFlavor := dirFlavor.WithCredential(contents)
 			if tc.engine != nil && tc.engine.dirRespCache != nil {
 				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, authFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-					resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, contents, tj.cacheMode)
+					resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, contents, cacheMode)
 					return resp, resp.XPelNsHdr.Namespace, qErr
 				})
 			} else {
