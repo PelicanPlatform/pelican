@@ -1794,6 +1794,9 @@ func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, err
 // counts are reconciled by the periodic metadata scan and adjusted by the
 // object-cap trim; they are not maintained on the object hot path.
 func (cdb *CacheDB) SetObjectCount(storageID StorageID, namespaceID NamespaceID, count int64) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
 	if count < 0 {
 		count = 0
 	}
