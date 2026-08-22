@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -52,10 +53,101 @@ type directorResponse struct {
 	ApprovalError bool   `json:"approval_error"`
 }
 
+// retryableAdError is a director response that says "not now" rather than
+// "no": the ad was not accepted, but nothing about it was judged wrong.
+//
+// It exists because the cost of treating the two alike is asymmetric. A
+// permanent rejection is worth reporting and waiting on; a director that is
+// merely not ready yet -- one that has not finished fetching the allowed
+// prefixes for caches, say -- clears in seconds, while waiting for the next
+// advertisement cycle leaves the federation without this server for
+// Server.AdvertisementInterval, a minute by default.
+type retryableAdError struct {
+	status     int
+	retryAfter time.Duration
+	msg        string
+}
+
+func (e *retryableAdError) Error() string {
+	return fmt.Sprintf("director is not ready to accept this advertisement (HTTP %d): %s", e.status, e.msg)
+}
+
+// isRetryableAdStatus reports whether a status means "ask again shortly".
+//
+// Deliberately narrow: 503 is the director saying it is not ready, and 429 is
+// it saying not so fast. Everything else -- including 500 -- is treated as a
+// real failure, because retrying a genuinely broken director every couple of
+// seconds only adds load to something already in trouble.
+func isRetryableAdStatus(status int) bool {
+	return status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests
+}
+
+// parseAdRetryAfter reads a Retry-After header expressed in whole seconds,
+// which is the only form Pelican's own services send. An HTTP-date is valid
+// per RFC 9110 but is not produced here, and an unparsable or absent value
+// simply means "no hint" -- the caller supplies its own delay.
+//
+// The result is clamped so a hint cannot stall advertisement: a server that
+// asks for an hour still gets asked again on the caller's schedule.
+func parseAdRetryAfter(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	hint := time.Duration(seconds) * time.Second
+	if hint > maxAdRetryDelay {
+		return maxAdRetryDelay
+	}
+	return hint
+}
+
+const (
+	// adRetryAttempts is how many extra attempts a retryable rejection buys.
+	// Small on purpose: this is here to ride out a director still starting up,
+	// not to paper over one that is down. Once these are spent the ordinary
+	// advertisement cycle takes over, which is the behavior that existed
+	// before.
+	adRetryAttempts = 3
+	// defaultAdRetryDelay is used when the director sends no Retry-After.
+	defaultAdRetryDelay = 2 * time.Second
+	// maxAdRetryDelay caps both the hint and the default, keeping the whole
+	// retry sequence far short of an advertisement interval.
+	maxAdRetryDelay = 5 * time.Second
+)
+
 func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 	log.Debugf("About to advertise %d XRootD servers", len(servers))
 	start := time.Now()
+
 	err := Advertise(ctx, servers)
+	// A director that answered "not yet" is worth asking again right away.
+	// Without this the next attempt is a whole advertisement cycle out, so a
+	// director that was starting up for a few seconds costs this server a
+	// minute of not being matchmade -- the ad is simply missing from the
+	// federation for that long.
+	for attempt := 1; attempt <= adRetryAttempts; attempt++ {
+		var retryable *retryableAdError
+		if !errors.As(err, &retryable) {
+			break
+		}
+		delay := retryable.retryAfter
+		if delay <= 0 {
+			delay = defaultAdRetryDelay
+		}
+		log.Infof("Director is not ready to accept the advertisement (%v); retrying in %v (attempt %d of %d)",
+			retryable.msg, delay, attempt, adRetryAttempts)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			log.Debugln("Advertisement retry abandoned: context cancelled")
+			return
+		}
+		err = Advertise(ctx, servers)
+	}
+
 	duration := time.Since(start)
 	if err != nil {
 		log.Warningf("XRootD server advertise failed (duration %s): %v", duration.String(), err)
@@ -215,6 +307,15 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(respbody))
 				}
 				log.Warningln("Error response from", directorUrl.String(), "status:", resp.StatusCode, "message:", respSimpleError.Msg)
+				if isRetryableAdStatus(resp.StatusCode) {
+					// Keep the status and any hint, so the caller can tell
+					// "not yet" from "no" instead of waiting a full cycle.
+					return &retryableAdError{
+						status:     resp.StatusCode,
+						retryAfter: parseAdRetryAfter(resp.Header.Get("Retry-After")),
+						msg:        respSimpleError.Msg,
+					}
+				}
 				return errors.Errorf("error during director advertisement: %v", respSimpleError.Msg)
 			}
 			successCount.Add(1)

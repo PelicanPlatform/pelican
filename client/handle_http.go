@@ -265,6 +265,7 @@ type (
 		project            string
 		requireChecksum    bool
 		requestedChecksums []ChecksumType
+		skipChecksums      bool
 		err                error
 		writer             io.WriteCloser          // Optional writer for downloads
 		reader             io.ReadCloser           // Optional reader for uploads
@@ -317,6 +318,7 @@ type (
 		xferType           transferType
 		requestedChecksums []ChecksumType
 		requireChecksum    bool
+		skipChecksums      bool
 		recursive          bool
 		rejectCollections  bool // If true, error when the remote path is a collection
 		skipAcquire        bool
@@ -437,6 +439,7 @@ type (
 	identTransferOptionCollectionsUrl           struct{}
 	identTransferOptionChecksums                struct{}
 	identTransferOptionRequireChecksum          struct{}
+	identTransferOptionSkipChecksums            struct{}
 	identTransferOptionRecursive                struct{}
 	identTransferOptionDepth                    struct{}
 	identTransferOptionWriter                   struct{}
@@ -1307,6 +1310,20 @@ func WithObjectMetadataContentType(contentType string) TransferOption {
 	return option.New(identTransferOptionObjectMetadataBlobType{}, contentType)
 }
 
+// WithSkipChecksums suppresses the digest request a download otherwise makes
+// once the bytes are in hand.
+//
+// That request is a HEAD carrying Want-Digest, and it is worth making for an
+// object: it is what verifies the transfer. It is not worth making for a
+// response the caller has already decided it will neither store nor verify --
+// a cache streaming a collection's directory index, say. Servers are free to
+// ignore Want-Digest, and an XRootD origin asked to digest a collection
+// answers nothing at all, so the request sits until the transport's response
+// header timeout expires. The caller waiting on the download waits with it.
+func WithSkipChecksums() TransferOption {
+	return option.New(identTransferOptionSkipChecksums{}, true)
+}
+
 // Create an option to specify the token acquisition logic
 //
 // Token acquisition (e.g., using OAuth2 to get a token when one
@@ -1458,6 +1475,8 @@ func applyJobOptions(tj *TransferJob, options []TransferOption) {
 			tj.requestedChecksums = opt.Value().([]ChecksumType)
 		case identTransferOptionRequireChecksum{}:
 			tj.requireChecksum = opt.Value().(bool)
+		case identTransferOptionSkipChecksums{}:
+			tj.skipChecksums = opt.Value().(bool)
 		case identTransferOptionDryRun{}:
 			tj.dryRun = opt.Value().(bool)
 		case identTransferOptionMetadataChannel{}:
@@ -3120,6 +3139,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			srcToken:           job.job.srcToken,
 			requestedChecksums: job.job.requestedChecksums,
 			requireChecksum:    job.job.requireChecksum,
+			skipChecksums:      job.job.skipChecksums,
 			packOption:         packOption,
 			localPath:          job.job.localPath,
 			xferType:           job.job.xferType,
@@ -3931,6 +3951,16 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"url": transfer.remoteURL.String(),
 				"job": transfer.job.ID(),
 			}).Debugln("Skipping checksum verification for byte-range download")
+		} else if transfer.skipChecksums {
+			// The caller has said it will not verify this response and will
+			// not keep it, so the digest has no consumer. Asking anyway costs
+			// a round trip the caller waits on -- and against a server that
+			// declines to answer Want-Digest for this path, it costs the
+			// transport's full response header timeout.
+			log.WithFields(log.Fields{
+				"url": transfer.remoteURL.String(),
+				"job": transfer.job.ID(),
+			}).Debugln("Skipping checksum fetch at the caller's request")
 		} else {
 			// Fetch checksum of the downloaded file, compare it to the calculated.
 			// Use downloadAttemptCount (the number of download-loop iterations)
@@ -5797,6 +5827,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							remoteURL:          &url.URL{Path: remotePath},
 							requestedChecksums: job.job.requestedChecksums,
 							requireChecksum:    job.job.requireChecksum,
+							skipChecksums:      job.job.skipChecksums,
 							packOption:         transfers[0].PackOption,
 							localPath:          job.job.localPath,
 							xferType:           job.job.xferType,
@@ -5885,6 +5916,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					remoteURL:          &url.URL{Path: newPath},
 					requestedChecksums: job.job.requestedChecksums,
 					requireChecksum:    job.job.requireChecksum,
+					skipChecksums:      job.job.skipChecksums,
 					packOption:         transfers[0].PackOption,
 					localPath:          targetPath,
 					xferType:           job.job.xferType,

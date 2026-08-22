@@ -1170,19 +1170,30 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Check if the allowed prefixes for caches data from the registry
 	// has been initialized in the director
 	if sType == server_structs.CacheType {
-		// If the allowed prefix for caches data is not initialized,
-		// wait for it to be initialized for 3 seconds.
-		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
-			log.Warning("Allowed prefixes for caches data is not initialized. Waiting for initialization before continuing with processing cache server advertisement.")
-			start := time.Now()
-			// Wait until last set timestamp is updated
-			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
-				if time.Since(start) >= 3*time.Second {
-					log.Error("Allowed prefix for caches data was not initialized within the 3-second timeout")
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
+		// A cache ad that arrives before the director has its allowed prefixes
+		// cannot be judged yet, so hold it rather than turning it away. The
+		// registry fetch behind this retries every second until it succeeds,
+		// but a cache whose ad is refused does not offer itself again until
+		// its next advertisement -- Server.AdvertisementInterval, a minute by
+		// default, with no retry in between. Refusing therefore costs the
+		// federation a minute without this cache to settle a condition that
+		// usually clears in seconds.
+		if !waitForAllowedPrefixesForCaches(ctx.Request.Context()) {
+			log.Error("Allowed prefixes for caches data was not initialized before this cache advertisement had to be answered")
+			// Distinct from the stale case below: nothing is known to be
+			// wrong, the director is simply not ready, so say so with a
+			// retryable status rather than a 500.
+			//
+			// Note that Pelican's own advertiser does not read this hint --
+			// doAdvertise treats any failure alike and waits for its next
+			// cycle -- so this is correct HTTP for other clients rather than
+			// something that shortens the retry today.
+			ctx.Header("Retry-After", "1")
+			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "The Director has not yet fetched this cache's allowed prefixes from the Registry; please retry shortly.",
+			})
+			return
 		}
 
 		// If the allowed prefix for caches data is stale (older than 15 minutes),

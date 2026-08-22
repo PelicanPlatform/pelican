@@ -1997,6 +1997,15 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		client.WithWriter(dw),
 		client.WithMetadataChannel(metadataChan),
 	}
+	if dl.forceNoStore {
+		// The source is a collection, so this response is passed through and
+		// never stored -- nothing will ever compare a digest against it. The
+		// origin may also refuse to produce one: XRootD does not answer
+		// Want-Digest for a collection, leaving the request to sit until the
+		// response header timeout, with the client that asked for the listing
+		// waiting the whole time.
+		transferOpts = append(transferOpts, client.WithSkipChecksums())
+	}
 	if fedTP != nil {
 		transferOpts = append(transferOpts, client.WithFedToken(fedTP))
 	}
