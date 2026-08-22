@@ -1179,10 +1179,15 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		// federation a minute without this cache to settle a condition that
 		// usually clears in seconds.
 		if !waitForAllowedPrefixesForCaches(ctx.Request.Context()) {
-			log.Error("Allowed prefixes for caches data was not initialized in time; asking this cache to advertise again shortly")
+			log.Error("Allowed prefixes for caches data was not initialized before this cache advertisement had to be answered")
 			// Distinct from the stale case below: nothing is known to be
 			// wrong, the director is simply not ready, so say so with a
 			// retryable status rather than a 500.
+			//
+			// Note that Pelican's own advertiser does not read this hint --
+			// doAdvertise treats any failure alike and waits for its next
+			// cycle -- so this is correct HTTP for other clients rather than
+			// something that shortens the retry today.
 			ctx.Header("Retry-After", "1")
 			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
