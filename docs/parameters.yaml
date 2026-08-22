@@ -3236,6 +3236,97 @@ default: false
 components: ["cache"]
 hidden: true
 ---
+name: Cache.S3StorageTargets
+description: |+
+  A list of S3 storage targets the V2 (persistent) cache uses as additional object storage.
+  Once an object is fully downloaded to a local storage directory, the cache uploads it
+  (unencrypted) to a configured S3 bucket when the object size meets or exceeds
+  ${Cache.S3UploadThreshold}; the local copy is then removed and the object is served from S3.
+
+  Each entry is an object with the following keys:
+
+  - **ServiceUrl** (string, required): S3 endpoint URL (e.g. `https://s3.us-east-1.amazonaws.com`).
+  - **Region** (string, optional): the S3 region; defaults to `us-east-1`.
+  - **Bucket** (string, required): the bucket that holds cached objects.
+  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **UrlStyle** (string, optional): `path` (default) or `virtual` bucket addressing.
+  - **AccessKeyfile** (string, optional): file containing the S3 access key ID.
+  - **SecretKeyfile** (string, optional): file containing the S3 secret key.
+    Both keyfiles must be provided together; when omitted, the ambient AWS credential
+    chain is used.
+  - **MaxSize** (string, required): maximum bytes of cache data stored in the bucket
+    (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
+  - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
+    watermarks as a percentage of MaxSize; defaults follow ${Cache.HighWaterMark} and
+    ${Cache.LowWaterMark}.
+
+  Example YAML:
+  ```yaml
+  Cache:
+    S3StorageTargets:
+      - ServiceUrl: https://s3.example.com
+        Region: us-east-1
+        Bucket: pelican-cache
+        Prefix: objects
+        MaxSize: 10TB
+        AccessKeyfile: /etc/pelican/s3-access
+        SecretKeyfile: /etc/pelican/s3-secret
+  ```
+
+  **The cache assumes exclusive ownership of the bucket (or of the configured
+  Prefix within it).**  Its consistency sweep deletes any object under the prefix
+  it does not recognize, and crash recovery aborts all in-progress multipart
+  uploads there — do not share the prefix with other applications or with a
+  second cache instance.
+
+  This setting only has effect when `${Cache.EnableV2}` is true.
+type: object
+default: none
+components: ["cache"]
+---
+name: Cache.S3UploadThreshold
+description: |+
+  The minimum object size for the V2 cache to tier a completed object to an S3 storage
+  target configured via ${Cache.S3StorageTargets}.  Objects smaller than this threshold
+  stay on local storage.  Accepts byte units (e.g. "4MB", "16MiB").
+type: string
+default: 4MB
+components: ["cache"]
+---
+name: Cache.S3DisableRedirect
+description: |+
+  When objects are stored on an S3 storage target (${Cache.S3StorageTargets}), the V2 cache
+  by default redirects GET requests to a pre-signed S3 URL so clients download directly from
+  the bucket.  Set this to true to instead proxy the object bytes through the cache.
+
+  The pre-signed URL is self-authenticating and never carries the client's Pelican bearer
+  token.  Spec-compliant HTTP clients (including Pelican's own client) strip the Authorization
+  header when following a redirect to a different host, so the token is not disclosed to the
+  S3 provider.  Enable this option (proxy instead of redirect) if you serve private namespaces
+  to clients that forward Authorization across hosts (e.g. `curl --location-trusted`), or if
+  the S3 endpoint shares the cache's hostname, since in those cases a redirect could expose the
+  token to the S3 endpoint.
+type: bool
+default: false
+components: ["cache"]
+---
+name: Cache.S3PresignExpiry
+description: |+
+  The lifetime of pre-signed S3 URLs handed to clients when serving objects from an S3
+  storage target via redirect (see ${Cache.S3DisableRedirect}).
+type: duration
+default: 5m
+components: ["cache"]
+---
+name: Cache.S3PresignEvictionHold
+description: |+
+  How long after handing out a pre-signed S3 URL the referenced object is protected from
+  cache eviction.  This prevents deleting an object out from under a client that is still
+  downloading it via a pre-signed URL.  Should be at least ${Cache.S3PresignExpiry}.
+type: duration
+default: 5m
+components: ["cache"]
+---
 name: Cache.WorkerCount
 description: |+
   The number of concurrent transfer workers the V2 (persistent) cache uses to fetch objects from upstream

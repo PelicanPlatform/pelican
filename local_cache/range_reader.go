@@ -164,6 +164,12 @@ type RangeReader struct {
 	// because a pipe is forward-only.
 	noStoreReader io.ReadCloser
 
+	// remoteStream serves objects that reside on an S3 storage target when
+	// redirect is disabled (proxy mode).  Unlike noStoreReader it is
+	// seekable, so http.ServeContent works normally.  When set, Read/Seek
+	// delegate here and the block-storage path is bypassed.
+	remoteStream *s3ObjectStream
+
 	// size is the content length of a no-store response.  It is only valid
 	// when noStoreReader is set.
 	size int64
@@ -279,6 +285,11 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 	// Streaming no-store mode: forward-only pipe from origin
 	if rr.noStoreReader != nil {
 		return rr.noStoreReader.Read(p)
+	}
+
+	// S3 proxy mode: delegate to the remote stream
+	if rr.remoteStream != nil {
+		return rr.remoteStream.Read(p)
 	}
 
 	if rr.position > rr.end {
@@ -590,6 +601,9 @@ func (rr *RangeReader) Close() error {
 	if rr.noStoreReader != nil {
 		err = rr.noStoreReader.Close()
 	}
+	if rr.remoteStream != nil {
+		err = rr.remoteStream.Close()
+	}
 	if rr.onClose != nil {
 		rr.onClose()
 	}
@@ -659,6 +673,11 @@ func (rr *RangeReader) Seek(offset int64, whence int) (int64, error) {
 	// Streaming no-store mode: cannot seek a pipe
 	if rr.noStoreReader != nil {
 		return 0, errors.New("seek not supported on streaming no-store response")
+	}
+
+	// S3 proxy mode: the remote stream is seekable
+	if rr.remoteStream != nil {
+		return rr.remoteStream.Seek(offset, whence)
 	}
 
 	var newPos int64
