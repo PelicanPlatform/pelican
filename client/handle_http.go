@@ -5769,9 +5769,16 @@ func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.
 	if gowebdav.IsErrNotFound(err) {
 		return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 	}
-	if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-		// The origin returns 500 when asked to ReadDir on a plain object;
-		// fall back to Stat so we can still surface a single FileInfo for it.
+	// Two different errors can mean "this path is an object, not a
+	// collection". An XRootD origin answers ReadDir on a plain object with a
+	// 500. An origin that answers the PROPFIND correctly -- 207 with a single
+	// non-collection response for the object itself -- instead trips
+	// gowebdav's own check that "self" must be a collection, which surfaces as
+	// a synthesized 405. Neither is a refusal to list, and a Stat settles
+	// which case we are in before we report one.
+	isServerErr := gowebdav.IsErrCode(err, http.StatusInternalServerError)
+	isMethodNotAllowed := gowebdav.IsErrCode(err, http.StatusMethodNotAllowed)
+	if isServerErr || isMethodNotAllowed {
 		var info fs.FileInfo
 		statErr := retryWebDavOperation("Stat", func() error {
 			var err error
@@ -5779,13 +5786,16 @@ func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.
 			return err
 		})
 		if statErr != nil {
-			return nil, errors.Wrap(statErr, "failed to stat remote path")
-		}
-		if !info.IsDir() {
+			if isServerErr {
+				return nil, errors.Wrap(statErr, "failed to stat remote path")
+			}
+			// For a 405 a failed stat only means we cannot show the path is an
+			// object; fall through and report that listings are unsupported.
+		} else if !info.IsDir() {
 			return info, nil
 		}
 	}
-	if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+	if isMethodNotAllowed {
 		// We replace the error from gowebdav with our own because gowebdav
 		// returns "ReadDir /prefix/different-path/: 405" which is not very
 		// user friendly.
