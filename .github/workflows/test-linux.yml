@@ -115,6 +115,26 @@ jobs:
             echo "$HOME/go/bin" >> $GITHUB_PATH
           fi
 
+      # The libLotMan shared library is the one artifact in the tree that needs
+      # cgo and -buildmode=c-shared. Nothing else in CI compiles it: the
+      # goreleaser configs build only ./cmd with CGO_ENABLED=0, and "go build
+      # ./..." skips a main package's link step under cross-compilation. Without
+      # this step a change that breaks the C ABI surface -- or the legacy ABI
+      # variant, which no test binary selects -- reaches a release unnoticed.
+      - name: Build the libLotMan shared library (both ABI variants)
+        if: matrix.binary_name == 'pelican-server'
+        run: |
+          set -eux
+          # -buildvcs=false: the checkout inside the container is owned by a
+          # different user than the build process, so git refuses it as a
+          # dubious repository and the VCS stamping aborts the whole command
+          # with "error obtaining VCS status: exit status 128".
+          go build -buildvcs=false -buildmode=c-shared \
+            -o /tmp/libLotMan.so ./lotman/cshared
+          test -s /tmp/libLotMan.h
+          go build -buildvcs=false -buildmode=c-shared -tags lotman_legacy_api \
+            -o /tmp/libLotMan-legacy.so ./lotman/cshared
+
       - name: Run "go test"
         env:
           JUNIT_FILE: junit-${{ matrix.binary_name }}.xml

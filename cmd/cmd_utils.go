@@ -51,6 +51,8 @@ const (
 	serverDowntimeAPIPath = "/api/v1.0/downtime"
 	// The API path for API key management
 	serverApiKeyAPIPath = "/api/v1.0/tokens"
+	// The API path for lot (storage reservation) management
+	serverLotsAPIPath = "/api/v1.0/lots"
 )
 
 // Given an input map of flag-->viper config, convert any comma-delineated
@@ -304,6 +306,31 @@ func adminTokenIssuerHint() string {
 			colocated, param.Server_Modules.GetName())
 	}
 	return hint
+}
+
+// Helper function to validate the cache web URL and construct the full lots API endpoint URL
+func constructLotsAPIURL(serverURLStr string) (*url.URL, error) {
+	if serverURLStr == "" {
+		return nil, errors.New("The --server flag providing the cache's web URL is required")
+	}
+	serverURLStr = strings.TrimSuffix(serverURLStr, "/") // Normalize URL
+	baseURL, err := url.Parse(serverURLStr)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Invalid server URL format: %s", serverURLStr)
+	}
+	// A Pelican server must use HTTPS scheme
+	if baseURL.Scheme != "https" {
+		return nil, errors.Errorf("Server URL must have an https scheme: %s", serverURLStr)
+	}
+	if baseURL.Host == "" {
+		return nil, errors.Errorf("Server URL must include a hostname: %s", serverURLStr)
+	}
+	// Construct the full API endpoint URL
+	targetURL, err := baseURL.Parse(serverLotsAPIPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to construct lots API URL")
+	}
+	return targetURL, nil
 }
 
 // Helper function to load or generate token that could access server's web API with admin privileges

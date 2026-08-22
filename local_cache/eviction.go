@@ -22,6 +22,7 @@ import (
 	"context"
 	fmt "fmt"
 	"math"
+	"math/big"
 	rand "math/rand/v2"
 	"sort"
 	"sync"
@@ -42,9 +43,39 @@ const rrTableSize = 1024
 // Each storage directory has independent watermarks; eviction is triggered
 // per-directory when a directory exceeds its high-water mark and proceeds
 // until the directory's usage falls to its low-water mark.
+// lotEvictionPlanner supplies lot-aware eviction guidance. It is optional: when
+// set (lot tracking enabled), the eviction loop drains over-quota/expired lots
+// first, in priority order, before falling back to greediest-bucket eviction.
+// Implemented by PersistentCache; the interface keeps eviction decoupled from
+// the lot manager.
+type lotEvictionPlanner interface {
+	// syncLotUsage pushes current cache usage into the lot store so the
+	// priority queries below reflect what the cache actually holds.
+	syncLotUsage() error
+	// priorityBuckets returns the accounting buckets to evict first within a
+	// storage directory, ordered past-deletion, past-expiration,
+	// over-opportunistic, then over-dedicated, restricted to lots with usage in
+	// that directory.
+	priorityBuckets(storageID StorageID) []lotEvictionTarget
+}
+
+// lotEvictionTarget is one bucket the eviction loop may drain, together with the
+// number of bytes it is allowed to take from it. maxBytes < 0 means unbounded:
+// the lot's lifetime is over (past deletion or expiration), so all of it is
+// reclaimable. A non-negative maxBytes is the lot's overage against the quota
+// that selected it -- draining past that would take bytes the lot is entitled
+// to keep, which for a dedicated quota is precisely the guarantee it represents.
+type lotEvictionTarget struct {
+	bucket   NamespaceID
+	maxBytes int64
+}
+
 type EvictionManager struct {
 	db      *CacheDB
 	storage *StorageManager
+
+	// planner is the optional lot-aware eviction advisor; nil disables it.
+	planner lotEvictionPlanner
 
 	// Per-directory size limits, keyed by storageID.  The map is
 	// read-only after construction and requires no synchronization.
@@ -79,6 +110,59 @@ type dirEvictionLimits struct {
 	maxSize   uint64
 	highWater uint64
 	lowWater  uint64
+}
+
+// highWaterInt64 and lowWaterInt64 return the watermarks as int64 for comparison
+// and arithmetic against the int64 usage figures getDirUsage reports. The
+// watermarks are clamped to <= math.MaxInt64 when the limits are built
+// (NewEvictionManager), so these conversions never overflow; the explicit bound
+// keeps that guarantee local to the conversion.
+func (l *dirEvictionLimits) highWaterInt64() int64 { return clampToInt64(l.highWater) }
+func (l *dirEvictionLimits) lowWaterInt64() int64  { return clampToInt64(l.lowWater) }
+
+// clampToInt64 converts a uint64 to int64, capping at math.MaxInt64 so the
+// conversion cannot overflow into a negative value.
+func clampToInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
+}
+
+// scaleByRatio computes value * num / denom without overflowing uint64.
+//
+// The obvious `value * num / denom` wraps once the product exceeds 2^64, which
+// for a byte count against a directory size is only about 4 GB x 4 GB -- well
+// inside the range of a real cache. Wrapping there is worse than a crash: the
+// result stays a plausible-looking byte count, so a purge target computed from
+// it can come out near zero and take the whole directory with it.
+//
+// Do the division first where it is exact, and fall back to big.Int only for
+// the remainder, which cannot itself overflow.
+func scaleByRatio(value, num, denom uint64) uint64 {
+	if denom == 0 {
+		return 0
+	}
+	// value * (num/denom) + value * (num%denom)/denom, with the first term exact.
+	q, r := num/denom, num%denom
+	if q != 0 && value > math.MaxUint64/q {
+		return math.MaxUint64
+	}
+	whole := value * q
+	var frac uint64
+	if r != 0 {
+		var b big.Int
+		b.Mul(new(big.Int).SetUint64(value), new(big.Int).SetUint64(r))
+		b.Div(&b, new(big.Int).SetUint64(denom))
+		if !b.IsUint64() {
+			return math.MaxUint64
+		}
+		frac = b.Uint64()
+	}
+	if whole > math.MaxUint64-frac {
+		return math.MaxUint64
+	}
+	return whole + frac
 }
 
 // EvictionConfig holds configuration for the eviction manager
@@ -258,7 +342,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 
 	// Fast path: check the atomic estimate against the watermark.
 	limits, lok := em.dirLimits[storageID]
-	if !lok || newVal <= int64(limits.highWater) {
+	if !lok || newVal <= limits.highWaterInt64() {
 		return
 	}
 
@@ -267,7 +351,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 	dbUsage := em.getDirUsage(storageID)
 	counter.Store(dbUsage)
 
-	if dbUsage > int64(limits.highWater) {
+	if dbUsage > limits.highWaterInt64() {
 		em.TriggerEviction()
 	}
 }
@@ -335,11 +419,44 @@ func (em *EvictionManager) getDirUsage(storageID StorageID) int64 {
 	return total
 }
 
+// SetLotPlanner installs the optional lot-aware eviction advisor. Passing nil
+// (the default) leaves eviction in greediest-bucket mode.
+func (em *EvictionManager) SetLotPlanner(p lotEvictionPlanner) {
+	em.planner = p
+}
+
 // checkAndEvict checks each storage directory against its own watermarks
 // and evicts from any directory that exceeds its high-water mark.
 // Directories are processed concurrently because they typically reside
 // on separate physical devices, so parallel I/O carries little penalty.
 func (em *EvictionManager) checkAndEvict() {
+	runID := em.evictRunCounter.Add(1)
+	rl := log.WithField("evictRun", runID)
+
+	// Lot-aware eviction refreshes the lot store's usage view before planning so
+	// the priority queries are accurate -- but only if some directory actually
+	// needs eviction, to avoid syncing on idle ticks.
+	//
+	// This runs *before* the evicting flag is raised, deliberately. The sync
+	// writes to the shared server database and can be slow under contention;
+	// holding the flag across it would make an administrator's emergency purge
+	// fail with "eviction already in progress" during precisely the window when
+	// the cache is over its high watermark and nothing has been freed yet.
+	if em.planner != nil {
+		needsEviction := false
+		for sid, limits := range em.dirLimits {
+			if u := em.getDirUsage(sid); u > 0 && uint64(u) > limits.highWater {
+				needsEviction = true
+				break
+			}
+		}
+		if needsEviction {
+			if err := em.planner.syncLotUsage(); err != nil {
+				rl.WithError(err).Warn("Pre-eviction lot usage sync failed; proceeding with stale usage")
+			}
+		}
+	}
+
 	em.evictMu.Lock()
 	if em.evicting {
 		em.evictMu.Unlock()
@@ -353,9 +470,6 @@ func (em *EvictionManager) checkAndEvict() {
 		em.evicting = false
 		em.evictMu.Unlock()
 	}()
-
-	runID := em.evictRunCounter.Add(1)
-	rl := log.WithField("evictRun", runID)
 
 	startTime := time.Now()
 	var totalEvictedBytes atomic.Uint64
@@ -379,6 +493,38 @@ func (em *EvictionManager) checkAndEvict() {
 				"highWater": limits.highWater,
 			}).Info("Starting eviction")
 
+			// Tier 1: drain over-quota / expired lots first, in priority order.
+			if em.planner != nil {
+				for _, target := range em.planner.priorityBuckets(sid) {
+					dirUsage = em.getDirUsage(sid)
+					if dirUsage <= 0 || uint64(dirUsage) <= limits.lowWater {
+						break
+					}
+					// Take the smaller of what the directory still needs and what
+					// this lot may give up. Without the second bound, one lot
+					// marginally over quota absorbs the directory's entire
+					// overhead -- evicting data inside its guaranteed reservation
+					// while lots that are grossly over theirs go untouched.
+					budget := dirUsage - limits.lowWaterInt64()
+					if target.maxBytes >= 0 && target.maxBytes < budget {
+						budget = target.maxBytes
+					}
+					if budget <= 0 {
+						continue
+					}
+					bytes, count, skipped, conflicts, err := em.evictFromNamespace(rl, sid, target.bucket, 0, budget)
+					totalConflicts.Add(int64(conflicts))
+					if err != nil {
+						rl.WithFields(log.Fields{"storageID": sid, "namespaceID": target.bucket}).WithError(err).Warn("Error evicting priority lot")
+						continue
+					}
+					totalEvictedBytes.Add(bytes)
+					totalEvictedObjects.Add(int64(count))
+					totalSkipped.Add(int64(skipped))
+				}
+			}
+
+			// Tier 2: fall back to greediest-bucket eviction for any remainder.
 			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
@@ -392,7 +538,7 @@ func (em *EvictionManager) checkAndEvict() {
 					break
 				}
 
-				overhead := dirUsage - int64(limits.lowWater)
+				overhead := dirUsage - limits.lowWaterInt64()
 				rl.WithFields(log.Fields{
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
@@ -660,7 +806,7 @@ func (em *EvictionManager) rebuildRRTable() {
 		if used < 0 {
 			used = 0
 		}
-		free := int64(em.dirLimits[sid].maxSize) - used
+		free := clampToInt64(em.dirLimits[sid].maxSize) - used
 		if free < 1 {
 			free = 1
 		}
@@ -756,7 +902,7 @@ func (em *EvictionManager) ChooseDiskStorage() StorageID {
 func (em *EvictionManager) ForcePurge() error {
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = int64(limits.lowWater)
+		targets[sid] = limits.lowWaterInt64()
 	}
 	_, _, err := em.forcePurgeToTargets("Force purge", targets)
 	return err
@@ -782,7 +928,7 @@ func (em *EvictionManager) ForcePurgeToBytes(targetBytes uint64) (uint64, int64,
 
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = int64((targetBytes * limits.maxSize) / totalMax)
+		targets[sid] = clampToInt64(scaleByRatio(targetBytes, limits.maxSize, totalMax))
 	}
 	return em.forcePurgeToTargets("Purge-to-target", targets)
 }

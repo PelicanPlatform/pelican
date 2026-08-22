@@ -25,7 +25,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -415,12 +414,6 @@ func TestTPCCrossOrigin(t *testing.T) {
 	origin2RuntimeDir := filepath.Join(origin2Dir, "runtime")
 	require.NoError(t, os.MkdirAll(origin2RuntimeDir, 0755))
 
-	// Find a free port for origin #2.
-	ln, err := net.Listen("tcp", host+":0")
-	require.NoError(t, err)
-	origin2Port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-
 	// Grab federation values from the running federation.
 	discoveryURL := param.Federation_DiscoveryUrl.GetString()
 	require.NotEmpty(t, discoveryURL, "Federation discovery URL should be set")
@@ -460,7 +453,7 @@ Federation:
 IssuerKeysDirectory: %s
 
 Server:
-  WebPort: %d
+  WebPort: 0
   TLSCACertificateFile: %s
   TLSCAKey: %s
   TLSCertificateChain: %s
@@ -487,7 +480,7 @@ Logging:
 
 Xrootd:
   RunLocation: %s
-`, discoveryURL, origin2IssuerKeysDir, origin2Port, caCertFile, caKeyFile, tlsCertFile, tlsKeyFile, host,
+`, discoveryURL, origin2IssuerKeysDir, caCertFile, caKeyFile, tlsCertFile, tlsKeyFile, host,
 		filepath.Join(origin2Dir, "origin.sqlite"),
 		origin2StorageDir, origin2FedPrefix,
 		origin2LogPath,
@@ -545,12 +538,13 @@ Xrootd:
 	require.NoError(t, os.MkdirAll(srcDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(sourceContent), 0644))
 
-	// Wait for origin #2 to become healthy.
-	origin2URL := fmt.Sprintf("https://%s:%d", host, origin2Port)
-	healthURL := origin2URL + "/api/v1.0/health"
-	err = waitForURLStatusOrProcessExit(t, ctx, healthURL, http.StatusOK, 30*time.Second, 500*time.Millisecond, exitCh, origin2LogPath, "origin2 health")
-	require.NoError(t, err, "Origin #2 failed to become healthy")
-
+	// origin #2 binds Server.WebPort: 0, letting the OS assign a free port
+	// (no racy "find a free port then hope it's still free" dance). We never
+	// need its concrete URL: the transfer below goes through the federation,
+	// and the director-registration poll -- which also watches exitCh for an
+	// early subprocess crash -- is the readiness gate. It succeeding proves
+	// origin #2 came up and registered.
+	//
 	// Poll the director until origin #2's namespace is resolvable.
 	// This means the origin has registered and the director can redirect to it.
 	directorURL := param.Server_ExternalWebUrl.GetString()
