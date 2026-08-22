@@ -1,3 +1,11 @@
+//go:build cgo
+
+// These tests drive the exported C entry points through the Go-typed bridge in
+// bridge.go, which is a cgo file and so is absent from the package whenever cgo
+// is disabled -- which is every GOOS the linter cross-checks. Without this
+// constraint the test files reference helpers that do not exist in that
+// configuration and the package fails to type-check.
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
