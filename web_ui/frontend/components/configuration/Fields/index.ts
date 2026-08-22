@@ -54,7 +54,8 @@ export type ParameterValue =
   | GeoIPOverride[]
   | Export[]
   | PolicyDefinition[]
-  | StorageDir[];
+  | StorageDir[]
+  | S3StorageTarget[];
 
 export type ParameterValueRecord = { [key: string]: ParameterValue };
 
@@ -149,6 +150,19 @@ export interface Export {
 
 export interface StorageDir {
   path: string;
+  maxsize: string;
+  highwatermarkpercentage: number;
+  lowwatermarkpercentage: number;
+}
+
+export interface S3StorageTarget {
+  serviceurl: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  urlstyle: string;
+  accesskeyfile: string;
+  secretkeyfile: string;
   maxsize: string;
   highwatermarkpercentage: number;
   lowwatermarkpercentage: number;

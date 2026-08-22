@@ -245,6 +245,12 @@ func TestOpenCacheDBReadOnlyRefusesWrites(t *testing.T) {
 			_, _, err := db.EvictByLRU(StorageIDInline, 1, 1, 0, nil)
 			return err
 		},
+		"SetS3UploadIntent": func() error {
+			return db.SetS3UploadIntent(instHash, &S3UploadIntent{})
+		},
+		"DeleteS3UploadIntent": func() error {
+			return db.DeleteS3UploadIntent(instHash)
+		},
 		// A batch holds an open BadgerDB write transaction, so each of these
 		// cancels the one it took -- the refusal is the assertion, not a reason
 		// to leak the transaction until Close.
