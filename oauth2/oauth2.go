@@ -69,6 +69,27 @@ func trimPath(pathName string, maxDepth int) string {
 	return "/" + path.Join(pathComponents[0:maxLength]...)
 }
 
+// announceVerification tells the user where to approve the pending device-flow
+// authorization request, writing the instructions to w.
+//
+// Which URL the user needs depends on the issuer.  A verification_uri_complete
+// already carries the user code, so it suffices on its own; a plain
+// verification_uri has to be paired with the code the user then types there.
+func announceVerification(w io.Writer, deviceAuth *DeviceAuth) {
+	if len(deviceAuth.VerificationURIComplete) > 0 {
+		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, deviceAuth.VerificationURIComplete)
+	} else {
+		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL:")
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, deviceAuth.VerificationURI)
+		fmt.Fprintln(w, "\nand enter the following code")
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, deviceAuth.UserCode)
+	}
+}
+
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
 	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
@@ -140,18 +161,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 		return nil, errors.Wrapf(err, "Failed to perform device code flow with URL %s", issuerInfo.DeviceAuthURL)
 	}
 
-	if len(deviceAuth.VerificationURIComplete) > 0 {
-		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
-	} else {
-		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL:")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
-		fmt.Fprintln(os.Stderr, "\nand enter the following code")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.UserCode)
-	}
+	announceVerification(os.Stderr, deviceAuth)
 
 	upstream_token, err := oauth2Config.Poll(ctx, deviceAuth)
 	if err != nil {
