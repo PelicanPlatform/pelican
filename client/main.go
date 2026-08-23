@@ -229,7 +229,9 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 	// the caller's write credential to every cache in the response.
 	directorMethod, tokenOperation := http.MethodGet, config.TokenRead
 	if uploadDestination {
-		directorMethod, tokenOperation = http.MethodPut, config.TokenWrite
+		// Use the upload operation so the credential acquired (and cached)
+		// here carries the same scopes the subsequent PUT will need.
+		directorMethod, tokenOperation = http.MethodPut, uploadTokenOperation()
 	}
 
 	// Reuse the engine's director responses the way job creation does, when
