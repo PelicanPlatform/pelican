@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -35,6 +36,48 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// VerificationURLHandler is called with the address a user must visit to
+// approve a device-flow authorization request, and the code they must enter
+// once there.
+//
+// verificationURL is the issuer's verification_uri_complete when it supplied
+// one, in which case the URL already carries the code and userCode is empty;
+// otherwise it is verification_uri and userCode is the code to enter there.
+// The handler is called only when the issuer named a URL at all.
+//
+// It runs on the goroutine driving the flow, after the URL has been written
+// to stderr and before polling begins, so a handler that blocks delays the
+// user's own approval.  It must not be treated as the only way the user is
+// told: AcquireToken prints the URL whether or not a handler is installed,
+// and a handler that fails silently leaves that output as the fallback.
+type VerificationURLHandler func(verificationURL, userCode string)
+
+var verificationURLHandler atomic.Pointer[VerificationURLHandler]
+
+// SetVerificationURLHandler installs handler as the process-wide destination
+// for device-flow verification URLs, replacing any previous one.  A nil
+// handler removes the current one.
+//
+// This exists so that a program embedding Pelican can bring the URL to its
+// user by whatever means suits it -- opening a browser, raising a desktop
+// notification, showing it in a GUI -- without reimplementing the flow.  Every
+// step AcquireToken performs around the announcement is unexported: deciding
+// whether a cached token would have done (client.tokenIsAcceptable), dynamic
+// client registration (client.registerClient), scope construction (trimPath),
+// refresh (client.refreshTokenEntry), and local minting (client.generateToken).
+// An embedder that copied them to reach the URL would drift from them, and the
+// first consequence is that Pelican judges the token the copy obtained
+// unacceptable and opens a second device flow -- so the user approves twice.
+//
+// It is safe to call at any time, including while a flow is in progress.
+func SetVerificationURLHandler(handler VerificationURLHandler) {
+	if handler == nil {
+		verificationURLHandler.Store(nil)
+		return
+	}
+	verificationURLHandler.Store(&handler)
+}
 
 func deviceCodeSupported(grantTypes *[]string) bool {
 	for _, grant := range *grantTypes {
@@ -70,23 +113,38 @@ func trimPath(pathName string, maxDepth int) string {
 }
 
 // announceVerification tells the user where to approve the pending device-flow
-// authorization request, writing the instructions to w.
+// authorization request, writing the instructions to w and then handing the
+// same URL to the installed VerificationURLHandler, if there is one.
 //
 // Which URL the user needs depends on the issuer.  A verification_uri_complete
 // already carries the user code, so it suffices on its own; a plain
 // verification_uri has to be paired with the code the user then types there.
+//
+// The write to w happens unconditionally and first, so a handler can only add
+// a way for the user to reach the URL, never take one away.
 func announceVerification(w io.Writer, deviceAuth *DeviceAuth) {
-	if len(deviceAuth.VerificationURIComplete) > 0 {
+	verificationURL, userCode := deviceAuth.VerificationURIComplete, ""
+	if len(verificationURL) > 0 {
 		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
 		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, deviceAuth.VerificationURIComplete)
+		fmt.Fprintln(w, verificationURL)
 	} else {
+		verificationURL, userCode = deviceAuth.VerificationURI, deviceAuth.UserCode
 		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL:")
 		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, deviceAuth.VerificationURI)
+		fmt.Fprintln(w, verificationURL)
 		fmt.Fprintln(w, "\nand enter the following code")
 		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, deviceAuth.UserCode)
+		fmt.Fprintln(w, userCode)
+	}
+
+	// A malformed response naming no URL at all leaves nothing worth handing
+	// over; the printed output above is still the user's record of it.
+	if verificationURL == "" {
+		return
+	}
+	if handler := verificationURLHandler.Load(); handler != nil {
+		(*handler)(verificationURL, userCode)
 	}
 }
 
