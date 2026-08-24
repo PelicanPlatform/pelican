@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -43,6 +44,13 @@ type (
 	RegexpFilter struct {
 		Regexp *regexp.Regexp
 		Name   string
+		// Levels declares which log levels this filter observes; Fire is only
+		// invoked for entries at these levels. The declaration also feeds
+		// logrusLevelFor, which raises logrus's internal level just far enough
+		// for the filter to see what it asked for. Leaving Levels empty means
+		// "observe everything" -- at the cost of pinning logrus to TraceLevel
+		// (full entry construction for every suppressed log call in the
+		// process) for as long as the filter is registered.
 		Levels []log.Level
 		Fire   func(*log.Entry) error
 	}
@@ -161,6 +169,12 @@ func (rt *regexpTransformHook) Levels() []log.Level {
 func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 	filters := fh.filters.Load()
 	for _, filter := range *filters {
+		// A filter only observes the levels it declared (empty means all).
+		// logrusLevelFor uses the same declaration to decide how far logrus's
+		// level gate must open, so declaration and delivery stay in agreement.
+		if len(filter.Levels) > 0 && !slices.Contains(filter.Levels, entry.Level) {
+			continue
+		}
 		if filter.Regexp.MatchString(entry.Message) {
 			curErr := filter.Fire(entry)
 			if curErr != nil && err == nil {
@@ -284,15 +298,18 @@ func logrusLevelFor(configured log.Level) log.Level {
 	return needed
 }
 
-// syncLogrusLevel re-derives logrus's internal level after a change to the
-// registered filter set. Only meaningful when hook-based filtering is
-// active; otherwise logrus's level already equals the configured level and
-// raising it would leak filter-only lines straight to the output.
-func syncLogrusLevel() {
-	globalTransformMu.Lock()
-	hooked := addedGlobalFilters
-	globalTransformMu.Unlock()
-	if hooked {
+// syncLogrusLevelLocked re-derives logrus's internal level after a change
+// to the registered filter set. Callers must hold globalTransformMu:
+// SetLogging updates the level under the same mutex, so a derive-then-set
+// outside it could interleave with a concurrent SetLogging and leave logrus
+// below what a just-registered filter needs (a lost update, and a filter
+// that never fires).
+//
+// Only meaningful when hook-based filtering is active; otherwise logrus's
+// level already equals the configured level and raising it would leak
+// filter-only lines straight to the output.
+func syncLogrusLevelLocked() {
+	if addedGlobalFilters {
 		log.SetLevel(logrusLevelFor(GetEffectiveLogLevel()))
 	}
 }
@@ -308,9 +325,8 @@ func initFilterLogging() {
 	// On the FIRST init pass, log.GetLevel() reflects the operator's
 	// configured level. On subsequent passes (unit-test reinit, config
 	// reload paths that re-enter this function) it may reflect a level
-	// raised for a still-registered filter -- so guard the effective-level
-	// cache update behind the same first-time-only gate that installs the
-	// hooks.
+	// raised for a still-registered filter, so the effective-level cache is
+	// the accurate source for what the operator configured.
 	//
 	// Historically the level was pinned to TraceLevel here so the filter
 	// hooks could see every message. That forced every suppressed
@@ -318,8 +334,13 @@ func initFilterLogging() {
 	// (three global-mutex acquisitions and a formatting pass) on hot
 	// request paths; now the level is raised only as far as registered
 	// filters actually need (see logrusLevelFor).
+	globalTransformMu.Lock()
 	configLevel := log.GetLevel()
+	if addedGlobalFilters {
+		configLevel = GetEffectiveLogLevel()
+	}
 	log.SetLevel(logrusLevelFor(configLevel))
+	globalTransformMu.Unlock()
 	hookLevel := make([]log.Level, 0)
 	for _, lvl := range log.AllLevels {
 		if lvl <= configLevel {
@@ -374,31 +395,41 @@ func ResetGlobalLoggingHooks() {
 }
 
 func AddFilter(newFilter *RegexpFilter) {
-	filters := globalFilters.filters.Load()
-	var newFilters []*RegexpFilter
-	if filters == nil {
-		newFilters = make([]*RegexpFilter, 0)
-	} else {
-		newFilters = *filters
+	// The mutex serializes the read-modify-write on the filter list against
+	// concurrent Add/Remove calls, and the level update against SetLogging.
+	globalTransformMu.Lock()
+	defer globalTransformMu.Unlock()
+	var existing []*RegexpFilter
+	if filters := globalFilters.filters.Load(); filters != nil {
+		existing = *filters
 	}
+	// Copy rather than append in place: Fire iterates the published slice
+	// lock-free, so a published slice must never be mutated afterward.
+	newFilters := make([]*RegexpFilter, 0, len(existing)+1)
+	newFilters = append(newFilters, existing...)
 	newFilters = append(newFilters, newFilter)
 	globalFilters.filters.Store(&newFilters)
 	// The new filter may need to observe levels below the configured one;
 	// raise logrus's level accordingly for as long as it is registered.
-	syncLogrusLevel()
+	syncLogrusLevelLocked()
 }
 
 func RemoveFilter(name string) {
-	filters := *globalFilters.filters.Load()
-	result := make([]*RegexpFilter, 0)
-	for _, filter := range filters {
+	globalTransformMu.Lock()
+	defer globalTransformMu.Unlock()
+	var existing []*RegexpFilter
+	if filters := globalFilters.filters.Load(); filters != nil {
+		existing = *filters
+	}
+	result := make([]*RegexpFilter, 0, len(existing))
+	for _, filter := range existing {
 		if filter.Name != name {
 			result = append(result, filter)
 		}
 	}
 	globalFilters.filters.Store(&result)
 	// Drop logrus's level back down if this filter was what held it up.
-	syncLogrusLevel()
+	syncLogrusLevelLocked()
 }
 
 func SetLogging(logLevel log.Level) {
@@ -476,9 +507,10 @@ func SetLogging(logLevel log.Level) {
 }
 
 // GetEffectiveLogLevel returns the effective log level -- the level the
-// operator asked for, as opposed to logrus's internal log.GetLevel()
-// which is pinned to TraceLevel whenever the hook-based filter tree is
-// active (so hooks see every entry). The value is served from an atomic
+// operator asked for, as opposed to logrus's internal log.GetLevel(),
+// which may sit temporarily above it while a registered RegexpFilter needs
+// to observe more verbose entries (see logrusLevelFor). The value is
+// served from an atomic
 // cache updated by SetLogging, initFilterLogging, and
 // ResetGlobalLoggingHooks; the hot path (LogRingBuffer.shouldBuffer,
 // invoked on every entry) is therefore a single atomic load with no
