@@ -329,9 +329,9 @@ const (
 // for the correct first-login / return-visit flow.
 type User struct {
 	ID          string     `gorm:"primaryKey" json:"id"`
-	Username    string     `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
+	Username    string     `gorm:"not null;uniqueIndex:idx_user_username_live" json:"username"`
 	Sub         string     `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
-	Issuer      string     `gorm:"not null;uniqueIndex:idx_user_issuer;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
+	Issuer      string     `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
 	Status      UserStatus `gorm:"not null;default:active" json:"status"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 	DisplayName string     `gorm:"not null;default:''" json:"displayName"`
