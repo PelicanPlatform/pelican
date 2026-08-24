@@ -602,11 +602,10 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 // For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
 // ad for `/foo/bar`.  Returns nil if no ad matches.
 //
-// The returned pointer aliases an element of the provided namespaceAds slice
-// (no copy is made): treat it as read-only, and copy the struct before any
-// mutation, or the change will write through to the caller's slice -- which,
-// on the director, is live TTL-cache memory read concurrently by other
-// goroutines.
+// The returned ad is a copy, detached from the provided slice, so callers may
+// hold or mutate it freely -- important on the director, where namespaceAds
+// is live TTL-cache memory read concurrently by other goroutines. Only the
+// single best match is copied; the scan itself does not allocate.
 func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	// Normalize incoming path if needed --> adding the trailing / makes
 	// basic prefix matching safer
@@ -617,7 +616,7 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	// bestLen tracks the length of the best "/"-terminated prefix matched so
 	// far; any real match has nsLen >= 1, so 0 doubles as "nothing yet".
 	bestLen := 0
-	var bestNamespace *NamespaceAd
+	bestIdx := -1
 	for idx := range namespaceAds {
 		// Normalize stored namespace paths. Compare without allocating: a
 		// path lacking the trailing "/" must be a proper prefix of reqPath
@@ -637,11 +636,15 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 
 		if nsLen > bestLen {
 			bestLen = nsLen
-			bestNamespace = &namespaceAds[idx]
+			bestIdx = idx
 		}
 	}
 
-	return bestNamespace
+	if bestIdx < 0 {
+		return nil
+	}
+	bestNamespace := namespaceAds[bestIdx]
+	return &bestNamespace
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
