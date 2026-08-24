@@ -601,6 +601,12 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 // LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
 // For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
 // ad for `/foo/bar`.  Returns nil if no ad matches.
+//
+// The returned pointer aliases an element of the provided namespaceAds slice
+// (no copy is made): treat it as read-only, and copy the struct before any
+// mutation, or the change will write through to the caller's slice -- which,
+// on the director, is live TTL-cache memory read concurrently by other
+// goroutines.
 func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	// Normalize incoming path if needed --> adding the trailing / makes
 	// basic prefix matching safer
@@ -608,7 +614,9 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 		reqPath += "/"
 	}
 
-	var bestFedPrefix string
+	// bestLen tracks the length of the best "/"-terminated prefix matched so
+	// far; any real match has nsLen >= 1, so 0 doubles as "nothing yet".
+	bestLen := 0
 	var bestNamespace *NamespaceAd
 	for idx := range namespaceAds {
 		// Normalize stored namespace paths. Compare without allocating: a
@@ -627,12 +635,8 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 			nsLen++ // account for the implied trailing "/"
 		}
 
-		if bestFedPrefix == "" || nsLen > len(bestFedPrefix) {
-			if strings.HasSuffix(nsPath, "/") {
-				bestFedPrefix = nsPath
-			} else {
-				bestFedPrefix = nsPath + "/"
-			}
+		if nsLen > bestLen {
+			bestLen = nsLen
 			bestNamespace = &namespaceAds[idx]
 		}
 	}
