@@ -84,7 +84,7 @@ func createTestInviteLink(t *testing.T, db *gorm.DB, groupID, createdBy, plainte
 func TestRedeemGroupInviteLink(t *testing.T) {
 	t.Run("redeem-with-existing-user", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
-		user := User{ID: "user-1", Username: "alice", Sub: "alice-sub", Issuer: "https://issuer.example.com"}
+		user := User{ID: "user-1", Username: "alice"}
 		require.NoError(t, db.Create(&user).Error)
 		group := Group{ID: "group-1", Name: "test-group", CreatedBy: "admin"}
 		require.NoError(t, db.Create(&group).Error)
@@ -114,8 +114,8 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify user was created
-		var user User
-		require.NoError(t, db.First(&user, "sub = ? AND issuer = ?", "new-user-sub", "https://issuer.example.com").Error)
+		user, err := GetUserByIdentity(db, "new-user-sub", "https://issuer.example.com")
+		require.NoError(t, err)
 		assert.Equal(t, "newuser", user.Username)
 
 		// Verify user was added to group
@@ -136,14 +136,14 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		_, _, err := RedeemGroupInviteLink(db, token, "", "derived-sub", "https://issuer.example.com", "")
 		require.NoError(t, err)
 
-		var user User
-		require.NoError(t, db.First(&user, "sub = ?", "derived-sub").Error)
+		user, err := GetUserByIdentity(db, "derived-sub", "https://issuer.example.com")
+		require.NoError(t, err)
 		assert.Equal(t, "derived-sub", user.Username)
 	})
 
 	t.Run("redeem-expired-link", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
-		user := User{ID: "user-exp", Username: "alice-exp", Sub: "alice-exp-sub", Issuer: "https://issuer.example.com"}
+		user := User{ID: "user-exp", Username: "alice-exp"}
 		require.NoError(t, db.Create(&user).Error)
 
 		token := "test-token-expired"
@@ -157,9 +157,9 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 
 	t.Run("redeem-single-use-already-redeemed", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
-		user1 := User{ID: "user-su1", Username: "bob", Sub: "bob-sub", Issuer: "https://issuer.example.com"}
+		user1 := User{ID: "user-su1", Username: "bob"}
 		require.NoError(t, db.Create(&user1).Error)
-		user2 := User{ID: "user-su2", Username: "carol", Sub: "carol-sub", Issuer: "https://issuer.example.com"}
+		user2 := User{ID: "user-su2", Username: "carol"}
 		require.NoError(t, db.Create(&user2).Error)
 		group := Group{ID: "group-su", Name: "su-group", CreatedBy: "admin"}
 		require.NoError(t, db.Create(&group).Error)
@@ -179,7 +179,7 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 
 	t.Run("redeem-invalid-token", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
-		user := User{ID: "user-inv", Username: "dave", Sub: "dave-sub", Issuer: "https://issuer.example.com"}
+		user := User{ID: "user-inv", Username: "dave"}
 		require.NoError(t, db.Create(&user).Error)
 
 		_, _, err := RedeemGroupInviteLink(db, "nonexistent-token", "user-inv", "", "", "")
@@ -202,9 +202,11 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 
 	t.Run("redeem-finds-existing-user-by-identity", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
-		// Create user with primary identity
-		user := User{ID: "user-ident", Username: "eve", Sub: "eve-oidc-sub", Issuer: "https://issuer.example.com"}
+		// Create a user and link the identity the invite will be redeemed with.
+		user := User{ID: "user-ident", Username: "eve"}
 		require.NoError(t, db.Create(&user).Error)
+		_, err := CreateUserIdentity(db, user.ID, "eve-oidc-sub", "https://issuer.example.com")
+		require.NoError(t, err)
 
 		group := Group{ID: "group-ident", Name: "ident-group", CreatedBy: "admin"}
 		require.NoError(t, db.Create(&group).Error)
@@ -212,8 +214,8 @@ func TestRedeemGroupInviteLink(t *testing.T) {
 		token := "test-token-ident"
 		createTestInviteLink(t, db, "group-ident", "admin", token, false, time.Now().Add(1*time.Hour))
 
-		// Provide sub/issuer that matches existing user's primary identity, but no userID
-		_, _, err := RedeemGroupInviteLink(db, token, "", "eve-oidc-sub", "https://issuer.example.com", "")
+		// Provide sub/issuer that matches the linked identity, but no userID
+		_, _, err = RedeemGroupInviteLink(db, token, "", "eve-oidc-sub", "https://issuer.example.com", "")
 		require.NoError(t, err)
 
 		// Verify user was added to the group
@@ -279,11 +281,10 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		// Two real users: the original owner and the redeemer.
 		require.NoError(t, db.Create(&User{
 			ID: "owner-1", Username: "owner1",
-			Sub: "owner1-sub", Issuer: "https://issuer.example.com",
 		}).Error)
 		require.NoError(t, db.Create(&User{
 			ID: "redeemer-1", Username: "redeemer1",
-			Sub: "redeemer1-sub", Issuer: "https://issuer.example.com",
+
 			Status: UserStatusActive,
 		}).Error)
 
@@ -351,16 +352,14 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		require.NoError(t, db.Create(&User{
 			ID: "owner-2", Username: "owner2",
-			Sub: "owner2-sub", Issuer: "https://issuer.example.com",
 		}).Error)
 		require.NoError(t, db.Create(&User{
 			ID: "redeemer-2", Username: "redeemer2",
-			Sub: "redeemer2-sub", Issuer: "https://issuer.example.com",
+
 			Status: UserStatusActive,
 		}).Error)
 		require.NoError(t, db.Create(&User{
 			ID: "third-party", Username: "third",
-			Sub: "third-sub", Issuer: "https://issuer.example.com",
 		}).Error)
 
 		coll := Collection{
@@ -412,6 +411,69 @@ func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
 	return live, tombstoned
 }
 
+// externalIdentities returns every identity that is not a built-in-admin local
+// one, which is what ensureBuiltinAdmin is expected to leave alone.
+func externalIdentities(t *testing.T, db *gorm.DB) []UserIdentity {
+	t.Helper()
+	var out []UserIdentity
+	require.NoError(t, db.Where("sub <> ?", builtinAdminUsername).Order("id").Find(&out).Error)
+	return out
+}
+
+// adminLocalIdentity returns the built-in admin's own ("admin", <local issuer>)
+// identity row.
+func adminLocalIdentity(t *testing.T, db *gorm.DB, userID string) UserIdentity {
+	t.Helper()
+	var ident UserIdentity
+	require.NoError(t, db.Where("user_id = ? AND sub = ?", userID, builtinAdminUsername).First(&ident).Error)
+	return ident
+}
+
+// An administrator with a password may unlink their last identity, which used
+// to leave the built-in admin row with none — and the next startup would retire
+// the account, taking its groups and everything it owns with it. The row is
+// re-linked instead; only a row holding somebody *else's* identity is retired.
+func TestEnsureBuiltinAdminRelinksRatherThanRetires(t *testing.T) {
+	const url = "https://origin.example.test"
+	version, err := globalUniqueUsernameMigrationVersion()
+	require.NoError(t, err)
+	db, sqlDB := migrateToVersion(t, version)
+	finishMigrations(t, sqlDB)
+
+	setExternalWebURL(t, url)
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	admin, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, admin)
+	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown, OwnerID: admin.ID}).Error)
+
+	// The admin sets a password and unlinks its identity, which the
+	// last-credential guard permits once a password exists.
+	require.NoError(t, SetUserPassword(db, admin.ID, "correct horse battery staple"))
+	identities, err := ListUserIdentities(db, admin.ID)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.NoError(t, DeleteUserIdentity(db, identities[0].ID, admin.ID))
+
+	require.NoError(t, ensureBuiltinAdmin(db))
+
+	same, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, same)
+	assert.Equal(t, admin.ID, same.ID, "the account must survive, not be replaced")
+	live, tombstoned := adminRows(t, db)
+	assert.Equal(t, []string{admin.ID}, live)
+	assert.Empty(t, tombstoned)
+	relinked, err := ListUserIdentities(db, admin.ID)
+	require.NoError(t, err)
+	require.Len(t, relinked, 1, "the identity is put back")
+	assert.Equal(t, builtinAdminUsername, relinked[0].Sub)
+
+	var group Group
+	require.NoError(t, db.First(&group, "id = ?", "ops").Error)
+	assert.Equal(t, admin.ID, group.OwnerID, "what the admin owned is still theirs")
+}
+
 // ensureBuiltinAdmin keeps the admin row and its state across a URL change,
 // evicts a row squatting on "admin", and recreates the admin when missing.
 func TestEnsureBuiltinAdmin(t *testing.T) {
@@ -430,8 +492,7 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	require.NotNil(t, admin)
 	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown}).Error)
 	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: admin.ID, AddedBy: CreatorUnknown}).Error)
-	require.NoError(t, db.Create(&User{ID: "alice", Username: "alice", Sub: "sub-alice", Issuer: "https://idp.example.test",
-		CreatedBy: CreatorSelfEnrolled}).Error)
+	require.NoError(t, db.Create(&User{ID: "alice", Username: "alice", CreatedBy: CreatorSelfEnrolled}).Error)
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-admin", UserID: admin.ID, Sub: "sub-linked-1", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-alice", UserID: "alice", Sub: "sub-linked-2", Issuer: "https://idp.example.test"}).Error)
 
@@ -445,31 +506,34 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	var members []GroupMember
 	require.NoError(t, db.Where("group_id = ? AND user_id = ?", "ops", admin.ID).Find(&members).Error)
 	assert.Len(t, members, 1)
-	var linked []UserIdentity
-	require.NoError(t, db.Order("id").Find(&linked).Error)
+	linked := externalIdentities(t, db)
 	require.Len(t, linked, 1)
 	assert.Equal(t, "li-alice", linked[0].ID, "only the admin's identities are unlinked")
+	assert.Equal(t, newURL, adminLocalIdentity(t, db, admin.ID).Issuer, "the local identity follows the server's URL")
 
 	require.NoError(t, ensureBuiltinAdmin(db))
 	live, tombstoned := adminRows(t, db)
 	assert.Equal(t, []string{admin.ID}, live)
 	assert.Empty(t, tombstoned)
 
-	require.NoError(t, db.Delete(&User{}, "id = ?", admin.ID).Error)
-	require.NoError(t, db.Create(&User{ID: "squatter", Username: "admin", Sub: "sub-x", Issuer: "https://idp.example.test",
-		CreatedBy: CreatorSelfEnrolled}).Error)
+	// DeleteUser, not a bare soft delete: it is what releases the account's
+	// identities, which is the production path for retiring an account.
+	require.NoError(t, DeleteUser(db, admin.ID, "", true))
+	require.NoError(t, db.Create(&User{ID: "squatter", Username: "admin", CreatedBy: CreatorSelfEnrolled}).Error)
+	require.NoError(t, db.Create(&UserIdentity{ID: "li-squatter", UserID: "squatter", Sub: "sub-x", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, ensureBuiltinAdmin(db))
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	fresh, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
-	assert.Equal(t, "admin", fresh.Sub)
+	assert.Equal(t, newURL, adminLocalIdentity(t, db, fresh.ID).Issuer)
 	assert.NotEqual(t, admin.ID, fresh.ID)
 	live, tombstoned = adminRows(t, db)
 	assert.Equal(t, []string{fresh.ID}, live)
 	assert.ElementsMatch(t, []string{admin.ID, "squatter"}, tombstoned)
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-fresh", UserID: fresh.ID, Sub: "sub-linked-3", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, ensureBuiltinAdmin(db))
-	require.NoError(t, db.Order("id").Find(&linked).Error)
+	linked = externalIdentities(t, db)
 	require.Len(t, linked, 1)
 	assert.Equal(t, "li-alice", linked[0].ID)
 

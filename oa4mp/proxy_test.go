@@ -62,8 +62,7 @@ func seedUser(t *testing.T, db *gorm.DB, username string) string {
 	id := username + "-id"
 	var u database.User
 	require.NoError(t, db.Where(database.User{Username: username}).Attrs(database.User{
-		ID: id, Sub: username, Issuer: "https://idp.example.com",
-		Status: database.UserStatusActive,
+		ID: id, Status: database.UserStatusActive,
 	}).FirstOrCreate(&u).Error)
 	return u.ID
 }

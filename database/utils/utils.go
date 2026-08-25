@@ -3,8 +3,11 @@ package utils
 import (
 	"database/sql"
 	"embed"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"github.com/pkg/errors"
@@ -87,6 +90,31 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 
 func MigrateDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string) error {
 	return MigrateServerSpecificDB(sqldb, migrationFS, migrationPath, "")
+}
+
+// MigrationVersion returns the version of the one migration under
+// migrationPath whose file name ends with suffix.
+//
+// Call sites that need to reason about a specific migration read its version
+// this way rather than hard-coding the number, so renumbering the file — which
+// a release branch may force — cannot silently desync them from it.
+func MigrationVersion(migrationFS embed.FS, migrationPath, suffix string) (int64, error) {
+	entries, err := fs.ReadDir(migrationFS, migrationPath)
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to list the embedded migrations under %s", migrationPath)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		version, err := strconv.ParseInt(strings.TrimSuffix(name, suffix), 10, 64)
+		if err != nil {
+			return 0, errors.Wrapf(err, "failed to parse the migration version from %q", name)
+		}
+		return version, nil
+	}
+	return 0, errors.Errorf("no migration named *%s was found under %s", suffix, migrationPath)
 }
 
 // MigrateDBUpTo applies the universal migrations up to `version` and returns

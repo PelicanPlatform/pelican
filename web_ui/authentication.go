@@ -230,19 +230,18 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 	// mint such a token, and the user-management API is exactly the
 	// operator surface that key represents. Resolve the subject to a
 	// user row so RequireAUPCompliance and the /users,/groups handlers
-	// (which key off UserId) accept the request. User rows for local
-	// accounts carry issuer == Server.ExternalWebUrl (see
-	// BootstrapAdminAndBackfillOwners), so we pin the lookup to that
-	// issuer rather than matching a username across every OIDC realm.
+	// (which key off UserId) accept the request. Usernames are globally
+	// unique among live rows, so a bare username resolves to exactly one
+	// account regardless of which issuer authenticated it — there is no
+	// longer a users.issuer column to pin against (identities live in
+	// user_identities now), and pinning was only ever a disambiguator the
+	// unique-username invariant makes unnecessary.
 	if userId == "" && database.ServerDatabase != nil {
-		externalURL := param.Server_ExternalWebUrl.GetString()
-		if externalURL != "" {
-			var resolved database.User
-			if lookupErr := database.ServerDatabase.
-				Where("username = ? AND issuer = ?", user, externalURL).
-				First(&resolved).Error; lookupErr == nil {
-				userId = resolved.ID
-			}
+		var resolved database.User
+		if lookupErr := database.ServerDatabase.
+			Where("username = ?", user).
+			First(&resolved).Error; lookupErr == nil {
+			userId = resolved.ID
 		}
 	}
 
@@ -451,18 +450,21 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	identity := UserIdentity{
 		Username: loginCookieTokenCfg.Subject,
 		ID:       userRecord.ID,
-		Sub:      userRecord.Sub,
 		Groups:   groups,
 	}
 	if isAdmin, _ := CheckAdmin(identity); isAdmin {
 		loginCookieTokenCfg.AddScopes(token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	}
 
-	// Add claims for unique user resolution using userId
+	// Add claims for unique user resolution using userId.
+	//
+	// oidc_sub / oidc_iss used to ride along here. They were only ever fed
+	// into UserIdentity.Sub, which nothing read once admin matching moved to
+	// usernames in v7.27 — and with identities unified there is no single
+	// subject for an account anyway. Emitting an arbitrary one of several
+	// would look authoritative without being so.
 	loginCookieTokenCfg.Claims = map[string]string{
-		"user_id":  userRecord.ID,
-		"oidc_sub": userRecord.Sub,
-		"oidc_iss": userRecord.Issuer,
+		"user_id": userRecord.ID,
 	}
 
 	// CreateToken also handles validation for us
@@ -763,10 +765,15 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 }
 
 // UserIdentity encapsulates all available information about a user's identity
+// UserIdentity is the request-scoped view of who is calling: the
+// server-managed username, the internal user ID, and the groups that came with
+// the session. It deliberately carries no OIDC subject — as of v7.27 admin
+// lists match the username only (see warnNonUsernameAdminEntries), so nothing
+// in the authorization path reads a subject, and a user may now hold several
+// identities with no reason to prefer one of them here.
 type UserIdentity struct {
 	Username string
 	ID       string
-	Sub      string // OIDC Subject
 	Groups   []string
 }
 
@@ -955,7 +962,6 @@ func adminFromGroupView(db *gorm.DB, user *database.User, view func(*gorm.DB, st
 	isAdmin, _ := CheckAdmin(UserIdentity{
 		Username: user.Username,
 		ID:       user.ID,
-		Sub:      user.Sub,
 		Groups:   groups,
 	})
 	return isAdmin
@@ -1006,7 +1012,6 @@ func UserAdminAuthHandler(ctx *gin.Context) {
 		Username: user,
 		Groups:   groups,
 		ID:       ctx.GetString("UserId"),
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	if isAdmin, _ := CheckAdmin(identity); isAdmin {
 		ctx.Next()
@@ -1048,7 +1053,6 @@ func AdminAuthHandler(ctx *gin.Context) {
 		Username: user,
 		Groups:   groups,
 		ID:       ctx.GetString("UserId"),
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 
 	isAdmin, msg := CheckAdmin(identity)
@@ -1075,7 +1079,6 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 			Username: user,
 			ID:       userId,
 			Groups:   groups,
-			Sub:      ctx.GetString("OIDCSub"),
 		}
 
 		// User has valid cookie, check if admin
@@ -1162,7 +1165,7 @@ func loginHandler(ctx *gin.Context) {
 
 	// Step 1: try the local-user database.
 	if externalUrl != "" {
-		dbUser, dbErr := database.VerifyUserPassword(database.ServerDatabase, login.User, login.Password, externalUrl)
+		dbUser, dbErr := database.VerifyUserPassword(database.ServerDatabase, login.User, login.Password)
 		if dbErr == nil {
 			userRecord = dbUser
 		} else if !errors.Is(dbErr, database.ErrInvalidPassword) {
@@ -1210,7 +1213,7 @@ func loginHandler(ctx *gin.Context) {
 		// (the user came in with their own credential, no other user
 		// brought the account into existence).
 		var err error
-		userRecord, err = database.GetOrCreateUser(database.ServerDatabase, login.User, login.User, externalUrl, database.CreatorSelf())
+		userRecord, err = database.GetOrCreateLocalUser(database.ServerDatabase, login.User, externalUrl, database.CreatorSelf())
 		if err != nil {
 			log.Errorf("Failed to get or create user %s: %s", login.User, err)
 			ctx.JSON(http.StatusInternalServerError,
@@ -1308,7 +1311,7 @@ func initLoginHandler(ctx *gin.Context) {
 	// Get or create the admin user in the database. The init-code path
 	// is the bootstrap admin authenticating themselves — self-enrolled.
 	externalUrl := param.Server_ExternalWebUrl.GetString()
-	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, "admin", "admin", externalUrl, database.CreatorSelf())
+	userRecord, err := database.GetOrCreateLocalUser(database.ServerDatabase, "admin", externalUrl, database.CreatorSelf())
 	if err != nil {
 		log.Errorf("Failed to get or create admin user: %s", err)
 		ctx.JSON(http.StatusInternalServerError,
@@ -1391,7 +1394,6 @@ func whoamiHandler(ctx *gin.Context) {
 			Username: user,
 			ID:       userId,
 			Groups:   groups,
-			Sub:      ctx.GetString("OIDCSub"),
 		}
 		isAdmin, _ := CheckAdmin(identity)
 		if isAdmin {

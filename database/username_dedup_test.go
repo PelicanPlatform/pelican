@@ -441,10 +441,10 @@ func TestPrepareForGlobalUniqueUsernamesSkipsPastMigration(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	finishMigrations(t, sqlDB)
 	require.NoError(t, db.Exec("DROP INDEX "+liveUsernameIndexName).Error)
-	insertLegacyUser(t, db, legacyUser{id: "alice-1", username: "alice", sub: "sub-1", issuer: dedupOIDCIssuer,
-		createdAt: "2026-01-01 00:00:00"})
-	insertLegacyUser(t, db, legacyUser{id: "alice-2", username: "alice", sub: "sub-2", issuer: dedupOldIssuer,
-		createdAt: "2026-02-01 00:00:00"})
+	// The schema here is fully migrated, so the users table no longer carries
+	// sub/issuer; duplicate usernames are all this test needs.
+	require.NoError(t, db.Exec("INSERT INTO users (id, username, created_at) VALUES "+
+		"('alice-1', 'alice', '2026-01-01 00:00:00'), ('alice-2', 'alice', '2026-02-01 00:00:00')").Error)
 
 	setExternalWebURL(t, dedupLocalIssuer)
 	require.NoError(t, prepareForGlobalUniqueUsernames(sqlDB, db))

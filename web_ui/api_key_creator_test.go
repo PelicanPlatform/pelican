@@ -52,10 +52,7 @@ func TestAPIKeyCreatorScopesDoNotFollowAUsername(t *testing.T) {
 	t.Cleanup(func() { database.ServerDatabase = prevDB })
 	migrateTestDB(t)
 
-	alice := &database.User{
-		ID: "u-alice", Username: "alice", Sub: "alice@idp",
-		Issuer: "https://idp.example", Status: database.UserStatusActive,
-	}
+	alice := &database.User{ID: "u-alice", Username: "alice", Status: database.UserStatusActive}
 	require.NoError(t, mockDB.Create(alice).Error)
 	require.NoError(t, database.GrantUserScope(mockDB, alice.ID,
 		token_scopes.Server_CollectionAdmin, database.CreatorSelf()))
@@ -75,10 +72,7 @@ func TestAPIKeyCreatorScopesDoNotFollowAUsername(t *testing.T) {
 	// the same scope. The old key's created_by still names the OLD ID,
 	// so it stays dead — this is the regression the username fallback
 	// used to open.
-	newAlice := &database.User{
-		ID: "u-new-alice", Username: "alice", Sub: "new-alice@idp",
-		Issuer: "https://idp.example", Status: database.UserStatusActive,
-	}
+	newAlice := &database.User{ID: "u-new-alice", Username: "alice", Status: database.UserStatusActive}
 	require.NoError(t, mockDB.Create(newAlice).Error)
 	require.NoError(t, database.GrantUserScope(mockDB, newAlice.ID,
 		token_scopes.Server_CollectionAdmin, database.CreatorSelf()))

@@ -1,8 +1,8 @@
 export interface User {
   id: string;
   username: string;
-  sub: string;
-  issuer: string;
+  // Identities (sub, issuer pairs) are no longer carried on the user record;
+  // they live in user_identities and are fetched via the identities endpoints.
   displayName?: string;
   createdAt: string;
   // Server-derived: true when a local password is set on the account.
