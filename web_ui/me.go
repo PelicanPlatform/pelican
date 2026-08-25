@@ -290,7 +290,7 @@ func handleUpdateMyPassword(ctx *gin.Context) {
 	// VerifyUserPassword returns ErrInvalidPassword for any failure
 	// mode (no row, empty hash, mismatch, inactive) without
 	// distinguishing — same posture as the login flow.
-	if _, err := database.VerifyUserPassword(database.ServerDatabase, user.Username, req.CurrentPassword, user.Issuer); err != nil {
+	if _, err := database.VerifyUserPassword(database.ServerDatabase, user.Username, req.CurrentPassword); err != nil {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "current password is incorrect",
@@ -375,6 +375,16 @@ func handleUnlinkMyIdentity(ctx *gin.Context) {
 		return
 	}
 	if err := database.DeleteUserIdentity(database.ServerDatabase, identityID, caller); err != nil {
+		if errors.Is(err, database.ErrLastCredential) {
+			// Not a server error: the request is well-formed, the outcome would
+			// just leave the account with no way to sign in. The admin handler
+			// maps this the same way.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

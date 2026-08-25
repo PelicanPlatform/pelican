@@ -356,7 +356,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 
@@ -706,7 +705,6 @@ func getNamespace(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
 	belongsTo := false

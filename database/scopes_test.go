@@ -57,10 +57,10 @@ type scopeFixtures struct {
 func seedScopeFixtures(t *testing.T, db *gorm.DB) scopeFixtures {
 	t.Helper()
 	users := []User{
-		{ID: "u-alice", Username: "alice", Sub: "alice", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-bob", Username: "bob", Sub: "bob", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-carol", Username: "carol", Sub: "carol", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-dan", Username: "dan", Sub: "dan", Issuer: "local", Status: UserStatusActive},
+		{ID: "u-alice", Username: "alice", Status: UserStatusActive},
+		{ID: "u-bob", Username: "bob", Status: UserStatusActive},
+		{ID: "u-carol", Username: "carol", Status: UserStatusActive},
+		{ID: "u-dan", Username: "dan", Status: UserStatusActive},
 	}
 	for i := range users {
 		require.NoError(t, db.Create(&users[i]).Error)

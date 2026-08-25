@@ -14,10 +14,13 @@ The user’s record has the following properties:
 - **Name**: The unique machine-readable name (“bockelman”). May be used for authorization decisions or in policy written by humans (e.g., referred to in the configuration file under the list of administrators; web displays should manipulate based on ID instead). Editable only by administrators. It may be auto-created based on the first sign-in from the
 - **Display Name**: The human-readable name (“Brian Bockelman”). Used to display information to humans in the web interface. Decisions that impact authorization (e.g., add/remove from a group, transfer ownership) MUST show both display name and name in the UI. Can be self-edited by the user.
 - **Identities**: A user has one or more *identity*; the identity is used solely for authentication (not authorization). Identities have an issuer and subject (terminology mirroring the fact these are created via OIDC typically).
-  - The “internal issuer” (the issuer URL used by the server for creating authorizations like cookies, not for data access) identity is set when the user has a locally-stored password. In this case, the sub must match the user’s name.
+  - All identities are equal. They live in `user_identities` and none of them is distinguished as "primary" — an account is reached through any of them, and any of them may be unlinked.
+  - The “internal issuer” (the issuer URL used by the server for creating authorizations like cookies, not for data access) identity is created when a local account is made. It is an ordinary identity row; nothing special-cases it, and password login resolves by username, which is globally unique.
   - To prevent humans from sharing an account, each user may have at most one associated sub per issuer.
   - A (sub, issuer) tuple may not be associated with more than one user.
-  - Users may not edit their identities but are permitted to unlink one.
+  - Both of the rules above are unique indexes on `user_identities`, so they hold for every writer. They were previously split across the `users` row and `user_identities`, which no constraint could span; the hand-written checks that stood in for one missed cases in both directions.
+  - Users may not edit their identities but are permitted to unlink one, provided they keep some way to sign in — the last identity of an account with no password cannot be removed.
+  - An administrator may *move* an identity between accounts (`AdoptUserIdentity`), which is how a mis-enrollment is corrected without deleting the account that wrongly holds it.
 - **Creation date, last edit date**: Metadata about changes; useful in diagnosing the source of users.
 - **Creator**: The user ID + session info that created this record. A special value, “self-enrolled” indicates the user was created on login. The special value “unknown” indicates the user record predated this field. The session info should indicate whether the creator was from the web interface or an API key (and what API key)
 - **Scopes**: A list of known permissions the user has in the Pelican server. These may be implicit (not stored in the DB; current example: UI access). Scopes are not editable by users.

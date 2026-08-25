@@ -81,9 +81,7 @@ func mintLoginCookieForTest(t *testing.T, userRecord *database.User, groups []st
 	tk.AddScopes(token_scopes.WebUi_Access)
 	tk.AddGroups(groups...)
 	tk.Claims = map[string]string{
-		"user_id":  userRecord.ID,
-		"oidc_sub": userRecord.Sub,
-		"oidc_iss": userRecord.Issuer,
+		"user_id": userRecord.ID,
 	}
 	tok, err := tk.CreateToken()
 	require.NoError(t, err)
@@ -130,9 +128,8 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 	zara := &database.User{
 		ID:       "u-zara",
 		Username: "zara",
-		Sub:      "zara@oidc",
-		Issuer:   "https://idp.example.com",
-		Status:   database.UserStatusActive,
+
+		Status: database.UserStatusActive,
 	}
 	require.NoError(t, database.ServerDatabase.Create(zara).Error)
 
@@ -149,9 +146,8 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 	otherOwner := &database.User{
 		ID:       "u-other",
 		Username: "otto",
-		Sub:      "otto@oidc",
-		Issuer:   "https://idp.example.com",
-		Status:   database.UserStatusActive,
+
+		Status: database.UserStatusActive,
 	}
 	require.NoError(t, database.ServerDatabase.Create(otherOwner).Error)
 
@@ -229,7 +225,6 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 	identity := UserIdentity{
 		Username: user,
 		ID:       userId,
-		Sub:      zara.Sub,
 		Groups:   groups,
 	}
 	ok, _ := CheckCollectionAdmin(identity)

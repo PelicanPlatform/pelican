@@ -81,10 +81,9 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 		_, aupVersion, _ := web_ui.CurrentAUPVersion()
 		require.NoError(t, database.ServerDatabase.Clauses(clause.OnConflict{DoNothing: true}).
 			Create(&database.User{
-				ID:         subject,
-				Username:   subject,
-				Sub:        subject,
-				Issuer:     "https://example.com",
+				ID:       subject,
+				Username: subject,
+
 				Status:     database.UserStatusActive,
 				AUPVersion: aupVersion,
 			}).Error)

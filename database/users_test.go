@@ -81,9 +81,13 @@ func TestCreateLocalUserHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
-	// Local-issuer invariant: sub equals username.
-	assert.Equal(t, u.Username, u.Sub)
-	assert.Equal(t, localIssuerForTests, u.Issuer)
+	// The local identity is an ordinary row in user_identities like any
+	// other, with sub == username at the local issuer.
+	identities, err := ListUserIdentities(db, u.ID)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	assert.Equal(t, u.Username, identities[0].Sub)
+	assert.Equal(t, localIssuerForTests, identities[0].Issuer)
 	assert.Equal(t, "Alice Smith", u.DisplayName)
 	// No password is set up front — admins use the password-invite flow.
 	assert.False(t, u.HasPassword, "freshly-created local user must not have a password")
@@ -155,19 +159,30 @@ func TestCreateUserRejectsDuplicateIdentity(t *testing.T) {
 
 // ---------- RenameUser invariants ----------
 
-func TestRenameUserKeepsSubInLockstepForLocalUsers(t *testing.T) {
+func TestRenameUserLeavesLocalIdentityAlone(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
 	require.NoError(t, err)
+	require.NoError(t, SetUserPassword(db, u.ID, "correct horse battery staple"))
 
-	require.NoError(t, RenameUser(db, u.ID, "alicia", localIssuerForTests))
+	require.NoError(t, RenameUser(db, u.ID, "alicia"))
 
 	got, err := GetUserByID(db, u.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "alicia", got.Username)
-	// Local-issuer accounts: sub must follow the username so password
-	// login (which keys off (username, issuer)) keeps working.
-	assert.Equal(t, "alicia", got.Sub)
+
+	// The identity keeps the sub it was created with. Nothing needs it kept
+	// in lockstep any more: password login resolves by username, which is
+	// globally unique.
+	identities, err := ListUserIdentities(db, u.ID)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	assert.Equal(t, "alice", identities[0].Sub)
+
+	// The rename must not lock the user out.
+	verified, err := VerifyUserPassword(db, "alicia", "correct horse battery staple")
+	require.NoError(t, err)
+	assert.Equal(t, u.ID, verified.ID)
 }
 
 func TestRenameUserLeavesOIDCSubAlone(t *testing.T) {
@@ -175,21 +190,23 @@ func TestRenameUserLeavesOIDCSubAlone(t *testing.T) {
 	u, err := CreateUser(db, "alice", "alice@idp", "https://idp.example", adminCreator())
 	require.NoError(t, err)
 
-	// localIssuer is supplied but the user's issuer is the OIDC one —
-	// the local-issuer rule must not apply.
-	require.NoError(t, RenameUser(db, u.ID, "alicia", localIssuerForTests))
+	require.NoError(t, RenameUser(db, u.ID, "alicia"))
 
 	got, err := GetUserByID(db, u.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "alicia", got.Username)
-	assert.Equal(t, "alice@idp", got.Sub, "OIDC sub must not be rewritten on rename")
+
+	identities, err := ListUserIdentities(db, u.ID)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	assert.Equal(t, "alice@idp", identities[0].Sub, "an issuer's subject is not ours to rewrite")
 }
 
 func TestRenameUserRejectsInvalidIdentifier(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
 	require.NoError(t, err)
-	assert.ErrorIs(t, RenameUser(db, u.ID, "alice/admin", localIssuerForTests), ErrInvalidIdentifier)
+	assert.ErrorIs(t, RenameUser(db, u.ID, "alice/admin"), ErrInvalidIdentifier)
 }
 
 // ---------- LookupOrBootstrapUser ----------
@@ -315,18 +332,18 @@ func TestSetAndVerifyUserPasswordRoundTrip(t *testing.T) {
 
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
 
-	got, err := VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	got, err := VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, u.ID, got.ID)
 	assert.True(t, got.HasPassword)
 
 	// Wrong password.
-	_, err = VerifyUserPassword(db, "alice", "wrong", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "wrong")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 
 	// Unknown user — same error class so callers can't distinguish.
-	_, err = VerifyUserPassword(db, "bob", "hunter2", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "bob", "hunter2")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 }
 
@@ -335,7 +352,7 @@ func TestVerifyUserPasswordRejectsWhenNoPasswordSet(t *testing.T) {
 	_, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
 	require.NoError(t, err)
 	// No SetUserPassword call — the row exists but has no credential.
-	_, err = VerifyUserPassword(db, "alice", "anything", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "anything")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 }
 
@@ -346,7 +363,7 @@ func TestVerifyUserPasswordRejectsInactiveAccount(t *testing.T) {
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
 	require.NoError(t, UpdateUserStatus(db, u.ID, UserStatusInactive))
 
-	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 }
 
@@ -357,12 +374,12 @@ func TestSetUserPasswordEmptyClearsPassword(t *testing.T) {
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
 
 	// Sanity: password works.
-	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	require.NoError(t, err)
 
 	// Clear it; subsequent verify must fail.
 	require.NoError(t, SetUserPassword(db, u.ID, ""))
-	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 
 	got, err := GetUserByID(db, u.ID)
@@ -437,7 +454,7 @@ func TestRedeemPasswordInviteLinkSingleUseRaceSafe(t *testing.T) {
 	assert.Equal(t, 1, failures, "the other concurrent redemption must fail")
 
 	// And — independently — the password must be set.
-	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	assert.NoError(t, err)
 }
 
@@ -459,9 +476,9 @@ func TestRedeemPasswordInviteLinkSecondAttemptFails(t *testing.T) {
 	_, err = RedeemPasswordInviteLink(db, plaintext, "another-password-attempt")
 	assert.Error(t, err)
 
-	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "hunter2-correct-horse")
 	assert.NoError(t, err, "first password must remain in effect after a failed second redemption")
-	_, err = VerifyUserPassword(db, "alice", "another-password-attempt", localIssuerForTests)
+	_, err = VerifyUserPassword(db, "alice", "another-password-attempt")
 	assert.ErrorIs(t, err, ErrInvalidPassword)
 }
 
@@ -498,4 +515,199 @@ func TestInviteLinkExposesTokenPrefixForPublicID(t *testing.T) {
 	// match it back to a token they generated.
 	require.Len(t, link.TokenPrefix, inviteTokenPrefixLen)
 	assert.Equal(t, plaintext[:inviteTokenPrefixLen], link.TokenPrefix)
+}
+
+// ---------- identity unification ----------
+//
+// These pin the properties the two-table split could not hold. Both invariants
+// are now ordinary unique indexes on user_identities, so they apply to every
+// writer rather than only to the ones that remembered to check.
+
+// TestLookupOrBootstrapUserFindsLinkedIdentity is the regression for the bug
+// that motivated unification: LookupOrBootstrapUser consulted only the users
+// table, so an identity an admin had *linked* was invisible to it and the
+// user's next sign-in minted a second account instead of logging them in.
+func TestLookupOrBootstrapUserFindsLinkedIdentity(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const kc = "https://keycloak.example.org/realms/proj"
+
+	alice, err := LookupOrBootstrapUser(db, "cilogon-sub", "https://cilogon.org", "Alice", []string{"alice"})
+	require.NoError(t, err)
+
+	// An admin links alice's identity at a second issuer.
+	_, err = CreateUserIdentity(db, alice.ID, "kc-sub", kc)
+	require.NoError(t, err)
+
+	// Signing in through that issuer must land on alice's account.
+	viaLogin, err := LookupOrBootstrapUser(db, "kc-sub", kc, "Alice", []string{"alice"})
+	require.NoError(t, err)
+	assert.Equal(t, alice.ID, viaLogin.ID, "a linked identity must resolve to the account it was linked to")
+
+	var count int64
+	require.NoError(t, db.Model(&User{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count, "signing in with a linked identity must not create a second account")
+}
+
+func TestCreateUserIdentityRejectsIdentityLinkedElsewhere(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const kc = "https://keycloak.example.org/realms/proj"
+
+	alice, err := LookupOrBootstrapUser(db, "a-sub", "https://cilogon.org", "Alice", []string{"alice"})
+	require.NoError(t, err)
+	bob, err := LookupOrBootstrapUser(db, "kc-sub", kc, "Bob", []string{"bob"})
+	require.NoError(t, err)
+
+	_, err = CreateUserIdentity(db, alice.ID, "kc-sub", kc)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIdentityClaimed)
+
+	// The identity still resolves to its original owner.
+	got, err := GetUserByIdentity(db, "kc-sub", kc)
+	require.NoError(t, err)
+	assert.Equal(t, bob.ID, got.ID)
+}
+
+func TestCreateUserIdentityRejectsSecondIdentityAtSameIssuer(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const idp = "https://idp.example.org"
+
+	alice, err := LookupOrBootstrapUser(db, "a-sub", idp, "Alice", []string{"alice"})
+	require.NoError(t, err)
+
+	// One identity per issuer per user — otherwise two people could share an
+	// account by each linking their own subject at the same IdP.
+	_, err = CreateUserIdentity(db, alice.ID, "different-sub", idp)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIssuerAlreadyLinked)
+}
+
+// TestAdoptUserIdentityMovesIdentity covers the correction path that used to
+// require deleting an account: with one table, moving an identity is a
+// single-row update.
+func TestAdoptUserIdentityMovesIdentity(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const kc = "https://keycloak.example.org/realms/proj"
+
+	alice, err := LookupOrBootstrapUser(db, "cilogon-sub", "https://cilogon.org", "Alice", []string{"alice"})
+	require.NoError(t, err)
+	// A mis-enrollment: the same person auto-enrolled as a separate account.
+	stray, err := LookupOrBootstrapUser(db, "kc-sub", kc, "Alice", []string{"alice-kc"})
+	require.NoError(t, err)
+
+	moved, err := AdoptUserIdentity(db, alice.ID, "kc-sub", kc)
+	require.NoError(t, err)
+	assert.Equal(t, alice.ID, moved.UserID)
+
+	got, err := GetUserByIdentity(db, "kc-sub", kc)
+	require.NoError(t, err)
+	assert.Equal(t, alice.ID, got.ID, "the identity must now resolve to alice")
+
+	// The stray account still exists — adopting an identity is not a delete,
+	// so anything it owns is preserved for the admin to deal with separately.
+	_, err = GetUserByID(db, stray.ID)
+	assert.NoError(t, err)
+}
+
+func TestAdoptUserIdentityRefusesIssuerCollision(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const kc = "https://keycloak.example.org/realms/proj"
+
+	alice, err := LookupOrBootstrapUser(db, "alice-kc", kc, "Alice", []string{"alice"})
+	require.NoError(t, err)
+	_, err = LookupOrBootstrapUser(db, "bob-kc", kc, "Bob", []string{"bob"})
+	require.NoError(t, err)
+
+	// Alice already has an identity at this issuer; taking Bob's would give
+	// her two, which is the invariant the (user_id, issuer) index protects.
+	_, err = AdoptUserIdentity(db, alice.ID, "bob-kc", kc)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIssuerAlreadyLinked)
+}
+
+func TestDeleteUserIdentityGuardsLastCredential(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const idp = "https://idp.example.org"
+
+	alice, err := LookupOrBootstrapUser(db, "a-sub", idp, "Alice", []string{"alice"})
+	require.NoError(t, err)
+	identities, err := ListUserIdentities(db, alice.ID)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+
+	// No password and no other identity: unlinking would lock the account out.
+	err = DeleteUserIdentity(db, identities[0].ID, alice.ID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrLastCredential)
+
+	// With a password set, the same unlink is allowed — every identity is
+	// removable now, including the one that used to live on the user row.
+	require.NoError(t, SetUserPassword(db, alice.ID, "correct horse battery staple"))
+	require.NoError(t, DeleteUserIdentity(db, identities[0].ID, alice.ID))
+
+	remaining, err := ListUserIdentities(db, alice.ID)
+	require.NoError(t, err)
+	assert.Empty(t, remaining)
+}
+
+func TestDeleteUserIdentityAllowsUnlinkWhenAnotherRemains(t *testing.T) {
+	db := setupCollectionTestDB(t)
+
+	alice, err := LookupOrBootstrapUser(db, "a-sub", "https://idp-one.example", "Alice", []string{"alice"})
+	require.NoError(t, err)
+	second, err := CreateUserIdentity(db, alice.ID, "a-sub-2", "https://idp-two.example")
+	require.NoError(t, err)
+
+	require.NoError(t, DeleteUserIdentity(db, second.ID, alice.ID))
+	remaining, err := ListUserIdentities(db, alice.ID)
+	require.NoError(t, err)
+	assert.Len(t, remaining, 1)
+}
+
+// TestDeleteUserFreesIdentityForReEnrollment is the regression for the orphaned-
+// identity bug: DeleteUser soft-deletes the user row but must hard-delete its
+// identities, or the (sub, issuer) stays reserved by the non-partial unique
+// index and the same person can never sign in again.
+func TestDeleteUserFreesIdentityForReEnrollment(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const iss = "https://idp.example.org"
+
+	alice, err := LookupOrBootstrapUser(db, "alice-sub", iss, "Alice", []string{"alice"})
+	require.NoError(t, err)
+
+	require.NoError(t, DeleteUser(db, alice.ID, "admin", true))
+
+	// No identity row should survive the delete.
+	var count int64
+	require.NoError(t, db.Model(&UserIdentity{}).Where("sub = ? AND issuer = ?", "alice-sub", iss).Count(&count).Error)
+	assert.EqualValues(t, 0, count, "the deleted user's identity must not linger")
+
+	// The same person can enroll again — previously this failed with a
+	// UNIQUE violation surfaced as "could not allocate a unique username".
+	reAlice, err := LookupOrBootstrapUser(db, "alice-sub", iss, "Alice", []string{"alice"})
+	require.NoError(t, err, "re-enrollment after deletion must succeed")
+	assert.NotEqual(t, alice.ID, reAlice.ID, "re-enrollment mints a fresh account")
+}
+
+// TestGetOrCreateLocalUserAfterRename covers htpasswd (or local-password) login
+// for an account an admin has renamed. The identity keeps its original sub while
+// the username moves, so a bare username lookup misses and the re-link collides
+// on the issuer — the function must recognize that and return the account rather
+// than erroring, which would lock the user out.
+func TestGetOrCreateLocalUserAfterRename(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	const localIssuer = "https://origin.example"
+
+	u, err := CreateLocalUser(db, "alice", "", localIssuer, adminCreator())
+	require.NoError(t, err)
+	require.NoError(t, RenameUser(db, u.ID, "alicia"))
+
+	// htpasswd login by the NEW username must resolve to the same account.
+	got, err := GetOrCreateLocalUser(db, "alicia", localIssuer, CreatorSelf())
+	require.NoError(t, err, "a renamed local account must still be resolvable by username")
+	assert.Equal(t, u.ID, got.ID)
+
+	// And it must not have spuriously created a second account.
+	var count int64
+	require.NoError(t, db.Model(&User{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }

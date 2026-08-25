@@ -114,7 +114,7 @@ func TestRedeemPasswordInviteLink(t *testing.T) {
 		assert.Equal(t, uid, gotUserID)
 
 		// VerifyUserPassword should now succeed with the chosen password.
-		_, err = VerifyUserPassword(db, "alice", newPw, "https://local")
+		_, err = VerifyUserPassword(db, "alice", newPw)
 		require.NoError(t, err)
 
 		// And the link is marked redeemed.
@@ -152,9 +152,9 @@ func TestRedeemPasswordInviteLink(t *testing.T) {
 		// Critical: the conditional UPDATE pattern in the redeem flow
 		// has to claim the link BEFORE writing the hash, so a beaten
 		// race rolls back the hash write too.
-		_, err = VerifyUserPassword(db, "alice", "first-pw-12345", "https://local")
+		_, err = VerifyUserPassword(db, "alice", "first-pw-12345")
 		assert.NoError(t, err, "first redemption's password should still be in effect")
-		_, err = VerifyUserPassword(db, "alice", "second-pw-67890", "https://local")
+		_, err = VerifyUserPassword(db, "alice", "second-pw-67890")
 		assert.ErrorIs(t, err, ErrInvalidPassword,
 			"second redemption must NOT have rewritten the hash")
 	})

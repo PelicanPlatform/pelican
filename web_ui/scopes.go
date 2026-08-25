@@ -127,7 +127,6 @@ func init() {
 		identity := UserIdentity{
 			Username: user.Username,
 			ID:       user.ID,
-			Sub:      user.Sub,
 		}
 		return EffectiveScopesForIdentity(identity)
 	}
@@ -339,7 +338,6 @@ func handleGetMyScopes(ctx *gin.Context) {
 	identity := UserIdentity{
 		Username: ctx.GetString("User"),
 		ID:       id,
-		Sub:      ctx.GetString("OIDCSub"),
 		Groups:   groups,
 	}
 	ctx.JSON(http.StatusOK, EffectiveScopesForIdentity(identity))

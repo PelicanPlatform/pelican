@@ -59,9 +59,8 @@ func seedUser(t *testing.T, id, username, password string) string {
 	require.NoError(t, database.ServerDatabase.Create(&database.User{
 		ID:       id,
 		Username: username,
-		Sub:      username,
-		Issuer:   "https://example.com",
-		Status:   database.UserStatusActive,
+
+		Status: database.UserStatusActive,
 	}).Error)
 	if password != "" {
 		require.NoError(t, database.SetUserPassword(database.ServerDatabase, id, password))
@@ -151,9 +150,9 @@ func TestHandleUpdateMyPassword(t *testing.T) {
 		// The new password must verify; the old one must not. (Both
 		// halves matter — a buggy implementation that wrote a tombstone
 		// hash would pass "new doesn't verify" but break "old fails too".)
-		_, err := database.VerifyUserPassword(database.ServerDatabase, "dan", "newSecret123", "https://example.com")
+		_, err := database.VerifyUserPassword(database.ServerDatabase, "dan", "newSecret123")
 		assert.NoError(t, err, "the new password must authenticate after rotation")
-		_, err = database.VerifyUserPassword(database.ServerDatabase, "dan", "old-pw-123", "https://example.com")
+		_, err = database.VerifyUserPassword(database.ServerDatabase, "dan", "old-pw-123")
 		assert.Error(t, err, "the previous password must stop working as soon as the rotation succeeds")
 	})
 }
@@ -189,7 +188,7 @@ func TestHandleClearMyPassword(t *testing.T) {
 
 		// After clear, login with the OLD password must fail. There's
 		// no "new" password to test — that's the point.
-		_, err := database.VerifyUserPassword(database.ServerDatabase, "frank", "old-pw-123", "https://example.com")
+		_, err := database.VerifyUserPassword(database.ServerDatabase, "frank", "old-pw-123")
 		assert.Error(t, err, "the cleared password must stop authenticating")
 	})
 
