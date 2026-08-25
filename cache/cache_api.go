@@ -216,12 +216,16 @@ func cleanupDirectorTestFiles(ctx context.Context, dirTestPath string) error {
 
 	// Clean up legacy flat files
 	if len(legacyFiles) > 0 {
+		cleanedCount := 0
 		for i := 0; i < len(legacyFiles); i++ {
 			filePath := filepath.Join(dirTestPath, legacyFiles[i].Name())
 			if err := removeTestFile(ctx, filePath); err != nil {
 				log.WithError(err).Warnf("Failed to remove legacy director test file: %s", filePath)
+			} else {
+				cleanedCount++
 			}
 		}
+		log.Debugf("Cleaned up %d of %d legacy director test files scanned in %s", cleanedCount, len(legacyFiles), dirTestPath)
 	}
 
 	return nil
@@ -245,6 +249,8 @@ func cleanupDirectorIDSubtree(ctx context.Context, idDirPath, todayStr string) e
 		if entry.Name() < todayStr {
 			if err := cleanTestDir(ctx, dateDir); err != nil {
 				log.WithError(err).Warnf("Failed to remove old director test directory: %s", dateDir)
+			} else {
+				log.Debugf("Cleaned up old director test directory: %s", dateDir)
 			}
 		} else if entry.Name() == todayStr {
 			if err := cleanupOldFilesInDir(ctx, dateDir, 1); err != nil {
@@ -290,14 +296,20 @@ func cleanupOldFilesInDir(ctx context.Context, dirPath string, keepObjects int) 
 	}
 	sort.Strings(keys)
 
+	cleanedCount := 0
+	totalCount := 0
 	for i := 0; i < len(keys)-keepObjects; i++ {
 		for _, name := range objects[keys[i]] {
+			totalCount++
 			filePath := filepath.Join(dirPath, name)
 			if err := removeTestFile(ctx, filePath); err != nil {
 				log.WithError(err).Warnf("Failed to remove old test file: %s", filePath)
+			} else {
+				cleanedCount++
 			}
 		}
 	}
+	log.Debugf("Cleaned up %d of %d director test files scanned in %s", cleanedCount, totalCount, dirPath)
 	return nil
 }
 
@@ -351,6 +363,8 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 		return
 	}
 
+	log.Debugf("Received authorized eviction request from director for test file %s", reqBody.Path)
+
 	if err := evictViaLocalPlugin(ctx.Request.Context(), reqBody.Path); err != nil {
 		log.Warningf("Failed to submit evict request for director test file %s: %v", reqBody.Path, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -363,7 +377,7 @@ func HandleDirectorEvictRequest(ctx *gin.Context) {
 	// Note: the file is now a PFC purge candidate, not necessarily removed from disk.
 	// Physical removal is deferred to PFC's threshold-gated purge cycle (see the doc
 	// comment on evictViaLocalPlugin).
-	log.Debugf("Marked director test file as PFC purge candidate via local plugin: %s", reqBody.Path)
+	log.Debugf("Successfully marked director test file %q as a PFC purge candidate via Evict API", reqBody.Path)
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 		Status: server_structs.RespOK,
 		Msg:    "Eviction request accepted; file marked as a purge candidate (physical removal deferred to PFC purge cycle)",
@@ -468,6 +482,8 @@ func LaunchDirectorTestFileCleanup(ctx context.Context, egrp *errgroup.Group) {
 			// Run immediately on startup, then once every 24h.
 			if err := cleanupDirectorTestFiles(ctx, dirTestPath); err != nil {
 				log.Warningf("Failure during director test file backup cleanup: %v", err)
+			} else {
+				log.Debugf("Director test file backup cleanup pass completed for %s", dirTestPath)
 			}
 			select {
 			case <-ctx.Done():
