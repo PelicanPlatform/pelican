@@ -104,6 +104,38 @@ func TestCreateLocalUserRejectsDuplicateUsername(t *testing.T) {
 	assert.Error(t, err, "second create with the same (username, issuer) must fail")
 }
 
+// Usernames are a GLOBAL authorization handle, not per-issuer: because
+// admin matching is issuer-blind (web_ui/scopes.go), a name must back at
+// most one live account across the whole server. Enforced by the partial
+// unique index idx_user_username_live (migration 20260812000000).
+func TestUsernameIsGloballyUniqueAcrossIssuers(t *testing.T) {
+	db := setupCollectionTestDB(t)
+
+	// An OIDC account claims "alice" under CILogon.
+	oidc, err := CreateUser(db, "alice", "cilogon-sub-123", "https://cilogon.org", adminCreator())
+	require.NoError(t, err)
+	require.Equal(t, "alice", oidc.Username)
+
+	// A local password account for "alice" (different issuer, different
+	// sub) must be refused — otherwise both collapse into one issuer-blind
+	// authz identity.
+	_, err = CreateLocalUser(db, "alice", "Alice Local", localIssuerForTests, adminCreator())
+	assert.Error(t, err, "local 'alice' must not coexist with OIDC 'alice'")
+
+	// An admin-created OIDC account under yet another issuer must also be
+	// refused.
+	_, err = CreateUser(db, "alice", "gh-sub-1", "https://github.com", adminCreator())
+	assert.Error(t, err, "cross-issuer duplicate username must be rejected")
+
+	// First-login bootstrap under a *different* issuer whose derived
+	// username also resolves to "alice" must disambiguate rather than
+	// create a second live "alice" (pre-fix this produced a duplicate).
+	u, err := LookupOrBootstrapUser(db, "gh-sub-2", "https://github.com", "Alice GH", []string{"alice"})
+	require.NoError(t, err)
+	assert.NotEqual(t, "alice", u.Username)
+	assert.True(t, strings.HasPrefix(u.Username, "alice-"), "expected disambiguated name, got %q", u.Username)
+}
+
 func TestCreateUserRejectsInvalidIdentifier(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	for _, bad := range []string{"", "alice/admin", "alice..bob"} {

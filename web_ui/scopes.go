@@ -53,6 +53,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	pkgerrors "github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/api_token"
@@ -248,6 +249,48 @@ func hasScope(identity UserIdentity, scope token_scopes.TokenScope) bool {
 		}
 	}
 	return false
+}
+
+// warnNonUsernameAdminEntries scans the username-matched admin lists
+// (Server.UIAdminUsers, Server.UserAdminUsers,
+// Server.CollectionAdminUsers) for entries that can never match a
+// Pelican username and logs a startup error naming each one.
+//
+// As of v7.27 these lists are matched against the server-managed
+// username only — never the OIDC subject and never the internal user
+// ID (see addByUsernameMatch above and the design rationale on
+// CheckAdmin). Before v7.27, Server.UIAdminUsers also matched the
+// OIDC subject, so operators commonly listed CILogon User Identifiers
+// like "http://cilogon.org/serverA/users/12345". Such entries now
+// silently grant nothing — an admin lockout the operator should hear
+// about at startup, not discover as a login denial.
+//
+// database.ValidateIdentifier is the same validator applied wherever
+// usernames enter the system, so any entry it rejects (URL- or
+// oidc_sub-shaped values, anything with '/' or ':') cannot equal a
+// stored username. Opaque non-URL subjects are indistinguishable from
+// usernames and pass through unflagged; this is a heuristic for the
+// common CILogon case, not a completeness guarantee.
+func warnNonUsernameAdminEntries() {
+	for _, p := range []param.StringSliceParam{
+		param.Server_UIAdminUsers,
+		param.Server_UserAdminUsers,
+		param.Server_CollectionAdminUsers,
+	} {
+		invalid := []string{}
+		for _, entry := range p.GetStringSlice() {
+			if database.ValidateIdentifier(entry) != nil {
+				invalid = append(invalid, entry)
+			}
+		}
+		if len(invalid) > 0 {
+			log.Errorf("%s contains entries that are not valid Pelican usernames and will never grant admin permission: %q. "+
+				"As of Pelican v7.27, entries are matched against the server-managed username only "+
+				"(see user's profile page after they login) — OIDC subjects such as CILogon User "+
+				"Identifiers no longer grant admin. Replace the listed entries, or grant admin access via %s instead.",
+				p.GetName(), invalid, param.Server_AdminGroups.GetName())
+		}
+	}
 }
 
 // =============================================================================

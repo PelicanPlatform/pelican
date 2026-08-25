@@ -3619,10 +3619,17 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIAdminUsers
 description: |+
-  A string slice of "subject" claim of users to give admin permission for the server admin website,
-  who are authenticated through OAuth/OIDC.
+  A list of Pelican usernames to give admin permission for the server Web UI.
 
-  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+  Each entry is matched against the server-managed username only. Confirm the exact value
+  from the user's profile page in the Web UI after they have logged in once.
+
+  **Breaking change (v7.27):** entries were previously also matched against the user's
+  OIDC "subject" claim (e.g. a CILogon User Identifier such as
+  `http://cilogon.org/serverA/users/12345`) and the internal user ID. As of v7.27 those
+  values no longer grant admin permission; Pelican logs a startup error naming any such
+  entry. Replace each one with the user's Pelican username, or (recommended) grant admin
+  access via ${Server.AdminGroups} instead.
 type: stringSlice
 default: []
 components: ["cache", "director", "origin", "registry"]
@@ -3647,7 +3654,7 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UserAdminUsers
 description: |+
-  A list of user identifiers (username, OIDC subject, or user ID) that are granted user administrator privileges.
+  A list of Pelican usernames that are granted user administrator privileges.
   User administrators can create, modify, and delete non-admin users and unprivileged groups.
   They cannot modify the system admin user or system admin groups.
 type: stringSlice
@@ -3664,7 +3671,7 @@ components: ["origin", "registry"]
 ---
 name: Server.CollectionAdminUsers
 description: |+
-  A list of user identifiers (username, OIDC subject, or user ID) that are granted collection administrator privileges.
+  A list of Pelican usernames that are granted collection administrator privileges.
   Collection administrators can create, modify, and delete collections and manage collection ACLs.
 type: stringSlice
 default: []

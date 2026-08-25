@@ -19,9 +19,12 @@
 package web_ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -337,4 +340,78 @@ func TestCheckHelpersHonorAdminGroupsConfig(t *testing.T) {
 func mustCheckCollectionAdmin(identity UserIdentity) bool {
 	ok, _ := CheckCollectionAdmin(identity)
 	return ok
+}
+
+// TestWarnNonUsernameAdminEntries covers the startup check that flags
+// admin-list entries which can never match a server-managed username —
+// principally pre-7.27 CILogon OIDC subjects left in
+// Server.UIAdminUsers (see OPS-525).
+func TestWarnNonUsernameAdminEntries(t *testing.T) {
+	setup := func(t *testing.T) *logrustest.Hook {
+		server_utils.ResetTestState()
+		t.Cleanup(server_utils.ResetTestState)
+		hook := logrustest.NewGlobal()
+		t.Cleanup(hook.Reset)
+		return hook
+	}
+
+	errorEntries := func(hook *logrustest.Hook) []string {
+		msgs := []string{}
+		for _, e := range hook.AllEntries() {
+			if e.Level == logrus.ErrorLevel {
+				msgs = append(msgs, e.Message)
+			}
+		}
+		return msgs
+	}
+
+	t.Run("no lists set logs nothing", func(t *testing.T) {
+		hook := setup(t)
+		warnNonUsernameAdminEntries()
+		assert.Empty(t, errorEntries(hook))
+	})
+
+	t.Run("valid usernames log nothing", func(t *testing.T) {
+		hook := setup(t)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice", "bob@wisc.edu", "carol.d-e_f@example.org"}))
+		warnNonUsernameAdminEntries()
+		assert.Empty(t, errorEntries(hook))
+	})
+
+	t.Run("CILogon oidc_sub entry is named in an error", func(t *testing.T) {
+		hook := setup(t)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"http://cilogon.org/serverA/users/12345"}))
+		warnNonUsernameAdminEntries()
+		msgs := errorEntries(hook)
+		require.Len(t, msgs, 1)
+		assert.Contains(t, msgs[0], param.Server_UIAdminUsers.GetName())
+		assert.Contains(t, msgs[0], "http://cilogon.org/serverA/users/12345")
+		assert.Contains(t, msgs[0], param.Server_AdminGroups.GetName())
+	})
+
+	t.Run("mixed list names only the invalid entries", func(t *testing.T) {
+		hook := setup(t)
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{
+			"valid.user@example.edu",
+			"https://cilogon.org/serverB/users/999",
+		}))
+		warnNonUsernameAdminEntries()
+		msgs := errorEntries(hook)
+		require.Len(t, msgs, 1)
+		assert.Contains(t, msgs[0], "https://cilogon.org/serverB/users/999")
+		assert.NotContains(t, msgs[0], "valid.user@example.edu",
+			"valid username must not be listed as an offending entry")
+	})
+
+	t.Run("other username-matched admin lists are checked too", func(t *testing.T) {
+		hook := setup(t)
+		require.NoError(t, param.Server_UserAdminUsers.Set([]string{"http://cilogon.org/serverA/users/1"}))
+		require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{"http://cilogon.org/serverA/users/2"}))
+		warnNonUsernameAdminEntries()
+		msgs := errorEntries(hook)
+		require.Len(t, msgs, 2)
+		joined := strings.Join(msgs, "\n")
+		assert.Contains(t, joined, param.Server_UserAdminUsers.GetName())
+		assert.Contains(t, joined, param.Server_CollectionAdminUsers.GetName())
+	})
 }
