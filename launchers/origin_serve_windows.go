@@ -24,9 +24,10 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {

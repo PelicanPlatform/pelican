@@ -1,4 +1,4 @@
-//go:build server && !client
+//go:build server
 
 /***************************************************************
  *
@@ -20,7 +20,9 @@
 
 package main
 
-// docBinaryName is the canonical name used when generating CLI documentation
-// for the server binary. It controls the root command name in generated pages
-// and the URL prefix under commands-reference/.
-const docBinaryName = "pelican-server"
+// The server build names its documentation pages after the "pelican-server"
+// binary. When a build also carries the client tag, the client name wins; see
+// docBinaryName in doc_gen.go.
+func init() {
+	serverDocBinaryName = "pelican-server"
+}

@@ -185,7 +185,7 @@ func configGet(cmd *cobra.Command, args []string) {
 // flattenConfig recursively flattens the config structure into a map[string]string.
 func flattenConfig(config interface{}, parentKey string, result map[string]string) {
 	v := reflect.ValueOf(config)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 
@@ -205,7 +205,7 @@ func flattenConfig(config interface{}, parentKey string, result map[string]strin
 		switch fieldValue.Kind() {
 		case reflect.Struct:
 			flattenConfig(fieldValue.Interface(), key, result)
-		case reflect.Ptr:
+		case reflect.Pointer:
 			if !fieldValue.IsNil() {
 				flattenConfig(fieldValue.Interface(), key, result)
 			}

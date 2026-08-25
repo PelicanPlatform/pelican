@@ -529,7 +529,7 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 func (f *sshFile) Readdir(count int) ([]os.FileInfo, error) {
 	// Ensure a trailing slash so the request matches the mux pattern
 	// registered as prefix+"/".  Without it the helper's ServeMux would
-	// issue a 301 redirect, which cannot be followed over a one-shot
+	// issue a redirect, which cannot be followed over a one-shot
 	// reverse connection.
 	dirName := f.name
 	if !strings.HasSuffix(dirName, "/") {

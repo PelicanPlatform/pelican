@@ -58,14 +58,14 @@ func compareStructsAsym(v1, v2 interface{}) interface{} {
 	val1 := reflect.ValueOf(v1)
 	val2 := reflect.ValueOf(v2)
 
-	if val1.Kind() == reflect.Ptr {
+	if val1.Kind() == reflect.Pointer {
 		if val1.IsNil() {
 			val1 = reflect.Value{}
 		} else {
 			val1 = val1.Elem()
 		}
 	}
-	if val2.Kind() == reflect.Ptr {
+	if val2.Kind() == reflect.Pointer {
 		if val2.IsNil() {
 			val2 = reflect.Value{}
 		} else {

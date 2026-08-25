@@ -585,7 +585,7 @@ func (ad *ServerBaseAd) After(other ServerBaseAdInterface) AdAfter {
 	// A typed-nil value (e.g. (*DirectorAd)(nil)) is not nil, and it will
 	// cause a panic if we try to access its methods.
 	// So we use reflection to check if the underlying value is nil.
-	if other == nil || (reflect.ValueOf(other).Kind() == reflect.Ptr && reflect.ValueOf(other).IsNil()) {
+	if other == nil || (reflect.ValueOf(other).Kind() == reflect.Pointer && reflect.ValueOf(other).IsNil()) {
 		return AdAfterUnknown
 	}
 

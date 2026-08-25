@@ -59,7 +59,7 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 			if process, findErr := os.FindProcess(pid); findErr == nil {
 				// On Windows, FindProcess always succeeds, so we can't reliably detect stale PIDs
 				// We'll assume the server is running if the PID file exists
-				process.Release()
+				_ = process.Release()
 				return nil, errors.Errorf("server appears to be running (PID %d from PID file)", pid)
 			}
 		}

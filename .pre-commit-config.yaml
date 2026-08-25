@@ -47,11 +47,14 @@ repos:
   # Check semantics.
   #
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.9.0
+    rev: v2.12.2
     hooks:
+      # These can be some of the more time-consuming checks.
+      # The "full" variant more closely matches the GitHub Actions.
       - id: golangci-lint
-        # This can be one of the more time-consuming checks.
-        stages: [pre-push, manual]
+        stages: [pre-push]
+      - id: golangci-lint-full
+        stages: [manual]
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:

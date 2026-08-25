@@ -23,8 +23,9 @@ package oa4mp
 import (
 	"os/exec"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func customizeCmd(cmd *exec.Cmd) error {
