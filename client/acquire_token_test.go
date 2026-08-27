@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +41,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -1418,4 +1421,120 @@ func TestRefreshTokenEntryInvalidGrant(t *testing.T) {
 	require.Error(t, err, "expected the stale refresh token to be rejected")
 	assert.Contains(t, err.Error(), "invalid_grant")
 	assert.Contains(t, err.Error(), "invalid refresh token")
+}
+
+// mintPrefixScopedToken produces the shape of credential an issuer actually
+// hands a user: WLCG read+write scopes on a *prefix*, not on one object.
+func mintPrefixScopedToken(t *testing.T, jwkKey jwk.Key, issuer, prefix string) string {
+	t.Helper()
+
+	tc, err := token.NewTokenConfig(token.WlcgProfile{})
+	require.NoError(t, err)
+	tc.Lifetime = time.Hour
+	tc.Issuer = issuer
+	tc.Subject = "test-user"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, prefix),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, prefix),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, prefix),
+	)
+
+	tokBytes, err := tc.CreateTokenWithKey(jwkKey)
+	require.NoError(t, err)
+	return string(tokBytes)
+}
+
+// TestCopyTokenOperationsAcceptPrefixScopedTokens pins the operations a
+// third-party copy asks for.  The copy job used to ask for TokenSharedRead /
+// TokenSharedWrite, which demand a scope naming the object exactly; against an
+// ordinary prefix-scoped credential every copy then logged "Using provided
+// token ... even though it does not appear to be acceptable to perform
+// transfer" and transferred anyway.  See issue #3663.
+func TestCopyTokenOperationsAcceptPrefixScopedTokens(t *testing.T) {
+	issuerURL, err := url.Parse("https://issuer.example")
+	require.NoError(t, err)
+
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{Namespace: "/foo"},
+		XPelTokGenHdr: server_structs.XPelTokGen{
+			Issuers:   []*url.URL{issuerURL},
+			BasePaths: []string{"/foo"},
+		},
+	}
+
+	tkn := mintPrefixScopedToken(t, createTestJWK(t), "https://issuer.example", "/data")
+	const object = "/foo/data/sub/object.txt"
+
+	t.Run("source operation accepts a prefix-scoped token", func(t *testing.T) {
+		assert.True(t, tokenIsAcceptable(tkn, object, dirResp,
+			config.TokenGenerationOpts{Operation: copySourceTokenOperation}))
+	})
+
+	t.Run("destination operation accepts a prefix-scoped token", func(t *testing.T) {
+		assert.True(t, tokenIsAcceptable(tkn, object, dirResp,
+			config.TokenGenerationOpts{Operation: copyDestinationTokenOperation}))
+	})
+
+	// The regression itself: the share-flavored operations reject exactly the
+	// credential the copy was handed, which is what produced the warning.
+	t.Run("share operations still demand an exact scope", func(t *testing.T) {
+		assert.False(t, tokenIsAcceptable(tkn, object, dirResp,
+			config.TokenGenerationOpts{Operation: config.TokenSharedRead}))
+		assert.False(t, tokenIsAcceptable(tkn, object, dirResp,
+			config.TokenGenerationOpts{Operation: config.TokenSharedWrite}))
+	})
+}
+
+// TestUnacceptableTokenWarnsOnce covers the second half of the noise in issue
+// #3663: when the generator does fall back to a credential it cannot vouch for,
+// it says so once rather than once per file.  Get() used to clear the cache on
+// every call for such a credential, which re-ran the whole on-disk token search
+// and re-emitted the warning each time.
+func TestUnacceptableTokenWarnsOnce(t *testing.T) {
+	issuerURL, err := url.Parse("https://issuer.example")
+	require.NoError(t, err)
+
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{Namespace: "/foo", RequireToken: true},
+		XPelTokGenHdr: server_structs.XPelTokGen{
+			Issuers:   []*url.URL{issuerURL},
+			BasePaths: []string{"/foo"},
+		},
+	}
+
+	// Scoped to a sibling prefix, so it is unacceptable for the object below
+	// under any operation -- which is the case the fallback exists for.
+	tkn := mintPrefixScopedToken(t, createTestJWK(t), "https://issuer.example", "/elsewhere")
+
+	tokenPath := filepath.Join(t.TempDir(), "bearer_token")
+	require.NoError(t, os.WriteFile(tokenPath, []byte(tkn), 0600))
+
+	// The iterator walks the ambient discovery locations after the explicit
+	// one; clear them so a credential belonging to whoever is running the
+	// tests cannot join the search.
+	for _, envVar := range []string{"BEARER_TOKEN", "BEARER_TOKEN_FILE", "TOKEN", "XDG_RUNTIME_DIR", "_CONDOR_CREDS"} {
+		t.Setenv(envVar, "")
+		require.NoError(t, os.Unsetenv(envVar))
+	}
+
+	hook := captureDebugLogs(t)
+
+	tg := newTokenGenerator(&pelican_url.PelicanURL{Path: "/foo/data/object.txt"}, &dirResp,
+		copyDestinationTokenOperation, true)
+	tg.SetTokenLocation(tokenPath)
+
+	for i := 0; i < 3; i++ {
+		contents, err := tg.Get()
+		require.NoError(t, err)
+		assert.Equal(t, tkn, contents, "the fallback credential is handed back on every call")
+	}
+
+	var warnings int
+	for _, entry := range entriesAtLevel(hook.AllEntries(), logrus.WarnLevel) {
+		if strings.Contains(entry.Message, "does not appear to be acceptable") {
+			warnings++
+		}
+	}
+	assert.Equal(t, 1, warnings, "the unacceptable-credential warning must be said once, not once per call")
 }

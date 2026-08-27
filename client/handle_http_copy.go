@@ -41,6 +41,26 @@ import (
 	"github.com/pelicanplatform/pelican/error_codes"
 )
 
+// summarizeCopyFailure renders a destination server's error body as a single
+// line fit to carry on an error value.
+//
+// The body is remote text: bounded by maxErrorBodySize on the way in and by
+// truncateErrorDetail here, and flattened to one line so a multi-line body
+// cannot spread itself across log records.  XRootD prefixes its COPY failures
+// with "failure: ", which adds nothing once the message already says the copy
+// failed, so that prefix is dropped.  Everything else is passed through as the
+// server wrote it -- guessing at which half of the sentence matters is how the
+// useful half gets thrown away.
+func summarizeCopyFailure(body []byte) string {
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return ""
+	}
+	detail = strings.Join(strings.Fields(detail), " ")
+	detail = strings.TrimSpace(strings.TrimPrefix(detail, "failure:"))
+	return truncateErrorDetail(detail)
+}
+
 // tpcStatus represents a status update from a third-party-copy transfer
 type tpcStatus struct {
 	err     error
@@ -273,8 +293,16 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 				err = newThrottleErrorFromResponse(resp, string(respBytes), resolvedDestUrl.Host)
 			} else {
 				log.Errorf("TPC COPY to %s failed (HTTP status %d): %q", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
-				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
-					resp.StatusCode), Err: statusErr}
+				// The destination's own words are the only part of this that
+				// says *why* the copy was refused -- "is a directory", "no
+				// space left", "permission denied".  Without them the caller
+				// is left with a bare status code and has to go digging
+				// through the log for the line above.
+				str := fmt.Sprintf("TPC COPY to %s failed (HTTP status %d)", resolvedDestUrl.String(), resp.StatusCode)
+				if detail := summarizeCopyFailure(respBytes); detail != "" {
+					str = fmt.Sprintf("%s: %s", str, detail)
+				}
+				err = &HttpErrResp{Code: resp.StatusCode, Str: str, Err: statusErr}
 			}
 		}
 		return
