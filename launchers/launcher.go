@@ -70,14 +70,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	config.LogPelicanVersion()
 
-	var engine *gin.Engine
-	engine, err = web_ui.GetEngine()
-	if err != nil {
+	// Config must be initialized before the gin engine is built: GetEngine
+	// reads parameters (e.g. Server.TrustedProxies) that are baked into the
+	// engine at construction time and never re-applied.
+	if err = config.InitServer(ctx, modules); err != nil {
+		err = errors.Wrap(err, "Failure when configuring the server")
 		return
 	}
 
-	if err = config.InitServer(ctx, modules); err != nil {
-		err = errors.Wrap(err, "Failure when configuring the server")
+	var engine *gin.Engine
+	engine, err = web_ui.GetEngine()
+	if err != nil {
 		return
 	}
 
