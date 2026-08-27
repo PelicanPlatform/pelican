@@ -1,0 +1,63 @@
+---
+title: pelican server origin pstore metadata restore
+---
+
+## pelican-server origin pstore metadata-restore
+
+Restore a metadata backup into an empty store
+
+### Synopsis
+
+Restore a metadata backup taken by "pstore metadata-backup".
+
+This restores the namespace only. The object data must already be in place --
+a restore into an empty directory produces a store that lists every object and
+can serve none of them.
+
+The target store must be empty: restoring over live records would interleave
+two namespaces rather than replace one. Restore into a fresh directory
+alongside the object data and masterkey.json the backup was taken with, then
+point the origin at it.
+
+Every metadata backup is complete in itself; there are no incremental backups
+to chain, precisely because the target must be empty.
+
+The backup is opened with the origin's issuer keys, so on the origin itself
+nothing more is needed. Elsewhere -- or if those keys are gone -- pass either:
+
+  --key-file  the backup key from "pstore metadata-backup-key", which opens
+              every backup this origin has written; or
+  --file-key  this one file's own key, from "pstore metadata-backup-key &lt;file&gt;",
+              which opens this file and no other.
+
+Which container the file is in is read from the file itself. A backup written
+in a format version this build does not read is refused by version number
+rather than decoded.
+
+```
+pelican-server origin pstore metadata-restore <file> [flags]
+```
+
+### Options
+
+```
+      --file-key metadata-backup-key <file>   Open the backup with this one archive's own key, read from this file (see metadata-backup-key <file>)
+  -h, --help                                  help for metadata-restore
+      --key-file metadata-backup-key          Open the backup with the backup key in this file instead of the origin's issuer keys (see metadata-backup-key)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+      --location string     Store directory (defaults to Origin.PStoreLocation)
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin pstore](/commands-reference/pelican-server/origin/pstore/)	 - Inspect and repair a Pelican store

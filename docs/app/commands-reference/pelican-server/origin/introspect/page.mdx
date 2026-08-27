@@ -1,0 +1,57 @@
+---
+title: pelican server origin introspect
+---
+
+## pelican-server origin introspect
+
+Inspect a running origin's storage backend
+
+### Synopsis
+
+Inspect the storage backend of an origin that is currently running.
+
+These commands ask the origin over its administrative API, so they work while
+it is serving. They are the live counterpart to "pelican-server origin pstore", which
+reads the store directly and therefore requires the origin to be stopped.
+
+CURRENTLY PSTORE ONLY. The endpoints these use exist only when the origin is
+configured with Origin.StorageType "pstore"; against any other backend the
+origin does not register them and these commands report that plainly. A POSIX
+origin's storage can be inspected with ordinary filesystem tools, which is why
+it has no equivalent.
+
+Consistency checking is deliberately absent here. Scanning an index while it is
+being written produces findings indistinguishable from real problems, so
+"pelican-server origin pstore fsck" remains an offline command.
+
+These commands authenticate to the origin as an administrator. Run on the
+origin host, no token is needed: a short-lived admin token is minted locally
+with the origin's issuer key. Elsewhere -- or when that key is not readable --
+pass --token pointing at a file holding an administrator token.
+
+### Options
+
+```
+  -h, --help            help for introspect
+      --json            Emit raw JSON instead of a table
+      --server string   Origin web URL (defaults to this host's Server.ExternalWebUrl)
+  -t, --token string    Path to admin token file (auto-generated from the local issuer key if not provided)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin](/commands-reference/pelican-server/origin/)	 - Operate a Pelican origin service
+* [pelican-server origin introspect digest](/commands-reference/pelican-server/origin/introspect/digest/)	 - Show an object's recorded checksums from the running origin
+* [pelican-server origin introspect ls](/commands-reference/pelican-server/origin/introspect/ls/)	 - List a directory in the running origin's store
+* [pelican-server origin introspect stat](/commands-reference/pelican-server/origin/introspect/stat/)	 - Show an object's metadata from the running origin
+* [pelican-server origin introspect usage](/commands-reference/pelican-server/origin/introspect/usage/)	 - Report how much of the store is in use

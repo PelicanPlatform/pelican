@@ -1,0 +1,46 @@
+---
+title: pelican server origin object metadata
+---
+
+## pelican-server origin object-metadata
+
+Inspect the origin's local object-metadata tracking database
+
+### Synopsis
+
+Query the origin's local SQLite-backed object-metadata tracking layer.
+
+This is a thin client over the origin's admin endpoints under
+/api/v1.0/origin_ui/object_metadata. All subcommands require an
+administrative token for the target origin (the same one
+'pelican downtime' uses); pass it with --token or let the CLI
+generate one from the origin's signing key when invoked locally.
+
+Object-metadata tracking must be enabled on the origin
+(Origin.Metadata.TrackAccess) for these endpoints to return data.
+
+### Options
+
+```
+  -h, --help            help for object-metadata
+  -s, --server string   Web URL of the Pelican origin (e.g. https://my-origin.com:8447)
+  -t, --token string    Path to the admin token file
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin](/commands-reference/pelican-server/origin/)	 - Operate a Pelican origin service
+* [pelican-server origin object-metadata get](/commands-reference/pelican-server/origin/object-metadata/get/)	 - Get one object's live row (and optional history)
+* [pelican-server origin object-metadata history](/commands-reference/pelican-server/origin/object-metadata/history/)	 - List the full history for one object
+* [pelican-server origin object-metadata list](/commands-reference/pelican-server/origin/object-metadata/list/)	 - List live (non-deleted) objects in a namespace
