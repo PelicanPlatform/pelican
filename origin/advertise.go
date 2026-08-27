@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -77,7 +78,7 @@ func (server *OriginServer) GetRequiredFeatures() []features.Feature {
 	return requiredFeatures
 }
 
-func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertise, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	serverIssuerUrlStr, err := config.GetServerIssuerURL()
@@ -95,7 +96,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		return nil, errors.Wrap(err, "unable to parse the server's issuer url")
 	}
 
-	var nsAds []server_structs.NamespaceAdV2
+	var nsAds []server_structs.NamespaceAd
 	var prefixes []string
 	ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
@@ -106,6 +107,7 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		return nil, err
 	}
 
+	advertisedExports := make([]server_utils.OriginExport, 0, len(originExports))
 	for _, export := range originExports {
 		if isGlobusBackend {
 			// Do not include the export if it's an inactive Globus collection
@@ -114,50 +116,14 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 				continue
 			}
 		}
-		// PublicReads implies reads
-		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
+		advertisedExports = append(advertisedExports, export)
+	}
 
-		// Set up issuer URLs for the namespace. Note that this uses a single
-		// base path (the fed prefix) per issuer per export even if a single issuer
-		// at the origin is configured for multiple prefixes. This is because we have
-		// no global concept of issuers at the Director and we store this issuer info
-		// per namespace. It doesn't currently make much sense to construct the full list
-		// of potential base paths in this context.
-		issuerUrls := make([]server_structs.TokenIssuer, len(export.IssuerUrls))
-		for i, issUrlStr := range export.IssuerUrls {
-			issUrl, err := url.Parse(issUrlStr)
-			if err != nil {
-				return nil, errors.Wrap(err, "unable to parse issuer url")
-			}
-			issuerUrls[i] = server_structs.TokenIssuer{
-				IssuerUrl: *issUrl,
-				BasePaths: []string{export.FederationPrefix},
-			}
-		}
-
-		// Populate the struct for the namespace's "token generation" field
-		// TODO: It's not clear what the intended difference/abstraction between the
-		// "Generation" and the "Issuer" fields is... We should define these eventually
-		var tokGen server_structs.TokenGen
-		if len(issuerUrls) > 0 {
-			tokGen.Strategy = server_structs.OAuthStrategy
-			tokGen.MaxScopeDepth = 3
-			tokGen.CredentialIssuer = issuerUrls[0].IssuerUrl
-		}
-
-		nsAds = append(nsAds, server_structs.NamespaceAdV2{
-			Caps: server_structs.Capabilities{
-				PublicReads: export.Capabilities.PublicReads,
-				Reads:       reads,
-				Writes:      export.Capabilities.Writes,
-				Listings:    export.Capabilities.Listings,
-				DirectReads: export.Capabilities.DirectReads,
-				Copies:      export.Capabilities.Copies,
-			},
-			Path:       export.FederationPrefix,
-			Generation: []server_structs.TokenGen{tokGen},
-			Issuer:     issuerUrls,
-		})
+	nsAds, err = server_utils.NamespaceAdsFromExports(advertisedExports)
+	if err != nil {
+		return nil, err
+	}
+	for _, export := range advertisedExports {
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
@@ -179,20 +145,26 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	// Get the overall health status as reported by the origin.
 	status := metrics.GetHealthStatus().OverallStatus
 
-	// For POSIXv2 and SSH origins co-located with a director, DataURL (which becomes
+	// For native (non-XRootD) origins co-located with a director, DataURL (which becomes
 	// ServerAd.URL) should have the /api/v1.0/origin/data prefix so the director redirects
 	// to the right endpoint. When the origin is standalone, older clients cannot handle
 	// non-empty resource paths, so we advertise the base URL.
 	// WebURL stays as the base server URL for web browser access.
+	//
+	// This tracks UsesXRootD rather than an explicit list of storage types: the
+	// condition is exactly "served by the pelican process rather than XRootD",
+	// and a hand-maintained list silently omits each new native backend --
+	// which is how pstore first advertised a data URL with no route behind it,
+	// leaving the director redirecting into a loop.
 	dataUrlToAdvertise := originUrlStr
-	if (ost == server_structs.OriginStoragePosixv2 || ost == server_structs.OriginStorageSSH) && config.IsServerEnabled(server_structs.DirectorType) {
+	if !ost.UsesXRootD() && config.IsServerEnabled(server_structs.DirectorType) {
 		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
-			parsedUrl.Path = "/api/v1.0/origin/data"
+			parsedUrl.Path = server_structs.OriginDataRoutePrefix
 			dataUrlToAdvertise = parsedUrl.String()
 		}
 	}
 
-	ad := server_structs.OriginAdvertiseV2{
+	ad := server_structs.OriginAdvertise{
 		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        dataUrlToAdvertise,
@@ -223,6 +195,21 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
+
+	if geoStr := param.GeoLocation.GetString(); geoStr != "" {
+		if lat, long, err := utils.ParseCoordinateStr(geoStr); err == nil {
+			coord := server_structs.Coordinate{
+				Lat:    lat,
+				Long:   long,
+				Source: server_structs.CoordinateSourceDeclared,
+				// The service has given us a coordinate, so we assume no accuracy radius
+				AccuracyRadius: 0,
+			}
+			ad.Coordinate = &coord
+		} else {
+			log.Warningf("Ignoring invalid %s value %q: %v", param.GeoLocation.GetName(), geoStr, err)
+		}
+	}
 
 	if len(prefixes) == 0 {
 		if isGlobusBackend {

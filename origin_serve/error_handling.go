@@ -27,6 +27,8 @@ import (
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/pstore"
 )
 
 // ErrorHandler manages consistent error handling and HTTP status code mapping
@@ -54,6 +56,7 @@ func NewErrorHandler() *ErrorHandler {
 
 			// Resource exhaustion
 			"disk quota exceeded":              http.StatusInsufficientStorage,
+			"no space left on device":          http.StatusInsufficientStorage,
 			"too many open files":              http.StatusServiceUnavailable,
 			"resource temporarily unavailable": http.StatusServiceUnavailable,
 
@@ -120,7 +123,10 @@ func (eh *ErrorHandler) MapToHTTPStatus(err error) int {
 			return http.StatusBadRequest
 		case syscall.EMFILE, syscall.ENFILE:
 			return http.StatusServiceUnavailable
-		case syscall.EDQUOT:
+		case syscall.EDQUOT, syscall.ENOSPC:
+			// ENOSPC is the canonical out-of-space error and was previously
+			// missing here, so it fell through to the string matcher and came
+			// out as a 500 rather than 507.
 			return http.StatusInsufficientStorage
 		case syscall.ECONNREFUSED:
 			return http.StatusServiceUnavailable
@@ -141,6 +147,48 @@ func (eh *ErrorHandler) MapToHTTPStatus(err error) int {
 
 	// Default to internal server error for unknown errors
 	return http.StatusInternalServerError
+}
+
+// statusForBackendError returns the HTTP status a backend error deserves, or
+// zero when the WebDAV handler's own status should stand.
+//
+// golang.org/x/net/webdav has a fixed, coarse mapping: every failed write is
+// 405 Method Not Allowed and every failed open is 404 or 409, whatever went
+// wrong underneath. That is actively misleading -- a full store, a subtree
+// still being reclaimed, and a failed compare-and-swap are all things a client
+// can act on, and "method not allowed" tells it to do the one thing that will
+// never help. Nothing in the request path used to consult MapToHTTPStatus at
+// all, so the ENOSPC-to-507 mapping below it existed only in tests.
+//
+// Only errors whose meaning is unambiguous are rewritten; anything else is
+// left to the WebDAV handler, so this cannot turn a correct status into a
+// worse one.
+//
+// conditional says the request carried If-Match or If-None-Match, which is
+// what distinguishes "the object already exists" as a failed precondition
+// (412) from an ordinary conflict (409).
+func statusForBackendError(err error, conditional bool) int {
+	if err == nil {
+		return 0
+	}
+	switch {
+	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
+		return http.StatusInsufficientStorage
+	case errors.Is(err, pstore.ErrPreconditionFailed):
+		return http.StatusPreconditionFailed
+	case errors.Is(err, pstore.ErrDraining), errors.Is(err, pstore.ErrConflict):
+		// Both mean "this will work if you try again shortly", which is what
+		// 409 tells a client -- and is a great deal more useful than the 500
+		// an opaque index-transaction error would otherwise produce.
+		return http.StatusConflict
+	case errors.Is(err, fs.ErrPermission):
+		// A path refused by the export's containment check, among others.
+		return http.StatusForbidden
+	case conditional && errors.Is(err, fs.ErrExist):
+		// "If-None-Match: *" lost the race to a concurrent create.
+		return http.StatusPreconditionFailed
+	}
+	return 0
 }
 
 // LogError logs an error with appropriate context

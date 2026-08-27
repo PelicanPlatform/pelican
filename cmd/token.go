@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -119,50 +120,58 @@ These two flags are mutually exclusive.`,
 	}
 )
 
-var (
-	readFlag   bool
-	writeFlag  bool
-	modifyFlag bool
-)
-
 func addScopeFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
-	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
+	cmd.Flags().BoolP("read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
+	cmd.Flags().BoolP("write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
 		"Does not grant the ability to overwrite/modify existing resources.")
-	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
+	cmd.Flags().BoolP("modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
+}
+
+// addTokenCreateFlags registers every flag that the `token create` command and
+// its createToken handler read. It is the single source of truth for that flag
+// set, shared by init() and tests so the two cannot drift apart.
+func addTokenCreateFlags(cmd *cobra.Command) {
+	// Token capabilities
+	addScopeFlags(cmd)
+
+	cmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
+	cmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
+		"the object path without the namespace prefix.")
+
+	// Additional token fields
+	cmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
+		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
+	cmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
+	cmd.Flags().String("expiration", "", "Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.")
+	cmd.MarkFlagsMutuallyExclusive("lifetime", "expiration")
+	cmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
+	cmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
+	cmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
+	cmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
+		"'storage.read:/ storage.create:/'.")
+	cmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
+	cmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
+		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
+	cmd.Flags().String("kid", "", "Override the JWS key ID ('kid' header) stamped on the token. Pelican normally "+
+		"auto-detects the right KID by matching the local signing key against the issuer's published JWKS, so this flag "+
+		"is only needed when auto-detection cannot reach the issuer (e.g. air-gapped) or when you need to force a "+
+		"specific KID for testing.")
 }
 
 func init() {
 	rootCmd.AddCommand(tokenCmd)
-	tokenCmd.AddCommand(tokenCreateCmd)
-	tokenCmd.AddCommand(tokenFetchCmd)
 
-	// Token capabilities
-	addScopeFlags(tokenCreateCmd)
+	// Token create command setup
+	tokenCmd.AddCommand(tokenCreateCmd)
+	addTokenCreateFlags(tokenCreateCmd)
+
+	// Token fetch command setup
+	tokenCmd.AddCommand(tokenFetchCmd)
 	addScopeFlags(tokenFetchCmd)
 
 	// Token fetch requires exactly one of read, write or modify
 	tokenFetchCmd.MarkFlagsMutuallyExclusive("read", "write", "modify")
 	tokenFetchCmd.MarkFlagsOneRequired("read", "write", "modify")
-
-	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
-	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
-		"the object path without the namespace prefix.")
-
-	// Additional token fields
-	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
-		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
-	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
-	tokenCreateCmd.Flags().String("expiration", "", "Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.")
-	tokenCreateCmd.MarkFlagsMutuallyExclusive("lifetime", "expiration")
-	tokenCreateCmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
-	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
-	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
-	tokenCreateCmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
-		"'storage.read:/ storage.create:/'.")
-	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
-	tokenCreateCmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
-		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
 }
 
 func splitClaim(claim string) (string, string, error) {
@@ -179,50 +188,68 @@ func splitClaim(claim string) (string, string, error) {
 	return key, val, nil
 }
 
-// Given some issuer and a set of KIDs, determine whether the issuer's JWKS contains a key with a matching KID
-func issuerMatchesKey(issuer string, kidSet map[string]struct{}) (bool, error) {
-	remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer)
-	if err != nil {
-		return false, err
-	}
-
-	for kid := range kidSet {
-		if _, ok := (*remoteJWKS).LookupKeyID(kid); ok {
-			log.Debugf("Found matching key ID %s in JWKS from issuer %s", kid, issuer)
-			return true, nil
+// findMatchingRemoteKey reports the first key in `remote` whose public-key
+// material matches any key in `local`. The comparison uses the RFC 7638 JWK
+// thumbprint (via jwk.Equal), so it is robust to issuers that publish keys
+// under a KID that differs from the SHA256 thumbprint Pelican computes
+// locally (e.g. short OAuth2-issuer KIDs like "c2a5"). String-based KID
+// comparison would miss such matches, especially with externally-supplied
+// RSA keys.
+//
+// Returning the matched remote key (rather than just a bool) lets callers
+// pick up whatever KID the issuer assigned to it, so the resulting JWT can
+// be stamped with a KID the issuer's verifiers will recognize.
+func findMatchingRemoteKey(remote, local jwk.Set) jwk.Key {
+	ctx := context.Background()
+	localIt := local.Keys(ctx)
+	for localIt.Next(ctx) {
+		localKey := localIt.Pair().Value.(jwk.Key)
+		remoteIt := remote.Keys(ctx)
+		for remoteIt.Next(ctx) {
+			remoteKey := remoteIt.Pair().Value.(jwk.Key)
+			if jwk.Equal(localKey, remoteKey) {
+				log.Debugf("Local key with KID %s matches remote key with KID %s by thumbprint", localKey.KeyID(), remoteKey.KeyID())
+				return remoteKey
+			}
 		}
 	}
-
-	return false, nil
+	return nil
 }
 
-// Given a Pelican resource and a set of KIDs, discover issuers from the Director
-// and return the first whose JWKS contains a key matching one of the input KIDs
+// Given some issuer and the set of locally-known public keys, determine whether
+// the issuer's JWKS contains a key with the same public key material. Returns
+// the matched remote key (or nil) so callers can adopt its KID.
+func issuerMatchesKey(issuer string, localKeys jwk.Set) (jwk.Key, error) {
+	remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer)
+	if err != nil {
+		return nil, err
+	}
+	return findMatchingRemoteKey(*remoteJWKS, localKeys), nil
+}
+
+// Given a Pelican resource and the set of locally-known public keys, discover
+// issuers from the Director and return the first whose JWKS contains a key
+// matching the signing key by public key material. The matched remote key is
+// returned alongside so callers can adopt the issuer-assigned KID.
 //
-// This is use to handle multi-issuer namespaces where it may not be obvious to the user
-// which issuer aligns with their signing key.
-func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]struct{}) (string, error) {
+// This is used to handle multi-issuer namespaces where it may not be obvious
+// to the user which issuer aligns with their signing key.
+func getIssuer(directorInfo server_structs.DirectorResponse, localKeys jwk.Set) (string, jwk.Key, error) {
 	if len(directorInfo.XPelAuthHdr.Issuers) == 0 {
-		return "", errors.Errorf("no issuers found for %s in the Director response", directorInfo.XPelNsHdr.Namespace)
+		return "", nil, errors.Errorf("no issuers found for %s in the Director response", directorInfo.XPelNsHdr.Namespace)
 	}
 
-	// Comb through the JWKS from each issuer to find which matches the signing key
 	for _, issuer := range directorInfo.XPelAuthHdr.Issuers {
 		remoteJWKS, err := registry_jwks.GetJWKSFromIssUrl(issuer.String())
 		if err != nil {
 			log.Warningf("Unable to get JWKS from issuer URL %s: %v; skipping", issuer, err)
 			continue
 		}
-		it := (*remoteJWKS).Keys(context.Background())
-		for it.Next(context.Background()) {
-			key := it.Pair().Value.(jwk.Key)
-			if _, ok := kidSet[key.KeyID()]; ok {
-				log.Debugf("Found matching key ID %s in JWKS from issuer %s", key.KeyID(), issuer.String())
-				return issuer.String(), nil
-			}
-
-			log.Debugf("Key ID %s from issuer %s does not match any of the locally-provided signing keys: %v", key.KeyID(), issuer.String(), kidSet)
+		if matched := findMatchingRemoteKey(*remoteJWKS, localKeys); matched != nil {
+			log.Debugf("Found matching key in JWKS from issuer %s", issuer.String())
+			return issuer.String(), matched, nil
 		}
+		log.Debugf("None of the keys from issuer %s match any of the locally-provided signing keys", issuer.String())
 	}
 
 	combineUrls := func(urls []*url.URL) string {
@@ -233,8 +260,67 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 		return strings.Join(combined, ", ")
 	}
 
-	return "", errors.Errorf("none of the issuers discovered at the director match your signing key; issuers that were checked: %s",
+	return "", nil, errors.Errorf("none of the issuers discovered at the director match your signing key; issuers that were checked: %s",
 		combineUrls(directorInfo.XPelAuthHdr.Issuers))
+}
+
+// Given a Director's redirect response, re-query the Director's UI endpoint to get the full namespace ad information.
+// This can be used later to determine what capabilities the namespace supports in comparison with the requested
+// token scopes.
+func getNsAd(directorInfo server_structs.DirectorResponse) (server_structs.NamespaceAdResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return server_structs.NamespaceAdResponse{}, errors.Wrap(err, "unable to get federation info from config")
+	}
+
+	client := config.GetClient()
+
+	reqURL := strings.TrimRight(fedInfo.DirectorEndpoint, "/") + "/api/v1.0/director_ui/namespaces"
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
+			"failed to create request for Director server lookup at %s", reqURL)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
+			"failed to query Director for server ads at %s", reqURL)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return server_structs.NamespaceAdResponse{}, errors.Errorf(
+			"Director server lookup at %s returned status code %d",
+			reqURL,
+			response.StatusCode,
+		)
+	}
+
+	// Parse the response body into a slice of server ads
+	var nsAds []server_structs.NamespaceAdResponse
+	err = json.NewDecoder(response.Body).Decode(&nsAds)
+	if err != nil {
+		return server_structs.NamespaceAdResponse{}, errors.Wrapf(err,
+			"failed to decode Director response for namespace ads at %s", reqURL)
+	}
+
+	namespace := directorInfo.XPelNsHdr.Namespace
+	// Find the first server advertising this namespace
+	for _, nsAd := range nsAds {
+		if path.Clean(nsAd.Path) == path.Clean(namespace) {
+			return nsAd, nil
+		}
+	}
+
+	return server_structs.NamespaceAdResponse{}, errors.Errorf(
+		"no namespace advertisement found for namespace %s",
+		namespace,
+	)
 }
 
 // Create a token using the provided flags/args
@@ -308,6 +394,15 @@ func createToken(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Grab the namespace ad from the Director -- we'll use this later to validate token scopes.
+	// This is best-effort: if we can't retrieve it (e.g. transient Director error), we skip the
+	// capability-based scope validation rather than driving it off a zero-value ad, which would
+	// emit misleading warnings.
+	nsAd, nsAdErr := getNsAd(directorInfo)
+	if nsAdErr != nil {
+		log.Warningf("Unable to retrieve namespace information from the Director; skipping validation of requested token scopes against namespace capabilities: %v", nsAdErr)
+	}
+
 	// Handle any raw scopes early -- may be useful for developers/admin who want to create arbitrarily-scoped tokens,
 	// and early handling lets us use this as another mechanism to avoid scope paths.
 	rawScopes, err := cmd.Flags().GetStringArray("raw-scope")
@@ -338,53 +433,8 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 	log.Debugf("Using path %s for token scopes", sPath)
 
-	// Load the key and create a set of KIDs; we'll later check it against any issuers we may discover/be provided
-	var myJWKS jwk.Set
-	keyPath, err := cmd.Flags().GetString("private-key")
-	if err != nil {
-		return errors.Wrap(err, "unable to get private key path")
-	} else if keyPath == "" {
-		myJWKS, err = config.GetIssuerPublicJWKS()
-		if err != nil {
-			return errors.Wrap(err, "unable to get issuer public JWKS from default locations")
-		} else if myJWKS == nil {
-			return errors.New("internal error: config.GetIssuerPublicJWKS() returned nil")
-		}
-	} else {
-		myJWKS, err = config.GetIssuerPublicJWKS(keyPath)
-		if err != nil {
-			return errors.Wrapf(err, "unable to get issuer public JWKS from %s", keyPath)
-		}
-	}
-
-	kidSet := make(map[string]struct{}, myJWKS.Len())
-	it := myJWKS.Keys(context.Background())
-	for it.Next(context.Background()) {
-		key := it.Pair().Value.(jwk.Key)
-		kidSet[key.KeyID()] = struct{}{}
-	}
-
-	if issuer == "" {
-		// If no issuer is provided, try to discover it from the info we previously obtained
-		// from the Director
-		issuer, err = getIssuer(directorInfo, kidSet)
-		if err != nil {
-			return errors.Wrapf(err, "unable to determine issuer for resource %s; you may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
-		}
-	} else {
-		// If an issuer is provided, check whether it matches the signing key
-		matches, err := issuerMatchesKey(issuer, kidSet)
-		if err != nil {
-			log.Errorf("unable to fetch public JWKS from provided issuer %s, using anyway: %v; ", issuer, err)
-		} else if !matches {
-			// If the user-provided issuer does not match the signing key, we should warn the user
-			// but still allow them to use it -- maybe they're creating tokens before the infrastructure is set up
-			log.Errorf("provided issuer %s does not match the signing key; using anyway", issuer)
-		}
-	}
-	tokenConfig.Issuer = issuer
-
-	// Add token scopes for object manipulation
+	// Start constructing the token scopes early -- we'll validate the scopes requested by the user
+	// against what we think the namespace supports later.
 	read, _ := cmd.Flags().GetBool("read")
 	write, _ := cmd.Flags().GetBool("write")
 	modify, _ := cmd.Flags().GetBool("modify")
@@ -392,13 +442,29 @@ func createToken(cmd *cobra.Command, args []string) error {
 
 	scopes := []token_scopes.TokenScope{}
 
+	// For each scope we want to add, check against the Director's opinion of which scopes are supported for this resource.
+	// Log an error for any requested scopes that aren't supported, but still add them to the token in case the user knows something we don't.
 	if read {
+		if nsAdErr == nil {
+			if nsAd.Caps.PublicReads {
+				// Read access is not behind token auth
+				log.Warningf("Director indicates that the resource at %s is publicly readable so a token is not actually required to read it, but the --read flag was provided; adding read scope to token anyway", rawUrl)
+			} else if !nsAd.Caps.Reads {
+				log.Warningf("Director indicates that the resource at %s does not support read operations, but --read flag was provided; adding read scope to token anyway", rawUrl)
+			}
+		}
 		scopes = append(scopes, tokenProfile.ReadScope(sPath))
 	}
 	if write {
+		if nsAdErr == nil && !nsAd.Caps.Writes {
+			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --write flag was provided; adding write scope to token anyway", rawUrl)
+		}
 		scopes = append(scopes, tokenProfile.WriteScope(sPath))
 	}
 	if modify {
+		if nsAdErr == nil && !nsAd.Caps.Writes {
+			log.Warningf("Director indicates that the resource at %s does not support write/modify operations, but --modify flag was provided; adding modify scope to token anyway", rawUrl)
+		}
 		scopes = append(scopes, tokenProfile.ModifyScope(sPath))
 	}
 	if stage {
@@ -408,6 +474,98 @@ func createToken(cmd *cobra.Command, args []string) error {
 
 	if len(scopes)+len(rawScopes) == 0 {
 		log.Warningf("Detected creation of a token without any capabilities. Use flags like --read, --write, --modify, or --stage to add capabilities to the token.")
+	}
+
+	// Load the local signing key's public JWKS so we can match it against any
+	// issuers we discover or are provided.
+	var myJWKS jwk.Set
+	keyPath, err := cmd.Flags().GetString("private-key")
+	var keyLoadErr error
+	if err != nil {
+		return errors.Wrap(err, "unable to get private key path")
+	} else if keyPath == "" {
+		myJWKS, err = config.GetIssuerPublicJWKS()
+		if err != nil {
+			keyLoadErr = errors.Wrap(err, "unable to load signing key from default location")
+		} else if myJWKS == nil {
+			keyLoadErr = errors.New("internal error: config.GetIssuerPublicJWKS() returned nil")
+		}
+	} else {
+		myJWKS, err = config.GetIssuerPublicJWKS(keyPath)
+		if err != nil {
+			keyLoadErr = errors.Wrapf(err, "unable to load signing key from %s", keyPath)
+		}
+	}
+
+	if keyLoadErr != nil {
+		// If the namespace doesn't require protected reads and doesn't support writes,
+		// a token probably isn't needed at all — give the user a more helpful hint.
+		if nsAdErr == nil && !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+			return errors.Wrapf(keyLoadErr, "failed to load a local signing key; note that the Director reports namespace '%s' does not require auth for reads and does not support writes, so you may not need a token", nsAd.Path)
+		}
+		return keyLoadErr
+	}
+
+	kidOverride, err := cmd.Flags().GetString("kid")
+	if err != nil {
+		return errors.Wrap(err, "unable to get kid flag")
+	}
+	if kidOverride != "" && myJWKS.Len() != 1 {
+		return errors.Errorf("--kid override requires exactly one signing key, but %d are loaded; "+
+			"re-run with --private-key pointing at a single key file", myJWKS.Len())
+	}
+
+	// matchedRemoteKey, when non-nil, is the issuer-published key that matched
+	// our signing key by thumbprint. We use its KID for auto-detection, but
+	// only when --kid was not explicitly supplied.
+	var matchedRemoteKey jwk.Key
+	if issuer == "" {
+		// If no issuer is provided, try to discover it from the info we previously obtained
+		// from the Director
+		issuer, matchedRemoteKey, err = getIssuer(directorInfo, myJWKS)
+		if err != nil {
+			// If the namespace doesn't require protected reads and it doesn't support writes, there will likely have been no issuer to discover.
+			// In that case, we warn that the user probably doesn't need to create a token in the first place, but we provide instructions for
+			// supplying an issuer if they know better than we do.
+			if nsAdErr == nil && !(nsAd.Caps.Reads && !nsAd.Caps.PublicReads) && !nsAd.Caps.Writes {
+				return errors.Wrapf(err, "unable to determine issuer for resource %s. This is likely because the Director reports that this namespace does not require token issuance for reads and does not support writes. Are you sure you need a token? You may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
+			} else if len(directorInfo.XPelAuthHdr.Issuers) > 0 {
+				// Issuers were discovered but none match the local signing key — the inner error already
+				// describes this clearly; avoid the misleading "unable to determine issuer" phrasing.
+				return errors.Wrapf(err, "no issuer for resource %s matches your signing key; re-run with '--issuer <issuer URL>' to specify one, or ensure you are using the correct private key", rawUrl)
+			} else {
+				return errors.Wrapf(err, "unable to determine issuer for resource %s; you may need to re-run with '--issuer <issuer URL>' to specify an issuer", rawUrl)
+			}
+		}
+	} else {
+		// If an issuer is provided, check whether it matches the signing key
+		matchedRemoteKey, err = issuerMatchesKey(issuer, myJWKS)
+		if err != nil {
+			log.Errorf("unable to fetch public JWKS from provided issuer %s, using anyway: %v; ", issuer, err)
+		} else if matchedRemoteKey == nil {
+			// If the user-provided issuer does not match the signing key, we should warn the user
+			// but still allow them to use it -- maybe they're creating tokens before the infrastructure is set up
+			log.Errorf("provided issuer %s does not match the signing key; using anyway", issuer)
+		}
+	}
+	tokenConfig.Issuer = issuer
+
+	// Determine the effective KID to stamp on the JWT. Precedence:
+	//  1. --kid: an explicit user override always wins. Auto-detection from
+	//     the matched remote key is suppressed entirely so the user can be
+	//     certain that whatever they passed is what ends up on the JWT.
+	//  2. The KID the issuer assigned to the matched key, when one was
+	//     found. This means users don't have to learn about --kid for the
+	//     common case where an OAuth2 issuer publishes RSA keys with short
+	//     KIDs like "c2a5".
+	//  3. Otherwise, leave it for AssignKeyID (thumbprint).
+	var effectiveKid string
+	switch {
+	case kidOverride != "":
+		effectiveKid = kidOverride
+	case matchedRemoteKey != nil && matchedRemoteKey.KeyID() != "":
+		effectiveKid = matchedRemoteKey.KeyID()
+		log.Debugf("Auto-detected KID %q from issuer's JWKS for the matched signing key", effectiveKid)
 	}
 
 	// Set token lifetime — either via --expiration (RFC3339) or --lifetime (seconds).
@@ -465,7 +623,27 @@ func createToken(cmd *cobra.Command, args []string) error {
 		tokenConfig.Claims = claims
 	}
 
-	tok, err := tokenConfig.CreateToken(keyPath)
+	var tok string
+	if effectiveKid == "" {
+		tok, err = tokenConfig.CreateToken(keyPath)
+	} else {
+		// Load the private key directly so we can stamp the resolved KID onto
+		// the JWS header. CreateTokenWithKey's internal AssignKeyID is a no-op
+		// when the KID is already set, so this sticks.
+		var signingKey jwk.Key
+		if keyPath == "" {
+			signingKey, err = config.GetIssuerPrivateJWK()
+		} else {
+			signingKey, err = config.GetIssuerPrivateJWK(keyPath)
+		}
+		if err != nil {
+			return errors.Wrap(err, "Failed to load signing key")
+		}
+		if err := signingKey.Set(jwk.KeyIDKey, effectiveKid); err != nil {
+			return errors.Wrap(err, "failed to apply KID to signing key")
+		}
+		tok, err = tokenConfig.CreateTokenWithKey(signingKey)
+	}
 	if err != nil {
 		return errors.Wrap(err, "unable to create token")
 	}

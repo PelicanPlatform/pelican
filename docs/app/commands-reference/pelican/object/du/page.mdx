@@ -1,0 +1,57 @@
+---
+title: pelican object du
+---
+
+## pelican object du
+
+Estimate storage usage under one or more federation paths
+
+### Synopsis
+
+Report the total size of every collection under the given federation
+path(s), analogous to the Unix "du" utility.
+
+By default, every collection encountered during the recursive walk is printed
+with its cumulative byte total (plus the number of objects and nested
+collections it holds) followed by the argument itself. Use --max-depth to trim
+the output to a limited number of levels below the argument; --max-depth 0
+prints only the argument.
+
+Sizes are always cumulative -- every object counts toward every enclosing
+collection up to the argument. Collections themselves have no intrinsic size,
+so their totals reflect only the objects they contain.
+
+Unreadable subtrees encountered during the walk are reported to stderr and
+skipped; the totals still reflect every object that was reachable. If any
+subtree failed, du exits with a non-zero status.
+
+```
+pelican object du <object> [<object>...] [flags]
+```
+
+### Options
+
+```
+      --collections-url string   URL to use for collection listing, overriding the director's response
+      --count                    Include object and nested-collection counts alongside each size
+      --help                     help for du
+  -h, --human-readable           Print sizes in a human-readable format (KiB, MiB, GiB, ... using IEC binary units)
+  -j, --json                     Print results in JSON format
+      --max-depth int            Print the total for a collection only if it is at most N levels below an argument. -1 means unlimited. (default -1)
+  -s, --summarize                Print only the total for each argument (equivalent to --max-depth 0)
+  -t, --token string             Token file to use for authenticated listings
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/pelican/object/)	 - Interact with objects in the federation

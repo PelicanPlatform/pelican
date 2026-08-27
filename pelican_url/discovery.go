@@ -509,6 +509,15 @@ func (p *PelicanURL) PopulateFedInfo(opts ...DiscoveryOption) error {
 			}
 
 			p.FedInfo = item.Value().fedInfo
+			// The cached federation info carries no discovery endpoint --
+			// the uncached path below stamps it after discovery, and the
+			// TTL cache stores what discovery returned.  Stamp it here too:
+			// callers key on this to attribute a namespace to the
+			// federation it was learned from, and one that arrives empty
+			// silently disables that keying (the director-response cache
+			// refuses to store or match an entry with no federation, so
+			// every object pays a fresh director query).
+			p.FedInfo.DiscoveryEndpoint = discoveryUrl.String()
 			log.Debugln("Using cached federation info for", discoveryUrl.String())
 			return nil
 		}

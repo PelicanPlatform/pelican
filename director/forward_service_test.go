@@ -49,7 +49,7 @@ func TestForwardService(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://external-url"))
 
 	ctx := context.Background()
-	ad := &server_structs.OriginAdvertiseV2{
+	ad := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -101,40 +101,36 @@ func TestForwardServiceAd(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://director1.com"))
 
 	ch1 := make(chan *forwardAdInfo, 1)
-	dir1 := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://director-ad-url-1",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         "dir1",
-				InstanceID:   "inst-id-1",
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	dir1 := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://director-ad-url-1",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         "dir1",
+			InstanceID:   "inst-id-1",
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch1,
-	}
+	})
+	dir1.forwardAdChan = ch1
 
 	ch2 := make(chan *forwardAdInfo, 1)
-	dir2 := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://director-ad-url-2",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         "dir2",
-				InstanceID:   "inst-id-2",
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	dir2 := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://director-ad-url-2",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         "dir2",
+			InstanceID:   "inst-id-2",
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch2,
-	}
+	})
+	dir2.forwardAdChan = ch2
 
 	directorAds.Set("dir1", dir1, 15*time.Minute)
 	directorAds.Set("dir2", dir2, 15*time.Minute)
 
 	// Build a fake service ad
-	svcAd := &server_structs.OriginAdvertiseV2{
+	svcAd := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -146,7 +142,7 @@ func TestForwardServiceAd(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	forwardServiceAd(ctx, svcAd, server_structs.OriginType, []string{dir1.ad.Name})
+	forwardServiceAd(ctx, svcAd, server_structs.OriginType, []string{dir1.ad.Load().Name})
 
 	// We should have received an ad on channel 2 but not channel 1
 	select {
@@ -177,55 +173,49 @@ func TestForwardServiceAdSeenByPreventsLoop(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://director1.com"))
 
 	ch1 := make(chan *forwardAdInfo, 1)
-	dir1 := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://director-ad-url-1",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         "dir1",
-				InstanceID:   "inst-id-1",
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	dir1 := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://director-ad-url-1",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         "dir1",
+			InstanceID:   "inst-id-1",
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch1,
-	}
+	})
+	dir1.forwardAdChan = ch1
 
 	ch2 := make(chan *forwardAdInfo, 1)
-	dir2 := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://director-ad-url-2",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         "dir2",
-				InstanceID:   "inst-id-2",
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	dir2 := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://director-ad-url-2",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         "dir2",
+			InstanceID:   "inst-id-2",
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch2,
-	}
+	})
+	dir2.forwardAdChan = ch2
 
 	ch3 := make(chan *forwardAdInfo, 1)
-	dir3 := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://director-ad-url-3",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         "dir3",
-				InstanceID:   "inst-id-3",
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	dir3 := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://director-ad-url-3",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         "dir3",
+			InstanceID:   "inst-id-3",
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch3,
-	}
+	})
+	dir3.forwardAdChan = ch3
 
 	directorAds.Set("dir1", dir1, 15*time.Minute)
 	directorAds.Set("dir2", dir2, 15*time.Minute)
 	directorAds.Set("dir3", dir3, 15*time.Minute)
 
-	svcAd := &server_structs.OriginAdvertiseV2{
+	svcAd := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",
@@ -329,23 +319,21 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 			for _, name := range names {
 				ch := make(chan *forwardAdInfo, 1000)
 				channels[name] = ch
-				info := &directorInfo{
-					ad: &server_structs.DirectorAd{
-						AdvertiseUrl: "http://" + name + ".example.com",
-						ServerBaseAd: server_structs.ServerBaseAd{
-							Name:         name,
-							InstanceID:   "inst-" + name,
-							StartTime:    12345,
-							GenerationID: 1,
-							Version:      "v1",
-						},
+				info := newTestDirectorInfo(&server_structs.DirectorAd{
+					AdvertiseUrl: "http://" + name + ".example.com",
+					ServerBaseAd: server_structs.ServerBaseAd{
+						Name:         name,
+						InstanceID:   "inst-" + name,
+						StartTime:    12345,
+						GenerationID: 1,
+						Version:      "v1",
 					},
-					forwardAdChan: ch,
-				}
+				})
+				info.forwardAdChan = ch
 				directorAds.Set(name, info, 15*time.Minute)
 			}
 
-			svcAd := &server_structs.OriginAdvertiseV2{
+			svcAd := &server_structs.OriginAdvertise{
 				ServerBaseAd: server_structs.ServerBaseAd{
 					Name:         "origin-1",
 					InstanceID:   "origin-inst",
@@ -425,7 +413,7 @@ func TestForwardServiceSeenBySerialized(t *testing.T) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set("http://external-url"))
 
 	ctx := context.Background()
-	ad := &server_structs.OriginAdvertiseV2{
+	ad := &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "svc-name",
 			InstanceID:   "inst-id",

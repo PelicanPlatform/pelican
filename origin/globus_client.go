@@ -61,12 +61,35 @@ var (
 	globusOAuthCfgError error
 )
 
+// ResetGlobusOAuthCfg resets the cached OAuth2 configuration so it will
+// be rediscovered on the next call to GetGlobusOAuthCfg.  This is
+// intended for use in tests only.
+func ResetGlobusOAuthCfg() {
+	onceGlobusOAuthCfg = sync.Once{}
+	globusOAuthCfg = nil
+	globusOAuthCfgError = nil
+}
+
 const (
-	globusIssuerEndpoint          = "https://auth.globus.org/" // Globus issuer endpoint
-	globusTransferServer          = "transfer.api.globus.org"  // The resource name for the Globus transfer API server
-	globusTransferEndpointBaseUrl = "https://transfer.api.globusonline.org/v0.10/"
-	globusTransferBaseScope       = "urn:globus:auth:scope:transfer.api.globus.org:all"
+	globusTransferServer    = "transfer.api.globus.org" // The resource name for the Globus transfer API server
+	globusTransferBaseScope = "urn:globus:auth:scope:transfer.api.globus.org:all"
 )
+
+// globusIssuerURL returns the configurable Globus OIDC issuer URL.
+func globusIssuerURL() string {
+	if v := param.Origin_GlobusIssuerURL.GetString(); v != "" {
+		return v
+	}
+	return "https://auth.globus.org/"
+}
+
+// globusTransferAPIBaseURL returns the configurable Globus Transfer API base URL.
+func globusTransferAPIBaseURL() string {
+	if v := param.Origin_GlobusTransferAPIBaseUrl.GetString(); v != "" {
+		return v
+	}
+	return "https://transfer.api.globusonline.org/v0.10/"
+}
 
 const (
 	// We render the frontend and call the API from there for better user experience
@@ -119,7 +142,7 @@ func setupGlobusOAuthCfg() {
 	}
 
 	// 2. Get Globus OAuth endpoints
-	iss, err := config.GetIssuerMetadata(globusIssuerEndpoint)
+	iss, err := config.GetIssuerMetadata(globusIssuerURL())
 	if err != nil {
 		globusOAuthCfgError = err
 		return
@@ -376,7 +399,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 	}
 
 	// Get the https server of the collection from Globus transfer API server
-	transferReq, err := http.NewRequest(http.MethodGet, globusTransferEndpointBaseUrl+"endpoint/"+cid, nil)
+	transferReq, err := http.NewRequest(http.MethodGet, globusTransferAPIBaseURL()+"endpoint/"+cid, nil)
 	if err != nil {
 		log.Errorf("Error creating http request for Globus transfer API: %v", err)
 		ctx.JSON(http.StatusInternalServerError,

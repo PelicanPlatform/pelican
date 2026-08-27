@@ -28,7 +28,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -53,7 +52,7 @@ type (
 		RedirectInfo    *server_structs.RedirectInfo
 		// Fields used by AdaptiveSort to generate the availability map after truncation.
 		GinCtx       *gin.Context
-		NamespaceAd  server_structs.NamespaceAdV2
+		NamespaceAd  server_structs.NamespaceAd
 		RequestId    uuid.UUID
 		IsOriginSort bool
 	}
@@ -84,7 +83,7 @@ const (
 // coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts
 // will be effectively random the first time, but subsequent requests within a short time period will still likely
 // generate cache hits.
-func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID, isOriginSort bool, precomputedAvailMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
+func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, nsAd server_structs.NamespaceAd, requestId uuid.UUID, isOriginSort bool, precomputedAvailMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
 	sortMethod := server_structs.SortType(param.Director_CacheSortMethod.GetString())
 	redirectInfo.DirectorSortMethod = sortMethod.String()
 	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
@@ -138,48 +137,12 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 	return truncateAds(sortedAds, sourceServerAdsLimit), nil
 }
 
-// Given a request path and a slice of namespace ads, pick the namespace ad whose
-// path is the longest logical prefix of the request path. For example, for path
-// `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, the function should return
-// the namespace ad for `/foo/bar`.
-func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAdV2) *server_structs.NamespaceAdV2 {
-	// Normalize incoming path if needed --> adding the trailing / makes
-	// basic prefix matching safer
-	if !strings.HasSuffix(reqPath, "/") {
-		reqPath += "/"
-	}
-
-	var bestFedPrefix string
-	var bestNamespace *server_structs.NamespaceAdV2
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
-
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
-		}
-
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
-			continue
-		}
-
-		if bestFedPrefix == "" {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
-			continue
-		}
-
-		if len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
-			continue
-		}
-	}
-
-	return bestNamespace
+// getLongestNSMatch picks the namespace ad whose path is the longest logical
+// prefix of the request path.  The implementation lives in server_structs so
+// that servers answering clients the way the director does (e.g. a standalone
+// origin) resolve namespaces identically.
+func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAd) *server_structs.NamespaceAd {
+	return server_structs.LongestNSMatch(reqPath, namespaceAds)
 }
 
 // Given a request path, find all the ads that express willingness to work with
@@ -191,12 +154,8 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	// paths like /foo and /foobar with basic prefix matching because without the trailing /, these
 	// two would match.
 	reqPath = path.Clean(reqPath) + "/"
-	ads := make([]*server_structs.Advertisement, 0, serverAds.Len())
 
-	serverAds.Range(func(item *ttlcache.Item[string, *server_structs.Advertisement]) bool {
-		ads = append(ads, item.Value())
-		return true
-	})
+	ads := getServerAdsSnapshot()
 
 	// Move topo sorted ads to the end of our slice
 	sortServerAdsByTopo(ads)
@@ -209,7 +168,7 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 			continue
 		}
 
-		var nsAd *server_structs.NamespaceAdV2
+		var nsAd *server_structs.NamespaceAd
 		if nsAd = getLongestNSMatch(reqPath, ad.NamespaceAds); nsAd == nil {
 			// This server doesn't support the requested namespace, skip it
 			continue

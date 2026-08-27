@@ -21,13 +21,16 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	goerrors "errors"
 	"fmt"
+	"iter"
 	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"math/rand"
@@ -40,6 +43,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -128,9 +132,12 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 		return nil, errors.Wrap(err, "failed to parse remote path")
 	}
 
-	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
+	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director.
+	// Unknown query params are allowed through (with a warning) for the same reason DoGet and DoPut allow them:
+	// an older client must keep working against a newer director/origin/cache that has added a parameter it does
+	// not recognize.  Callers also feed URLs from GetRawUrl() back through here, which preserves the raw query.
 	client := config.GetClient()
-	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
+	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOptions); err != nil {
@@ -149,8 +156,33 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	return pUrl, nil
 }
 
-// Check the size of a remote file in an origin
+// DoStat returns metadata about a single remote object or collection.
+//
+// The path is treated as something to be read unless the caller passes
+// WithStatUploadDestination(true), in which case it is treated as the
+// destination of a pending upload: the Director is queried with PUT and
+// destination-role token options apply.  Either way the role-specific token
+// options override the generic ones, exactly as they do for a transfer, so a
+// caller's --source-token or --dest-token is honored here too.
+//
+// No TransferEngine is built: a stat needs only the Director response, a
+// token, and statHttp's own gowebdav client, so callers can pre-flight a
+// path without paying for a worker pool and its goroutines.
 func DoStat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
+	return stat(ctx, nil, destination, options...)
+}
+
+// Stat is DoStat for a caller that already holds an engine -- the cache, for
+// one, which stats before every miss it fills. It is the same lookup; the
+// difference is that the engine's director responses are reused rather than
+// re-queried, which is the whole of what an engine has to offer a stat.
+func (te *TransferEngine) Stat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
+	return stat(ctx, te, destination, options...)
+}
+
+// stat is the body of both. te may be nil, in which case the Director is
+// queried directly.
+func stat(ctx context.Context, te *TransferEngine, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -162,48 +194,80 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
+	// Without an initialized client the transport is whatever the defaults
+	// happen to be, so any CA bundle or proxy the caller configured would
+	// silently not apply to the requests below.  NewTransferEngine enforces
+	// this for every other entry point; DoStat builds no engine, so it has
+	// to check for itself.
+	if !config.IsClientInitialized() {
+		return nil, errors.New("client has not been initialized, unable to stat")
+	}
+
 	pUrl, err := ParseRemoteAsPUrl(ctx, destination)
 	if err != nil {
 		return
 	}
 
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
-
-	// Pre-scan options for cacheMode which affects the director query.
-	var cacheMode bool
+	// Pre-scan the options that decide how the Director is queried.
+	var cacheMode, uploadDestination bool
 	for _, option := range options {
-		if _, ok := option.Ident().(identTransferOptionCacheEmbeddedClientMode); ok {
-			cacheMode = true
-			break
+		switch option.Ident() {
+		case identTransferOptionCacheEmbeddedClientMode{}:
+			// The value, not merely the presence of the option: every caller
+			// in the cache passes useEmbeddedCacheMode(), which is false in
+			// site-local mode, and reading it as true there queries the
+			// Director with the wrong flavor.
+			cacheMode = option.Value().(bool)
+		case identTransferOptionStatUploadDestination{}:
+			uploadDestination = option.Value().(bool)
 		}
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", cacheMode)
+	// An upload destination is stat'ed against the origins that accept the
+	// write, not against caches: caches serve no listings for a
+	// writes-without-reads namespace, and a GET-flavored query would hand
+	// the caller's write credential to every cache in the response.
+	directorMethod, tokenOperation := http.MethodGet, config.TokenRead
+	if uploadDestination {
+		// Use the upload operation so the credential acquired (and cached)
+		// here carries the same scopes the subsequent PUT will need.
+		directorMethod, tokenOperation = http.MethodPut, uploadTokenOperation()
+	}
+
+	// Reuse the engine's director responses the way job creation does, when
+	// there is an engine. A cache stats before it downloads, so otherwise every
+	// miss spends two director queries on the same namespace. Cache entries
+	// are keyed by flavor -- verb, cache-mode routing, and the URL query --
+	// so an upload destination is cached too and can never be answered with a
+	// read's caches.
+	var dirResp server_structs.DirectorResponse
+	// A stat against a directorless federation is its own metadata query: the
+	// PROPFIND carries back whatever a preceding one would have said, so asking
+	// first would send the same request twice.  An upload destination still
+	// asks, since a write wants its credential settled before it starts.
+	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
+	if directorless && !uploadDestination {
+		dirResp, err = resolveForRequest(ctx, pUrl, directorMethod, "", cacheMode)
+	} else if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(directorMethod, cacheMode, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	var requestedChecksums []ChecksumType
 
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, tokenOperation, true)
+	applyTokenOptions(token, nil, uploadDestination, options)
 	var fedToken TokenProvider
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionTokenLocation{}:
-			token.SetTokenLocation(option.Value().(string))
-		case identTransferOptionAcquireToken{}:
-			token.EnableAcquire = option.Value().(bool)
-		case identTransferOptionToken{}:
-			token.SetToken(option.Value().(string))
 		case identTransferOptionFedToken{}:
 			fedToken = option.Value().(TokenProvider)
 		case identTransferOptionChecksums{}:
@@ -214,14 +278,20 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	var tokenContents string
 	if dirResp.XPelNsHdr.RequireToken {
 		tokenContents, err = token.Get()
-		if err != nil || tokenContents == "" {
+		if err != nil {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
-	} else {
+		if tokenContents == "" {
+			return nil, errors.New("failed to get token for transfer: no token found for a namespace that requires one")
+		}
+	} else if !directorless {
 		token = nil
 	}
+	// When nothing has been asked, "no token required" is not yet a fact, so the
+	// generator stays: a refusal carrying token hints needs somewhere to acquire
+	// onto (see bearerAuthenticator.Verify).
 
-	statInfo, err := statHttp(pUrl, dirResp, token, fedToken)
+	statInfo, err := statHttp(ctx, pUrl, dirResp, token, fedToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	}
@@ -358,6 +428,16 @@ func getUserAgent(project string) (agent string) {
 	return
 }
 
+// objServerKey returns the host:port identity used to deduplicate object servers.
+// For well-formed URLs this is the Host field (which includes the port when present);
+// we fall back to the full string for unusual inputs that don't parse a host.
+func objServerKey(u *url.URL) string {
+	if u.Host != "" {
+		return u.Host
+	}
+	return u.String()
+}
+
 // Given a response from the director with sorted object servers, incorporate any "preferred" servers (origins/caches) that
 // may be passed in from the command line. This should handle the special '+' logic -- if the user provides a list of servers
 // and no +, it means they ONLY want to use the provided servers. Otherwise, we prefer those servers, but also incorporate the
@@ -401,8 +481,25 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 	}
 
 	log.Debugln("Using the returned sources from the director")
-	// We may have some servers from the preferred list
-	objectServers = append(objectServers, dirResp.ObjectServers...)
+	// Append the director-provided servers, but skip any whose host:port collides with
+	// a server we've already included. This keeps the '+' fallback from re-adding a
+	// user-configured preferred cache and drops duplicates within the
+	// director's own list. We intentionally do NOT deduplicate the preferred servers
+	// against each other: a user may list the same cache multiple times to force
+	// repeated attempts (e.g. when testing or troubleshooting a specific cache).
+	seenHosts := make(map[string]bool, len(objectServers))
+	for _, oServer := range objectServers {
+		seenHosts[objServerKey(oServer)] = true
+	}
+	for _, oServer := range dirResp.ObjectServers {
+		key := objServerKey(oServer)
+		if seenHosts[key] {
+			log.Debugf("Skipping director-provided server (%s) that duplicates an already-listed cache\n", oServer)
+			continue
+		}
+		seenHosts[key] = true
+		objectServers = append(objectServers, oServer)
+	}
 
 	if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
 		oHosts := make([]string, len(objectServers))
@@ -424,37 +521,131 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 
 }
 
-// Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
-func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
-	// First, create a handler for any panics that occur
+// WalkFunc is the callback signature accepted by Walk. It mirrors
+// fs.WalkDirFunc: a successful entry arrives as (info, nil); an error
+// attributable to a specific path in the walk arrives as
+// (FileInfo{Name: path, IsCollection: ...}, err). Returning a non-nil error
+// unwinds the walk with that error, except for the SkipSubtree and SkipAll
+// sentinels below which alter control flow without failing the walk.
+type WalkFunc func(FileInfo, error) error
+
+// SkipSubtree, when returned from a WalkFunc invoked on a collection entry (or
+// on an error tuple for a subtree that could not be listed), tells Walk not to
+// descend into that subtree but to continue with the next sibling. Analogous
+// to fs.SkipDir.
+var SkipSubtree = errors.New("client: skip subtree")
+
+// SkipAll, when returned from a WalkFunc, tells Walk to end the walk cleanly.
+// Walk itself returns nil in that case. Analogous to fs.SkipAll.
+var SkipAll = errors.New("client: skip all")
+
+// Walk lists remoteObject and hands each entry to fn in walk order. It is
+// the streaming primitive that DoList and WalkSeq are built on. The callback
+// receives (FileInfo, error) where a non-nil error identifies a specific
+// subtree that could not be listed; a nil return from fn after such an error
+// tells Walk to continue with the next sibling, and SkipSubtree is an
+// explicit synonym for the same behavior. SkipAll ends the walk cleanly.
+// Any other non-nil return from fn aborts the walk with that error.
+//
+// Walk is a lower-level replacement for the historical DoList (which buffers
+// results into a slice and aborts on the first error). Prefer Walk when the
+// result set may be large or when the caller wants to keep going past
+// per-subtree failures. See cmd/object_du.go for an example.
+func Walk(ctx context.Context, remoteObject string, fn WalkFunc, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic captured while attempting to perform Walk:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
-			err = errors.New(ret)
+			err = errors.Errorf("Unrecoverable error (panic) captured in Walk: %v", r)
 		}
 	}()
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
-	}
-
+	// The transfer engine isn't strictly needed for a listing (listHttpEmit
+	// uses its own WebDAV client), but historical Walk callers assume its
+	// setup+teardown always happens. Create + shutdown one for a single-arg
+	// Walk; WalkMany hoists this out so N walks share a single engine.
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
+		if shutErr := te.Shutdown(); shutErr != nil {
+			log.Errorln("Failure when shutting down transfer engine:", shutErr)
 		}
 	}()
+	return walkOn(ctx, te, remoteObject, fn, options...)
+}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
+// Walk is the package-level Walk for a caller that already holds an engine.
+// It skips the per-call engine setup and teardown, and the listing reuses
+// the engine's director responses instead of asking again.
+func (te *TransferEngine) Walk(ctx context.Context, remoteObject string, fn WalkFunc, options ...TransferOption) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform Walk:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			err = errors.Errorf("Unrecoverable error (panic) captured in Walk: %v", r)
+		}
+	}()
+	return walkOn(ctx, te, remoteObject, fn, options...)
+}
+
+// List is DoList for a caller that already holds an engine.
+func (te *TransferEngine) List(ctx context.Context, remoteObject string, options ...TransferOption) ([]FileInfo, error) {
+	return collectList(func(fn WalkFunc) error {
+		return te.Walk(ctx, remoteObject, fn, options...)
+	})
+}
+
+// collectList buffers a walk into a slice, aborting on the first error --
+// the historical DoList shape, shared by both entry points.
+func collectList(walk func(WalkFunc) error) ([]FileInfo, error) {
+	var fileInfos []FileInfo
+	err := walk(func(info FileInfo, emitErr error) error {
+		if emitErr != nil {
+			return emitErr
+		}
+		fileInfos = append(fileInfos, info)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return fileInfos, nil
+}
+
+// walkOn is Walk without the transfer-engine dance; the caller owns the
+// TransferEngine (te is currently unused at the listing layer, but WalkMany
+// forwards a shared one anyway so the resource story matches what callers
+// expect). Panic recovery, options parsing, and SkipAll unwrapping happen
+// here, since they must apply to every Walk-shaped listing.
+func walkOn(ctx context.Context, te *TransferEngine, remoteObject string, fn WalkFunc, options ...TransferOption) error {
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
+	}
+
+	// A listing carries back what a metadata query would have said, so a
+	// directorless federation is not asked twice.
+	//
+	// When the caller owns an engine, take the director response from its
+	// cache: walking many collections under one namespace -- listing a
+	// directory of directories, say -- otherwise asks the director once per
+	// collection for an answer that is the same every time.
+	var dirResp server_structs.DirectorResponse
+	if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(http.MethodGet, false, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := resolveForRequest(lCtx, pUrl, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
+	}
+	if err != nil {
+		return err
+	}
+	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
 
 	// Get our token if needed
 	token := NewTokenGenerator(pUrl, &dirResp, config.TokenRead, true)
@@ -479,7 +670,6 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		case identTransferOptionCollectionsUrl{}:
 			collectionsOverride = option.Value().(string)
 		case identTransferOptionRecursive{}:
-			// Option overrides query parameter
 			recursive = option.Value().(bool)
 		case identTransferOptionDepth{}:
 			depth = option.Value().(int)
@@ -489,28 +679,209 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if dirResp.XPelNsHdr.RequireToken {
 		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
-			return nil, errors.Wrap(err, "failed to get token for transfer")
+			return errors.Wrap(err, "failed to get token for transfer")
 		}
-	} else {
+	} else if !directorless {
+		// With nothing having asked, "no token required" is not yet a fact; the
+		// generator stays so a refusal carrying hints can acquire onto it.
 		token = nil
 	}
 	if collectionsOverride != "" {
 		collectionsOverrideUrl, err := url.Parse(collectionsOverride)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to parse collections URL override")
+			return errors.Wrap(err, "unable to parse collections URL override")
 		}
 		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
-	fileInfos, err = listHttp(pUrl, dirResp, token, recursive, depth)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to perform list request")
+	// listHttpEmit already understands SkipSubtree at every level; Walk
+	// promotes SkipAll from any level to a clean nil return so the sentinel
+	// stays out of the callers' error paths.
+	if err := listHttpEmit(pUrl, dirResp, token, recursive, depth, fn); err != nil {
+		if errors.Is(err, SkipAll) {
+			return nil
+		}
+		return errors.Wrap(err, "failed to perform list request")
+	}
+	return nil
+}
+
+// WalkManyFunc is the callback accepted by WalkMany. It matches WalkFunc but
+// also identifies which of the caller-supplied roots the entry came from,
+// enabling per-root accumulation without threading additional state through.
+// Because WalkMany dispatches concurrently, fn may be invoked from multiple
+// goroutines; implementations must be safe for concurrent use.
+type WalkManyFunc func(root string, info FileInfo, err error) error
+
+// WalkMany walks each entry in roots concurrently, capped at parallelism (or
+// param.Client_WorkerCount when parallelism <= 0), and reuses a single
+// TransferEngine across all walks. fn receives (root, info, err) so callers
+// can attribute each entry back to its argument; return semantics match Walk
+// (nil to continue, SkipSubtree to prune a subtree in that root's walk,
+// SkipAll to end that walk cleanly, other error to abort that walk).
+//
+// A per-root failure does not stop the other walks; WalkMany returns
+// errors.Join of every root-level error observed, or nil if every walk
+// finished cleanly.
+func WalkMany(ctx context.Context, roots []string, parallelism int, fn WalkManyFunc, options ...TransferOption) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform WalkMany:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			err = errors.Errorf("Unrecoverable error (panic) captured in WalkMany: %v", r)
+		}
+	}()
+
+	if len(roots) == 0 {
+		return nil
 	}
 
-	return fileInfos, nil
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if shutErr := te.Shutdown(); shutErr != nil {
+			log.Errorln("Failure when shutting down transfer engine:", shutErr)
+		}
+	}()
+
+	return fanOutWalk(ctx, roots, parallelism, fn, func(root string, cb WalkFunc) error {
+		return walkOn(ctx, te, root, cb, options...)
+	})
+}
+
+// fanOutWalk is the concurrency plumbing behind WalkMany, separated so it can
+// be exercised in tests without spinning up a TransferEngine or the HTTP
+// listing pipeline. runWalk performs the actual walk for a given root and
+// dispatches entries through cb. parallelism follows WalkMany semantics
+// (<=0 defaults to param.Client_WorkerCount, capped at len(roots)).
+func fanOutWalk(ctx context.Context, roots []string, parallelism int, fn WalkManyFunc, runWalk func(root string, cb WalkFunc) error) error {
+	if parallelism <= 0 {
+		parallelism = param.Client_WorkerCount.GetInt()
+	}
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > len(roots) {
+		parallelism = len(roots)
+	}
+
+	// Bounded semaphore: N slots throttle how many walks run concurrently.
+	sem := make(chan struct{}, parallelism)
+	var (
+		wg     sync.WaitGroup
+		errsMu sync.Mutex
+		errs   []error
+	)
+	for _, root := range roots {
+		root := root
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errsMu.Lock()
+				errs = append(errs, errors.Wrapf(ctx.Err(), "walk %q cancelled before start", root))
+				errsMu.Unlock()
+				return
+			}
+			defer func() { <-sem }()
+
+			if walkErr := runWalk(root, func(info FileInfo, emitErr error) error {
+				return fn(root, info, emitErr)
+			}); walkErr != nil {
+				errsMu.Lock()
+				errs = append(errs, errors.Wrapf(walkErr, "walk %q", root))
+				errsMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return goerrors.Join(errs...)
+}
+
+// DoList collects every FileInfo returned by Walk into a slice and returns
+// it. It preserves its historical abort-on-first-error behavior: any
+// walk-time error (including a single unreadable subtree) is returned and
+// partial results are discarded. Prefer Walk or WalkSeq when you want to
+// keep going past per-subtree failures.
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
+	return collectList(func(fn WalkFunc) error {
+		return Walk(ctx, remoteObject, fn, options...)
+	})
+}
+
+// errStopIter is returned from the callback inside walkAsSeq to unwind the
+// underlying walk when a range-over-func caller breaks out of its loop. It
+// never escapes walkAsSeq -- the wrapper filters it before deciding whether
+// to yield a terminal (zero, error) tuple.
+var errStopIter = errors.New("client: iteration stopped")
+
+// walkAsSeq converts a Walk-shaped run into an iter.Seq2. It is the core of
+// WalkSeq extracted so unit tests can exercise the range-over-func semantics
+// (early-break, per-entry error propagation, zero-value guarantees) without
+// spinning up the full transfer engine and Director stack.
+func walkAsSeq(run func(fn WalkFunc) error) iter.Seq2[FileInfo, error] {
+	return func(yield func(FileInfo, error) bool) {
+		stopped := false
+		err := run(func(info FileInfo, emitErr error) error {
+			if !yield(info, emitErr) {
+				stopped = true
+				return errStopIter
+			}
+			return nil
+		})
+		if stopped {
+			// Caller broke out; they already have every value they wanted
+			// and shouldn't receive a synthetic error for their own break.
+			return
+		}
+		if err != nil {
+			yield(FileInfo{}, err)
+		}
+	}
+}
+
+// WalkSeq is a range-over-func (iter.Seq2) adapter over Walk. It walks
+// remoteObject the same way Walk does but presents each entry as one loop
+// iteration, e.g.:
+//
+//	for info, err := range client.WalkSeq(ctx, url, options...) {
+//	    if err != nil {
+//	        // per-subtree failure; keep going or return err to abort
+//	        continue
+//	    }
+//	    // handle info
+//	}
+//
+// If the caller breaks out of the loop early the walk is aborted immediately
+// and no synthetic terminal error tuple is yielded. If the walk fails at a
+// step that isn't attributable to a specific path (e.g. Director lookup), one
+// final (zero, err) tuple is yielded so the loop body observes the error
+// before the range ends.
+func WalkSeq(ctx context.Context, remoteObject string, options ...TransferOption) iter.Seq2[FileInfo, error] {
+	return walkAsSeq(func(fn WalkFunc) error {
+		return Walk(ctx, remoteObject, fn, options...)
+	})
 }
 
 // DoDelete queries the director using the DELETE HTTP method, retrieves the token, and initializes the delete operation.
 func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
+	return deleteObj(ctx, nil, remoteDestination, recursive, options...)
+}
+
+// Delete is DoDelete for a caller that already holds an engine; the director
+// response is taken from the engine's cache rather than re-queried. Removing
+// many objects from one namespace otherwise spends a director round trip on
+// each.
+func (te *TransferEngine) Delete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
+	return deleteObj(ctx, te, remoteDestination, recursive, options...)
+}
+
+// deleteObj is the body of both. te may be nil, in which case the Director is
+// queried directly.
+func deleteObj(ctx context.Context, te *TransferEngine, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Debugln("Panic occurred while attempting to perform delete operation (DoDelete):", r)
@@ -529,7 +900,16 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		recursive = true
 	}
 
-	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
+	var dirResp server_structs.DirectorResponse
+	if te != nil && te.dirRespCache != nil {
+		flavor := NewDirRespFlavor(http.MethodDelete, false, pUrl.RawQuery)
+		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(lCtx, pUrl, http.MethodDelete, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
+	}
 	if err != nil {
 		return err
 	}
@@ -716,11 +1096,41 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		// Note that we use the pUrl.Path, as this will have stripped any query params for us
+		// The destination is an existing directory -- a "container
+		// target".  Rows G2, G4, and G5 of docs/object-transfer-semantics.md
+		// all live in this branch:
+		//
+		//   * G2: a non-recursive get of an object infers the local
+		//     filename from the source basename.
+		//   * G4: a non-recursive get of a collection is an error.
+		//     Symmetric with the put-side P4 guard.
+		//   * G5: a recursive get of a collection lays entries FLAT
+		//     under LOCAL/ -- basename(source) is NOT interposed.
+		//     `pelican object sync` and client_agent/transfer_manager
+		//     depend on that layout, so nothing may be appended to
+		//     localDestination on the recursive path.
+		//
+		// Telling G2 from G4 requires knowing whether the source is a
+		// collection, so the non-recursive path stats it.  The
+		// recursive path needs no such decision and deliberately skips
+		// the stat, keeping the extra round trip off the sync hot path.
+		//
+		// ErrObjectNotFound is left alone: the transfer machinery
+		// surfaces a missing source with a better error than anything
+		// that can be said here.  Every other stat failure is fatal,
+		// because a G4 collection that stats as unknown would silently
+		// build the G2 layout and write a directory listing to a file.
 		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
+				return nil, errors.Wrapf(statErr,
+					"failed to stat remote source %q while deciding destination layout", remoteObject)
+			}
+			if stat != nil && stat.IsCollection {
+				return nil, errors.Errorf(
+					"remote object %q is a collection but recursive is not enabled", remoteObject)
+			}
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}

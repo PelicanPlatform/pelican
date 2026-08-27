@@ -105,8 +105,12 @@ func HeaderParser(values string) (retMap map[string]string) {
 		// Remove any unwanted spaces
 		pair = strings.ReplaceAll(pair, " ", "")
 
-		// Break out key/value pairs and put in the map
-		split := strings.Split(pair, "=")
+		// Break out key/value pairs and put in the map.
+		// Skip pairs that don't contain "=" to avoid panicking on malformed input.
+		split := strings.SplitN(pair, "=", 2)
+		if len(split) < 2 {
+			continue
+		}
 		retMap[split[0]] = split[1]
 	}
 

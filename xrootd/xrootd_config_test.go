@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -54,7 +54,7 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	tmpDir := t.TempDir()
 	server_utils.ResetTestState()
 
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	require.NoError(t, param.Xrootd_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Cache_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
@@ -208,6 +208,40 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		server_utils.ResetTestState()
 	})
+
+	// VOMS requires TLS client auth to request a client certificate; enabling VOMS
+	// without it is a non-functional setup and must be rejected.
+	t.Run("TestOriginVomsWithoutTLSClientAuthErrors", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		require.NoError(t, param.Origin_EnableVoms.Set(true))
+		require.NoError(t, param.Origin_EnableTLSClientAuth.Set(false))
+
+		_, err := ConfigXrootd(ctx, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), param.Origin_EnableTLSClientAuth.GetName())
+	})
+
+	t.Run("TestOriginTLSClientAuthRendering", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
+
+		// Off by default
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+off`, string(content))
+
+		// On when enabled
+		require.NoError(t, param.Origin_EnableTLSClientAuth.Set(true))
+		configPath, err = ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		content, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+on`, string(content))
+	})
 }
 
 func TestShouldEnableTPC(t *testing.T) {
@@ -274,7 +308,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	server_utils.ResetTestState()
 
 	require.NoError(t, param.Cache_RunLocation.Set(dirname))
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	err = config.InitServer(ctx, server_structs.CacheType)
@@ -364,6 +398,40 @@ func TestXrootDCacheConfig(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
 	})
+
+	// VOMS requires TLS client auth to request a client certificate; enabling VOMS
+	// without it is a non-functional setup and must be rejected.
+	t.Run("TestCacheVomsWithoutTLSClientAuthErrors", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.CacheType, egrp)
+
+		require.NoError(t, param.Cache_EnableVoms.Set(true))
+		require.NoError(t, param.Cache_EnableTLSClientAuth.Set(false))
+
+		_, err := ConfigXrootd(ctx, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), param.Cache_EnableTLSClientAuth.GetName())
+	})
+
+	t.Run("TestCacheTLSClientAuthRendering", func(t *testing.T) {
+		defer server_utils.ResetTestState()
+		setupXrootd(t, ctx, server_structs.CacheType, egrp)
+
+		// Off by default
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		content, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+off`, string(content))
+
+		// On when enabled
+		require.NoError(t, param.Cache_EnableTLSClientAuth.Set(true))
+		configPath, err = ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		content, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Regexp(t, `http\.tlsclientauth\s+on`, string(content))
+	})
 }
 
 func TestDurationStrToSecondsHookFuncGenerator(t *testing.T) {
@@ -449,7 +517,7 @@ func TestUpdateAuth(t *testing.T) {
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
-	require.NoError(t, param.ConfigDir.Set(configDirname))
+	require.NoError(t, param.ConfigBase.Set(configDirname))
 	authfileName := filepath.Join(configDirname, "authfile")
 	require.NoError(t, param.Xrootd_Authfile.Set(authfileName))
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
@@ -552,7 +620,7 @@ func TestCopyCertificates(t *testing.T) {
 	server_utils.ResetTestState()
 	require.NoError(t, param.Logging_Level.Set("Debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
-	require.NoError(t, param.ConfigDir.Set(configDirname))
+	require.NoError(t, param.ConfigBase.Set(configDirname))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -646,7 +714,7 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	runDir := t.TempDir()
 	configDir := t.TempDir()
 	require.NoError(t, param.Origin_RunLocation.Set(runDir))
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -847,7 +915,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	})
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Cache_RunLocation.Set(dir))
 
 	// Start with a valid authfile and scitokens so the first cycles succeed
@@ -918,7 +986,7 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 	})
 
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Cache_RunLocation.Set(dir))
 	require.NoError(t, param.Xrootd_AutoShutdownEnabled.Set(true))
 	require.NoError(t, param.Xrootd_ConfigUpdateFailureTimeout.Set(1*time.Second))
@@ -977,7 +1045,7 @@ func TestLaunchXrootdMaintenanceSeedsHealthStatus(t *testing.T) {
 	require.Equal(t, metrics.StatusCritical.String(), status,
 		"precondition: stale Critical status must be visible before launch")
 
-	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.ConfigBase.Set(dir))
 	require.NoError(t, param.Cache_RunLocation.Set(dir))
 	authfilePath := filepath.Join(dir, "authfile")
 	require.NoError(t, os.WriteFile(authfilePath, []byte("u * /.well-known lr\n"), 0600))
@@ -1024,6 +1092,32 @@ func TestPurgeColdFilesAgeFromMaxLotLifetime(t *testing.T) {
 			got, err := purgeColdFilesAgeFromMaxLotLifetime(tc.in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// pfc.diskusage interprets a bare number as a fraction of disk and a suffixed
+// number as an absolute size. Pelican exposes watermarks and file-usage sizes
+// as integer percentages or suffixed sizes, so cacheSizeToXrootd must rewrite a
+// percentage to its decimal fraction and leave everything else alone.
+func TestCacheSizeToXrootd(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"integer percent becomes fraction", "85", "0.85"},
+		{"low integer percent", "5", "0.05"},
+		{"100 percent becomes 1.00", "100", "1.00"},
+		{"absolute gigabytes pass through", "100g", "100g"},
+		{"absolute terabytes pass through", "1t", "1t"},
+		{"already-decimal fraction passes through", "0.90", "0.90"},
+		{"zero passes through (not a percentage)", "0", "0"},
+		{"empty passes through", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, cacheSizeToXrootd(tc.in))
 		})
 	}
 }

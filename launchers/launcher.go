@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -104,7 +105,15 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	if modules.IsEnabled(server_structs.RegistryType) ||
+	// OAuth2/OIDC client routes are needed only when at least one
+	// enabled module wants to log users in via a third-party IdP. The
+	// registry used to force this on unconditionally — predating the
+	// new local-user/password scheme — so it now follows the same
+	// EnableOIDC opt-in pattern as the other components. When all four
+	// flags are false the server still works for local-password and
+	// API-token authentication; only the OIDC code-exchange flow is
+	// absent.
+	if (modules.IsEnabled(server_structs.RegistryType) && param.Registry_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
 		(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
@@ -176,7 +185,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 			return
 		}
 		servers = append(servers, server)
-		serversRequireAdvertisement = append(serversRequireAdvertisement, server)
+		// Standalone origins aren't part of any federation, so there is no
+		// director to advertise to.
+		if !config.IsStandaloneOrigin() {
+			serversRequireAdvertisement = append(serversRequireAdvertisement, server)
+		}
 
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
@@ -212,6 +225,28 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules, keyChangeCallbacks...)
 
+	// Initialize and register the transfer module if enabled as a standalone server
+	if modules.IsEnabled(server_structs.TransferType) {
+		if err = database.InitServerDatabase(server_structs.TransferType); err != nil {
+			return
+		}
+		if err = transfer.InitTransferDatabase(); err != nil {
+			return
+		}
+		if err = transfer.RegisterTransferAPI(ctx, engine, egrp); err != nil {
+			return
+		}
+		// A standalone transfer server has no co-located origin to stand up the
+		// embedded issuer, so register the server-level local issuer here. This
+		// lets clients obtain a pelican.transfer token (iss=GetLocalIssuerUrl)
+		// to authenticate to the transfer API.
+		if err = transfer.RegisterLocalIssuer(ctx, egrp, engine, database.ServerDatabase); err != nil {
+			return
+		}
+		transfer.LaunchCredentialCleanup(ctx, egrp)
+		log.Info("Transfer module enabled")
+	}
+
 	// Start periodic database backup routine
 	database.LaunchPeriodicBackup(ctx, egrp)
 
@@ -236,8 +271,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Launch director discovery.  This is done after the director modules are done
 	// (since they may provide some of the response information) and before the origin/cache
-	// are started (since we may forward ads based on discovered directors)
-	if err = server_utils.LaunchPeriodicDirectorDiscovery(ctx, modules.IsEnabled(server_structs.DirectorType)); err != nil {
+	// are started (since we may forward ads based on discovered directors).
+	// A standalone origin advertises to nobody, so it has no reason to go looking
+	// for directors in the first place.
+	if config.IsStandaloneOrigin() {
+		log.Debugf("Skipping director discovery because %s is enabled", param.Origin_EnableStandaloneMode.GetName())
+	} else if err = server_utils.LaunchPeriodicDirectorDiscovery(ctx, modules.IsEnabled(server_structs.DirectorType)); err != nil {
 		return
 	}
 	if modules.IsEnabled(server_structs.DirectorType) {
@@ -248,7 +287,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		issuerMode := param.Origin_IssuerMode.GetString()
 		var issuerHealthCheckUrl string
 		if issuerMode == "embedded" || issuerMode == "" {
-			// For the embedded issuer, use the first auth-requiring export's namespace.
+			// For the embedded issuer, health-check the first auth-requiring
+			// export's namespace discovery.
 			originExports, exErr := server_utils.GetOriginExports()
 			if exErr == nil {
 				for _, oe := range originExports {
@@ -259,9 +299,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 					}
 				}
 			}
+			// No export requires authentication (an all-public origin), but the
+			// embedded issuer still registers the server's local issuer for
+			// transfer/collection auth. Health-check that instead of the
+			// namespace-less OA4MP path, which the embedded issuer never serves.
+			if issuerHealthCheckUrl == "" {
+				issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() +
+					"/api/v1.0/issuer/ns" + server_structs.LocalIssuerNamespace + "/.well-known/openid-configuration"
+			}
 		}
 		if issuerHealthCheckUrl == "" {
-			// Fallback for OA4MP mode or if no auth-requiring export found
+			// Fallback for OA4MP mode.
 			issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
 		}
 		if err = server_utils.WaitUntilWorking(ctx, "GET", issuerHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
@@ -283,7 +331,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
-	if fedInfo.BrokerEndpoint != "" {
+	if fedInfo.BrokerEndpoint != "" && !config.IsStandaloneOrigin() {
 		if modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool() {
 			if err = origin.LaunchBrokerListener(ctx, egrp, engine); err != nil {
 				return
@@ -327,19 +375,24 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		for _, export := range originExports {
 			go func(prefix string) {
 				defer wg.Done()
+				// Use goroutine-local error variables: these run concurrently
+				// and must not share the enclosing function's named-return `err`
+				// (concurrent writes are a data race and let one prefix's result
+				// clobber another's, causing spurious advertisement failures).
 				// Probably no need to incur another err check since we already checked the director URL.
 				urlToCheck, _ := url.Parse(directorUrl.String())
-				urlToCheck.Path, err = url.JoinPath("/api/v1.0/director/origin", prefix)
+				joinedPath, joinErr := url.JoinPath("/api/v1.0/director/origin", prefix)
+				if joinErr != nil {
+					errCh <- errors.Wrapf(joinErr, "Failed to join path %s for origin advertisement check", prefix)
+					return
+				}
+				urlToCheck.Path = joinedPath
 				// Skip stat check. Otherwise it will return 404
 				query := urlToCheck.Query()
 				query.Add("skipstat", "")
 				urlToCheck.RawQuery = query.Encode()
-				if err != nil {
-					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
-					return
-				}
-				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); err != nil {
-					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
+				if waitErr := server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); waitErr != nil {
+					errCh <- errors.Wrapf(waitErr, "The prefix %s does not seem to have advertised correctly", prefix)
 				}
 
 			}(export.FederationPrefix)
@@ -413,7 +466,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Launch periodic advertise BEFORE broker listener because the broker listener
 	// needs server metadata which is populated during the first advertisement.
-	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) && len(serversRequireAdvertisement) > 0 {
+	// The length check must gate the whole branch: a standalone origin (or a
+	// site-local cache) leaves the slice empty, and advertising an empty slice
+	// would still report a bogus "federation: OK" health component.
+	if len(serversRequireAdvertisement) > 0 {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
@@ -529,7 +585,11 @@ func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerTy
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "The server is shutting down")
 		// When the server is up again, the ShuttingDown status will be cleared
 
-		if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
+		// The final "I'm going away" ad only makes sense for servers a director
+		// knows about; a standalone origin has never advertised at all.
+		if config.IsStandaloneOrigin() {
+			log.Debug("Skipping shutdown advertisement because the origin is running in standalone mode")
+		} else if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
 			log.Errorf("Failed to advertise before shutdown: %v", advErr)
 		}
 		time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())

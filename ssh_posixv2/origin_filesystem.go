@@ -124,21 +124,48 @@ func NewSSHFileSystem(transport http.RoundTripper, federationPrefix, storagePref
 
 // makeHelperURL constructs the URL for a request to the helper
 // The helper serves WebDAV at /<federationPrefix>/<path>
-func (fs *SSHFileSystem) makeHelperURL(name string) string {
+//
+// name arrives from the WebDAV layer and is not trusted.  path.Join
+// normalizes dot-segments away, so a name containing "../" would resolve
+// *out* of the federation prefix and address a different export's route on
+// the helper -- the same join-then-clean mistake that aferoFileSystem's
+// confineToPrefix exists to prevent.  The request path is cleaned before it
+// reaches here, but a MOVE or COPY Destination header is not cleaned by
+// golang.org/x/net/webdav, so the guard belongs here as well: SSHFileSystem
+// is a webdav.FileSystem in its own right and must not depend on a caller
+// two layers up having sanitised its input.
+func (fs *SSHFileSystem) makeHelperURL(name string) (string, error) {
 	// The helper uses the federation prefix as its route.
 	// Preserve trailing slashes so that directory requests match the
 	// http.ServeMux pattern registered with a trailing slash.
 	trailingSlash := strings.HasSuffix(name, "/")
-	cleanPath := path.Clean(path.Join(fs.federationPrefix, name))
+	prefix := path.Clean("/" + strings.TrimPrefix(fs.federationPrefix, "/"))
+	cleanPath := path.Clean(path.Join(prefix, name))
+	if !withinPrefix(cleanPath, prefix) {
+		return "", errors.Errorf("path %q resolves outside the export's federation prefix %q", name, fs.federationPrefix)
+	}
 	if trailingSlash && !strings.HasSuffix(cleanPath, "/") {
 		cleanPath += "/"
 	}
-	return "http://helper" + cleanPath
+	return "http://helper" + cleanPath, nil
+}
+
+// withinPrefix reports whether an already-cleaned absolute path is the
+// prefix itself or sits beneath it.  The trailing separator matters: without
+// it "/exports/one-secret" would count as being under "/exports/one".
+func withinPrefix(cleaned, prefix string) bool {
+	if prefix == "/" || cleaned == prefix {
+		return true
+	}
+	return strings.HasPrefix(cleaned, strings.TrimSuffix(prefix, "/")+"/")
 }
 
 // Mkdir creates a directory on the remote filesystem via WebDAV MKCOL
 func (fs *SSHFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
-	url := fs.makeHelperURL(name)
+	url, err := fs.makeHelperURL(name)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, "MKCOL", url, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create MKCOL request")
@@ -179,7 +206,10 @@ func (fs *SSHFileSystem) OpenFile(ctx context.Context, name string, flag int, pe
 
 // RemoveAll removes a file or directory
 func (fs *SSHFileSystem) RemoveAll(ctx context.Context, name string) error {
-	url := fs.makeHelperURL(name)
+	url, err := fs.makeHelperURL(name)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create DELETE request")
@@ -201,14 +231,20 @@ func (fs *SSHFileSystem) RemoveAll(ctx context.Context, name string) error {
 
 // Rename renames a file or directory via WebDAV MOVE
 func (fs *SSHFileSystem) Rename(ctx context.Context, oldName, newName string) error {
-	url := fs.makeHelperURL(oldName)
+	url, err := fs.makeHelperURL(oldName)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, "MOVE", url, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create MOVE request")
 	}
 
 	// Set the Destination header for the new location
-	destURL := fs.makeHelperURL(newName)
+	destURL, err := fs.makeHelperURL(newName)
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Destination", destURL)
 	req.Header.Set("Overwrite", "T")
 	setPelicanHeaders(ctx, req)
@@ -228,7 +264,10 @@ func (fs *SSHFileSystem) Rename(ctx context.Context, oldName, newName string) er
 
 // Stat returns file info via WebDAV PROPFIND
 func (fs *SSHFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
-	url := fs.makeHelperURL(name)
+	url, err := fs.makeHelperURL(name)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "PROPFIND", url, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create PROPFIND request")
@@ -414,7 +453,10 @@ func (f *sshFile) Close() error {
 func (f *sshFile) Read(p []byte) (n int, err error) {
 	// If we don't have a reader yet, create one
 	if f.reader == nil {
-		url := f.fs.makeHelperURL(f.name)
+		url, err := f.fs.makeHelperURL(f.name)
+		if err != nil {
+			return 0, err
+		}
 		req, err := http.NewRequestWithContext(f.ctx, "GET", url, nil)
 		if err != nil {
 			return 0, errors.Wrap(err, "failed to create GET request")
@@ -496,7 +538,12 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 		go func() {
 			defer close(f.writeDone)
 
-			helperURL := f.fs.makeHelperURL(f.name)
+			helperURL, err := f.fs.makeHelperURL(f.name)
+			if err != nil {
+				f.writeErr = err
+				_ = pr.CloseWithError(err)
+				return
+			}
 			req, err := http.NewRequestWithContext(f.ctx, "PUT", helperURL, pr)
 			if err != nil {
 				f.writeErr = errors.Wrap(err, "failed to create PUT request")
@@ -529,13 +576,16 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 func (f *sshFile) Readdir(count int) ([]os.FileInfo, error) {
 	// Ensure a trailing slash so the request matches the mux pattern
 	// registered as prefix+"/".  Without it the helper's ServeMux would
-	// issue a 301 redirect, which cannot be followed over a one-shot
+	// issue a redirect, which cannot be followed over a one-shot
 	// reverse connection.
 	dirName := f.name
 	if !strings.HasSuffix(dirName, "/") {
 		dirName += "/"
 	}
-	url := f.fs.makeHelperURL(dirName)
+	url, err := f.fs.makeHelperURL(dirName)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(f.ctx, "PROPFIND", url, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create PROPFIND request")

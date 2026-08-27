@@ -33,6 +33,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -82,6 +83,13 @@ var (
 
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
+
+	// errStatOnCollectionAtCache is an internal sentinel for the case where a
+	// stat host (typically an XRootD cache) returns 409 for a PROPFIND on what
+	// is actually a directory. Caches do not serve directory listings; statHttp
+	// uses this to decide whether to fall back to the collections URL (origin
+	// WebDAV endpoint), which does serve them.
+	errStatOnCollectionAtCache = errors.New("stat host returned 409 (likely a collection at a cache)")
 
 	// maxWebDavRetries is the maximum number of attempts (including the initial attempt)
 	// for WebDAV operations that encounter idle connection errors.
@@ -257,11 +265,36 @@ type (
 		project            string
 		requireChecksum    bool
 		requestedChecksums []ChecksumType
+		skipChecksums      bool
 		err                error
 		writer             io.WriteCloser          // Optional writer for downloads
 		reader             io.ReadCloser           // Optional reader for uploads
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
+
+		// TagScheduler hooks: nil unless the engine was constructed with a
+		// scheduler. schedFirstByte fires once (idempotent) as soon as the
+		// remote end proves responsive: for downloads, the first non-empty
+		// body byte written to the local sink; for uploads, the earliest of
+		// a negotiated 100-continue, the first byte of the PUT response, or
+		// uploadNonStarvingSentBytes of body consumed by the transport (the
+		// far end must be draining it); for third-party copies, the first
+		// byte of the COPY response or the first performance marker,
+		// whichever arrives first. schedDone fires exactly once when the
+		// worker is done with this file.
+		schedFirstByte func()
+		schedDone      func()
+		// objectMetadata is the optional uploader-supplied custom-
+		// fields map. When non-empty, the upload PUT is decorated
+		// with an X-Pelican-Object-Metadata header carrying the SFV
+		// rendering of these fields.
+		objectMetadata map[string]any
+		// objectMetadataBlob carries the optional opaque-blob
+		// metadata supplied via WithObjectMetadataBlob /
+		// WithObjectMetadataBlobFile. When non-nil, the upload PUT
+		// is sent as multipart/form-data: "metadata" part with
+		// the blob, "object" part with the file body.
+		objectMetadataBlob *objectMetadataBlob
 	}
 
 	// A representation of a "transfer job".  The job
@@ -279,14 +312,15 @@ type (
 		lookupDone         atomic.Bool
 		lookupErr          error
 		activeXfer         atomic.Int64
-		totalXfer          int
 		skipped403         sync.Mutex // Protects skipped403Objs slice
 		skipped403Objs     []string   // List of object paths skipped due to 403 during sync
 		localPath          string
 		xferType           transferType
 		requestedChecksums []ChecksumType
 		requireChecksum    bool
+		skipChecksums      bool
 		recursive          bool
+		rejectCollections  bool // If true, error when the remote path is a collection
 		skipAcquire        bool
 		dryRun             bool                            // Enable dry-run mode to display what would be transferred without actually doing it
 		srcURL             *url.URL                        // When a copy job, this is the source URL
@@ -308,6 +342,16 @@ type (
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
+		// objectMetadata is the optional client-supplied
+		// X-Pelican-Object-Metadata field-set propagated to all
+		// child transferFiles for upload jobs.
+		objectMetadata map[string]any
+		// objectMetadataBlob is the optional opaque-blob metadata
+		// (set by WithObjectMetadataBlob / WithObjectMetadataBlobFile).
+		// When non-nil and the blob body is non-empty, every child
+		// transferFile uploads via multipart/form-data instead of
+		// the historic raw PUT.
+		objectMetadataBlob *objectMetadataBlob
 	}
 
 	// A TransferJob associated with a client's request
@@ -350,31 +394,33 @@ type (
 		dirRespCache       *DirRespCache   // Prefix-matching cache for director responses
 		prestageAPISupport map[string]bool // Lookup table for caches that support the Pelican prestage API (key: host)
 		prestageAPIMutex   sync.RWMutex    // Protects the prestageAPISupport map
+		scheduler          *TagScheduler   // Optional fair-scheduler; when set, admits before te.files
 	}
 
 	TransferCallbackFunc = func(path string, downloaded int64, totalSize int64, completed bool)
 
 	// A client to the transfer engine.
 	TransferClient struct {
-		id             uuid.UUID
-		ctx            context.Context
-		cancel         context.CancelFunc
-		callback       TransferCallbackFunc
-		engine         *TransferEngine
-		skipAcquire    bool          // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		syncLevel      SyncLevel     // Policy for the client to synchronize data
-		tokenLocation  string        // Location of a token file to use for transfers
-		token          string        // Token that should be used for transfers
-		fedToken       TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
-		cacheMode      bool          // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/)
-		dryRun         bool          // Enable dry-run mode to display what would be transferred without actually doing it
-		work           chan *TransferJob
-		closed         bool
-		closeOnce      sync.Once
-		prefObjServers []*url.URL // holds any client-requested caches/origins
-		results        chan *TransferResults
-		finalResults   chan TransferResults
-		setupResults   sync.Once
+		id                uuid.UUID
+		ctx               context.Context
+		cancel            context.CancelFunc
+		callback          TransferCallbackFunc
+		engine            *TransferEngine
+		skipAcquire       bool          // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		syncLevel         SyncLevel     // Policy for the client to synchronize data
+		tokenLocation     string        // Location of a token file to use for transfers
+		token             string        // Token that should be used for transfers
+		fedToken          TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
+		cacheMode         bool          // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/)
+		dryRun            bool          // Enable dry-run mode to display what would be transferred without actually doing it
+		rejectCollections bool          // Reject downloads of collections when not in recursive mode
+		work              chan *TransferJob
+		closed            bool
+		closeOnce         sync.Once
+		prefObjServers    []*url.URL // holds any client-requested caches/origins
+		results           chan *TransferResults
+		finalResults      chan TransferResults
+		setupResults      sync.Once
 	}
 
 	TransferOption                              = option.Interface
@@ -393,6 +439,7 @@ type (
 	identTransferOptionCollectionsUrl           struct{}
 	identTransferOptionChecksums                struct{}
 	identTransferOptionRequireChecksum          struct{}
+	identTransferOptionSkipChecksums            struct{}
 	identTransferOptionRecursive                struct{}
 	identTransferOptionDepth                    struct{}
 	identTransferOptionWriter                   struct{}
@@ -405,6 +452,17 @@ type (
 	identTransferOptionFedToken                 struct{}
 	identTransferOptionCacheEmbeddedClientMode  struct{}
 	identTransferOptionRequestId                struct{}
+	identTransferOptionTokenProvider            struct{}
+	identTransferOptionSourceTokenProvider      struct{}
+	identTransferOptionNonInteractive           struct{}
+	identTransferOptionStatUploadDestination    struct{}
+	identTransferOptionLazyStat                 struct{}
+	identTransferOptionRejectCollections        struct{}
+	identTransferOptionObjectMetadata           struct{}
+	identTransferOptionObjectMetadataFile       struct{}
+	identTransferOptionObjectMetadataBlob       struct{}
+	identTransferOptionObjectMetadataBlobFile   struct{}
+	identTransferOptionObjectMetadataBlobType   struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -429,6 +487,10 @@ type (
 		closed         atomic.Bool
 		bytesPerSecond atomic.Int64
 		lastRateSample time.Time
+		// onFirstByte, if non-nil, fires exactly once when the first
+		// non-empty write lands. Used by TagScheduler to promote a
+		// transfer from the starving bucket to the active bucket.
+		onFirstByte func()
 	}
 )
 
@@ -590,15 +652,57 @@ func createAllChecksumHashes() (writers []io.Writer, types []ChecksumType) {
 	return
 }
 
+// checksumFallbacksSeen tracks which fallback checksum algorithms have
+// already produced a warning this process, so repeated fallbacks (one per
+// transfer in bulk workloads) log at debug level instead.
+var checksumFallbacksSeen sync.Map
+
+// serviceDigests remembers, per object-server host, which digest algorithms
+// the service most recently reported. When the caller requests no specific
+// checksum types, verification defaults to what this service is known to
+// provide; first contact still asks for the platform default (crc32c).
+var serviceDigests sync.Map // string (host) -> []ChecksumType
+
+// rememberServiceDigests records the digest algorithms a service reported so
+// later transfers to it can default their verification accordingly.
+func rememberServiceDigests(host string, infos []ChecksumInfo) {
+	if host == "" || len(infos) == 0 {
+		return
+	}
+	types := make([]ChecksumType, 0, len(infos))
+	for _, info := range infos {
+		types = append(types, info.Algorithm)
+	}
+	serviceDigests.Store(host, types)
+}
+
+// defaultChecksumTypesForService returns the checksum types to verify against
+// when the caller requested none: the set this service last reported, falling
+// back to the global default for services we have not heard from yet.
+func defaultChecksumTypesForService(host string) []ChecksumType {
+	if v, ok := serviceDigests.Load(host); ok {
+		if types, ok := v.([]ChecksumType); ok && len(types) > 0 {
+			return types
+		}
+	}
+	return []ChecksumType{AlgDefault}
+}
+
 // verifyTransferChecksums compares server-provided checksums against locally-computed ones.
 //
 // It tries to match any server-provided checksum against the computed values. If the match
 // is for a type the client didn't explicitly request (e.g., the server returned MD5 when
 // CRC32C was requested), a warning is logged about the fallback. Returns whether verification
 // succeeded and any error (e.g., checksum mismatch or missing required checksum).
+// quietFallbacks names algorithms whose use in place of the requested ones
+// should not be reported as a surprise: the caller expressed no preference
+// and this service is already known to provide these digests. It affects
+// logging only -- verification itself is unchanged, as is the set of
+// algorithms reported back to the caller in ClientChecksums.
 func verifyTransferChecksums(
 	allComputed map[ChecksumType][]byte,
 	requestedTypes []ChecksumType,
+	quietFallbacks []ChecksumType,
 	serverChecksums []ChecksumInfo,
 	requireChecksum bool,
 	fields log.Fields,
@@ -617,6 +721,10 @@ func verifyTransferChecksums(
 	for _, t := range requestedTypes {
 		requestedSet[t] = true
 	}
+	quietSet := make(map[ChecksumType]bool, len(quietFallbacks))
+	for _, t := range quietFallbacks {
+		quietSet[t] = true
+	}
 
 	for _, serverCk := range serverChecksums {
 		clientVal, ok := allComputed[serverCk.Algorithm]
@@ -634,9 +742,28 @@ func verifyTransferChecksums(
 			return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 		}
 		if !requestedSet[serverCk.Algorithm] {
-			log.WithFields(fields).Warnf(
-				"Requested checksum type(s) not provided by server; verified transfer using %s instead",
-				HttpDigestFromChecksum(serverCk.Algorithm))
+			if quietSet[serverCk.Algorithm] {
+				// Not what we asked for, but what this service is known to
+				// provide, and the caller expressed no preference.
+				log.WithFields(fields).Debugf("Checksum %s matches: %s",
+					HttpDigestFromChecksum(serverCk.Algorithm),
+					checksumValueToHttpDigest(serverCk.Algorithm, serverCk.Value))
+				return true, nil
+			}
+			// This fires for every transfer against a server that lacks the
+			// requested digest (e.g. an origin that only computes MD5 when
+			// CRC32C was requested) -- warn once per process per algorithm,
+			// then drop to debug so bulk workloads aren't flooded.
+			if _, seen := checksumFallbacksSeen.LoadOrStore(serverCk.Algorithm, struct{}{}); !seen {
+				log.WithFields(fields).Warnf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead"+
+						" (subsequent fallbacks will be logged at debug level)",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			} else {
+				log.WithFields(fields).Debugf(
+					"Requested checksum type(s) not provided by server; verified transfer using %s instead",
+					HttpDigestFromChecksum(serverCk.Algorithm))
+			}
 		} else {
 			log.WithFields(fields).Debugf("Checksum %s matches: %s",
 				HttpDigestFromChecksum(serverCk.Algorithm),
@@ -771,13 +898,74 @@ func (tr TransferResults) ID() string {
 	return tr.JobId.String()
 }
 
+// transferEngineConfig collects the settings assembled from the
+// TransferEngineOption arguments handed to NewTransferEngine.
+type transferEngineConfig struct {
+	workerCount int
+	scheduler   *TagScheduler
+}
+
+// TransferEngineOption customizes the engine returned by NewTransferEngine.
+//
+// Unlike TransferOption (an alias for the option package's untyped
+// interface), engine options are a distinct function type; the two sets are
+// therefore not interchangeable, so a per-transfer option such as
+// WithCallback cannot be handed to the constructor and silently dropped.
+type TransferEngineOption func(*transferEngineConfig)
+
+// WithWorkerCount sets the number of transfer workers the engine launches,
+// overriding the Client.WorkerCount default.  This lets embedded consumers
+// (e.g. the cache) run with more concurrency than a command-line client
+// would.  A workerCount <= 0 is an error at construction.
+func WithWorkerCount(workerCount int) TransferEngineOption {
+	return func(cfg *transferEngineConfig) {
+		cfg.workerCount = workerCount
+	}
+}
+
+// WithScheduler wires the engine to a TagScheduler that admits transfers
+// into per-tag FIFOs and dispatches them to workers with a weighted random
+// draw.  Callers that don't want per-tag fairness (e.g., single-user CLI
+// transfers) should omit this option.
+//
+// The scheduler must have been created with NewTagScheduler; it is started
+// by NewTransferEngine and stopped when the engine shuts down.  A nil
+// scheduler is ignored.
+func WithScheduler(scheduler *TagScheduler) TransferEngineOption {
+	return func(cfg *transferEngineConfig) {
+		cfg.scheduler = scheduler
+	}
+}
+
+// NewTransferEngineWithWorkers creates a transfer engine with an explicit
+// number of transfer workers.
+//
+// Deprecated: use NewTransferEngine with WithWorkerCount.
+func NewTransferEngineWithWorkers(ctx context.Context, workerCount int) (te *TransferEngine, err error) {
+	return NewTransferEngine(ctx, WithWorkerCount(workerCount))
+}
+
 // Returns a new transfer engine object whose lifetime is tied
 // to the provided context.  Will launcher worker goroutines to
 // handle the underlying transfers
-func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
+//
+// With no options the engine runs the client's configured number of workers
+// (Client.WorkerCount) and hands transfers straight to them; see
+// WithWorkerCount and WithScheduler to change either behavior.
+func NewTransferEngine(ctx context.Context, opts ...TransferEngineOption) (te *TransferEngine, err error) {
 	// If we did not initClient yet, we should fail to avoid unexpected/undesired behavior
 	if !config.IsClientInitialized() {
 		return nil, errors.New("client has not been initialized, unable to create transfer engine")
+	}
+
+	cfg := transferEngineConfig{workerCount: param.Client_WorkerCount.GetInt()}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	// Validate before anything is allocated so a bad worker count cannot leak
+	// the derived context or the URL cache's goroutine.
+	if cfg.workerCount <= 0 {
+		return nil, errors.New("worker count must be a positive integer")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -808,19 +996,130 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		dirRespCache:       NewDirRespCache(5 * time.Minute),
 		prestageAPISupport: make(map[string]bool),
 	}
-	workerCount := param.Client_WorkerCount.GetInt()
-	if workerCount <= 0 {
-		return nil, errors.New("worker count must be a positive integer")
-	}
-	for idx := 0; idx < workerCount; idx++ {
+	for idx := 0; idx < cfg.workerCount; idx++ {
 		egrp.Go(func() error {
 			return runTransferWorker(ctx, te.files, te.results)
 		})
 	}
-	te.workersActive = workerCount
+	te.workersActive = cfg.workerCount
 	egrp.Go(te.runMux)
 	egrp.Go(te.runJobHandler)
+
+	if cfg.scheduler != nil {
+		scheduler := cfg.scheduler
+		te.scheduler = scheduler
+		// Transfers still queued in the scheduler when it stops would
+		// otherwise vanish without a result, leaving their jobs' active
+		// counts permanently non-zero (and result waiters blocked until ctx
+		// cancellation). Synthesize a failure result for each, exactly as
+		// submitFile does for an admission rejection.
+		scheduler.onDrop = func(file *clientTransferFile) {
+			res := synthesizeRejectionResult(file, errors.New("transfer engine shut down before the transfer could be dispatched"))
+			select {
+			case te.results <- res:
+			case <-te.ctx.Done():
+			}
+		}
+		// The scheduler goroutine joins the engine's errgroup. It cannot make
+		// Shutdown's egrp.Wait() hang: runJobHandler — also in that group —
+		// calls scheduler.Stop() before closing te.files, so run() has already
+		// returned by the time the group drains.
+		scheduler.Start(te.ctx, te.egrp, te.files)
+	}
 	return
+}
+
+// submitFile hands a clientTransferFile off to the worker pool. When a
+// scheduler is configured, the file goes through per-tag admission
+// (which may return ErrTooManyRequests); otherwise it goes straight to
+// the workers via te.files.
+//
+// On a scheduler rejection the function pushes a synthetic
+// clientTransferResults to te.results so the job-completion machinery
+// observes the failure exactly as it would for any other transfer
+// error, then returns the rejection error to the caller.
+func (te *TransferEngine) submitFile(ctx context.Context, file *clientTransferFile) error {
+	if te.scheduler != nil {
+		tag := deriveSchedulerTag(file)
+		err := te.scheduler.Submit(ctx, tag, file)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, ErrTooManyRequests) {
+			select {
+			case te.results <- synthesizeRejectionResult(file, err):
+			case <-te.ctx.Done():
+				return te.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return err
+	}
+	select {
+	case te.files <- file:
+		return nil
+	case <-te.ctx.Done():
+		return te.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// workerFailureResult builds the result a transfer worker reports for a file it
+// declines to run.
+//
+// The job pointer matters: runMux dereferences it on every result it routes, to
+// decrement the job's active-transfer count and decide whether the job is
+// finished. A result without it is a nil dereference on the runMux goroutine,
+// which takes the process down -- and does so *after* the result has already
+// been handed to the client, so the crash does not even look related to the
+// transfer that caused it.
+func workerFailureResult(file *clientTransferFile, err error) TransferResults {
+	if file.file == nil || file.file.job == nil {
+		return TransferResults{JobId: file.jobId, Error: err}
+	}
+	res := newTransferResults(file.file.job)
+	res.JobId = file.jobId
+	res.Error = err
+	return res
+}
+
+// uncountSubmission undoes the activeXfer increment a caller made just before
+// a submission that then failed for a reason other than a scheduler shed.
+//
+// The count has to be taken before submitting: a shed produces a synthetic
+// result immediately, and runMux both decrements on every result and retires
+// the job when the count reaches zero, so counting afterwards would let the
+// result be processed against a count that had not been taken yet. Any other
+// failure produces no result at all, so the count has to come back off -- a
+// job whose active count never drains is never finished, and the client's
+// results channel stays open forever.
+func (tj *TransferJob) uncountSubmission() {
+	tj.activeXfer.Add(-1)
+}
+
+// deriveSchedulerTag chooses the tag under which a transfer is admitted.
+// The tag is the hostname of the first attempt (the primary upstream
+// origin); the key is opaque to the scheduler, so a username or prefix can
+// be composed into it later without a scheduler change. We deliberately do
+// not retag on failover: if the transfer moves from origin A to origin B
+// mid-flight, it keeps A's slot for the duration of the transfer. This is a
+// small fairness leak bounded by the transfer's lifetime.
+//
+// A transfer with no usable attempt URL falls back to the empty tag. Every
+// such transfer then shares one tag and therefore one set of caps, so log
+// it: callers are expected to have resolved at least one attempt by now, and
+// silently collapsing them together would look like unexplained throttling.
+func deriveSchedulerTag(file *clientTransferFile) string {
+	if file == nil || file.file == nil {
+		return ""
+	}
+	if len(file.file.attempts) > 0 && file.file.attempts[0].Url != nil {
+		return file.file.attempts[0].Url.Host
+	}
+	log.Warningln("Transfer has no attempt URL to derive a scheduler tag from; it will share the fallback tag's share of the worker pool")
+	return ""
 }
 
 // Create an option that provides a callback for a TransferClient
@@ -873,6 +1172,21 @@ func WithFedToken(provider TokenProvider) TransferOption {
 	return option.New(identTransferOptionFedToken{}, provider)
 }
 
+// WithTokenProvider supplies a dynamic producer for the destination (or, for
+// non-copy transfers, the primary) token.  The provider is queried on every
+// token request, so callers can back it with a refreshable source such as an
+// encrypted credential store.
+func WithTokenProvider(provider TokenProvider) TransferOption {
+	return option.New(identTransferOptionTokenProvider{}, provider)
+}
+
+// WithSourceTokenProvider supplies a dynamic producer for the source token of a
+// third-party-copy transfer.  For a get operation it provides the primary
+// token instead.
+func WithSourceTokenProvider(provider TokenProvider) TransferOption {
+	return option.New(identTransferOptionSourceTokenProvider{}, provider)
+}
+
 // Create an option to provide a source token for a third-party-copy transfer
 func WithSourceToken(token string) TransferOption {
 	return option.New(identTransferOptionSourceToken{}, token)
@@ -897,6 +1211,36 @@ func WithDestinationTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionDestinationTokenLocation{}, location)
 }
 
+// WithLazyStat defers the metadata lookup a read-mode OpenFile would
+// otherwise perform before returning the handle. A reader that only asks for
+// byte ranges never needs the object's size: end-of-file arrives as the
+// server's own 416, and the operations that do need a size (Stat, Seek from
+// the end, ReadDir) fetch one on demand.
+//
+// This trades a fail-fast open for a round trip per open. A caller reading
+// many objects it already knows exist -- a filesystem walking its own block
+// store, say -- wants that trade; one that opens a path a user typed
+// probably does not. PelicanFS.Open ignores this option and always stats,
+// because io/fs requires opening a missing file to fail.
+func WithLazyStat(enable bool) TransferOption {
+	return option.New(identTransferOptionLazyStat{}, enable)
+}
+
+// WithStatUploadDestination tells DoStat that the path being stat'ed is the
+// destination of a pending upload rather than a source to be read.  This
+// changes two things: the Director is queried with PUT, so the stat runs
+// against origins that accept writes instead of against caches, and
+// destination-role token options (WithDestinationToken,
+// WithDestinationTokenLocation) apply instead of source-role ones.
+//
+// Callers pre-flighting an upload destination must set this.  A GET-flavored
+// stat would send the caller's write credential to every cache in the
+// Director's response, and caches cannot answer for a namespace that grants
+// writes without reads.
+func WithStatUploadDestination(enable bool) TransferOption {
+	return option.New(identTransferOptionStatUploadDestination{}, enable)
+}
+
 // Create an option to specify the checksums to request for a given
 // transfer
 func WithRequestChecksums(types []ChecksumType) TransferOption {
@@ -908,6 +1252,94 @@ func WithRequireChecksum() TransferOption {
 	return option.New(identTransferOptionRequireChecksum{}, true)
 }
 
+// WithObjectMetadata attaches a map of uploader-supplied fields to an
+// upload job. When non-empty, the resulting PUT carries an
+// X-Pelican-Object-Metadata header whose value is the RFC 9651
+// Structured Fields rendering of the map (see object_metadata.go).
+//
+// Values must be scalars: string, bool, int / int64, or float64. The
+// keys "path", "size", "etag", and "created_at" are reserved by the
+// origin and refused at validation time. The map is propagated to
+// every transferFile produced by a recursive upload.
+func WithObjectMetadata(fields map[string]any) TransferOption {
+	return option.New(identTransferOptionObjectMetadata{}, fields)
+}
+
+// WithObjectMetadataFile is the file-shaped sibling of WithObjectMetadata.
+// The supplied path must point to a JSON object whose top-level keys
+// are scalar (string / number / boolean) values. The file is read
+// and validated lazily inside NewTransferJob's option-apply pass,
+// so a malformed file or unreadable path surfaces as an error from
+// NewTransferJob (and therefore from DoPut) rather than at upload
+// time. The same reserved-key rules and value-type restrictions
+// described on WithObjectMetadata apply.
+//
+// If both WithObjectMetadata and WithObjectMetadataFile are supplied,
+// later options win — matching the option-application order used by
+// every other With…() helper here.
+func WithObjectMetadataFile(path string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataFile{}, path)
+}
+
+// WithObjectMetadataBlob attaches an opaque metadata blob to an
+// upload. When non-empty, the upload PUT switches from raw to
+// multipart/form-data with two parts: the metadata blob first, the
+// object body second. The origin's multipart middleware reads the
+// blob into memory (capped by Origin.Metadata.MaxMetadataBytes),
+// streams the object part through the existing POSC pipeline, and
+// forwards the blob byte-for-byte to the configured metadata
+// endpoint as the second part of a multipart/related body.
+//
+// `contentType` is the on-the-wire Content-Type a receiver sees;
+// pass an empty string to default to "application/octet-stream".
+// Reserved field names ("metadata", "object" by default) are
+// configured on the origin and are not visible to callers — the
+// client always sends the metadata part with the origin's
+// configured metadata-part name.
+func WithObjectMetadataBlob(body []byte, contentType string) TransferOption {
+	// Defensive copy so the caller can recycle the byte slice.
+	cpy := append([]byte(nil), body...)
+	return option.New(identTransferOptionObjectMetadataBlob{}, objectMetadataBlob{
+		body:        cpy,
+		contentType: contentType,
+	})
+}
+
+// WithObjectMetadataBlobFile is the file-shaped sibling of
+// WithObjectMetadataBlob. The blob is read lazily during
+// NewTransferJob's option-apply pass; an unreadable path surfaces
+// as an error from DoPut before any network I/O. The blob's
+// Content-Type is sniffed from the file extension (".xml" ⇒
+// application/xml, ".json" ⇒ application/json, …) and may be
+// overridden via WithObjectMetadataContentType.
+func WithObjectMetadataBlobFile(path string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataBlobFile{}, path)
+}
+
+// WithObjectMetadataContentType overrides the Content-Type used for
+// the metadata blob supplied via WithObjectMetadataBlobFile. No
+// effect on WithObjectMetadataBlob (which takes the content type as
+// a constructor argument). Last-supplied wins if both
+// WithObjectMetadataContentType and WithObjectMetadataBlob /
+// WithObjectMetadataBlobFile are used.
+func WithObjectMetadataContentType(contentType string) TransferOption {
+	return option.New(identTransferOptionObjectMetadataBlobType{}, contentType)
+}
+
+// WithSkipChecksums suppresses the digest request a download otherwise makes
+// once the bytes are in hand.
+//
+// That request is a HEAD carrying Want-Digest, and it is worth making for an
+// object: it is what verifies the transfer. It is not worth making for a
+// response the caller has already decided it will neither store nor verify --
+// a cache streaming a collection's directory index, say. Servers are free to
+// ignore Want-Digest, and an XRootD origin asked to digest a collection
+// answers nothing at all, so the request sits until the transport's response
+// header timeout expires. The caller waiting on the download waits with it.
+func WithSkipChecksums() TransferOption {
+	return option.New(identTransferOptionSkipChecksums{}, true)
+}
+
 // Create an option to specify the token acquisition logic
 //
 // Token acquisition (e.g., using OAuth2 to get a token when one
@@ -915,6 +1347,15 @@ func WithRequireChecksum() TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
+}
+
+// WithNonInteractive controls whether token acquisition may fall back to the
+// interactive OAuth2 device-code flow.  When enabled (true), acquisition uses
+// only cached, refreshable, or locally-generatable tokens and fails instead of
+// prompting.  This is intended for callers without a controlling terminal,
+// such as the client agent.
+func WithNonInteractive(enable bool) TransferOption {
+	return option.New(identTransferOptionNonInteractive{}, enable)
 }
 
 // WithSourceAcquireToken controls automatic token acquisition for the source
@@ -965,6 +1406,12 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 			if isCopy {
 				srcToken.EnableAcquire = val
 			}
+		case identTransferOptionNonInteractive{}:
+			val := opt.Value().(bool)
+			token.nonInteractive = val
+			if isCopy {
+				srcToken.nonInteractive = val
+			}
 		}
 	}
 
@@ -1007,6 +1454,20 @@ func applyTokenOptions(token, srcToken *tokenGenerator, upload bool, options []T
 			} else if upload {
 				token.EnableAcquire = opt.Value().(bool)
 			}
+		case identTransferOptionTokenProvider{}:
+			// The destination (or primary, for non-copy transfers) token is
+			// produced dynamically by an external provider.
+			if p, ok := opt.Value().(TokenProvider); ok && p != nil {
+				token.SetExternalProvider(p)
+			}
+		case identTransferOptionSourceTokenProvider{}:
+			if p, ok := opt.Value().(TokenProvider); ok && p != nil {
+				if isCopy {
+					srcToken.SetExternalProvider(p)
+				} else if !upload {
+					token.SetExternalProvider(p)
+				}
+			}
 		}
 	}
 }
@@ -1030,6 +1491,8 @@ func applyJobOptions(tj *TransferJob, options []TransferOption) {
 			tj.requestedChecksums = opt.Value().([]ChecksumType)
 		case identTransferOptionRequireChecksum{}:
 			tj.requireChecksum = opt.Value().(bool)
+		case identTransferOptionSkipChecksums{}:
+			tj.skipChecksums = opt.Value().(bool)
 		case identTransferOptionDryRun{}:
 			tj.dryRun = opt.Value().(bool)
 		case identTransferOptionMetadataChannel{}:
@@ -1132,19 +1595,21 @@ func WithMetadataChannel(ch chan<- TransferMetadata) TransferOption {
 	return option.New(identTransferOptionMetadataChannel{}, ch)
 }
 
-// WithCacheEmbeddedClientMode sets the client into "cache-embedded"
-// mode.  In this mode, the client queries the director's origin
-// endpoint (/api/v1.0/director/origin/…) instead of the default
-// shortcut endpoint.  This causes the director to redirect to origins
-// rather than to caches, which is the correct behaviour when the
-// transfer client is itself embedded inside a cache process.
+// WithCacheEmbeddedClientMode controls whether the client runs in
+// "cache-embedded" mode.  When enabled, the client queries the
+// director's origin endpoint (/api/v1.0/director/origin/…) instead of
+// the default shortcut endpoint.  This causes the director to redirect
+// to origins rather than to caches, which is the correct behaviour when
+// the transfer client is itself embedded inside a cache process.
 //
-// Without this option, a GET for /test/file.txt is routed through the
-// director's shortcut middleware, which redirects to a cache.  With
-// this option, the same GET is explicitly routed to the origin
-// endpoint so the cache can fetch from the origin.
-func WithCacheEmbeddedClientMode() TransferOption {
-	return option.New(identTransferOptionCacheEmbeddedClientMode{}, true)
+// With it enabled, a GET for /test/file.txt is explicitly routed to the
+// origin endpoint so the cache can fetch from the origin.  When disabled
+// (enabled=false), the same GET is routed through the director's shortcut
+// middleware, which redirects to a cache — the correct behaviour for a
+// site-local cache, which appears to the federation as a client and
+// fetches from other caches rather than directly from origins.
+func WithCacheEmbeddedClientMode(enabled bool) TransferOption {
+	return option.New(identTransferOptionCacheEmbeddedClientMode{}, enabled)
 }
 
 // WithRequestId sets a caller-supplied request ID that is propagated as
@@ -1177,6 +1642,36 @@ func getJobId(ctx context.Context) (string, bool) {
 		return id, true
 	}
 	return searchJobAd(attrJobId)
+}
+
+// Create an option to reject collections during download.
+//
+// This is off by default, and deliberately so. Pelican's own machinery moves
+// bytes through this same client -- the cache submits ordinary non-recursive
+// download jobs for the blocks it is filling, and the HTCondor plugin does the
+// same on behalf of a batch system -- and none of it has any use for the
+// check: it is not interpreting a command line, and it pays for the endpoint
+// probe the check needs. Turning this on by default would put that probe in
+// front of every cache block fetch. The commands that do interpret a command
+// line ask for it explicitly.
+//
+// When enabled, the client determines whether the remote path is a collection
+// before downloading it, and fails the transfer if it is. This is for callers
+// that mean to fetch a single object: without it, a collection is downloaded as
+// whatever bytes the origin happens to serve for it, which is at best a
+// listing and at worst an empty file.
+//
+// The check rides along with the endpoint probe every download already
+// performs, so it does not add a round trip. It is fail-closed: if no endpoint
+// will say whether the path is a collection, the transfer fails rather than
+// proceeding. An endpoint that will not describe the path it is about to serve
+// is not one to take a GET on faith from, and proceeding is how the caller ends
+// up with a directory listing saved as though it were their object. The cost of
+// that choice is that a download fails against an object server that answers
+// neither a byte range nor a PROPFIND; see objectCached for the order those are
+// tried in.
+func WithRejectCollections(reject bool) TransferOption {
+	return option.New(identTransferOptionRejectCollections{}, reject)
 }
 
 // Create a new client to work with an engine
@@ -1215,6 +1710,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.dryRun = option.Value().(bool)
 		case identTransferOptionCacheEmbeddedClientMode{}:
 			client.cacheMode = option.Value().(bool)
+		case identTransferOptionRejectCollections{}:
+			client.rejectCollections = option.Value().(bool)
 		case identTransferOptionForcePrestageAPI{}:
 			// This option is handled at the job level, not client level
 			// Skip it here; it will be processed in NewTransferJob/NewPrestageJob
@@ -1245,6 +1742,9 @@ func (te *TransferEngine) Shutdown() error {
 	te.cancel()
 
 	err := te.egrp.Wait()
+	if te.scheduler != nil {
+		te.scheduler.Stop()
+	}
 	if err != nil && err != context.Canceled {
 		return err
 	}
@@ -1262,7 +1762,12 @@ func (te *TransferEngine) Close() {
 
 // If we've detected a job is done, clean up the active job state map
 func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) {
-	if len((*activeJobs)[id]) == 1 {
+	// Retiring the client's last job -- or being handed a job that is no longer
+	// in the list at all -- has to leave no entry behind. Storing an
+	// empty-but-non-nil slice would make the client look permanently active:
+	// the close-time check tests that entry against nil, so the results channel
+	// would never close and Shutdown() would wait forever.
+	if len((*activeJobs)[id]) <= 1 {
 		log.Debugln("Job", job.ID(), "is done for client", id.String(), "which has no active jobs remaining")
 		// Delete the job from the list of active jobs
 		delete(*activeJobs, id)
@@ -1465,27 +1970,21 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a job has been processed into files (or failed)
 			job := recv.Interface().(*clientTransferJob)
 			job.job.lookupDone.Store(true)
-			// If no transfers were created or we have an error, the job is no
-			// longer active
-			if job.job.lookupErr != nil || job.job.totalXfer == 0 {
-				// Remove this job from the list of active jobs for the client.
-				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
-					return oldJob.uuid == job.job.uuid
-				})
-				if len(activeJobs[job.uuid]) == 0 {
-					func() {
-						te.clientLock.Lock()
-						defer te.clientLock.Unlock()
-						// If the client is closed and there are no remaining
-						// jobs for that client, we can close the results channel.
-						if te.workMap[job.uuid] == nil {
-							close(te.resultsMap[job.uuid])
-						}
-					}()
-				}
-			} else if job.job.activeXfer.Load() == 0 {
-				// Transfer jobs were created but they all completed before the recursive directory
-				// walk finished.
+			// A job is finished once its lookup is done AND every transfer the
+			// lookup handed to the workers has reported back.
+			//
+			// A lookup failure does not by itself end the job. A recursive walk
+			// can fail partway through, after it has already submitted files
+			// that are now in flight, and each of those still owes the client a
+			// result. Retiring the job here on the strength of lookupErr alone
+			// would close the client's results channel out from under them:
+			// the next result to arrive is then a send on a closed channel,
+			// which takes down the process.
+			//
+			// The same predicate is applied as each result arrives, so whichever
+			// happens last -- the lookup finishing or the final result landing --
+			// is what retires the job.
+			if job.job.activeXfer.Load() == 0 {
 				te.finishJob(&activeJobs, job.job, job.uuid)
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
@@ -1529,6 +2028,14 @@ func (te *TransferEngine) runJobHandler() error {
 		case job, ok := <-te.work:
 			if !ok {
 				log.Debugln("Job handler has been shutdown")
+				// If a scheduler is configured it is a producer on
+				// te.files; stop it first so the close below cannot
+				// race with a scheduler dispatch and panic on a
+				// send-on-closed channel. Stop() is idempotent —
+				// engine.Shutdown() may call it again, harmlessly.
+				if te.scheduler != nil {
+					te.scheduler.Stop()
+				}
 				close(te.files)
 				return nil
 			}
@@ -1545,6 +2052,19 @@ func (te *TransferEngine) runJobHandler() error {
 			}
 		}
 	}
+}
+
+// uploadTokenOperation returns the token operation used when acquiring a
+// credential for an upload. By default only object creation is needed
+// (storage.create); when Client.EnableOverwrites is set, an upload may
+// replace an existing object — an action that causes data loss and therefore
+// requires storage.modify, requested via the delete operation bit.
+func uploadTokenOperation() config.TokenOperation {
+	operation := config.TokenWrite
+	if param.Client_EnableOverwrites.GetBool() {
+		operation.Set(config.TokenDelete)
+	}
+	return operation
 }
 
 // Create a new transfer job for the client
@@ -1571,22 +2091,26 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 	operation := config.TokenRead
 	if upload {
-		operation = config.TokenWrite
+		operation = uploadTokenOperation()
 	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
-		localPath:      localPath,
-		remoteURL:      &copyUrl,
-		callback:       tc.callback,
-		skipAcquire:    tc.skipAcquire,
-		dryRun:         tc.dryRun,
-		syncLevel:      tc.syncLevel,
-		xferType:       transferTypeDownload,
-		uuid:           id,
-		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
-		inPlace:        false, // Default to using temporary files (rsync-style)
+		// A recursive job is asking for the collection, so it cannot also
+		// refuse one. This covers the ?recursive query form too, which has
+		// already been folded into `recursive` above.
+		rejectCollections: tc.rejectCollections && !recursive,
+		localPath:         localPath,
+		remoteURL:         &copyUrl,
+		callback:          tc.callback,
+		skipAcquire:       tc.skipAcquire,
+		dryRun:            tc.dryRun,
+		syncLevel:         tc.syncLevel,
+		xferType:          transferTypeDownload,
+		uuid:              id,
+		project:           project,
+		token:             newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		inPlace:           false, // Default to using temporary files (rsync-style)
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1623,6 +2147,42 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.cacheMode = option.Value().(bool)
 		case identTransferOptionRequestId{}:
 			tj.requestId = option.Value().(string)
+		case identTransferOptionRejectCollections{}:
+			// Narrowed the same way as the client-wide setting above: a
+			// recursive job is asking for the collection, so a per-job
+			// override cannot refuse one.
+			tj.rejectCollections = option.Value().(bool) && !recursive
+		case identTransferOptionObjectMetadata{}:
+			tj.objectMetadata = option.Value().(map[string]any)
+		case identTransferOptionObjectMetadataFile{}:
+			path := option.Value().(string)
+			fields, ferr := loadObjectMetadataFile(path)
+			if ferr != nil {
+				err = errors.Wrap(ferr, "WithObjectMetadataFile")
+				return
+			}
+			tj.objectMetadata = fields
+		case identTransferOptionObjectMetadataBlob{}:
+			blob := option.Value().(objectMetadataBlob)
+			tj.objectMetadataBlob = &blob
+		case identTransferOptionObjectMetadataBlobFile{}:
+			path := option.Value().(string)
+			blob, ferr := loadObjectMetadataBlobFile(path)
+			if ferr != nil {
+				err = errors.Wrap(ferr, "WithObjectMetadataBlobFile")
+				return
+			}
+			tj.objectMetadataBlob = blob
+		case identTransferOptionObjectMetadataBlobType{}:
+			ct := option.Value().(string)
+			// Apply to whatever blob is currently set. If no blob
+			// is set yet, allocate an empty placeholder so a later
+			// WithObjectMetadataBlobFile / WithObjectMetadataBlob
+			// can fill in the body. Apply order is last-wins.
+			if tj.objectMetadataBlob == nil {
+				tj.objectMetadataBlob = &objectMetadataBlob{}
+			}
+			tj.objectMetadataBlob.contentType = ct
 		}
 	}
 
@@ -1645,10 +2205,32 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// is in a-priori.
 	var dirResp server_structs.DirectorResponse
 	directorFailed := false
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		copyUrlRef := &copyUrl
-		cacheMode := tj.cacheMode
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+	// With no director in the federation, nothing has told us yet whether this
+	// namespace wants a credential -- the origin says so when it answers.  The
+	// transfer therefore keeps its token generator either way, so that a
+	// rejection carrying token hints has something to acquire onto.
+	directorless := copyUrl.FedInfo.DirectorEndpoint == "" && copyUrl.FedInfo.DiscoveryEndpoint != ""
+	copyUrlRef := &copyUrl
+	// Snapshot the routing mode for the director loaders below rather than
+	// reading it off tj inside them. Those loaders run on a goroutine that
+	// DirRespCache.LookupOrLoad deliberately lets outlive this call -- it
+	// detaches cancellation so a caller that goes away does not waste the
+	// query other waiters are relying on -- while tj is this function's
+	// *named return*. Every `return nil, err` below therefore assigns nil to
+	// the very variable such a goroutine would be dereferencing, and
+	// tj.cacheMode on a nil tj is a segfault at offset 0x318 rather than a
+	// read of `false`.
+	cacheMode := tj.cacheMode
+	dirFlavor := NewDirRespFlavor(httpMethod, cacheMode, copyUrl.RawQuery)
+	// A download against a directorless federation resolves locally and pays no
+	// round trip: it addresses the object to the host the user named and lets
+	// the origin's own rejection say what credential the namespace wants.  An
+	// upload has no such second chance -- there is no hint retry on a PUT -- so
+	// it still asks first.
+	if directorless && !upload {
+		dirResp, err = resolveForRequest(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, dirFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -1665,6 +2247,12 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				ObjectServers: []*url.URL{},
 			}
 			tj.dirResp = dirResp
+			// Assigned directly rather than through SetDirectorResponse: no
+			// director answered, so this placeholder carries no authorization
+			// metadata and must not be treated as though a director vouched
+			// for it.  The named object servers do not get to supply that
+			// metadata either -- they are not the federation's discovery host,
+			// so canApplyTokenHint refuses their hints.
 			tj.token.DirResp = &dirResp
 			err = nil // Clear the error since we're continuing with explicit caches
 		} else {
@@ -1679,16 +2267,16 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	} else {
 		tj.dirResp = dirResp
-		tj.token.DirResp = &dirResp
+		tj.token.SetDirectorResponse(&dirResp)
 	}
 
 	// For uploads or when director indicates token is required, get a token
 	// If director failed but we have explicit caches, try to get token anyway
-	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) {
+	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) || directorless {
 		contents, err := tj.token.Get()
 		if err != nil || contents == "" {
 			// If director failed, token errors are not fatal - we'll try without token
-			if directorFailed {
+			if directorFailed || directorless {
 				log.Debugln("Could not acquire token, will attempt transfer without token")
 			} else {
 				return nil, errors.Wrap(err, "failed to get token for transfer")
@@ -1696,9 +2284,25 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 
 		// The director response may change if it's given a token; let's repeat the query.
-		// Skip re-query if director already failed
-		if contents != "" && !directorFailed {
-			dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
+		// Skip re-query if the director already failed, or if there is no
+		// director to re-query.
+		if contents != "" && !directorFailed && !directorless {
+			// A director may answer differently once it sees a credential,
+			// so this asks again -- but the answer holds for every object
+			// in the namespace that this same credential reaches, and a
+			// token-protected namespace would otherwise spend a director
+			// round trip on every single transfer.  Cache it under a
+			// credential-scoped flavor: another token (or none) keys
+			// elsewhere and never receives this answer.
+			authFlavor := dirFlavor.WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, authFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, contents, cacheMode)
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
+			}
 			if err != nil {
 				var sce *StatusCodeError
 				if errors.As(err, &sce) {
@@ -1709,11 +2313,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				return nil, err
 			}
 			tj.dirResp = dirResp
-			tj.token.DirResp = &dirResp
-			// Update the cache with the token-authenticated response.
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyUrl.Path, dirResp)
-			}
+			tj.token.SetDirectorResponse(&dirResp)
 		}
 	} else {
 		tj.token = nil
@@ -1789,7 +2389,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	var dirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -1802,7 +2402,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		return
 	}
 	tj.dirResp = dirResp
-	tj.token.DirResp = &dirResp
+	tj.token.SetDirectorResponse(&dirResp)
 
 	log.Debugln("Dir resp:", dirResp.XPelNsHdr)
 	if dirResp.XPelNsHdr.RequireToken {
@@ -1820,9 +2420,9 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 				return nil, err
 			}
 			tj.dirResp = dirResp
-			tj.token.DirResp = &dirResp
+			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
 	} else {
@@ -1872,15 +2472,19 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
-		remoteURL:      &copyDestUrl,
-		callback:       tc.callback,
-		skipAcquire:    tc.skipAcquire,
-		dryRun:         tc.dryRun,
-		syncLevel:      tc.syncLevel,
-		xferType:       transferTypeCopy,
-		uuid:           id,
-		project:        project,
-		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
+		// Narrowed the same way NewTransferJob narrows it: a recursive copy is
+		// asking for the collection. For a copy the guard is about the source,
+		// which is what gets read.
+		rejectCollections: tc.rejectCollections && !recursive,
+		remoteURL:         &copyDestUrl,
+		callback:          tc.callback,
+		skipAcquire:       tc.skipAcquire,
+		dryRun:            tc.dryRun,
+		syncLevel:         tc.syncLevel,
+		xferType:          transferTypeCopy,
+		uuid:              id,
+		project:           project,
+		token:             NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
 	}
 	tj.fedToken = tc.fedToken
 	tj.cacheMode = tc.cacheMode
@@ -1907,9 +2511,15 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
 	var dirResp server_structs.DirectorResponse
 	destVerb := "COPY"
+	// The TPC destination flavor, pinned to COPY even when the query below
+	// falls back to PUT: the fallback is part of answering "where may this
+	// third-party copy write?", and only this resolution asks that question.
+	// Pinning it keeps lookup and store on one key, and keeps the entry from
+	// ever answering a plain PUT -- which would be a different question.
+	destFlavor := NewDirRespFlavor(destVerb, false, copyDestUrl.RawQuery)
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyDestUrlRef := &copyDestUrl
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
 			if qErr != nil {
 				// Fall back to PUT if COPY is not supported by the director
@@ -1932,7 +2542,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 	tj.destDirResp = dirResp
-	tj.token.DirResp = &dirResp
+	tj.token.SetDirectorResponse(&dirResp)
 
 	// Acquire token for the destination if needed
 	if dirResp.XPelNsHdr.RequireToken {
@@ -1949,9 +2559,9 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 				return nil, err
 			}
 			tj.destDirResp = dirResp
-			tj.token.DirResp = &dirResp
+			tj.token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor.WithCredential(contents), dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
 			}
 		}
 	}
@@ -1960,7 +2570,8 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	var srcDirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copySrcUrlRef := &copySrcUrl
-		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		srcFlavor := NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery)
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, srcFlavor, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -1973,7 +2584,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 	tj.srcDirResp = srcDirResp
-	tj.srcToken.DirResp = &srcDirResp
+	tj.srcToken.SetDirectorResponse(&srcDirResp)
 
 	if srcDirResp.XPelNsHdr.RequireToken {
 		contents, tErr := tj.srcToken.Get()
@@ -1989,9 +2600,9 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 				return nil, err
 			}
 			tj.srcDirResp = srcDirResp
-			tj.srcToken.DirResp = &srcDirResp
+			tj.srcToken.SetDirectorResponse(&srcDirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery).WithCredential(contents), srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
 			}
 		}
 	} else {
@@ -2063,8 +2674,13 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	defer cancel()
 
 	var dirResp server_structs.DirectorResponse
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+	// The probe below is itself the question a metadata query would have asked,
+	// so a directorless federation is not asked twice.
+	directorless := pelicanURL.FedInfo.DirectorEndpoint == "" && pelicanURL.FedInfo.DiscoveryEndpoint != ""
+	if directorless {
+		dirResp, err = resolveForRequest(ctx, pelicanURL, http.MethodGet, "", false)
+	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
 			resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, "", false)
 			return resp, resp.XPelNsHdr.Namespace, qErr
 		})
@@ -2076,7 +2692,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 		return
 	}
-	token.DirResp = &dirResp
+	token.SetDirectorResponse(&dirResp)
 
 	if dirResp.XPelNsHdr.RequireToken {
 		var contents string
@@ -2094,12 +2710,14 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 				return
 			}
-			token.DirResp = &dirResp
+			token.SetDirectorResponse(&dirResp)
 			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
+				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
 			}
 		}
-	} else {
+	} else if !directorless {
+		// Nothing has asked yet, so "no token required" is not a fact; keep the
+		// generator so a refusal carrying hints can acquire onto it.
 		token = nil
 	}
 
@@ -2116,7 +2734,8 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	cacheUrl := *sortedServers[0]
 	cacheUrl.Path = remoteUrl.Path
 
-	return objectCached(ctx, &cacheUrl, token)
+	age, size, _, _, err = objectCached(ctx, &cacheUrl, token, false)
+	return
 }
 
 // Close the transfer client object
@@ -2288,37 +2907,39 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 	return details
 }
 
-// Generate the unique list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
-// in the slice of transferAttemptDetails structs.
+// Generate the list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
+// in the slice of transferAttemptDetails structs. The incoming sortedObjectServers list is expected to be deduplicated by
+// generateSortedObjServers, except that intentional duplicates among the user's preferred caches are preserved (a user may list
+// the same cache more than once to force repeated attempts); those duplicates are honored here rather than collapsed.
 // nPreferred indicates how many entries at the start of sortedObjectServers came from the user's PreferredCaches
 // configuration; those entries will have Preferred=true in the returned details.
-func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
-	oServersListed := 0
-	oServerList := make(map[string]bool)
+//
+// directorServersToTry caps only the director-discovered servers. Every user-supplied preferred cache is always tried:
+// the user asked for those endpoints explicitly, so we honor the full list in order rather than truncating it.
+func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, directorServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
 	oServers := make([]string, 0)
 
+	directorListed := 0
 	for idx, oServer := range sortedObjectServers {
-		if oServersListed == oServersToTry {
-			break
-		}
-		// Handle deduplication of any object servers
-		if oServerList[oServer] {
-			continue
-		} else {
-			oServersListed++
-			oServers = append(oServers, oServer)
-			oServerList[oServer] = true
-			td := transferDetailsOptions{
-				NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
-				PackOption: packOption,
+		isPreferred := idx < nPreferred
+		if !isPreferred {
+			// The attempt cap applies only to director-discovered servers; preferred caches
+			// (which all sort ahead of director servers) are exempt and always included.
+			if directorListed == directorServersToTry {
+				break
 			}
-			isPreferred := idx < nPreferred
-			newTransfers := generateTransferDetails(oServer, td)
-			for i := range newTransfers {
-				newTransfers[i].Preferred = isPreferred
-			}
-			transfers = append(transfers, newTransfers...)
+			directorListed++
 		}
+		oServers = append(oServers, oServer)
+		td := transferDetailsOptions{
+			NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
+			PackOption: packOption,
+		}
+		newTransfers := generateTransferDetails(oServer, td)
+		for i := range newTransfers {
+			newTransfers[i].Preferred = isPreferred
+		}
+		transfers = append(transfers, newTransfers...)
 	}
 	log.Debugln("Trying the object servers:", oServers)
 	return transfers
@@ -2370,13 +2991,9 @@ func buildDownloadTransfers(job *clientTransferJob, packOption string) ([]transf
 		sortedServerStrings = append(sortedServerStrings, serverUrl.String())
 	}
 
-	// Make sure we only try as many object servers as we have
-	objectServersToTry := ObjectServersToTry
-	if objectServersToTry > len(sortedServers) {
-		objectServersToTry = len(sortedServers)
-	}
-	log.Debugf("Trying the first %d object servers", objectServersToTry)
-	transfers := getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
+	// The cap applies only to director-discovered servers; all preferred caches are always tried.
+	log.Debugf("Trying all %d preferred object servers plus up to %d director-provided servers", nPreferred, ObjectServersToTry)
+	transfers := getObjectServersToTry(sortedServerStrings, job.job, ObjectServersToTry, packOption, nPreferred)
 
 	if len(transfers) > 0 {
 		log.Traceln("First transfer in list:", transfers[0].Url)
@@ -2440,7 +3057,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			// federation namespace, https://example.com/prefix/ in this case.
 			remotePath := transfers[0].Url.Path
 			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
-			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
+			return te.walkDirUpload(job, transfers, job.job.localPath)
 		} else if job.job.xferType == transferTypeDownload {
 			// For recursive downloads, stat the remote path.
 			var statInfo FileInfo
@@ -2451,15 +3068,15 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				return errors.Wrap(err, "failed to parse remote URL for recursive download")
 			}
 			if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
-				statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+				statInfo, statErr = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
 			} else {
-				statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
+				statInfo, statErr = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			}
 			if statErr != nil {
 				return errors.Wrap(statErr, "failed to stat remote path for recursive download")
 			}
 			if statInfo.IsCollection {
-				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+				return te.walkDirDownload(job, transfers, remoteUrl)
 			}
 		} else if job.job.xferType == transferTypeCopy {
 			// For copy, stat the SOURCE to see if it's a collection.
@@ -2471,16 +3088,16 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			}
 			var statInfo FileInfo
 			if job.job.srcDirResp.XPelNsHdr.CollectionsUrl != nil {
-				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
+				statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
 			} else {
-				statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
+				statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
 			}
 			if err != nil {
 				return errors.Wrap(err, "failed to stat source path for recursive copy")
 			}
 
 			if statInfo.IsCollection {
-				return te.walkDirCopy(job, transfers, te.files, srcUrl)
+				return te.walkDirCopy(job, transfers, srcUrl)
 			}
 		}
 		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
@@ -2493,24 +3110,52 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			if err != nil {
 				return
 			}
-			statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			statInfo, err = statHttp(job.job.ctx, pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
 			if err != nil {
 				err = errors.Wrap(err, "failed to stat object to prestage")
 				return
 			}
 			if statInfo.IsCollection {
-				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+				return te.walkDirDownload(job, transfers, remoteUrl)
 			}
+		}
+	} else if job.job.rejectCollections && job.job.xferType == transferTypeCopy {
+		// A third-party copy reads the source the same way a download does, so
+		// it deserves the same refusal -- but it never reaches downloadObject,
+		// where the refusal for ordinary downloads lives, because the bytes
+		// move between two remote servers. Stat the source directly. The
+		// recursive branch above already stats it for a different reason, so
+		// this costs a non-recursive copy the one request that branch would
+		// have spent anyway.
+		var srcPelicanUrl *pelican_url.PelicanURL
+		srcPelicanUrl, err = pelican_url.Parse(srcUrl.String(), nil, nil)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse source URL for copy")
+		}
+		var statInfo FileInfo
+		if job.job.srcDirResp.XPelNsHdr.CollectionsUrl != nil {
+			statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil, true)
+		} else {
+			statInfo, err = statHttp(job.job.ctx, srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil)
+		}
+		if err != nil {
+			return error_codes.NewResolutionError(
+				errors.Wrapf(err, "could not confirm whether source %s is a collection; refusing to copy", srcUrl.Path),
+			)
+		}
+		if statInfo.IsCollection {
+			return error_codes.NewParameterError(
+				errors.Errorf("source path %s is a collection; use a recursive transfer (--recursive on the command line) to copy its contents", srcUrl.Path),
+			)
 		}
 	}
 
 	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
-	job.job.totalXfer += 1
+	// Counted before submission: a scheduler rejection produces a synthetic
+	// result right away, and runMux decrements on every result, so counting
+	// afterwards would race that result's delivery.
 	job.job.activeXfer.Add(1)
-	select {
-	case <-te.ctx.Done():
-		log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
-	case te.files <- &clientTransferFile{
+	submitErr := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
 		jobId: job.job.uuid,
 		file: &transferFile{
@@ -2523,6 +3168,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			srcToken:           job.job.srcToken,
 			requestedChecksums: job.job.requestedChecksums,
 			requireChecksum:    job.job.requireChecksum,
+			skipChecksums:      job.job.skipChecksums,
 			packOption:         packOption,
 			localPath:          job.job.localPath,
 			xferType:           job.job.xferType,
@@ -2534,8 +3180,23 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			reader:             job.job.reader,
 			byteRange:          job.job.byteRange,
 			metadataChan:       job.job.metadataChan,
+			objectMetadata:     job.job.objectMetadata,
+			objectMetadataBlob: job.job.objectMetadataBlob,
 		},
-	}:
+	})
+	if submitErr != nil {
+		if errors.Is(submitErr, ErrTooManyRequests) {
+			// submitFile already pushed a synthetic failure result for this
+			// file, so the counts above are matched and the job completes
+			// normally with a 429 result.
+			log.Debugln("Scheduler rejected transfer for", remoteUrl.String(), ":", submitErr)
+			return
+		}
+		// Nothing was queued and no result is coming, so this file must not
+		// stay on the job's books.
+		job.job.uncountSubmission()
+		err = submitErr
+		return
 	}
 
 	return
@@ -2561,63 +3222,81 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 					return nil
 				}
 			}
-			if file.file.ctx.Err() == context.Canceled {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case results <- &clientTransferResults{
-					id: file.uuid,
-					results: TransferResults{
-						JobId: file.jobId,
-						Error: file.file.ctx.Err(),
-					},
-				}:
-				}
-				break
-			}
-			if file.file.err != nil {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-
-				case results <- &clientTransferResults{
-					id: file.uuid,
-					results: TransferResults{
-						JobId: file.jobId,
-						Error: file.file.err,
-					},
-				}:
-				}
-				break
-			}
-			var err error
-			var transferResults TransferResults
-			switch file.file.xferType {
-			case transferTypeUpload:
-				transferResults, err = uploadObject(file.file)
-			case transferTypeCopy:
-				transferResults, err = copyHTTP(file.file)
-			default:
-				transferResults, err = downloadObject(file.file)
-			}
-			transferResults.JobId = file.jobId
-			transferResults.Scheme = file.file.remoteURL.Scheme
-			if err != nil {
-				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
-				transferResults = newTransferResults(file.file.job)
-				transferResults.Scheme = file.file.remoteURL.Scheme
-				transferResults.Error = err
-			}
-			if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
-				transferResults.DirectorDecision = file.file.job.dirResp.RedirectInfo
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case results <- &clientTransferResults{id: file.uuid, results: transferResults}:
+			// Wrap the per-file body in a closure so the scheduler's
+			// schedDone hook (if any) fires exactly once per file via
+			// defer, not once for the worker's entire lifetime.
+			if err := runTransferWorkerFile(ctx, file, results); err != nil {
+				return err
 			}
 		}
 	}
+}
+
+// runTransferWorkerFile processes one file dequeued by a transfer
+// worker. It always fires file.file.schedDone (if set) on exit.
+// Returns a non-nil error only if the worker itself should exit (e.g.
+// ctx cancellation while we were trying to write results).
+func runTransferWorkerFile(ctx context.Context, file *clientTransferFile, results chan<- *clientTransferResults) error {
+	if file.file != nil && file.file.schedDone != nil {
+		schedDone := file.file.schedDone
+		file.file.schedDone = nil
+		defer schedDone()
+	}
+	if file.file.ctx.Err() == context.Canceled {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- &clientTransferResults{
+			id:      file.uuid,
+			results: workerFailureResult(file, file.file.ctx.Err()),
+		}:
+		}
+		return nil
+	}
+	if file.file.err != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- &clientTransferResults{
+			id:      file.uuid,
+			results: workerFailureResult(file, file.file.err),
+		}:
+		}
+		return nil
+	}
+	var err error
+	var transferResults TransferResults
+	switch file.file.xferType {
+	case transferTypeUpload, transferTypeCopy:
+		// Both of these report their own first-byte signal to the scheduler
+		// (see the schedFirstByte docs on transferFile), so they stay in the
+		// "starving" bucket — and thus under the smaller starving cap — until
+		// the destination proves it is responding.
+		if file.file.xferType == transferTypeUpload {
+			transferResults, err = uploadObject(file.file)
+		} else {
+			transferResults, err = copyHTTP(file.file)
+		}
+	default:
+		transferResults, err = downloadObject(file.file)
+	}
+	transferResults.JobId = file.jobId
+	transferResults.Scheme = file.file.remoteURL.Scheme
+	if err != nil {
+		log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
+		transferResults = newTransferResults(file.file.job)
+		transferResults.Scheme = file.file.remoteURL.Scheme
+		transferResults.Error = err
+	}
+	if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
+		transferResults.DirectorDecision = file.file.job.dirResp.RedirectInfo
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case results <- &clientTransferResults{id: file.uuid, results: transferResults}:
+	}
+	return nil
 }
 
 // attemptSorter pairs a responsiveness score with a transfer attempt for sorting.
@@ -2647,13 +3326,32 @@ func compareAttempts(left attemptSorter, right attemptSorter) int {
 	return 0
 }
 
-// If there are multiple potential attempts, try to see if we can quickly eliminate some of them
+// collectionCheckTimeout bounds the probe when its answer decides whether a
+// download is refused. It is deliberately far longer than the budget for
+// merely ordering endpoints: an answer that arrives late is still useful,
+// whereas no answer at all fails the download outright. It remains a bound, so
+// an unresponsive federation degrades to a refusal rather than hanging.
+const collectionCheckTimeout = 10 * time.Second
+
+// sortAttempts sees whether some of multiple potential attempts can be quickly
+// eliminated.
 //
-// Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
-// a second behind those that do respond.
-func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token *tokenGenerator) (size int64, results []transferAttemptDetails) {
+// Attempts a HEAD against all the endpoints simultaneously.  Put any that don't
+// respond within the probe budget behind those that do respond.
+//
+// wantCollectionInfo additionally reports whether the path names a collection.
+// Asking for it changes three things: the per-endpoint probe learns the answer
+// at no extra cost (see objectCached), a lone endpoint is still probed, where
+// otherwise there would be nothing to sort and the function would return
+// immediately, and the probe budget lengthens because the answer now decides
+// whether the transfer happens at all.
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token *tokenGenerator, wantCollectionInfo bool) (size int64, collection collectionAnswer, results []transferAttemptDetails) {
 	size = -1
-	if len(attempts) < 2 {
+	if len(attempts) < 2 && !wantCollectionInfo {
+		results = attempts
+		return
+	}
+	if len(attempts) == 0 {
 		results = attempts
 		return
 	}
@@ -2661,7 +3359,13 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		idx  int
 		size uint64
 		age  int
-		err  error
+		// answeredCollection distinguishes "this endpoint told us" from "this
+		// endpoint did not": an unanswered question is not the same as a
+		// negative answer, and the caller refuses the download rather than
+		// guess.
+		answeredCollection bool
+		isCollection       bool
+		err                error
 	}
 	headChan := make(chan checkResults)
 
@@ -2674,24 +3378,59 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 
 	defer close(headChan)
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	// Ranking endpoints and asking whether the path is a collection want
+	// different budgets. A second is plenty to decide which cache to prefer,
+	// and giving up on that is harmless -- the download proceeds against an
+	// unsorted list. The collection answer is acted on, so abandoning it is
+	// not harmless: the download the caller asked to have guarded fails for
+	// want of an answer. A healthy endpoint answers a Depth-0 PROPFIND well
+	// inside the longer budget, and a first success still cancels the rest, so
+	// this only costs time when every endpoint is slow -- which is when the
+	// answer is worth waiting for.
+	probeTimeout := time.Second
+	if wantCollectionInfo {
+		probeTimeout = collectionCheckTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	for idx, transferEndpoint := range attempts {
 		tUrl := *transferEndpoint.Url
 		tUrl.Path = path
+		unixSocket := transferEndpoint.UnixSocket
 
 		go func(idx int, tUrl *url.URL) {
-			// If the scheme is unix://, it is a local cache and therefore, we should always try this cache first and skip the HEAD request (since it will fail)
+			// A unix:// endpoint is the local cache. Ranking it is pointless
+			// -- it is always tried first -- and probing it with a ranged GET
+			// would make it start filling the object we may be about to
+			// refuse, so ordinarily it is skipped outright.
 			if tUrl.Scheme == "unix" {
-				headChan <- checkResults{idx, 0, -1, nil}
+				if !wantCollectionInfo {
+					headChan <- checkResults{idx, 0, -1, false, false, nil}
+					return
+				}
+				// Skipping it is not an option once the answer is load
+				// bearing: a client whose only object server is the local
+				// cache would have nothing to refuse or allow on. The local
+				// cache serves PROPFIND over the same socket, so ask it, and
+				// ask it alone -- a PROPFIND starts no download.
+				size, isCollection, propErr := propfindObject(ctx, tUrl, unixSocket, token)
+				if propErr != nil {
+					log.Debugln("PROPFIND of local cache socket", unixSocket, "went unanswered:", propErr)
+					headChan <- checkResults{idx, 0, -1, false, false, nil}
+					return
+				}
+				headChan <- checkResults{idx, uint64(max(size, 0)), -1, true, isCollection, nil}
 				return
 			}
 
-			if age, size, err := objectCached(ctx, tUrl, token); err != nil {
-				headChan <- checkResults{idx, 0, -1, err}
+			if age, size, answered, isCollection, err := objectCached(ctx, tUrl, token, wantCollectionInfo); err != nil {
+				// The collection answer survives a failed probe: an endpoint
+				// can describe the path accurately and still be unable to
+				// serve it, and the answer is about the path.
+				headChan <- checkResults{idx, 0, -1, answered, isCollection, err}
 				return
 			} else {
-				headChan <- checkResults{idx, uint64(size), age, err}
+				headChan <- checkResults{idx, uint64(size), age, answered, isCollection, err}
 			}
 
 		}(idx, &tUrl)
@@ -2702,6 +3441,22 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	finished := make(map[int]int)
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
+		// Recorded before the health check below, because the two are
+		// independent: any endpoint that answered the question answers it for
+		// the object as a whole -- they are all describing the same path --
+		// even if that same endpoint turned out not to be usable.
+		if result.answeredCollection {
+			collection.answered = true
+			if result.isCollection {
+				collection.isCollection = true
+			}
+		}
+		// A shed probe is the one failure that says something about why the
+		// question went unanswered, so it is kept rather than flattened in
+		// with the rest. The first one is enough; they all mean "ask later".
+		if result.err != nil && collection.throttleErr == nil && errors.Is(result.err, ErrTooManyRequests) {
+			collection.throttleErr = result.err
+		}
 		if result.err != nil {
 			// If an attempt to contact the remote cache failed, log a message (unless we purposely
 			// canceled the attempt).
@@ -2717,7 +3472,12 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				attempts[result.idx].CacheAge = time.Duration(result.age) * time.Second
 				attempts[result.idx].CacheQuery = true
 			}
-			if result.idx == 0 && result.err == nil {
+			// Cancelling the other probes discards whatever they were about to
+			// say, which is fine when all they were deciding was sort order,
+			// but not while the collection question is still open: the caller
+			// refuses the download if nobody answers it, so silencing the
+			// endpoints that might have is how a good download gets refused.
+			if result.idx == 0 && result.err == nil && (!wantCollectionInfo || collection.answered) {
 				cancel()
 				// If the first responds successfully, we want to return immediately instead of giving
 				// the other caches time to respond - the result is "good enough".
@@ -2770,6 +3530,48 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	}
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
+
+	var size int64 = -1
+	attempts := transfer.attempts
+	// A job that refuses collections has to find out before anything is
+	// created locally, or the caller is left holding the empty file this is
+	// meant to prevent. The endpoint probe that would otherwise happen further
+	// down is simply brought forward and asked one additional question; it is
+	// the same requests either way. Skipped for a dry run, which creates
+	// nothing and is expected not to reach out to the object servers at all.
+	sorted := false
+	if transfer.job != nil && transfer.job.ctx != nil && transfer.job.rejectCollections && !transfer.job.dryRun {
+		var collection collectionAnswer
+		size, collection, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, probeToken(transfer.token, transfer.fedToken), true)
+		sorted = true
+		if collection.isCollection {
+			err = error_codes.NewParameterError(
+				errors.Errorf("remote path %s is a collection; use a recursive transfer (--recursive on the command line) to download its contents", transfer.remoteURL.Path),
+			)
+			return
+		}
+		if !collection.answered {
+			// A shed probe is why the question went unanswered here, and it is
+			// already classified as retryable with the cache's own Retry-After.
+			// Reporting the refusal below instead would turn "the cache asked
+			// you to wait" into a non-retryable resolution failure and send the
+			// caller away for good.
+			if collection.throttleErr != nil {
+				err = collection.throttleErr
+				return
+			}
+			// Downloading anyway is how the caller ends up with a directory
+			// listing saved as though it were their object. An endpoint that
+			// cannot answer a PROPFIND for the path it is about to serve is
+			// not one to take a GET on faith from, so refuse and say why.
+			err = error_codes.NewResolutionError(
+				errors.Errorf(
+					"no object server could confirm whether %s is a collection; refusing to download",
+					transfer.remoteURL.Path),
+			)
+			return
+		}
+	}
 
 	// Create hash instances for all known checksum types so we can verify against
 	// whatever algorithm the server actually supports. This handles cases like a multiuser
@@ -2986,9 +3788,23 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		fileWriter = io.Discard
 	}
 
-	// Close the custom writer at the end if provided
+	// Close the custom writer at the end if provided. A pipe-backed writer
+	// (WithWriter — the io/fs read path) must learn about a failed transfer
+	// at Read time: a plain Close hands the reader a clean EOF, and a
+	// failed download becomes indistinguishable from an empty object (the
+	// error only surfaces through the results channel, which the reader may
+	// race). CloseWithError propagates the failure into the reader's Read;
+	// with a nil error it behaves exactly like Close.
 	if fileCloser != nil {
 		defer func() {
+			xferErr := err
+			if xferErr == nil && transferResults.Error != nil {
+				xferErr = transferResults.Error
+			}
+			if cwe, ok := fileCloser.(interface{ CloseWithError(error) error }); ok {
+				_ = cwe.CloseWithError(xferErr)
+				return
+			}
 			if closeErr := fileCloser.Close(); closeErr != nil && err == nil {
 				err = closeErr
 			}
@@ -2997,10 +3813,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
-	var size int64 = -1
-	attempts := transfer.attempts
-	if transfer.job != nil && transfer.job.ctx != nil {
-		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	// Sort (re-order) the transfer attempts by querying each endpoint, which
+	// also discovers the object size. A job that refuses collections has
+	// already done this above.
+	if !sorted && transfer.job != nil && transfer.job.ctx != nil {
+		size, _, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token, false)
 	}
 
 	// Create a new transferResults if we don't already have one
@@ -3066,8 +3883,37 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			byteRangeEnd = transfer.byteRange.End
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
 		)
+
+		// If the endpoint returned a 403 with director-style token hints, learn
+		// what token is needed, acquire it, and retry this same endpoint once
+		// with the token.  A 403 is returned before any body is written, so
+		// retrying is safe.  canApplyTokenHint decides whether the hint is one
+		// this transfer may act on at all.
+		var hintErr *tokenHintError
+		if errors.As(err, &hintErr) && transfer.token.canApplyTokenHint(transferEndpoint.Url) {
+			// Acquire on a private generator, coalesced with any sibling file
+			// handed the same hint: the job's generator is shared with every
+			// other file in this transfer.
+			//
+			// Retrying with the credential just rejected would only earn the
+			// same 403, so a hint that yields nothing new ends the attempt.
+			if newTok, tErr := transfer.token.tokenForHint(&hintErr.dirResp); tErr == nil && newTok != "" && newTok != tokenContents {
+				log.WithFields(fields).Debugln("Retrying with token after 403 token hint from", transferEndpoint.Url.Host)
+				// Publish the credential to the job's generator so the sibling
+				// files and the checksum request that follows this download do
+				// not each repeat the acquisition.
+				transfer.token.cacheToken(newTok)
+				tokenContents = newTok
+				// The rejected attempt wrote no body, so the scheduler has not
+				// been told this endpoint is responsive; the retry is the
+				// attempt that will prove it.  schedFirstByte is idempotent.
+				attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err = downloadHTTP(
+					ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
+				)
+			}
+		}
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
 
@@ -3148,6 +3994,16 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"url": transfer.remoteURL.String(),
 				"job": transfer.job.ID(),
 			}).Debugln("Skipping checksum verification for byte-range download")
+		} else if transfer.skipChecksums {
+			// The caller has said it will not verify this response and will
+			// not keep it, so the digest has no consumer. Asking anyway costs
+			// a round trip the caller waits on -- and against a server that
+			// declines to answer Want-Digest for this path, it costs the
+			// transport's full response header timeout.
+			log.WithFields(log.Fields{
+				"url": transfer.remoteURL.String(),
+				"job": transfer.job.ID(),
+			}).Debugln("Skipping checksum fetch at the caller's request")
 		} else {
 			// Fetch checksum of the downloaded file, compare it to the calculated.
 			// Use downloadAttemptCount (the number of download-loop iterations)
@@ -3155,6 +4011,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// entries from a failed prestage API call, or len(transferUrls),
 			// which is pre-allocated and may contain nil entries for unattempted URLs.
 			gotChecksum := false
+			checksumHost := ""
 			// Iterate through the various sources to fetch the checksums, starting with the successful one.
 			for idx := 0; idx < downloadAttemptCount; idx++ {
 				url := transferUrls[downloadAttemptCount-idx-1]
@@ -3170,6 +4027,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if checksums, err := fetchChecksum(ctx, KnownChecksumTypes(), url, tokenContents, transfer.project); err == nil {
 					transferResults.ServerChecksums = checksums
 					gotChecksum = true
+					checksumHost = url.Host
+					rememberServiceDigests(url.Host, checksums)
 				}
 			}
 			if !gotChecksum && transfer.requireChecksum {
@@ -3184,8 +4043,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 			// Populate ClientChecksums with the originally-requested types for backward compatibility
 			requestedTypes := transfer.requestedChecksums
+			var quietFallbacks []ChecksumType
 			if len(requestedTypes) == 0 {
 				requestedTypes = []ChecksumType{AlgDefault}
+				// The caller asked for nothing in particular, so a digest
+				// this service is known to provide is not a surprise worth
+				// warning about.
+				quietFallbacks = defaultChecksumTypesForService(checksumHost)
 			}
 			transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 			for _, t := range requestedTypes {
@@ -3204,7 +4068,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"job": transfer.job.ID(),
 			}
 			if _, verifyErr := verifyTransferChecksums(
-				allComputed, requestedTypes, transferResults.ServerChecksums,
+				allComputed, requestedTypes, quietFallbacks, transferResults.ServerChecksums,
 				transfer.requireChecksum, fields,
 			); verifyErr != nil {
 				transferResults.Error = verifyErr
@@ -3326,6 +4190,13 @@ func parseDigestHeader(header http.Header, fields log.Fields) (result []Checksum
 	}
 	for _, val := range header.Values("Digest") {
 		for _, entry := range strings.Split(val, ",") {
+			// Per RFC 7230 §7, list elements may be separated by a comma
+			// followed by optional whitespace (e.g. "md5=...., crc32c=....").
+			// Trim it so the algorithm name doesn't carry a leading space.
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
 			info := strings.SplitN(entry, "=", 2)
 			if len(info) != 2 {
 				continue
@@ -3432,6 +4303,55 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 	return nil
 }
 
+// acquireFromTokenHint reads the token hints an origin attached to a response
+// that refused the request and, if tok may act on them, obtains the credential
+// they name and caches it so a retry carries it.  Reports whether it did.
+//
+// This is how an operation other than a download learns what it needs: a stat,
+// a listing, and a cache-age probe all ask their own question first and read
+// the answer off the refusal, rather than paying for a metadata query that the
+// request was about to make redundant.
+func acquireFromTokenHint(tok *tokenGenerator, resp *http.Response) bool {
+	if tok == nil || resp == nil || resp.Request == nil {
+		return false
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	if resp.Header.Get(server_structs.XPelNs{}.GetName()) == "" {
+		return false
+	}
+	if !tok.canApplyTokenHint(resp.Request.URL) {
+		return false
+	}
+	hint, err := ParseDirectorInfo(resp)
+	if err != nil || !hint.XPelNsHdr.RequireToken {
+		return false
+	}
+	contents, err := tok.tokenForHint(&hint)
+	if err != nil || contents == "" {
+		return false
+	}
+	// Publish it so the rest of the operation -- the other stat hosts, the rest
+	// of a recursive listing -- does not each repeat the acquisition.
+	tok.cacheToken(contents)
+	return true
+}
+
+// tokenHintError is returned by downloadHTTP when an object server responds
+// with 403 and director-style X-Pelican-* headers indicating that a token is
+// required.  The embedded dirResp carries the parsed token-hint information so
+// the caller can acquire the right token and retry the same endpoint.  It
+// unwraps to the underlying authorization error so existing error handling
+// continues to work if no retry is attempted (or the retry fails).
+type tokenHintError struct {
+	dirResp server_structs.DirectorResponse
+	err     error
+}
+
+func (e *tokenHintError) Error() string { return e.err.Error() }
+func (e *tokenHintError) Unwrap() error { return e.err }
+
 // Download a single object from a single HTTP server with no retries.
 //
 // The following information is required:
@@ -3450,7 +4370,7 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - metadataChan: optional channel to receive early transfer metadata (ETag, size, etc.) before data transfer.
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata, onFirstByte func()) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
@@ -3608,13 +4528,46 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
-		bodyBytes, readErr := io.ReadAll(resp.Body)
+		// Cap the error-body read: the peer is not necessarily trustworthy,
+		// and the body is copied into error strings that outlive the
+		// request. Anything useful fits well within the cap.
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		if readErr != nil {
 			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
 		}
 		bodyStr := string(bodyBytes)
 		log.WithFields(fields).Debugln("Error response body:", bodyStr)
 		serverVersion = resp.Header.Get("Server")
+		// A server that answers namespace questions about itself -- a standalone
+		// origin -- returns the same X-Pelican-* token-hint headers a director
+		// would, on the response that turns the request down.  Both codes carry
+		// them and both matter: 401 is what a client that sent nothing gets,
+		// which is the ordinary first request when no director was asked what
+		// this namespace wants, and 403 is what a presented-but-insufficient
+		// credential gets.  Surface either as a tokenHintError so the caller can
+		// obtain the right credential and retry this same endpoint, reusing the
+		// director-response parser.  Whether the hint may be acted on is decided
+		// by canApplyTokenHint, not here.
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			if resp.Header.Get(server_structs.XPelNs{}.GetName()) != "" {
+				if parsed, perr := ParseDirectorInfo(resp); perr == nil && parsed.XPelNsHdr.RequireToken {
+					// Keep the underlying error the shape each status already
+					// had, so nothing downstream sees a 401 become a 403.
+					var wrapped error
+					if resp.StatusCode == http.StatusForbidden {
+						pde := &PermissionDeniedError{}
+						if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
+							pde.message = "Permission denied: " + trimmed
+						}
+						wrapped = error_codes.NewAuthorizationError(pde)
+					} else {
+						sce := StatusCodeError(resp.StatusCode)
+						wrapped = wrapStatusCodeError(&sce)
+					}
+					return 0, 0, -1, serverVersion, "", &tokenHintError{dirResp: parsed, err: wrapped}
+				}
+			}
+		}
 		if resp.StatusCode == http.StatusForbidden {
 			// Preserve the origin's response body so operators can see why
 			// the request was rejected (e.g. scope mismatch, token issue).
@@ -3624,7 +4577,19 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
 				pde.message = "Permission denied: " + trimmed
 			}
-			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(pde)
+			authErr := error_codes.NewAuthorizationError(pde)
+			return 0, 0, -1, serverVersion, "", authErr
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// The serving cache's fair scheduler shed this request. Parse the
+			// structured reason from the body and the Retry-After hint so the
+			// error is classified as the specific retryable throttle type and
+			// the advertised backoff is carried to the caller / external
+			// retrier.
+			throttleErr := newThrottleErrorFromResponse(resp, bodyStr, transfer.Url.Host)
+			log.WithFields(fields).Warnf("Server %s throttled the request (reason=%s, retry-after=%s)",
+				transfer.Url.Host, throttleErr.Reason, throttleErr.RetryAfter)
+			return 0, 0, -1, serverVersion, "", throttleErr
 		}
 		sce := StatusCodeError(resp.StatusCode)
 		// Wrap StatusCodeError with appropriate PelicanError based on status code
@@ -3811,7 +4776,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// In a deferred function, we wait on the done channel to get the signal that the download is done
 	done := make(chan error, 1)
 	pw := &progressWriter{
-		writer: writer,
+		writer:      writer,
+		onFirstByte: onFirstByte,
 	}
 
 	go func() {
@@ -4048,12 +5014,29 @@ func (cs *ConstantSizer) BytesComplete() int64 {
 	return cs.read.Load()
 }
 
+// uploadNonStarvingSentBytes is the volume of request body the transport must
+// have consumed before an upload destination is presumed to be draining the
+// connection. Kernel socket buffers plus the transport's own buffering can
+// absorb a few megabytes from a peer that has stopped reading, so a small
+// number of sent bytes proves nothing; once this many bytes have gone out,
+// the far end must actually be consuming them.
+const uploadNonStarvingSentBytes = 4 << 20
+
 // progressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type progressReader struct {
 	reader io.ReadCloser
 	sizer  Sizer
 	closed chan bool
+
+	// sentBytes counts what the HTTP transport has consumed from the
+	// reader (a close proxy for bytes sent on the wire — the transport's
+	// write buffering is a few KiB). When it crosses sentThreshold,
+	// onSentThreshold fires once. Both are touched only from Read, which
+	// the transport calls from a single goroutine, so no locking.
+	sentBytes       int64
+	sentThreshold   int64
+	onSentThreshold func()
 }
 
 // Read implements the common read function for io.Reader
@@ -4061,6 +5044,13 @@ func (pr *progressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
 	if cs, ok := pr.sizer.(*ConstantSizer); ok {
 		cs.read.Add(int64(n))
+	}
+	if pr.onSentThreshold != nil {
+		pr.sentBytes += int64(n)
+		if pr.sentBytes >= pr.sentThreshold {
+			pr.onSentThreshold()
+			pr.onSentThreshold = nil
+		}
 	}
 	return n, err
 }
@@ -4088,6 +5078,9 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	}
 	if pw.firstByteTime.IsZero() && len(p) > 0 {
 		pw.firstByteTime = time.Now()
+		if pw.onFirstByte != nil {
+			pw.onFirstByte()
+		}
 	}
 	now := time.Now()
 	startupTime := now.Sub(pw.firstByteTime)
@@ -4148,7 +5141,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Skip this check if Client.EnableOverwrites is enabled
 	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel == SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
-		_, statErr := statHttp(remoteUrl, dirResp, token, nil)
+		_, statErr := statHttp(transfer.ctx, remoteUrl, dirResp, token, nil)
 		if statErr == nil {
 			// Object exists, abort upload
 			transferResult.Error = error_codes.NewSpecification_FileAlreadyExistsError(
@@ -4246,6 +5239,12 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 				}
 				return transferResult, transferResult.Error
 			}
+			// Nothing else closes this handle: the request body below is a
+			// TeeReader (not a ReadCloser), so the HTTP transport wraps it
+			// in a NopCloser and never closes the underlying file. Without
+			// this, every filesystem upload leaks a file descriptor — and
+			// on Windows leaves the source file locked.
+			defer file.Close()
 			ioreader = file
 			sizer = &ConstantSizer{size: fileInfo.Size()}
 			fileSizeHint = fileInfo.Size()
@@ -4286,25 +5285,75 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
-	responseChan := make(chan *http.Response)
-	reader := &progressReader{ioreader, sizer, closed}
+	// Buffered: the loop below abandons the upload on several paths (stopped
+	// transfer, error on the side channel) without ever receiving here, and an
+	// unbuffered channel would wedge runPut's goroutine — and with it the
+	// transport still reading the source file — for the life of the process.
+	responseChan := make(chan *http.Response, 1)
+	reader := &progressReader{reader: ioreader, sizer: sizer, closed: closed}
 	// This will write to the checksum hashes as we read from the file
 	tee := io.TeeReader(reader, hashesWriter)
 	putContext, cancel := context.WithCancel(transfer.ctx)
 	transferStartTime := time.Now()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
+	// Tell the scheduler (if any) the destination is alive on the earliest of
+	// three signals: a negotiated 100-continue, the first byte of the final
+	// response, or enough request body consumed that the far end must be
+	// draining it (without 100-continue, a server that only answers after the
+	// whole body would otherwise leave a long upload "starving" for its
+	// entire duration). The hook is CAS-guarded upstream, so the three paths
+	// firing in any combination is harmless. The trace is scoped to the PUT
+	// itself, not to the checksum fetch that reuses putContext. Note that we
+	// do not send an Expect: 100-continue header, so Got100Continue only
+	// fires when the transport negotiates it on its own.
+	requestContext := putContext
+	if transfer.schedFirstByte != nil {
+		schedFirstByte := transfer.schedFirstByte
+		reader.sentThreshold = uploadNonStarvingSentBytes
+		reader.onSentThreshold = schedFirstByte
+		requestContext = httptrace.WithClientTrace(putContext, &httptrace.ClientTrace{
+			Got100Continue:       func() { schedFirstByte() },
+			GotFirstResponseByte: func() { schedFirstByte() },
+		})
+	}
 	var request *http.Request
+
+	// Decide whether the wire body is a raw stream (the default,
+	// historical shape) or multipart/form-data (set when the caller
+	// supplied opaque-blob metadata via WithObjectMetadataBlob /
+	// WithObjectMetadataBlobFile). The multipart branch wraps the
+	// existing `tee` (which already drives progress + checksum
+	// accounting) into the "object" part; the "metadata" part holds
+	// the blob bytes.
+	wireBody := io.Reader(tee)
+	wireContentType := "" // empty = leave existing handling alone (no Content-Type override)
+	if transfer.objectMetadataBlob != nil && len(transfer.objectMetadataBlob.body) > 0 && nonZeroSize {
+		mpBody, mpCT := buildMultipartUploadBody(tee, transfer.objectMetadataBlob)
+		wireBody = mpBody
+		wireContentType = mpCT
+	}
 	// For files that are 0 length, we need to send a PUT request with an nil body
 	if nonZeroSize {
-		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), tee)
+		request, err = http.NewRequestWithContext(requestContext, http.MethodPut, dest.String(), wireBody)
 	} else {
-		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), http.NoBody)
+		request, err = http.NewRequestWithContext(requestContext, http.MethodPut, dest.String(), http.NoBody)
 	}
 	if err != nil {
 		log.Errorln("Error creating request:", err)
 		transferResult.Error = err
 		return transferResult, err
+	}
+	if wireContentType != "" {
+		request.Header.Set("Content-Type", wireContentType)
+		// Multipart bodies have unknown total length on the wire
+		// (the metadata blob size + file size + per-part framing
+		// overhead). Force chunked transfer encoding so Go's HTTP
+		// client doesn't try to compute a Content-Length we can't
+		// supply exactly. The server's POSC pipeline already
+		// streams the object part from the multipart reader.
+		request.ContentLength = -1
+		request.TransferEncoding = []string{"chunked"}
 	}
 
 	// Hint upload size
@@ -4327,12 +5376,58 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	if result, found := getJobId(putContext); found {
 		request.Header.Set("X-Pelican-JobId", result)
 	}
+	// If the caller supplied uploader metadata, render it into the
+	// origin-side X-Pelican-Object-Metadata Structured Fields
+	// header. We've already validated values during option parsing
+	// (see WithObjectMetadata + WithObjectMetadataFile), so an
+	// error here means a programmer bug, not a user-input problem.
+	if len(transfer.objectMetadata) > 0 {
+		hdrVal, hdrErr := buildObjectMetadataHeader(transfer.objectMetadata)
+		if hdrErr != nil {
+			log.Errorln("Failed to render X-Pelican-Object-Metadata header:", hdrErr)
+			transferResult.Error = hdrErr
+			return transferResult, hdrErr
+		}
+		if hdrVal != "" {
+			request.Header.Set(ObjectMetadataHeaderName, hdrVal)
+		}
+	}
 	var lastKnownWritten int64
 	uploadStart := time.Now()
 
 	useProxy := transfer.attempts[0].Proxy
 
-	go runPut(request, responseChan, errorChan, useProxy)
+	putDone := make(chan struct{})
+	go func() {
+		defer close(putDone)
+		runPut(request, responseChan, errorChan, useProxy)
+	}()
+	// The transport reads the source file until the request finishes, so cancel
+	// the PUT and join its goroutine before the deferred file.Close() above can
+	// run. Registered after `defer cancel()`, so it runs before it -- cancelling
+	// here is what makes the join prompt.
+	//
+	// This narrows rather than eliminates the overlap: client.Do returns once
+	// response headers arrive, so on an early server response the transport's
+	// write loop can still be reading the body when runPut returns, and
+	// cancellation is asynchronous. os.File tolerates that (the read fails with
+	// ErrFileClosing rather than hitting a reused descriptor) and the transfer
+	// has already latched its error, so the remaining window is benign.
+	//
+	// Also drain the response the abandoned PUT may have deposited: nothing
+	// else is going to receive it, and its body holds a connection open until
+	// the cancel tears it down.
+	defer func() {
+		cancel()
+		<-putDone
+		select {
+		case resp := <-responseChan:
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+		default:
+		}
+	}()
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -4404,6 +5499,15 @@ Loop:
 			// older versions of XRootD incorrectly use 200.
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
+				if response.StatusCode == http.StatusTooManyRequests {
+					// The destination throttled the upload; classify it with
+					// the structured reason + Retry-After hint so the error is
+					// the same retryable throttle type a download would get.
+					// runPut re-buffered the (bounded) error body for us.
+					bodyBytes, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBodySize))
+					lastError = newThrottleErrorFromResponse(response, string(bodyBytes), request.URL.Host)
+					break Loop
+				}
 				sce := StatusCodeError(response.StatusCode)
 				// Wrap StatusCodeError with appropriate PelicanError based on status code
 				wrappedErr := wrapStatusCodeError(&sce)
@@ -4492,6 +5596,7 @@ Loop:
 			}
 		} else {
 			transferResult.ServerChecksums = result
+			rememberServiceDigests(dest.Host, result)
 		}
 
 		// Build map of all computed checksums for verification
@@ -4502,8 +5607,13 @@ Loop:
 
 		// Populate ClientChecksums with the originally-requested types for backward compatibility
 		requestedTypes := transfer.requestedChecksums
+		var quietFallbacks []ChecksumType
 		if len(requestedTypes) == 0 {
 			requestedTypes = []ChecksumType{AlgDefault}
+			// The caller asked for nothing in particular, so a digest this
+			// service is known to provide is not a surprise worth warning
+			// about.
+			quietFallbacks = defaultChecksumTypesForService(dest.Host)
 		}
 		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 		for _, t := range requestedTypes {
@@ -4521,7 +5631,7 @@ Loop:
 			"job": transfer.job.ID(),
 		}
 		if _, verifyErr := verifyTransferChecksums(
-			allComputed, requestedTypes, transferResult.ServerChecksums,
+			allComputed, requestedTypes, quietFallbacks, transferResult.ServerChecksums,
 			transfer.requireChecksum, fields,
 		); verifyErr != nil {
 			transferResult.Error = verifyErr
@@ -4560,7 +5670,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 		close(errorChan)
 		return
 	}
-	dump, _ = httputil.DumpResponse(response, true)
+	// Headers only: dumping the body would io.ReadAll it into memory, which
+	// defeats the bounded read below and hands a hostile destination an
+	// unbounded allocation per upload worker. Error bodies are logged (and
+	// bounded) a few lines down.
+	dump, _ = httputil.DumpResponse(response, false)
 	log.Debugf("Dumping response: %s", dump)
 	// Note: XRootD used to always return 200 (OK) on upload, even when it was supposed to turn
 	// HTTP 201 (Created).  Check for both here; in the future we may want to remove the 200 check
@@ -4568,13 +5682,17 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
-		textResponse, err := io.ReadAll(response.Body)
+		textResponse, err := io.ReadAll(io.LimitReader(response.Body, maxErrorBodySize))
 		if err != nil {
 			log.Errorln("Error reading response from server:", err)
 			responseChan <- response
 			return
 		}
 		log.Debugln(string(textResponse))
+		// Re-buffer the (bounded) body so the consumer on responseChan can
+		// still inspect it — e.g. to extract the structured reason from a
+		// 429 throttle response.
+		response.Body = io.NopCloser(strings.NewReader(string(textResponse)))
 	}
 	responseChan <- response
 
@@ -4592,7 +5710,7 @@ func skipPrestage(object string, job *TransferJob) bool {
 	}
 
 	cache.Path = object
-	if age, _, err := objectCached(job.ctx, &cache, job.token); err == nil {
+	if age, _, _, _, err := objectCached(job.ctx, &cache, job.token, false); err == nil {
 		return age >= 0
 	} else {
 		log.Warningln("Failed to check cache status of object", cache.String(), "so assuming it needs prestaging:", err)
@@ -4643,7 +5761,7 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 		return false
 	}
 
-	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token, nil)
+	remoteInfo, err := statHttp(job.ctx, remoteUrl, job.dirResp, job.token, nil)
 	if err != nil {
 		return false
 	}
@@ -4658,7 +5776,7 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 }
 
 // Walk a remote collection in a WebDAV server, emitting the files discovered
-func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
+func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, url *url.URL) error {
 	// Create the client to walk the filesystem
 	collUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
 	if collUrl == nil {
@@ -4667,14 +5785,14 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	log.Debugln("Trying collections URL: ", collUrl.String())
 
 	client := createWebDavClient(collUrl, job.job.token, job.job.project)
-	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
+	return te.walkDirDownloadHelper(job, transfers, url.Path, client)
 }
 
 // Helper function for the `walkDirDownload`.
 //
 // Recursively walks through the remote server collection, emitting transfer files
 // for the engine to process.
-func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
+func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
@@ -4737,11 +5855,11 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 						transferAttempts[i].Url = fileURL
 						log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 					}
+					// Counted before submission: a scheduler rejection produces a
+					// synthetic result right away, and runMux decrements on every
+					// result, so counting afterwards would race its delivery.
 					job.job.activeXfer.Add(1)
-					select {
-					case <-job.job.ctx.Done():
-						return job.job.ctx.Err()
-					case files <- &clientTransferFile{
+					if err := te.submitFile(job.job.ctx, &clientTransferFile{
 						uuid:  job.uuid,
 						jobId: job.job.uuid,
 						file: &transferFile{
@@ -4752,6 +5870,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							remoteURL:          &url.URL{Path: remotePath},
 							requestedChecksums: job.job.requestedChecksums,
 							requireChecksum:    job.job.requireChecksum,
+							skipChecksums:      job.job.skipChecksums,
 							packOption:         transfers[0].PackOption,
 							localPath:          job.job.localPath,
 							xferType:           job.job.xferType,
@@ -4759,8 +5878,15 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							fedToken:           job.job.fedToken,
 							attempts:           transferAttempts,
 						},
-					}:
-						job.job.totalXfer += 1
+					}); err != nil {
+						if !errors.Is(err, ErrTooManyRequests) {
+							// Nothing was queued and no result is coming, so this
+							// file must not stay on the job's books.
+							job.job.uncountSubmission()
+							return err
+						}
+						// 429 already reported to te.results by submitFile;
+						// continue enumerating the collection.
 					}
 				}
 			}
@@ -4773,7 +5899,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	for _, info := range infos {
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
-			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
+			err := te.walkDirDownloadHelper(job, transfers, newPath, client)
 			if err != nil {
 				return err
 			}
@@ -4818,11 +5944,11 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				transferAttempts[i].Url = fileURL
 				log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
 			}
+			// Counted before submission: a scheduler rejection produces a
+			// synthetic result right away, and runMux decrements on every
+			// result, so counting afterwards would race its delivery.
 			job.job.activeXfer.Add(1)
-			select {
-			case <-job.job.ctx.Done():
-				return job.job.ctx.Err()
-			case files <- &clientTransferFile{
+			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
 				jobId: job.job.uuid,
 				file: &transferFile{
@@ -4833,6 +5959,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					remoteURL:          &url.URL{Path: newPath},
 					requestedChecksums: job.job.requestedChecksums,
 					requireChecksum:    job.job.requireChecksum,
+					skipChecksums:      job.job.skipChecksums,
 					packOption:         transfers[0].PackOption,
 					localPath:          targetPath,
 					xferType:           job.job.xferType,
@@ -4840,8 +5967,13 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					fedToken:           job.job.fedToken,
 					attempts:           transferAttempts,
 				},
-			}:
-				job.job.totalXfer += 1
+			}); err != nil {
+				if !errors.Is(err, ErrTooManyRequests) {
+					// Nothing was queued and no result is coming, so this
+					// file must not stay on the job's books.
+					job.job.uncountSubmission()
+					return err
+				}
 			}
 		}
 	}
@@ -4849,7 +5981,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 }
 
 // Helper function for walkDirUpload; not to be called directly
-func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, localPath string) error {
+func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, localPath string) error {
 	if job.job.ctx.Err() != nil {
 		return job.job.ctx.Err()
 	}
@@ -4871,11 +6003,11 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(localPath, job.job.localPath)); skipUpload(job.job, localPath, job.job.remoteURL) {
 				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 			} else if info.Mode().Type().IsRegular() {
+				// Counted before submission: a scheduler rejection produces a
+				// synthetic result right away, and runMux decrements on every
+				// result, so counting afterwards would race its delivery.
 				job.job.activeXfer.Add(1)
-				select {
-				case <-job.job.ctx.Done():
-					return job.job.ctx.Err()
-				case files <- &clientTransferFile{
+				if err := te.submitFile(job.job.ctx, &clientTransferFile{
 					uuid:  job.uuid,
 					jobId: job.job.uuid,
 					file: &transferFile{
@@ -4890,8 +6022,13 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 						token:      job.job.token,
 						attempts:   transfers,
 					},
-				}:
-					job.job.totalXfer += 1
+				}); err != nil {
+					if !errors.Is(err, ErrTooManyRequests) {
+						// Nothing was queued and no result is coming, so this
+						// file must not stay on the job's books.
+						job.job.uncountSubmission()
+						return err
+					}
 				}
 			}
 			return nil
@@ -4910,18 +6047,18 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 
 		if info.IsDir() {
 			// Recursively call this function to create any nested dir's as well as list their files
-			err := te.walkDirUpload(job, transfers, files, newPath)
+			err := te.walkDirUpload(job, transfers, newPath)
 			if err != nil {
 				return err
 			}
 		} else if skipUpload(job.job, newPath, remoteUrl) {
 			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
+			// Counted before submission: a scheduler rejection produces a
+			// synthetic result right away, and runMux decrements on every
+			// result, so counting afterwards would race its delivery.
 			job.job.activeXfer.Add(1)
-			select {
-			case <-job.job.ctx.Done():
-				return job.job.ctx.Err()
-			case files <- &clientTransferFile{
+			if err := te.submitFile(job.job.ctx, &clientTransferFile{
 				uuid:  job.uuid,
 				jobId: job.job.uuid,
 				file: &transferFile{
@@ -4936,26 +6073,35 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					token:      job.job.token,
 					attempts:   transfers,
 				},
-			}:
-				job.job.totalXfer += 1
+			}); err != nil {
+				if !errors.Is(err, ErrTooManyRequests) {
+					// Nothing was queued and no result is coming, so this
+					// file must not stay on the job's books.
+					job.job.uncountSubmission()
+					return err
+				}
 			}
 		}
 	}
 	return err
 }
 
-// This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) (fileInfos []FileInfo, err error) {
-	// Get our collection listing host
+// listHttpEmit walks the collection at remoteUrl (recursively if requested)
+// and hands each entry to emit in the order encountered. The emit signature
+// mirrors filepath.WalkDirFunc: for a successful entry emit is called with
+// (info, nil); for an error attributable to a specific path in the tree
+// (e.g. an unreadable subdirectory) emit is called with a FileInfo carrying
+// just Name and IsCollection alongside the error. Returning a non-nil error
+// from emit unwinds the walk with that error; returning nil after an error
+// tells the walker to skip that subtree and continue with the next sibling,
+// matching filepath.WalkDir's continuation semantics. This is the streaming
+// primitive used by DoList, DoListStream, and DoListSeq.
+func listHttpEmit(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int, emit func(FileInfo, error) error) error {
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
-		return nil, errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
+		return errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
-	if collectionsUrl == nil {
-		err = errors.New("namespace does not provide a collections URL for listing")
-		return
-	}
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
 	project, found := searchJobAd(attrProjectName)
@@ -4965,147 +6111,198 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
-	// If recursive listing is requested, use the helper function
 	if recursive {
-		return listHttpRecursive(client, remotePath, depth)
+		return listHttpRecursiveEmit(client, remotePath, 0, depth, emit)
 	}
+	return listHttpFlatEmit(client, remotePath, emit)
+}
 
-	// Non-recursive listing (original behavior)
+// classifyReadDirErr converts the ReadDir-error zoo (404 / 500-that-means-file
+// / 405-no-listings / everything else) into a single error suitable for
+// bubbling through emit. Returns (nil, nil) when the error meant "this is a
+// plain object, not a directory" and info is populated with the stat result --
+// the caller should emit that info instead of the error.
+func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.FileInfo, error) {
+	if gowebdav.IsErrNotFound(err) {
+		return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
+	}
+	// Two different errors can mean "this path is an object, not a
+	// collection". An XRootD origin answers ReadDir on a plain object with a
+	// 500. An origin that answers the PROPFIND correctly -- 207 with a single
+	// non-collection response for the object itself -- instead trips
+	// gowebdav's own check that "self" must be a collection, which surfaces as
+	// a synthesized 405. Neither is a refusal to list, and a Stat settles
+	// which case we are in before we report one.
+	isServerErr := gowebdav.IsErrCode(err, http.StatusInternalServerError)
+	isMethodNotAllowed := gowebdav.IsErrCode(err, http.StatusMethodNotAllowed)
+	if isServerErr || isMethodNotAllowed {
+		var info fs.FileInfo
+		statErr := retryWebDavOperation("Stat", func() error {
+			var err error
+			info, err = cli.Stat(remotePath)
+			return err
+		})
+		if statErr != nil {
+			if isServerErr {
+				return nil, errors.Wrap(statErr, "failed to stat remote path")
+			}
+			// For a 405 a failed stat only means we cannot show the path is an
+			// object; fall through and report that listings are unsupported.
+		} else if !info.IsDir() {
+			return info, nil
+		}
+	}
+	if isMethodNotAllowed {
+		// We replace the error from gowebdav with our own because gowebdav
+		// returns "ReadDir /prefix/different-path/: 405" which is not very
+		// user friendly.
+		listingErr := &dirListingNotSupportedError{
+			Err: errors.New("405: object listings are not supported by the discovered origin"),
+		}
+		return nil, error_codes.NewSpecificationError(listingErr)
+	}
+	return nil, errors.Wrap(err, "failed to read remote collection")
+}
+
+// listHttpFlatEmit performs the non-recursive listing at remotePath. It reads
+// the immediate children (or, if remotePath is a plain object, emits a single
+// entry for it) via emit.
+func listHttpFlatEmit(client *gowebdav.Client, remotePath string, emit func(FileInfo, error) error) error {
 	var infos []fs.FileInfo
-	err = retryWebDavOperation("ReadDir", func() error {
+	err := retryWebDavOperation("ReadDir", func() error {
 		var err error
 		infos, err = client.ReadDir(remotePath)
 		return err
 	})
 	if err != nil {
-		// Check if we got a 404:
-		if gowebdav.IsErrNotFound(err) {
-			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
-		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			var info fs.FileInfo
-			err := retryWebDavOperation("Stat", func() error {
-				var err error
-				info, err = client.Stat(remotePath)
-				return err
-			})
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to stat remote path")
-			}
-			// If the path leads to a file and not a collection, just add the filename
-			if !info.IsDir() {
-				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
-				file := FileInfo{
-					Name:         remotePath,
-					Size:         info.Size(),
-					ModTime:      info.ModTime(),
-					IsCollection: false,
-				}
-				fileInfos = append(fileInfos, file)
-				return fileInfos, nil
-			}
-		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
-			listingErr := &dirListingNotSupportedError{
-				Err: errors.New("405: object listings are not supported by the discovered origin"),
-			}
-			return nil, error_codes.NewSpecificationError(listingErr)
+		statInfo, classified := classifyReadDirErr(client, remotePath, err)
+		if classified == nil && statInfo != nil {
+			// The path is a plain object, not a collection; emit it once.
+			return emit(FileInfo{
+				Name:         remotePath,
+				Size:         statInfo.Size(),
+				ModTime:      statInfo.ModTime(),
+				IsCollection: false,
+			}, nil)
 		}
-		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote collection")
+		// Bubble the (classified) error through emit so the caller can decide
+		// whether to skip or abort. For the flat listing the "subtree" is the
+		// entire request, so SkipSubtree and a plain nil return both mean
+		// "done here"; only SkipAll and real errors matter as distinct outputs.
+		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			return nil
+		}
+		return emitErr
 	}
 
 	for _, info := range infos {
 		jPath, _ := url.JoinPath(remotePath, info.Name())
-		// Create a FileInfo for the file and append it to the slice
-		file := FileInfo{
+		emitErr := emit(FileInfo{
 			Name:         jPath,
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
+		}, nil)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			// SkipSubtree is a no-op in the flat listing (no descent to
+			// skip); treat it the same as nil so the loop keeps going.
+			continue
 		}
-		fileInfos = append(fileInfos, file)
+		return emitErr
 	}
-	return fileInfos, nil
+	return nil
 }
 
-// listHttpRecursive recursively lists all objects in a collection with optional depth limiting
-func listHttpRecursive(client *gowebdav.Client, remotePath string, maxDepth int) (fileInfos []FileInfo, err error) {
-	return listHttpRecursiveHelper(client, remotePath, 0, maxDepth)
-}
-
-// listHttpRecursiveHelper is the recursive helper function that tracks the current depth
-func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, currentDepth int, maxDepth int) (fileInfos []FileInfo, err error) {
-	// Check if we've reached the maximum depth (if maxDepth is >= 0)
+// listHttpRecursiveEmit is the recursive analogue of listHttpFlatEmit. It
+// descends into each collection depth-first, honoring maxDepth (-1 = no
+// limit) and emitting every visited entry through emit in walk order.
+// Per-subdirectory ReadDir failures are routed through emit as
+// (FileInfo{Name: path, IsCollection: true}, err); returning nil from emit
+// tells the walker to skip the failed subtree and keep going with the next
+// sibling, matching filepath.WalkDir's semantics.
+func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDepth, maxDepth int, emit func(FileInfo, error) error) error {
 	if maxDepth >= 0 && currentDepth > maxDepth {
-		return fileInfos, nil
+		return nil
 	}
 
 	var infos []fs.FileInfo
-	err = retryWebDavOperation("ReadDir", func() error {
+	err := retryWebDavOperation("ReadDir", func() error {
 		var err error
 		infos, err = client.ReadDir(remotePath)
 		return err
 	})
 	if err != nil {
-		// Check if we got a 404:
-		if gowebdav.IsErrNotFound(err) {
-			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
-		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			var info fs.FileInfo
-			err := retryWebDavOperation("Stat", func() error {
-				var err error
-				info, err = client.Stat(remotePath)
-				return err
-			})
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to stat remote path")
-			}
-			// If the path leads to a file and not a collection, just add the filename
-			if !info.IsDir() {
-				file := FileInfo{
-					Name:         remotePath,
-					Size:         info.Size(),
-					ModTime:      info.ModTime(),
-					IsCollection: false,
-				}
-				fileInfos = append(fileInfos, file)
-				return fileInfos, nil
-			}
-		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			listingErr := &dirListingNotSupportedError{
-				Err: errors.New("405: object listings are not supported by the discovered origin"),
-			}
-			return nil, error_codes.NewSpecificationError(listingErr)
+		statInfo, classified := classifyReadDirErr(client, remotePath, err)
+		if classified == nil && statInfo != nil {
+			return emit(FileInfo{
+				Name:         remotePath,
+				Size:         statInfo.Size(),
+				ModTime:      statInfo.ModTime(),
+				IsCollection: false,
+			}, nil)
 		}
-		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote collection")
+		// Give the caller a chance to skip. Returning nil or SkipSubtree
+		// unwinds this level cleanly (there's no subtree left to walk); any
+		// other error, including SkipAll, propagates so the outer walk can
+		// react.
+		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
+			return nil
+		}
+		return emitErr
 	}
 
 	for _, info := range infos {
 		jPath, _ := url.JoinPath(remotePath, info.Name())
-		// Create a FileInfo for the file and append it to the slice
-		file := FileInfo{
+		fi := FileInfo{
 			Name:         jPath,
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
 		}
-		fileInfos = append(fileInfos, file)
-
-		// If this is a collection and we haven't reached max depth, recurse into it
-		// We check currentDepth + 1 < maxDepth because currentDepth represents how deep we are,
-		// and we want to recurse only if going one level deeper wouldn't exceed maxDepth
-		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
-			subFileInfos, err := listHttpRecursiveHelper(client, jPath, currentDepth+1, maxDepth)
-			if err != nil {
-				return nil, err
+		emitErr := emit(fi, nil)
+		if emitErr != nil {
+			if errors.Is(emitErr, SkipSubtree) {
+				// Caller doesn't want us to descend into this entry (only
+				// meaningful for collections). Continue with the next sibling.
+				continue
 			}
-			fileInfos = append(fileInfos, subFileInfos...)
+			// SkipAll, real errors, or errStopIter all propagate upward.
+			return emitErr
+		}
+		// Recurse into subcollections. maxDepth < 0 means unlimited; otherwise
+		// only descend when the next level would still be within budget.
+		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
+			if err := listHttpRecursiveEmit(client, jPath, currentDepth+1, maxDepth, emit); err != nil {
+				// SkipAll aborts every enclosing loop up to Walk; SkipSubtree
+				// at the child level doesn't reach us (it's consumed there),
+				// so anything non-nil here is a real error or SkipAll.
+				return err
+			}
 		}
 	}
+	return nil
+}
 
+// listHttp walks the specified collection and buffers every visited FileInfo
+// into a slice. It is a thin wrapper over listHttpEmit for callers that want
+// the full result set in memory rather than a stream. Any error surfaced by
+// the walker (including a per-subtree ReadDir failure) aborts the walk and is
+// returned; partial results are discarded, matching the pre-streaming
+// behavior of this function.
+func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) ([]FileInfo, error) {
+	var fileInfos []FileInfo
+	err := listHttpEmit(remoteUrl, dirResp, token, recursive, depth, func(info FileInfo, emitErr error) error {
+		if emitErr != nil {
+			return emitErr
+		}
+		fileInfos = append(fileInfos, info)
+		return nil
+	})
+	if err != nil && !errors.Is(err, SkipAll) {
+		return nil, err
+	}
 	return fileInfos, nil
 }
 
@@ -5282,11 +6479,27 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // there is no collectionsUrl the origin has indicated it does not support
 // PROPFIND, so we must not attempt to stat against it directly.
 // preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
-func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+//
+// ctx bounds the work. The PROPFINDs fan out across every stat host and are
+// waited on together, so without it a single unresponsive object server holds
+// the caller for as long as the transport allows -- and the cache calls this
+// on the path of every miss it fills.
+func statHttp(ctx context.Context, dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
+	return statHttpImpl(ctx, dest, dirResp, token, fedToken, useCollectionsOnly, false)
+}
+
+// statHttpImpl is the recursion-safe internals of statHttp.  The
+// alreadyFellBack flag stops the two fallback branches at the bottom
+// from ping-ponging: one branch flips useCollectionsOnly false->true,
+// the other flips it true->false, so an initial call that hits both
+// triggers back-to-back would otherwise recurse forever.  After a
+// single fallback we have tried both modes and any remaining failure
+// is reported to the caller.
+func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, useCollectionsOnly bool, alreadyFellBack bool) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-	useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
 	if useCollectionsOnly {
 		if collectionsUrl != nil {
 			statHosts = append(statHosts, *collectionsUrl)
@@ -5303,12 +6516,19 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 			statHosts = append(statHosts, *collectionsUrl)
 		}
 	}
+	// With nothing to ask, the loop below would report success on zero
+	// results and hand back a zero-valued FileInfo -- an object of size 0
+	// that is not a collection.  Callers use IsCollection to decide where a
+	// transfer lands, so a fabricated answer is worse than an error.
+	if len(statHosts) == 0 {
+		return FileInfo{}, errors.Errorf("no endpoint available to stat %s: "+
+			"the director returned neither object servers nor a collections URL", dest.String())
+	}
 	type statResults struct {
 		info FileInfo
 		err  error
 	}
 	resultsChan := make(chan statResults)
-	transport := config.GetTransport()
 
 	// When a federation token is present but no user token (public
 	// namespace), we wrap the federation token in a tokenGenerator so
@@ -5362,6 +6582,16 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		destCopy := statUrl
 		destCopy.Path = propfindPath
 
+		// No method on studio-b12/gowebdav's Client takes a context -- not in
+		// any release through v0.13.0, nor on master -- so the caller's
+		// deadline is attached to each request through the interceptor, which
+		// runs on the request the library is about to send. (Not to be
+		// confused with golang.org/x/net/webdav, used on the origin side of
+		// this repo, whose FileSystem methods do take one.)
+		client.SetInterceptor(func(_ string, r *http.Request) {
+			*r = *r.WithContext(ctx)
+		})
+
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
@@ -5369,16 +6599,30 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 
 			var info FileInfo
 			for {
+				// Local to this goroutine: every stat host runs one of these
+				// concurrently, and the proxy decision below is per-host.
+				var transport http.RoundTripper
 				if disableProxy {
 					log.Debugln("Performing request (without proxy)", endpoint.String())
 					transport = config.GetTransportNoProxy()
 				} else {
 					log.Debugln("Performing request", endpoint.String())
+					transport = config.GetTransport()
 				}
-				client.SetTransport(transport)
+				client.SetTransport(boundPropfindBody(transport))
 
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
+					// gowebdav reports "nothing I could use in that 207" as a
+					// nil *File and no error, tucked inside a non-nil
+					// os.FileInfo whose methods take a value receiver -- so
+					// reading one panics, on this goroutine, where nothing
+					// recovers. Treat it as the failure it is.
+					if file, ok := fsinfo.(*gowebdav.File); fsinfo == nil || (ok && file == nil) {
+						err = errors.Errorf("PROPFIND response from %s described nothing usable for %s", endpoint.Host, endpoint.Path)
+						resultsChan <- statResults{FileInfo{}, err}
+						return
+					}
 					info = FileInfo{
 						Size:         fsinfo.Size(),
 						IsCollection: fsinfo.IsDir(),
@@ -5398,6 +6642,16 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return
+				} else if gowebdav.IsErrCode(err, http.StatusTooManyRequests) {
+					// The endpoint shed the request. Classify it so it is
+					// retryable rather than falling through to the generic
+					// (non-retryable) bucket below; the WebDAV client does not
+					// surface the response, so there is no reason or
+					// Retry-After hint to carry.
+					err = newThrottleErrorNoResponse(endpoint.Host,
+						fmt.Sprintf("stat of %s was throttled at endpoint %s", dest.String(), endpoint.String()))
+					resultsChan <- statResults{FileInfo{}, err}
+					return
 				} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 					// 500 is NOT "not found"; report it as a server error so
 					// callers (e.g. uploadObject) can distinguish a genuine
@@ -5407,10 +6661,11 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrCode(err, http.StatusConflict) {
 					// 409 Conflict — XRootD caches return this for PROPFIND
-					// on directories.  Report as an error so the collections
-					// URL fallback can still succeed.
+					// on directories.  Wrap the sentinel so the loop that
+					// collects these results can decide to fall back to
+					// the collections URL.
 					log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
-					err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
+					err = errors.Wrapf(errStatOnCollectionAtCache, "stat of %s at endpoint %s", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
@@ -5446,6 +6701,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	}
 	success := false
 	notFound := false
+	sawConflict := false
 	for ctr := 0; ctr < len(statHosts); ctr++ {
 		result := <-resultsChan
 		if result.err == nil {
@@ -5460,11 +6716,35 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 				notFound = true
 			}
 		}
+		if result.err != nil && errors.Is(result.err, errStatOnCollectionAtCache) {
+			sawConflict = true
+		}
 	}
 	// Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
-	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
-		// Recursively call statHttp without preferCollectionsUrlOnly
-		return statHttp(dest, dirResp, token, fedToken)
+	if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 && !alreadyFellBack {
+		// Retry without preferCollectionsUrlOnly; mark the retry as
+		// already-fell-back so the sibling fallback below cannot then
+		// flip us back to collections-only and ping-pong.
+		return statHttpImpl(ctx, dest, dirResp, token, fedToken, false, true)
+	}
+	// Fallback: if no host succeeded, at least one stat host was a cache
+	// that returned 409 on what is likely a collection, and the director
+	// gave us a collections URL, retry via the collections URL (origin
+	// WebDAV endpoint) which does serve directory listings.
+	if !success && sawConflict && !useCollectionsOnly && collectionsUrl != nil && !alreadyFellBack {
+		return statHttpImpl(ctx, dest, dirResp, token, fedToken, true, true)
+	}
+	// Past both fallbacks, a 409 is still an answer rather than just a failure:
+	// it is how an XRootD cache says "collection" to a PROPFIND. Reaching here
+	// with one means no collections URL was available to describe the path
+	// properly, or the retry against it did not succeed either -- so this is a
+	// last resort, not a shortcut past the fallbacks above. Without it, a
+	// collection reached through an XRootD cache stats as a plain error, and
+	// the callers that ask "is this a collection" conclude that it is not,
+	// which is how the cache came to store a listing as the object.
+	if !success && sawConflict {
+		success = true
+		info = FileInfo{Name: dest.Path, IsCollection: true}
 	}
 	if success {
 		err = nil
@@ -5472,12 +6752,199 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	return
 }
 
-// Check if a given URL is present at the first cache in the director response
+// propfindObject asks a single endpoint, directly, whether objectUrl is a
+// collection and how large it is.
+//
+// This deliberately does not go through statHttp: that fans out across every
+// object server the director returned and waits for all of them with no
+// deadline, which is far too much machinery -- and far too much latency -- to
+// put in front of an ordinary download. Here the endpoint is already chosen and
+// the caller's context bounds the wait.
+//
+// unixSocket, when non-empty, is the local cache's socket: the endpoint is
+// reached by dialing it rather than by resolving the URL's host.
+//
+// No method on studio-b12/gowebdav's Client takes a context -- not in any
+// release through v0.13.0, nor on master -- so the caller's deadline is
+// attached through the interceptor, which runs on the request the library is
+// about to send. Without that, a stalled endpoint would hang the download for
+// as long as the transport allowed. The interceptor also restores the query,
+// which carries the authorization some endpoints want and which gowebdav has
+// no way to pass through.
+//
+// This is the WebDAV *client*; golang.org/x/net/webdav, which the origin side
+// of this repo serves with, is a different package whose FileSystem methods do
+// take a context. Upgrading gowebdav would not remove the need for this.
+func propfindObject(ctx context.Context, objectUrl *url.URL, unixSocket string, token *tokenGenerator) (size int64, isCollection bool, err error) {
+	base := *objectUrl
+	base.Path = ""
+	base.RawQuery = ""
+	transport := config.GetTransport()
+	if unixSocket != "" {
+		// Same treatment downloadHTTP gives a unix:// endpoint: the scheme has
+		// to become one net/http understands, and the host is a label for log
+		// messages since the dialer ignores it.
+		transport = transport.Clone()
+		transport.Proxy = nil
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", unixSocket)
+		}
+		base.Scheme = "http"
+		base.Host = "localhost"
+	}
+	client := gowebdav.NewAuthClient(base.String(), &bearerAuth{token: token})
+	client.SetTransport(transport)
+	query := objectUrl.RawQuery
+	client.SetInterceptor(func(_ string, r *http.Request) {
+		*r = *r.WithContext(ctx)
+		if query != "" && r.URL.RawQuery == "" {
+			r.URL.RawQuery = query
+		}
+	})
+
+	info, statErr := client.Stat(objectUrl.Path)
+	if statErr != nil {
+		// An XRootD cache reports a collection by refusing the PROPFIND with
+		// 409 rather than describing it, so the refusal is itself the answer.
+		if gowebdav.IsErrCode(statErr, http.StatusConflict) {
+			log.Debugln("PROPFIND of", objectUrl.Path, "at", objectUrl.Host, "returned 409; treating as a collection")
+			return -1, true, nil
+		}
+		return -1, false, statErr
+	}
+	// gowebdav hands back a nil *File and no error when it finds nothing it
+	// can use in the multistatus: a 207 whose only propstat is a 404, one with
+	// no response element, or a body its parser choked on -- it discards decode
+	// errors silently. The nil arrives inside a non-nil os.FileInfo, and File's
+	// methods take a value receiver, so reading one panics on the spot rather
+	// than yielding zero values. This probe runs on a bare goroutine per
+	// endpoint, so that panic would take the process down on behalf of whatever
+	// object server the director happened to name. Count it as no answer.
+	if file, ok := info.(*gowebdav.File); info == nil || (ok && file == nil) {
+		return -1, false, errors.Errorf("PROPFIND response from %s described nothing usable for %s", objectUrl.Host, objectUrl.Path)
+	}
+	return info.Size(), info.IsDir(), nil
+}
+
+// probeDrainLimit caps how much of an endpoint probe's response body is read
+// before the rest is abandoned. The probe wants headers, not content.
+const probeDrainLimit = 32 * 1024
+
+// propfindBodyLimit bounds a Depth-0 PROPFIND response.
+//
+// Every PROPFIND this package sends to learn about a single path asks with
+// Depth: 0, so a conforming answer describes exactly one resource: one href
+// and a handful of properties, a few kilobytes at the outside. The limit is
+// far above that because it is not a budget, it is a backstop -- gowebdav
+// decodes the body into memory with no bound of its own, so without one a
+// server that streams an endless href grows the heap until something dies,
+// and these run on goroutines the caller does not wait on.
+//
+// Depth: 1 listings are a different matter and do not come through here; see
+// walkDirDownload and friends, which stream a whole collection on purpose.
+const propfindBodyLimit = 256 * 1024
+
+// errPropfindTooLarge is what a reader gets for the part of a PROPFIND
+// response past propfindBodyLimit.
+var errPropfindTooLarge = errors.Errorf("PROPFIND response exceeded %d bytes", propfindBodyLimit)
+
+// boundedBodyTransport caps the response bodies of everything sent through it.
+// gowebdav offers no hook for this, so it goes in at the transport.
+type boundedBodyTransport struct {
+	base  http.RoundTripper
+	limit int64
+}
+
+func (t *boundedBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp == nil || resp.Body == nil {
+		return resp, err
+	}
+	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: t.limit}
+	return resp, nil
+}
+
+// boundedBody fails the read rather than truncating it. A short read would
+// leave gowebdav's parser holding a half-document, and it discards decode
+// errors silently, so the caller would be told "nothing here" for what is
+// really "too much here".
+type boundedBody struct {
+	io.ReadCloser
+	remaining int64
+}
+
+func (b *boundedBody) Read(p []byte) (int, error) {
+	if b.remaining <= 0 {
+		return 0, errPropfindTooLarge
+	}
+	if int64(len(p)) > b.remaining {
+		p = p[:b.remaining]
+	}
+	n, err := b.ReadCloser.Read(p)
+	b.remaining -= int64(n)
+	return n, err
+}
+
+// boundPropfindBody wraps a transport so a Depth-0 PROPFIND cannot read an
+// unbounded response into memory.
+func boundPropfindBody(base http.RoundTripper) http.RoundTripper {
+	return &boundedBodyTransport{base: base, limit: propfindBodyLimit}
+}
+
+// probeToken picks the credential the endpoint probe should present.
+//
+// The download itself carries a federation token as an `access_token` query
+// parameter, added per-attempt once an endpoint has been chosen. The probe runs
+// before that and has only the user token, so on a namespace where the
+// federation token is the only credential -- a public namespace read by a
+// client that acquired none of its own -- every probe would be refused, and a
+// refused probe now fails the download instead of merely misordering it.
+// Falling back to the federation token as a bearer credential is what statHttp
+// does for the same reason; see the note there about redirects.
+func probeToken(token *tokenGenerator, fedToken TokenProvider) *tokenGenerator {
+	if token != nil {
+		if contents, err := token.Get(); err == nil && contents != "" {
+			return token
+		}
+	}
+	if fedToken != nil {
+		if contents, err := fedToken.Get(); err == nil && contents != "" {
+			probe := &tokenGenerator{Sync: new(singleflight.Group)}
+			probe.SetToken(contents)
+			return probe
+		}
+	}
+	return token
+}
+
+// collectionAnswer is what an endpoint probe learned about whether a path is a
+// collection. `answered` is separate from `isCollection` because not knowing is
+// not the same as knowing it is an object: a caller that refuses collections
+// refuses on either, rather than downloading something it cannot describe.
+type collectionAnswer struct {
+	answered     bool
+	isCollection bool
+	// throttleErr is a 429 seen while asking, kept because it changes what an
+	// unanswered question means. A caller that refuses collections refuses
+	// when nobody answered, and "every endpoint was too busy to say" is a
+	// retryable condition carrying a Retry-After, where "every endpoint
+	// declined to say" is not. Reporting the latter for the former would tell
+	// a client to give up on a cache that only asked it to wait.
+	throttleErr error
+}
+
+// objectCached checks if a given URL is present at the first cache in the
+// director response.
 //
 // Note that xrootd returns an `Age` header for GETs but only a `Content-Length`
 // header for HEADs.  If `Content-Range` is found, we will use that header; if not,
 // we will issue two commands.
-func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator) (age int, size int64, err error) {
+//
+// wantCollectionInfo asks objectCached to determine whether the URL names a
+// collection as well as sizing it. It costs nothing extra: the fall-back
+// request objectCached already makes to learn the size becomes a PROPFIND,
+// which reports both.
+func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator, wantCollectionInfo bool) (age int, size int64, answeredCollection bool, isCollection bool, err error) {
 
 	age = -1
 
@@ -5486,7 +6953,13 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
-	headRequest.Header.Set("Range", "0-0")
+	// RFC 7233 syntax. The unit prefix used to be missing, which XRootD
+	// tolerates -- it skips whatever precedes the `=` without checking it --
+	// but every standards-compliant server rejects, answering either with the
+	// whole object or with a 416. That made the one request this probe is
+	// supposed to cost into two everywhere except XRootD, and against a server
+	// that answers 416 it made the endpoint look broken.
+	headRequest.Header.Set("Range", "bytes=0-0")
 	if token != nil {
 		if tokenContents, err := token.Get(); err == nil && tokenContents != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
@@ -5497,19 +6970,60 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
-	// Allow response body to fail to read; we are only interested in the headers
-	// of the response, not the contents.
-	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
+	// An origin that answers namespace questions about itself says on the
+	// refusal which credential would have worked.  Take it and ask once more,
+	// so this probe learns the same way the transfer it precedes does.
+	if acquireFromTokenHint(token, headResponse) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(headResponse.Body, probeDrainLimit))
+		headResponse.Body.Close()
+		retryRequest, retryErr := http.NewRequestWithContext(ctx, http.MethodGet, objectUrl.String(), nil)
+		if retryErr != nil {
+			err = retryErr
+			return
+		}
+		retryRequest.Header.Set("Range", "bytes=0-0")
+		if tokenContents, tokErr := token.Get(); tokErr == nil && tokenContents != "" {
+			retryRequest.Header.Set("Authorization", "Bearer "+tokenContents)
+		}
+		headResponse, err = headClient.Do(retryRequest)
+		if err != nil {
+			return
+		}
+	}
+	// The probe wants headers, but an *error* response's body carries the
+	// structured reason that tells a throttle apart from any other refusal, so
+	// keep a bounded prefix in that case only; on the success path nothing is
+	// retained.
+	var bodyPrefix []byte
+	if headResponse.StatusCode >= 400 {
+		bodyPrefix, _ = io.ReadAll(io.LimitReader(headResponse.Body, maxErrorBodySize))
+	}
+	// Whatever is left is drained so the connection can be reused, but only up
+	// to a bound. Not every server honors a one-byte range, and one that does
+	// not answers with the whole object; this probe runs against every endpoint
+	// of every download, so an unbounded drain would stream objects in full
+	// only to throw them away. Reading is allowed to fail -- the headers are
+	// already in hand either way.
+	if _, err := io.Copy(io.Discard, io.LimitReader(headResponse.Body, probeDrainLimit)); err != nil {
 		log.Debugln("Failure when reading the one-byte-response body - expected because the body is discarded:", err)
 	}
 	headResponse.Body.Close()
 	gotContentRange := false
-	if headResponse.StatusCode <= 300 {
+	if headResponse.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+		// Not an unhealthy endpoint, just one that would not serve the range
+		// asked for. Nothing was learned, but nothing is wrong either: fall
+		// through to the request below, which asks without a range.
+		log.Debugln("Endpoint", objectUrl.Host, "did not satisfy the probe's byte range")
+	} else if headResponse.StatusCode <= 300 {
 		if contentRangeStr := headResponse.Header.Get("Content-Range"); contentRangeStr != "" {
 			if after, found := strings.CutPrefix(contentRangeStr, "bytes 0-0/"); found {
 				if afterParsed, err := strconv.Atoi(after); err == nil {
 					size = int64(afterParsed)
-					gotContentRange = true
+					// Only a 206 means the range was actually served. A 200
+					// carrying a Content-Range is a server contradicting
+					// itself, and this value decides whether a download is
+					// refused, so take it only when the status agrees.
+					gotContentRange = headResponse.StatusCode == http.StatusPartialContent
 				} else {
 					log.Warningf("Ignoring invalid content range value (%s) due to parsing error: %s", after, err.Error())
 				}
@@ -5525,6 +7039,17 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 				age = ageParsed
 			}
 		}
+	} else if headResponse.StatusCode == http.StatusTooManyRequests {
+		// Throttled: classify as the retryable throttle type, carrying the
+		// reason from the body and the Retry-After hint.
+		//
+		// Return rather than falling through to the HEAD retry below. The
+		// cache answers HEAD without going through its fair scheduler, so a
+		// HEAD would likely succeed and overwrite this error, reporting the
+		// object's cache status as authoritative when in fact the request
+		// that would tell us was shed.
+		err = newThrottleErrorFromResponse(headResponse, string(bodyPrefix), objectUrl.Host)
+		return
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{
@@ -5533,9 +7058,36 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 			Err:  &sce,
 		}
 	}
-	// Early return -- all the info we wanted was in the GET response.
+	// Early return -- all the info we wanted was in the GET response. A server
+	// that satisfied a byte range served an object: collections have no byte
+	// ranges to serve, so there is nothing further to ask about.
 	if gotContentRange {
+		answeredCollection = wantCollectionInfo
 		return
+	}
+
+	// The size is not in the GET response, so a second request is needed. When
+	// the caller also wants to know whether this is a collection, ask by
+	// PROPFIND rather than HEAD -- it answers both questions in the one
+	// request a HEAD would have cost.
+	if wantCollectionInfo {
+		var propErr error
+		if size, isCollection, propErr = propfindObject(ctx, objectUrl, "", token); propErr == nil {
+			// Whether the path is a collection and whether this endpoint can
+			// serve it are separate questions, so a PROPFIND answering the
+			// first does not overturn a ranged GET that failed the second: err
+			// is left as it was found. The caller records the answer either
+			// way, and an endpoint that describes an object it will not serve
+			// stays sorted behind ones that will.
+			answeredCollection = true
+			return
+		}
+		// The endpoint did not answer. Fall through to the HEAD so sizing and
+		// endpoint selection keep working, but leave the collection question
+		// unanswered -- the caller decides what to do about that, and refusing
+		// is the safe choice when the alternative is writing an unknown
+		// response to the caller's file.
+		log.Debugln("PROPFIND unanswered at", objectUrl.Host, ":", propErr)
 	}
 
 	headRequest, err = http.NewRequestWithContext(ctx, http.MethodHead, objectUrl.String(), nil)
@@ -5566,6 +7118,8 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 
 			}
 		}
+	} else if headResponse.StatusCode == http.StatusTooManyRequests {
+		err = newThrottleErrorFromResponse(headResponse, "", objectUrl.Host)
 	} else {
 		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{

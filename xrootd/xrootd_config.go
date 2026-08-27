@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"database/sql"
 	_ "embed"
 	"encoding/base64"
 	builtin_errors "errors"
@@ -39,6 +40,7 @@ import (
 	"text/template"
 	"time"
 
+	_ "github.com/glebarez/sqlite"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -104,7 +106,9 @@ type (
 		EnableListings      bool
 		DisableCopies       bool
 		EnableTPC           bool
+		AllowNonPublicTPC   bool
 		EnableAtomicUploads bool
+		EnableTLSClientAuth bool
 		SelfTest            bool
 		MonitoringPrefix    string
 		Concurrency         int
@@ -153,7 +157,7 @@ type (
 		EnableVoms                 bool
 		Port                       int
 		HighWaterMark              string
-		LowWatermark               string
+		LowWaterMark               string
 		FilesBaseSize              string
 		FilesNominalSize           string
 		FilesMaxSize               string
@@ -476,8 +480,11 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
+		nsAds, err := buildCacheNsAdsWithIssuer(cacheServer)
 		if err != nil {
+			return errors.Wrap(err, "failed to build cache namespace ads for scitokens configuration")
+		}
+		if err := WriteCacheScitokensConfig(nsAds, true); err != nil {
 			return errors.Wrap(err, "failed to create scitokens configuration for the cache")
 		}
 	}
@@ -515,10 +522,54 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 	return pssOrigin, nil
 }
 
+// enableSqliteWAL opens dbPath (creating it if missing) and sets journal_mode=WAL.
+// The mode is persisted in the file header, so once this returns nil every
+// subsequent SQLite open on that file -- from scitokens-cpp inside xrootd
+// worker threads -- runs in WAL mode. See comment in CheckXrootdEnv for why.
+func enableSqliteWAL(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open %s", dbPath)
+	}
+	defer db.Close()
+
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
+		return errors.Wrap(err, "PRAGMA journal_mode=WAL failed")
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return errors.Errorf("SQLite refused WAL mode; journal_mode is %q", mode)
+	}
+	return nil
+}
+
+// serverLaunchesXrootd reports whether this server will actually start an
+// XRootD process. The native backends (posixv2, pstore, s3v2, httpsv2,
+// globusv2, ssh) and the v2 cache are served in-process by pelican and
+// never spawn the daemon.
+func serverLaunchesXrootd(server server_structs.XRootDServer) bool {
+	switch st := server.GetServerType(); {
+	case st.IsEnabled(server_structs.CacheType):
+		return !param.Cache_EnableV2.GetBool()
+	case st.IsEnabled(server_structs.OriginType):
+		return server_structs.OriginStorageType(param.Origin_StorageType.GetString()).UsesXRootD()
+	default:
+		// Unrecognized server kind: keep the conservative behavior and
+		// require the binary.
+		return true
+	}
+}
+
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
-	// Check XRootD version before proceeding with environment setup
-	if err := CheckXrootdVersion(); err != nil {
-		return err
+	// Only require the XRootD binary when this server will run one.
+	// CheckDefaults calls this for every server, so an unconditional
+	// version probe made XRootD a hard startup dependency of deployments
+	// that never launch it — a native-backend origin or a v2 cache would
+	// refuse to start on a host without it.
+	if serverLaunchesXrootd(server) {
+		if err := CheckXrootdVersion(); err != nil {
+			return err
+		}
 	}
 
 	uid, err := config.GetDaemonUID()
@@ -568,6 +619,27 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	}
 	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
 		return errors.Wrap(err, "unable to set $XDG_CACHE_HOME for scitokens library")
+	}
+
+	// Pre-flip the scitokens-cpp JWKS SQLite cache into WAL mode before xrootd
+	// touches it. scitokens-cpp uses the default rollback-journal, where a bare
+	// SELECT holds a SHARED lock and a later UPDATE/DELETE upgrade can return
+	// SQLITE_BUSY_SNAPSHOT without honoring the busy handler -- a real race for
+	// the multi-threaded xrootd worker pool. WAL is persisted in the file header,
+	// so once we set it here every subsequent open (from any process/thread) uses
+	// WAL, letting readers and writers proceed concurrently. Best-effort: any
+	// failure logs and continues; scitokens-cpp will still function on the
+	// default journal, just with the race window intact.
+	scitokensCacheDir := filepath.Join(cacheDir, "scitokens")
+	if err := config.MkdirAll(scitokensCacheDir, 0700, uid, gid); err != nil {
+		log.Warnf("Failed to create scitokens SQLite cache directory %s; leaving JWKS cache on default journal: %v", scitokensCacheDir, err)
+	} else {
+		scitokensCacheDB := filepath.Join(scitokensCacheDir, "scitokens_cpp.sqllite")
+		if err := enableSqliteWAL(scitokensCacheDB); err != nil {
+			log.Warnf("Failed to enable WAL on scitokens SQLite cache %s; leaving on default journal: %v", scitokensCacheDB, err)
+		} else if err := os.Chown(scitokensCacheDB, uid, -1); err != nil {
+			log.Warnf("Failed to chown scitokens SQLite cache %s to daemon uid %d: %v", scitokensCacheDB, uid, err)
+		}
 	}
 
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
@@ -1104,6 +1176,20 @@ func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	)
 }
 
+// cacheSizeToXrootd translates a Pelican cache watermark / file-usage size into
+// the form xrootd's pfc.diskusage expects. Pelican accepts these values either
+// as a bare integer percentage of total disk (e.g. "85") or as an absolute size
+// suffixed with k|m|g|t (e.g. "1t"). xrootd's cfg2bytes reads a bare number as a
+// decimal fraction of the disk and a suffixed number as an absolute size, so an
+// integer percentage is rewritten as its decimal fraction (85 -> "0.85") while
+// absolute sizes (and any already-fractional value) are passed through untouched.
+func cacheSizeToXrootd(val string) string {
+	if num, err := strconv.Atoi(val); err == nil && num > 0 && num <= 100 {
+		return strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+	}
+	return val
+}
+
 func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
@@ -1150,17 +1236,14 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		}
 		xrdConfig.Cache.PSSOrigin = pssOrigin
 
-		// For cache watermarks, convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
-		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
-			if num <= 100 && num > 0 {
-				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
-			}
-		}
-		if num, err := strconv.Atoi(xrdConfig.Cache.LowWatermark); err == nil {
-			if num <= 100 && num > 0 {
-				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
-			}
-		}
+		// The watermarks and the file-usage sizes may each be given as an integer
+		// percentage of total disk or as an absolute size; normalize the percentage
+		// form to the decimal fraction xrootd expects (absolute sizes pass through).
+		xrdConfig.Cache.HighWaterMark = cacheSizeToXrootd(xrdConfig.Cache.HighWaterMark)
+		xrdConfig.Cache.LowWaterMark = cacheSizeToXrootd(xrdConfig.Cache.LowWaterMark)
+		xrdConfig.Cache.FilesBaseSize = cacheSizeToXrootd(xrdConfig.Cache.FilesBaseSize)
+		xrdConfig.Cache.FilesNominalSize = cacheSizeToXrootd(xrdConfig.Cache.FilesNominalSize)
+		xrdConfig.Cache.FilesMaxSize = cacheSizeToXrootd(xrdConfig.Cache.FilesMaxSize)
 
 		// Set up Lotman config
 		lotmanCfg := LotmanCfg{Enabled: false}
@@ -1201,6 +1284,16 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			}
 		}
 		xrdConfig.Cache.LotmanCfg = lotmanCfg
+
+		// VOMS authentication relies on the client presenting an X.509 certificate
+		// during the TLS handshake, which only happens when TLS client auth is
+		// requested. Enabling VOMS without TLS client auth yields a non-functional
+		// setup: the cache never asks for a client certificate, so VOMS has nothing
+		// to extract.
+		if xrdConfig.Cache.EnableVoms && !xrdConfig.Cache.EnableTLSClientAuth {
+			return "", errors.Errorf("%s is enabled but %s is disabled; VOMS/X.509 client authentication cannot function because the cache will not request a client certificate. Set %s to true, or disable %s.",
+				param.Cache_EnableVoms.GetName(), param.Cache_EnableTLSClientAuth.GetName(), param.Cache_EnableTLSClientAuth.GetName(), param.Cache_EnableVoms.GetName())
+		}
 	}
 
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
@@ -1213,6 +1306,12 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		}
 		xrdConfig.Origin.Exports = originExports
 		xrdConfig.Origin.EnableTPC = shouldEnableTPC(xrdConfig.Origin.DisableCopies, originExports)
+		// XRootD's TPC handler denies copies to/from loopback and private
+		// (RFC 1918) addresses by default as SSRF protection. Allow them only
+		// when Pelican's SSRF protection is disabled or its default blocks are
+		// skipped (e.g. for localhost test federations).
+		xrdConfig.Origin.AllowNonPublicTPC = param.Server_SSRFProtection_Disabled.GetBool() ||
+			param.Server_SSRFProtection_SkipDefaultBlocks.GetBool()
 		xrdConfig.Origin.MonitoringPrefix = server_utils.MonitoringBaseNs
 
 		switch xrdConfig.Origin.StorageType {
@@ -1246,6 +1345,16 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 					xrdConfig.Origin.GlobusTransferTokenFile = globusExports[0].TransferTokenFile
 				}
 			}
+		}
+
+		// VOMS authentication relies on the client presenting an X.509 certificate
+		// during the TLS handshake, which only happens when TLS client auth is
+		// requested. Enabling VOMS without TLS client auth yields a non-functional
+		// setup: the origin never asks for a client certificate, so VOMS has nothing
+		// to extract.
+		if xrdConfig.Origin.EnableVoms && !xrdConfig.Origin.EnableTLSClientAuth {
+			return "", errors.Errorf("%s is enabled but %s is disabled; VOMS/X.509 client authentication cannot function because the origin will not request a client certificate. Set %s to true, or disable %s.",
+				param.Origin_EnableVoms.GetName(), param.Origin_EnableTLSClientAuth.GetName(), param.Origin_EnableTLSClientAuth.GetName(), param.Origin_EnableVoms.GetName())
 		}
 	}
 

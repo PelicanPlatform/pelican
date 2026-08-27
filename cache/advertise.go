@@ -49,14 +49,14 @@ type (
 // Can use this mechanism to override the minimum for the sake of tests
 var MinFedTokenTickerRate = 1 * time.Minute
 
-func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertise, error) {
 	registryPrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 
 	// Get the overall health status as reported by the cache.
 	status := metrics.GetHealthStatus().OverallStatus
 
 	nsAds := server.GetNamespaceAds()
-	ad := server_structs.OriginAdvertiseV2{
+	ad := server_structs.OriginAdvertise{
 		ServerID:            id,
 		RegistryPrefix:      registryPrefix,
 		DataURL:             originUrl,
@@ -67,6 +67,21 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
+
+	if geoStr := param.GeoLocation.GetString(); geoStr != "" {
+		if lat, long, err := utils.ParseCoordinateStr(geoStr); err == nil {
+			coord := server_structs.Coordinate{
+				Lat:    lat,
+				Long:   long,
+				Source: server_structs.CoordinateSourceDeclared,
+				// The service has given us a coordinate, so we assume no accuracy radius
+				AccuracyRadius: 0,
+			}
+			ad.Coordinate = &coord
+		} else {
+			log.Warningf("Ignoring invalid %s value %q: %v", param.GeoLocation.GetName(), geoStr, err)
+		}
+	}
 
 	// Extract prefixes from namespace ads for broker configuration
 	var prefixes []string
@@ -110,13 +125,13 @@ func (server *CacheServer) SetFilters() {
 	}
 }
 
-func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.NamespaceAd) []server_structs.NamespaceAd {
 	/*
 	* Filters out ads based on the namespaces listed in server.NamespaceFilter
 	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
 	* from the director and the ones provided might differ.
 	 */
-	filteredAds := []server_structs.NamespaceAdV2{}
+	filteredAds := []server_structs.NamespaceAd{}
 	if len(server.namespaceFilter) > 0 {
 		for _, ad := range nsAds {
 			ns := ad.Path
@@ -153,19 +168,19 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.Name
 
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Get the endpoint of the director
-	var respNS []server_structs.NamespaceAdV2
+	var respNS []server_structs.NamespaceAd
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
 		return err
 	}
 	if fedInfo.DirectorEndpoint == "" {
-		return errors.New("No director specified; give the federation name (-f)")
+		return errors.New("no director specified; give the federation name (-f)")
 	}
 
 	directorEndpointURL, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
-		return errors.Wrap(err, "Unable to parse director url")
+		return errors.Wrap(err, "unable to parse director url")
 	}
 
 	// Create the listNamespaces url
@@ -174,34 +189,14 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		return err
 	}
 
-	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
-	// from the 1.0 endpoint and convert from V1 to V2
 	tr := config.GetTransport()
 	respData, err := utils.MakeRequest(context.Background(), tr, directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			directorNSListEndpointURL, err = url.JoinPath(fedInfo.DirectorEndpoint, "api", "v1.0", "director", "listNamespaces")
-			if err != nil {
-				return err
-			}
-			respData, err = utils.MakeRequest(context.Background(), tr, directorNSListEndpointURL, "GET", nil, nil)
-			var respNSV1 []server_structs.NamespaceAdV1
-			if err != nil {
-				return errors.Wrap(err, "Failed to make request")
-			} else {
-				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
-					return errors.Wrapf(err, "Failed to make request: %v", err)
-				}
-				respNS = server_structs.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
-			}
-		} else {
-			return errors.Wrap(err, "Failed to make request")
-		}
-	} else {
-		err = json.Unmarshal(respData, &respNS)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
-		}
+		return errors.Wrap(err, "failed to make request")
+	}
+	err = json.Unmarshal(respData, &respNS)
+	if err != nil {
+		return errors.Wrapf(err, "failed to marshal response in to JSON: %v", err)
 	}
 
 	if len(server.namespaceFilter) > 0 {
@@ -286,7 +281,12 @@ func getTickerRate(tok string) time.Duration {
 	tokenLifetime, err := calcTokLifetime(tok)
 	if err != nil {
 		tokenLifetime = param.Director_FedTokenLifetime.GetDuration()
-		log.Errorf("Failed to calculate lifetime of federation token: %v.", err)
+		// An empty token is expected before the first fetch (e.g. when the
+		// persistent cache defers its initial fetch until after registration);
+		// only surface a genuine parse failure of a non-empty token.
+		if tok != "" {
+			log.Errorf("Failed to calculate lifetime of federation token: %v.", err)
+		}
 	}
 	tickerRate = tokenLifetime / 3
 	return validateTickerRate(tickerRate, tokenLifetime)
@@ -300,38 +300,16 @@ func getTickerRate(tok string) time.Duration {
 // new token is obtained.  The persistent cache uses this to keep the
 // token in memory.
 //
-// retryNow, if non-nil, is a channel that triggers an immediate token
-// fetch.  The launcher signals it after the cache is first registered
-// and advertised to the director so the token manager does not have to
-// wait for the next ticker fire.
+// retryNow, if non-nil, is a channel the launcher signals after the cache has
+// been registered and advertised to the director.  When it is provided, the
+// manager DEFERS its first token fetch until that signal, guaranteeing the
+// first getFedToken request is not made before the cache is registered (which
+// would fail).  When it is nil, the manager fetches immediately at startup.
 func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc, onTokenUpdate func(string), retryNow <-chan struct{}) {
-	// Do our initial token fetch+set, then turn things over to the ticker
-	tok, err := server_utils.CreateFedTok(ctx, cache)
-	if err != nil {
-		log.Errorf("Failed to get a federation token: %v", err)
-	}
-
-	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
-	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
-	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
-	// gives us a bit of buffer in the event the Director is down for a short period of time.
-	tickerRate := getTickerRate(tok)
-
-	// Set up the federation token directories in the cache
-	err = server_utils.SetupFedTokDirs(cache)
-	if err != nil {
+	// Set up the federation token directories in the cache.  This is
+	// independent of having a token, so do it up front.
+	if err := server_utils.SetupFedTokDirs(cache); err != nil {
 		log.Errorf("Failed to setup federation token directory: %v", err)
-	}
-
-	// Set the token in the cache
-	err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
-	if err != nil {
-		log.Errorf("Failed to set the federation token: %v", err)
-	}
-
-	// Deliver the initial token to the in-memory consumer (if any).
-	if onTokenUpdate != nil && tok != "" {
-		onTokenUpdate(tok)
 	}
 
 	// refreshFedTok performs a single fetch-and-set cycle, returning
@@ -360,25 +338,57 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		return newRate, newTok
 	}
 
+	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
+	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
+	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
+	// gives us a bit of buffer in the event the Director is down for a short period of time.
+	tickerRate := getTickerRate("")
+
+	// When retryNow is nil there is no external "registered & advertised"
+	// signal to wait for (e.g. the XRootD cache), so fetch immediately as
+	// before.  When retryNow is provided (the persistent cache), we instead
+	// defer the first fetch until the launcher signals that the cache has been
+	// registered and advertised to the director — requesting a federation token
+	// before the cache is registered is guaranteed to fail and can leave stale
+	// negative state at the director.
+	if retryNow == nil {
+		tickerRate, _ = refreshFedTok(tickerRate)
+	}
+
 	// TODO: Figure out what to do if the Director starts issuing tokens with a different
 	// lifetime --> we can adjust ticker period dynamically, but what's the sensible thing to do?
 	fedTokTicker := time.NewTicker(tickerRate)
 	egrp.Go(func() error {
 		defer fedTokTicker.Stop()
+
+		doRefresh := func() {
+			newRate, _ := refreshFedTok(tickerRate)
+			if newRate != tickerRate {
+				fedTokTicker.Reset(newRate)
+				tickerRate = newRate
+			}
+		}
+
+		// Force the ordering: for the persistent cache, the first token fetch
+		// happens only after the launcher signals registration+advertisement
+		// (retryNow).  The ticker acts as a fallback so we still fetch even if
+		// the signal is somehow missed.
+		if retryNow != nil {
+			select {
+			case <-retryNow:
+			case <-fedTokTicker.C:
+			case <-ctx.Done():
+				return nil
+			}
+			doRefresh()
+		}
+
 		for {
 			select {
 			case <-fedTokTicker.C:
-				newRate, _ := refreshFedTok(tickerRate)
-				if newRate != tickerRate {
-					fedTokTicker.Reset(newRate)
-					tickerRate = newRate
-				}
+				doRefresh()
 			case <-retryNow:
-				newRate, _ := refreshFedTok(tickerRate)
-				if newRate != tickerRate {
-					fedTokTicker.Reset(newRate)
-					tickerRate = newRate
-				}
+				doRefresh()
 			case <-ctx.Done():
 				return nil
 			}

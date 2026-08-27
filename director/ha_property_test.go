@@ -249,26 +249,24 @@ func setupForwardingState(t *testing.T) {
 func makeTestDirector(t *testing.T, name string, ttl time.Duration) chan *forwardAdInfo {
 	t.Helper()
 	ch := make(chan *forwardAdInfo, 20)
-	info := &directorInfo{
-		ad: &server_structs.DirectorAd{
-			AdvertiseUrl: "http://" + name + ".example.com",
-			ServerBaseAd: server_structs.ServerBaseAd{
-				Name:         name,
-				InstanceID:   "inst-" + name,
-				StartTime:    12345,
-				GenerationID: 1,
-				Version:      "v1",
-			},
+	info := newTestDirectorInfo(&server_structs.DirectorAd{
+		AdvertiseUrl: "http://" + name + ".example.com",
+		ServerBaseAd: server_structs.ServerBaseAd{
+			Name:         name,
+			InstanceID:   "inst-" + name,
+			StartTime:    12345,
+			GenerationID: 1,
+			Version:      "v1",
 		},
-		forwardAdChan: ch,
-	}
+	})
+	info.forwardAdChan = ch
 	directorAds.Set(name, info, ttl)
 	return ch
 }
 
-// makeTestServiceAd builds a minimal OriginAdvertiseV2 for use in forwarding tests.
-func makeTestServiceAd() *server_structs.OriginAdvertiseV2 {
-	return &server_structs.OriginAdvertiseV2{
+// makeTestServiceAd builds a minimal OriginAdvertise for use in forwarding tests.
+func makeTestServiceAd() *server_structs.OriginAdvertise {
+	return &server_structs.OriginAdvertise{
 		ServerBaseAd: server_structs.ServerBaseAd{
 			Name:         "origin-1",
 			InstanceID:   "origin-inst",
@@ -558,19 +556,17 @@ func TestForwardingReachesAllDirectors(t *testing.T) {
 			for _, name := range names {
 				ch := make(chan *forwardAdInfo, 1000)
 				channels[name] = ch
-				info := &directorInfo{
-					ad: &server_structs.DirectorAd{
-						AdvertiseUrl: "http://" + name + ".example.com",
-						ServerBaseAd: server_structs.ServerBaseAd{
-							Name:         name,
-							InstanceID:   "inst-" + name,
-							StartTime:    12345,
-							GenerationID: 1,
-							Version:      "v1",
-						},
+				info := newTestDirectorInfo(&server_structs.DirectorAd{
+					AdvertiseUrl: "http://" + name + ".example.com",
+					ServerBaseAd: server_structs.ServerBaseAd{
+						Name:         name,
+						InstanceID:   "inst-" + name,
+						StartTime:    12345,
+						GenerationID: 1,
+						Version:      "v1",
 					},
-					forwardAdChan: ch,
-				}
+				})
+				info.forwardAdChan = ch
 				directorAds.Set(name, info, 15*time.Minute)
 			}
 

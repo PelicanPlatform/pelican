@@ -42,7 +42,12 @@ var cliExecErrorHook func(err error)
 //go:generate go run -tags server . generate-docs docs/app/commands-reference/pelican-server
 func main() {
 	logging.SetupLogBuffering()
+	// On a panic (or any unwind), flip the log writer to synchronous mode first
+	// so buffered lines are flushed and late lines reach the log file, then run
+	// the normal flush. Defers run LIFO, so EnterSyncMode (registered last) runs
+	// before FlushLogs.
 	defer logging.FlushLogs(false)
+	defer logging.EnterSyncMode()
 	if len(os.Args) > 1 && os.Args[1] == "generate-docs" {
 		outputDir := "docs/app/commands-reference"
 		if len(os.Args) > 2 {
@@ -50,14 +55,24 @@ func main() {
 		}
 		err := generateCLIDocs(outputDir)
 		if err != nil {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		return
 	}
 	err := handleCLI(os.Args)
 	if err != nil {
-		os.Exit(1)
+		exitWithFlush(1)
 	}
+}
+
+// exitWithFlush terminates the process after draining the log writer. The
+// deferred flush in main covers a normal return and a panic unwind, but
+// os.Exit runs no defers, so every explicit exit has to drain for itself or
+// lose whatever is still buffered -- including the line explaining the exit.
+func exitWithFlush(code int) {
+	logging.EnterSyncMode()
+	logging.FlushLogs(false)
+	os.Exit(code)
 }
 
 func handleCLI(args []string) error {
@@ -89,7 +104,7 @@ func handleCLI(args []string) error {
 		cliExecErrorHook(err)
 	}
 	if err != nil {
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	return nil
 }

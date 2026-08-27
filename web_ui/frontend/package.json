@@ -3,18 +3,24 @@
   "version": "7.2.0",
   "private": true,
   "scripts": {
+    "copy-sw": "cp node_modules/@pelicanplatform/web-client/dist/serviceWorker/downloadServiceWorker.js public/downloadServiceWorker.js",
+    "predev": "pnpm run copy-sw",
     "dev": "next dev --turbo",
+    "prebuild": "pnpm run copy-sw",
     "build": "next build",
     "build:help": "next build --help",
     "build:debug": "next build --debug",
     "start": "next start",
     "export": "next export",
     "lint": "next lint",
-    "format": "prettier --check --ignore-path .gitignore .",
-    "format:fix": "prettier --write --ignore-path .gitignore .",
+    "format": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore .",
+    "format:fix": "prettier --write --ignore-path .gitignore --ignore-path .prettierignore .",
     "clean": "rm -rf .next & rm -rf out",
     "analyze": "ANALYZE=true next build",
-    "test": "jest"
+    "test": "jest",
+    "e2e": "playwright test",
+    "playwright:save-auth": "playwright codegen --save-storage=auth.json https://localhost:8444",
+    "playwright:generate": "playwright codegen https://localhost:8444"
   },
   "dependencies": {
     "@chtc/web-components": "^1.0.23",
@@ -22,8 +28,12 @@
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^7",
     "@mui/material": "^7",
+    "@mui/system": "^7",
     "@mui/x-date-pickers": "^8",
     "@mui/x-tree-view": "^8",
+    "@pelicanplatform/components": "^1.9.0",
+    "@pelicanplatform/hooks": "^1.9.0",
+    "@pelicanplatform/web-client": "^2.1.0",
     "@sgratzl/chartjs-chart-boxplot": "^4.4.2",
     "babel-plugin-react-compiler": "^19.1.0-rc.3",
     "chart.js": "^4.4.4",
@@ -43,17 +53,20 @@
     "react-dom": "^19.0.0",
     "react-map-gl": "^7.1.7",
     "react-markdown": "^9.0.1",
+    "react-syntax-highlighter": "^16",
     "semver": "^7.7.2",
-    "sharp": "^0.34.1",
+    "sharp": "^0.34.5",
     "swagger-ui-react": "^5.31.1",
     "swr": "^2.2.5",
     "yaml": "^2.3.4"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "@babel/preset-env": "^7.25.7",
     "@babel/preset-react": "^7.25.7",
     "@babel/preset-typescript": "^7.25.7",
     "@next/bundle-analyzer": "^14.2.3",
+    "@playwright/test": "^1.60.0",
     "@types/chroma-js": "^2.4.4",
     "@types/jest": "^29.5.13",
     "@types/js-yaml": "^4.0.9",
@@ -76,7 +89,8 @@
     "ts-jest": "^29.2.5",
     "typescript": "5.1.6"
   },
+  "packageManager": "pnpm@11.20.0",
   "engines": {
-    "node": "20"
+    "node": "26"
   }
 }

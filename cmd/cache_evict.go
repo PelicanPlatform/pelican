@@ -123,6 +123,22 @@ func getCacheEvictToken(serverURL, tokenFile string, scopes []token_scopes.Token
 	tc := token.NewWLCGToken()
 	tc.Lifetime = 5 * time.Minute
 	tc.Subject = "admin"
+
+	// This deliberately does *not* use webAPIAdminTokenIssuer, and the two must
+	// not be unified even though they look alike.
+	//
+	// The web API pins a token's issuer to the server's own local issuer URL
+	// (see extractUserFromBearerToken).  Eviction does not go through that
+	// path: it is authorized against the *namespace* ACL, which requires the
+	// issuer to be one the namespace trusts and to have published a JWKS the
+	// cache can fetch (authConfig.getResourceScopes rejects anything else with
+	// "token issuer %s is not one of the trusted issuers").  Those are
+	// different requirements, and the local issuer URL is not generally a
+	// registered issuer for a namespace a cache holds.
+	//
+	// GetServerIssuerURL is what makes the token acceptable here, and what the
+	// working reference in local_cache's makeEvictToken uses.  A test pins the
+	// agreement so a later tidy-up cannot quietly swap it.
 	issuerURL, issuerErr := config.GetServerIssuerURL()
 	if issuerErr != nil || issuerURL == "" {
 		issuerURL = serverURL

@@ -5,5 +5,6 @@ export default {
     "get": "pelican-server origin collection get",
     "list": "pelican-server origin collection list",
     "metadata": "pelican-server origin collection metadata",
+    "ownership-invite": "pelican-server origin collection ownership-invite",
     "update": "pelican-server origin collection update",
 }

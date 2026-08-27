@@ -76,11 +76,11 @@ func TestRenewalEndToEnd(t *testing.T) {
 	require.NoError(t, param.Lotman_MinFillerWidth.Set(0))
 
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/foo", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 		{Path: "/foo/bar", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
-	getAds := func() []server_structs.NamespaceAdV2 { return ads }
+	getAds := func() []server_structs.NamespaceAd { return ads }
 
 	// --- Tick 1: should mint lots for /foo and /foo/bar -----------------
 	runRenewalTick(getAds, time.Second)
@@ -132,7 +132,7 @@ func TestRenewalEndToEnd(t *testing.T) {
 
 	// Stop the renewal scheduler from minting fresh lots during GC by
 	// supplying an empty ad list.
-	emptyAds := func() []server_structs.NamespaceAdV2 { return nil }
+	emptyAds := func() []server_structs.NamespaceAd { return nil }
 	runRenewalTick(emptyAds, time.Second)
 
 	runGcTick()

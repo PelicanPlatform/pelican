@@ -634,7 +634,11 @@ func TestSyncUpload(t *testing.T) {
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsDownload)
 
-		// Verify we received the original contents, not any modified contents
+		// Verify we received the original contents, not any modified contents.
+		// Recursive get of a collection into an existing local dir lays entries
+		// flat under downloadDir (row G5 of docs/object-transfer-semantics.md),
+		// so the inner file lives under
+		// downloadDir/<basename(innerTempDir)>/<basename(innerTempFile)>.
 		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
 		require.NoError(t, err)
 		require.Equal(t, innerTestFileContent, string(contentBytes))
@@ -998,6 +1002,109 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			require.Error(t, err, "Expected an error when attempting to find a non-existent object")
 			require.Contains(t, err.Error(), "server returned 404 Not Found", "Error message did not match expected text")
 
+		}
+	})
+
+	t.Run("testObjectGetNonRecursiveDirPath", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
+
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			// Create a collection on the origin to download
+			storagePrefix := export.StoragePrefix
+			testCollectionName := "test-collection-get-nonrecursive"
+			testCollection := filepath.Join(storagePrefix, testCollectionName)
+			err := os.Mkdir(testCollection, 0755)
+			require.NoError(t, err)
+			defer os.RemoveAll(testCollection)
+
+			// Create an object inside the collection
+			testFilePath := filepath.Join(testCollection, "testfile.txt")
+			err = os.WriteFile(testFilePath, []byte("test content"), 0644)
+			require.NoError(t, err)
+
+			// Try to download the collection with collection rejection enabled (simulates CLI non-recursive)
+			downloadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, testCollectionName)
+			destPath := filepath.Join(t.TempDir(), "downloaded-collection")
+
+			// The commands ask for this explicitly -- it is not a client
+			// default, because the cache fetches from origins through the
+			// same client and must not pay for the check.
+			opts := []client.TransferOption{client.WithRejectCollections(true)}
+			var getErr error
+			if export.Capabilities.PublicReads {
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, opts...)
+			} else {
+				opts = append(opts, client.WithTokenLocation(tempToken.Name()))
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, opts...)
+			}
+
+			require.Error(t, getErr, "Expected an error when passing a collection to object get without the recursive option set")
+			expectedMessage := "is a collection"
+			require.Contains(t, getErr.Error(), expectedMessage, "Error message did not match expected text")
+
+			// Naming a collection is a mistake in the request, so it must carry
+			// the parameter code (1000) and the exit status that goes with it,
+			// rather than looking like a transfer that failed. error_codes
+			// exports no constant for the value.
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(getErr, &pe), "Error should be wrapped in PelicanError")
+			assert.Equal(t, 1000, pe.Code(), "Should be Parameter error code")
+
+			// Verify that nothing was created at the destination
+			_, statErr := os.Stat(destPath)
+			require.True(t, os.IsNotExist(statErr), "Destination should not have been created")
+
+			// The guard must not fire when the caller asked for the
+			// collection: recursively, or via the ?recursive query form that
+			// NewTransferJob folds into the same flag.
+			recursiveDest := filepath.Join(t.TempDir(), "recursive-collection")
+			_, recErr := client.DoGet(fed.Ctx, downloadURL, recursiveDest, true, opts...)
+			require.NoError(t, recErr, "a recursive get must still download the collection")
+
+			queryDest := filepath.Join(t.TempDir(), "query-collection")
+			_, queryErr := client.DoGet(fed.Ctx, downloadURL+"?recursive", queryDest, false, opts...)
+			require.NoError(t, queryErr, "?recursive must also disable the collection guard")
+
+			// The guard belongs to the client rather than to `object get`, so
+			// every entry point that downloads inherits it. DoCopy backs
+			// `object copy`; DoGet backs `object get`, the transfer server's
+			// async jobs, and the HTCondor plugin. `object sync` always asks
+			// recursively, so the guard correctly never applies there.
+			copyDest := filepath.Join(t.TempDir(), "copied-collection")
+			_, copyErr := client.DoCopy(fed.Ctx, downloadURL, copyDest, false, opts...)
+			require.Error(t, copyErr, "a non-recursive copy of a collection must be refused too")
+			require.Contains(t, copyErr.Error(), "is a collection")
+			_, statErr = os.Stat(copyDest)
+			require.True(t, os.IsNotExist(statErr), "a refused copy must leave nothing behind")
+
+			// A client that does not ask keeps the unguarded behavior, which is
+			// what the cache relies on: it submits ordinary non-recursive
+			// download jobs for the blocks it is filling and must not have them
+			// refused.
+			defaultDest := filepath.Join(t.TempDir(), "not-asked")
+			_, defaultErr := client.DoGet(fed.Ctx, downloadURL, defaultDest, false)
+			assert.NotContains(t, fmt.Sprint(defaultErr), "is a collection",
+				"the guard must be off unless the caller asks for it")
+
+			// And an ordinary object must still download with the guard on --
+			// the check runs on the same probe as every other get, so a
+			// regression here would break downloads generally.
+			objectURL := fmt.Sprintf("pelican://%s%s/%s/testfile.txt", discoveryUrl.Host,
+				export.FederationPrefix, testCollectionName)
+			objectDest := filepath.Join(t.TempDir(), "testfile.txt")
+			_, objErr := client.DoGet(fed.Ctx, objectURL, objectDest, false, opts...)
+			require.NoError(t, objErr, "a regular object must download with collection rejection enabled")
+			contents, readErr := os.ReadFile(objectDest)
+			require.NoError(t, readErr)
+			assert.Equal(t, "test content", string(contents))
 		}
 	})
 

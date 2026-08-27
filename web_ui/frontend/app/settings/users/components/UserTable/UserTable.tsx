@@ -1,3 +1,4 @@
+import { TableCell, Typography } from '@mui/material';
 import {
   ClientTable,
   stringSort,
@@ -11,9 +12,45 @@ import makeDeleteCell from '@/components/Table/DeleteCell/makeDeleteCell';
 import makeEditCell from '@/components/Table/EditCell/makeEditCell';
 import DefaultCell from '@/components/Table/DefaultCell';
 
+// UserCell renders "Display Name" on the first line and "username"
+// on a second line in monospace below it. Per the user/group design
+// contract, every authz-affecting control should show both labels
+// together so admins can disambiguate two users with similar display
+// names ("Brian B."). This preserves the existing username-sort
+// (column id is still "username") while making the visual unit a
+// single cell rather than two columns the eye has to correlate.
+const UserCell = ({ row }: CellComponentProps<User, 'username'>) => (
+  <TableCell>
+    {row.displayName ? (
+      <>
+        <Typography variant='body2'>{row.displayName}</Typography>
+        <Typography
+          variant='caption'
+          color='text.secondary'
+          sx={{ fontFamily: 'monospace' }}
+        >
+          {row.username}
+        </Typography>
+      </>
+    ) : (
+      <Typography variant='body2' sx={{ fontFamily: 'monospace' }}>
+        {row.username}
+      </Typography>
+    )}
+  </TableCell>
+);
+
 const tableConfigGenerator = (mutate: () => void) => {
   return {
-    username: { id: 'username', name: 'Username', sort: stringSort },
+    // Single combined column. The cell renders "Display Name" + "username"
+    // stacked; the sort still keys off the username string so admins
+    // looking for a specific machine-name can find it.
+    username: {
+      id: 'username',
+      name: 'User',
+      sort: stringSort,
+      CellComponent: UserCell,
+    },
     sub: { id: 'sub', name: 'Sub', sort: stringSort },
     issuer: { id: 'issuer', name: 'Issuer', sort: stringSort },
     createdAt: {

@@ -165,6 +165,11 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 
 	defer ticker.Stop()
 
+	// prevCacheTestFilePath tracks the namespace-relative path of the test file created in the
+	// previous successful cache test cycle. On the next successful cycle, this file is evicted
+	// from the cache via the xrdhttp-pelican evict API so that test files don't accumulate.
+	var prevCacheTestFilePath string
+
 	// runDirectorTestCycle executes a single director test cycle and reports the result back to the server.
 	// Extracted as a helper to allow running the first test immediately upon registration, avoiding the
 	// race condition where the origin/cache 30s timeout fires before the first ticker-driven test.
@@ -187,11 +192,12 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 		log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", currentServerAd.Type, currentServerAd.Name, currentServerAd.URL.String()))
 		testSucceeded := true
 		var testErr error
+		var currentTestFilePath string
 		if currentServerAd.Type == server_structs.OriginType.String() {
 			fileTests := server_utils.TestFileTransferImpl{}
 			testSucceeded, testErr = fileTests.RunTests(ctx, currentServerAd.URL.String(), currentServerAd.URL.String(), "", server_utils.DirectorTest)
 		} else if currentServerAd.Type == server_structs.CacheType.String() {
-			testErr = runCacheTest(ctx, currentServerAd.URL)
+			currentTestFilePath, testErr = runCacheTest(ctx, currentServerAd.URL)
 		}
 
 		// Compose the result of this Director-test to report to the server
@@ -202,6 +208,16 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 			reportMessage = "Director test cycle succeeded at " + time.Now().Format(time.RFC3339)
 			healthStatus = HealthStatusOK
 			log.Debugf("Director file transfer test cycle succeeded at %s for %s server with URL at %s", time.Now().Format(time.RFC3339), currentServerAd.Type, currentServerAd.URL.String())
+
+			// On a successful cache test, evict the test file from the previous cycle via the
+			// cache's web API, which in turn calls the xrdhttp-pelican evict API locally.
+			// This ensures test files don't accumulate on the cache, especially when
+			// Server.DropPrivileges is true and the Pelican process cannot directly delete
+			// xrootd-owned files.
+			if currentServerAd.Type == server_structs.CacheType.String() && prevCacheTestFilePath != "" {
+				evictCacheTestFile(ctx, currentServerAd.WebURL.String(), prevCacheTestFilePath)
+			}
+			prevCacheTestFilePath = currentTestFilePath
 		} else {
 			reportStatus = "error"
 			reportMessage = "Director file transfer test cycle failed for server: " + currentServerAd.URL.String()

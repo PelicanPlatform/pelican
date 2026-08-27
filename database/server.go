@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,6 +20,17 @@ import (
 )
 
 var ServerDatabase *gorm.DB
+
+// openedServerDatabases tracks every handle InitServerDatabase has opened this
+// process. When several servers run in one process (the fed tests launch
+// origin+cache+director+registry together) each call reassigns the global
+// ServerDatabase, so a plain ShutdownDB that only closed the current global
+// would leak the earlier handles -- each a WAL SQLite database holding several
+// file descriptors. ShutdownDB closes all tracked handles instead.
+var (
+	openedServerDatabases   []*gorm.DB
+	openedServerDatabasesMu sync.Mutex
+)
 
 //go:embed universal_migrations/*.sql
 var EmbedUniversalMigrations embed.FS
@@ -53,6 +65,9 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return err
 	}
 	ServerDatabase = tdb
+	openedServerDatabasesMu.Lock()
+	openedServerDatabases = append(openedServerDatabases, tdb)
+	openedServerDatabasesMu.Unlock()
 
 	// Enable foreign key constraints for SQLite
 	if err := ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
@@ -73,6 +88,41 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	if err := runServerTypeMigrations(sqlDB, serverType); err != nil {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
+
+	// Post-migration bootstrap: ensure the built-in admin user record
+	// exists and that every group has a real owner. These need to run
+	// at startup rather than as SQL migrations because they depend on
+	// runtime config (Server.ExternalWebUrl). Idempotent.
+	if err := BootstrapAdminAndBackfillOwners(ServerDatabase); err != nil {
+		// Don't fail startup — log and continue. The most common cause
+		// of failure here is ExternalWebUrl not being set yet on a
+		// brand-new install where bootstrap will be retried later
+		// (e.g. on the first admin login via init code).
+		log.Warnf("Post-migration bootstrap incomplete: %v", err)
+	}
+
+	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.
+	// Pre-existing accounts (created before the knob existed, or on
+	// older builds) wouldn't otherwise carry the operator-configured
+	// baseline because the auto-grant path triggers only at user
+	// creation. See BackfillNewUserDefaultScopes for the one-shot
+	// semantics — subsequent edits to the config do not propagate
+	// retroactively, by design.
+	if err := BackfillNewUserDefaultScopes(ServerDatabase); err != nil {
+		log.Warnf("NewUserDefaultScopes backfill incomplete: %v", err)
+	}
+
+	// NOTE: we deliberately do NOT mirror Server.UIAdminUsers /
+	// Server.AdminGroups (or the User-/Collection-admin variants)
+	// into user_scopes / group_scopes at startup. Doing so would
+	// surprise operators: removing a name from the config file
+	// would leave the corresponding scope grant alive in the DB,
+	// silently preserving admin privileges that the operator
+	// intended to revoke. The config-driven lists are evaluated
+	// live on every request inside EffectiveScopesForIdentity so
+	// they always reflect the current file, and DB-stored grants
+	// stay reserved for grants made deliberately through the
+	// management API.
 
 	// Data cleanup - remove stale entries in the `servers` and `services` tables
 	// They are caused by the damaged foreign key constraint in `services` table and we didn't update webUI to use server deletion API in time.
@@ -105,6 +155,13 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 	case server_structs.RegistryType:
 		return utils.MigrateServerSpecificDB(sqlDB, EmbedRegistryMigrations, "registry_migrations", "registry")
 	case server_structs.OriginType:
+		return utils.MigrateServerSpecificDB(sqlDB, EmbedOriginMigrations, "origin_migrations", "origin")
+	case server_structs.TransferType:
+		// A standalone transfer server runs the embedded "local" issuer, whose
+		// OIDC tables (oidc_*) live in the origin migration set. Reuse that set
+		// (sharing the "origin" goose tracking) so a transfer-only server
+		// provisions them; the handful of origin-specific tables it also creates
+		// are unused but harmless.
 		return utils.MigrateServerSpecificDB(sqlDB, EmbedOriginMigrations, "origin_migrations", "origin")
 	default:
 		log.Debugf("No specific migrations for server type: %s", serverType.String())
@@ -455,20 +512,73 @@ func GetDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
 	return &downtime, nil
 }
 
+// Retrieve the registered server name for a server ID from the servers table.
+// Only meaningful on a Registry, which owns that table.
+func GetServerNameByID(serverID string) (string, error) {
+	var server server_structs.Server
+	if err := ServerDatabase.Select("name").First(&server, "id = ?", serverID).Error; err != nil {
+		return "", err
+	}
+	return server.Name, nil
+}
+
 func ShutdownDB() error {
-	if ServerDatabase == nil {
-		return nil
+	// Close every handle opened this process, not just the current global. When
+	// several servers share the global in one process (the fed tests), a later
+	// InitServerDatabase reassigns ServerDatabase, so closing only the current
+	// one would leak the earlier handles' file descriptors across restarts.
+	openedServerDatabasesMu.Lock()
+	dbs := openedServerDatabases
+	openedServerDatabases = nil
+	openedServerDatabasesMu.Unlock()
+
+	// Also close the current global handle when it was assigned without going
+	// through InitServerDatabase (e.g. tests that set ServerDatabase directly
+	// from utils.InitSQLiteDB, and so never registered it above).  Otherwise its
+	// file handle leaks and, on Windows, the SQLite file cannot be removed by
+	// t.TempDir() cleanup ("being used by another process").
+	if ServerDatabase != nil {
+		alreadyTracked := false
+		for _, db := range dbs {
+			if db == ServerDatabase {
+				alreadyTracked = true
+				break
+			}
+		}
+		if !alreadyTracked {
+			dbs = append(dbs, ServerDatabase)
+		}
 	}
-	sqldb, err := ServerDatabase.DB()
-	if err != nil {
-		log.Errorln("Failure when getting database instance from gorm:", err)
-		return err
+
+	var firstErr error
+	for _, db := range dbs {
+		sqldb, err := db.DB()
+		if err != nil {
+			log.Errorln("Failure when getting database instance from gorm:", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err = sqldb.Close(); err != nil {
+			log.Errorln("Failure when shutting down the database:", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
-	err = sqldb.Close()
-	if err != nil {
-		log.Errorln("Failure when shutting down the database:", err)
-	}
-	return err
+	// Deliberately leave ServerDatabase pointing at the (now-closed) handle
+	// rather than niling it here. Server subsystems (notably
+	// LaunchPeriodicAdvertise) run in the same errgroup as the goroutine that
+	// calls ShutdownDB and can race one more iteration through
+	// UpsertServerLocalMetadata / GetIncompleteDowntimes after the DB has been
+	// closed. A nil global turns that race into a SIGSEGV in gorm.getInstance;
+	// keeping the wrapper non-nil turns it into a graceful
+	// "sql: database is closed" error the caller can log and drop. sql.DB.Close
+	// is idempotent, so a subsequent ShutdownDB call re-closing this handle is
+	// safe. Tests that need to force reinitialization set ServerDatabase = nil
+	// themselves.
+	return firstErr
 }
 
 // Convert IsOrigin/IsCache boolean to a string for the service_names table.

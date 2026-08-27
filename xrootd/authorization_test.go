@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -533,7 +533,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 
 func TestPopulateAuthLinesMapForCache(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{
 			Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 			Path: "/first/namespace",
@@ -739,8 +739,8 @@ func TestEmitAuthfile(t *testing.T) {
 	testCases := []struct {
 		name                 string
 		serverType           server_structs.ServerType
-		originCfg            string                         // only used if serverType is Origin
-		nsAds                []server_structs.NamespaceAdV2 // only used if serverType is Cache
+		originCfg            string                       // only used if serverType is Origin
+		nsAds                []server_structs.NamespaceAd // only used if serverType is Cache
 		dropPrivileges       bool
 		discoverOSDFAuthfile bool
 		inputAuthfile        string
@@ -808,7 +808,7 @@ u * /second/valid/path lr /second/namespace -lr /first/namespace lr /.well-known
 		{
 			name:       "Cache with discoverOSDFAuthfile true and valid input authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -832,7 +832,7 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 		{
 			name:       "Cache with valid input authfile and without OSDF authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -853,7 +853,7 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 		{
 			name:       "Cache with without input authfile or OSDF authfile",
 			serverType: server_structs.CacheType,
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
 					Path: "/first/namespace",
@@ -1086,7 +1086,7 @@ func TestMergeConfig(t *testing.T) {
 	require.NoError(t, param.Origin_Port.Set(8443))
 	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/"))
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
@@ -1298,7 +1298,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
-			require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+			require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 			require.NoError(t, param.Logging_Level.Set("debug"))
 
 			test_utils.MockFederationRoot(t, nil, nil)
@@ -1365,17 +1365,17 @@ func TestGenerateCacheIssuers(t *testing.T) {
 
 	testCases := []struct {
 		name            string
-		nsAds           []server_structs.NamespaceAdV2
+		nsAds           []server_structs.NamespaceAd
 		expectedIssuers []Issuer
 	}{
 		{
 			name:            "empty namespace ads",
-			nsAds:           []server_structs.NamespaceAdV2{},
+			nsAds:           []server_structs.NamespaceAd{},
 			expectedIssuers: []Issuer{},
 		},
 		{
 			name: "single namespace ad with public capabilities",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1394,7 +1394,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "single namespace ad with private capabilities",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1418,7 +1418,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with the same issuer",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1454,7 +1454,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with different issuers",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1495,7 +1495,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 		},
 		{
 			name: "multiple namespace ads with multiple issuers",
-			nsAds: []server_structs.NamespaceAdV2{
+			nsAds: []server_structs.NamespaceAd{
 				{
 					Path: "/foo1",
 					Caps: server_structs.Capabilities{
@@ -1585,7 +1585,7 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 			tmpDir := t.TempDir()
-			require.NoError(t, param.ConfigDir.Set(tmpDir))
+			require.NoError(t, param.ConfigBase.Set(tmpDir))
 			require.NoError(t, param.Logging_Level.Set("debug"))
 			require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
 			require.NoError(t, param.Origin_SelfTest.Set(true))
@@ -1627,7 +1627,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_SelfTest.Set(true))
@@ -1689,7 +1689,7 @@ func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
 
 	// Create cache server with initial namespace ads - one public, one private
 	cacheServer := &cache.CacheServer{}
-	initialNamespaceAds := []server_structs.NamespaceAdV2{
+	initialNamespaceAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public/data",
 			Caps: server_structs.Capabilities{
@@ -1749,7 +1749,7 @@ func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
 
 	// Simulate namespace ads changing - make the previously public namespace private
 	// and add a new public namespace
-	updatedNamespaceAds := []server_structs.NamespaceAdV2{
+	updatedNamespaceAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public/data", // This was public, now becomes private
 			Caps: server_structs.Capabilities{

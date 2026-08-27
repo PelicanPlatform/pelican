@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -31,11 +31,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
@@ -47,15 +47,29 @@ import (
 
 // If we prompted the user for a new password while setting up the file,
 // this global flag will be set to true.  This prevents us from asking for
-// the password again later.
-var setEmptyPassword = false
+// the password again later.  It is atomic because credential reads/writes now
+// happen concurrently (e.g. a transfer resolving a token while a background
+// refresh runs).
+var setEmptyPassword atomic.Bool
+
+func init() {
+	// Allow callers (such as test subprocesses) to opt into passwordless
+	// credential storage via the environment.  This avoids interactive
+	// password prompts when the process has no controlling terminal.
+	if v := os.Getenv("PELICAN_CLIENT_NOPASSWORD"); v == "1" || v == "true" {
+		log.Warning("PELICAN_CLIENT_NOPASSWORD is set: the credential wallet " +
+			"(including refresh tokens and OAuth client secrets) will be stored " +
+			"UNENCRYPTED on disk. Use only in non-interactive/test environments.")
+		setEmptyPassword.Store(true)
+	}
+}
 
 // SetEmptyPassword instructs the encrypted config layer to skip password
 // prompts and store credentials without encryption.  Call this before any
 // operation that would trigger a credential save (e.g. AcquireToken) when
 // the user has opted for passwordless storage via --no-password.
 func SetEmptyPassword() {
-	setEmptyPassword = true
+	setEmptyPassword.Store(true)
 }
 
 var ErrIncorrectPassword = errors.New("incorrect password")
@@ -64,7 +78,7 @@ func GetEncryptedConfigName() (string, error) {
 	if override := param.Client_CredentialFile.GetString(); override != "" {
 		return override, nil
 	}
-	configDir := viper.GetString("ConfigDir")
+	configDir := param.ConfigBase.GetString()
 	if GetPreferredPrefix() == PelicanPrefix || IsRootExecution() {
 		return filepath.Join(configDir, "credentials", "client-credentials.pem"), nil
 	}
@@ -118,7 +132,7 @@ func GetEncryptedContents() (string, error) {
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
 
-			if !setEmptyPassword {
+			if !setEmptyPassword.Load() {
 				password, err := GetPassword(true)
 				if err != nil {
 					return "", err
@@ -128,7 +142,7 @@ func GetEncryptedContents() (string, error) {
 						log.Debugln("Failed to save password:", err)
 					}
 				} else {
-					setEmptyPassword = true
+					setEmptyPassword.Store(true)
 				}
 			}
 
@@ -233,8 +247,8 @@ func GetPassword(newFile bool) ([]byte, error) {
 
 // Returns the current contents of the credential configuration
 // from disk.
-func GetCredentialConfigContents() (OSDFConfig, error) {
-	config := OSDFConfig{}
+func GetCredentialConfigContents() (CredentialConfig, error) {
+	config := CredentialConfig{}
 
 	encContents, err := GetEncryptedContents()
 	if len(encContents) == 0 {
@@ -262,7 +276,7 @@ func GetCredentialConfigContents() (OSDFConfig, error) {
 			foundKey = true
 			// If the private key exists and is unprotected, assume this is
 			// the same as the user explicitly setting an empty password.
-			setEmptyPassword = true
+			setEmptyPassword.Store(true)
 		} else if block.Type == "ENCRYPTED PRIVATE KEY" {
 			password, _ := TryGetPassword()
 			typedPassword := false
@@ -333,7 +347,7 @@ func ResetPassword() error {
 	return nil
 }
 
-func SaveConfigContents(config *OSDFConfig) error {
+func SaveConfigContents(config *CredentialConfig) error {
 	return saveConfigContents(config, false)
 }
 
@@ -341,8 +355,8 @@ func SaveConfigContents(config *OSDFConfig) error {
 // fresh ed25519/x25519 key pair, and returns the PEM-encoded result.
 // If password is non-empty the private key block is PKCS#8-encrypted;
 // otherwise it is stored in the clear.
-func marshalEncryptedConfig(config *OSDFConfig, password []byte) ([]byte, error) {
-	defaultConfig := OSDFConfig{}
+func marshalEncryptedConfig(config *CredentialConfig, password []byte) ([]byte, error) {
+	defaultConfig := CredentialConfig{}
 	if config == nil {
 		config = &defaultConfig
 	}
@@ -397,9 +411,9 @@ func marshalEncryptedConfig(config *OSDFConfig, password []byte) ([]byte, error)
 	return pem_bytes, nil
 }
 
-func saveConfigContents(config *OSDFConfig, forcePassword bool) error {
+func saveConfigContents(config *CredentialConfig, forcePassword bool) error {
 	password, err := TryGetPassword()
-	if setEmptyPassword {
+	if setEmptyPassword.Load() {
 		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
 	} else if forcePassword || len(password) == 0 || err != nil {
 		var exists bool
@@ -571,7 +585,7 @@ func DecryptString(encryptedString string) (decryptedString string, keyID string
 // If withPassword is false, the credentials are saved without encryption.
 // This is useful for creating credential files that can be used in non-interactive
 // contexts where password prompts would fail.
-func SaveConfigContentsToFile(config *OSDFConfig, filePath string, withPassword bool) error {
+func SaveConfigContentsToFile(config *CredentialConfig, filePath string, withPassword bool) error {
 	var password []byte
 	var err error
 	if withPassword {

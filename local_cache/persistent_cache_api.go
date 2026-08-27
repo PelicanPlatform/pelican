@@ -21,9 +21,9 @@ package local_cache
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"io/fs"
@@ -45,10 +45,12 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -71,35 +73,7 @@ func requestLogger(r *http.Request, objectPath string) *log.Entry {
 // Digest header value.  If there are no checksums, it returns an empty string.
 // Example output: "md5=rL0Y20zC+Fzt72VPzMSk2A==, crc32c=abcd1234"
 func formatDigestHeader(checksums []Checksum) string {
-	if len(checksums) == 0 {
-		return ""
-	}
-
-	var parts []string
-	for _, ck := range checksums {
-		var algName, encodedVal string
-		switch ck.Type {
-		case ChecksumMD5:
-			algName = "md5"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumSHA1:
-			algName = "sha"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumSHA256:
-			algName = "sha-256"
-			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
-		case ChecksumCRC32:
-			algName = "crc32"
-			encodedVal = hex.EncodeToString(ck.Value)
-		case ChecksumCRC32C:
-			algName = "crc32c"
-			encodedVal = hex.EncodeToString(ck.Value)
-		default:
-			continue // skip unknown checksum types
-		}
-		parts = append(parts, algName+"="+encodedVal)
-	}
-	return strings.Join(parts, ", ")
+	return FormatDigestHeader(checksums)
 }
 
 // isConnectionError checks if an error is a connection error (reset, refused, etc.)
@@ -123,8 +97,9 @@ func isConnectionError(err error) bool {
 // chunked transfer-encoding, which is required for HTTP/1.1 trailers.
 type trailerWriter struct {
 	http.ResponseWriter
-	writeErr    *error
-	sendTrailer bool
+	writeErr     *error
+	sendTrailer  bool
+	bytesWritten int64
 }
 
 func (tw *trailerWriter) Header() http.Header {
@@ -142,6 +117,7 @@ func (tw *trailerWriter) WriteHeader(code int) {
 
 func (tw *trailerWriter) Write(p []byte) (int, error) {
 	n, err := tw.ResponseWriter.Write(p)
+	tw.bytesWritten += int64(n)
 	if err != nil && *tw.writeErr == nil {
 		*tw.writeErr = err
 	}
@@ -171,6 +147,117 @@ func (etr *errorTrackingReader) Read(p []byte) (int, error) {
 		*etr.readErr = err
 	}
 	return n, err
+}
+
+// retryAfterValue returns the whole-seconds Retry-After header value
+// advertised on shed (429) responses, from Cache.Throttle.RetryAfter.
+// Unset or non-positive values fall back to 60 seconds.
+func retryAfterValue() string {
+	d := param.Cache_Throttle_RetryAfter.GetDuration()
+	if d <= 0 {
+		d = 60 * time.Second
+	}
+	secs := int64((d + time.Second - 1) / time.Second)
+	return strconv.FormatInt(secs, 10)
+}
+
+// onlyThrottled reports whether err represents throttling and nothing else.
+//
+// A download accumulates one error per object server it tried
+// (client.TransferErrors implements Unwrap() []error), so a plain
+// errors.Is(err, ErrTooManyRequests) is true when *any* single attempt was
+// shed. Answering 429 on that basis would let one throttled origin mask a
+// definitive answer from another: a namespace served by origins A and B where
+// A returns 404 and B is throttled would be reported to the client as "retry
+// later", and it would retry forever for an object that does not exist. Only
+// take the throttle path when there is no more specific failure to report.
+//
+// Note this only helps where the errors are actually accumulated. statHttp
+// keeps just the first error across its endpoints rather than building a
+// multi-error, so on the HEAD/stat path a throttle from whichever endpoint
+// answered first still hides another endpoint's not-found. Fixing that means
+// changing how stat aggregates, not how the result is classified here.
+func onlyThrottled(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Walk down the single-error wrappers looking for an accumulator. The
+	// chain can be several links long -- github.com/pkg/errors.Wrap alone adds
+	// two -- so this has to loop rather than peek one level down, or a wrapped
+	// accumulator would collapse into the errors.Is below and lose the
+	// per-attempt detail this function exists to inspect.
+	for cur := err; cur != nil; {
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			children := multi.Unwrap()
+			if len(children) == 0 {
+				return false
+			}
+			for _, child := range children {
+				if !onlyThrottled(child) {
+					return false
+				}
+			}
+			return true
+		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		cur = single.Unwrap()
+	}
+	return errors.Is(err, client.ErrTooManyRequests)
+}
+
+// anyAttemptNotFound reports whether any attempt in err definitively found the
+// object missing.
+//
+// errors.As stops at the first PelicanError in tree order, which for an
+// accumulator is whatever the first object server happened to return. When one
+// origin was throttled and another answered "not found", that ordering decides
+// whether the client is told 404 or something far less useful, so the
+// definitive answer is searched for explicitly instead.
+//
+// This only ranks not-found above the *unclassified* remainder. A status code
+// relayed from upstream, and an authorization failure, still win: they say
+// something about the object that a sibling's 404 does not.
+func anyAttemptNotFound(err error) bool {
+	for cur := err; cur != nil; {
+		if pe, ok := cur.(*error_codes.PelicanError); ok && pe.Code() == fileNotFoundErrorCode {
+			return true
+		}
+		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
+			for _, child := range multi.Unwrap() {
+				if anyAttemptNotFound(child) {
+					return true
+				}
+			}
+			return false
+		}
+		single, ok := cur.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		cur = single.Unwrap()
+	}
+	return false
+}
+
+// fileNotFoundErrorCode is error_codes' Specification.FileNotFound.
+const fileNotFoundErrorCode = 5011
+
+// validShedReason returns reason if it is one of the known shed reasons, and
+// the generic "too_many_requests" otherwise.
+//
+// The value is written to the machine-parseable "error" field of a 429 body,
+// so it must come from a fixed vocabulary. Callers can reach here holding a
+// reason that arrived from an upstream server, and an arbitrary string echoed
+// to a client would flow onward into its logs and job ads.
+func validShedReason(reason string) string {
+	switch client.ShedReason(reason) {
+	case client.ShedOriginUnresponsive, client.ShedOriginSlow, client.ShedCacheOverloaded:
+		return reason
+	}
+	return "too_many_requests"
 }
 
 // handleError writes a structured JSON error response based on the error type.
@@ -206,6 +293,31 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		reqLog.Warn("Upstream response timeout")
 		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream response timeout")
 		return
+	} else if onlyThrottled(getErr) {
+		// Either the cache's own fair scheduler refused to admit this
+		// upstream fetch (SchedulerRejection), or the upstream server
+		// answered the fetch with a 429 of its own (CacheThrottleError).
+		// Ask the client to retry after a moment, and surface the specific
+		// reason so the client can distinguish an unresponsive origin from a
+		// merely-slow one or a cache-wide overload.  The "error" field is the
+		// machine-parseable reason; the client maps it to a Pelican error code.
+		errCode := "too_many_requests"
+		var rej *client.SchedulerRejection
+		var throttled *client.CacheThrottleError
+		if errors.As(getErr, &rej) {
+			errCode = validShedReason(string(rej.Reason))
+		} else if errors.As(getErr, &throttled) && throttled.Reason != "" {
+			// This reason originated at whatever upstream answered our fetch.
+			// It is validated where the response is parsed, but it reaches here
+			// through an exported field on an exported type, so re-check it
+			// rather than trusting a caller elsewhere to have done so: it is
+			// about to be echoed to a client as a machine-parseable value.
+			errCode = validShedReason(throttled.Reason)
+		}
+		reqLog.Warnf("Rejecting fetch with 429 (%s): %v", errCode, getErr)
+		w.Header().Set("Retry-After", retryAfterValue())
+		writeJSON(http.StatusTooManyRequests, errCode, getErr.Error())
+		return
 	}
 
 	reqLog.Errorln("Failed to get file from cache:", getErr)
@@ -218,10 +330,18 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
 		switch {
-		case pe.Code() == 5011: // FileNotFound
-			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
+			// Ranked above not-found: "you may not read this" is actionable
+			// (refresh a credential) and, unlike a sibling's 404, does not
+			// claim the object is absent.
 			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())
+		case pe.Code() == fileNotFoundErrorCode || anyAttemptNotFound(getErr):
+			// A definitive "the object is not here" from any attempt beats a
+			// sibling attempt's transient failure, whichever one errors.As
+			// happened to reach first. Without the second test, a throttle
+			// recorded ahead of the not-found decides the response and the
+			// client is told to come back for an object that will never exist.
+			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		default:
 			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())
 		}
@@ -264,6 +384,17 @@ func requestOnlyIfCached(r *http.Request) bool {
 //   - No-store streaming (io.Copy) for non-seekable responses
 //   - Range requests via http.ServeContent for seekable responses
 func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
+	// Every response from here carries object bytes the cache did not author
+	// and whose type it does not know: the origin's Content-Type is not
+	// recorded anywhere, so both the stored path (http.ServeContent) and the
+	// pass-through path fall back to sniffing, which types anything
+	// HTML-shaped as a document. This handler is mounted on the same Gin
+	// engine as the web UI, so that document would run on the origin holding
+	// the admin session cookie -- reachable by anyone who can put a .html or
+	// .svg into a namespace this cache serves. Set once here, before any
+	// branch writes, so it covers GET, HEAD, and PROPFIND on both listeners.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
 	authzHeader := r.Header.Get("Authorization")
 	bearerToken := ""
 	if strings.HasPrefix(authzHeader, "Bearer ") {
@@ -379,6 +510,14 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
 		w.Header().Set("Accept-Ranges", "bytes")
+		// Relay checksums as an RFC 3230 Digest header so clients can verify
+		// downloads -- they fetch checksums via HEAD. This applies whether the
+		// object is cached (checksums from metadata) or not (checksums from the
+		// origin's stat response); without it a client's WithRequireChecksum
+		// download through the cache has nothing to verify against.
+		if digest := formatDigestHeader(result.Checksums); digest != "" {
+			w.Header().Set("Digest", digest)
+		}
 		if result.Meta != nil {
 			if result.Meta.ETag != "" {
 				w.Header().Set("ETag", result.Meta.ETag)
@@ -528,10 +667,22 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", strconv.FormatInt(contentLen, 10))
 		}
 		w.Header().Set("Accept-Ranges", "none")
+		// The stored path gets its content type from http.ServeContent; this
+		// path has to say so itself. Without it net/http sniffs the body, and
+		// an origin's directory listing -- the reason this path exists -- is
+		// HTML, which would then be typed as such and run as a document on the
+		// cache's own web origin. What the origin sent is not recorded, so the
+		// honest answer is the opaque one.
+		contentType := meta.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(http.StatusOK)
 
 		var writeErr error
-		if _, err := io.Copy(w, reader); err != nil {
+		nServed, err := io.Copy(w, reader)
+		if err != nil {
 			writeErr = err
 		}
 		if sendTrailer {
@@ -541,6 +692,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Header().Set("X-Transfer-Status", trailerVal)
 		}
+		pc.emitTransferMonitoring(r, objectPath, nServed, startTime, bearerToken)
 		reqLog.WithFields(log.Fields{
 			"status":   200,
 			"cache":    "pass-through",
@@ -580,12 +732,23 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 
 	http.ServeContent(wrappedWriter, r, objectPath, modTime, wrappedReader)
 
+	// After the body has streamed, surface any post-download verification
+	// failure -- e.g. an origin/local checksum mismatch detected only after
+	// the body fully arrives from the origin -- in the trailer.  This blocks
+	// only for full-object reads (where the client was already waiting for
+	// the whole download); for partial range reads it returns immediately so
+	// a tiny range of a multi-GB object doesn't have to wait for the rest of
+	// the backing fill to complete.  See RangeReader.WaitForCompletion.
+	verifyErr := reader.WaitForCompletion(r.Context())
+
 	if sendTrailer {
 		trailerVal := "200: OK"
 		if writeErr != nil {
 			trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
 		} else if readErr != nil {
 			trailerVal = fmt.Sprintf("%d: %s", 500, readErr)
+		} else if verifyErr != nil {
+			trailerVal = fmt.Sprintf("%d: %s", 500, verifyErr)
 		}
 		w.Header().Set("X-Transfer-Status", trailerVal)
 	}
@@ -597,10 +760,64 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	if meta != nil && !meta.Completed.IsZero() && meta.Completed.Before(startTime) {
 		cacheStatus = "hit"
 	}
+	pc.emitTransferMonitoring(r, objectPath, wrappedWriter.bytesWritten, startTime, bearerToken)
 	reqLog.WithFields(log.Fields{
 		"cache":    cacheStatus,
 		"duration": time.Since(startTime).Round(time.Millisecond).String(),
 	}).Info("Request complete")
+}
+
+// emitTransferMonitoring emits an XRootD-style monitoring record for a served
+// GET, mirroring what the POSIXv2 origin emits.  It is a no-op when the
+// monitoring shoveler is disabled or when no bytes were served (e.g. a 304).
+// The packets flow to the shoveler's internal channel and on to the configured
+// monitoring collectors.
+func (pc *PersistentCache) emitTransferMonitoring(r *http.Request, objectPath string, bytesServed int64, start time.Time, bearerToken string) {
+	if bytesServed <= 0 || !param.Shoveler_Enable.GetBool() {
+		return
+	}
+
+	event := metrics.TransferEvent{
+		Path:         objectPath,
+		ReadBytes:    bytesServed,
+		ReadOps:      1,
+		ClientIP:     cacheClientIP(r),
+		AuthProtocol: "https",
+		UserAgent:    r.UserAgent(),
+		Project:      utils.ExtractProjectFromUserAgent(r.Header.Values("User-Agent")),
+		StartTime:    start,
+		EndTime:      time.Now(),
+	}
+
+	// Best-effort user attribution from the (already-authorized) token.  The
+	// token signature is not re-verified here; it is used only for monitoring.
+	if bearerToken != "" {
+		if tok, err := token.UnsafeParseClaims(bearerToken); err == nil {
+			event.UserDN = tok.Subject()
+			event.Issuer = tok.Issuer()
+		}
+	}
+
+	metrics.EmitTransferEvent(event)
+}
+
+// cacheClientIP extracts the client IP from a request, preferring the
+// X-Forwarded-For / X-Real-IP headers set by a fronting proxy and falling back
+// to the connection's remote address.
+func cacheClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.IndexByte(xff, ','); idx >= 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return strings.TrimSpace(xrip)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // servePropfindFromCache synthesizes a WebDAV multistatus response from
@@ -614,6 +831,39 @@ func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http
 		return false
 	}
 
+	body := buildPropfindMultistatus(objectPath, meta)
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusMultiStatus)
+	if _, err := w.Write(body); err != nil {
+		log.Errorln("Failed to write PROPFIND response:", err)
+	}
+	return true
+}
+
+// writeXMLText writes s to buf as XML character data, escaping anything that
+// would otherwise be read as markup.  xml.EscapeText can only fail when the
+// writer fails, and a bytes.Buffer never does, so the error is logged rather
+// than plumbed through the callers.
+func writeXMLText(buf *bytes.Buffer, s string) {
+	if err := xml.EscapeText(buf, []byte(s)); err != nil {
+		log.Errorln("Failed to escape XML text for PROPFIND response:", err)
+	}
+}
+
+// buildPropfindMultistatus renders the WebDAV multistatus body describing a
+// single cached object.
+//
+// Every interpolated value is escaped rather than concatenated: the path comes
+// from the client, and ContentType and ETag are copied verbatim from the
+// upstream origin's response headers.  A hostile origin that answers with an
+// ETag such as `</D:getetag><D:resourcetype><D:collection/></D:resourcetype>`
+// would otherwise forge properties in a document the cache serves to its own
+// clients under its own name — a forged resourcetype in particular now steers
+// client behavior, since clients use it to decide whether a path is a
+// collection.
+func buildPropfindMultistatus(objectPath string, meta *CacheMetadata) []byte {
 	// Format Last-Modified per RFC 7232 §2.2 / HTTP-date.
 	var lastMod string
 	if !meta.LastModified.IsZero() {
@@ -626,32 +876,32 @@ func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http
 	buf.WriteString("\n")
 	buf.WriteString(`<D:multistatus xmlns:D="DAV:">`)
 	buf.WriteString("\n  <D:response>\n    <D:href>")
-	buf.WriteString(objectPath)
+	writeXMLText(&buf, objectPath)
 	buf.WriteString("</D:href>\n    <D:propstat>\n      <D:prop>\n")
 	buf.WriteString("        <D:resourcetype/>\n")
 	if meta.ContentLength > 0 {
 		fmt.Fprintf(&buf, "        <D:getcontentlength>%d</D:getcontentlength>\n", meta.ContentLength)
 	}
 	if lastMod != "" {
-		fmt.Fprintf(&buf, "        <D:getlastmodified>%s</D:getlastmodified>\n", lastMod)
+		buf.WriteString("        <D:getlastmodified>")
+		writeXMLText(&buf, lastMod)
+		buf.WriteString("</D:getlastmodified>\n")
 	}
 	if meta.ContentType != "" {
-		fmt.Fprintf(&buf, "        <D:getcontenttype>%s</D:getcontenttype>\n", meta.ContentType)
+		buf.WriteString("        <D:getcontenttype>")
+		writeXMLText(&buf, meta.ContentType)
+		buf.WriteString("</D:getcontenttype>\n")
 	}
 	if meta.ETag != "" {
-		fmt.Fprintf(&buf, "        <D:getetag>%s</D:getetag>\n", meta.ETag)
+		buf.WriteString("        <D:getetag>")
+		writeXMLText(&buf, meta.ETag)
+		buf.WriteString("</D:getetag>\n")
 	}
 	buf.WriteString("      </D:prop>\n")
 	buf.WriteString("      <D:status>HTTP/1.1 200 OK</D:status>\n")
 	buf.WriteString("    </D:propstat>\n  </D:response>\n</D:multistatus>\n")
 
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	w.WriteHeader(http.StatusMultiStatus)
-	if _, err := w.Write(buf.Bytes()); err != nil {
-		log.Errorln("Failed to write PROPFIND response:", err)
-	}
-	return true
+	return buf.Bytes()
 }
 
 // proxyPropfind forwards a PROPFIND request to the origin server.
@@ -776,7 +1026,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 // injection, and connection-error classification.  Switching to the transfer
 // engine would eliminate ~80 lines of manual HTTP plumbing here and in
 // proxyPropfind.  The trade-off is that proxyWrite needs cache-specific
-// behaviour the engine doesn't (yet) support: scope-aware authorization
+// behavior the engine doesn't (yet) support: scope-aware authorization
 // (storage.create vs storage.modify), streaming the origin's full response
 // back to the caller (status + headers + body), and post-success cache
 // invalidation with ETag-aware instance management.  Until the engine
@@ -1422,6 +1672,17 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	adminIntrospect.POST("/consistency", pc.introspectConsistencyHandler)
 	log.Info("Cache introspection API registered at /api/v1.0/cache/introspect/")
 
+	// Register the destructive chaos/fault-injection endpoint only when
+	// explicitly enabled (Cache.EnableChaosAPI), since it deliberately corrupts
+	// cached data.  It is admin-authenticated like the rest of introspect.
+	if param.Cache_EnableChaosAPI.GetBool() {
+		adminIntrospect.POST("/chaos", pc.introspectChaosHandler)
+		chaosAPIEnabled.Set(1)
+		log.Warn("Cache chaos/fault-injection API is ENABLED at /api/v1.0/cache/introspect/chaos (Cache.EnableChaosAPI); this can corrupt cached data and should only be used for testing")
+	} else {
+		chaosAPIEnabled.Set(0)
+	}
+
 	return nil
 }
 
@@ -1679,6 +1940,93 @@ func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
 		}
 	}
 
+	c.JSON(http.StatusOK, result)
+}
+
+// introspectChaosHandler injects corruption into a cached object for
+// fault-injection testing.  It is only registered when Cache.EnableChaosAPI is
+// true and is admin-authenticated.
+//
+// POST /api/v1.0/cache/introspect/chaos?op=corrupt|truncate&url=...&etag=...&instance=...
+//
+//	corrupt:  &block=<n>&bytes=<n>
+//	truncate: &chunk=<n>&drop-bytes=<n>
+func (pc *PersistentCache) introspectChaosHandler(c *gin.Context) {
+	op := c.Query("op")
+	objectURL := c.Query("url")
+	etag := c.Query("etag")
+	instance := c.Query("instance")
+
+	if objectURL == "" && instance == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url or instance query parameter is required"})
+		return
+	}
+
+	// Parsing helpers that bound each value to its target type's width via the
+	// bitSize argument, so the subsequent narrowing conversion is provably safe.
+	parseU32 := func(name string, def uint32) (uint32, error) {
+		v := c.Query(name)
+		if v == "" {
+			return def, nil
+		}
+		n, perr := strconv.ParseUint(v, 10, 32)
+		if perr != nil {
+			return 0, errors.Errorf("invalid %s parameter", name)
+		}
+		return uint32(n), nil
+	}
+	parseI32 := func(name string, def int32) (int32, error) {
+		v := c.Query(name)
+		if v == "" {
+			return def, nil
+		}
+		n, perr := strconv.ParseInt(v, 10, 32)
+		if perr != nil {
+			return 0, errors.Errorf("invalid %s parameter", name)
+		}
+		return int32(n), nil
+	}
+
+	injector := NewChaosInjector(pc.db, pc.storage)
+
+	var result *ChaosResult
+	var err error
+	switch op {
+	case "corrupt":
+		var block uint32
+		var nbytes int32
+		if block, err = parseU32("block", 0); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if nbytes, err = parseI32("bytes", 0); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		result, err = injector.CorruptBlock(objectURL, etag, instance, block, int(nbytes))
+	case "truncate":
+		var chunk int32
+		if chunk, err = parseI32("chunk", -1); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var drop int64
+		if v := c.Query("drop-bytes"); v != "" {
+			if drop, err = strconv.ParseInt(v, 10, 64); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drop-bytes parameter"})
+				return
+			}
+		}
+		result, err = injector.TruncateObject(objectURL, etag, instance, int(chunk), drop)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "op must be 'corrupt' or 'truncate'"})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 

@@ -80,7 +80,7 @@ func withoutCacheDataLocations() lotmanTestOption {
 // Initialize Lotman
 // If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
 // so that underlying metadata discovery can happen against the mock discovery host
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2, opts ...lotmanTestOption) (bool, func()) {
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAd, opts ...lotmanTestOption) (bool, func()) {
 	o := lotmanTestOpts{}
 	for _, opt := range opts {
 		opt(&o)
@@ -88,7 +88,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
 	require.NoError(t, param.Cache_HighWaterMark.Set("100g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("50g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("50g"))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	// The newer lotman library strictly enforces creation_time < expiration_time
 	// when storing a lot. The auto-created `default` and `root` lots derive
@@ -127,7 +127,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	} else {
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
-		require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 		_ = config.InitServer(context.Background(), server_structs.CacheType)
 	}
 

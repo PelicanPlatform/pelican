@@ -222,7 +222,7 @@ func (f *FedTest) Spinup() {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(f.T, err)
 
-	require.NoError(f.T, param.ConfigDir.Set(tmpPath))
+	require.NoError(f.T, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
 	require.NoError(f.T, param.RuntimeDir.Set(tmpPath))
 
@@ -1264,6 +1264,146 @@ func TestCreateTransferError(t *testing.T) {
 	})
 }
 
+// Test that addDataToClassAd classifies result-level (post-transfer) errors.
+// A checksum mismatch is set on result.Error after the download attempts have all
+// succeeded (attempt.Error == nil), so it must still populate TransferErrorData with
+// the proper ErrorType/PelicanErrorCode rather than being reported with no code.
+func TestAddDataToClassAdResultLevelError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Checksum mismatch: attempts succeeded, error lives only on result.Error.
+	t.Run("ChecksumMismatch", func(t *testing.T) {
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 1)
+
+		errorType, ok := classad.GetAs[string](errorDataList[0], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", errorType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[0], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+		devErrType, ok := classad.GetAs[string](teDevData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, checksumErr.ErrorType(), devErrType)
+	})
+
+	// Regression: when a per-attempt error already captured the failure, the
+	// result-level branch must not add a duplicate TransferErrorData entry.
+	t.Run("PerAttemptErrorNotDuplicated", func(t *testing.T) {
+		attemptErr := error_codes.NewContact_ConnectionSetupError(errors.New("connection refused"))
+		result := &client.TransferResults{
+			Error: attemptErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", Error: attemptErr},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 1)
+	})
+
+	// Failover then post-transfer failure: an early attempt fails (e.g. a stale cache
+	// connection), a later attempt succeeds, and only then does the checksum fail. The
+	// download-level error must not stand in for the fatal result-level error; both are
+	// recorded, in the order they occurred (attempt errors first, result-level error last).
+	t.Run("FailoverThenChecksumMismatch", func(t *testing.T) {
+		connErr := error_codes.NewContact_ConnectionSetupError(errors.New("connection refused"))
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			// On a successful download the client clears the aggregate error and sets
+			// result.Error only from post-transfer verification (the checksum failure).
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cache.example.com", Error: connErr},
+				{Number: 1, Endpoint: "origin.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 2)
+
+		// Entry 0: the recovered per-attempt connection error.
+		firstType, ok := classad.GetAs[string](errorDataList[0], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Contact", firstType)
+
+		// Entry 1: the fatal result-level checksum error, carrying its ErrorType/code.
+		secondType, ok := classad.GetAs[string](errorDataList[1], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", secondType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[1], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+	})
+
+	// Same as above but with multiple failed attempts before the successful one
+	// (cacheA fails, cacheB fails, originC succeeds, then the checksum fails). Every
+	// per-attempt error is recorded, followed by the fatal result-level error, all in
+	// the order they occurred.
+	t.Run("MultipleFailoversThenChecksumMismatch", func(t *testing.T) {
+		cacheAErr := error_codes.NewContact_ConnectionSetupError(errors.New("cacheA: connection refused"))
+		cacheBErr := error_codes.NewContact_ConnectionSetupError(errors.New("cacheB: connection reset"))
+		checksumErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("checksum mismatch for md5"))
+		result := &client.TransferResults{
+			// The download ultimately succeeded on originC, so result.Error carries only
+			// the post-transfer checksum failure, not the earlier attempt errors.
+			Error: checksumErr,
+			Attempts: []client.TransferResult{
+				{Number: 0, Endpoint: "cacheA.example.com", Error: cacheAErr},
+				{Number: 1, Endpoint: "cacheB.example.com", Error: cacheBErr},
+				{Number: 2, Endpoint: "originC.example.com", TransferFileBytes: 1024},
+			},
+		}
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, result, result.Error, len(result.Attempts), nil, nil)
+
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
+		require.True(t, ok)
+		require.Len(t, errorDataList, 3)
+
+		// Entries 0 and 1: the two recovered per-attempt connection errors.
+		for i := 0; i < 2; i++ {
+			attemptType, ok := classad.GetAs[string](errorDataList[i], "ErrorType")
+			require.True(t, ok)
+			assert.Equal(t, "Contact", attemptType)
+		}
+
+		// Entry 2: the fatal result-level checksum error, carrying its ErrorType/code.
+		lastType, ok := classad.GetAs[string](errorDataList[2], "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", lastType)
+
+		teDevData, ok := classad.GetAs[*classad.ClassAd](errorDataList[2], "DeveloperData")
+		require.True(t, ok)
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(checksumErr.Code()), errorCode)
+	})
+}
+
 // Test recursive downloads from the plugin
 func TestPluginRecursiveDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -1726,7 +1866,7 @@ func TestTransferError404(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1826,7 +1966,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -2005,7 +2145,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -2111,4 +2251,129 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 		}
 	}
+}
+
+// TestCreateTransferErrorThrottle pins the HTCondor result-ad contract for a
+// transfer shed by a cache's fair scheduler (HTTP 429).
+//
+// The plugin protocol has no retry-delay field and the plugin must never sleep
+// (HTCondor is timing it), so the backoff hint and the machine-parseable shed
+// reason are only visible to external retriers and operators if they are
+// carried in DeveloperData. Dropping either one leaves the job ad saying
+// nothing more than "it failed", and a retrier has no way to distinguish an
+// overloaded cache from an origin that is genuinely broken.
+func TestCreateTransferErrorThrottle(t *testing.T) {
+	newThrottle := func(reason string, retryAfter time.Duration, inner error) *client.CacheThrottleError {
+		return &client.CacheThrottleError{
+			Reason:     reason,
+			RetryAfter: retryAfter,
+			Endpoint:   "cache.example.org:8443",
+			Err:        inner,
+		}
+	}
+
+	t.Run("ReasonAndBackoffSurfaced", func(t *testing.T) {
+		originSlow := error_codes.NewTransfer_OriginSlowError(errors.New("origin is over its share of the transfer pool"))
+		throttled := newThrottle(string(client.ShedOriginSlow), 30*time.Second, originSlow)
+
+		transferError := createTransferError(throttled)
+		devData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+
+		retryAfterSeconds, ok := classad.GetAs[int64](devData, "RetryAfterSeconds")
+		require.True(t, ok, "a throttled transfer must advertise its backoff hint")
+		assert.Equal(t, int64(30), retryAfterSeconds)
+
+		throttleReason, ok := classad.GetAs[string](devData, "ThrottleReason")
+		require.True(t, ok, "a throttled transfer must advertise the shed reason")
+		assert.Equal(t, string(client.ShedOriginSlow), throttleReason)
+
+		// The shed classification must survive as the Pelican error code, so
+		// the job ad distinguishes a slow origin from a generic transfer
+		// failure.
+		pelicanErrorCode, ok := classad.GetAs[int64](devData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(6009), pelicanErrorCode)
+		assert.Equal(t, int64(originSlow.Code()), pelicanErrorCode)
+
+		// A shed request is worth retrying; if the ad said otherwise HTCondor
+		// would give up on a transfer that would have succeeded moments later.
+		retryable, ok := classad.GetAs[bool](devData, "Retryable")
+		require.True(t, ok)
+		assert.True(t, retryable)
+
+		errorType, ok := classad.GetAs[string](devData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer.OriginSlow", errorType)
+		topErrorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", topErrorType)
+	})
+
+	t.Run("SubSecondBackoffRoundsUp", func(t *testing.T) {
+		// Retry-After is whole seconds. A sub-second hint truncated to 0 reads
+		// as "no hint given" rather than "retry almost immediately", so it must
+		// round up.
+		throttled := newThrottle(string(client.ShedCacheOverloaded), 500*time.Millisecond,
+			error_codes.NewTransfer_CacheOverloadedError(errors.New("cache is shedding load")))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(throttled), "DeveloperData")
+		require.True(t, ok)
+		retryAfterSeconds, ok := classad.GetAs[int64](devData, "RetryAfterSeconds")
+		require.True(t, ok)
+		assert.Equal(t, int64(1), retryAfterSeconds)
+	})
+
+	t.Run("NoHintMeansNoAttribute", func(t *testing.T) {
+		// A cache that shed the request without a Retry-After header leaves the
+		// attribute out entirely rather than claiming a zero-second backoff.
+		throttled := newThrottle(string(client.ShedOriginUnresponsive), 0,
+			error_codes.NewTransfer_OriginUnresponsiveError(errors.New("origin is not answering")))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(throttled), "DeveloperData")
+		require.True(t, ok)
+		_, ok = classad.GetAs[int64](devData, "RetryAfterSeconds")
+		assert.False(t, ok, "no backoff hint means no RetryAfterSeconds attribute")
+		throttleReason, ok := classad.GetAs[string](devData, "ThrottleReason")
+		require.True(t, ok)
+		assert.Equal(t, string(client.ShedOriginUnresponsive), throttleReason)
+	})
+
+	t.Run("NonThrottleErrorHasNoThrottleAttributes", func(t *testing.T) {
+		// The throttle attributes must be specific to a shed request; a
+		// retrier keying off them would otherwise back off on failures that
+		// have nothing to do with load.
+		notFound := error_codes.NewSpecification_FileNotFoundError(errors.New("object does not exist"))
+
+		devData, ok := classad.GetAs[*classad.ClassAd](createTransferError(notFound), "DeveloperData")
+		require.True(t, ok)
+		_, ok = classad.GetAs[int64](devData, "RetryAfterSeconds")
+		assert.False(t, ok)
+		_, ok = classad.GetAs[string](devData, "ThrottleReason")
+		assert.False(t, ok)
+	})
+
+	t.Run("RetryableReachesTheExitCode", func(t *testing.T) {
+		// The retryable flag on the result ad is what the plugin turns into
+		// exit code 11, which is how HTCondor learns to reschedule the
+		// transfer instead of holding the job.
+		throttled := newThrottle(string(client.ShedOriginSlow), 30*time.Second,
+			error_codes.NewTransfer_OriginSlowError(errors.New("origin is over its share of the transfer pool")))
+
+		results := make(chan *classad.ClassAd, 1)
+		failTransfer("pelican://example.org/namespace/object.txt", "/path/to/local.txt", results, false, throttled)
+		resultAd := <-results
+
+		transferRetryable, ok := classad.GetAs[bool](resultAd, "TransferRetryable")
+		require.True(t, ok)
+		assert.True(t, transferRetryable)
+
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "results.ad"))
+		require.NoError(t, err)
+		defer tempFile.Close()
+		success, retryable, err := writeOutfile(nil, []*classad.ClassAd{resultAd}, tempFile)
+		require.NoError(t, err)
+		assert.False(t, success)
+		assert.True(t, retryable, "a shed transfer must be reported to HTCondor as retryable (exit code 11)")
+	})
 }

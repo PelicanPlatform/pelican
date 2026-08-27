@@ -300,7 +300,7 @@ func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) 
 // DeleteUnusedDynamicClients removes dynamically registered clients that have
 // never been used (last_used_at IS NULL) and were created more than maxAge ago.
 func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-maxAge)
+	cutoff := time.Now().Add(-maxAge)
 	result := s.db.WithContext(ctx).
 		Where("dynamically_registered = ? AND last_used_at IS NULL AND created_at < ? AND namespace = ?", true, cutoff, s.Namespace).
 		Delete(&OIDCClientRecord{})
@@ -310,7 +310,7 @@ func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge tim
 // DeleteStaleDynamicClients removes dynamically registered clients that were
 // previously used but have not been used for longer than maxAge.
 func (s *OIDCStorage) DeleteStaleDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-maxAge)
+	cutoff := time.Now().Add(-maxAge)
 	result := s.db.WithContext(ctx).
 		Where("dynamically_registered = ? AND last_used_at IS NOT NULL AND last_used_at < ? AND namespace = ?", true, cutoff, s.Namespace).
 		Delete(&OIDCClientRecord{})
@@ -320,8 +320,14 @@ func (s *OIDCStorage) DeleteStaleDynamicClients(ctx context.Context, maxAge time
 // DeleteExpiredTokenSessions removes expired rows from all token/session tables
 // (access tokens, refresh tokens, authorization codes, PKCE requests, OpenID
 // sessions). Returns the total number of rows deleted.
+//
+// Time-comparison invariant: expiry columns are written elsewhere in this
+// package with the local clock (time.Now().Add(...)), and the glebarez/SQLite
+// driver stores time.Time as offset-bearing strings compared lexically. The GC
+// cutoffs must therefore use the same local basis — mixing time.Now().UTC()
+// here silently skips or over-deletes rows on hosts whose timezone is not UTC.
 func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, error) {
-	now := time.Now().UTC()
+	now := time.Now()
 	tables := []string{
 		"oidc_access_tokens",
 		"oidc_authorization_codes",
@@ -365,7 +371,7 @@ func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, er
 // DeleteExpiredDeviceCodes removes device codes that have expired or have been
 // consumed (status = 'used'). Returns the number of rows deleted.
 func (s *OIDCStorage) DeleteExpiredDeviceCodes(ctx context.Context) (int64, error) {
-	now := time.Now().UTC()
+	now := time.Now()
 	result := s.db.WithContext(ctx).
 		Where("expires_at < ? OR status = ?", now, "used").
 		Delete(&OIDCDeviceCode{})
@@ -375,7 +381,7 @@ func (s *OIDCStorage) DeleteExpiredDeviceCodes(ctx context.Context) (int64, erro
 // DeleteExpiredJWTAssertions removes JWT assertion replay-prevention entries
 // whose expiry has passed. Returns the number of rows deleted.
 func (s *OIDCStorage) DeleteExpiredJWTAssertions(ctx context.Context) (int64, error) {
-	now := time.Now().UTC()
+	now := time.Now()
 	result := s.db.WithContext(ctx).
 		Where("expires_at < ?", now).
 		Delete(&OIDCJWTAssertion{})
@@ -554,7 +560,7 @@ func (s *OIDCStorage) RotateRefreshToken(ctx context.Context, requestID string, 
 	return s.db.WithContext(ctx).Model(&OIDCRefreshToken{}).
 		Where("signature = ? AND namespace = ? AND active = ?", refreshTokenSignature, s.Namespace, true).
 		Updates(map[string]interface{}{
-			"first_used_at": gorm.Expr("COALESCE(first_used_at, ?)", time.Now().UTC()),
+			"first_used_at": gorm.Expr("COALESCE(first_used_at, ?)", time.Now()),
 			"active":        false,
 		}).Error
 }
@@ -721,7 +727,7 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 	// SELECT-then-UPDATE.  If RowsAffected == 0 the previous poll
 	// was too recent → slow_down.
 	const pollingInterval = 5 * time.Second
-	now := time.Now().UTC()
+	now := time.Now()
 	cutoff := now.Add(-pollingInterval)
 	pollResult := s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
 		Where("device_code = ? AND namespace = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)", deviceCode, s.Namespace, cutoff).
@@ -788,7 +794,7 @@ func (s *OIDCStorage) InvalidateDeviceCodeSession(ctx context.Context, deviceCod
 func (s *OIDCStorage) UpdateDeviceCodePolling(ctx context.Context, deviceCode string) error {
 	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
 		Where("device_code = ? AND namespace = ?", deviceCode, s.Namespace).
-		Update("last_polled_at", time.Now().UTC()).Error
+		Update("last_polled_at", time.Now()).Error
 }
 
 // ---- Internal helpers ----

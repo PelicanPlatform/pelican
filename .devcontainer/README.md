@@ -23,8 +23,8 @@ This directory contains the devcontainer configuration for developing Pelican us
 ## Container Details
 
 - **Base Image**: `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`
-- **User**: root (default)
-- **Non-root Users (for testing)**: alice
+- **User**: `vscode` (non-root, created by the `common-utils` feature with passwordless `sudo`; the container no longer runs as `root` by default so that tools which refuse to run as root — such as `claude --dangerously-skip-permissions` — work out of the box)
+- **Additional test user**: `alice` (shipped by the base image for multi-user scenarios; switch with `su - alice`)
 - **Forwarded Ports**:
   - 8444: Default Pelican server port
   - 8443: Pelican web UI port
@@ -66,9 +66,11 @@ go test ./...
 cd director && go test
 ```
 
-## Testing as Non-Root Users
+## User & Non-Root Testing
 
-The dev container includes a non-root user `alice` for scenarios such as:
+The dev container runs as the non-root user `vscode` by default (created by the `common-utils` feature with passwordless `sudo`). Running as non-root keeps tools that refuse to run as `root` — such as `claude --dangerously-skip-permissions` — working out of the box. Use `sudo` when you need root.
+
+The base image also ships a separate `alice` user for scenarios such as:
 
 - Bootstrapping Pelican config locations for non-root users
 - Multi-user Origins

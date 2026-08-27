@@ -305,6 +305,11 @@ func (ct *chunkTracker) releaseAll() {
 type StorageManager struct {
 	db *CacheDB
 
+	// evictionRunning records whether the TTL caches' eviction loops were
+	// started, so Close knows whether there is anything to stop. Read-only
+	// managers never start them.
+	evictionRunning atomic.Bool
+
 	// dirs maps storageID → objects directory (e.g. "/data1/objects").
 	// StorageIDFirstDisk is always present; additional dirs have
 	// sequential IDs.
@@ -349,6 +354,17 @@ type StorageManager struct {
 	// (InstanceHash, blockNumber); cost = BlockDataSize per entry.
 	// Nil when disabled (MemoryCacheSize == 0).
 	ptCache *ristretto.Cache[uint64, []byte]
+
+	// pins tracks object versions with live readers, so a delete path that
+	// respects them does not pull data out from under one.  See pin.go.
+	pins *pinSet
+
+	// liveAppends holds the instance hashes of AppendWriters this process
+	// still owns, as a set (the value is always struct{}{}).  A persisted
+	// append-in-flight record whose hash is absent here belongs to a writer
+	// that did not survive, which is what makes it reclaimable.  Kept as a
+	// sync.Map so the zero value works in every StorageManager constructor.
+	liveAppends sync.Map
 
 	// chooseDir selects a storage directory for new chunk files.
 	// Defaults to simple round-robin.  In production, NewPersistentCache
@@ -567,6 +583,7 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		fdCacheMaxSize: fdCacheSize,
 		ptCache:        ptCache,
 		chooseDir:      defaultChooseDir,
+		pins:           newPinSet(),
 		blockStates:    newBlockStateCache(db),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
@@ -589,11 +606,27 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 	// Start the TTL cache eviction goroutines so idle entries are reaped
 	// automatically.  They are stopped when the StorageManager is closed.
 	// Launching through the errgroup prevents goroutine leaks in tests.
+	sm.evictionRunning.Store(true)
 	egrp.Go(func() error { sm.blockStates.Start(); return nil })
 	egrp.Go(func() error { sm.diskCrypto.Start(); return nil })
 	egrp.Go(func() error { sm.openFiles.Start(); return nil })
 
 	return sm, nil
+}
+
+// SetChooseDir replaces the storage-directory selection function.
+//
+// The default is plain round-robin, which ignores how full each directory is.
+// The cache substitutes a free-space-weighted chooser from its eviction
+// manager; a pstore, which has no eviction manager, substitutes one driven by
+// its own capacity limits.  Without this a store with directories of
+// different sizes round-robins straight into a full one.
+//
+// Must be called before any concurrent access begins.
+func (sm *StorageManager) SetChooseDir(fn func() StorageID) {
+	if fn != nil {
+		sm.chooseDir = fn
+	}
 }
 
 // GetDirs returns the configured storage directories (storageID → objects dir).
@@ -602,10 +635,27 @@ func (sm *StorageManager) GetDirs() map[StorageID]string {
 }
 
 // Close stops TTL cache eviction goroutines and releases cached resources.
+//
+// Only the caches that were actually started are stopped.  ttlcache's Stop is
+// an unbuffered channel send that its Start loop receives, so stopping a cache
+// whose loop was never spawned blocks forever -- which is what happened to
+// every manager built by NewStorageManagerReadOnly, making the read-only
+// introspection paths hang on exit.
 func (sm *StorageManager) Close() {
-	sm.blockStates.Stop()
-	sm.diskCrypto.Stop()
-	sm.openFiles.Stop()
+	// Stop() hands the eviction loop a value over an unbuffered channel and
+	// waits for it to be received, so it blocks forever if the loop is not
+	// running -- which is the case for a read-only manager (it never starts
+	// them) and for a second Close(). Only signal loops that are live, and
+	// claim them so a repeated Close() cannot signal again.
+	//
+	// This makes Close repeatable, not concurrency-safe: the work below the CAS
+	// is unguarded, and ristretto's Close is itself not safe to call twice at
+	// once. Every caller today closes from a single goroutine.
+	if sm.evictionRunning.CompareAndSwap(true, false) {
+		sm.blockStates.Stop()
+		sm.diskCrypto.Stop()
+		sm.openFiles.Stop()
+	}
 	// Closing caches evicts all entries, triggering OnEviction which
 	// closes each file descriptor.
 	sm.openFiles.DeleteAll()
@@ -617,6 +667,12 @@ func (sm *StorageManager) Close() {
 // NewStorageManagerReadOnly creates a storage manager for read-only introspection.
 // This is a lightweight variant suitable for CLI tools that only need to read
 // metadata and block states, not perform downloads or writes.
+//
+// It carries no read-only flag of its own, and needs none: it never touches
+// the database except through db's typed methods, so a db from
+// OpenCacheDBReadOnly already refuses every write made through it.  Callers
+// that hand it a writable db (pstore's maintenance open, which needs `fsck
+// --repair` to work) are asserting their own preconditions instead.
 func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, error) {
 	// Load disk mappings to discover storage directories
 	mappings, err := db.LoadDiskMappings()
@@ -634,6 +690,7 @@ func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, er
 		db:             db,
 		dirs:           objDirs,
 		inlineMaxBytes: InlineThreshold,
+		pins:           newPinSet(),
 		blockStates:    newBlockStateCache(db),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
@@ -1870,14 +1927,30 @@ func (sm *StorageManager) deleteChunkFiles(instanceHash InstanceHash, contentLen
 // either limit means "no limit on that dimension".  The method is allowed
 // to go one object over the byte threshold to prevent starvation.
 //
+// Objects under a live reader are spared.  Deleting one does not merely slow
+// that reader down: refCountedFile keeps its descriptor open across the
+// unlink, but the reader also needs the object's metadata, data key, and
+// block state, and eviction removes all three -- so the transfer fails.  The
+// overlap is small by construction, since the head of the LRU index is the
+// least recently used object and a pinned object is being read right now, but
+// UpdateLRU debounces by ten minutes: a slow reader streaming a large object
+// through a fast-churning cache can drift toward the head, which is exactly
+// the case worth protecting.
+//
+// A spared object stays at the head of the index and is reconsidered on the
+// next pass, by which time its reader has usually finished.
+//
 // All DB mutations happen atomically; filesystem deletes follow afterward.
-// Returns the evicted objects, total bytes freed, and any error.
-func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) ([]evictedObject, uint64, error) {
-	evicted, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes)
+// Returns the evicted objects, total bytes freed, and how many were spared.
+func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) ([]evictedObject, uint64, int, error) {
+	// isPinned is called from inside the eviction transaction.  That is safe
+	// because pins.mu is a leaf: pinning never opens a Badger transaction, so
+	// the two locks cannot be acquired in opposing orders.
+	evicted, skipped, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes, sm.pins.isPinned)
 	if err != nil {
 		// Return the attempted (uncommitted) objects alongside the error
 		// so the caller can log which objects were involved in a conflict.
-		return evicted, 0, errors.Wrap(err, "failed to evict objects by LRU")
+		return evicted, 0, skipped, errors.Wrap(err, "failed to evict objects by LRU")
 	}
 
 	var totalFreed uint64
@@ -1904,7 +1977,7 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		}
 	}
 
-	return evicted, totalFreed, nil
+	return evicted, totalFreed, skipped, nil
 }
 
 // GetObjectSize returns the content length of a cached object
@@ -1956,6 +2029,7 @@ type ObjectReader struct {
 	inlineData   []byte
 	encryptor    *BlockEncryptor   // cached from getDiskCrypto; nil for inline
 	blockState   *ObjectBlockState // cached from GetSharedBlockState; nil for inline
+	unpin        func()            // releases this reader's pin; see pin.go
 }
 
 // NewObjectReader creates a reader for a cached object
@@ -1974,12 +2048,16 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 		meta:         meta,
 		position:     0,
 		length:       meta.ContentLength,
+		// Held until Close so a concurrent delete that respects pins cannot
+		// remove the metadata and block state this reader still needs.
+		unpin: sm.pins.pin(instanceHash),
 	}
 
 	if meta.IsInline() {
 		// Read all inline data upfront
 		data, err := sm.ReadInline(instanceHash)
 		if err != nil {
+			reader.unpin()
 			return nil, err
 		}
 		reader.inlineData = data
@@ -1987,6 +2065,7 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 		// Cache the encryptor so Read/ReadAt skip the getDiskCrypto TTL lookup.
 		dc, err := sm.getDiskCrypto(instanceHash)
 		if err != nil {
+			reader.unpin()
 			return nil, errors.Wrap(err, "failed to get disk crypto")
 		}
 		reader.encryptor = dc.encryptor
@@ -1994,6 +2073,7 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 		// Cache the block state so Read/ReadAt skip the GetSharedBlockState TTL lookup.
 		bs, err := sm.GetSharedBlockState(instanceHash)
 		if err != nil {
+			reader.unpin()
 			return nil, errors.Wrap(err, "failed to get block state")
 		}
 		reader.blockState = bs
@@ -2004,6 +2084,7 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 		// ReadBlocks callers.
 		rc, err := sm.getFile(instanceHash, meta.StorageID)
 		if err != nil {
+			reader.unpin()
 			return nil, errors.Wrap(err, "failed to open object file")
 		}
 		reader.file = rc
@@ -2143,6 +2224,9 @@ func (r *ObjectReader) Close() error {
 	if r.file != nil {
 		r.file.Release()
 		r.file = nil
+	}
+	if r.unpin != nil {
+		r.unpin()
 	}
 	return nil
 }

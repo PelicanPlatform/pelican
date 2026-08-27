@@ -46,7 +46,7 @@ pushd dependencies
 # Install scitokens first, which our xrootd build relies on
 git clone https://github.com/scitokens/scitokens-cpp.git
 pushd scitokens-cpp
-git checkout v1.1.3
+git checkout v1.4.1
 mkdir build
 cd build
 export SCITOKENS_CPP_DIR=$PWD/release_dir
@@ -59,7 +59,7 @@ popd
 # Add patches to xrootd source code if needed
 git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout v5.9.2-pelican
+git checkout v5.9.6-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -67,7 +67,7 @@ ninja
 ninja install
 popd
 
-git clone --branch v1.6.2 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v1.8.1 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -90,8 +90,18 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHttpPelican-5.so" "$xrootd_libdir"
 popd
 
-git clone --recurse-submodules --branch v0.6.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.9 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
+# xrootd-s3-http builds with -Wall -Werror and bundles nlohmann/json 3.11.2,
+# whose `operator "" _json` (a space before the literal suffix) trips the
+# -Wdeprecated-literal-operator diagnostic in newer clang (Xcode 26.x),
+# turning the third-party header into a hard build error. We can't edit the
+# vendored header, and nlohmann only fixed the syntax in 3.11.3, so silence
+# just this one diagnostic. Appended AFTER -Wall/-Werror in their CMakeLists
+# so it wins. Use the plain -Wno- form (not -Wno-error=): clang honors it,
+# while GCC/older compilers that don't know the option ignore it silently
+# rather than erroring on an unknown -Wno-error= target.
+sed -i.bak 's/-Wall -Werror/-Wall -Werror -Wno-deprecated-literal-operator/' CMakeLists.txt
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"

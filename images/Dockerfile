@@ -73,7 +73,7 @@ ARG TOMCAT_GID=10443
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
-ARG LOTMAN_SRC_BUILD=true
+ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.1.0
 ARG LOTMAN_RELEASE=
 # ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
@@ -81,15 +81,15 @@ ARG LOTMAN_RELEASE=
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.6.2
+ARG XRDCL_PELICAN_VER=1.8.1
 ARG XRDCL_PELICAN_RELEASE=
 # ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_LOTMAN_SRC_BUILD=true
+ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.1.0
 ARG XROOTD_LOTMAN_RELEASE=
 # ARG XROOTD_LOTMAN_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
-ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.7
+ARG XROOTD_S3_HTTP_SRC_BUILD=false
+ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
@@ -161,13 +161,23 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   # We use npm to bootstrap the installation of the required Node.js version
   # and an updated version of npm itself. The `dnf remove` in the middle is to
   # avoid there being multiple, incompatible versions of npm.
+  #
+  # libatomic is a runtime dependency of the Node.js >= 24 binaries; the
+  # minimal AlmaLinux base image does not include it, so install it explicitly.
 
-  dnf install -y npm
+  dnf install -y libatomic npm
   npm install -g n
   n $(jq < /context/package.json -r .engines.node)
   dnf remove -y npm
   npm install -g npm@latest
   n prune
+
+  # The web UI is built with pnpm. Install the exact version pinned by the
+  # "packageManager" field so this image, CI, and the lockfile all agree.
+  # Corepack used to provide this shim but is no longer bundled with current
+  # Node releases, so install it through npm instead.
+
+  npm install -g "$(jq < /context/package.json -r .packageManager)"
 ENDRUN
 
 # Make sure that the version of Go we just installed comes first.
@@ -194,7 +204,7 @@ COPY . .
 
 RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
     --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked \
-    --mount=type=cache,id=npm-${TARGETPLATFORM},target=/root/.npm,sharing=locked \
+    --mount=type=cache,id=pnpm-store-${TARGETPLATFORM},target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=cache,id=node-modules-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/node_modules,sharing=locked \
     --mount=type=cache,id=nextjs-cache-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/.next/cache,sharing=locked \
     <<ENDRUN
@@ -281,10 +291,16 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
 
   # Install common software.
 
+  # NOTE: libatomic is a runtime dependency of the Node.js >= 24 binaries.
+  # It is needed both by the Node.js that later stages install via `n` and by
+  # the Node.js that `actions/setup-node` downloads when CI jobs run inside
+  # images derived from this base. Installing it here covers every descendant
+  # image (test, dev, origin, cache, central services).
   dnf install -y \
     'dnf-command(versionlock)' \
     jq \
     less \
+    libatomic \
     osg-ca-certs \
     procps \
     psmisc \
@@ -313,8 +329,8 @@ ARG XROOTD_GID
 # We install from osg-testing (which contains tested packages) and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.2"
-ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.9.6"
+ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
@@ -404,7 +420,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y --enablerepo=osg-contrib \
+      dnf install -y \
             cmake3 \
             gcc-c++ \
             git \
@@ -519,7 +535,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     elif [ -n "${!RELEASE-}" ]; then
       dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
     fi
   }
 
@@ -837,6 +853,8 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   # We use npm to bootstrap the installation of the required Node.js version
   # and an updated version of npm itself. The `dnf remove` in the middle is to
   # avoid there being multiple, incompatible versions of npm.
+  # (libatomic, a runtime dependency of Node.js >= 24, is inherited from
+  # pelican-software-base.)
 
   dnf install -y npm
   npm install -g n
@@ -844,6 +862,13 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   dnf remove -y npm
   npm install -g npm@latest
   n prune
+
+  # The web UI is built with pnpm. Install the exact version pinned by the
+  # "packageManager" field so this image, CI, and the lockfile all agree.
+  # Corepack used to provide this shim but is no longer bundled with current
+  # Node releases, so install it through npm instead.
+
+  npm install -g "$(jq < /context/package.json -r .packageManager)"
 
   # Install gotestsum for better test output formatting.
   # Make a copy of the binary so that non-root users can use it.
@@ -853,7 +878,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
 
-  dnf install -y --enablerepo=osg-contrib \
+  dnf install -y \
         cmake3 \
         delve \
         docker \

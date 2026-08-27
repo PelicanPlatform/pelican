@@ -19,6 +19,7 @@
 package server_structs
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -33,6 +34,7 @@ const (
 	RegistryType
 	BrokerType
 	LocalCacheType
+	TransferType
 )
 
 // Set sets a list of newServers to ServerType instance
@@ -80,6 +82,8 @@ func (sType ServerType) String() string {
 		return "Registry"
 	case BrokerType:
 		return "Broker"
+	case TransferType:
+		return "Transfer"
 	}
 	return "Unknown"
 }
@@ -104,6 +108,30 @@ func (sType *ServerType) SetString(name string) bool {
 	case "broker":
 		*sType |= BrokerType
 		return true
+	case "transfer":
+		*sType |= TransferType
+		return true
 	}
 	return false
+}
+
+// ServerTypeFromString parses a case-insensitive service name into the
+// corresponding ServerType constant, returning an error for unrecognized names.
+func ServerTypeFromString(name string) (ServerType, error) {
+	switch strings.ToLower(name) {
+	case "cache":
+		return CacheType, nil
+	case "localcache":
+		return LocalCacheType, nil
+	case "origin":
+		return OriginType, nil
+	case "director":
+		return DirectorType, nil
+	case "registry":
+		return RegistryType, nil
+	case "broker":
+		return BrokerType, nil
+	default:
+		return 0, fmt.Errorf("unrecognized server type %q", name)
+	}
 }

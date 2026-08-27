@@ -1,0 +1,47 @@
+---
+title: pelican server cache chaos
+---
+
+## pelican-server cache chaos
+
+Inject corruption into cached objects (fault-injection testing)
+
+### Synopsis
+
+Deliberately corrupt cached object data to exercise the cache's
+integrity-detection paths (the read-time AES-GCM check and the periodic
+data-integrity scan).
+
+This is a destructive testing/"chaos engineering" tool. It operates against a
+running cache server through its admin API, so the corruption is applied
+in-process (BadgerDB is single-process, so a CLI cannot touch the cache's
+database directly while the server holds it open).
+
+The endpoint is only available when the cache server is started with
+Cache.EnableChaosAPI set to true.
+
+### Options
+
+```
+      --etag string       Select the object version by ETag (default: latest)
+  -h, --help              help for chaos
+      --instance string   Select the object version by instance hash
+      --json              Output in JSON format
+  -t, --token string      Path to admin token file (auto-generated if not provided)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server cache](/commands-reference/pelican-server/cache/)	 - Operate a Pelican cache service
+* [pelican-server cache chaos corrupt](/commands-reference/pelican-server/cache/chaos/corrupt/)	 - Flip bytes in a cached object's block
+* [pelican-server cache chaos truncate](/commands-reference/pelican-server/cache/chaos/truncate/)	 - Truncate a cached object's on-disk data

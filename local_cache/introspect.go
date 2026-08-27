@@ -194,9 +194,17 @@ type IntrospectAPIOpen struct {
 
 // NewIntrospectAPI creates a new introspection API by opening the cache
 // database and storage manager in read-only mode.
+//
+// The cache must be stopped: OpenCacheDBReadOnly takes BadgerDB's directory
+// lock, and it explains as much when it cannot.  `pelican cache introspect`
+// only reaches this path when the cache is not running, routing to the live
+// service otherwise.
 func NewIntrospectAPI(baseDir string) (*IntrospectAPIOpen, error) {
-	// Open database (read-only is not directly supported by NewCacheDB,
-	// but we only perform read operations)
+	// Read-only here is enforced by CacheDB rather than by BadgerDB -- see
+	// OpenCacheDBReadOnly for why -- so every mutating method on the handle
+	// below refuses.  That covers the storage manager too: StorageManager
+	// reaches the database only through CacheDB's typed methods, never through
+	// the raw badger handle.
 	db, err := OpenCacheDBReadOnly(baseDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open cache database")

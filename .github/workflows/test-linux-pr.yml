@@ -13,6 +13,9 @@ on:
       - dispatch-build
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: Test

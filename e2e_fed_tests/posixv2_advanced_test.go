@@ -456,36 +456,22 @@ Director:
 	digestHeader := resp.Header.Get("Digest")
 	assert.NotEmpty(t, digestHeader, "HEAD response should include Digest header with default checksum")
 
-	// Verify digest header contains crc32c with correct value (RFC 3230 format: algorithm=value)
-	// Note: Currently the origin returns MD5 even when DefaultChecksumTypes is set to crc32c.
-	// This test is updated to verify the actual checksum value rather than just presence.
-	if strings.Contains(digestHeader, "crc32c=") {
-		// Compute expected CRC32C and verify
-		crc32cHash := crc32.New(crc32.MakeTable(crc32.Castagnoli))
-		_, _ = crc32cHash.Write(testContent)
-		expectedCRC32C := base64.StdEncoding.EncodeToString(crc32cHash.Sum(nil))
-		for _, part := range strings.Split(digestHeader, ",") {
-			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "crc32c=") {
-				actualCRC32C := strings.TrimPrefix(part, "crc32c=")
-				assert.Equal(t, expectedCRC32C, actualCRC32C, "CRC32C value in Digest header should match expected")
-				break
-			}
+	// The origin defaults its HEAD Want-Digest to the first algorithm in
+	// Origin.DefaultChecksumTypes (here, crc32c). Verify the header carries
+	// the expected algorithm and the correct value. CRC32C values are encoded
+	// as 8-char lowercase hex per the origin's RFC 3230 formatter.
+	require.Contains(t, digestHeader, "crc32c=",
+		"Digest header should advertise crc32c when DefaultChecksumTypes starts with crc32c; got: %s", digestHeader)
+	crc32cHash := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	_, _ = crc32cHash.Write(testContent)
+	expectedCRC32C := fmt.Sprintf("%08x", crc32cHash.Sum32())
+	for _, part := range strings.Split(digestHeader, ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "crc32c=") {
+			actualCRC32C := strings.TrimPrefix(part, "crc32c=")
+			assert.Equal(t, expectedCRC32C, actualCRC32C, "CRC32C value in Digest header should match expected")
+			break
 		}
-	} else if strings.Contains(digestHeader, "md5=") {
-		// If MD5 is returned instead, verify it's correct (fallback behavior)
-		md5Hash := md5.Sum(testContent)
-		expectedMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
-		for _, part := range strings.Split(digestHeader, ",") {
-			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "md5=") {
-				actualMD5 := strings.TrimPrefix(part, "md5=")
-				assert.Equal(t, expectedMD5, actualMD5, "MD5 value in Digest header should match expected (fallback)")
-				break
-			}
-		}
-	} else {
-		t.Errorf("Digest header should contain either crc32c or md5 checksum, got: %s", digestHeader)
 	}
 }
 

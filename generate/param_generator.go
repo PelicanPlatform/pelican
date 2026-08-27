@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -50,6 +51,857 @@ type TemplateData struct {
 var requiredKeys = [3]string{"description", "default", "type"}
 var deprecatedMap = make(map[string][]string)
 var runtimeConfigurableMap = make(map[string]bool)
+
+// paramRefRe matches ${Param.Name} references in default values (e.g.
+// "${ConfigBase}/certificates/tls.crt"). parseTier uses this to populate
+// defaultTier.paramRefs, which serve two purposes:
+//   - They define edges in the dependency graph so Kahn's topological sort
+//     processes the referenced parameter before the one that uses it.
+//   - They tell writeSetDefault to emit strings.ReplaceAll interpolation
+//     code that resolves the reference via v.GetString at startup.
+var paramRefRe = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// envRefRe matches $UPPER_CASE_VAR references in default values (e.g.
+// "$XDG_RUNTIME_DIR/pelican"). Unlike ${Param.Name} refs, environment
+// variable refs don't create ordering dependencies — they are resolved at
+// startup via os.Getenv and cannot form cycles. parseTier's collectRefs
+// skips any match that is actually part of a ${...} param ref to avoid
+// double-counting (e.g. ${HOSTNAME} is a param ref, not an env ref).
+var envRefRe = regexp.MustCompile(`\$([A-Z][A-Z0-9_]+)`)
+
+// seedParams lists parameters whose defaults cannot be expressed as static
+// YAML values — they require Go runtime calls (os.Hostname, the xdg package,
+// etc.). SetBaseDefaultsInConfig in config/config.go sets these via
+// v.SetDefault before calling the generated SetParameterDefaults function.
+//
+// The generator excludes seed params in two ways:
+//   - GenDefaults skips emitting v.SetDefault calls for them.
+//   - The topological sort treats them as pre-satisfied dependencies: other
+//     params may reference ${ConfigBase} or ${Server.Hostname} freely without
+//     creating a missing-node error or a false cycle.
+var seedParams = map[string]bool{
+	"ConfigBase":      true,
+	"Server.Hostname": true,
+	"RuntimeDir":      true,
+}
+
+// defaultTier holds a single default-value "tier" parsed from parameters.yaml.
+//
+// Each parameter in parameters.yaml may declare up to five tiers of defaults:
+// default, root_default, osdf_default, client_default, and server_default.
+// At runtime the generated code selects the appropriate tier based on context
+// (e.g. isRoot, isOSDF). A tier's raw value may contain interpolation
+// references — either ${Param.Name} refs to other config parameters, or
+// $ENV_VAR refs to environment variables — which are resolved at startup.
+// parseTier populates paramRefs and envRefs so that GenDefaults can:
+//   - build a dependency graph and topologically sort parameters (paramRefs)
+//   - emit the correct os.Getenv / v.GetString interpolation code (envRefs)
+type defaultTier struct {
+	raw       any      // the raw YAML value (string, bool, int, float64, or []any)
+	paramRefs []string // ${Param.Name} references that create ordering dependencies
+	envRefs   []string // $ENV_VAR references resolved via os.Getenv at startup
+}
+
+// paramDefault aggregates all default tiers for a single parameter from
+// parameters.yaml. GenDefaults iterates over these in topologically-sorted
+// order (via allDeps) and calls writeSetDefault for each non-nil tier to
+// emit the appropriate v.SetDefault() call in the generated Go source.
+// Deprecated parameters are tracked but skipped during code generation
+// because setting their defaults would cause viper.IsSet to return true,
+// breaking the migration logic in handleDeprecatedConfig.
+type paramDefault struct {
+	name          string
+	varName       string // dots replaced with underscores for Go variable names
+	pType         string // param type from parameters.yaml
+	deprecated    bool   // whether this is a deprecated parameter
+	def           *defaultTier
+	rootDefault   *defaultTier
+	osdfDefault   *defaultTier
+	clientDefault *defaultTier
+	serverDefault *defaultTier
+}
+
+// parseTier parses a single default-value tier from parameters.yaml into a
+// defaultTier, extracting any ${Param.Name} and $ENV_VAR references. These
+// references drive two downstream concerns:
+//   - paramRefs feed into allDeps --> Kahn's topological sort, ensuring that
+//     a parameter like Server.ExternalWebUrl (which references
+//     ${Server.Hostname}) is processed after Server.Hostname.
+//   - envRefs and paramRefs tell writeSetDefault to emit string interpolation
+//     code (strings.ReplaceAll + os.Getenv) instead of a bare literal.
+//
+// Returns nil when the raw value is nil (i.e. the tier was absent in YAML),
+// which signals to GenDefaults that this tier should be skipped.
+func parseTier(raw any) *defaultTier {
+	if raw == nil {
+		return nil
+	}
+	t := &defaultTier{raw: raw}
+	// Collect refs from string representations
+	collectRefs := func(s string) {
+		for _, m := range paramRefRe.FindAllStringSubmatch(s, -1) {
+			t.paramRefs = append(t.paramRefs, m[1])
+		}
+		for _, m := range envRefRe.FindAllStringSubmatch(s, -1) {
+			// Skip if this is actually part of a ${...} ref
+			if strings.Contains(s, "${"+m[1]+"}") {
+				continue
+			}
+			t.envRefs = append(t.envRefs, m[1])
+		}
+	}
+	switch v := raw.(type) {
+	case string:
+		collectRefs(v)
+	case []any:
+		for _, elem := range v {
+			if s, ok := elem.(string); ok {
+				collectRefs(s)
+			}
+		}
+	}
+	return t
+}
+
+// allDeps returns the union of ${Param.Name} references across all of this
+// parameter's tiers. GenDefaults uses the result to build edges in the
+// dependency graph for Kahn's topological sort: if param A references
+// ${B} in any tier, then B must be processed before A so that
+// v.GetString("B") returns the correct value when A's default is set.
+// Seed params (ConfigBase, Server.Hostname, RuntimeDir) are excluded from
+// the graph edges by the caller since they are set externally before the
+// generated function runs.
+func (pd *paramDefault) allDeps() map[string]bool {
+	deps := make(map[string]bool)
+	for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault, pd.clientDefault, pd.serverDefault} {
+		if t == nil {
+			continue
+		}
+		for _, r := range t.paramRefs {
+			deps[r] = true
+		}
+	}
+	return deps
+}
+
+// topoSortParams returns the names of allParams ordered so that every
+// ${Param.Name} dependency appears before the parameters that reference it,
+// using Kahn's algorithm. Seed params (ConfigBase, Server.Hostname, RuntimeDir)
+// are treated as already-satisfied — their values are set externally before the
+// generated code runs — so they are excluded from the graph edges and may be
+// referenced freely without creating a missing-node error or a false cycle.
+//
+// The output is deterministic: ties are broken alphabetically by re-sorting the
+// ready queue on each step. This is O(n² log n), which is irrelevant for an
+// offline generator at ~400 parameters; if the count ever grows past ~2000,
+// switch the queue to a container/heap min-heap for O(n log n).
+//
+// An error is returned (rather than panicking) when the graph contains a cycle,
+// listing the parameters that could not be ordered, so callers can decide how to
+// surface it and so the logic is unit-testable in isolation.
+func topoSortParams(allParams []*paramDefault) ([]string, error) {
+	// Build adjacency list and in-degree. Edge: dep --> param (dep must be
+	// processed before param).
+	inDegree := make(map[string]int, len(allParams))
+	adj := make(map[string][]string)
+	for _, pd := range allParams {
+		inDegree[pd.name] = 0
+	}
+	for _, pd := range allParams {
+		count := 0
+		for dep := range pd.allDeps() {
+			// Seeds are set externally, so they impose no ordering constraint.
+			if !seedParams[dep] {
+				adj[dep] = append(adj[dep], pd.name)
+				count++
+			}
+		}
+		inDegree[pd.name] = count
+	}
+
+	var queue []string
+	for _, pd := range allParams {
+		if inDegree[pd.name] == 0 {
+			queue = append(queue, pd.name)
+		}
+	}
+	sort.Strings(queue)
+
+	var sorted []string
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, n)
+		neighbors := adj[n]
+		sort.Strings(neighbors)
+		for _, nb := range neighbors {
+			inDegree[nb]--
+			if inDegree[nb] == 0 {
+				queue = append(queue, nb)
+			}
+		}
+		// Re-sort for deterministic output after adding newly-ready nodes.
+		sort.Strings(queue)
+	}
+
+	if len(sorted) != len(allParams) {
+		var remaining []string
+		for _, pd := range allParams {
+			if inDegree[pd.name] != 0 {
+				remaining = append(remaining, pd.name)
+			}
+		}
+		sort.Strings(remaining)
+		return nil, fmt.Errorf("cycle detected in parameter defaults dependency graph; remaining params: %v", remaining)
+	}
+	return sorted, nil
+}
+
+// validateNoTierShadowing guards against a subtle ordering hazard in the
+// defaults pipeline. At runtime, defaults are applied in this sequence:
+//
+//	SetParameterDefaults  -> base tiers (default / root_default / osdf_default)
+//	ApplyDerivedDefaults  -> re-resolves base-tier ${Param.Name} interpolations
+//	                         once user config (files, env) has been merged
+//	ApplyServerDefaults /
+//	ApplyClientDefaults   -> server_default / client_default tier overrides
+//
+// Because the server/client tiers are applied AFTER ApplyDerivedDefaults, a
+// base-tier interpolation that depends on a parameter whose value is overridden
+// by a server_default or client_default tier would be computed from that
+// dependency's *base* default and never reflect the server/client override —
+// a silent staleness bug of exactly the kind the generated defaults are meant
+// to eliminate.
+//
+// Rather than allow that to slip in unnoticed, fail generation so the conflict
+// surfaces at build time. The fix, should it ever trigger, is to fold the
+// override into the base default (or drop the dependency), not to weaken this
+// check.
+func validateNoTierShadowing(allParams []*paramDefault, byName map[string]*paramDefault) error {
+	for _, pd := range allParams {
+		if pd.deprecated || !pd.hasBaseParamRefs() {
+			continue
+		}
+		// Collect only the base-tier refs, since those are what
+		// SetParameterDefaults and ApplyDerivedDefaults resolve.
+		refs := make(map[string]bool)
+		for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault} {
+			if t == nil {
+				continue
+			}
+			for _, r := range t.paramRefs {
+				refs[r] = true
+			}
+		}
+		for ref := range refs {
+			dep, ok := byName[ref]
+			if !ok {
+				// Dangling references are reported by topoSortParams as a cycle.
+				continue
+			}
+			if dep.clientDefault != nil && !isNoneValue(dep.pType, dep.clientDefault.raw) {
+				return fmt.Errorf("parameter %q interpolates ${%s}, which declares a client_default tier; "+
+					"ApplyClientDefaults runs after ApplyDerivedDefaults, so the interpolated value would ignore "+
+					"the client override. Fold the override into the base default or remove the dependency",
+					pd.name, ref)
+			}
+			if dep.serverDefault != nil && !isNoneValue(dep.pType, dep.serverDefault.raw) {
+				return fmt.Errorf("parameter %q interpolates ${%s}, which declares a server_default tier; "+
+					"ApplyServerDefaults runs after ApplyDerivedDefaults, so the interpolated value would ignore "+
+					"the server override. Fold the override into the base default or remove the dependency",
+					pd.name, ref)
+			}
+		}
+	}
+	return nil
+}
+
+// GenDefaults generates config/parameter_defaults.go, which contains three
+// functions that replace the former defaults.yaml + osdf.yaml file-loading
+// approach:
+//
+//   - SetParameterDefaults(v, isRoot, isOSDF): sets all base defaults in
+//     dependency order, branching on isRoot/isOSDF for params that have
+//     root_default or osdf_default tiers.
+//   - ApplyClientDefaults(v): overrides base defaults with client_default
+//     tier values. Called after SetParameterDefaults for client commands.
+//   - ApplyServerDefaults(v): overrides base defaults with server_default
+//     tier values. Called after SetParameterDefaults for server commands.
+//
+// The pipeline is:
+//  1. Parse every YAML document in parameters.yaml into a paramDefault.
+//  2. Build a dependency graph from ${Param.Name} refs (via allDeps).
+//  3. Topologically sort with Kahn's algorithm (panic on cycles to create
+//     a build error that developers will notice).
+//  4. Iterate in sorted order, calling writeSetDefault to emit each
+//     v.SetDefault call — with string interpolation code when the tier
+//     contains param or env refs, or bare literals otherwise.
+//  5. Write the formatted Go source to config/parameter_defaults.go.
+func GenDefaults() {
+	filename, _ := filepath.Abs("../docs/parameters.yaml")
+	yamlFile, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer yamlFile.Close()
+
+	decoder := yaml.NewDecoder(yamlFile)
+	var allParams []*paramDefault
+
+	for {
+		var value map[string]any
+		if err := decoder.Decode(&value); err != nil {
+			if err == io.EOF {
+				break
+			}
+			panic(fmt.Errorf("document decode failed: %w", err))
+		}
+		name, _ := value["name"].(string)
+		if name == "" {
+			continue
+		}
+		pType, _ := value["type"].(string)
+
+		pd := &paramDefault{
+			name:    name,
+			varName: strings.ReplaceAll(name, ".", "_"),
+			pType:   pType,
+		}
+		if dep, ok := value["deprecated"].(bool); ok && dep {
+			pd.deprecated = true
+		}
+		pd.def = parseTier(value["default"])
+		pd.rootDefault = parseTier(value["root_default"])
+		pd.osdfDefault = parseTier(value["osdf_default"])
+		pd.clientDefault = parseTier(value["client_default"])
+		pd.serverDefault = parseTier(value["server_default"])
+		allParams = append(allParams, pd)
+	}
+
+	// Build name --> paramDefault lookup
+	byName := make(map[string]*paramDefault, len(allParams))
+	for _, pd := range allParams {
+		byName[pd.name] = pd
+	}
+
+	// Topologically sort parameters so that every ${Param.Name} dependency is
+	// emitted (and resolved) before the parameters that reference it. The sort
+	// lives in a pure, unit-tested helper (topoSortParams); a cycle there is a
+	// developer error in parameters.yaml, so surface it as a build-failing panic.
+	sorted, err := topoSortParams(allParams)
+	if err != nil {
+		panic(err)
+	}
+
+	// Guard against the tier-shadowing ordering hazard: a base-tier interpolation
+	// must not depend on a parameter whose value is overridden by a server/client
+	// tier, because ApplyServerDefaults/ApplyClientDefaults run AFTER
+	// ApplyDerivedDefaults. Catching this at generation time keeps the
+	// "defaults-everywhere" design honest (see validateNoTierShadowing).
+	if err := validateNoTierShadowing(allParams, byName); err != nil {
+		panic(err)
+	}
+
+	// Generate the Go source file
+	var buf bytes.Buffer
+	buf.WriteString(`// Code generated by go generate; DO NOT EDIT.
+/***************************************************************
+ *
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package config
+
+import (
+	"os"
+	"strings"
+
+	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
+)
+
+// Ensure imports are used.
+var (
+	_ = os.Getenv
+	_ = strings.ReplaceAll
+)
+
+// SetParameterDefaults sets all parameter defaults from parameters.yaml in
+// topologically-sorted dependency order. Seed values (ConfigBase,
+// Server.Hostname, RuntimeDir) must already be set in viper via SetDefault
+// before calling this function, as dependent params read them inline.
+func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+`)
+
+	// Collect which overrides are needed for client/server defaults
+	var clientDefaults []*paramDefault
+	var serverDefaults []*paramDefault
+
+	for _, name := range sorted {
+		if seedParams[name] {
+			continue
+		}
+		pd := byName[name]
+
+		// Skip deprecated params — their defaults should not be set via
+		// SetParameterDefaults because viper.IsSet returns true for SetDefault
+		// values, which would break the deprecation migration logic in
+		// handleDeprecatedConfig. Deprecated params have their values migrated
+		// to replacement keys at runtime.
+		if pd.deprecated {
+			continue
+		}
+
+		// Collect client/server defaults for separate functions
+		if pd.clientDefault != nil {
+			clientDefaults = append(clientDefaults, pd)
+		}
+		if pd.serverDefault != nil {
+			serverDefaults = append(serverDefaults, pd)
+		}
+
+		// Determine which tiers are present
+		hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+		hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+		hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
+
+		if !hasDef && !hasRoot && !hasOsdf {
+			continue
+		}
+
+		// Emit the v.SetDefault call(s) for this parameter.
+		//
+		// When a parameter has only a "default" tier, the generated code is
+		// a single unconditional v.SetDefault call. But many parameters have
+		// environment-specific tiers (root_default, osdf_default) that must
+		// take precedence in certain contexts. For those, we emit an
+		// if/else-if/else chain that selects the correct tier at runtime:
+		//
+		//   if isOSDF {
+		//       v.SetDefault(param.X.GetName(), <osdf_default>)
+		//   } else if isRoot {
+		//       v.SetDefault(param.X.GetName(), <root_default>)
+		//   } else {
+		//       v.SetDefault(param.X.GetName(), <default>)
+		//   }
+		//
+		// Not every parameter has all three tiers — the `first`
+		// flag tracks whether we've already opened an `if` so we know whether
+		// to emit `if` vs `} else if` for the next branch. If the fallback
+		// "default" tier is absent (hasDef == false), the chain simply has no
+		// else clause, meaning non-root/non-OSDF environments get no default
+		// for that parameter (viper.IsSet will return false).
+		fmt.Fprintf(&buf, "\t// %s\n", name)
+
+		emitDefaultAssignment(&buf, pd, "\t")
+	}
+
+	buf.WriteString("}\n\n")
+
+	// Generate ApplyDerivedDefaults.
+	//
+	// SetParameterDefaults resolves every ${Param.Name} reference at startup,
+	// BEFORE user configuration (files, env vars, flags) is merged into viper.
+	// That means a parameter like Server.ExternalWebUrl, whose default is
+	// "https://${Server.Hostname}:${Server.WebPort}", is baked with the default
+	// web port even when the operator later sets a custom Server.WebPort. The
+	// same staleness affects every interpolated default and cascades through
+	// transitive references (e.g. Director.AdvertiseUrl = ${Server.ExternalWebUrl}).
+	//
+	// ApplyDerivedDefaults recomputes these interpolated defaults from the
+	// CURRENT value of their dependencies, in the same topological order, after
+	// all configuration has been merged. It only rewrites a parameter when that
+	// parameter still comes from a default source (per SourceTracker) — i.e. the
+	// user has not explicitly set it — so user overrides are never clobbered.
+	// Because viper's SetDefault overwrites the prior default (last write wins),
+	// and these params are read back via v.GetString in topological order, the
+	// recomputation cascades correctly through transitive dependencies.
+	//
+	// This single generated pass replaces the former hand-written per-parameter
+	// "refresh" hooks. Any new interpolated default added to parameters.yaml is
+	// covered automatically — there is no separate hook to remember to write.
+	buf.WriteString(`// ApplyDerivedDefaults recomputes interpolated parameter defaults (those whose
+// values reference ${Param.Name}) from the current values of their dependencies.
+// Call this after all configuration layers (defaults, config files, env vars)
+// have been merged into v, so that user overrides of referenced parameters are
+// reflected in the dependent defaults. Parameters the user has explicitly set
+// (per the SourceTracker) are left untouched.
+func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+	st := GetSourceTracker()
+	isDefaultSource := func(key string) bool {
+		src, ok := st.Get(strings.ToLower(key))
+		return !ok || src.Type == SourceDefault
+	}
+`)
+	for _, name := range sorted {
+		if seedParams[name] {
+			continue
+		}
+		pd := byName[name]
+		if pd.deprecated || !pd.hasBaseParamRefs() {
+			continue
+		}
+		hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+		hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+		hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
+		if !hasDef && !hasRoot && !hasOsdf {
+			continue
+		}
+		fmt.Fprintf(&buf, "\t// %s\n", name)
+		fmt.Fprintf(&buf, "\tif isDefaultSource(param.%s.GetName()) {\n", pd.varName)
+		emitDefaultAssignment(&buf, pd, "\t\t")
+		buf.WriteString("\t}\n")
+	}
+	buf.WriteString("}\n\n")
+
+	// Generate ApplyClientDefaults
+	buf.WriteString(`// ApplyClientDefaults overrides base defaults with client-specific values.
+// Call after SetParameterDefaults.
+func ApplyClientDefaults(v *viper.Viper) {
+`)
+	for _, pd := range clientDefaults {
+		if isNoneValue(pd.pType, pd.clientDefault.raw) {
+			continue
+		}
+		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
+		writeSetDefault(&buf, pd, pd.clientDefault, "\t")
+	}
+	buf.WriteString("}\n\n")
+
+	// Generate ApplyServerDefaults
+	buf.WriteString(`// ApplyServerDefaults overrides base defaults with server-specific values.
+// Call after SetParameterDefaults.
+func ApplyServerDefaults(v *viper.Viper) {
+`)
+	for _, pd := range serverDefaults {
+		if isNoneValue(pd.pType, pd.serverDefault.raw) {
+			continue
+		}
+		fmt.Fprintf(&buf, "\t// %s\n", pd.name)
+		writeSetDefault(&buf, pd, pd.serverDefault, "\t")
+	}
+	buf.WriteString("}\n")
+
+	// Write the file
+	outPath, _ := filepath.Abs("../config/parameter_defaults.go")
+	if err := os.WriteFile(outPath, buf.Bytes(), 0644); err != nil {
+		panic(fmt.Errorf("failed to write parameter_defaults.go: %w", err))
+	}
+}
+
+// isNoneValue returns true if the raw YAML value represents "no default" for
+// the given parameter type. When this returns true, GenDefaults skips emitting
+// a v.SetDefault call, keeping viper.IsSet at false so downstream code can
+// distinguish "not configured" from "configured to the default value".
+//
+// The "none" sentinel for each parameters.yaml type is:
+//
+//	string / filename / url / duration / byterate
+//	    Canonical:  default: none   (YAML string "none")
+//	    Equivalent: default: ""     (empty YAML string)
+//	    Also caught: YAML null (~)  parses as nil
+//
+//	stringSlice
+//	    Canonical:  default: none   (YAML string "none")
+//	    Equivalent: default: []     (empty YAML sequence)
+//	    Also caught: YAML null (~)  parses as nil
+//
+//	int / bool / object
+//	    Canonical:  default: none   (YAML string "none")
+//	    Also caught: YAML null (~)  parses as nil
+//	    Note: 0 (int) and false (bool) are legitimate non-none default values,
+//	    so they are NOT treated as "no default".
+//
+// All types accept the string literal "none" (case-sensitive) as the
+// explicit sentinel so that parameters.yaml is self-documenting.
+func isNoneValue(pType string, v any) bool {
+	if v == nil {
+		return true
+	}
+	// The string "none" is accepted as the explicit sentinel for every type.
+	if s, ok := v.(string); ok {
+		if s == "none" {
+			return true
+		}
+		// For string-like types, an empty string also means "no default".
+		switch pType {
+		case "string", "filename", "url", "duration", "byterate":
+			return s == ""
+		}
+		return false
+	}
+	// For stringSlice, an empty YAML sequence means "no default".
+	// This keeps parity with the empty-string convention for scalar string types,
+	// and prevents emitting v.SetDefault(..., []string{}) which would make
+	// viper.IsSet return true and GetStringSlice return non-nil []string{}.
+	if pType == "stringSlice" {
+		if slice, ok := v.([]any); ok {
+			return len(slice) == 0
+		}
+	}
+	// For object types, treat empty sequence or empty map as "no default"
+	// for the same reason: avoid making viper.IsSet return true.
+	if pType == "object" {
+		if slice, ok := v.([]any); ok {
+			return len(slice) == 0
+		}
+		if m, ok := v.(map[string]any); ok {
+			return len(m) == 0
+		}
+	}
+	return false
+}
+
+// goLiteral renders an arbitrary YAML-decoded value (string / bool / int /
+// float64 / []any / map[string]any) as a Go source-level expression suitable
+// for use as the second argument to v.SetDefault. Used for object-type
+// parameter defaults where the value is a nested map/slice structure that
+// can't be expressed as a typed Go slice literal.
+func goLiteral(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "nil"
+	case string:
+		return fmt.Sprintf("%q", x)
+	case bool:
+		return fmt.Sprintf("%t", x)
+	case int:
+		return fmt.Sprintf("%d", x)
+	case float64:
+		if x == float64(int(x)) {
+			return fmt.Sprintf("%d", int(x))
+		}
+		return fmt.Sprintf("%v", x)
+	case []any:
+		var sb strings.Builder
+		sb.WriteString("[]any{")
+		for i, e := range x {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(goLiteral(e))
+		}
+		sb.WriteString("}")
+		return sb.String()
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var sb strings.Builder
+		sb.WriteString("map[string]any{")
+		for i, k := range keys {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(&sb, "%q: %s", k, goLiteral(x[k]))
+		}
+		sb.WriteString("}")
+		return sb.String()
+	default:
+		return fmt.Sprintf("%#v", v)
+	}
+}
+
+// hasBaseParamRefs reports whether any of the parameter's base tiers
+// (default, root_default, osdf_default) contains a ${Param.Name} reference.
+// Such parameters have interpolated defaults that must be recomputed after
+// user configuration is merged (see ApplyDerivedDefaults). Client/server tiers
+// are excluded because they are applied via ApplyClientDefaults /
+// ApplyServerDefaults at a later, well-defined point.
+func (pd *paramDefault) hasBaseParamRefs() bool {
+	for _, t := range []*defaultTier{pd.def, pd.rootDefault, pd.osdfDefault} {
+		if t != nil && len(t.paramRefs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// emitDefaultAssignment writes the v.SetDefault call(s) for a single parameter's
+// base tiers (default, root_default, osdf_default) at the given indent. When a
+// parameter declares environment-specific tiers, it emits an if/else-if/else
+// chain that selects the correct tier at runtime:
+//
+//	if isOSDF {
+//	    v.SetDefault(param.X.GetName(), <osdf_default>)
+//	} else if isRoot {
+//	    v.SetDefault(param.X.GetName(), <root_default>)
+//	} else {
+//	    v.SetDefault(param.X.GetName(), <default>)
+//	}
+//
+// Parameters with only a "default" tier yield a single unconditional call. This
+// helper is shared by SetParameterDefaults and ApplyDerivedDefaults so the two
+// emit identical tier-selection logic.
+func emitDefaultAssignment(buf *bytes.Buffer, pd *paramDefault, indent string) {
+	hasRoot := pd.rootDefault != nil && !isNoneValue(pd.pType, pd.rootDefault.raw)
+	hasOsdf := pd.osdfDefault != nil && !isNoneValue(pd.pType, pd.osdfDefault.raw)
+	hasDef := pd.def != nil && !isNoneValue(pd.pType, pd.def.raw)
+
+	if hasRoot || hasOsdf {
+		first := true
+		if hasOsdf {
+			fmt.Fprintf(buf, "%sif isOSDF {\n", indent)
+			writeSetDefault(buf, pd, pd.osdfDefault, indent+"\t")
+			first = false
+		}
+		if hasRoot {
+			if first {
+				fmt.Fprintf(buf, "%sif isRoot {\n", indent)
+			} else {
+				fmt.Fprintf(buf, "%s} else if isRoot {\n", indent)
+			}
+			writeSetDefault(buf, pd, pd.rootDefault, indent+"\t")
+		}
+		if hasDef {
+			fmt.Fprintf(buf, "%s} else {\n", indent)
+			writeSetDefault(buf, pd, pd.def, indent+"\t")
+		}
+		fmt.Fprintf(buf, "%s}\n", indent)
+	} else {
+		writeSetDefault(buf, pd, pd.def, indent)
+	}
+}
+
+// writeSetDefault emits Go source code for a single v.SetDefault() call
+// into buf. It is the lowest-level emitter in the code generation pipeline,
+// called by GenDefaults once per (parameter, tier) pair.
+//
+// For tiers with no interpolation refs, it emits a simple literal:
+//
+//	v.SetDefault(param.Logging_Level.GetName(), "error")
+//
+// For tiers containing ${Param.Name} or $ENV_VAR refs, it emits a scoped
+// block that builds the value via strings.ReplaceAll and os.Getenv:
+//
+//	{
+//		val := "${ConfigBase}/certificates/tls.crt"
+//		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+//		v.SetDefault(param.Server_TLSCertificateChain.GetName(), val)
+//	}
+//
+// NOTE: The raw "${ConfigBase}/..." string that appears in the generated Go
+// source is safe — it is NOT an unresolved template. It is a Go string
+// literal copied verbatim from parameters.yaml's default field, and it is
+// fully resolved by the strings.ReplaceAll call(s) immediately below it
+// before the value ever reaches v.SetDefault. The ${...} syntax only has
+// meaning inside this generator's pipeline; in the generated code it is
+// just a substring being matched and replaced. Because the entire file is
+// regenerated from parameters.yaml by `go generate`, these strings cannot
+// drift out of sync with the YAML source.
+//
+// The type switch handles string, bool, int, float64, and []any (string
+// slices). Object-type params (nested maps/slices) are rendered via
+// goLiteral before the switch.
+func writeSetDefault(buf *bytes.Buffer, pd *paramDefault, tier *defaultTier, indent string) {
+	paramVar := fmt.Sprintf("param.%s.GetName()", pd.varName)
+
+	// Object-type params have nested map/slice defaults that don't fit any
+	// fixed Go slice element type. Emit them via goLiteral, which renders
+	// arbitrary nested []any / map[string]any structures.
+	if pd.pType == "object" {
+		fmt.Fprintf(buf, "%sv.SetDefault(%s, %s)\n", indent, paramVar, goLiteral(tier.raw))
+		return
+	}
+
+	// Check if we need string interpolation
+	hasParamRefs := len(tier.paramRefs) > 0
+	hasEnvRefs := len(tier.envRefs) > 0
+	needsInterp := hasParamRefs || hasEnvRefs
+
+	switch raw := tier.raw.(type) {
+	case string:
+		if needsInterp {
+			fmt.Fprintf(buf, "%s{\n", indent)
+			fmt.Fprintf(buf, "%s\tval := %q\n", indent, raw)
+			for _, ref := range tier.paramRefs {
+				refVar := strings.ReplaceAll(ref, ".", "_")
+				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"${%s}\", v.GetString(%s.GetName()))\n",
+					indent, ref, "param."+refVar)
+			}
+			for _, env := range tier.envRefs {
+				// runtimeEnvValue (config package) resolves the env var with a
+				// writable fallback for XDG_RUNTIME_DIR when it is unset, rather
+				// than substituting an empty string (which collapses
+				// "$XDG_RUNTIME_DIR/pelican/..." to "/pelican/...").
+				fmt.Fprintf(buf, "%s\tval = strings.ReplaceAll(val, \"$%s\", runtimeEnvValue(%q))\n",
+					indent, env, env)
+			}
+			fmt.Fprintf(buf, "%s\tv.SetDefault(%s, val)\n", indent, paramVar)
+			fmt.Fprintf(buf, "%s}\n", indent)
+		} else {
+			fmt.Fprintf(buf, "%sv.SetDefault(%s, %q)\n", indent, paramVar, raw)
+		}
+	case bool:
+		fmt.Fprintf(buf, "%sv.SetDefault(%s, %t)\n", indent, paramVar, raw)
+	case int:
+		fmt.Fprintf(buf, "%sv.SetDefault(%s, %d)\n", indent, paramVar, raw)
+	case float64:
+		// YAML numbers may parse as float64
+		if raw == float64(int(raw)) {
+			fmt.Fprintf(buf, "%sv.SetDefault(%s, %d)\n", indent, paramVar, int(raw))
+		} else {
+			fmt.Fprintf(buf, "%sv.SetDefault(%s, %v)\n", indent, paramVar, raw)
+		}
+	case []any:
+		// String slice — check if interpolation is needed
+		if needsInterp {
+			fmt.Fprintf(buf, "%s{\n", indent)
+			fmt.Fprintf(buf, "%s\tvals := []string{", indent)
+			for i, elem := range raw {
+				if i > 0 {
+					buf.WriteString(", ")
+				}
+				fmt.Fprintf(buf, "%q", fmt.Sprint(elem))
+			}
+			buf.WriteString("}\n")
+			fmt.Fprintf(buf, "%s\tfor i, val := range vals {\n", indent)
+			for _, ref := range tier.paramRefs {
+				refVar := strings.ReplaceAll(ref, ".", "_")
+				fmt.Fprintf(buf, "%s\t\tval = strings.ReplaceAll(val, \"${%s}\", v.GetString(%s.GetName()))\n",
+					indent, ref, "param."+refVar)
+			}
+			for _, env := range tier.envRefs {
+				fmt.Fprintf(buf, "%s\t\tval = strings.ReplaceAll(val, \"$%s\", os.Getenv(%q))\n",
+					indent, env, env)
+			}
+			fmt.Fprintf(buf, "%s\t\tvals[i] = val\n", indent)
+			fmt.Fprintf(buf, "%s\t}\n", indent)
+			fmt.Fprintf(buf, "%s\tv.SetDefault(%s, vals)\n", indent, paramVar)
+			fmt.Fprintf(buf, "%s}\n", indent)
+		} else {
+			fmt.Fprintf(buf, "%sv.SetDefault(%s, []string{", indent, paramVar)
+			for i, elem := range raw {
+				if i > 0 {
+					buf.WriteString(", ")
+				}
+				fmt.Fprintf(buf, "%q", fmt.Sprint(elem))
+			}
+			buf.WriteString("})\n")
+		}
+	default:
+		// For nil or unknown types, skip
+		if raw != nil {
+			fmt.Fprintf(buf, "%s// TODO: unhandled default type %T for %s\n", indent, raw, pd.name)
+		}
+	}
+}
 
 func GenParamEnum() {
 	/*
@@ -90,7 +942,6 @@ func GenParamEnum() {
 	opaqueParamMap := make(map[string]string)
 	allParamNames := make([]string, 0, 512)
 
-	// Skip the first parameter (ConfigBase is special)
 	// Save the first parameter separately in order to do "<pname> Param = iota" for the enums
 
 	// Parse and check the values of each parameter against the required Keys
@@ -99,9 +950,6 @@ func GenParamEnum() {
 		entryName, ok := entry["name"]
 		if !ok {
 			panic(fmt.Sprintf("Parameter entry at position %d is missing the name attribute", idx))
-		}
-		if entryName == "ConfigBase" {
-			continue
 		}
 		for _, keyName := range requiredKeys {
 			if _, ok := entry[keyName]; !ok {
@@ -356,10 +1204,8 @@ func GenParamStruct() {
 		NestedFields: make(map[string]*GoField),
 	}
 
-	// Convert YAML entries to a nested Go struct. We intentionally skip
-	// the first entry, i.e. ConfigBase as it's only a verbose parameter
-	// for user to read but not being set in the code
-	for i := 1; i < len(values); i++ {
+	// Convert YAML entries to a nested Go struct.
+	for i := 0; i < len(values); i++ {
 		entry := values[i].(map[string]any)
 
 		// Skip required YAML field check as has been done in GenParamEnum
@@ -407,16 +1253,6 @@ func GenParamStruct() {
 		current.Type = goType
 	}
 
-	// Manually added this config to reflect what ConfigBase was meant to be
-	// Refer to where getConfigBase() is used in InitServer() in config/config.go
-	// for details
-	root.NestedFields["ConfigDir"] = &GoField{
-		Name:         "ConfigDir",
-		Tag:          "configdir",
-		NestedFields: make(map[string]*GoField),
-		Type:         "string",
-	}
-
 	data := TemplateData{
 		GeneratedConfig:         `type Config` + generateGoStructCode(root, ""),
 		GeneratedConfigWithType: `type configWithType` + generateGoStructWithTypeCode(root, ""),
@@ -444,7 +1280,7 @@ func GenParamStruct() {
 var packageTemplate = template.Must(template.New("").Parse(`// Code generated by go generate; DO NOT EDIT.
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -929,7 +1765,7 @@ func LookupParam(name string) (Param, bool) {
 var structTemplate = template.Must(template.New("").Parse(`// Code generated by go generate; DO NOT EDIT.
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may

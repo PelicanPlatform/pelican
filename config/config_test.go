@@ -37,7 +37,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
@@ -138,74 +137,6 @@ func newTimeoutTestServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
-}
-
-// Test that no deprecated config keys are present in defaultsYaml or osdfDefaultsYaml
-func TestNoReplacementKeysInDefaults(t *testing.T) {
-	type testCase struct {
-		yamlStr     string
-		fName       string
-		shouldError bool
-	}
-	testCases := []testCase{
-		{yamlStr: defaultsYaml, fName: "defaults.yaml", shouldError: false},
-		{yamlStr: osdfDefaultsYaml, fName: "osdfDefaults.yaml", shouldError: false},
-		// Example: Client.DisableHttpProxy is a replacement for DisableHttpProxy
-		{yamlStr: `
-Client:
-  DisableHttpProxy: true
-`, fName: "inline test case with replacement key Client.DisableHttpProxy", shouldError: true},
-	}
-
-	deprecatedMap := param.GetDeprecated()
-	for _, tc := range testCases {
-		var m map[string]any
-		err := yaml.Unmarshal([]byte(tc.yamlStr), &m)
-		require.NoError(t, err, "Failed to parse %s", tc.fName)
-
-		// Map replacement key -> deprecated key(s)
-		found := make(map[string]string)
-		for deprecated, replacements := range deprecatedMap {
-			for _, rep := range replacements {
-				if rep == "none" {
-					continue
-				}
-				// Check for top-level and nested keys (e.g., Logging.Level)
-				parts := strings.Split(rep, ".")
-				node := m
-				foundKey := true
-				for _, part := range parts {
-					val, ok := node[part]
-					if !ok {
-						foundKey = false
-						break
-					}
-					// If not at the last part, descend if possible
-					if mp, ok := val.(map[string]any); ok {
-						node = mp
-					} else if part != parts[len(parts)-1] {
-						foundKey = false
-						break
-					}
-				}
-				if foundKey {
-					found[rep] = deprecated
-				}
-			}
-		}
-
-		if tc.shouldError {
-			assert.NotEmpty(t, found, "Expected replacement key(s) in %s, but none found", tc.fName)
-		} else {
-			if len(found) > 0 {
-				var details []string
-				for rep, dep := range found {
-					details = append(details, fmt.Sprintf("%q (replacement for deprecated key %q)", rep, dep))
-				}
-				t.Errorf("Replacement config key(s) found in %s: %v. Please remove them from the defaults yaml and set them in a SetDefaults() function in the config package.", tc.fName, details)
-			}
-		}
-	}
 }
 
 func TestResponseHeaderTimeout(t *testing.T) {
@@ -375,7 +306,7 @@ func TestHomeDir(t *testing.T) {
 			require.NoError(t, param.Reset())
 
 			if tc.configDir != "" {
-				require.NoError(t, param.ConfigDir.Set(tc.configDir))
+				require.NoError(t, param.ConfigBase.Set(tc.configDir))
 			}
 
 			if !tc.homeEnv {
@@ -384,7 +315,7 @@ func TestHomeDir(t *testing.T) {
 
 			InitConfigDir(viper.GetViper())
 
-			cDir := viper.GetString("ConfigDir")
+			cDir := param.ConfigBase.GetString()
 			require.Equal(t, tc.expectedDir, cDir)
 		})
 	}
@@ -575,7 +506,7 @@ func TestDeprecationHandling(t *testing.T) {
 
 	tlsCertPath := filepath.Join(tmpConfigDirPath, "somerandomfile.txt")
 
-	require.NoError(t, param.ConfigDir.Set(tmpConfigDirPath))
+	require.NoError(t, param.ConfigBase.Set(tmpConfigDirPath))
 	require.NoError(t, param.Logging_Level.Set("Warning"))
 
 	// Set the deprecated config parameter `Server.TLSCertificate`.
@@ -735,7 +666,7 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		mockFederationRoot(t)
 		tempDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(tempDir))
+		require.NoError(t, param.ConfigBase.Set(tempDir))
 	}
 
 	initDirectoryConfig := func() {
@@ -876,7 +807,7 @@ func TestWebConfigSetsLogFile(t *testing.T) {
 	ResetConfig()
 	defer ResetConfig()
 	configDir := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(configDir))
+	require.NoError(t, param.ConfigBase.Set(configDir))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	webConfigFile := filepath.Join(configDir, "web-config.yaml")
 	require.NoError(t, param.Server_WebConfigFile.Set(webConfigFile))
@@ -911,7 +842,7 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("globus"))
 	require.NoError(t, param.Server_EnableUI.Set(false))
 	require.NoError(t, param.OIDC_Issuer.Set("globus"))
@@ -923,6 +854,182 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	require.ErrorContains(t, err, "globus")
 }
 
+// standaloneOriginBase applies the minimum configuration a standalone origin
+// needs: a native backend and no federation to discover.
+func standaloneOriginBase(t *testing.T) {
+	t.Helper()
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+	require.NoError(t, param.Origin_StorageType.Set("posixv2"))
+	require.NoError(t, param.Origin_StoragePrefix.Set(t.TempDir()))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/standalone"))
+	require.NoError(t, param.Origin_EnableStandaloneMode.Set(true))
+}
+
+func TestInitServerStandaloneOrigin(t *testing.T) {
+	t.Run("needs-no-federation", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		// Deliberately no Federation.DiscoveryUrl and no mock federation root:
+		// the whole point of standalone mode is that neither is reachable.
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		require.True(t, IsStandaloneOrigin())
+
+		// The discovery endpoint doubles as the federation issuer and must be
+		// populated, but it should point at this origin -- and no director or
+		// registry should have been invented for it.
+		fedInfo, err := GetFederation(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, param.Server_ExternalWebUrl.GetString(), fedInfo.DiscoveryEndpoint)
+		assert.Empty(t, fedInfo.DirectorEndpoint)
+		assert.Empty(t, fedInfo.RegistryEndpoint)
+		assert.Empty(t, fedInfo.BrokerEndpoint)
+	})
+
+	t.Run("rejects-explicit-discovery-url", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		fedRoot := mockFederationRoot(t)
+		standaloneOriginBase(t)
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(fedRoot))
+
+		// Accepting both would leave the process holding two answers to "what
+		// federation is this?": GetFederation would report the remote one, while
+		// the document this origin publishes at its own root names itself and no
+		// director.
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, param.Federation_DiscoveryUrl.GetName())
+	})
+
+	t.Run("rejects-root-federation-prefix", func(t *testing.T) {
+		// A "/" export would be mounted at the bare root, colliding with the
+		// origin's own /api and /.well-known routes; gin panics on that collision
+		// mid-startup, so the operator has to be stopped here instead.
+		for _, tc := range []struct {
+			name  string
+			apply func(t *testing.T)
+			param string
+		}{
+			{
+				name:  "top-level",
+				apply: func(t *testing.T) { require.NoError(t, param.Origin_FederationPrefix.Set("/")) },
+				param: param.Origin_FederationPrefix.GetName(),
+			},
+			{
+				name: "exports-block",
+				apply: func(t *testing.T) {
+					require.NoError(t, param.Origin_Exports.Set([]map[string]any{{
+						"FederationPrefix": "/",
+						"StoragePrefix":    t.TempDir(),
+						"Capabilities":     []string{"PublicReads"},
+					}}))
+				},
+				param: param.Origin_Exports.GetName(),
+			},
+			{
+				name: "export-volume",
+				// Spelled out rather than built from t.TempDir(): the volume
+				// syntax splits on the first colon, and a Windows temp path
+				// carries its own in the drive letter.
+				apply: func(t *testing.T) { require.NoError(t, param.Origin_ExportVolumes.Set([]string{"/srv/data:/"})) },
+				param: param.Origin_ExportVolumes.GetName(),
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ResetConfig()
+				t.Cleanup(ResetConfig)
+
+				standaloneOriginBase(t)
+				tc.apply(t)
+
+				err := InitServer(context.Background(), server_structs.OriginType)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+				assert.ErrorContains(t, err, tc.param)
+			})
+		}
+	})
+
+	t.Run("disables-broker", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_EnableBroker.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		assert.False(t, param.Origin_EnableBroker.GetBool())
+	})
+
+	t.Run("rejects-xrootd-backend", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_StorageType.Set("posix"))
+
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, param.Origin_StorageType.GetName())
+	})
+
+	t.Run("rejects-colocated-federation-module", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+
+		modules := server_structs.OriginType
+		modules.Set(server_structs.DirectorType)
+		err := InitServer(context.Background(), modules)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_EnableStandaloneMode.GetName())
+		assert.ErrorContains(t, err, "director")
+	})
+
+	t.Run("rejects-disable-direct-clients", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_DisableDirectClients.Set(true))
+
+		err := InitServer(context.Background(), server_structs.OriginType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Origin_DisableDirectClients.GetName())
+	})
+
+	t.Run("disables-director-test", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Origin_DirectorTest.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		assert.False(t, param.Origin_DirectorTest.GetBool())
+	})
+
+	t.Run("does-not-apply-without-origin-module", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		// A shared config file may carry the origin knob even on a cache-only
+		// process; it must not disconnect the cache from the federation.
+		require.NoError(t, param.Origin_EnableStandaloneMode.Set(true))
+
+		require.NoError(t, InitServer(context.Background(), server_structs.CacheType))
+		assert.False(t, IsStandaloneOrigin())
+	})
+}
+
 func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
 	ResetConfig()
 	t.Cleanup(func() {
@@ -930,7 +1037,7 @@ func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("s3"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_S3ServiceUrl.Set("https://s3.example.com"))
@@ -948,7 +1055,7 @@ func TestInitServerAtomicUploadsRequiresTempLocation(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("posix"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_UploadTempLocation.Set(""))
@@ -1373,13 +1480,14 @@ func TestConfigFileBootstrapping(t *testing.T) {
 				param.Server_WebHost: "home-host",
 			},
 			etcConfig: map[configParam]string{
-				// Use a different string param to test no-merge behavior
-				param.Server_Hostname: "etc-hostname-should-not-appear",
+				// Use WebHost + a different param to test no-merge behavior
+				param.Server_WebHost:        "etc-host-should-not-appear",
+				param.Server_UIPasswordFile: "/etc/value-should-not-appear",
 			},
-			// Home config shadows /etc completely, so Hostname stays at default (empty), not from /etc
+			// Home config shadows /etc completely: WebHost comes from home,
+			// and UIPasswordFile stays at its generated default.
 			expectedConfig: map[configParam]string{
-				param.Server_WebHost:  "home-host",
-				param.Server_Hostname: "", // Default value, not merged from /etc
+				param.Server_WebHost: "home-host",
 			},
 		},
 		{
@@ -1455,15 +1563,211 @@ func TestConfigFileBootstrapping(t *testing.T) {
 	}
 }
 
+// TestApplyLogLevelInheritance verifies that when a user sets Logging.Level,
+// sub-loggers inherit the new level unless they are individually pinned.
+func TestApplyLogLevelInheritance(t *testing.T) {
+	t.Run("NoSourceRecorded_NoPropagation", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+
+		// Logging.Level is at the default "info". No source recorded.
+		GetSourceTracker().Reset()
+
+		origCms := v.GetString(param.Logging_Origin_Cms.GetName())
+		ApplyLogLevelInheritance(v)
+		// Sub-loggers should not change.
+		assert.Equal(t, origCms, v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+
+	t.Run("UserSetsDebug_SubLoggersInherit", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		v.Set(param.Logging_Level.GetName(), "debug")
+
+		// Simulate user-set via config file.
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Cms.GetName()))
+		assert.Equal(t, "debug", v.GetString(param.Logging_Cache_Http.GetName()))
+		assert.Equal(t, "debug", v.GetString(param.Logging_Cache_Pfc.GetName()))
+		// Special-case sub-loggers should also be debug when user overrides from info.
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Scitokens.GetName()))
+	})
+
+	t.Run("PinnedSubLoggerPreserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		v.Set(param.Logging_Level.GetName(), "debug")
+		v.Set(param.Logging_Cache_Http.GetName(), "warn")
+
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+		st.Record(strings.ToLower(param.Logging_Cache_Http.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		// Pinned sub-logger keeps its explicit value.
+		assert.Equal(t, "warn", v.GetString(param.Logging_Cache_Http.GetName()))
+		// Unpinned sub-loggers inherit.
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+
+	t.Run("InfoLevel_SpecialCasesApply", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		// User explicitly sets "info" (matching default, but via config file).
+		v.Set(param.Logging_Level.GetName(), "info")
+
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		// At info level, Scitokens → fatal, Pfc/Xrootd → info (special cases).
+		assert.Equal(t, "fatal", v.GetString(param.Logging_Origin_Scitokens.GetName()))
+		assert.Equal(t, "info", v.GetString(param.Logging_Origin_Xrootd.GetName()))
+		assert.Equal(t, "fatal", v.GetString(param.Logging_Cache_Scitokens.GetName()))
+		assert.Equal(t, "info", v.GetString(param.Logging_Cache_Pfc.GetName()))
+		// Standard sub-loggers get "info".
+		assert.Equal(t, "info", v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+}
+
+// TestDeprecationRespectsEnvVarReplacement verifies that handleDeprecatedConfig
+// does NOT overwrite a replacement key that was set by an environment variable.
+// Before the fix, InConfig() was used to detect user-set replacements, but it
+// only checks config files — missing env vars entirely.
+func TestDeprecationRespectsEnvVarReplacement(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	// Use DisableHttpProxy (deprecated) → Client.DisableHttpProxy (replacement).
+	// Set the deprecated key to true via viper (simulating config file).
+	viper.Set(param.DisableHttpProxy.GetName(), true)
+
+	// Set the replacement key via env var. In real usage this would be
+	// PELICAN_CLIENT_DISABLEHTTPPROXY=false, but we simulate by recording it
+	// in the SourceTracker (which RecordEnvVarSources would have done) and
+	// setting the value via viper.Set (which env binding does under the hood).
+	viper.Set(param.Client_DisableHttpProxy.GetName(), false)
+	st := GetSourceTracker()
+	st.Reset()
+	st.Record(strings.ToLower(param.Client_DisableHttpProxy.GetName()), ConfigSource{
+		Type:   SourceEnvVar,
+		Detail: "PELICAN_CLIENT_DISABLEHTTPPROXY",
+	})
+
+	// Run deprecation handling.
+	handleDeprecatedConfig()
+
+	// The replacement key should retain its env-var-set value (false),
+	// NOT be overwritten by the deprecated key's value (true).
+	assert.Equal(t, false, viper.GetBool(param.Client_DisableHttpProxy.GetName()),
+		"handleDeprecatedConfig should not overwrite a replacement key set via env var")
+}
+
+func TestPort443StrippingInSetServerDefaults(t *testing.T) {
+	// Verify that SetServerDefaults strips :443 from generated defaults and
+	// from user-provided URLs for Origin.Url, Cache.Url, and Origin.TokenAudience.
+
+	t.Run("DefaultPort443IsStripped", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		// Set ports to 443 so the generated defaults produce "https://host:443"
+		v.Set(param.Origin_Port.GetName(), 443)
+		v.Set(param.Cache_Port.GetName(), 443)
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+
+		SetBaseDefaultsInConfig(v)
+
+		// Before SetServerDefaults, the generated defaults include :443
+		assert.Contains(t, v.GetString(param.Origin_Url.GetName()), ":443",
+			"Origin.Url should contain :443 before stripping")
+		assert.Contains(t, v.GetString(param.Origin_TokenAudience.GetName()), ":443",
+			"Origin.TokenAudience should contain :443 before stripping")
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		// After SetServerDefaults, :443 should be stripped
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Origin_Url.GetName()),
+			"Origin.Url should have :443 stripped")
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Cache_Url.GetName()),
+			"Cache.Url should have :443 stripped")
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Origin_TokenAudience.GetName()),
+			"Origin.TokenAudience should have :443 stripped")
+	})
+
+	t.Run("NonStandardPortPreserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		v.Set(param.Origin_Port.GetName(), 8443)
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+
+		SetBaseDefaultsInConfig(v)
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		assert.Equal(t, "https://test-host.example.com:8443", v.GetString(param.Origin_Url.GetName()),
+			"Origin.Url should preserve non-443 ports")
+	})
+
+	t.Run("UserConfiguredUrlWithPort443", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+		SetBaseDefaultsInConfig(v)
+
+		// Simulate a user-configured URL with explicit :443
+		v.Set(param.Origin_Url.GetName(), "https://my-origin.example.com:443")
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		assert.Equal(t, "https://my-origin.example.com", v.GetString(param.Origin_Url.GetName()),
+			"User-configured Origin.Url with :443 should be normalized")
+	})
+}
+
 // setupCacheLotmanPrereqs configures the cache-side parameters that
 // InitServer's Cache.EnableLotman block requires before it inspects
 // Lotman-specific bounds. Tests that exercise the Lotman boundary
 // validators in InitServer should call this first, then override the
 // specific Lotman.* parameter under test.
 func setupCacheLotmanPrereqs(t *testing.T) {
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Cache_EnableLotman.Set(true))
-	require.NoError(t, param.Cache_LowWatermark.Set("80"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("80"))
 	require.NoError(t, param.Cache_HighWaterMark.Set("90"))
 	require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
 	require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
@@ -1539,4 +1843,118 @@ func TestInitServerAcceptsLotmanMaxLotLifetimeAtBounds(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The Cache.Files*Size parameters accept either an integer percentage of total
+// disk or an absolute size, and xrootd requires base < nominal < max < low
+// watermark. InitServer enforces that ordering when the operands are expressed
+// the same way (both percentages or both absolute) and otherwise defers to
+// xrootd, which knows the real disk total. These messages are emitted before
+// any Lotman-specific bounds, so the cases below assert on the files-validation
+// messages directly.
+func TestInitServerFilesSizeValidation(t *testing.T) {
+	const orderMsg = "base size must be less than the"
+	const maxBelowLwmMsg = "less than Cache.LowWaterMark"
+
+	cases := []struct {
+		name       string
+		low, high  string
+		base       string
+		nominal    string
+		max        string
+		rejectWith string // substring the error must contain; "" means the files checks must pass
+	}{
+		{"percent ordering below watermark accepted", "85", "89", "70", "75", "80", ""},
+		{"percent max equal to low watermark rejected", "80", "90", "60", "70", "80", maxBelowLwmMsg},
+		{"percent max above low watermark rejected", "80", "90", "60", "70", "85", maxBelowLwmMsg},
+		{"percent base not below nominal rejected", "85", "89", "75", "75", "80", orderMsg},
+		// Absolute files against a percentage watermark can't be ordered without
+		// the disk total, so the max-below-low-watermark check is deferred to xrootd.
+		{"absolute files with percent watermark deferred", "85", "89", "1g", "2g", "3g", ""},
+		// Both absolute: the max-below-low-watermark check can be evaluated here.
+		{"absolute max above absolute low watermark rejected", "2g", "90", "100m", "200m", "3g", maxBelowLwmMsg},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(ResetConfig)
+			mockFederationRoot(t)
+
+			require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+			require.NoError(t, param.Cache_EnableLotman.Set(true))
+			require.NoError(t, param.Cache_LowWaterMark.Set(tc.low))
+			require.NoError(t, param.Cache_HighWaterMark.Set(tc.high))
+			require.NoError(t, param.Cache_FilesBaseSize.Set(tc.base))
+			require.NoError(t, param.Cache_FilesNominalSize.Set(tc.nominal))
+			require.NoError(t, param.Cache_FilesMaxSize.Set(tc.max))
+
+			err := InitServer(context.Background(), server_structs.CacheType)
+			if tc.rejectWith != "" {
+				require.Error(t, err)
+				require.ErrorContains(t, err, tc.rejectWith)
+				return
+			}
+			// InitServer may still fail downstream (no xrootd in place); only
+			// assert that the files-size validators did not reject this config.
+			if err != nil {
+				require.NotContains(t, err.Error(), orderMsg)
+				require.NotContains(t, err.Error(), maxBelowLwmMsg)
+			}
+		})
+	}
+}
+
+// Enabling Lotman should not force operators to hand-size the file-usage purge
+// band: when none of the Cache.Files*Size values are set, SetServerDefaults
+// fills in percentage defaults that sit below the default low watermark. A plain
+// (non-Lotman) cache must be left untouched so its purge behaviour is unchanged.
+func TestLotmanScopedFilesSizeDefaults(t *testing.T) {
+	t.Run("applied when lotman enabled and unset", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(true))
+
+		// InitServer runs SetServerDefaults early; it may fail later for unrelated
+		// reasons, but the defaults are populated by then.
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.Equal(t, "70", param.Cache_FilesBaseSize.GetString())
+		assert.Equal(t, "75", param.Cache_FilesNominalSize.GetString())
+		assert.Equal(t, "80", param.Cache_FilesMaxSize.GetString())
+	})
+
+	t.Run("not applied when lotman disabled", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(false))
+
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.False(t, param.Cache_FilesBaseSize.IsSet())
+		assert.False(t, param.Cache_FilesNominalSize.IsSet())
+		assert.False(t, param.Cache_FilesMaxSize.IsSet())
+	})
+
+	t.Run("operator values are preserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_EnableLotman.Set(true))
+		require.NoError(t, param.Cache_FilesBaseSize.Set("1g"))
+		require.NoError(t, param.Cache_FilesNominalSize.Set("2g"))
+		require.NoError(t, param.Cache_FilesMaxSize.Set("3g"))
+
+		_ = InitServer(context.Background(), server_structs.CacheType)
+
+		assert.Equal(t, "1g", param.Cache_FilesBaseSize.GetString())
+		assert.Equal(t, "2g", param.Cache_FilesNominalSize.GetString())
+		assert.Equal(t, "3g", param.Cache_FilesMaxSize.GetString())
+	})
 }

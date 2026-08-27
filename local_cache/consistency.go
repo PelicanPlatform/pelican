@@ -21,13 +21,9 @@ package local_cache
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"hash/crc32"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -54,6 +50,10 @@ var (
 	errChannelFull         = errors.New("channel_full")
 	errScanDone            = errors.New("scan_done")
 	errChecksumSkipped     = errors.New("checksum_skipped")
+	// errChecksumAlreadyVerified is returned (in "once" data-scan mode) for an
+	// object whose on-disk data has already been verified, so it is skipped
+	// without being re-read.
+	errChecksumAlreadyVerified = errors.New("checksum_already_verified")
 
 	metadataScanInconsistentObjects = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "pelican_cache_metadata_scan_inconsistent_objects_total",
@@ -103,6 +103,19 @@ var (
 		Name: "pelican_cache_data_scan_bytes_processed_total",
 		Help: "Total bytes processed during data scans",
 	})
+	// dataScanModeOnce is 1 when the data scan is in "once" mode (verify each
+	// object once then skip), which relies on the underlying storage for
+	// ongoing at-rest integrity.  Exported so a misconfigured cache is visible.
+	dataScanModeOnce = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_cache_data_scan_mode_once",
+		Help: "1 when the data-integrity scan is in \"once\" mode (Cache.DataScanMode=once); 0 for full re-verification each cycle",
+	})
+	// chaosAPIEnabled is 1 when the destructive chaos/fault-injection admin API
+	// is registered (Cache.EnableChaosAPI).  It should be 0 in production.
+	chaosAPIEnabled = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_cache_chaos_api_enabled",
+		Help: "1 when the cache chaos/fault-injection admin API is enabled (Cache.EnableChaosAPI); should be 0 in production",
+	})
 )
 
 // ConsistencyChecker verifies cache consistency between database and disk.
@@ -117,6 +130,18 @@ type ConsistencyChecker struct {
 	dataScanBytesPerSec int64          // Max bytes per second for data scanning
 	minAgeForCleanup    time.Duration  // Minimum age before cleanup to avoid races
 	checksumTypes       []ChecksumType // Checksum algorithms to calculate/verify
+	skipVerifiedData    bool           // When true, the data scan verifies each object once then skips it
+	resampleInterval    int            // In skip mode, re-verify ~1/N already-verified objects (0 disables)
+
+	// preserveCorruptObjects suppresses the delete-on-mismatch that is right
+	// for a cache and catastrophic for a store holding the only copy.
+	preserveCorruptObjects bool
+	// skipChecksumBackfill suppresses the metadata write that records
+	// checksums for an object that has none.
+	skipChecksumBackfill bool
+	// suppressCacheMetrics leaves the cache-named collectors alone, for a
+	// consumer that is not a cache.  See ConsistencyConfig.
+	suppressCacheMetrics bool
 
 	// Statistics
 	stats   ConsistencyStats
@@ -142,6 +167,50 @@ type ConsistencyConfig struct {
 	// ChecksumTypes specifies which checksums to calculate and verify.
 	// When empty, defaults to []ChecksumType{ChecksumSHA256}.
 	ChecksumTypes []ChecksumType
+	// SkipVerifiedData, when true, makes the data scan verify each object's
+	// on-disk data exactly once (recording the checksum and comparing it
+	// against the origin's reported value when available) and then skip that
+	// object on subsequent scans.  Intended for storage backends that already
+	// guarantee at-rest integrity (e.g. ZFS).  When false (default) every scan
+	// re-verifies all objects.
+	SkipVerifiedData bool
+	// ResampleInterval, when SkipVerifiedData is true, makes the scan still
+	// re-verify roughly 1 in N already-verified objects each cycle, so there is
+	// a nonzero floor of at-rest corruption detection even in "once" mode.
+	// 0 disables re-sampling (pure once).
+	ResampleInterval int
+	// PreserveCorruptObjects, when true, makes the data scan report at-rest
+	// corruption without deleting the object.
+	//
+	// A cache must delete: the object is a copy, deleting it is how the next
+	// request repairs it from the origin.  A primary store (pstore) has no
+	// upstream, so deleting is the loss rather than the repair -- the block
+	// file and its metadata are the only record that the object ever existed,
+	// including its path, size, and checksums.  Set this for any store that is
+	// the last copy; leave it false for a cache.
+	PreserveCorruptObjects bool
+	// SkipChecksumBackfill, when true, makes the data scan leave objects that
+	// carry no recorded checksums alone rather than computing and storing them.
+	//
+	// The backfill is a metadata write, so a scan that sets it is not the
+	// read-only pass its callers may believe it to be.  For a cache the write
+	// is harmless; for a primary store it can persist a checksum derived from
+	// data that is already corrupt, or race a write that has not yet recorded
+	// its own checksums.
+	SkipChecksumBackfill bool
+	// SuppressCacheMetrics stops this checker from updating the
+	// pelican_cache_*_scan_* collectors above.
+	//
+	// Those names describe a cache, and this checker has a second consumer:
+	// pstore drives it to scan an *origin*.  Left on, an origin's integrity
+	// scan is reported as cache activity -- a process serving no cache at all
+	// publishes cache series, and one serving both adds the two together in
+	// the same graph with no way to separate them.  A consumer that sets this
+	// takes on publishing the equivalent figures under its own names; pstore
+	// does, as pelican_pstore_data_scan_*.
+	//
+	// It does not change what the scan does, only what it reports.
+	SuppressCacheMetrics bool
 }
 
 // ConsistencyStats holds statistics from consistency checks
@@ -180,20 +249,49 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 	burstNs := 100 * 1_000_000                                // 100ms burst capacity
 	limiter := rate.NewLimiter(rate.Limit(activeNsPerSec), burstNs)
 
-	// Initialize metrics
-	now := float64(time.Now().Unix())
-	metadataScanLastStartTime.Set(now)
-	dataScanLastStartTime.Set(now)
+	// Initialize metrics.  Skipped entirely for a non-cache consumer: seeding
+	// the cache's scan timestamps from a pstore's checker would make a cache
+	// that is not running look like one that had just scanned.
+	if !config.SuppressCacheMetrics {
+		now := float64(time.Now().Unix())
+		metadataScanLastStartTime.Set(now)
+		dataScanLastStartTime.Set(now)
+	}
 
-	return &ConsistencyChecker{
+	cc := &ConsistencyChecker{
 		db:                  db,
 		storage:             storage,
 		metadataScanLimiter: limiter,
 		dataScanBytesPerSec: config.DataScanBytesPerSec,
 		minAgeForCleanup:    config.MinAgeForCleanup,
 		checksumTypes:       checksumTypes,
+		skipVerifiedData:    config.SkipVerifiedData,
+		resampleInterval:    config.ResampleInterval,
 		stopCh:              make(chan struct{}),
+
+		preserveCorruptObjects: config.PreserveCorruptObjects,
+		skipChecksumBackfill:   config.SkipChecksumBackfill,
+		suppressCacheMetrics:   config.SuppressCacheMetrics,
 	}
+
+	// Surface the data-scan mode so a misconfigured cache is visible: emit a
+	// loud warning and export a metric when running in "once" mode, which
+	// relies on the underlying storage (e.g. ZFS scrubbing) for ongoing at-rest
+	// integrity rather than re-reading every object.
+	if config.SkipVerifiedData {
+		if !config.SuppressCacheMetrics {
+			dataScanModeOnce.Set(1)
+		}
+		if config.ResampleInterval > 0 {
+			log.Warnf("Cache data-integrity scan is in \"once\" mode: each object's on-disk data is verified once and then skipped (re-sampling ~1/%d per cycle). This relies on the underlying storage to detect at-rest corruption; ensure it scrubs (e.g. ZFS).", config.ResampleInterval)
+		} else {
+			log.Warn("Cache data-integrity scan is in \"once\" mode with re-sampling disabled: each object's on-disk data is verified once and then never re-checked. This relies entirely on the underlying storage to detect at-rest corruption; ensure it scrubs (e.g. ZFS).")
+		}
+	} else if !config.SuppressCacheMetrics {
+		dataScanModeOnce.Set(0)
+	}
+
+	return cc
 }
 
 // Start begins the background consistency checking goroutines
@@ -311,7 +409,9 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	lastProgressLog := scanStartTime
 	lastProgressSend := scanStartTime
 	cc.lastMetadataScan.Store(scanStartTime.Unix())
-	metadataScanLastStartTime.Set(float64(scanStartTime.Unix()))
+	if !cc.suppressCacheMetrics {
+		metadataScanLastStartTime.Set(float64(scanStartTime.Unix()))
+	}
 
 	// Stream files from disk via channel.  Each directory's WalkDir
 	// produces entries in lexicographic order.  A k-way merge goroutine
@@ -806,8 +906,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 				inconsistentCount++
 				inconsistentSize += del.size
 			}
-			metadataScanInconsistentObjects.Add(float64(inconsistentCount))
-			metadataScanInconsistentBytes.Add(float64(inconsistentSize))
+			if !cc.suppressCacheMetrics {
+				metadataScanInconsistentObjects.Add(float64(inconsistentCount))
+				metadataScanInconsistentBytes.Add(float64(inconsistentSize))
+			}
 		}
 
 		// Check if we've processed all DB entries (no entries in this transaction means we're done)
@@ -853,9 +955,11 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	cc.stats.OrphanedFiles += orphanedFiles
 	cc.statsMu.Unlock()
 
-	metadataScanDurationSeconds.Add(scanDuration.Seconds())
-	metadataScanFilesProcessed.Add(float64(filesScanned))
-	metadataScanDBEntriesProcessed.Add(float64(dbEntriesScanned))
+	if !cc.suppressCacheMetrics {
+		metadataScanDurationSeconds.Add(scanDuration.Seconds())
+		metadataScanFilesProcessed.Add(float64(filesScanned))
+		metadataScanDBEntriesProcessed.Add(float64(dbEntriesScanned))
+	}
 
 	log.Infof("Metadata scan complete in %v: scanned %d DB entries and %d files, found %d orphaned DB entries and %d orphaned files (%s)",
 		scanDuration, dbEntriesScanned, filesScanned, orphanedDBEntries, orphanedFiles, utils.HumanBytes(orphanedBytes))
@@ -989,7 +1093,9 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context, progressCh chan<-
 	sl.Info("Starting data integrity scan")
 	scanStartTime := time.Now()
 	cc.lastDataScan.Store(scanStartTime.Unix())
-	dataScanLastStartTime.Set(float64(scanStartTime.Unix()))
+	if !cc.suppressCacheMetrics {
+		dataScanLastStartTime.Set(float64(scanStartTime.Unix()))
+	}
 
 	// Rate limiter for I/O
 	bytesLimiter := rate.NewLimiter(rate.Limit(cc.dataScanBytesPerSec), int(cc.dataScanBytesPerSec))
@@ -1199,7 +1305,9 @@ scanComplete:
 
 	// Final stats update (scan timing / log)
 	scanDuration := time.Since(scanStartTime)
-	dataScanDurationSeconds.Add(scanDuration.Seconds())
+	if !cc.suppressCacheMetrics {
+		dataScanDurationSeconds.Add(scanDuration.Seconds())
+	}
 
 	sl.WithFields(log.Fields{
 		"elapsed":            scanDuration.Truncate(time.Second),
@@ -1235,8 +1343,8 @@ func (cc *ConsistencyChecker) processBatchForDataScan(
 		prevObjects := *objectsVerified
 
 		if err := cc.verifyObjectChecksum(ctx, item.instanceHash, item.meta, bytesLimiter, checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified); err != nil {
-			if errors.Is(err, errChecksumSkipped) {
-				continue // Incomplete object — don't count as verified
+			if errors.Is(err, errChecksumSkipped) || errors.Is(err, errChecksumAlreadyVerified) {
+				continue // Incomplete or already-verified object — don't count as verified
 			}
 			sl.WithError(err).WithField("instanceHash", item.instanceHash).Warn("Error verifying object")
 		}
@@ -1248,10 +1356,15 @@ func (cc *ConsistencyChecker) processBatchForDataScan(
 		deltaObjects := *objectsVerified - prevObjects
 
 		if deltaMismatches > 0 || deltaBytes > 0 || deltaObjects > 0 {
-			dataScanInconsistentObjects.Add(float64(deltaMismatches))
-			dataScanInconsistentBytes.Add(float64(deltaInconsistent))
-			dataScanObjectsProcessed.Add(float64(deltaObjects))
-			dataScanBytesProcessed.Add(float64(deltaBytes))
+			// The stats below are updated either way: they are this checker's
+			// own, and a consumer that suppressed the cache-named collectors
+			// reads them to publish its own.
+			if !cc.suppressCacheMetrics {
+				dataScanInconsistentObjects.Add(float64(deltaMismatches))
+				dataScanInconsistentBytes.Add(float64(deltaInconsistent))
+				dataScanObjectsProcessed.Add(float64(deltaObjects))
+				dataScanBytesProcessed.Add(float64(deltaBytes))
+			}
 
 			cc.statsMu.Lock()
 			cc.stats.LastDataScan = time.Now()
@@ -1283,11 +1396,30 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 		}
 	}
 
+	// In "verify once" mode, skip objects whose on-disk data has already been
+	// read back and verified.  The expensive read+hash is avoided entirely.
+	// A small fraction (~1/resampleInterval) is still re-verified each cycle so
+	// there is a nonzero floor of at-rest corruption detection rather than zero.
+	if cc.skipVerifiedData && !meta.DataVerified.IsZero() {
+		if cc.resampleInterval <= 0 || rand.Intn(cc.resampleInterval) != 0 {
+			return errChecksumAlreadyVerified
+		}
+		// Otherwise fall through and re-verify this object (re-sampled).
+	}
+
 	// If no checksums available, calculate and store them
 	if len(meta.Checksums) == 0 {
+		// Unless the caller asked for a strictly read-only pass: the backfill
+		// is a metadata write, and for a store holding the only copy it can
+		// bless data that is already corrupt or race a write that has not yet
+		// recorded its own checksums.
+		if cc.skipChecksumBackfill {
+			return errChecksumSkipped
+		}
 		if err := cc.calculateAndStoreChecksums(ctx, instanceHash, meta, bytesLimiter); err != nil {
 			return err
 		}
+		cc.markDataVerified(instanceHash)
 		*objectsVerified++
 		return nil
 	}
@@ -1315,6 +1447,17 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 			log.Warnf("Checksum mismatch for object %s (type %d)", instanceHash, cksum.Type)
 			*checksumMismatches++
 			*inconsistentBytes += meta.ContentLength
+			if cc.preserveCorruptObjects {
+				// Deleting is how a cache repairs itself; for a store that
+				// holds the only copy it *is* the data loss.  Report and keep
+				// the bytes so an operator can still restore, re-ingest, or at
+				// minimum see the object's path, size, and checksums.
+				log.Errorf("At-rest corruption in object %s (checksum type %d does not match "+
+					"what was recorded at ingest). The object has been LEFT IN PLACE because "+
+					"this store holds the only copy; it cannot be re-fetched. Restore it from "+
+					"backup or re-ingest it.", instanceHash, cksum.Type)
+				return nil
+			}
 			if err := cc.storage.Delete(instanceHash); err != nil {
 				log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
 			}
@@ -1323,8 +1466,23 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	}
 
 	*bytesVerified += verified
+	cc.markDataVerified(instanceHash)
 	*objectsVerified++
 	return nil
+}
+
+// markDataVerified records that an object's on-disk data has just been read
+// back and checksum-verified.  It is only persisted in "verify once" mode,
+// where the recorded timestamp causes subsequent scans to skip the object;
+// in the default mode it is a no-op to avoid a metadata write per object per
+// scan cycle.
+func (cc *ConsistencyChecker) markDataVerified(instanceHash InstanceHash) {
+	if !cc.skipVerifiedData {
+		return
+	}
+	if err := cc.db.MergeMetadata(instanceHash, &CacheMetadata{DataVerified: time.Now()}); err != nil {
+		log.Warnf("Failed to record data-verified timestamp for %s: %v", instanceHash, err)
+	}
 }
 
 // hashObjectData reads all object data through the storage manager and
@@ -1443,20 +1601,7 @@ func (cc *ConsistencyChecker) calculateAndStoreChecksums(
 
 // createHasher creates a hash.Hash for the given checksum type
 func (cc *ConsistencyChecker) createHasher(checksumType ChecksumType) (hash.Hash, error) {
-	switch checksumType {
-	case ChecksumMD5:
-		return md5.New(), nil
-	case ChecksumSHA1:
-		return sha1.New(), nil
-	case ChecksumSHA256:
-		return sha256.New(), nil
-	case ChecksumCRC32:
-		return crc32.NewIEEE(), nil
-	case ChecksumCRC32C:
-		return crc32.New(crc32.MakeTable(crc32.Castagnoli)), nil
-	default:
-		return nil, errors.Errorf("unknown checksum type: %d", checksumType)
-	}
+	return NewChecksumHasher(checksumType)
 }
 
 // VerifyObject verifies a single object's integrity.

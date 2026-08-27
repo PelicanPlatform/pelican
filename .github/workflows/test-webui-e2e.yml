@@ -1,0 +1,377 @@
+---
+name: Web UI E2E Tests
+
+# Compiles the Pelican binary once, then fans out across each service in
+# parallel. Each leg starts only its own module and runs only the matching
+# Playwright project (origin / cache / director / registry).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ── Build ────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Pelican binaries
+    runs-on: ubuntu-latest
+    container:
+      # pelican-dev has Go, Node.js, pnpm, GoReleaser, and XRootD pre-installed.
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs tag history
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: "web_ui/frontend/package.json"
+
+      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
+      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
+      # container-based jobs like this one, where the Actions-provided Node.js is
+      # not co-located with an npm. Installing pnpm with the npm that setup-node
+      # has just put on PATH sidesteps that. The version comes from the
+      # "packageManager" field, so it always matches the lockfile.
+      - name: Set up pnpm
+        id: pnpm
+        working-directory: web_ui/frontend
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          # Resolve the store path in its own assignment rather than inline in
+          # the echo, so that a failure aborts the step instead of quietly
+          # caching an empty path. pnpm chooses the store location based on the
+          # working directory's filesystem, so resolve it where installs run.
+          store="$(pnpm store path)"
+          echo "store=${store}" >> "$GITHUB_OUTPUT"
+
+      # Replaces setup-node's "cache: pnpm", which cannot be used because it
+      # requires pnpm to already be installed when setup-node runs.
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Cache Next.js build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
+          # Only the Next.js build cache lives here; the pnpm store is cached
+          # by the separate "Cache the pnpm store" step above.
+          path: |
+            ${{ github.workspace }}/web_ui/frontend/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-
+      - name: Build web UI
+        run: |
+          echo "::group::Building web UI"
+          make web-build
+          echo "::endgroup::"
+      - name: Generate GoReleaser config
+        run: make goreleaser-config
+
+      - name: Build Pelican binaries
+        # goreleaser is pre-installed in the pelican-dev image.
+        run: goreleaser build --single-target --clean --snapshot --config .goreleaser.generated.yml
+
+      - name: Stage binaries for upload
+        run: |
+          mkdir -p /tmp/pelican-binaries
+          cp dist/pelican_linux_amd64_v1/pelican /tmp/pelican-binaries/pelican
+          cp dist/pelican-server_linux_amd64_v1/pelican-server /tmp/pelican-binaries/pelican-server
+      - name: Upload Pelican binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pelican-binaries
+          path: /tmp/pelican-binaries/
+          retention-days: 1  # only needed for the sibling e2e jobs
+
+  # ── E2E tests (matrix) ───────────────────────────────────────────────────────
+  e2e-tests:
+    name: E2E (${{ matrix.service }})
+    needs: build
+    runs-on: ubuntu-latest
+    # Without an explicit cap this job inherits GitHub's 6-hour default, so a
+    # hung Playwright run (e.g. a reporter that never exits, or a test that
+    # stalls in startup) burns 6 hours of silence before it is cancelled. Cap it
+    # so such a hang fails fast and surfaces its log instead.
+    timeout-minutes: 30
+    container:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    strategy:
+      fail-fast: false   # run all services even when one fails
+      matrix:
+        include:
+          # registry has no upstream dependencies — runs alone.
+          #          - service: registry
+          #            module: registry
+          # director needs a registry to advertise to.
+          #          - service: director
+          #            module: director,registry
+          # origin and cache both need a director + registry to register with.
+          - service: origin
+            module: origin,director,registry
+          - service: cache
+            module: origin,cache,director,registry
+          # transfer exercises the standalone transfer server's web UI (Jobs /
+          # Credentials pages). The transfer web view is gated on the transfer
+          # server type being enabled, so it runs the `transfer` module (plus a
+          # director + registry to form a federation and the local issuer).
+          - service: transfer
+            module: transfer,director,registry
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: "web_ui/frontend/package.json"
+
+      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
+      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
+      # container-based jobs like this one, where the Actions-provided Node.js is
+      # not co-located with an npm. Installing pnpm with the npm that setup-node
+      # has just put on PATH sidesteps that. The version comes from the
+      # "packageManager" field, so it always matches the lockfile.
+      - name: Set up pnpm
+        id: pnpm
+        working-directory: web_ui/frontend
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          # Resolve the store path in its own assignment rather than inline in
+          # the echo, so that a failure aborts the step instead of quietly
+          # caching an empty path. pnpm chooses the store location based on the
+          # working directory's filesystem, so resolve it where installs run.
+          store="$(pnpm store path)"
+          echo "store=${store}" >> "$GITHUB_OUTPUT"
+
+      # Replaces setup-node's "cache: pnpm", which cannot be used because it
+      # requires pnpm to already be installed when setup-node runs.
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Download Pelican binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: pelican-binaries
+          path: /tmp/pelican-binaries
+
+      - name: Install Pelican binaries
+        run: |
+          install -m 755 /tmp/pelican-binaries/pelican ./pelican
+          install -m 755 /tmp/pelican-binaries/pelican-server ./pelican-server
+      - name: Set up Pelican config and admin credentials
+        run: |
+          mkdir -p /tmp/pelican-origin-data
+          echo -n "password" > /tmp/pelican-admin-password.txt
+          # Generate the bcrypt htpasswd file in the default config dir.
+          ./pelican-server generate password \
+            --password /tmp/pelican-admin-password.txt \
+            --output /etc/pelican/server-web-passwd
+          # Write a minimal config. All file paths default to /etc/pelican/
+          # so only non-default values need to be specified.
+          cat > /etc/pelican/pelican.yaml <<'EOF'
+          TLSSkipVerify: true
+          OIDC:
+            ClientID: fake-client
+            ClientSecretFile: /tmp/pelican-admin-password.txt
+          Server:
+            HostName: localhost
+            WebPort: 8444
+            # Disable the Acceptable Use Policy gate: it would redirect every
+            # authenticated page to an "I agree" screen, which these UI tests are
+            # not exercising.
+            AUPFile: none
+          Logging:
+            Level: info
+          Origin:
+            Exports:
+              - FederationPrefix: /test/github-actions
+                StoragePrefix: /etc/pelican
+                capabilities:
+                  - DirectReads
+                  - Writes
+                  - Listings
+                  - Reads
+                AuthorizationTemplates:
+                  - actions: [ "read", "modify" ]
+                    prefix: /$USER
+          Federation:
+            DiscoveryUrl: https://localhost:8444
+          EOF
+      - name: Start Pelican ${{ matrix.service }} server
+        run: |
+          ./pelican-server serve --module ${{ matrix.module }} \
+            > /tmp/pelican-server.log 2>&1 &
+          echo $! > /tmp/pelican-server.pid
+      - name: Wait for Pelican server to be ready
+        run: |
+          echo "Waiting for Pelican ${{ matrix.service }} server..."
+          for i in $(seq 1 60); do
+            # Bail early if the server process has already exited.
+            if ! kill -0 "$(cat /tmp/pelican-server.pid)" 2>/dev/null; then
+              echo "::error::Pelican ${{ matrix.service }} process died before becoming ready"
+              exit 1
+            fi
+            health_ok=false
+            metadata_ok=false
+            key_ok=false
+            curl -sk https://localhost:8444/api/v1.0/health > /dev/null 2>&1 && health_ok=true
+            curl -sk https://localhost:8444/.well-known/pelican-configuration > /dev/null && metadata_ok=true
+            # Keys are written as pelican_generated_*.pem inside issuer-keys/, not issuer.jwk.
+            ls /etc/pelican/issuer-keys/*.pem > /dev/null 2>&1 && key_ok=true
+            if $health_ok && $key_ok; then
+              echo "Server ready after ${i} poll(s)"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Pelican ${{ matrix.service }} server did not become ready in time (health=${health_ok}, issuer_key=${key_ok})"
+              exit 1
+            fi
+            sleep 3
+          done
+      - name: Generate admin bearer token
+        run: |
+          # No --private-key needed: PELICAN_CONFIGDIR is set in the job env so
+          # the binary discovers the key from issuer-keys/ automatically.
+          #
+          # The standalone transfer server authenticates against its server-level
+          # local issuer (Server.ExternalWebUrl) and needs the pelican.transfer
+          # scope for the transfer API; the origin/cache legs use the origin
+          # issuer and monitoring scopes.
+          if [ "${{ matrix.service }}" = "transfer" ]; then
+            ISSUER="https://localhost:8444"
+            SCOPE="web_ui.access pelican.transfer"
+          else
+            ISSUER="https://localhost:8444/api/v1.0/origin"
+            SCOPE="web_ui.access monitoring.query monitoring.scrape"
+          fi
+          # Two audiences, because this one token is consumed by two validators
+          # that accept different values:
+          #  - ${ISSUER}: the web-UI `login` cookie path (GetUserGroups in
+          #    web_ui/authentication.go) requires aud == config.GetLocalIssuerUrl(),
+          #    which is "<ExternalWebUrl>/api/v1.0/origin" whenever origin and
+          #    director are co-located -- the origin and cache legs here. Playwright
+          #    injects this token as that cookie, and unlike the Authorization
+          #    header path it checks the audience, so omitting this value rejects
+          #    every request on those legs.
+          #  - https://localhost:8444: the origin's data-plane authz
+          #    (origin_serve/authz.go) matches aud against Origin.TokenAudience,
+          #    which defaults to the bare origin URL. The Object Browser tests
+          #    reach the data plane with the same token.
+          TOKEN=$(./pelican-server origin token create \
+            --profile wlcg \
+            --scope "${SCOPE}" \
+            --issuer "${ISSUER}" \
+            --lifetime 7200 \
+            --subject admin \
+            --audience "${ISSUER}" \
+            --audience https://localhost:8444 \
+            --claim "oidc_iss=${ISSUER}" \
+            --claim "oidc_sub=admin")
+          echo "PELICAN_E2E_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
+      - name: Install pnpm dependencies and Playwright browsers
+        working-directory: web_ui/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          # pelican-dev is AlmaLinux-based; Playwright's --with-deps uses apt-get
+          # and will fail. Install Chromium's system deps via dnf instead.
+          dnf install -y \
+            alsa-lib \
+            atk \
+            cups-libs \
+            gtk3 \
+            libdrm \
+            libgbm \
+            libXcomposite \
+            libXdamage \
+            libXext \
+            libXfixes \
+            libXi \
+            libXrandr \
+            libXScrnSaver \
+            libXtst \
+            mesa-libgbm \
+            nss \
+            nspr \
+            pango
+          pnpm exec playwright install chromium
+      - name: Run Playwright e2e tests (${{ matrix.service }})
+        working-directory: web_ui/frontend
+        env:
+          CI: "true"
+          TARGET_ORIGIN_URL: https://localhost:8444
+          TARGET_CACHE_URL: https://localhost:8444
+          TARGET_DIRECTOR_URL: https://localhost:8444
+          TARGET_REGISTRY_URL: https://localhost:8444
+          TARGET_TRANSFER_URL: https://localhost:8444
+          TARGET_ORIGIN_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+          TARGET_CACHE_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+          TARGET_DIRECTOR_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+          TARGET_REGISTRY_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+          TARGET_TRANSFER_TOKEN: ${{ env.PELICAN_E2E_TOKEN }}
+        run: |
+          # Verify the server is still alive after the pnpm/dnf install steps.
+          if ! kill -0 "$(cat /tmp/pelican-server.pid)" 2>/dev/null; then
+            echo "::error::Pelican server is no longer running before Playwright tests started"
+            echo "--- last 50 lines of server log ---"
+            tail -50 /tmp/pelican-server.log || true
+            exit 1
+          fi
+          pnpm exec playwright test --project=${{ matrix.service }}
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: playwright-report-${{ matrix.service }}
+          path: web_ui/frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload Playwright raw artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: playwright-test-results-${{ matrix.service }}
+          path: web_ui/frontend/test-results/
+          retention-days: 30
+
+      - name: Upload Pelican server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pelican-server-state-${{ matrix.service }}
+          path: |
+            /etc/pelican/
+            /tmp/pelican-server.log
+          retention-days: 7
+
+      - name: Stop Pelican server
+        if: always()
+        run: |
+          if [ -f /tmp/pelican-server.pid ]; then
+            kill "$(cat /tmp/pelican-server.pid)" || true
+          fi

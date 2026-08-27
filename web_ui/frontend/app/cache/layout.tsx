@@ -20,7 +20,6 @@ import Main from '@/components/layout/Main';
 import { PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
-import ServerName from '@/components/ServerName';
 
 export const metadata = {
   title: 'Cache',
@@ -34,10 +33,7 @@ export default function RootLayout({
   return (
     <Navigation config={NavigationConfiguration['cache']}>
       <Main>
-        <PaddedContent>
-          <ServerName defaultName={'Cache'} />
-          {children}
-        </PaddedContent>
+        <PaddedContent>{children}</PaddedContent>
       </Main>
     </Navigation>
   );

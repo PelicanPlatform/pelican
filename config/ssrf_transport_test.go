@@ -19,11 +19,29 @@
 package config
 
 import (
+	"context"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// TestSSRFTransport_ValidateHost checks the admission-time host validator used to
+// keep the transfer server from being an SSRF pivot. Literal IPs are resolved by
+// the stdlib resolver without a network lookup, so this is deterministic.
+func TestSSRFTransport_ValidateHost(t *testing.T) {
+	ctx := context.Background()
+	st := newTestSSRFTransport(false, nil, nil)
+
+	assert.Error(t, st.ValidateHost(ctx, "169.254.169.254"), "cloud metadata IP must be blocked")
+	assert.Error(t, st.ValidateHost(ctx, "127.0.0.1"), "loopback must be blocked")
+	assert.Error(t, st.ValidateHost(ctx, "10.0.0.5"), "RFC-1918 must be blocked")
+	assert.NoError(t, st.ValidateHost(ctx, "8.8.8.8"), "a public IP must be allowed")
+	assert.NoError(t, st.ValidateHost(ctx, ""), "an empty host is a no-op")
+
+	disabled := newTestSSRFTransport(true, nil, nil)
+	assert.NoError(t, disabled.ValidateHost(ctx, "169.254.169.254"), "a disabled policy allows everything")
+}
 
 func newTestSSRFTransport(disabled bool, allowed, blocked []string) *SSRFTransport {
 	return &SSRFTransport{

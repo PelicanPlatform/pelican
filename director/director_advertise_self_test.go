@@ -47,17 +47,24 @@ func TestSendMyAdInsertsIntoDirectorAds(t *testing.T) {
 	ResetState()
 	t.Cleanup(ResetState)
 
-	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
-	defer cancel()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	// Cancel and wait for the ad-forwarding goroutines to exit before the test
+	// returns (and thus before the config.ResetConfig cleanup runs); otherwise
+	// a still-running getDirectorToken -> GetFederation reads viper while
+	// ResetConfig resets it, which the race detector flags.
+	defer func() {
+		cancel()
+		_ = egrp.Wait()
+	}()
 
 	sendMyAd(ctx)
 
 	item := directorAds.Get(selfName)
 	require.NotNil(t, item, "directorAds must contain the self-entry after sendMyAd")
 	require.NotNil(t, item.Value())
-	require.NotNil(t, item.Value().ad)
-	assert.Equal(t, selfName, item.Value().ad.Name)
-	assert.Equal(t, "http://self.example.com", item.Value().ad.AdvertiseUrl)
+	require.NotNil(t, item.Value().ad.Load())
+	assert.Equal(t, selfName, item.Value().ad.Load().Name)
+	assert.Equal(t, "http://self.example.com", item.Value().ad.Load().AdvertiseUrl)
 }
 
 // TestListDirectorsReturnsSelfAfterPeerExpires verifies the key
@@ -85,8 +92,15 @@ func TestListDirectorsReturnsSelfAfterPeerExpires(t *testing.T) {
 		return len(directorAds.Items()) == 0
 	}, 1*time.Second, 5*time.Millisecond, "peer ad should expire")
 
-	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
-	defer cancel()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	// Cancel and wait for the ad-forwarding goroutines to exit before the test
+	// returns (and thus before the config.ResetConfig cleanup runs); otherwise
+	// a still-running getDirectorToken -> GetFederation reads viper while
+	// ResetConfig resets it, which the race detector flags.
+	defer func() {
+		cancel()
+		_ = egrp.Wait()
+	}()
 
 	sendMyAd(ctx)
 
@@ -95,6 +109,6 @@ func TestListDirectorsReturnsSelfAfterPeerExpires(t *testing.T) {
 	selfItem, ok := items[selfName]
 	require.True(t, ok, "self-entry must be keyed by the director name")
 	require.NotNil(t, selfItem.Value())
-	require.NotNil(t, selfItem.Value().ad)
-	assert.Equal(t, selfName, selfItem.Value().ad.Name)
+	require.NotNil(t, selfItem.Value().ad.Load())
+	assert.Equal(t, selfName, selfItem.Value().ad.Load().Name)
 }

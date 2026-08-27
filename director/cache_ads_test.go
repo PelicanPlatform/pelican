@@ -56,7 +56,7 @@ func TestLaunchTTLCache(t *testing.T) {
 	}
 	mockPelicanOriginServerAd.Initialize("test-origin-server")
 
-	mockNamespaceAd := server_structs.NamespaceAdV2{
+	mockNamespaceAd := server_structs.NamespaceAd{
 		Caps:   server_structs.Capabilities{PublicReads: false},
 		Path:   "/foo/bar/",
 		Issuer: []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
@@ -88,7 +88,7 @@ func TestLaunchTTLCache(t *testing.T) {
 
 			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 				ServerAd:     mockPelicanOriginServerAd,
-				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+				NamespaceAds: []server_structs.NamespaceAd{mockNamespaceAd},
 			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
@@ -152,7 +152,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 
 			serverAds.Set(mockServerAd.URL.String(), &server_structs.Advertisement{
 				ServerAd:     mockServerAd,
-				NamespaceAds: []server_structs.NamespaceAdV2{},
+				NamespaceAds: []server_structs.NamespaceAd{},
 			}, time.Second*2)
 			require.True(t, serverAds.Has(mockServerAd.URL.String()), "Failed to register server Ad")
 		}()
@@ -209,14 +209,14 @@ func TestRecordAd(t *testing.T) {
 			URL:          topologyServerUrl,
 			FromTopology: true,
 		},
-		NamespaceAds: []server_structs.NamespaceAdV2{},
+		NamespaceAds: []server_structs.NamespaceAd{},
 	}
 	mockPelican := &server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			URL:          pelicanServerUrl,
 			FromTopology: false,
 		},
-		NamespaceAds: []server_structs.NamespaceAdV2{},
+		NamespaceAds: []server_structs.NamespaceAd{},
 	}
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {

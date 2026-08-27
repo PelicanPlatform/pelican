@@ -8,4 +8,5 @@ export default {
     "plugin": "pelican plugin",
     "rclone": { display: 'hidden' },
     "token": "pelican token",
+    "transfer": "pelican transfer",
 }

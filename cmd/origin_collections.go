@@ -38,7 +38,9 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/oauth2/issuer"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -159,15 +161,10 @@ func acquireOAuthToken(ctx context.Context, issuerUrl string, scopes []string) (
 	}
 
 	var prefixEntry *config.PrefixEntry
-	prefixIdx := -1
 
-	// Look for existing credentials for this issuer
-	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == issuerUrl {
-			prefixIdx = idx
-			prefixEntry = &osdfConfig.OSDF.OauthClient[idx]
-			break
-		}
+	fc, prefixIdx := osdfConfig.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), issuerUrl)
+	if prefixIdx >= 0 {
+		prefixEntry = &fc.OauthClient[prefixIdx]
 	}
 
 	// If no credentials found, register a new client
@@ -195,23 +192,32 @@ func acquireOAuthToken(ctx context.Context, issuerUrl string, scopes []string) (
 		}
 
 		newEntry := config.PrefixEntry{
-			Prefix:       issuerUrl,
-			ClientID:     resp.ClientID,
-			ClientSecret: resp.ClientSecret,
+			Prefix: issuerUrl,
+			ClientRegistration: config.ClientRegistration{
+				ClientID:     resp.ClientID,
+				ClientSecret: resp.ClientSecret,
+				ClientScopes: scopes,
+			},
 		}
 
 		if prefixIdx < 0 {
 			// Add new entry
-			osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, newEntry)
-			prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+			fc.OauthClient = append(fc.OauthClient, newEntry)
+			prefixEntry = &fc.OauthClient[len(fc.OauthClient)-1]
 		} else {
 			// Update existing entry
-			osdfConfig.OSDF.OauthClient[prefixIdx] = newEntry
+			fc.OauthClient[prefixIdx] = newEntry
 			prefixEntry = &newEntry
 		}
 
-		// Save credentials
-		if err := config.SaveConfigContents(&osdfConfig); err != nil {
+		// Persist under the credential-file lock, re-reading and merging just
+		// this delta so a concurrent writer (e.g. the client-agent background
+		// refresh) is not clobbered.
+		if err := config.MutatePrefixEntry(param.Federation_DiscoveryUrl.GetString(), issuerUrl, func(e *config.PrefixEntry) {
+			e.ClientID = resp.ClientID
+			e.ClientSecret = resp.ClientSecret
+			e.ClientScopes = scopes
+		}); err != nil {
 			return "", errors.Wrap(err, "failed to save OAuth client credentials")
 		}
 	}
@@ -299,9 +305,18 @@ func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body
 		scopeStr = scopeStr + ":" + collectionID
 	}
 
+	// Collection operations are control-plane: the origin's collections API is
+	// gated by web_ui.AuthHandler, which requires a bearer token whose issuer is
+	// the origin's *local* issuer (config.GetLocalIssuerUrl). Discover that
+	// issuer explicitly rather than the origin's bare web URL — the base-URL OIDC
+	// document describes the origin's data-namespace issuer, whose tokens the
+	// collections API rejects. The local issuer mints the namespace-agnostic
+	// collection.* management scopes for us.
+	localIssuerURL := strings.TrimRight(originWebUrl, "/") + "/api/v1.0/issuer/ns" + issuer.LocalIssuerNamespace
+
 	// Get OAuth token with collection-specific scope
 	scopes := []string{scopeStr}
-	token, err := acquireOAuthToken(ctx, originWebUrl, scopes)
+	token, err := acquireOAuthToken(ctx, localIssuerURL, scopes)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to acquire OAuth token")
 	}
@@ -836,6 +851,58 @@ var originCollectionsACLRevokeCmd = &cobra.Command{
 	},
 }
 
+// ===== Ownership-transfer invite =====
+//
+// Mints a single-use invite link that, when redeemed by an
+// authenticated user, transfers ownership of the collection to that
+// user. The link is always single-use server-side regardless of any
+// client preference (ownership transfer is by definition one-shot).
+
+var originCollectionsOwnershipInviteCmd = &cobra.Command{
+	Use:   "ownership-invite",
+	Short: "Manage collection ownership-transfer invite links",
+}
+
+var originCollectionsOwnershipInviteCreateCmd = &cobra.Command{
+	Use:   "create <id>",
+	Short: "Mint an ownership-transfer invite for a collection",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		if err := config.InitClient(); err != nil {
+			return errors.Wrap(err, "failed to initialize client")
+		}
+
+		id := args[0]
+		endpoint := fmt.Sprintf("/collections/%s/ownership-invites", id)
+
+		req := origin.CreateCollectionOwnershipInviteReq{}
+		if cmd.Flags().Changed("expires-in") {
+			v, _ := cmd.Flags().GetString("expires-in")
+			req.ExpiresIn = v
+		}
+
+		respBody, err := makeCollectionAPIRequest(ctx, http.MethodPost, endpoint, req, token_scopes.Collection_Modify, id)
+		if err != nil {
+			return err
+		}
+
+		var res origin.CreateCollectionOwnershipInviteRes
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+
+		fmt.Println("Ownership-transfer invite created successfully!")
+		fmt.Printf("Token:       %s\n", res.InviteToken)
+		fmt.Printf("Link ID:     %s\n", res.ID)
+		fmt.Printf("Expires At:  %s\n", res.ExpiresAt.Format(time.RFC3339))
+		fmt.Printf("Single Use:  %v\n", res.IsSingleUse)
+		fmt.Println("\nShare the token with the intended new owner. The token is shown only once;")
+		fmt.Println("redeeming it transfers ownership of this collection to the redeemer.")
+		return nil
+	},
+}
+
 func init() {
 	// Use global --json flag from root.go for JSON output
 
@@ -857,6 +924,8 @@ func init() {
 	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "Group ID for the ACL (required)")
 	originCollectionsACLRevokeCmd.Flags().String("role", "", "Role for the ACL (required)")
 
+	originCollectionsOwnershipInviteCreateCmd.Flags().String("expires-in", "", "Expiration duration as a Go duration string (e.g. '168h'); defaults to 7 days server-side")
+
 	// Register commands
 	originCollectionCmd.AddCommand(originCollectionsListCmd)
 	originCollectionCmd.AddCommand(originCollectionsCreateCmd)
@@ -865,6 +934,7 @@ func init() {
 	originCollectionCmd.AddCommand(originCollectionsDeleteCmd)
 	originCollectionCmd.AddCommand(originCollectionsMetadataCmd)
 	originCollectionCmd.AddCommand(originCollectionsACLCmd)
+	originCollectionCmd.AddCommand(originCollectionsOwnershipInviteCmd)
 
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataGetCmd)
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataSetCmd)
@@ -873,4 +943,6 @@ func init() {
 	originCollectionsACLCmd.AddCommand(originCollectionsACLListCmd)
 	originCollectionsACLCmd.AddCommand(originCollectionsACLGrantCmd)
 	originCollectionsACLCmd.AddCommand(originCollectionsACLRevokeCmd)
+
+	originCollectionsOwnershipInviteCmd.AddCommand(originCollectionsOwnershipInviteCreateCmd)
 }

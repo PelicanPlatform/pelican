@@ -25,9 +25,9 @@ import (
 type (
 	XRootDServer interface {
 		GetServerType() ServerType
-		SetNamespaceAds([]NamespaceAdV2)
-		GetNamespaceAds() []NamespaceAdV2
-		CreateAdvertisement(name string, id string, serverUrl string, serverWebUrl string, downtimes []Downtime) (*OriginAdvertiseV2, error)
+		SetNamespaceAds([]NamespaceAd)
+		GetNamespaceAds() []NamespaceAd
+		CreateAdvertisement(name string, id string, serverUrl string, serverWebUrl string, downtimes []Downtime) (*OriginAdvertise, error)
 		GetNamespaceAdsFromDirector() error
 		GetAdTokCfg(string) (AdTokCfg, error) // Given a director URL, configuration a token for advertising
 		GetFedTokLocation() string
@@ -41,7 +41,7 @@ type (
 	}
 
 	NamespaceHolder struct {
-		namespaceAds []NamespaceAdV2
+		namespaceAds []NamespaceAd
 	}
 
 	AdTokCfg struct {
@@ -57,6 +57,16 @@ const (
 	CachePrefix  ServerPrefix = "/caches/"
 	OriginPrefix ServerPrefix = "/origins/"
 )
+
+// LocalIssuerNamespace is the reserved registry/route key for a server's
+// "local" OIDC issuer -- the generic embedded issuer that mints tokens under
+// the server's own identity (iss = config.GetLocalIssuerUrl()), independent of
+// any data-export namespace. It lives under Pelican's reserved /pelican space
+// so it can never collide with a registrable federation prefix: validatePrefix
+// rejects any prefix whose first component is "pelican" (see
+// registry/registry_validation.go), which makes /pelican/local-issuer
+// structurally impossible to register as a namespace.
+const LocalIssuerNamespace = "/pelican/local-issuer"
 
 func (s ServerPrefix) String() string {
 	return string(s)
@@ -97,10 +107,10 @@ func IsServerPrefix(ns string) bool {
 	return IsCacheNS(ns) || IsOriginNS(ns)
 }
 
-func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {
+func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAd) {
 	ns.namespaceAds = ads
 }
 
-func (ns *NamespaceHolder) GetNamespaceAds() []NamespaceAdV2 {
+func (ns *NamespaceHolder) GetNamespaceAds() []NamespaceAd {
 	return ns.namespaceAds
 }

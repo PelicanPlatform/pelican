@@ -33,6 +33,12 @@ type bearerAuth struct {
 // BearerAuthenticator is an Authenticator for BearerAuth
 type bearerAuthenticator struct {
 	token *tokenGenerator
+	// hintTried records that this request has already acted on a token hint,
+	// so a server that keeps refusing cannot keep sending it back for more.
+	// gowebdav's Clone returns the same instance, so the flag survives the
+	// retry it guards; NewAuthenticator builds a fresh one per request, so
+	// concurrent stats do not share it.
+	hintTried bool
 }
 
 // NewAuthenticator creates a new BearerAuthenticator
@@ -63,6 +69,15 @@ func (b *bearerAuthenticator) Verify(c *http.Client, rs *http.Response, path str
 
 	switch rs.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
+		// An origin that answers namespace questions about itself says on the
+		// refusal which issuer would have worked.  Acquire that credential and
+		// let gowebdav send the request again, so a stat or a listing learns
+		// the same way a download does instead of paying for a metadata query
+		// before it starts.
+		if !b.hintTried && acquireFromTokenHint(b.token, rs) {
+			b.hintTried = true
+			return true, nil
+		}
 		return b.token.recordAuthFailure(rs.StatusCode)
 	default:
 		if rs.StatusCode < 400 {

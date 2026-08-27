@@ -50,6 +50,8 @@ const DowntimeCard = ({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => setExpanded(!expanded)}
+      data-testid='downtime-card'
+      data-description={downtime.description}
     >
       <Badge color={'success'} invisible={!updatedRecently} badgeContent={' '}>
         <Paper
@@ -97,9 +99,11 @@ const DowntimeCard = ({
                   {editable && (
                     <Box>
                       <IconButton
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setDowntime(downtime);
                         }}
+                        aria-label='Edit downtime'
                       >
                         <Edit />
                       </IconButton>

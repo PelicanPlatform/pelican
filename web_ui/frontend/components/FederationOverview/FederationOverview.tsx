@@ -8,24 +8,24 @@ import getFederationUrls from '@/helpers/get/getFederationUrls';
 import LinkBox from './LinkBox';
 
 const FederationOverview = () => {
-  const { data: federationUrls, error } = useSWR(
+  const { data: federationUrls } = useSWR(
     'getFederationUrls',
     getFederationUrls,
-    { fallbackData: [] }
+    { fallbackData: {} }
   );
+
+  const entries = Object.entries(federationUrls).filter(([, url]) => !!url);
 
   return (
     <>
-      {!Object.values(federationUrls).every((x) => x == undefined) ? (
+      {entries.length > 0 ? (
         <Typography variant={'h4'} component={'h2'} mb={2}>
           Federation Overview
         </Typography>
       ) : null}
-      {Object.entries(federationUrls).map(([text, url]) => {
-        if (url) {
-          return <LinkBox key={text} href={url} text={text}></LinkBox>;
-        }
-      })}
+      {entries.map(([text, url]) => (
+        <LinkBox key={text} href={url} text={text}></LinkBox>
+      ))}
     </>
   );
 };

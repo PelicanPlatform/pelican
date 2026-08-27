@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/go-jose/go-jose/v3"
@@ -62,6 +63,12 @@ type OIDCProvider struct {
 	// provider is scoped to.
 	Namespace string
 
+	// IssuerURL is the canonical issuer identifier (the "iss" claim) for tokens
+	// minted by this provider, and the base for its OIDC discovery document.
+	// For per-namespace data issuers this is IssuerURLForNamespace(Namespace);
+	// for the server's local issuer it is config.GetLocalIssuerUrl().
+	IssuerURL string
+
 	// AuthzRules holds per-namespace compiled authorization templates.
 	// When set, these are used instead of the global rules from
 	// oa4mp.InitAuthzRules().
@@ -91,8 +98,8 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 
 	// Read token lifespans from config. The zero-checks guard against unit
 	// tests that call NewOIDCProvider directly without initializing viper
-	// via InitConfigInternal (which is the only place defaults.yaml is
-	// loaded); in those environments GetDuration returns 0.
+	// via InitConfigInternal (which is the only place the parameter defaults
+	// are applied); in those environments GetDuration returns 0.
 	accessTokenLifespan := param.Issuer_AccessTokenLifetime.GetDuration()
 	if accessTokenLifespan == 0 {
 		accessTokenLifespan = 1 * time.Hour
@@ -183,6 +190,7 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		strategy:            strategy,
 		privateKey:          privateKey,
 		Namespace:           namespace,
+		IssuerURL:           issuerURL,
 		DeviceCodeHandler:   deviceHandler,
 		RegistrationLimiter: regLimiter,
 	}, nil
@@ -437,12 +445,71 @@ func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
 }
 
+// Issuer returns the canonical issuer URL ("iss" claim / discovery base) for
+// this provider.  It prefers the explicitly-configured IssuerURL and falls
+// back to the per-namespace URL for providers constructed without one.
+func (p *OIDCProvider) Issuer() string {
+	if p.IssuerURL != "" {
+		return p.IssuerURL
+	}
+	return IssuerURLForNamespace(p.Namespace)
+}
+
+// RegisterLocalProvider creates the server's "local" OIDC issuer and registers
+// it in the given registry under the reserved LocalIssuerNamespace key, starting
+// its dynamic-client cleanup loop.  Its tokens carry iss = config.GetLocalIssuerUrl()
+// and the (group-gated) pelican.transfer scope, so the transfer middleware's
+// LocalIssuer check accepts them without any data-export namespace.  This is
+// shared by the origin (which adds it to the data-namespace registry) and the
+// standalone transfer server (which registers it in a dedicated registry).
+func RegisterLocalProvider(ctx context.Context, egrp *errgroup.Group, registry *ProviderRegistry, db *gorm.DB, gracePeriod time.Duration) error {
+	localIssuerURL := config.GetLocalIssuerUrl()
+	provider, err := NewOIDCProvider(db, localIssuerURL, gracePeriod, LocalIssuerNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to create local issuer provider: %w", err)
+	}
+	registry.Register(LocalIssuerNamespace, provider)
+
+	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+	if unusedTimeout == 0 {
+		unusedTimeout = 1 * time.Hour
+	}
+	staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+	if staleTimeout == 0 {
+		staleTimeout = 336 * time.Hour // 2 weeks
+	}
+	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+	log.Infof("Embedded OIDC issuer: registered local issuer (iss=%s)", localIssuerURL)
+	return nil
+}
+
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
 // Public clients rely on PKCE for security and use token_endpoint_auth_method "none".
+//
+// If the client already exists, its redirect URIs are reconciled so that every
+// entry in redirectURIs is allowed, adding any that are missing while preserving
+// the rest. This keeps the pre-allocated public client in sync with the current
+// configuration — for example after the origin's web UI is enabled or its
+// external web URL changes — instead of silently breaking browser (PKCE) logins
+// against a stale redirect list persisted by an earlier run.
 func (p *OIDCProvider) EnsurePublicClient(ctx context.Context, clientID string, redirectURIs []string) error {
-	_, err := p.storage.GetClient(ctx, clientID)
+	existing, err := p.storage.GetClient(ctx, clientID)
 	if err == nil {
-		return nil // already exists
+		merged := existing.GetRedirectURIs()
+		added := false
+		for _, uri := range redirectURIs {
+			if !slices.Contains(merged, uri) {
+				merged = append(merged, uri)
+				added = true
+			}
+		}
+		if added {
+			log.Infof("Reconciling redirect URIs for public OIDC client %q: %v", clientID, merged)
+			if _, err := p.storage.UpdateClient(ctx, clientID, ClientUpdate{RedirectURIs: &merged}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if !errors.Is(err, fosite.ErrNotFound) {
 		return err

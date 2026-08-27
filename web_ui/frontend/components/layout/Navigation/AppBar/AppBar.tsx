@@ -16,7 +16,13 @@ import BurgerMenu from '@/components/layout/Navigation/AppBar/BurgerMenu';
 const pages = ['Products', 'Pricing', 'Blog'];
 const settings = ['Profile', 'Account', 'Dashboard', 'Logout'];
 
-function ResponsiveAppBar({ config, exportType, role }: NavigationProps) {
+function ResponsiveAppBar({
+  config,
+  exportType,
+  role,
+  scopes,
+  topOffset = 0,
+}: NavigationProps) {
   const [navOpen, setNavOpen] = React.useState(false);
 
   return (
@@ -88,7 +94,9 @@ function ResponsiveAppBar({ config, exportType, role }: NavigationProps) {
       <Box
         sx={{
           position: 'fixed',
-          top: 0,
+          // Yield to any out-of-flow banner above us (admin session
+          // strip) so the burger drawer doesn't slide in over it.
+          top: `${topOffset}px`,
           width: '100vw',
           backgroundColor: 'white',
           zIndex: 1000,
@@ -99,6 +107,7 @@ function ResponsiveAppBar({ config, exportType, role }: NavigationProps) {
             config={config}
             exportType={exportType}
             role={role}
+            scopes={scopes}
             onClose={() => setNavOpen(false)}
           />
         </Collapse>

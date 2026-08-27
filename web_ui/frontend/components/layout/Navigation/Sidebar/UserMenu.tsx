@@ -3,7 +3,16 @@
 import useSWR from 'swr';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
-import { IconButton, Menu, MenuItem, MenuProps, Tooltip } from '@mui/material';
+import {
+  Box,
+  Divider,
+  IconButton,
+  Menu,
+  MenuItem,
+  MenuProps,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import {
   AccountCircle,
   AdminPanelSettings,
@@ -109,12 +118,48 @@ const UserMenu = ({ menuOptions }: { menuOptions?: Partial<MenuProps> }) => {
         }}
         {...menuOptions}
       >
-        {user.role === 'admin' ? (
-          <MenuItem disabled={true}>Admin User</MenuItem>
-        ) : null}
-        {user.role !== 'admin' ? (
-          <MenuItem disabled={true}>User</MenuItem>
-        ) : null}
+        {/*
+          Identity header. Two stacked lines so a long display name +
+          username pair doesn't blow out the menu's width:
+            line 1 — display name (or username when none is set)
+            line 2 — the literal username, monospaced and dimmed
+                     (suppressed when it would just repeat line 1)
+          Followed by a small role tag so the admin-vs-user signal we
+          used to convey via "Admin User" / "User" doesn't disappear.
+        */}
+        <Box sx={{ px: 2, py: 1, maxWidth: 240 }}>
+          <Typography
+            variant='body2'
+            sx={{ fontWeight: 600, wordBreak: 'break-word' }}
+          >
+            {user.displayName || user.user || 'Unknown user'}
+          </Typography>
+          {user.displayName && user.user && user.displayName !== user.user && (
+            <Typography
+              variant='caption'
+              color='text.secondary'
+              sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
+            >
+              {user.user}
+            </Typography>
+          )}
+          <Typography
+            variant='caption'
+            color='text.secondary'
+            sx={{ display: 'block', mt: 0.25 }}
+          >
+            {user.role === 'admin' ? 'Administrator' : 'User'}
+          </Typography>
+        </Box>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setMenuOpen(false);
+            router.push('/profile/');
+          }}
+        >
+          Profile
+        </MenuItem>
         <MenuItem onClick={handleLogout}>Logout</MenuItem>
       </Menu>
       {error && <StatusSnackBar message={error} severity={'error'} />}

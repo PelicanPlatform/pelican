@@ -20,10 +20,8 @@ package token
 
 import (
 	"context"
-	"encoding/json"
 	errors_default "errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -166,21 +164,17 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return errors.Wrap(err, "Failed to verify federation JWT signature or claims")
 	}
 
+	// Federation-issued tokens authenticate the *federation*, not a
+	// local user. The Subject claim is exposed for callers that need
+	// it (e.g. ownership of a registered namespace), but we deliberately
+	// do NOT propagate user_id, oidc_sub, or wlcg.groups into the gin
+	// context here — those are user-identity claims and their meaning
+	// belongs to the local server's issuer. A federation IdP could let
+	// a user self-assert any of those values; trusting them as if they
+	// came from a login cookie would let the federation impersonate
+	// arbitrary local users. See the contract on extractUserFromBearerToken.
 	c.Set("User", parsed.Subject())
-
-	// Also extract and set userId if present in the token
-	if userIdIface, ok := parsed.Get("user_id"); ok {
-		if userId, ok := userIdIface.(string); ok && userId != "" {
-			c.Set("UserId", userId)
-		}
-	}
-
-	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
-	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
-		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
-			c.Set("OIDCSub", oidcSub)
-		}
-	}
+	c.Set("VerifiedToken", parsed)
 
 	return nil
 }
@@ -217,15 +211,22 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 	}
 
 	c.Set("User", parsed.Subject())
+	c.Set("VerifiedToken", parsed)
 
-	// Also extract and set userId if present in the token
+	// user_id and oidc_sub are user-identity claims. They are safe to
+	// extract HERE because checkLocalIssuer has already verified that
+	// the token was signed by the local server's key AND its issuer
+	// claim equals Server.ExternalWebUrl — i.e. *we* minted this token
+	// and we control what we put in those claims. The same extraction
+	// is forbidden in checkFederationIssuer / checkRegisteredServer
+	// because external issuers can be coerced into setting arbitrary
+	// non-standard claims. See web_ui/authentication.go:extractUserFromBearerToken
+	// for the analogous contract on the cookie/bearer path.
 	if userIdIface, ok := parsed.Get("user_id"); ok {
 		if userId, ok := userIdIface.(string); ok && userId != "" {
 			c.Set("UserId", userId)
 		}
 	}
-
-	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
 	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			c.Set("OIDCSub", oidcSub)
@@ -377,6 +378,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	token := ""
 	// Find token from the provided sources list, stop when found the first token
 	tokenFound := false
+	var foundSource TokenSource
 	for _, opt := range authOption.Sources {
 		if tokenFound {
 			break
@@ -389,6 +391,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				token = cookieToken
 				tokenFound = true
+				foundSource = Cookie
 			}
 		case Header:
 			headerToken := ctx.Request.Header["Authorization"]
@@ -399,6 +402,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				token, found = strings.CutPrefix(headerToken[0], "Bearer ")
 				if found {
 					tokenFound = true
+					foundSource = Header
 				}
 			}
 		case Authz:
@@ -408,6 +412,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				token = authzToken[0]
 				tokenFound = true
+				foundSource = Authz
 			}
 		default:
 			log.Error("Invalid/unsupported token source")
@@ -418,6 +423,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	if token == "" {
 		log.Debugf("Unauthorized. No token is present from the list of potential token positions: %v", authOption.Sources)
 		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
+	}
+
+	// Store the token source for VerifyAndExtract consumers
+	if tokenFound {
+		ctx.Set("TokenSource", string(foundSource))
 	}
 
 	compoundErr := make([]error, 0, 1)
@@ -479,121 +489,78 @@ func GetAuthzEscaped(ctx *gin.Context) (authzEscaped string) {
 	return
 }
 
-// For a given prefix, get the prefix's issuer URL, where we consider that the openid endpoint
-// we use to look up a key location. Note that this is NOT the same as the issuer key -- to
-// find that, follow openid-style discovery using the issuer URL as a base.
-func GetNSIssuerURL(prefix string) (string, error) {
-	if prefix == "" || !strings.HasPrefix(prefix, "/") {
-		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
-	}
-	fedInfo, err := config.GetFederation(context.Background())
-	if err != nil {
-		return "", err
-	}
-	registryUrlStr := fedInfo.RegistryEndpoint
-	if registryUrlStr == "" {
-		return "", errors.New("federation registry URL is not set and was not discovered")
-	}
-	registryUrl, err := url.Parse(registryUrlStr)
-	if err != nil {
-		return "", err
-	}
-
-	registryUrl.Path, err = url.JoinPath(registryUrl.Path, "api", "v1.0", "registry", prefix)
-
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to construct openid-configuration lookup URL for prefix %s", prefix)
-	}
-	return registryUrl.String(), nil
+// VerifyResult holds the results of token verification including the parsed
+// JWT and the source from which the token was obtained.
+type VerifyResult struct {
+	Token  jwt.Token
+	Source TokenSource
 }
 
-// Given an issuer url, lookup the JWKS URL from the openid-configuration
-// For example, if the issuer URL is https://registry.com:8446/api/v1.0/registry/test-namespace,
-// this function will return the key indicated by the openid-configuration JSON hosted at
-// https://registry.com:8446/api/v1.0/registry/test-namespace/.well-known/openid-configuration.
-func GetJWKSURLFromIssuerURL(issuerUrl string) (string, error) {
-	// Get/parse the openid-configuration JSON to lookup key location
-	issOpenIDUrl, err := url.Parse(issuerUrl)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse issuer URL")
-	}
-	issOpenIDUrl.Path, _ = url.JoinPath(issOpenIDUrl.Path, ".well-known", "openid-configuration")
-
-	client := &http.Client{Transport: config.GetTransport()}
-	openIDCfg, err := client.Get(issOpenIDUrl.String())
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to lookup openid-configuration for issuer %s", issuerUrl)
-	}
-	defer openIDCfg.Body.Close()
-
-	// If we hit an old registry, it may not have the openid-configuration. In that case, we fallback to the old
-	// behavior of looking for the key directly at the issuer URL.
-	if openIDCfg.StatusCode == http.StatusNotFound {
-		oldKeyLoc, err := url.JoinPath(issuerUrl, ".well-known", "issuer.jwks")
-		if err != nil {
-			return "", errors.Wrapf(err, "failed to construct key lookup URL for issuer %s", issuerUrl)
-		}
-		return oldKeyLoc, nil
+// VerifyAndExtract works like Verify but additionally returns the parsed JWT
+// and the token source. This avoids the need to re-parse the token after
+// verification in order to extract claims such as issuer, subject, or groups.
+func VerifyAndExtract(ctx *gin.Context, authOption AuthOption) (*VerifyResult, int, bool, error) {
+	status, ok, err := Verify(ctx, authOption)
+	if !ok {
+		return nil, status, false, err
 	}
 
-	body, err := io.ReadAll(openIDCfg.Body)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to read response body from %s", issuerUrl)
+	result := &VerifyResult{}
+
+	if t, exists := ctx.Get("VerifiedToken"); exists {
+		result.Token = t.(jwt.Token)
+	}
+	if s, exists := ctx.Get("TokenSource"); exists {
+		result.Source = TokenSource(s.(string))
 	}
 
-	var openIDCfgMap map[string]string
-	err = json.Unmarshal(body, &openIDCfgMap)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to unmarshal openid-configuration for issuer %s", issuerUrl)
-	}
-
-	if keyLoc, ok := openIDCfgMap["jwks_uri"]; ok {
-		return keyLoc, nil
-	} else {
-		return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
-	}
+	return result, status, true, nil
 }
 
-func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
-	// Make sure our URL is solid
-	issuerUrl, err := url.Parse(issuer)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Invalid issuer URL: ", issuerUrl))
+// CheckOriginIssuer verifies a token whose issuer claim matches Origin.Url.
+// This is used when Origin.Url differs from Server.ExternalWebUrl but the
+// origin uses the same signing key. It is a standalone function (not part of
+// the AuthChecker interface) intended for use by the transfer module.
+func CheckOriginIssuer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	originURL := param.Origin_Url.GetString()
+	if originURL == "" {
+		return errors.New("Origin.Url is not configured")
 	}
 
-	// Discover the JWKS URL from the issuer
-	pubkeyUrlStr, err := GetJWKSURLFromIssuerURL(issuerUrl.String())
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
-		return nil, errors.Wrap(err, "Error getting JWKS URL from issuer URL")
+		return errors.Wrap(err, "invalid JWT")
 	}
 
-	// Query the JWKS URL for the public keys
-	httpClient := config.GetClient()
-	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Error querying issuer's key endpoint (%s)", pubkeyUrlStr)
-	}
-	defer resp.Body.Close()
-	// Check the response code, make sure it's not in the error ranges (400-500)
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, errors.Errorf("The issuer's JWKS endpoint returned an unexpected status: %s", resp.Status)
+	if originURL != tok.Issuer() {
+		return errors.New(fmt.Sprintf("token issuer %s does not match Origin.Url %s", tok.Issuer(), originURL))
 	}
 
-	// Read the response body and parse the JWKs from it
-	jwksStr, err := io.ReadAll(resp.Body)
+	// The origin uses the same signing key as the server
+	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error reading response body from %s", pubkeyUrlStr)
-	}
-	kSet, err := jwk.ParseString(string(jwksStr))
-	if err != nil {
-		return nil, errors.Wrapf(err, "Error parsing JWKs from %s", pubkeyUrlStr)
+		return errors.Wrap(err, "failed to load server's public key for origin issuer check")
 	}
 
-	return &kSet, nil
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
+	if err != nil {
+		return errors.Wrap(err, "failed to verify JWT with origin's key")
+	}
+
+	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
+	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+		return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
+	}
+
+	ctx.Set("User", parsed.Subject())
+	ctx.Set("VerifiedToken", parsed)
+
+	// Note: we intentionally do NOT extract user_id or oidc_sub here.
+	// Those claims are only trusted from the local issuer (checkLocalIssuer)
+	// where they originate from cookie-based auth.  An origin-issued token
+	// should not be allowed to assert arbitrary user_id or oidc_sub values.
+
+	return nil
 }
 
 // CheckApiTokenIssuerFunc is a hook for verifying API tokens against the database.

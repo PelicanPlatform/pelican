@@ -31,6 +31,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
@@ -90,14 +91,18 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			input_config := config.OSDFConfig{}
+			input_config := config.CredentialConfig{}
 			err = yaml.Unmarshal(input_config_b, &input_config)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to parse config file:", err)
 				os.Exit(1)
 			}
 
-			err = config.SaveConfigContents(&input_config)
+			// Serialize the overwrite against any concurrent credential-file
+			// writer (e.g. the client-agent background refresh).
+			err = config.WithCredentialFileLock(func() error {
+				return config.SaveConfigContents(&input_config)
+			})
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to save replaced configuration file:", err)
 				os.Exit(1)
@@ -140,7 +145,8 @@ func printOauthConfig() {
 		fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 		os.Exit(1)
 	}
-	clientList := &config.OSDF.OauthClient
+	fc := config.GetFederationCredentials(param.Federation_DiscoveryUrl.GetString())
+	clientList := &fc.OauthClient
 	config_b, err := yaml.Marshal(&clientList)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to convert object to YAML:", err)
@@ -185,7 +191,10 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+			opts := config.TokenGenerationOpts{
+				Operation:    config.TokenRead,
+				DiscoveryURL: pUrl.FedInfo.DiscoveryEndpoint,
+			}
 			if httpMethod == http.MethodPut {
 				opts.Operation = config.TokenWrite
 			}
@@ -217,30 +226,27 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Add a new oauth client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetCredentialConfigContents()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
-				os.Exit(1)
-			}
-
-			hasPrefix := false
-			for _, entry := range input_config.OSDF.OauthClient {
-				if entry.Prefix == args[0] {
-					hasPrefix = true
-					break
+			// Hold the credential-file lock across the whole read-modify-write so
+			// a concurrent writer (e.g. the client-agent background refresh)
+			// cannot clobber this change, and re-read the wallet inside the lock.
+			err := config.WithCredentialFileLock(func() error {
+				input_config, err := config.GetCredentialConfigContents()
+				if err != nil {
+					return err
 				}
-			}
-			if !hasPrefix {
-				newPrefix := config.PrefixEntry{Prefix: args[0]}
-				input_config.OSDF.OauthClient = append(input_config.OSDF.OauthClient, newPrefix)
-			} else {
-				fmt.Fprintln(os.Stderr, "Prefix to add already exists")
-				return
-			}
 
-			err = config.SaveConfigContents(&input_config)
+				fc, existingIdx := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+				if existingIdx >= 0 {
+					fmt.Fprintln(os.Stderr, "Prefix to add already exists")
+					return nil
+				}
+				newPrefix := config.PrefixEntry{Prefix: args[0]}
+				fc.OauthClient = append(fc.OauthClient, newPrefix)
+
+				return config.SaveConfigContents(&input_config)
+			})
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Unable to save replaced configuration file:", err)
+				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
 				os.Exit(1)
 			}
 		},
@@ -252,37 +258,40 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Set the oauth client attributes (client_id or client_secret)",
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetCredentialConfigContents()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
-				os.Exit(1)
-			}
-
-			var existingPrefix *config.PrefixEntry
-			existingPrefix = nil
-			for idx := range input_config.OSDF.OauthClient {
-				if input_config.OSDF.OauthClient[idx].Prefix == args[0] {
-					existingPrefix = &input_config.OSDF.OauthClient[idx]
-					break
-				}
-			}
-			if existingPrefix == nil {
-				fmt.Fprintln(os.Stderr, "Prefix to set was not present")
-				os.Exit(1)
-			}
-
-			if args[1] == "client_id" {
-				existingPrefix.ClientID = args[2]
-			} else if args[1] == "client_secret" {
-				existingPrefix.ClientSecret = args[2]
-			} else {
+			if args[1] != "client_id" && args[1] != "client_secret" {
 				fmt.Fprintln(os.Stderr, "Unknown attribute to set:", args[1])
 				os.Exit(1)
 			}
+			// Hold the credential-file lock across the read-modify-write and
+			// re-read the wallet inside it.
+			var notPresent bool
+			err := config.WithCredentialFileLock(func() error {
+				input_config, err := config.GetCredentialConfigContents()
+				if err != nil {
+					return err
+				}
 
-			err = config.SaveConfigContents(&input_config)
+				fc, existingIdx := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+				if existingIdx < 0 {
+					notPresent = true
+					return nil
+				}
+				existingPrefix := &fc.OauthClient[existingIdx]
+
+				if args[1] == "client_id" {
+					existingPrefix.ClientID = args[2]
+				} else {
+					existingPrefix.ClientSecret = args[2]
+				}
+
+				return config.SaveConfigContents(&input_config)
+			})
+			if notPresent {
+				fmt.Fprintln(os.Stderr, "Prefix to set was not present")
+				os.Exit(1)
+			}
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Unable to save replaced configuration file:", err)
+				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
 				os.Exit(1)
 			}
 		},
@@ -294,24 +303,28 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Delete the oauth client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetCredentialConfigContents()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
-				os.Exit(1)
-			}
-
-			prefix_list := input_config.OSDF.OauthClient
-			new_prefix_list := make([]config.PrefixEntry, 0, len(prefix_list)-1)
-			for _, entry := range prefix_list {
-				if entry.Prefix != args[0] {
-					new_prefix_list = append(new_prefix_list, entry)
+			// Hold the credential-file lock across the read-modify-write and
+			// re-read the wallet inside it.
+			err := config.WithCredentialFileLock(func() error {
+				input_config, err := config.GetCredentialConfigContents()
+				if err != nil {
+					return err
 				}
-			}
-			input_config.OSDF.OauthClient = new_prefix_list
 
-			err = config.SaveConfigContents(&input_config)
+				fc, _ := input_config.FindOauthClient(param.Federation_DiscoveryUrl.GetString(), args[0])
+				prefix_list := fc.OauthClient
+				new_prefix_list := make([]config.PrefixEntry, 0, len(prefix_list))
+				for _, entry := range prefix_list {
+					if entry.Prefix != args[0] {
+						new_prefix_list = append(new_prefix_list, entry)
+					}
+				}
+				fc.OauthClient = new_prefix_list
+
+				return config.SaveConfigContents(&input_config)
+			})
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Unable to save replaced configuration file:", err)
+				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
 				os.Exit(1)
 			}
 		},

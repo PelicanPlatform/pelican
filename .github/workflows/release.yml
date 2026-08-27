@@ -11,27 +11,71 @@ on:
       - "v[1-9][0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  goreleaser:
-    name: GoReleaser
+  web-build:
+    name: Build Web UI
     if: ${{ github.repository == 'PelicanPlatform/pelican' }}
     runs-on: ubuntu-latest
+    # This job exists so that "pnpm install" never runs on a runner that holds a
+    # write-scoped token. It is GoReleaser's "before" hook, hoisted out of
+    # the release job, which consumes the result as an artifact.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
           ref: ${{ github.ref_name }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "npm"
-          cache-dependency-path: "web_ui/frontend/package-lock.json"
           check-latest: true
+
+      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
+      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
+      # container-based jobs, where the Actions-provided Node.js is not
+      # co-located with an npm. Installing pnpm with the npm that setup-node has
+      # just put on PATH sidesteps that. The version comes from the
+      # "packageManager" field, so it always matches the lockfile.
+      - name: Set up pnpm
+        id: pnpm
+        working-directory: web_ui/frontend
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          # Resolve the store path in its own assignment rather than inline in
+          # the echo, so that a failure aborts the step instead of quietly
+          # caching an empty path. pnpm chooses the store location based on the
+          # working directory's filesystem, so resolve it where installs run.
+          store="$(pnpm store path)"
+          echo "store=${store}" >> "$GITHUB_OUTPUT"
+
+      # Replaces setup-node's "cache: pnpm", which cannot be used because it
+      # requires pnpm to already be installed when setup-node runs.
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Cache Next.js
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
+          # Only the Next.js build cache lives here; the pnpm store is cached
+          # by the separate "Cache the pnpm store" step above.
+          path: |
+            ${{ github.workspace }}/web_ui/frontend/.next/cache
+          # Generate a new cache whenever packages or source files change.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
+          # If source files changed but packages didn't, rebuild from a prior cache.
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-
 
       - name: Set Go version
         # Determine the string to use in setup-go's "go-version" input.
@@ -41,21 +85,74 @@ jobs:
           echo "version=${version}.x" >> $GITHUB_OUTPUT
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
+
+      - name: Build the web UI
+        run: |
+          make web-build
+
+      - name: Upload the web UI assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: web-ui
+          path: web_ui/frontend/out
+          include-hidden-files: true
+          overwrite: true  # allow the workflow to be re-run
+          retention-days: 1
+          if-no-files-found: error
+
+  goreleaser:
+    name: GoReleaser
+    needs: web-build
+    if: ${{ github.repository == 'PelicanPlatform/pelican' }}
+    runs-on: ubuntu-latest
+    # Nothing here runs pnpm, and "--skip=before" keeps GoReleaser from
+    # running the hooks that would.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+          ref: ${{ github.ref_name }}
+          # Do not leave the write-scoped token in .git/config.
+          persist-credentials: false
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Download the web UI assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: web-ui
+          path: web_ui/frontend/out
 
       - name: Generate GoReleaser config
         run: |
           make goreleaser-config
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --config .goreleaser.generated.yml
+          # The web-build job either ran the "before" hook or else their
+          # outputs are already committed.
+          args: release --clean --skip=before --config .goreleaser.generated.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

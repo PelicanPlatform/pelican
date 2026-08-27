@@ -1,0 +1,39 @@
+---
+title: pelican server server user aup clear
+---
+
+## pelican-server server user aup clear
+
+Clear a user's AUP acceptance, forcing them to re-sign
+
+### Synopsis
+
+Wipe a user's recorded AUP acceptance. The user will be redirected
+through the AUP-signing flow on their next AUP-gated request. Distinct
+from rotating the active AUP itself, which forces every user on the
+server to re-accept.
+
+```
+pelican-server server user aup clear <user-id> [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for clear
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server server user aup](/commands-reference/pelican-server/server/user/aup/)	 - Manage a user's AUP acceptance record

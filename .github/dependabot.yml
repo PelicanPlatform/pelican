@@ -1,0 +1,16 @@
+---
+# Keep the SHA-pinned actions in .github/workflows/ from going stale.
+# Dependabot rewrites both the SHA and its trailing version comment.
+
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      # Withhold a version update until the release has been on the
+      # registry for this many days, which buys time for a malicious
+      # release to be noticed. Security updates are exempt.
+      default-days: 7

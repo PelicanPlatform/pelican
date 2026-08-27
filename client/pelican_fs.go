@@ -72,16 +72,61 @@ func NewPelicanFSWithPrefix(ctx context.Context, urlPrefix string, options ...Tr
 	}
 }
 
+// Engine returns the transfer engine backing this filesystem.  Callers that
+// also make one-off client calls (Stat, List) can pass it to the engine-aware
+// variants so those share this filesystem's director-response cache instead
+// of querying the director again.
+func (pfs *PelicanFS) Engine() *TransferEngine {
+	pfs.mu.Lock()
+	defer pfs.mu.Unlock()
+	return pfs.transferEngine
+}
+
+// ensureFileInfo fetches and memoizes the object's metadata for the
+// operations that cannot answer without it -- Stat, Seek from the end, and
+// ReadDir. With an eager stat this has already happened at open time; with
+// WithLazyStat it happens here, on the first operation that actually needs a
+// size, and not at all for a reader that only asks for byte ranges.
+func (pf *PelicanFile) ensureFileInfoLocked() (*FileInfo, error) {
+	if pf.fileInfo != nil {
+		return pf.fileInfo, nil
+	}
+	if pf.statErr != nil {
+		return nil, pf.statErr
+	}
+	fi, err := statHttp(pf.ctx, pf.pUrl, pf.dirResp, pf.token, nil)
+	if err != nil {
+		pf.statErr = err
+		return nil, err
+	}
+	pf.fileInfo = &fi
+	return pf.fileInfo, nil
+}
+
 // Open opens the named file for reading and returns a fs.File that also
 // implements io.ReaderAt, io.Seeker, io.Writer (for write mode), and
 // fs.ReadDirFile (for directories).
 func (pfs *PelicanFS) Open(name string) (fs.File, error) {
-	return pfs.OpenFile(name, os.O_RDONLY)
+	// io/fs requires that opening a nonexistent file returns an error, so
+	// this entry point always stats even when the filesystem was built with
+	// WithLazyStat. Callers that want the deferred behavior ask for it by
+	// name, through OpenFile.
+	return pfs.openFile(name, os.O_RDONLY, false)
 }
 
 // OpenFile opens the named file with specified flags.
 // Supported flags: os.O_RDONLY, os.O_WRONLY, os.O_RDWR, os.O_CREATE
 func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
+	lazy := false
+	for _, o := range pfs.options {
+		if o.Ident() == (identTransferOptionLazyStat{}) {
+			lazy = o.Value().(bool)
+		}
+	}
+	return pfs.openFile(name, flag, lazy)
+}
+
+func (pfs *PelicanFS) openFile(name string, flag int, lazyStat bool) (fs.File, error) {
 	// Strip leading slash if present (fs.ValidPath requires unrooted paths)
 	cleanName := name
 	if len(name) > 0 && name[0] == '/' {
@@ -116,12 +161,29 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	operation := config.TokenRead
 	if writeMode && !rdwrMode {
 		httpMethod = http.MethodPut
-		operation = config.TokenWrite
+		operation = uploadTokenOperation()
 	}
 
-	dirResp, err := getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
-	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	// Opens reuse the engine's cached director response (5 min TTL):
+	// filesystem-oriented callers open many objects under one namespace in
+	// quick succession and should neither pay a director round trip per
+	// open nor couple every operation to the director's availability.
+	// Reads and writes cache separately -- the flavor carries the verb, so
+	// a writer is never handed the caches a read was told to use -- as does
+	// each distinct query (?directread and friends steer matchmaking).
+	var dirResp server_structs.DirectorResponse
+	var err2 error
+	if pfs.transferEngine != nil && pfs.transferEngine.dirRespCache != nil {
+		flavor := NewDirRespFlavor(httpMethod, false, pUrl.RawQuery)
+		dirResp, err2 = pfs.transferEngine.dirRespCache.LookupOrLoad(pfs.ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pUrl, httpMethod, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err2 = getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
+	}
+	if err2 != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err2}
 	}
 
 	token := newTokenGenerator(pUrl, &dirResp, operation, true)
@@ -146,9 +208,15 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 
 	// Stat the file for reads (writes may create new file)
 	// For O_RDWR, try to stat first. If file doesn't exist, switch to write-only mode.
+	//
+	// A deferred stat is only offered for a plain read: O_RDWR decides
+	// between reading and creating on the strength of this answer, so it
+	// still asks. The handle a deferred open returns has asked nobody
+	// anything -- whether the object is there is settled by the first read.
+	lazyStat = lazyStat && !rdwrMode
 	var fileInfo *FileInfo
-	if readMode {
-		fi, err := statHttp(pUrl, dirResp, token, nil)
+	if readMode && !lazyStat {
+		fi, err := statHttp(pfs.ctx, pUrl, dirResp, token, nil)
 		if err != nil {
 			if rdwrMode {
 				// File doesn't exist in RDWR mode - switch to write-only
@@ -159,7 +227,7 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 				if err != nil {
 					return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 				}
-				token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, true)
+				token = NewTokenGenerator(pUrl, &dirResp, uploadTokenOperation(), true)
 				for _, option := range pfs.options {
 					switch option.Ident() {
 					case identTransferOptionTokenLocation{}:
@@ -214,6 +282,7 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		writeMode:      writeMode,
 		rdwrMutex:      flag&os.O_RDWR != 0,
 		shouldShutdown: true,
+		lazyStat:       lazyStat,
 	}
 
 	return pf, nil
@@ -227,10 +296,15 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 // Functions with "Locked" suffix must be called with mu held.
 type PelicanFile struct {
 	// Immutable fields (safe to access without lock after construction)
-	ctx             context.Context
-	name            string
-	pUrl            *pelican_url.PelicanURL
-	fileInfo        *FileInfo
+	ctx      context.Context
+	name     string
+	pUrl     *pelican_url.PelicanURL
+	fileInfo *FileInfo
+	// statErr remembers a failed deferred stat so the operations that need
+	// one do not re-ask on every call.
+	statErr error
+	// lazyStat defers the metadata fetch until an operation needs it.
+	lazyStat        bool
 	options         []TransferOption
 	transferClient  *TransferClient
 	dirResp         server_structs.DirectorResponse
@@ -312,8 +386,11 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 	pf.transferStarted = true
 	pf.transferOffset = 0
 
-	// Create a transfer job with the pipe writer
-	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, WithWriter(pw))
+	// Create a transfer job with the pipe writer, forwarding the
+	// filesystem-level transfer options (checksum preferences, etc.).
+	opts := append([]TransferOption{}, pf.options...)
+	opts = append(opts, WithWriter(pw))
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, opts...)
 	if err != nil {
 		pw.Close()
 		return 0, err
@@ -446,6 +523,28 @@ func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
 
 		// Check status code
 		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusNotFound {
+				// Absence is a fact about the object, not a failure of this
+				// endpoint, but another server may still hold it -- so note
+				// it and keep trying. If every server agrees, the wrapped
+				// error below still satisfies errors.Is(err, fs.ErrNotExist),
+				// which is what tells a caller (a filesystem checking its
+				// own block store, say) that the object is gone rather than
+				// momentarily unreachable. With an eager stat this arrived
+				// at open time; a deferred open learns it here.
+				resp.Body.Close()
+				lastErr = errors.Wrapf(fs.ErrNotExist, "object not found at %s", objServer.String())
+				continue
+			}
+			if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+				// The range starts at or past the end of the object. That is
+				// end-of-file, not a failure, and it is how a reader learns
+				// where the end is when no stat established the size up
+				// front. Trying the remaining servers would only collect the
+				// same answer.
+				resp.Body.Close()
+				return 0, io.EOF
+			}
 			lastErr = errors.Errorf("unexpected status code: %d", resp.StatusCode)
 			continue
 		}
@@ -556,8 +655,11 @@ func (pf *PelicanFile) startTransferWrite() error {
 	pf.transferStarted = true
 	pf.writePosition = 0
 
-	// Create a transfer job with the pipe reader
-	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, WithReader(pr))
+	// Create a transfer job with the pipe reader, forwarding the
+	// filesystem-level transfer options (checksum preferences, etc.).
+	opts := append([]TransferOption{}, pf.options...)
+	opts = append(opts, WithReader(pr))
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, opts...)
 	if err != nil {
 		pr.Close()
 		pw.Close()
@@ -591,10 +693,11 @@ func (pf *PelicanFile) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		newPos = pf.position + offset
 	case io.SeekEnd:
-		if pf.fileInfo == nil {
-			return 0, &fs.PathError{Op: "seek", Path: pf.name, Err: errors.New("cannot seek from end without file size")}
+		fi, err := pf.ensureFileInfoLocked()
+		if err != nil {
+			return 0, &fs.PathError{Op: "seek", Path: pf.name, Err: errors.Wrap(err, "cannot seek from end without file size")}
 		}
-		newPos = pf.fileInfo.Size + offset
+		newPos = fi.Size + offset
 	default:
 		return 0, &fs.PathError{Op: "seek", Path: pf.name, Err: errors.New("invalid whence")}
 	}
@@ -619,6 +722,13 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 		return nil, fs.ErrClosed
 	}
 
+	if pf.fileInfo == nil && pf.lazyStat && pf.readMode {
+		// Nothing has established what this path is yet; a listing needs to
+		// know, so ask now.
+		if _, err := pf.ensureFileInfoLocked(); err != nil {
+			return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: err}
+		}
+	}
 	if pf.fileInfo == nil || !pf.fileInfo.IsCollection {
 		return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: errors.New("not a directory")}
 	}
@@ -681,6 +791,13 @@ func (pf *PelicanFile) Stat() (fs.FileInfo, error) {
 		return nil, fs.ErrClosed
 	}
 
+	if pf.fileInfo == nil && pf.lazyStat && pf.readMode {
+		// A deferred open has not looked the object up yet; Stat is exactly
+		// the question that requires it.
+		if _, err := pf.ensureFileInfoLocked(); err != nil {
+			return nil, &fs.PathError{Op: "stat", Path: pf.name, Err: err}
+		}
+	}
 	if pf.fileInfo == nil {
 		// For write-only files, we may not have stat info
 		return &pelicanFileInfo{

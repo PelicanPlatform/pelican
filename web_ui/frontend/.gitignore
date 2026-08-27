@@ -5,6 +5,12 @@
 /.pnp
 .pnp.js
 
+# This project uses pnpm; pnpm-lock.yaml is the committed lockfile. Ignore the
+# other package managers' lockfiles so that an accidental `npm install` or
+# `yarn install` cannot commit a second, conflicting source of truth.
+/package-lock.json
+/yarn.lock
+
 # testing
 /coverage
 
@@ -37,3 +43,14 @@ next-env.d.ts
 
 # generated files
 /public/data/error_codes.json
+# copied from @pelicanplatform/web-client by the copy-sw npm script
+/public/downloadServiceWorker.js
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+/e2e/.env

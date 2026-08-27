@@ -22,9 +22,17 @@
 version: "2"
 
 run:
-  # Pelican has gotten large enough that the GitHub Action sometimes
-  # times out on a cold cache
-  timeout: 3m
+  # Pelican is large enough that GitHub Actions sometimes time out
+  # on a cold cache.
+  timeout: 5m
+
+  # The client-only and server-only commands live behind build tags,
+  # so an untagged run silently skips all of the "cmd" package.
+  # Linting both tags at once keeps whole-program linters, such as "unused",
+  # from flagging helpers that only the other tag calls.
+  build-tags:
+    - client
+    - server
 
 linters:
   enable:

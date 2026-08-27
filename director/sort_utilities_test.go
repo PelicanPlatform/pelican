@@ -23,16 +23,22 @@ import (
 	_ "embed"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -716,6 +722,78 @@ func TestGetServerCoordinate(t *testing.T) {
 	}
 }
 
+// When a server declares its own coordinate, getServerCoordinate still returns the declared
+// value but should additionally compute the discrepancy versus what GeoIP would have resolved
+// and emit a debug log when that discrepancy exceeds locationDiscrepancyThresholdKm.
+func TestServerLocationDiscrepancy(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+
+	// The discrepancy line is logged at debug level, so capture debug entries.
+	hook := test.NewGlobal()
+	origLevel := config.GetEffectiveLogLevel()
+	config.SetLogging(logrus.DebugLevel)
+	t.Cleanup(func() { config.SetLogging(origLevel) })
+
+	const discrepancyMsg = "differs from its GeoIP-resolved location"
+
+	// smallRadiusHostname resolves (via the stubbed MaxMind) to Madison, WI.
+	const madisonLat, madisonLong = 43.07296, -89.40831
+
+	declaredAd := func(name, hostname string, lat, long float64) server_structs.ServerAd {
+		ad := server_structs.ServerAd{URL: mustUrl(hostname)}
+		ad.Initialize(name)
+		ad.Coordinate = server_structs.Coordinate{
+			Lat:    lat,
+			Long:   long,
+			Source: server_structs.CoordinateSourceDeclared,
+		}
+		return ad
+	}
+
+	loggedDiscrepancy := func() bool {
+		for _, e := range hook.AllEntries() {
+			if strings.Contains(e.Message, discrepancyMsg) {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("large discrepancy is logged", func(t *testing.T) {
+		hook.Reset()
+		// Declared in NYC (~1200 km from the GeoIP-resolved Madison).
+		ad := declaredAd("declared-far", smallRadiusHostname, 40.7128, -74.0060)
+		coord, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		// Behavior is unchanged: the declared coordinate is still what's returned.
+		assert.EqualValues(t, server_structs.CoordinateSourceDeclared, coord.Source)
+		assert.Equal(t, 40.7128, coord.Lat)
+		assert.True(t, loggedDiscrepancy(), "expected a discrepancy debug log for a far-off declared location")
+	})
+
+	t.Run("small discrepancy is silent", func(t *testing.T) {
+		hook.Reset()
+		// Declared only a few km from the GeoIP-resolved Madison location.
+		ad := declaredAd("declared-near", smallRadiusHostname, madisonLat+0.05, madisonLong+0.05)
+		_, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		assert.False(t, loggedDiscrepancy(), "did not expect a discrepancy log within the threshold")
+	})
+
+	t.Run("no log when GeoIP cannot resolve", func(t *testing.T) {
+		hook.Reset()
+		// notInMaxMindHostname resolves to an IP the stubbed MaxMind can't place, so there's
+		// no GeoIP coordinate to compare against.
+		ad := declaredAd("declared-nogeoip", notInMaxMindHostname, 40.7128, -74.0060)
+		coord, err := getServerCoordinate(ad)
+		assert.NoError(t, err)
+		assert.EqualValues(t, server_structs.CoordinateSourceDeclared, coord.Source)
+		assert.False(t, loggedDiscrepancy(), "should not log a discrepancy when GeoIP can't resolve a coordinate")
+	})
+}
+
 func TestGetClientCoordinate(t *testing.T) {
 	setupGetIPStub(t)
 	setupGetMaxMindStub(t)
@@ -766,7 +844,7 @@ func TestGetClientCoordinate(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			coord := getClientCoordinate(ctx, tc.addr)
+			coord := getClientCoordinate(ctx, tc.addr, nil)
 			assert.Equal(t, tc.expectedCoord.Source, coord.Source)
 			if tc.expectedCoord.Source != server_structs.CoordinateSourceRandom {
 				// For non-random sources, check full equality
@@ -780,4 +858,75 @@ func TestGetClientCoordinate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// makeGinCtxWithHeader builds a minimal gin.Context whose Request carries the given header value.
+func makeGinCtxWithHeader(headerName, headerValue string) *gin.Context {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(headerName, headerValue)
+	c.Request = req
+	return c
+}
+
+// TestGetClientCoordinateFromHeader verifies that a well-formed X-Pelican-Coordinate header
+// takes highest precedence over all other coordinate sources.
+func TestGetClientCoordinateFromHeader(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+	setUpRandAssignmentCache(t)
+
+	ctx := context.Background()
+
+	t.Run("ValidHeaderTakesPrecedenceOverMaxMind", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "lat=43.0739,long=-89.3848")
+		// Use an IP that would normally resolve via MaxMind.
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+		assert.InDelta(t, 43.0739, coord.Lat, 1e-9)
+		assert.InDelta(t, -89.3848, coord.Long, 1e-9)
+		assert.Equal(t, uint16(0), coord.AccuracyRadius)
+	})
+
+	t.Run("ValidHeaderTakesPrecedenceOverOverride", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "lat=10.0,long=20.0")
+		coord := getClientCoordinate(ctx, ipFromOverride, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+		assert.InDelta(t, 10.0, coord.Lat, 1e-9)
+		assert.InDelta(t, 20.0, coord.Long, 1e-9)
+	})
+
+	t.Run("MalformedHeaderFallsThroughToNextSource", func(t *testing.T) {
+		ginCtx := makeGinCtxWithHeader("X-Pelican-Coordinate", "not-valid-at-all")
+		// The IP resolves fine via MaxMind, so we should get a MaxMind coordinate.
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, ginCtx)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceMaxMind), coord.Source)
+	})
+
+	t.Run("NilGinCtxStillWorks", func(t *testing.T) {
+		coord := getClientCoordinate(ctx, ipInMaxMindSmallRadius, nil)
+		assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceMaxMind), coord.Source)
+	})
+}
+
+// TestGetServerCoordinateDeclared verifies that a server ad with a pre-populated
+// Coordinate (Source == CoordinateSourceDeclared) is used without any GeoIP lookup.
+func TestGetServerCoordinateDeclared(t *testing.T) {
+	// No MaxMind or override stubs needed — declared coordinate must win outright.
+	sAd := server_structs.ServerAd{URL: mustUrl("cache.example.com")}
+	sAd.Initialize("declared-cache")
+	sAd.Coordinate = server_structs.Coordinate{
+		Lat:    43.0739,
+		Long:   -89.3848,
+		Source: server_structs.CoordinateSourceDeclared,
+	}
+
+	coord, err := getServerCoordinate(sAd)
+	assert.NoError(t, err)
+	assert.Equal(t, server_structs.CoordinateSource(server_structs.CoordinateSourceDeclared), coord.Source)
+	assert.InDelta(t, 43.0739, coord.Lat, 1e-9)
+	assert.InDelta(t, -89.3848, coord.Long, 1e-9)
+	assert.Equal(t, uint16(0), coord.AccuracyRadius)
 }

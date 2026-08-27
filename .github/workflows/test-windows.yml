@@ -23,6 +23,9 @@ on:
         default: false
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: Windows (${{ matrix.binary_name }})
@@ -36,7 +39,7 @@ jobs:
             tags: client
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
@@ -53,7 +56,7 @@ jobs:
           echo "version=${version}.x" >> $GITHUB_OUTPUT
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
@@ -93,7 +96,7 @@ jobs:
 
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: junit-${{ matrix.binary_name }}-${{ runner.os }}
           path: junit-${{ matrix.binary_name }}.xml
@@ -101,7 +104,7 @@ jobs:
 
       - name: Publish JUnit summary
         if: always()
-        uses: test-summary/action@v2
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
@@ -113,7 +116,7 @@ jobs:
         run: ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"

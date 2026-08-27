@@ -43,6 +43,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -133,7 +134,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	// Set RuntimeDir to a per-test location to avoid race conditions in parallel tests
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	// Configure all relevant logging levels. We don't let the XRootD
@@ -173,6 +174,11 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	require.NoError(t, param.Origin_EnableVoms.Set(false))
 	require.NoError(t, param.Origin_Port.Set(0))
 	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "origin")))
+	// Point the Globus config/token directory at the temp tree too. Its default
+	// (${XDG_RUNTIME_DIR}/pelican/xrootd/origin/globus) collapses to /pelican/...
+	// on platforms where XDG_RUNTIME_DIR is unset (notably macOS), where the root
+	// filesystem is read-only and InitGlobusBackend's mkdir fails.
+	require.NoError(t, param.Origin_GlobusConfigLocation.Set(filepath.Join(tmpPath, "origin", "globus")))
 	require.NoError(t, param.Origin_DbLocation.Set(filepath.Join(t.TempDir(), "origin.sqlite")))
 	require.NoError(t, param.Origin_TokenAudience.Set(""))
 	require.NoError(t, param.Cache_Port.Set(0))
@@ -211,6 +217,23 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	viper.SetConfigType("yaml")
 	err = viper.MergeConfig(strings.NewReader(originConfig))
 	require.NoError(t, err, "error reading config")
+
+	// Test federations always run on localhost, so server-initiated transfers
+	// (notably third-party copies) target private/loopback addresses. Both
+	// Pelican's SSRF-resistant transport and XRootD's TPC handler refuse such
+	// addresses by default. Skip the default SSRF blocks for the test fed so
+	// these copies succeed; the blocking behavior itself is covered by unit
+	// tests (see config/ssrf_transport_test.go). This must be set before the
+	// servers launch so it is baked into the generated XRootD config.
+	//
+	// Gate on the effective value rather than viper.IsSet: SSRFProtection.Disabled
+	// now ships a registered default, so IsSet is always true and would never let
+	// this fire. Only skip the default blocks when protection is still on (a test
+	// that disables SSRF entirely already reaches localhost).
+	if !viper.GetBool(param.Server_SSRFProtection_Disabled.GetName()) {
+		viper.Set(param.Server_SSRFProtection_SkipDefaultBlocks.GetName(), true)
+	}
+	config.ResetSSRFTransportForTest()
 
 	err = yaml.Unmarshal([]byte(originConfig), &importedConf)
 	require.NoError(t, err, "error unmarshalling into interface")
@@ -278,19 +301,26 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	err = os.WriteFile(outputPath, outputData, 0644)
 	require.NoError(t, err, "error writing out temporary config file for fed test")
 
+	// Merge the overridden config (with real storage paths replacing /<SHOULD BE OVERRIDDEN>)
+	// directly into viper. The earlier viper.MergeConfig call loaded the original resource YAML
+	// with placeholder paths. initConfigOnce prevents InitConfigInternal from re-running when
+	// LaunchModules calls InitServer, so the config file written above would never be loaded
+	// via that path. Merging here ensures GetOriginExports sees the real storage paths.
+	require.NoError(t, viper.MergeConfig(strings.NewReader(string(outputData))), "error merging overridden config into viper")
+
 	require.NoError(t, param.SetRaw("config", outputPath))
 
-	servers, _, err := launchers.LaunchModules(ctx, modules)
-	require.NoError(t, err)
-
-	ft.Pids = make([]int, 0, 2)
-	for _, server := range servers {
-		ft.Pids = append(ft.Pids, server.GetPids()...)
-	}
-
-	var discoveryServer *httptest.Server
-	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
-	// servers, because they populate the param values we use to set the metadata.
+	// Set up the federation discovery httptest.Server *before* launching the
+	// pelican servers.  The origin generates its scitokens.cfg during
+	// LaunchModules and pins the federation-issuer entry to
+	// fedInfo.DiscoveryEndpoint at write time; if we set that after LaunchModules
+	// returns, the initial scitokens.cfg has the wrong (or empty) federation
+	// issuer URL and rejects federation tokens with
+	// "Token issuer ... is not in list of allowed issuers" until the xrootd
+	// scitokens plugin's periodic reload picks up the regenerated file (up to
+	// 60s later).  The discovery handler is a closure over param values that
+	// are read at request time, so it stays correct even though it's registered
+	// before those values are populated by LaunchModules.
 	//
 	// The handler also serves /.well-known/openid-configuration and
 	// /.well-known/issuer.jwks so that the discovery URL can act as an
@@ -300,6 +330,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	// so without the OIDC endpoints any federation token whose issuer is
 	// this URL would fail verification (the verifier fetches the issuer's
 	// openid-configuration to locate the JWKS).
+	var discoveryServer *httptest.Server
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/pelican-configuration":
@@ -338,7 +369,9 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 			http.NotFound(w, r)
 		}
 	}
-	// Use the generated server certificate instead of httptest's self-signed cert
+	// Use the generated server certificate instead of httptest's self-signed cert.
+	// config.InitServer (called above) has already run GenerateCert, so the cert
+	// and key files exist on disk by the time we reach this point.
 	discoveryServer = httptest.NewUnstartedServer(http.HandlerFunc(handler))
 	cert, err := config.LoadCertificate(param.Server_TLSCertificateChain.GetString())
 	require.NoError(t, err, "Failed to load server certificate")
@@ -371,12 +404,40 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 
 	t.Cleanup(discoveryServer.Close)
 
-	// Set the discovery URL in both viper and the global fed info object
+	// Publish the discovery URL via the viper key that discoverFederationImpl
+	// reads (Federation.DiscoveryUrl) BEFORE LaunchModules -- this is what the
+	// origin's scitokens.cfg generator will see when it calls GetFederation.
+	//
+	// Do NOT populate globalFedInfo here (via GetFederation or SetFederation):
+	// config.InitServer above has already fired the federation-discovery
+	// sync.Once with Server.ExternalWebUrl at its default port, and any
+	// snapshot we take now would carry that stale JwksUri /
+	// DirectorEndpoint into every subsequent GetFederation caller
+	// (including the Director's federation-metadata handler). Instead, reset
+	// the sync.Once so LaunchModules's first GetFederation call reruns
+	// discovery after UpdateConfigFromListener has bound the real port --
+	// at which point all values, including our Federation.DiscoveryUrl,
+	// resolve correctly.
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(discoveryServer.URL))
-	fedInfo, err := config.GetFederation(ctx)
-	require.NoError(t, err, "error getting federation info")
-	fedInfo.DiscoveryEndpoint = discoveryServer.URL
-	config.SetFederation(fedInfo)
+	config.ResetFederationForTest()
+
+	servers, _, err := launchers.LaunchModules(ctx, modules)
+	require.NoError(t, err)
+
+	ft.Pids = make([]int, 0, 2)
+	for _, server := range servers {
+		ft.Pids = append(ft.Pids, server.GetPids()...)
+	}
+
+	// config.InitServer above ran BootstrapAdminAndBackfillOwners while
+	// Server.WebPort was still 0, so the "admin" user row's issuer is set to
+	// Server.ExternalWebUrl at the unbound default port. LaunchModules has
+	// now bound the real ephemeral port (UpdateConfigFromListener), so any
+	// login flow from here on computes a different issuer for "admin" and
+	// won't find that row. Here we realign it via UPDATE.
+	require.NoError(t, database.ServerDatabase.Model(&database.User{}).
+		Where("username = ?", "admin").
+		Update("issuer", param.Server_ExternalWebUrl.GetString()).Error)
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)

@@ -24,9 +24,30 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
+
+// TestUseEmbeddedCacheMode verifies that the embedded transfer client only runs
+// in cache-embedded mode (fetching directly from origins) when the cache is a
+// normal federation member.  In site-local mode the cache appears to the
+// federation as a client and must fetch from other caches, so embedded mode is
+// disabled.
+func TestUseEmbeddedCacheMode(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Default (federation member): embedded mode is on.
+	assert.True(t, useEmbeddedCacheMode())
+
+	// Site-local mode: embedded mode is off so the director redirects us to
+	// other caches rather than origins.
+	require.NoError(t, param.Cache_EnableSiteLocalMode.Set(true))
+	assert.False(t, useEmbeddedCacheMode())
+}
 
 func TestCalcResources(t *testing.T) {
 	tests := []struct {

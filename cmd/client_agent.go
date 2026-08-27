@@ -344,11 +344,49 @@ var clientAgentStatusCmd = &cobra.Command{
 	},
 }
 
+var clientAgentWarmWrite bool
+
+var clientAgentWarmCmd = &cobra.Command{
+	Use:   "warm <url>...",
+	Short: "Acquire credentials for objects and unlock the agent's wallet",
+	Long: `Acquire the credentials needed to transfer the given objects, prompting
+interactively if necessary, and unlock the running client agent's wallet so it
+can use and refresh those credentials on your behalf.
+
+By default a read credential is acquired for each object; pass --write to also
+acquire write/delete scopes (e.g. for uploads). Objects in public namespaces
+that require no token are skipped.`,
+	SilenceUsage: true,
+	Args:         cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := config.InitClient(); err != nil {
+			return errors.Wrap(err, "Failed to initialize Pelican client")
+		}
+		ctx := cmd.Context()
+		apiClient, err := ensureClientAgentRunning(ctx, 5)
+		if err != nil {
+			return errors.Wrap(err, "Failed to reach the client agent")
+		}
+		items := make([]asyncWarmItem, len(args))
+		for i, u := range args {
+			items[i] = asyncWarmItem{url: u, write: clientAgentWarmWrite}
+		}
+		if err := warmWalletForAsync(ctx, apiClient, items); err != nil {
+			return err
+		}
+		fmt.Println("Credentials acquired; the client agent's wallet is unlocked.")
+		return nil
+	},
+}
+
 func init() {
 	// Add subcommands
 	clientAgentCmd.AddCommand(clientAgentServeCmd)
 	clientAgentCmd.AddCommand(clientAgentStopCmd)
 	clientAgentCmd.AddCommand(clientAgentStatusCmd)
+	clientAgentCmd.AddCommand(clientAgentWarmCmd)
+	clientAgentWarmCmd.Flags().BoolVar(&clientAgentWarmWrite, "write", false,
+		"Also acquire write/delete credentials (e.g. for uploads)")
 
 	// Persistent flags (available to all subcommands)
 	// Note: Default values for socket and pid-file will be computed at runtime if empty

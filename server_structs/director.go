@@ -20,6 +20,7 @@ package server_structs
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -61,23 +62,12 @@ type (
 		Copies      bool `json:"Copies"`
 	}
 
-	NamespaceAdV2 struct {
+	NamespaceAd struct {
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
 		Generation   []TokenGen    `json:"token-generation"`
 		Issuer       []TokenIssuer `json:"token-issuer"`
 		FromTopology bool          `json:"from-topology"`
-	}
-
-	NamespaceAdV1 struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
 	}
 
 	// Downtime represents a server downtime event
@@ -160,14 +150,14 @@ type (
 	Advertisement struct {
 		sync.RWMutex
 		ServerAd
-		NamespaceAds []NamespaceAdV2
+		NamespaceAds []NamespaceAd
 	}
 
 	StrategyType string
 	SortType     string
 
-	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
-	OriginAdvertiseV2 struct {
+	// OriginAdvertise is the struct used to advertise BOTH Origin and Cache server to the director
+	OriginAdvertise struct {
 		ServerBaseAd
 		ServerID string `json:"serverId"`
 		// The namespace prefix to register/look up the server in the registry.
@@ -176,11 +166,15 @@ type (
 		BrokerURL      string `json:"broker-url,omitempty"`
 		DataURL        string `json:"data-url" binding:"required"`
 		WebURL         string `json:"web-url,omitempty"`
+		// Coordinate allows a server to declare its own geolocation, which takes
+		// highest priority over GeoIP overrides and MaxMind lookups on the director.
+		// Set this via the GeoLocation config parameter ("lat,lon" string).
+		Coordinate *Coordinate `json:"coordinate,omitempty"`
 		// TODO: Deprecate top level "Origin" caps -- each namespace should have its own caps that
 		// express what the origin is willing to do on the namespace's behalf. This helps us work
 		// around the lack of a concept for "globally-defined" namespaces.
 		Caps                Capabilities      `json:"capabilities"`
-		Namespaces          []NamespaceAdV2   `json:"namespaces"`
+		Namespaces          []NamespaceAd     `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
@@ -188,15 +182,6 @@ type (
 		RequiredFeatures    []string          `json:"requiredFeatures"`
 		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
-	}
-
-	OriginAdvertiseV1 struct {
-		Name        string          `json:"name"`
-		URL         string          `json:"url" binding:"required"` // This is the url for origin's XRootD service and file transfer
-		WebURL      string          `json:"web_url,omitempty"`      // This is the url for origin's web engine and APIs
-		Namespaces  []NamespaceAdV1 `json:"namespaces"`
-		Writes      bool            `json:"enablewrite"`
-		DirectReads bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
 
 	DirectorTestResult struct {
@@ -222,9 +207,17 @@ type (
 		AuthorizationEndpoint string   `json:"authorization_endpoint,omitempty"`
 	}
 
-	XPelHeader interface {
+	XPelHeaderName string
+	XPelHeader     interface {
 		GetName() string
-		ParseRawHeader(*http.Response) error
+		ParseRawHeader(*http.Header) error
+	}
+
+	// A coordinate override supplied by Clients in the X-Pelican-Coordinate header.
+	// This is used when Clients want to provide their own geolocation information to the Director
+	// (e.g. for testing, or if they have more accurate information than MaxMind).
+	XPelCoordinate struct {
+		Coordinate Coordinate
 	}
 
 	XPelAuth struct {
@@ -288,6 +281,43 @@ type (
 	}
 
 	AdAfter int // Ternary logic for the `Ad.After` function
+
+	/////////////////////////
+	// Director UI structs //
+	/////////////////////////
+	TokenIssuerResponse struct {
+		BasePaths       []string `json:"basePaths"`
+		RestrictedPaths []string `json:"restrictedPaths"`
+		IssuerUrl       string   `json:"issuer"`
+	}
+
+	// TokenGenResponse creates a response struct for TokenGen
+	TokenGenResponse struct {
+		Strategy         StrategyType `json:"strategy"`
+		VaultServer      string       `json:"vaultServer"`
+		MaxScopeDepth    uint         `json:"maxScopeDepth"`
+		CredentialIssuer string       `json:"issuer"`
+	}
+
+	// NamespaceAdResponse creates a response struct for NamespaceAd
+	NamespaceAdResponse struct {
+		Path         string                `json:"path"`
+		Caps         Capabilities          `json:"capabilities"`
+		Generation   []TokenGenResponse    `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
+		FromTopology bool                  `json:"fromTopology"`
+	}
+
+	// NamespaceAdMappedResponse creates a response struct for NamespaceAd with mapped origins and caches
+	NamespaceAdMappedResponse struct {
+		Path         string                `json:"path"`
+		Caps         Capabilities          `json:"capabilities"`
+		Generation   []TokenGenResponse    `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
+		FromTopology bool                  `json:"fromTopology"`
+		Origins      []string              `json:"origins"`
+		Caches       []string              `json:"caches"`
+	}
 )
 
 var (
@@ -306,6 +336,7 @@ const (
 	CoordinateSourceOverride = "override"
 	CoordinateSourceRandom   = "random"
 	CoordinateSourceMaxMind  = "maxmind"
+	CoordinateSourceDeclared = "declared"
 )
 
 const (
@@ -324,13 +355,65 @@ const (
 // We chose -1 to avoid the default value (0) of the int64 type
 const IndefiniteEndTime int64 = -1
 
-func (x XPelNs) GetName() string {
-	return "X-Pelican-Namespace"
+const (
+	XPelicanCoordinateHeaderName      XPelHeaderName = "X-Pelican-Coordinate"
+	XPelicanNamespaceHeaderName       XPelHeaderName = "X-Pelican-Namespace"
+	XPelicanAuthHeaderName            XPelHeaderName = "X-Pelican-Authorization"
+	XPelicanTokenGenerationHeaderName XPelHeaderName = "X-Pelican-Token-Generation"
+)
+
+func (x XPelCoordinate) GetName() string {
+	return string(XPelicanCoordinateHeaderName)
 }
-func (x *XPelNs) ParseRawResponse(resp *http.Response) error {
-	raw := resp.Header.Values(x.GetName())
+func (x *XPelCoordinate) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
 	if len(raw) == 0 {
-		return errors.Errorf("No %s header found.", x.GetName())
+		return errors.Errorf("no %s header found.", x.GetName())
+	}
+
+	// Assume there's only one value here.
+	keyDict := utils.HeaderParser(raw[0])
+
+	latStr, exists := keyDict["lat"]
+	if !exists {
+		return errors.Errorf("no latitude found in %s header", x.GetName())
+	}
+
+	longStr, exists := keyDict["long"]
+	if !exists {
+		return errors.Errorf("no longitude found in %s header", x.GetName())
+	}
+
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		return errors.Errorf("failed to parse latitude %s from %s header: %v", latStr, x.GetName(), err)
+	}
+	long, err := strconv.ParseFloat(longStr, 64)
+	if err != nil {
+		return errors.Errorf("failed to parse longitude %s from %s header: %v", longStr, x.GetName(), err)
+	}
+
+	if err := utils.ValidateLatLong(lat, long); err != nil {
+		return errors.Errorf("invalid coordinates from %s header: %v", x.GetName(), err)
+	}
+
+	x.Coordinate.Lat = lat
+	x.Coordinate.Long = long
+	x.Coordinate.Source = CoordinateSourceDeclared
+	// When the the client or server declares its own coordinate, we assume they've
+	// provided exactly the coordinate they want.
+	x.Coordinate.AccuracyRadius = 0
+
+	return nil
+}
+
+func (x XPelNs) GetName() string {
+	return string(XPelicanNamespaceHeaderName)
+}
+func (x *XPelNs) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
+	if len(raw) == 0 {
+		return errors.Errorf("no %s header found.", x.GetName())
 	}
 	keyDict := utils.HeaderParser(raw[0])
 	x.Namespace = keyDict["namespace"]
@@ -342,11 +425,11 @@ func (x *XPelNs) ParseRawResponse(resp *http.Response) error {
 }
 
 func (x XPelAuth) GetName() string {
-	return "X-Pelican-Authorization"
+	return string(XPelicanAuthHeaderName)
 }
-func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
+func (x *XPelAuth) ParseRawHeader(header *http.Header) error {
 	// If the director provides an auth header, raw will have an array of length 1.
-	raw := resp.Header.Values(x.GetName())
+	raw := header.Values(x.GetName())
 	if len(raw) > 0 {
 		x.Issuers = make([]*url.URL, 0)
 		// clean up the string and split it by commas to fetch each issuer. Can't use
@@ -357,7 +440,7 @@ func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
 			issuerUrlStr := strings.TrimPrefix(issuer, "issuer=")
 			issuerUrl, err := url.Parse(issuerUrlStr)
 			if err != nil {
-				return errors.Errorf("Failed to parse issuer URL %s from Director's %s header: %v", issuerUrlStr, x.GetName(), err)
+				return errors.Errorf("failed to parse issuer URL %s from Director's %s header: %v", issuerUrlStr, x.GetName(), err)
 			}
 			x.Issuers = append(x.Issuers, issuerUrl)
 		}
@@ -366,10 +449,10 @@ func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
 }
 
 func (x XPelTokGen) GetName() string {
-	return "X-Pelican-Token-Generation"
+	return string(XPelicanTokenGenerationHeaderName)
 }
-func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
-	raw := resp.Header.Values(x.GetName())
+func (x *XPelTokGen) ParseRawHeader(header *http.Header) error {
+	raw := header.Values(x.GetName())
 	if len(raw) > 0 {
 		// Parse issuer, for now assuming a single value but eventually may be multiple
 		x.Issuers = make([]*url.URL, 0)
@@ -414,6 +497,141 @@ func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
 		}
 	}
 	return nil
+}
+
+// SetXAuthHeader sets the X-Pelican-Authorization header (when applicable) on hdr. This
+// header informs the client of the issuer(s) that can be used to generate a token for the
+// requested resource.  It is the "write" counterpart to XPelAuth.ParseRawHeader and is
+// shared by every server that answers a client the way the director does.
+func SetXAuthHeader(hdr http.Header, namespaceAd NamespaceAd) {
+	if len(namespaceAd.Issuer) != 0 {
+		issStrings := []string{}
+		for _, tokIss := range namespaceAd.Issuer {
+			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
+		}
+		hdr[XPelAuth{}.GetName()] = issStrings
+	}
+}
+
+// SetXTokenGenHeader sets the X-Pelican-Token-Generation header (when applicable) on hdr,
+// describing how a client may generate a token for the requested resource.
+func SetXTokenGenHeader(hdr http.Header, namespaceAd NamespaceAd) {
+	if len(namespaceAd.Generation) != 0 {
+		tokenGen := ""
+		first := true
+		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
+		// to fix this because the token gen header uses the issuer URL from NamespaceAd.Generation.CredentialIssuer, whereas basepaths
+		// come from NamespaceAd.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
+		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
+		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
+		var basePath string
+		for _, issuer := range namespaceAd.Issuer {
+			if issuer.IssuerUrl.String() == namespaceAd.Generation[0].CredentialIssuer.String() {
+				if len(issuer.BasePaths) > 0 {
+					basePath = issuer.BasePaths[0]
+				}
+				break
+			}
+		}
+
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
+			string(namespaceAd.Generation[0].Strategy), basePath}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path"} {
+			hdrVal := hdrVals[idx]
+			if hdrVal == "" {
+				continue
+			} else if hdrKey == "max-scope-depth" && hdrVal == "0" {
+				// don't send a 0 max-scope-depth because it's malformed and probably means there should be no token generation header
+				continue
+			}
+			if !first {
+				tokenGen += ", "
+			}
+			first = false
+			tokenGen += hdrKey + "=" + hdrVal
+		}
+
+		if tokenGen != "" {
+			hdr[XPelTokGen{}.GetName()] = []string{tokenGen}
+		}
+	}
+}
+
+// setXNamespaceHeader is the shared core that writes the X-Pelican-Namespace header
+// given an already-resolved collections URL (which may be empty).
+func setXNamespaceHeader(hdr http.Header, collUrl string, bestNSAd NamespaceAd) {
+	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", bestNSAd.Path, !bestNSAd.Caps.PublicReads)
+	if collUrl != "" {
+		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
+	}
+	hdr[XPelNs{}.GetName()] = []string{xPelicanNamespace}
+}
+
+// SetXNamespaceHeader sets the X-Pelican-Namespace header on hdr, including information about
+// the namespace and whether token auth is required for reading from it.  oAds (origin ads) are
+// only used to compute the optional collections-url; callers without origin ads may pass nil.
+func SetXNamespaceHeader(hdr http.Header, oAds []ServerAd, bestNSAd NamespaceAd) {
+	var collUrl string
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	for _, oAd := range oAds {
+		if oAd.Caps.Listings && bestNSAd.Caps.Listings {
+			if !bestNSAd.Caps.PublicReads && oAd.AuthURL != (url.URL{}) {
+				collUrl = oAd.AuthURL.String()
+				break
+			} else {
+				collUrl = oAd.URL.String()
+				break
+			}
+		}
+	}
+	setXNamespaceHeader(hdr, collUrl, bestNSAd)
+}
+
+// SetXNamespaceHeaderWithCollections sets the X-Pelican-Namespace header using an explicit
+// collections URL rather than deriving one from origin ads.  Used by a server that is itself
+// the collections endpoint for the namespace.  The collections URL is only advertised when
+// the namespace permits listings.
+func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSAd NamespaceAd) {
+	if !bestNSAd.Caps.Listings {
+		collUrl = ""
+	}
+	setXNamespaceHeader(hdr, collUrl, bestNSAd)
+}
+
+// LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
+// For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
+// ad for `/foo/bar`.  Returns nil if no ad matches.
+func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
+	// Normalize incoming path if needed --> adding the trailing / makes
+	// basic prefix matching safer
+	if !strings.HasSuffix(reqPath, "/") {
+		reqPath += "/"
+	}
+
+	var bestFedPrefix string
+	var bestNamespace *NamespaceAd
+	for _, ns := range namespaceAds {
+		// Create a copy of ns to avoid reusing the loop variable
+		currentNS := ns
+
+		// Additionally normalize stored namespace paths
+		nsPath := currentNS.Path
+		if !strings.HasSuffix(currentNS.Path, "/") {
+			nsPath += "/"
+		}
+
+		if !strings.HasPrefix(reqPath, nsPath) {
+			// This namespace doesn't match the request path, skip it
+			continue
+		}
+
+		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
+			bestFedPrefix = nsPath
+			bestNamespace = &currentNS
+		}
+	}
+
+	return bestNamespace
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
@@ -503,7 +721,7 @@ func (ad *ServerBaseAd) After(other ServerBaseAdInterface) AdAfter {
 	// A typed-nil value (e.g. (*DirectorAd)(nil)) is not nil, and it will
 	// cause a panic if we try to access its methods.
 	// So we use reflection to check if the underlying value is nil.
-	if other == nil || (reflect.ValueOf(other).Kind() == reflect.Ptr && reflect.ValueOf(other).IsNil()) {
+	if other == nil || (reflect.ValueOf(other).Kind() == reflect.Pointer && reflect.ValueOf(other).IsNil()) {
 		return AdAfterUnknown
 	}
 
@@ -605,193 +823,6 @@ func (ad *Advertisement) GetIOLoad() float64 {
 	ad.RLock()
 	defer ad.RUnlock()
 	return ad.IOLoad
-}
-
-func ConvertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
-	// Converts a list of V2 namespace ads to a list of V1 namespace ads.
-	// This is for backwards compatibility in the case an old version of a client calls
-	// out to a newer version of the director
-	nsV1 := []NamespaceAdV1{}
-
-	for _, nsAd := range nsV2 {
-		if len(nsAd.Issuer) != 0 {
-			for _, iss := range nsAd.Issuer {
-				for _, bp := range iss.BasePaths {
-					v1Ad := NamespaceAdV1{
-						Path:          nsAd.Path,
-						RequireToken:  !nsAd.Caps.PublicReads,
-						Issuer:        iss.IssuerUrl,
-						BasePath:      bp,
-						Strategy:      nsAd.Generation[0].Strategy,
-						VaultServer:   nsAd.Generation[0].VaultServer,
-						MaxScopeDepth: nsAd.Generation[0].MaxScopeDepth,
-					}
-					nsV1 = append(nsV1, v1Ad)
-				}
-			}
-		} else {
-			v1Ad := NamespaceAdV1{
-				Path:         nsAd.Path,
-				RequireToken: false,
-			}
-			nsV1 = append(nsV1, v1Ad)
-		}
-	}
-
-	return nsV1
-}
-
-func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) []NamespaceAdV2 {
-	//Convert a list of V1 namespace ads to a list of V2 namespace ads, note that this
-	//isn't the most efficient way of doing so (an interactive search as opposed to some sort
-	//of index or hash based search)
-
-	var wr bool
-	var fallback bool
-	var credurl url.URL
-
-	if oAd != nil {
-		fallback = oAd.DirectReads
-		wr = oAd.Writes
-	} else {
-		fallback = true
-		wr = false
-	}
-	nsAdsV2 := []NamespaceAdV2{}
-	for _, nsAd := range nsAdsV1 {
-		nsFound := false
-		for i := range nsAdsV2 {
-			//Namespace exists, so check if issuer already exists
-			if nsAdsV2[i].Path == nsAd.Path {
-				nsFound = true
-				issFound := false
-				tokIssuers := nsAdsV2[i].Issuer
-				for j := range tokIssuers {
-					//Issuer exists, so add the basepaths to the list
-					if tokIssuers[j].IssuerUrl == nsAd.Issuer {
-						issFound = true
-						bps := tokIssuers[j].BasePaths
-						bps = append(bps, nsAd.BasePath)
-						tokIss := &nsAdsV2[i].Issuer[j]
-						(*tokIss).BasePaths = bps
-						break
-					}
-				}
-				//Issuer doesn't exist for the URL, so create a new one
-				if nsAd.RequireToken {
-					if !issFound {
-						if oAd != nil {
-							urlPtr, err := url.Parse(oAd.URL)
-							if err != nil {
-								credurl = nsAd.Issuer
-							} else {
-								credurl = *urlPtr
-							}
-						} else {
-							credurl = nsAd.Issuer
-						}
-
-						tIss := TokenIssuer{
-							BasePaths:       []string{nsAd.BasePath},
-							RestrictedPaths: []string{},
-							IssuerUrl:       nsAd.Issuer,
-						}
-						v2NS := &nsAdsV2[i]
-						tis := append(nsAdsV2[i].Issuer, tIss)
-						(*v2NS).Issuer = tis
-						if len(nsAdsV2[i].Generation) == 0 {
-							tGen := TokenGen{
-								Strategy:         nsAd.Strategy,
-								VaultServer:      nsAd.VaultServer,
-								MaxScopeDepth:    nsAd.MaxScopeDepth,
-								CredentialIssuer: credurl,
-							}
-							(*v2NS).Generation = []TokenGen{tGen}
-						}
-					}
-				}
-			}
-			break
-		}
-		//Namespace doesn't exist for the Path, so create a new one
-		if !nsFound {
-			if oAd != nil {
-				urlPtr, err := url.Parse(oAd.URL)
-				if err != nil {
-					credurl = nsAd.Issuer
-				} else {
-					credurl = *urlPtr
-				}
-			} else {
-				credurl = nsAd.Issuer
-			}
-
-			caps := Capabilities{
-				PublicReads: !nsAd.RequireToken,
-				Reads:       true,
-				Writes:      wr,
-				Listings:    true,
-				DirectReads: fallback,
-			}
-
-			newNS := NamespaceAdV2{
-				Caps: caps,
-				Path: nsAd.Path,
-			}
-
-			if nsAd.RequireToken {
-				tGen := []TokenGen{{
-					Strategy:         nsAd.Strategy,
-					VaultServer:      nsAd.VaultServer,
-					MaxScopeDepth:    nsAd.MaxScopeDepth,
-					CredentialIssuer: credurl,
-				}}
-				tIss := []TokenIssuer{{
-					BasePaths:       []string{nsAd.BasePath},
-					RestrictedPaths: []string{},
-					IssuerUrl:       nsAd.Issuer,
-				}}
-
-				newNS.Generation = tGen
-				newNS.Issuer = tIss
-			}
-
-			nsAdsV2 = append(nsAdsV2, newNS)
-		}
-	}
-	return nsAdsV2
-}
-
-// Converts a V1 origin advertisement to a V2 origin advertisement
-func ConvertOriginAdV1ToV2(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
-
-	nsAdsV2 := ConvertNamespaceAdsV1ToV2(oAd1.Namespaces, &oAd1)
-	tokIssuers := []TokenIssuer{}
-
-	for _, v2Ad := range nsAdsV2 {
-		tokIssuers = append(tokIssuers, v2Ad.Issuer...)
-	}
-
-	//Origin Capabilities may be different from Namespace Capabilities, but since the original
-	//origin didn't contain capabilities, these are currently the defaults - we might want to potentially
-	//change this in the future
-	caps := Capabilities{
-		PublicReads: true,
-		Reads:       true,
-		Writes:      oAd1.Writes,
-		Listings:    true,
-		DirectReads: oAd1.DirectReads,
-	}
-
-	oAd2 := OriginAdvertiseV2{
-		DataURL:    oAd1.URL,
-		WebURL:     oAd1.WebURL,
-		Caps:       caps,
-		Namespaces: nsAdsV2,
-		Issuer:     tokIssuers,
-	}
-	oAd2.Initialize(oAd1.Name)
-	return oAd2
 }
 
 func ServerAdsToServerNameURL(ads []ServerAd) (output string) {

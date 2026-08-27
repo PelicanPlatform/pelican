@@ -365,3 +365,110 @@ func TestTransferStatus_Failure_NonExistent(t *testing.T) {
 		"Non-existent object should return error status, got %d", r.statusCode)
 	t.Logf("Non-existent object: status=%d, trailer=%q", r.statusCode, r.transferStatus)
 }
+
+// populateOriginChecksums issues a HEAD directly to the origin requesting
+// every algorithm the cache will later request, forcing the origin to compute
+// and persist all four checksum xattrs (md5, crc32c, crc32, sha) for the
+// file's current contents.
+func populateOriginChecksums(ctx context.Context, t *testing.T, name, token string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead,
+		originServerURL()+"/api/v1.0/origin/data/test/"+name, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Want-Digest", "md5,crc32c,crc32,sha")
+
+	resp, err := config.GetClientNoRedirect().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Sanity-check that the origin really advertised all four algorithms, so
+	// that after the content swap *every* reported digest is stale (and the
+	// mismatch can't be masked by an algorithm the origin recomputes fresh).
+	dg := resp.Header.Get("Digest")
+	for _, alg := range []string{"md5=", "crc32c=", "crc32=", "sha="} {
+		require.Contains(t, dg, alg,
+			"origin should advertise %s so all xattrs are populated; got %q", alg, dg)
+	}
+}
+
+// doOnlyIfCached issues a GET with "Cache-Control: only-if-cached", which the
+// cache answers from local storage only -- returning 504 Gateway Timeout on a
+// miss rather than fetching from the origin.
+func doOnlyIfCached(ctx context.Context, url, token string) int {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Cache-Control", "only-if-cached")
+	resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	return resp.StatusCode
+}
+
+// TestTransferStatus_Failure_OriginChecksumMismatch verifies that when the
+// bytes the cache downloads disagree with the digest the origin advertises,
+// the cache (a) reports the failure to the client via the X-Transfer-Status
+// trailer instead of silently serving the bad data, and (b) does NOT retain
+// the poisoned object in its cache.
+//
+// We induce the disagreement without corrupting the cache's own storage: the
+// origin caches checksums for content A, then the file is rewritten with
+// content B of the same length while its mtime is restored so the origin still
+// reports A's (now stale) digests. The origin therefore serves B's bytes while
+// advertising A's checksums -- the cache computes a checksum over B that
+// disagrees with the advertised digest.
+//
+// This is the disk-storage analogue of the inline path, which already discards
+// an object whose transfer result carries a checksum error.
+func TestTransferStatus_Failure_OriginChecksumMismatch(t *testing.T) {
+	env := setupTSEnv(t)
+	skipUnlessXattrs(t, env.ft.Exports[0].StoragePrefix)
+
+	const name = "ts_origin_mismatch.bin"
+	originFile := filepath.Join(env.ft.Exports[0].StoragePrefix, name)
+
+	// Content A: what the origin will cache checksums for. 16KB -> disk mode.
+	contentA := generateTestData(16384)
+	require.NoError(t, os.WriteFile(originFile, contentA, 0o644))
+
+	// Populate all four checksum xattrs for content A.
+	populateOriginChecksums(env.ft.Ctx, t, name, env.token)
+
+	infoA, err := os.Stat(originFile)
+	require.NoError(t, err)
+	mtimeA := infoA.ModTime()
+
+	// Rewrite with content B (same length) and restore the mtime so the
+	// origin's cached (A) checksums are not treated as stale. The origin now
+	// serves B while advertising the digests of A.
+	contentB := make([]byte, len(contentA))
+	for i := range contentB {
+		contentB[i] = contentA[i] ^ 0xFF
+	}
+	require.NoError(t, os.WriteFile(originFile, contentB, 0o644))
+	require.NoError(t, os.Chtimes(originFile, mtimeA, mtimeA))
+
+	// Drive a cache-miss GET through the V2 cache with trailer opt-in.
+	cacheURL := waitForCacheRedirectURL(t, env.ft, "/test/"+name, env.token)
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
+	require.NoError(t, r.err,
+		"HTTP transport should succeed; any checksum error is reported in the trailer")
+
+	// (a) The cache must surface the mismatch in the trailer, not "200: OK".
+	assert.NotEqual(t, "200: OK", r.transferStatus,
+		"a checksum mismatch must not produce a success trailer")
+	assert.True(t, strings.HasPrefix(r.transferStatus, "500:"),
+		"expected a 500 trailer for an origin/local checksum mismatch, got %q", r.transferStatus)
+
+	// (b) The poisoned object must not remain cached: an only-if-cached probe
+	// should miss (504) rather than serve the bad copy.
+	assert.Equal(t, http.StatusGatewayTimeout, doOnlyIfCached(env.ft.Ctx, cacheURL, env.token),
+		"a verification-failed object must not be retained in the cache")
+}

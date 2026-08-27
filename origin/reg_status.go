@@ -72,6 +72,12 @@ const (
 	RegCompleted          regStatusEnum = "Completed"          // Registration is completed
 	RegIncomplete         regStatusEnum = "Incomplete"         // Registered, but registration is incomplete
 	RegError              regStatusEnum = "Registration Error" // Failed to register
+	// RegStandalone means the origin runs with Origin.EnableStandaloneMode and
+	// deliberately has no registry to register at. The web UI treats this as
+	// "registration is not part of this deployment" rather than as a failure.
+	RegStandalone regStatusEnum = "Standalone"
+
+	standaloneStatusDescription = "This origin runs in standalone mode and is not registered with any federation registry."
 )
 
 func SetNamespacesStatus(key string, val RegistrationStatus, ttl time.Duration) {
@@ -161,6 +167,18 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 	wrappedExports := []exportWithStatus{}
 	fetchQ := []server_utils.OriginExport{}
 	prefixQ := []string{}
+
+	// A standalone origin has no registry to ask, and nothing to complete.
+	if config.IsStandaloneOrigin() {
+		for _, export := range exports {
+			wrappedExports = append(wrappedExports, exportWithStatus{
+				Status:            RegStandalone,
+				StatusDescription: standaloneStatusDescription,
+				OriginExport:      export,
+			})
+		}
+		return wrappedExports, nil
+	}
 
 	for _, export := range exports {
 		if registrationsStatus.Has(export.FederationPrefix) {

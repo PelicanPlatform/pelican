@@ -130,7 +130,7 @@ func RunHelper(ctx context.Context) error {
 			log.SetLevel(lvl)
 			sshLog.Debugf("Log level set to %s (from origin)", lvl)
 		} else {
-			sshLog.Warnf("Ignoring unrecognised log level %q from origin: %v", config.LogLevel, err)
+			sshLog.Warnf("Ignoring unrecognized log level %q from origin: %v", config.LogLevel, err)
 		}
 	}
 

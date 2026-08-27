@@ -227,6 +227,58 @@ func TestQueryDirector(t *testing.T) {
 	}
 }
 
+// TestQueryDirectorCacheMode verifies that the cacheMode flag controls which
+// director endpoint a request is routed through.  An embedded cache fetching
+// from origins uses cacheMode=true and must hit /api/v1.0/director/origin/...,
+// while a site-local cache (which appears to the federation as a client and
+// fetches from other caches) uses cacheMode=false and must hit the director's
+// default shortcut endpoint at the bare object path.
+func TestQueryDirectorCacheMode(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	require.NoError(t, param.Client_DirectorRetries.Set(1))
+
+	testCases := []struct {
+		name         string
+		cacheMode    bool
+		expectedPath string
+	}{
+		{
+			name:         "embedded cache mode routes to origin endpoint",
+			cacheMode:    true,
+			expectedPath: "/api/v1.0/director/origin/foo/bar",
+		},
+		{
+			name:         "client (site-local) mode routes to shortcut endpoint",
+			cacheMode:    false,
+			expectedPath: "/foo/bar",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestedPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestedPath = r.URL.Path
+				w.WriteHeader(http.StatusTemporaryRedirect)
+			}))
+			defer server.Close()
+
+			pUrl := pelican_url.PelicanURL{
+				FedInfo: pelican_url.FederationDiscovery{
+					DirectorEndpoint: server.URL,
+				},
+				Path: "/foo/bar",
+			}
+
+			_, _, err := queryDirector(context.Background(), "GET", &pUrl, "", tc.cacheMode)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedPath, requestedPath)
+		})
+	}
+}
+
 func TestGetDirectorInfoForPath(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -530,4 +582,58 @@ func TestDirectorTimeout(t *testing.T) {
 
 	// Verify the error message contains "i/o timeout"
 	assert.Contains(t, err.Error(), "i/o timeout")
+}
+
+// TestQueryDirectorGeoLocationHeader verifies that when GeoLocation is configured,
+// queryDirector attaches the X-Pelican-Coordinate header with the correct value, and
+// that no header is sent when GeoLocation is empty or invalid.
+func TestQueryDirectorGeoLocationHeader(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1,
+	})
+
+	var receivedCoordHeader string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedCoordHeader = r.Header.Get("X-Pelican-Coordinate")
+		http.Redirect(w, r, "http://cache.example.com:8443/foo/bar", http.StatusTemporaryRedirect)
+	}))
+	defer ts.Close()
+
+	pUrl := &pelican_url.PelicanURL{
+		FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: ts.URL},
+		Path:    "/foo/bar",
+	}
+
+	t.Run("HeaderSentWhenGeoLocationSet", func(t *testing.T) {
+		receivedCoordHeader = ""
+		require.NoError(t, param.GeoLocation.Set("43.0739,-89.3848"))
+		t.Cleanup(func() { require.NoError(t, param.GeoLocation.Set("")) })
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Equal(t, "lat=43.0739,long=-89.3848", receivedCoordHeader)
+	})
+
+	t.Run("HeaderNotSentWhenGeoLocationEmpty", func(t *testing.T) {
+		receivedCoordHeader = "sentinel"
+		require.NoError(t, param.GeoLocation.Set(""))
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Empty(t, receivedCoordHeader, "X-Pelican-Coordinate should not be sent when GeoLocation is empty")
+	})
+
+	t.Run("HeaderNotSentWhenGeoLocationInvalid", func(t *testing.T) {
+		receivedCoordHeader = "sentinel"
+		require.NoError(t, param.GeoLocation.Set("not-valid"))
+		t.Cleanup(func() { require.NoError(t, param.GeoLocation.Set("")) })
+
+		_, _, err := queryDirector(context.Background(), http.MethodGet, pUrl, "", false)
+		require.NoError(t, err)
+		assert.Empty(t, receivedCoordHeader, "X-Pelican-Coordinate should not be sent when GeoLocation is invalid")
+	})
 }

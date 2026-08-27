@@ -20,7 +20,10 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -31,6 +34,92 @@ import (
 
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// DirRespFlavor identifies which question was put to the director.  A
+// response answers exactly one of them and must never be handed to a caller
+// who asked another: the object servers for a read are caches, for a write
+// the origins that accept it, and for a ?directread read the origins again.
+// Answering a writer with a read's response would both address the write to
+// caches that reject it and disclose the write credential to every one of
+// them -- the thing the rest of the client is careful not to do.
+type DirRespFlavor struct {
+	// Verb is the HTTP method the director was asked about: GET for a
+	// read, PUT for a write, COPY for a third-party copy destination.
+	Verb string
+	// CacheMode routes the query through the director's origin endpoint,
+	// which answers with origins instead of caches.  Set by callers that
+	// are themselves a cache.
+	CacheMode bool
+	// Query is the normalized query string of the object URL.  Parameters
+	// including directread and prefercached steer matchmaking, so a
+	// response obtained under one set does not answer for another.
+	Query string
+	// Credential fingerprints the bearer token the response was obtained
+	// with, empty for an unauthenticated query.  A director may answer a
+	// credentialed request differently -- that is the whole reason the
+	// transfer paths re-ask once they hold a token -- so such a response
+	// must not be handed to a caller bearing a different credential, or to
+	// one bearing none.  It is a digest, never the token: cache keys reach
+	// debug logs.
+	Credential string
+}
+
+// WithCredential returns a copy of the flavor scoped to one bearer token.
+func (f DirRespFlavor) WithCredential(token string) DirRespFlavor {
+	f.Credential = tokenFingerprint(token)
+	return f
+}
+
+// tokenFingerprint reduces a bearer token to a short tag that identifies it
+// without disclosing it.
+func tokenFingerprint(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:8])
+}
+
+// NewDirRespFlavor builds a flavor from the verb, the cache-embedded-client
+// mode, and the object URL's raw query.  The query is normalized so that
+// orderings of the same parameters share one entry.
+func NewDirRespFlavor(verb string, cacheMode bool, rawQuery string) DirRespFlavor {
+	if verb == "" {
+		verb = http.MethodGet
+	}
+	return DirRespFlavor{Verb: verb, CacheMode: cacheMode, Query: normalizeQuery(rawQuery)}
+}
+
+// normalizeQuery sorts a raw query string so equivalent orderings agree.
+// An unparsable query is kept verbatim: it then keys only itself, which
+// is the safe direction.
+func normalizeQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return rawQuery
+	}
+	return values.Encode()
+}
+
+// String renders the flavor for use inside a cache key.
+func (f DirRespFlavor) String() string {
+	routing := "via-caches"
+	if f.CacheMode {
+		routing = "via-origins"
+	}
+	verb := f.Verb
+	if verb == "" {
+		verb = http.MethodGet
+	}
+	rendered := verb + " " + routing + " " + f.Query
+	if f.Credential != "" {
+		rendered += " cred:" + f.Credential
+	}
+	return rendered
+}
 
 // dirRespCacheEntry is a single cached director response with an expiry.
 type dirRespCacheEntry struct {
@@ -56,6 +145,15 @@ type inflightResult struct {
 //
 // Entries expire after a configurable TTL.  The cache is safe for
 // concurrent use.
+//
+// Entries are scoped to the federation they were learned from -- the discovery
+// endpoint, which is the host named in the user's pelican:// URL.  One
+// TransferEngine is shared across every transfer in a process, and namespace
+// paths are not globally unique, so two federations can readily present the
+// same one.  Without that scoping the second transfer would be answered with
+// the first federation's object servers and issuers, and would send its
+// credentials to a host the user never named -- the thing the rest of the
+// client is careful not to do (see canApplyTokenHint).
 type DirRespCache struct {
 	mu      sync.RWMutex
 	entries map[string]dirRespCacheEntry
@@ -129,50 +227,76 @@ func reconstitutePaths(resp server_structs.DirectorResponse, objectPath string) 
 	return resp
 }
 
-// Store saves a DirectorResponse under the given prefix.  Any previous
-// entry for the same prefix is replaced.
+// cacheKey qualifies a namespace prefix with the federation it was learned
+// from and the flavor of question that produced it.  None of a discovery
+// endpoint, a rendered flavor, or a path can contain a newline, so one
+// federation's entries cannot be made to answer for another's, nor one
+// flavor's for another's.
+func cacheKey(federation string, flavor DirRespFlavor, prefix string) string {
+	return federation + "\n" + flavor.String() + "\n" + prefix
+}
+
+// Store saves a DirectorResponse under the given prefix within federation.  Any
+// previous entry for the same prefix in the same federation is replaced.
+//
+// federation is the discovery endpoint the response was learned from, which is
+// the host named in the user's pelican:// URL.  A response is only ever handed
+// back to a later lookup naming that same federation: namespace paths are not
+// globally unique, and answering a request for one federation with another's
+// object servers and issuers would send its credentials to a host the user
+// never named.
 //
 // objectPath is the federation object path (e.g. "/test/file.txt")
 // that was used to obtain this response from the director.  It is
 // stripped from each ObjectServer URL so the cached entry contains
 // only the server-side base path.  Pass "" if no stripping is needed.
-func (c *DirRespCache) Store(prefix string, objectPath string, resp server_structs.DirectorResponse) {
+func (c *DirRespCache) Store(federation string, flavor DirRespFlavor, prefix string, objectPath string, resp server_structs.DirectorResponse) {
 	prefix = path.Clean(prefix)
 	if !strings.HasPrefix(prefix, "/") {
 		log.Debugf("DirRespCache: skipping non-absolute prefix %q", prefix)
 		return
 	}
+	if federation == "" {
+		// Unattributable: caching it would let it answer for any federation.
+		log.Debugf("DirRespCache: skipping entry for prefix %q with no federation", prefix)
+		return
+	}
 	resp = stripFederationPaths(resp, objectPath)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[prefix] = dirRespCacheEntry{
+	c.entries[cacheKey(federation, flavor, prefix)] = dirRespCacheEntry{
 		resp:   resp,
 		expiry: time.Now().Add(c.ttl),
 	}
-	log.Debugf("DirRespCache: stored entry for prefix %q (TTL %s)", prefix, c.ttl)
+	log.Debugf("DirRespCache: stored entry for prefix %q in federation %q, flavor %q (TTL %s)", prefix, federation, flavor, c.ttl)
 }
 
-// Lookup finds the longest cached prefix that matches `objectPath`.
+// Lookup finds the longest cached prefix within federation that matches
+// `objectPath`.  An entry learned from a different federation never matches,
+// however similar the path.
 //
 // For example, if the cache contains entries for "/a/b" and "/a", a
 // lookup for "/a/b/c/d.txt" will return the entry for "/a/b".
 //
 // Returns the cached DirectorResponse and true if a valid (non-expired)
 // entry was found, or the zero value and false otherwise.
-func (c *DirRespCache) Lookup(objectPath string) (server_structs.DirectorResponse, bool) {
+func (c *DirRespCache) Lookup(federation string, flavor DirRespFlavor, objectPath string) (server_structs.DirectorResponse, bool) {
 	objectPath = path.Clean(objectPath)
+	if federation == "" {
+		return server_structs.DirectorResponse{}, false
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	now := time.Now()
 
 	// Walk up the path hierarchy from the full path to "/", looking
-	// for the longest matching prefix.
+	// for the longest matching prefix within this federation.
 	candidate := objectPath
 	for {
-		if entry, ok := c.entries[candidate]; ok {
+		if entry, ok := c.entries[cacheKey(federation, flavor, candidate)]; ok {
 			if now.Before(entry.expiry) {
-				log.Debugf("DirRespCache: hit for path %q → prefix %q", objectPath, candidate)
+				log.Debugf("DirRespCache: hit for path %q (flavor %q) → prefix %q", objectPath, flavor, candidate)
 				return reconstitutePaths(entry.resp, objectPath), true
 			}
 			// Entry expired — don't return it, but continue looking
@@ -188,7 +312,7 @@ func (c *DirRespCache) Lookup(objectPath string) (server_structs.DirectorRespons
 		candidate = parent
 	}
 
-	log.Debugf("DirRespCache: miss for path %q", objectPath)
+	log.Debugf("DirRespCache: miss for path %q (flavor %q)", objectPath, flavor)
 	return server_structs.DirectorResponse{}, false
 }
 
@@ -208,17 +332,21 @@ type DirRespLoader func(ctx context.Context) (resp server_structs.DirectorRespon
 //
 // On success the response is automatically stored in the cache under
 // the prefix returned by the loader.
-func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, loader DirRespLoader) (server_structs.DirectorResponse, error) {
+func (c *DirRespCache) LookupOrLoad(ctx context.Context, federation string, flavor DirRespFlavor, objectPath string, loader DirRespLoader) (server_structs.DirectorResponse, error) {
 	// Fast path: cache hit.
-	if resp, ok := c.Lookup(objectPath); ok {
+	if resp, ok := c.Lookup(federation, flavor, objectPath); ok {
 		return resp, nil
 	}
 
 	objectPath = path.Clean(objectPath)
+	// Coalescing is per federation and per flavor too: two federations -- or
+	// a reader and a writer -- asking about the same path are asking
+	// different questions and must not receive one another's answer.
+	inflightKey := cacheKey(federation, flavor, objectPath)
 
 	// Check for an in-flight request for this path.
 	c.sfMu.Lock()
-	if cl, ok := c.inflight[objectPath]; ok {
+	if cl, ok := c.inflight[inflightKey]; ok {
 		c.sfMu.Unlock()
 		// Wait with context awareness.
 		resp, err := c.waitForCall(ctx, cl)
@@ -231,7 +359,7 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 	// No in-flight request; create one.
 	cl := &call{}
 	cl.wg.Add(1)
-	c.inflight[objectPath] = cl
+	c.inflight[inflightKey] = cl
 	c.sfMu.Unlock()
 
 	// Execute the loader.  We run it in a goroutine so we can
@@ -245,7 +373,7 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 		// On success, store in cache (stripping the federation
 		// object path from ObjectServer URLs).
 		if err == nil && prefix != "" {
-			c.Store(prefix, objectPath, resp)
+			c.Store(federation, flavor, prefix, objectPath, resp)
 		}
 
 		// Store the stripped version; waitForCall callers will
@@ -257,7 +385,7 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 
 		// Clean up the inflight map.
 		c.sfMu.Lock()
-		delete(c.inflight, objectPath)
+		delete(c.inflight, inflightKey)
 		c.sfMu.Unlock()
 	}()
 
@@ -290,12 +418,12 @@ func (c *DirRespCache) waitForCall(ctx context.Context, cl *call) (server_struct
 	}
 }
 
-// Invalidate removes the entry for the given prefix.
-func (c *DirRespCache) Invalidate(prefix string) {
+// Invalidate removes the entry for the given prefix within federation.
+func (c *DirRespCache) Invalidate(federation string, flavor DirRespFlavor, prefix string) {
 	prefix = path.Clean(prefix)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.entries, prefix)
+	delete(c.entries, cacheKey(federation, flavor, prefix))
 }
 
 // InvalidateAll removes all cached entries.

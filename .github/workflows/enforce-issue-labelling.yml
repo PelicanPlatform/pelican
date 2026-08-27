@@ -4,8 +4,15 @@ on:
   issues:
     types: [closed]
 
+permissions:
+  contents: read
+
 jobs:
   validate-issue:
+    permissions:
+      contents: read
+      issues: write  # the job reopens an unlabelled issue
+
     # 1. Don’t even start the job when the stale-bot did the closing **or**
     #    when the issue already bears the `stale` label.
     if: |
@@ -15,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Validate that the closed issue still has at least one label
         id: check_labels

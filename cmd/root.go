@@ -107,12 +107,29 @@ func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10
 var egrpPostHandler func(error) (bool, error)
 
 func Execute() error {
+	// log.Fatal writes the entry and then calls os.Exit, which runs no defers.
+	// Without this the fatal line -- the one explaining why the process died --
+	// sits in the async writer's buffer and is never written. logrus runs exit
+	// handlers after the entry has been handed to the writer, so the flush sees
+	// it. Registered before any command can log.
+	log.RegisterExitHandler(logging.EnterSyncMode)
+
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	// Register the errgroup with the logging subsystem so the asynchronous log
+	// writer (and its compression worker) run under the errgroup and stop when
+	// the context is cancelled.
+	logging.SetErrgroup(ctx, egrp)
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
 		log.Debugln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
 	}
+	// Stop the async log writer's drain goroutine and flip it to synchronous mode
+	// so egrp.Wait below does not block on it (notably for one-shot commands whose
+	// context is never cancelled) and any log lines emitted during the remaining
+	// shutdown go straight to the log file rather than being buffered. It blocks
+	// only until the writer has flushed and exited.
+	logging.EnterSyncMode()
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
 

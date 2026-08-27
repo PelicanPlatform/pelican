@@ -153,12 +153,20 @@ func TestExpirationDirector(t *testing.T) {
 
 	require.NoError(t, param.Server_AdLifetime.SetString("100ms"))
 	fed_test_utils.NewFedTest(t, "")
-	time.Sleep(time.Duration(500 * time.Millisecond))
-	assert.Less(t, 10, int(listDirectorCount.Load()))
+	// With a 100ms ad lifetime the servers re-advertise frequently. Poll until
+	// each endpoint has seen more than 10 ads rather than sleeping a fixed
+	// 500ms and asserting once: on a loaded CI runner the fixed-sleep version
+	// flaked when exactly 10 (not >10) ads had arrived by the deadline. Polling
+	// to a generous timeout tolerates slow runners while still verifying that
+	// re-advertisement happens repeatedly.
+	require.Eventually(t, func() bool {
+		return int(listDirectorCount.Load()) > 10 &&
+			int(directorPostCount.Load()) > 10 &&
+			int(originPostCount.Load()) > 10
+	}, 10*time.Second, 50*time.Millisecond,
+		"expected >10 ads to each endpoint (list, director-post, origin-post) with a 100ms ad lifetime")
 	log.Debugln("Fake director received", directorPostCount.Load(), "ads from the director")
-	assert.Less(t, 10, int(directorPostCount.Load()))
 	log.Debugln("Fake director received", originPostCount.Load(), "ads from the origin")
-	assert.Less(t, 10, int(originPostCount.Load()))
 }
 
 func TestForwardDirector(t *testing.T) {
@@ -167,7 +175,7 @@ func TestForwardDirector(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	var listDirectorCount atomic.Int32
-	var adPostCount atomic.Int32
+	var registerOriginCount, registerCacheCount, registerDirectorCount atomic.Int32
 	dirAd := &server_structs.DirectorAd{}
 	dirAd.Initialize("fake-director")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -181,8 +189,17 @@ func TestForwardDirector(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write(buf)
 			require.NoError(t, err)
-		} else if req.Method == "POST" && (req.URL.Path == "/api/v1.0/director/registerDirector" || req.URL.Path == "/api/v1.0/director/registerOrigin" || req.URL.Path == "/api/v1.0/director/registerCache") {
-			adPostCount.Add(1)
+		} else if req.Method == "POST" {
+			switch req.URL.Path {
+			case "/api/v1.0/director/registerOrigin":
+				registerOriginCount.Add(1)
+			case "/api/v1.0/director/registerCache":
+				registerCacheCount.Add(1)
+			case "/api/v1.0/director/registerDirector":
+				registerDirectorCount.Add(1)
+			default:
+				return
+			}
 			_, err := io.Copy(io.Discard, req.Body)
 			assert.NoError(t, err)
 			req.Body.Close()
@@ -195,5 +212,19 @@ func TestForwardDirector(t *testing.T) {
 
 	fed_test_utils.NewFedTest(t, "")
 	assert.Equal(t, 1, int(listDirectorCount.Load()))
-	assert.Equal(t, 7, int(adPostCount.Load()))
+	// The director forwards each server ad it receives to peer directors.
+	// The origin (2) and cache (1) forwards are deterministic. The
+	// director's own ad, however, is re-advertised on a periodic timer, so
+	// the number of registerDirector forwards that land within the
+	// fed-test startup window races with how long startup takes: a fast
+	// run sees 4, a slower run sees 5+. Asserting an exact grand total
+	// (previously `== 7`) is therefore timing-flaky and fails
+	// intermittently on slow CI runners — the more so as unrelated startup
+	// work (migrations, bootstrap) grows. Assert the deterministic
+	// per-type forwards exactly and the periodic director forward as a
+	// lower bound, which still verifies forwarding happens without
+	// depending on wall-clock timing.
+	assert.Equal(t, 2, int(registerOriginCount.Load()), "origin ad should be forwarded to the peer director")
+	assert.Equal(t, 1, int(registerCacheCount.Load()), "cache ad should be forwarded to the peer director")
+	assert.GreaterOrEqual(t, int(registerDirectorCount.Load()), 4, "director ad should be forwarded to the peer director")
 }

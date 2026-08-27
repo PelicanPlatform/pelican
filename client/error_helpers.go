@@ -21,11 +21,13 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,6 +42,13 @@ func wrapErrorByStatusCode(code int, err error) error {
 		return error_codes.NewSpecification_FileNotFoundError(err)
 	case code == http.StatusGatewayTimeout:
 		return error_codes.NewTransfer_TimedOutError(err)
+	case code == http.StatusTooManyRequests:
+		// 429 means the serving cache's fair scheduler shed the request. It is
+		// retryable. This is the generic fallback used when the response body
+		// carries no structured reason; the download path parses the body and
+		// substitutes a more specific origin_unresponsive / origin_slow
+		// classification via throttleErrorForReason.
+		return error_codes.NewTransfer_CacheOverloadedError(err)
 	case code == http.StatusUnauthorized || code == http.StatusForbidden:
 		// 401/403 are authorization errors
 		return error_codes.NewAuthorizationError(err)
@@ -53,6 +62,124 @@ func wrapErrorByStatusCode(code int, err error) error {
 		// For other status codes, wrap as Transfer error
 		return error_codes.NewTransferError(err)
 	}
+}
+
+// maxErrorBodySize bounds how much of an error-response body the client reads
+// and retains. Error bodies come from remote peers that are not necessarily
+// trustworthy; without a cap, a hostile server could feed each transfer worker
+// an arbitrarily large body.
+const maxErrorBodySize = 64 << 10
+
+// maxRetryAfter clamps the Retry-After hint carried on throttle errors so a
+// misbehaving server cannot push an absurd backoff to external retriers.
+const maxRetryAfter = time.Hour
+
+// throttleErrorForReason maps the machine-parseable reason string carried in a
+// cache's 429 response body (the "error" field written by the cache's
+// handleError) to the specific retryable Pelican error type. Unknown or empty
+// reasons fall back to the generic cache-overloaded classification.
+func throttleErrorForReason(reason string, err error) error {
+	switch ShedReason(reason) {
+	case ShedOriginUnresponsive:
+		return error_codes.NewTransfer_OriginUnresponsiveError(err)
+	case ShedOriginSlow:
+		return error_codes.NewTransfer_OriginSlowError(err)
+	case ShedCacheOverloaded:
+		return error_codes.NewTransfer_CacheOverloadedError(err)
+	default:
+		return error_codes.NewTransfer_CacheOverloadedError(err)
+	}
+}
+
+// parseThrottleBody extracts the machine-parseable reason and the
+// human-readable detail from a cache's 429 JSON body of the form
+// {"error": "<reason>", "detail": "..."}.
+//
+// The reason is validated against the known ShedReason constants — the body
+// comes from a remote peer, and an arbitrary string must not flow into logs,
+// HTCondor ClassAds, or error messages. It is "" when the body is not JSON,
+// has no "error" field, or carries an unrecognized reason; callers then fall
+// back to the generic throttle classification.
+//
+// The detail is free-form server text and is not validated (it is bounded by
+// truncateErrorDetail and quoted at display time). A body that is not the
+// expected JSON shape is passed through whole as the detail so an error
+// message from some other kind of server is not silently dropped.
+func parseThrottleBody(body string) (reason, detail string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", ""
+	}
+	var parsed struct {
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return "", body
+	}
+	switch ShedReason(parsed.Error) {
+	case ShedOriginUnresponsive, ShedOriginSlow, ShedCacheOverloaded:
+		// The reason is reported on its own, so falling back to the raw body
+		// here would just print it a second time.
+		return parsed.Error, parsed.Detail
+	}
+	if parsed.Detail != "" {
+		return "", parsed.Detail
+	}
+	return "", body
+}
+
+// parseThrottleReason returns just the validated reason from a 429 body.
+func parseThrottleReason(body string) string {
+	reason, _ := parseThrottleBody(body)
+	return reason
+}
+
+// truncateErrorDetail bounds a server-provided message before it is retained
+// on an error value. Escaping for safe display happens at formatting time
+// (the detail is rendered with %q, so control characters a hostile server
+// embeds cannot forge log records).
+func truncateErrorDetail(detail string) string {
+	const maxDetail = 512
+	if len(detail) > maxDetail {
+		detail = detail[:maxDetail] + "…"
+	}
+	return strings.TrimSpace(detail)
+}
+
+// parseRetryAfter parses an HTTP Retry-After header value. Per RFC 7231 it may
+// be a number of seconds or an HTTP date; the cache emits seconds. Returns 0
+// if absent or unparsable; values are clamped to maxRetryAfter.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	var d time.Duration
+	// ParseInt rather than Atoi: Atoi is int-wide, so on a 32-bit build a
+	// perfectly ordinary "3000000000" would be a range error. On overflow
+	// ParseInt still returns the saturated bound, which the clamps below turn
+	// into maxRetryAfter (or 0) instead of falling through to the date parse
+	// and yielding no hint at all.
+	secs, err := strconv.ParseInt(v, 10, 64)
+	if err == nil || errors.Is(err, strconv.ErrRange) {
+		if secs < 0 {
+			return 0
+		}
+		if secs > int64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
+		d = time.Duration(secs) * time.Second
+	} else if t, err := http.ParseTime(v); err == nil {
+		d = time.Until(t)
+	}
+	if d < 0 {
+		return 0
+	}
+	if d > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return d
 }
 
 // wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
@@ -345,6 +472,104 @@ func (e *HttpErrResp) Error() string {
 
 func (e *HttpErrResp) Unwrap() error {
 	return e.Err
+}
+
+// CacheThrottleError is returned when a cache responds with HTTP 429 because
+// its fair scheduler shed the request. It carries the machine-parseable Reason
+// (from the response body) and the RetryAfter hint (from the Retry-After
+// header) so callers and external retriers can distinguish an unresponsive
+// origin from a merely-slow one and honor the advertised backoff. It wraps the
+// specific retryable Pelican error type, so errors.As(err, &error_codes.PelicanError{})
+// and IsRetryable both work through the chain.
+type CacheThrottleError struct {
+	Reason     string
+	RetryAfter time.Duration
+	// Endpoint is the cache host that shed the request.
+	Endpoint string
+	// Err is the wrapped, specific retryable PelicanError.
+	Err error
+	// detail is the server-provided human-readable message.
+	detail string
+}
+
+func (e *CacheThrottleError) Error() string {
+	var sb strings.Builder
+	sb.WriteString("request throttled by cache")
+	if e.Endpoint != "" {
+		sb.WriteString(" ")
+		sb.WriteString(e.Endpoint)
+	}
+	if e.Reason != "" {
+		sb.WriteString(" (")
+		sb.WriteString(e.Reason)
+		sb.WriteString(")")
+	}
+	if e.RetryAfter > 0 {
+		fmt.Fprintf(&sb, "; retry after %s", e.RetryAfter)
+	}
+	if e.detail != "" {
+		// The detail is server-provided text: render it quoted so embedded
+		// control characters cannot forge log records downstream.
+		fmt.Fprintf(&sb, ": %q", e.detail)
+	}
+	if e.Err != nil {
+		sb.WriteString(": ")
+		sb.WriteString(e.Err.Error())
+	}
+	return sb.String()
+}
+
+func (e *CacheThrottleError) Unwrap() error {
+	return e.Err
+}
+
+// Is reports a match for ErrTooManyRequests so a throttle observed as a
+// remote 429 satisfies the same errors.Is check as a shed performed by
+// this process's own scheduler.
+func (e *CacheThrottleError) Is(target error) bool {
+	return target == ErrTooManyRequests
+}
+
+// newThrottleErrorFromResponse builds the structured throttle error for an
+// HTTP 429 from any request flavor (GET, PUT, HEAD, COPY): the reason is
+// parsed (and validated) from the already-read response body, the backoff
+// hint from the Retry-After header. body may be empty when the response
+// body was unavailable (e.g. HEAD).
+func newThrottleErrorFromResponse(resp *http.Response, body, endpoint string) *CacheThrottleError {
+	reason, detail := parseThrottleBody(body)
+	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+	return newCacheThrottleError(reason, detail, endpoint, retryAfter)
+}
+
+// newThrottleErrorNoResponse builds the structured throttle error for a 429
+// observed through a library that does not expose the response, so neither the
+// body's reason nor the Retry-After header is available (the WebDAV client used
+// for stat is the case in point). The result still classifies as retryable and
+// still satisfies errors.Is(err, ErrTooManyRequests); it just carries no reason
+// or backoff hint.
+func newThrottleErrorNoResponse(endpoint, detail string) *CacheThrottleError {
+	return newCacheThrottleError("", detail, endpoint, 0)
+}
+
+// newCacheThrottleError builds a CacheThrottleError from a cache's 429
+// response: the reason parsed from the JSON body's "error" field, the
+// Retry-After header, the endpoint host, and the body detail (truncated
+// here; quoted at display time since it is server-controlled text).
+func newCacheThrottleError(reason, detail, endpoint string, retryAfter time.Duration) *CacheThrottleError {
+	// Not every 429 carries a reason -- a HEAD response has no body, and the
+	// WebDAV client hides the response entirely -- so omit the parenthetical
+	// rather than rendering an empty one.
+	base := fmt.Errorf("cache %s throttled the request", endpoint)
+	if reason != "" {
+		base = fmt.Errorf("cache %s throttled the request (%s)", endpoint, reason)
+	}
+	return &CacheThrottleError{
+		Reason:     reason,
+		RetryAfter: retryAfter,
+		Endpoint:   endpoint,
+		Err:        throttleErrorForReason(reason, base),
+		detail:     truncateErrorDetail(detail),
+	}
 }
 
 // SlowTransferError methods

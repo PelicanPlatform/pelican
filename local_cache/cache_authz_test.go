@@ -40,7 +40,7 @@ func TestGetAcls_PublicNamespaceWithInvalidToken(t *testing.T) {
 	ac := &authConfig{}
 
 	// Configure a public namespace with no issuers (like an HTTPS-backed origin).
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public",
 			Caps: server_structs.Capabilities{
@@ -77,7 +77,7 @@ func TestGetAcls_MixedNamespaces(t *testing.T) {
 	ac := &authConfig{}
 
 	issuerURL, _ := url.Parse("https://issuer.example.com")
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{
 			Path: "/public",
 			Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
@@ -117,7 +117,7 @@ func TestUpdateConfig_InvalidatesTokenCache(t *testing.T) {
 	ac := newAuthConfig(ctx, egrp)
 
 	// Initial config: only /alpha is public.
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{Path: "/alpha", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 	}
 	require.NoError(t, ac.updateConfig(nsAds))
@@ -133,7 +133,7 @@ func TestUpdateConfig_InvalidatesTokenCache(t *testing.T) {
 
 	// Add /beta as a new public namespace (simulates a new origin registering
 	// with the director).
-	nsAds = append(nsAds, server_structs.NamespaceAdV2{
+	nsAds = append(nsAds, server_structs.NamespaceAd{
 		Path: "/beta",
 		Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
 	})
@@ -157,7 +157,7 @@ func TestUpdateConfig_InvalidatesTokenCache(t *testing.T) {
 	require.NotNil(t, ac.tokenAuthz.Get(""), "cache should be populated before no-op update")
 
 	// Update with an identical list.
-	nsAdsCopy := make([]server_structs.NamespaceAdV2, len(nsAds))
+	nsAdsCopy := make([]server_structs.NamespaceAd, len(nsAds))
 	copy(nsAdsCopy, nsAds)
 	require.NoError(t, ac.updateConfig(nsAdsCopy))
 
@@ -177,7 +177,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 
 	t.Run("PublicParentCoversPrivateChild", func(t *testing.T) {
 		issuerURL, _ := url.Parse("https://issuer.example.com")
-		nsAds := []server_structs.NamespaceAdV2{
+		nsAds := []server_structs.NamespaceAd{
 			{Path: "/data", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 			{
 				Path: "/data/private",
@@ -204,7 +204,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 
 	t.Run("PrivateParentDoesNotCoverChildWithoutToken", func(t *testing.T) {
 		issuerURL, _ := url.Parse("https://issuer.example.com")
-		nsAds := []server_structs.NamespaceAdV2{
+		nsAds := []server_structs.NamespaceAd{
 			{
 				Path: "/secure",
 				Caps: server_structs.Capabilities{Reads: true},
@@ -235,7 +235,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 	})
 
 	t.Run("UnrelatedNamespacesDoNotInterfere", func(t *testing.T) {
-		nsAds := []server_structs.NamespaceAdV2{
+		nsAds := []server_structs.NamespaceAd{
 			{Path: "/alpha", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 			{Path: "/beta", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 		}
@@ -269,7 +269,7 @@ func TestAuthorize_HierarchicalNamespaceOR(t *testing.T) {
 	ac := newAuthConfig(ctx, egrp)
 
 	issuerURL, _ := url.Parse("https://issuer.example.com")
-	nsAds := []server_structs.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAd{
 		{Path: "/data", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 		{
 			Path: "/data/restricted",
@@ -298,7 +298,7 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	issuerA, _ := url.Parse("https://issuer-a.example.com")
 	issuerB, _ := url.Parse("https://issuer-b.example.com")
 
-	base := []server_structs.NamespaceAdV2{
+	base := []server_structs.NamespaceAd{
 		{Path: "/public", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}},
 		{
 			Path: "/private",
@@ -310,18 +310,18 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	}
 
 	t.Run("IdenticalLists", func(t *testing.T) {
-		cp := make([]server_structs.NamespaceAdV2, len(base))
+		cp := make([]server_structs.NamespaceAd, len(base))
 		copy(cp, base)
 		assert.True(t, nsAdsAuthzEqual(base, cp))
 	})
 
 	t.Run("DifferentOrder", func(t *testing.T) {
-		reversed := []server_structs.NamespaceAdV2{base[1], base[0]}
+		reversed := []server_structs.NamespaceAd{base[1], base[0]}
 		assert.True(t, nsAdsAuthzEqual(base, reversed), "order should not matter")
 	})
 
 	t.Run("AddedNamespace", func(t *testing.T) {
-		extended := append(base, server_structs.NamespaceAdV2{
+		extended := append(base, server_structs.NamespaceAd{
 			Path: "/new", Caps: server_structs.Capabilities{PublicReads: true},
 		})
 		assert.False(t, nsAdsAuthzEqual(base, extended))
@@ -332,14 +332,14 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	})
 
 	t.Run("ChangedCapability", func(t *testing.T) {
-		cp := make([]server_structs.NamespaceAdV2, len(base))
+		cp := make([]server_structs.NamespaceAd, len(base))
 		copy(cp, base)
 		cp[0].Caps.Writes = true
 		assert.False(t, nsAdsAuthzEqual(base, cp))
 	})
 
 	t.Run("ChangedIssuerURL", func(t *testing.T) {
-		cp := make([]server_structs.NamespaceAdV2, len(base))
+		cp := make([]server_structs.NamespaceAd, len(base))
 		copy(cp, base)
 		cp[1].Issuer = []server_structs.TokenIssuer{{
 			IssuerUrl: *issuerB, BasePaths: []string{"/"}, RestrictedPaths: []string{"/sub"},
@@ -348,7 +348,7 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	})
 
 	t.Run("ChangedBasePaths", func(t *testing.T) {
-		cp := make([]server_structs.NamespaceAdV2, len(base))
+		cp := make([]server_structs.NamespaceAd, len(base))
 		copy(cp, base)
 		cp[1].Issuer = []server_structs.TokenIssuer{{
 			IssuerUrl: *issuerA, BasePaths: []string{"/other"}, RestrictedPaths: []string{"/sub"},
@@ -357,7 +357,7 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	})
 
 	t.Run("ChangedRestrictedPaths", func(t *testing.T) {
-		cp := make([]server_structs.NamespaceAdV2, len(base))
+		cp := make([]server_structs.NamespaceAd, len(base))
 		copy(cp, base)
 		cp[1].Issuer = []server_structs.TokenIssuer{{
 			IssuerUrl: *issuerA, BasePaths: []string{"/"}, RestrictedPaths: []string{"/other"},
@@ -367,6 +367,6 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 
 	t.Run("BothEmpty", func(t *testing.T) {
 		assert.True(t, nsAdsAuthzEqual(nil, nil))
-		assert.True(t, nsAdsAuthzEqual([]server_structs.NamespaceAdV2{}, []server_structs.NamespaceAdV2{}))
+		assert.True(t, nsAdsAuthzEqual([]server_structs.NamespaceAd{}, []server_structs.NamespaceAd{}))
 	})
 }

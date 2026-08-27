@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -14,9 +14,101 @@
 # limitations under the License.
 #
 
-# This file contains structured documentation about the Pelican parameters.
-# While it is somewhat human-readable, it is meant to help with the documentation
-# generation.
+# This file is the authoritative source for Pelican's configuration parameters.
+# It serves two purposes:
+#
+#   1. Documentation generation — the descriptions, types, and component lists
+#      are used to build the online parameter reference and MDX docs.
+#
+#   2. Source-code generation — the default values defined here are used by
+#      `go generate` (via generate/param_generator.go) to produce
+#      config/parameter_defaults.go, which sets most parameter defaults at
+#      startup. New defaults should generally be added here rather than
+#      hard-coded in Go source. The exceptions that must remain in Go are:
+#
+#        - "Seed" params (ConfigBase, Server.Hostname, RuntimeDir) whose
+#          defaults require runtime calls (os.Hostname, XDG dir probing,
+#          etc.) and are set in SetBaseDefaultsInConfig before the
+#          generated code runs. Other params may reference these seeds
+#          via ${ConfigBase}, ${Server.Hostname}, etc.
+#
+#        - Deprecated params (marked `deprecated: true` here) — the
+#          generator skips them so that viper.IsSet stays false,
+#          preserving migration logic in handleDeprecatedConfig. Their
+#          defaults are set manually in SetServerDefaults.
+#
+#        - Runtime-computed values that depend on conditional logic not
+#          expressible in YAML (e.g. ${Server.ExternalWebUrl}, which
+#          requires special logic for stripping default HTTPS ports).
+#
+# ── Parameter naming ──────────────────────────────────────────────────────
+#
+#   - Names use dot-separated CamelCase sections: <Component>.<Field>
+#     Examples: Server.Hostname, Origin.EnableCmsd, Cache.LowWatermark
+#
+#   - Top-level params (no dot) are allowed for global settings:
+#     ConfigBase, RuntimeDir, Debug, TLSSkipVerify
+#
+#   - References to other params in default values use ${Param.Name} syntax:
+#       default: ${ConfigBase}/certificates/tls.crt
+#     The code generator resolves these via v.GetString at startup and
+#     builds a dependency graph to ensure correct ordering.
+#
+#   - References to environment variables use bare $ENV_VAR syntax:
+#       default: $XDG_RUNTIME_DIR/pelican
+#     These are resolved via os.Getenv at startup.
+#
+# ── Default tiers ─────────────────────────────────────────────────────────
+#
+#   Each parameter must have a `default` key and may additionally specify
+#   one or more override tiers. At startup the code generator selects the
+#   appropriate tier based on runtime context:
+#
+#   default          - The base default applied unconditionally. Every
+#                      parameter must declare this. Use "none" (the string)
+#                      to indicate no meaningful default — the generator
+#                      will skip the v.SetDefault call so viper.IsSet
+#                      returns false, letting downstream code distinguish
+#                      "not configured" from "set to default".
+#
+#   root_default     - Overrides `default` when Pelican runs as root (UID 0).
+#                      Typically used for FHS-compliant paths like /etc/pelican
+#                      or /run/pelican. If omitted, `default` is used for root
+#                      and non-root alike. When a root_default is present, the
+#                      `default` value applies only to non-root users.
+#
+#   osdf_default     - Overrides `default` (and root_default, if present) when
+#                      running in OSDF federation mode. Used for OSDF-specific
+#                      endpoints and service URLs. Set to "none" if the OSDF
+#                      mode should explicitly have no default (e.g. when the
+#                      value is discovered dynamically).
+#
+#   client_default   - Applied after the base defaults for client commands only
+#                      (pelican object get/put/copy, etc.). Use this when a
+#                      param should have a different default in client context
+#                      than in server context. Example: Logging.Level defaults
+#                      to "warn" for clients but "info" for servers.
+#
+#   server_default   - Applied after the base defaults for server commands only
+#                      (pelican-server origin serve, pelican cache serve, etc.). Use
+#                      this when a param needs a server-specific override.
+#                      Example: Logging.Level defaults to "info" for servers.
+#
+#   Tier precedence (highest wins):
+#     client_default / server_default  >  osdf_default  >  root_default  >  default
+#
+# ── Other keys ────────────────────────────────────────────────────────────
+#
+#   name             - Dot-separated CamelCase parameter name (required)
+#   description      - Human-readable description in YAML block scalar (required)
+#   type             - Go-oriented type: string, bool, int, filename, url,
+#                      duration, stringSlice, object (required)
+#   components       - List of components that use this param:
+#                      ["client", "origin", "cache", "director", "registry", "*"]
+#   deprecated       - true if this param is deprecated
+#   replacedby       - The replacement param name, or "none" if no replacement
+#   hidden           - true to hide from public documentation
+#   runtime_configurable - true if changes take effect without restart
 
 ############################
 #     Top-Level Configs    #
@@ -24,8 +116,11 @@
 ---
 name: ConfigBase
 description: |+
-  The directory containing the Pelican configurations and data when the utility
-  is run as non-root.  Automatically configured; cannot be overridden.
+  The directory containing Pelican configurations and data. For non-root users,
+  this defaults to ~/.config/pelican. For root users, this defaults to /etc/pelican.
+  This value can be overridden by setting the PELICAN_CONFIGBASE environment variable
+  or by specifying ConfigBase in a configuration file.
+root_default: /etc/pelican
 default: "~/.config/pelican"
 components: ["*"]
 type: filename
@@ -49,10 +144,27 @@ components: ["*"]
 ---
 name: RuntimeDir
 description: |+
-  Directory where Pelican writes runtime artifacts such as address files; if unset it defaults to /run/pelican for root, $XDG_RUNTIME_DIR/pelican when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
+  Directory where Pelican writes runtime artifacts such as address files. For root users,
+  this defaults to /run/pelican. For non-root users, it defaults to $XDG_RUNTIME_DIR/pelican
+  when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
 type: filename
-default: ""
+root_default: /run/pelican
+default: $XDG_RUNTIME_DIR/pelican
 components: ["cache", "director", "origin", "registry"]
+---
+name: GeoLocation
+description: |+
+  A comma-separated string used to configure the lat/lon coordinates of all services that read from the configuration file.
+  When set, this value is used to declare a location to the federation central services, which affects client-server matchmaking decisions and GeoIP-based features.
+  The format of the string should be "lat,lon" where lat and lon are decimal values representing the latitude and longitude, respectively.
+  For example, `GeoLocation: "43.0739,-89.3848"` would indicate a location in Madison, WI.
+  In general, lat/lon coordinates should be restricted to at most 4 decimal places, which are sufficient to provide accuracy to within about 10 meters.
+
+  This provides an alternative to configuring GeoIP overrides for specific IP addresses and is intended for use in environments where GeoIP information is not available or not accurate.
+  When an admin/user-provided geolocation comes from an IP address that also has a configured GeoIP override, the admin/user-provided geolocation will take precedence.
+type: string
+default: ""
+components: ["cache", "client", "origin"]
 ---
 name: Debug
 description: |+
@@ -92,8 +204,7 @@ description: |+
 type: filename
 deprecated: true
 replacedby: none
-root_default: /etc/pelican/issuer.jwk
-default: $ConfigBase/issuer.jwk
+default: ${ConfigBase}/issuer.jwk
 components: ["origin", "cache", "registry", "director"]
 ---
 name: IssuerKeysDirectory
@@ -103,8 +214,7 @@ description: |+
 
   A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
-root_default: /etc/pelican/issuer-keys
-default: $ConfigBase/issuer-keys
+default: ${ConfigBase}/issuer-keys
 components: ["*"]
 ---
 name: Transport.DialerTimeout
@@ -215,6 +325,126 @@ description: |+
   A filename defining a file to write log outputs to, if the user desires.
 type: filename
 default: none
+components: ["*"]
+---
+name: Logging.Rotation.Disable
+description: |+
+  By default, when ${Logging.LogLocation} points at a regular file, Pelican
+  manages log rotation itself: the active log file is rotated whenever either the
+  calendar boundary (set by ${Logging.Rotation.Frequency}) is crossed or the size
+  threshold set by ${Logging.Rotation.MaxSize} is reached; rotated files are
+  compressed (unless ${Logging.Rotation.DisableCompress} is set) and old files
+  pruned per ${Logging.Rotation.MaxRetentionSize} and
+  ${Logging.Rotation.MaxRetentionPeriod}. Set this to true to disable Pelican's
+  built-in rotation entirely (for example, when an external service such as
+  logrotate manages the file).
+
+  Rotation is also automatically disabled when the log target is not a regular
+  file (for example, the empty default which logs to `stderr`, or a special file
+  such as `/dev/stdout`, a pipe, or a device), regardless of this setting.
+  Pelican assumes it is the only process rotating the file; multiple daemons on
+  the same file may be problematic.
+type: bool
+default: false
+components: ["*"]
+---
+name: Logging.Rotation.Frequency
+description: |+
+  How often the active log file is rotated on a calendar boundary, so
+  administrators can find logs by date. Accepted values are "daily", "hourly",
+  and "none" (case-insensitive); use "none" to disable time-based rotation and
+  rely solely on ${Logging.Rotation.MaxSize}.
+
+  Time-based rotation happens at the calendar boundary (local time): "daily"
+  rotates at midnight, "hourly" at the top of each hour. Each rotated file is
+  named for the period during which it was written -- the active file is renamed
+  with a suffix of the period's start: "<logfile>.2006-01-02" for daily and
+  "<logfile>.2006-01-02T15" for hourly. When time-based rotation is disabled
+  ("none"), size-triggered rotations are named with a full timestamp suffix
+  "<logfile>.2006-01-02T15-04-05". If more than one rotation occurs within the
+  same suffix, an incrementing "-N" is appended to keep names unique.
+type: string
+default: daily
+components: ["*"]
+---
+name: Logging.Rotation.MaxSize
+description: |+
+  The size threshold at which the active log file is rotated, e.g. "100MB" or
+  "1GB". Set to "0" to disable size-based rotation and rely solely on
+  ${Logging.Rotation.Frequency}. Size- and time-based rotation may be combined.
+
+  Together with ${Logging.Rotation.MaxRetentionSize} this bounds the disk the
+  logs may occupy: the default pair reserves a little over 1GB. Raise both on a
+  server whose logs are worth keeping longer; the defaults are chosen to be
+  unobtrusive on a workstation, where the client agent writes under the user's
+  own directory.
+type: string
+default: 100MB
+components: ["*"]
+---
+name: Logging.Rotation.MaxRetentionSize
+description: |+
+  The maximum total size of retained rotated (and compressed) log files, e.g.
+  "10GB". When the combined size of the rotated files would exceed this, the
+  oldest are deleted until it fits (the most recent rotated file is always kept).
+  Set to "0" to not limit retention by size. Applied independently of
+  ${Logging.Rotation.MaxRetentionPeriod}.
+
+  This is also the ceiling on the active log file when rotation is failing:
+  with nothing able to rotate it, the active file is the only log on disk, and
+  growth past this budget is treated as fatal rather than allowed to fill the
+  filesystem.
+type: string
+default: 1GB
+components: ["*"]
+---
+name: Logging.Rotation.MaxRetentionPeriod
+description: |+
+  The maximum age of retained rotated log files; rotated files older than this
+  are deleted. Set to 0 to not limit retention by age. Applied independently of
+  ${Logging.Rotation.MaxRetentionSize}.
+type: duration
+default: 720h
+components: ["*"]
+---
+name: Logging.Rotation.DisableCompress
+description: |+
+  By default, rotated log files are compressed with gzip (producing a `.gz`
+  suffix) by a background worker after rotation. Set this to true to keep rotated
+  files uncompressed.
+type: bool
+default: false
+components: ["*"]
+---
+name: Logging.Rotation.FlushInterval
+description: |+
+  The maximum interval the asynchronous log writer waits before flushing
+  buffered log lines to the log file. Lower values reduce the window in which
+  buffered lines could be lost; higher values reduce wakeups and syscalls.
+type: duration
+hidden: true
+default: 50ms
+components: ["*"]
+---
+name: Logging.Buffer.MaxSize
+description: |+
+  Upper bound on the size of the memory buffer for recent log lines, e.g.
+  "1MB" or "512K". Older log lines are evicted as newer ones arrive so the
+  buffer stays at or below this size. The larger the value, the more logging
+  history is available via the web interface.
+type: string
+default: 1MB
+components: ["*"]
+---
+name: Logging.Buffer.BatchLines
+description: |+
+  Number of log lines accumulated before the in-memory log buffer finalizes a
+  batch (making it visible to readers and eligible for eviction). Higher
+  values compress better and evict more coarsely; lower values stay uncompressed
+  for longer.
+type: int
+hidden: true
+default: 10000
 components: ["*"]
 ---
 name: Logging.Client.DisableProgressBars
@@ -461,7 +691,6 @@ name: Federation.DirectorUrl
 description: |+
   A URL indicating where a director service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 direct_access: false
 components: ["client", "origin", "cache", "registry"]
@@ -470,7 +699,6 @@ name: Federation.RegistryUrl
 description: |+
   A URL indicating where the namespace registry service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
 direct_access: false
 components: ["client", "director", "origin", "cache"]
@@ -479,7 +707,6 @@ name: Federation.JwkUrl
 description: |+
   A URL indicating where the JWKS for the Federation is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 direct_access: false
 components: ["*"]
@@ -713,11 +940,8 @@ description: |+
   The filepath to the SQLite database used by the client API server for persisting
   transfer job state, history, and recovery information. If not specified, defaults
   to `~/.pelican/client-agent.db`.
-
-  Set this to an empty string to disable database persistence entirely and run
-  the client API server in memory-only mode.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.HistoryRetentionDays
@@ -750,7 +974,7 @@ description: |+
   The PID file is used to track the running daemon process and prevent multiple
   instances from starting simultaneously.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.Socket
@@ -761,7 +985,7 @@ description: |+
 
   If not specified, the default location is `~/.pelican/client-api.sock`.
 type: filename
-default: ""
+default: none
 components: ["client"]
 ---
 name: ClientAgent.IdleTimeout
@@ -800,7 +1024,7 @@ description: |+
   A filepath to the intended location of the origin's database.
 type: filename
 root_default: /var/lib/pelican/origin.sqlite
-default: $ConfigBase/origin.sqlite
+default: ${ConfigBase}/origin.sqlite
 components: ["origin"]
 ---
 name: Origin.Url
@@ -885,9 +1109,140 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", and "xroot".
+  The type of storage underpinning the origin. Currently supported types are "posix", "posixv2", "https", "httpsv2", "s3",
+  "s3v2", "globus", "globusv2", "ssh", "pstore", and "xroot".
 type: string
 default: "posix"
+components: ["origin"]
+---
+name: Origin.PStoreLocation
+description: |+
+  The directory holding a "pstore" origin's catalog and, unless Origin.PStoreStorageDirs is set, its object data.
+
+  Only used when Origin.StorageType is "pstore", but effectively required there: the default of "none" is not usable,
+  and configuration validation fails unless either this or Origin.PStoreStorageDirs is set. When only
+  Origin.PStoreStorageDirs is set, the catalog lives alongside the first directory listed there.
+
+  The Pelican store keeps object data in encrypted, block-structured files and its namespace in an encrypted embedded
+  database, both keyed off the origin's issuer keys. The directory is owned exclusively by this origin while it runs
+  and must not be shared with a cache; the two use the same key space and each refuses to open a database the other
+  claimed.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreStorageDirs
+description: |+
+  Directories a "pstore" origin spreads object data across, letting a store span several devices without LVM or RAID.
+
+  Accepts either a list of paths or a list of objects with a Path and an optional MaxSize, matching the format of
+  LocalCache.StorageDirs. When unset, Origin.PStoreLocation holds the data as well as the catalog.
+
+  A pstore never evicts: once the configured size is reached, writes fail with 507 Insufficient Storage until something
+  is deleted. A directory with no MaxSize is unbounded, which makes the store as a whole unbounded.
+type: object
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupLocation
+description: |+
+  Directory receiving periodic metadata backups of a "pstore" origin.
+
+  A metadata backup covers the catalog only -- the namespace and each object's bookkeeping. It does NOT contain object
+  data. Restoring one gives back the directory tree and every object's size, checksums, and location, but the objects
+  themselves come from the block files, which need backing up separately.
+
+  Unlike a cache, an origin cannot re-fetch what it loses: object data on disk is encrypted and named by hash, and
+  everything needed to interpret it lives in the catalog, so a store whose catalog is gone is a directory of unreadable
+  bytes. The catalog is small next to the data and can be copied consistently while the origin runs, so backing it up
+  often is cheap insurance.
+
+  A metadata backup restores only the catalog. It is useful only alongside the object data, which ordinary filesystem
+  backup tools handle, and the masterkey.json file in the store directory, which wraps the encryption key and is itself
+  protected by the origin's issuer keys.
+
+  Every backup is complete; there are no incrementals. Each one is a verified container, so a truncated or damaged file
+  is refused rather than restored as a silently smaller catalog. Note that a restore which fails part-way cannot be
+  undone: the target directory is left holding a partial catalog and must be discarded, with the restore retried into a
+  fresh directory. Always restore into a new directory rather than over an existing store.
+
+  Backups are always encrypted, and there is no key to configure: a snapshot is a logical dump holding every object
+  path and the salt that keeps on-disk filenames unguessable, so there is no setting under which one is written in the
+  clear. Each backup is encrypted under a key of its own, derived from the origin's backup key and a random salt stored
+  in that file; the backup key in turn is derived from the origin's issuer keys and travels inside every backup, sealed
+  to each issuer key that was current when it was written. Three things therefore open a backup, and any one of them is
+  enough: any of those issuer keys, the origin's backup key -- printed for escrow by "pelican-server origin pstore
+  metadata-backup-key" -- or that one file's own key, printed by "pelican-server origin pstore metadata-backup-key <file>".
+  The last is what to hand to someone who should be able to restore one archive and no others.
+
+  Empty (the default) disables metadata backups.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupInterval
+description: |+
+  How often a "pstore" origin writes a metadata backup to Origin.PStoreMetadataBackupLocation.
+
+  Each backup is complete rather than incremental, and objects smaller than Origin.PStoreInlineMaxBytes are stored in
+  the catalog itself rather than in a block file -- so a snapshot is not merely a list of names and can be
+  substantially larger than the namespace alone suggests. The default is spaced accordingly; shorten it only after
+  looking at what a snapshot of your store actually costs, and remember that Origin.PStoreMetadataBackupsToKeep copies
+  of it are retained.
+type: duration
+default: 6h
+components: ["origin"]
+---
+name: Origin.PStoreMetadataBackupsToKeep
+description: |+
+  How many metadata backups a "pstore" origin retains, oldest pruned first.
+
+  Keeping several allows rolling back to a point before a corruption rather than only forward from the most recent
+  backup. Zero keeps every backup.
+type: int
+default: 24
+components: ["origin"]
+---
+name: Origin.PStoreIndexCheckInterval
+description: |+
+  How often a "pstore" origin checks its catalog for internal inconsistencies.
+
+  This pass reads only the catalog, so it is cheap. It reports and does not repair; repair stays a deliberate operator
+  action through "pelican-server origin pstore fsck --repair". Zero disables it.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.PStoreDataScanInterval
+description: |+
+  How often a "pstore" origin reads every object back and verifies it against the checksums recorded when it was
+  written.
+
+  This is the only check that detects at-rest corruption, and an origin needs it more than a cache does: a cache that
+  finds a corrupt object re-fetches it, while an origin has nowhere to re-fetch from.
+
+  The scan never modifies the store. A corrupt object is reported and left in place, because deleting it would destroy
+  the only copy along with the only record of its path, size, and checksums; restoring or re-ingesting it is an
+  operator decision, taken through "pelican-server origin pstore fsck". Zero disables the scan.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.PStoreDataScanRate
+description: |+
+  The rate at which a "pstore" origin's data scan reads, so verification does not compete with serving.
+type: byterate
+default: 100MB/s
+components: ["origin"]
+---
+name: Origin.PStoreInlineMaxBytes
+description: |+
+  The largest object a "pstore" origin keeps directly in its catalog rather than in a block file on disk.
+
+  Small objects cost a whole file each on a conventional filesystem; storing them inline avoids that. Zero selects the
+  built-in default of 4096 bytes.
+type: int
+default: 0
 components: ["origin"]
 ---
 name: Origin.FederationPrefix
@@ -992,7 +1347,7 @@ description: |+
   - `"no-cache, must-revalidate"` — caches may store the content but must revalidate with the origin via ETags before every use.
   - `"max-age=3600"` — content is considered fresh for one hour.
   - `""` (the default) — no Cache-Control header is sent, which gives the downstream cache full discretion over freshness.
-    This matches the behaviour of a plain XRootD origin.
+    This matches the behavior of a plain XRootD origin.
 type: string
 default: ""
 components: ["origin"]
@@ -1122,7 +1477,7 @@ description: |+
   StoragePrefix, because POSIX filesystems do not support renaming files across filesystem
   boundaries. If a mismatch is detected, Pelican will reject the configuration at startup.
 type: filename
-default: $Origin.RunLocation/in-progress
+default: ${Origin.RunLocation}/in-progress
 components: ["origin"]
 hidden: true
 ---
@@ -1166,7 +1521,6 @@ name: Origin.Multiuser
 description: |+
   A bool indicating whether an origin is "multiuser", ie whether the underlying XRootD instance must be configured in multi user mode.
 type: bool
-root_default: true
 default: false
 components: ["origin"]
 ---
@@ -1183,7 +1537,7 @@ name: Origin.MultiuserUmask
 description: |+
   The file-creation mask (umask) applied to the process at startup when multiuser mode is enabled.
   This umask controls which permission bits are masked off from the requested mode for all filesystem operations.
-  The umask is set once when the multiuser filesystem is initialised and left in place for the lifetime of the process.
+  The umask is set once when the multiuser filesystem is initialized and left in place for the lifetime of the process.
   A value of -1 (the default) means the process inherits the umask from its parent and does not change it.
   A value of 0 means the exact permissions requested by the caller are applied (no bits masked).
   Specify the value in YAML octal notation (e.g. 0o0022 removes group-write and other-write).
@@ -1293,6 +1647,27 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.EnableStandaloneMode
+description: |+
+  When true, the Origin runs without joining a federation at all. It will not register at a Registry, it will not
+  advertise to a Director, it will not perform Director-initiated file transfer tests, and it will not contact any
+  other federation service. Clients resolve objects against the Origin directly, so `pelican object get` and
+  anything else that speaks Pelican works against the Origin's own hostname. Every authorization decision is made
+  against tokens minted by the Origin's own embedded issuer.
+
+  This is the Origin counterpart of ${Cache.EnableSiteLocalMode}, and is intended for administrators who want
+  Pelican's managed authorization over a storage backend without operating (or belonging to) a federation.
+
+  Standalone mode requires one of the native "v2" storage backends -- `posixv2`, `s3v2`, `httpsv2`, `globusv2`, or
+  `ssh` -- because the XRootD-fronted backends derive their configuration from federation metadata. It also cannot
+  be combined with the Director, Registry, Cache, or Broker modules in the same process, and it is incompatible with
+  ${Origin.DisableDirectClients} (in standalone mode every client is a direct client). ${Origin.DirectorTest} is
+  force-disabled at startup, since no Director exists to run the test.
+
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.EnableIssuer
 description: |+
   Enable the built-in issuer daemon for the origin.
@@ -1303,13 +1678,17 @@ components: ["origin"]
 name: Origin.IssuerMode
 description: |+
   Select the issuer implementation to use when Origin.EnableIssuer is true.
-  "embedded" uses the built-in fosite-based OIDC provider which requires
-  no external processes (default).
-  "oa4mp" uses the external Java-based OA4MP issuer (legacy).
+  "embedded" uses the fosite-based OIDC provider built directly into Pelican,
+  which requires no external processes. This is under canary testing and
+  is expected to become the default in a future release.
+  "oa4mp" uses the external Java-based OA4MP issuer (legacy, will be deprecated in a future release).
   When switching between modes, state is not migrated between the two databases.
+
+  Note: the Issuer.AccessTokenLifetime, Issuer.AuthorizationCodeLifetime,
+  Issuer.IDTokenLifetime, and Issuer.RefreshTokenLifetime settings only take
+  effect when this is set to "embedded".
 type: string
 default: "oa4mp"
-hidden: true
 components: ["origin"]
 ---
 name: Origin.ScitokensRestrictedPaths
@@ -1435,8 +1814,25 @@ description: |+
   present X.509 client credentials in order to authenticate.  The configuration
   of the authorization for these clients must be done by the admin; Pelican
   does not support automatic VOMS authorization configuration.
+
+  This relies on the client presenting a certificate during the TLS handshake,
+  so Origin.EnableTLSClientAuth must also be set to true for VOMS authentication
+  to function.
 type: bool
-default: true
+default: false
+components: ["origin"]
+---
+name: Origin.EnableTLSClientAuth
+description: |+
+  Turns client certificate authentication on or off in xrootd for the HTTPS protocol. When false (default) the
+  origin will never request a TLS client certificate. When true, the origin will sometimes request
+  a client certificate from the client.
+
+  Note that X.509/VOMS-based authentication (see Origin.EnableVoms) relies on the client presenting
+  a certificate during the TLS handshake; if the origin should authenticate clients via VOMS,
+  this parameter must be set to true.
+type: bool
+default: false
 components: ["origin"]
 ---
 name: Origin.EnableDirListing
@@ -1548,6 +1944,24 @@ type: string
 default: path
 components: ["origin"]
 ---
+name: Origin.ObjectProviderURL
+description: |+
+  A gocloud.dev/blob-compatible URL that specifies the object store provider and bucket/container to use for the s3v2 storage type.
+  When set, this takes precedence over Origin.S3ServiceUrl, Origin.S3Region, and Origin.S3UrlStyle, allowing a single parameter to
+  configure S3, GCS, or Azure Object Storage.
+
+  Examples:
+    - S3: "s3://my-bucket?region=us-east-1&endpoint=https://s3.us-east-1.amazonaws.com"
+    - GCS: "gs://my-bucket"
+    - Azure: "azblob://my-container"
+
+  The Origin.StoragePrefix is still applied on top of this URL.
+  S3 credentials are still read from Origin.S3AccessKeyfile/S3SecretKeyfile when using s3:// URLs.
+  GCS and Azure use application default credentials from the environment.
+type: string
+default: none
+components: ["origin"]
+---
 name: Origin.HttpServiceUrl
 description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
@@ -1566,6 +1980,40 @@ description: |+
   If the origin backend is configured with the `globus` storage type, any value set here will be overridden with the filepath to
   the file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
 type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthTokenPassthrough
+description: |+
+  When set to true for httpsv2 backends, the client's bearer token is forwarded to the upstream HTTP server
+  instead of using a static token.
+  This is mutually exclusive with Origin.HttpAuthTokenFile.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2ClientID
+description: |+
+  When set for httpsv2 backends, configures OAuth2 client credentials for automatic token management
+  to the upstream HTTP server.
+  Requires Origin.HttpAuthOAuth2ClientSecretFile and Origin.HttpAuthOAuth2Issuer to also be set.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2ClientSecretFile
+description: |+
+  Path to a file containing the OAuth2 client secret for automatic token management to the upstream HTTP server.
+  The file should contain the secret as plain text (leading/trailing whitespace is trimmed).
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2Issuer
+description: |+
+  The OAuth2/OIDC issuer URL for automatic token management to the upstream HTTP server.
+  The token endpoint is discovered automatically via the issuer's `/.well-known/openid-configuration` metadata.
+type: string
 default: none
 components: ["origin"]
 ---
@@ -1647,13 +2095,41 @@ type: filename
 default: none
 components: ["origin"]
 ---
+name: Origin.GlobusIssuerURL
+description: |+
+  The OIDC issuer URL for Globus authentication.
+  This is used for OIDC discovery and constructing OAuth2 endpoints.
+  Only override this for testing with a mock Globus server.
+type: url
+default: https://auth.globus.org/
+hidden: true
+components: ["origin"]
+---
+name: Origin.GlobusTransferAPIBaseUrl
+description: |+
+  The base URL for the Globus Transfer API, used to look up collection endpoint information.
+  Only override this for testing with a mock Globus server.
+type: url
+default: https://transfer.api.globusonline.org/v0.10/
+hidden: true
+components: ["origin"]
+---
+name: Origin.Globusv2TokenRefreshInterval
+description: |+
+  The interval between periodic token refreshes for native Globus v2 backends.
+  Only override this for testing.
+type: duration
+default: 5m
+hidden: true
+components: ["origin"]
+---
 name: Origin.FedTokenLocation
 description: |+
   A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services
   to prove the origin's membership in the federation. For example, a third-party copy from one Origin to another that serves a namespace
   without DirectReads enabled may require a token to prove the origin's membership in the federation.
 type: filename
-default: $ConfigBase/origin-fed-token
+default: ${ConfigBase}/origin-fed-token
 components: ["origin"]
 ---
 name: Origin.SelfTestMaxAge
@@ -1895,6 +2371,328 @@ default: false
 components: ["origin"]
 ---
 ############################
+#  Origin POSC settings    #
+############################
+name: Origin.Posc.Enabled
+description: |+
+  When true, the V2 (POSIXv2) origin uses Persist On Successful Close (POSC) semantics: an
+  uploaded object is staged at a hidden in-progress filename until its handle is successfully
+  closed, at which point it is renamed atomically into place. Failed/abandoned uploads are
+  collected by a background expiry thread. POSC is independent of the metadata-publish feature.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Posc.Prefix
+description: |+
+  Path (relative to the export's StoragePrefix) under which POSC stages in-progress uploads.
+  Must be on the same filesystem as the export so the final rename is atomic. Default
+  ".pelican-posc" creates a hidden directory inside the export root that is invisible to clients.
+type: string
+default: ".pelican-posc"
+components: ["origin"]
+---
+name: Origin.Posc.FileTimeout
+description: |+
+  How long an in-progress POSC file may go without being touched before the background expiry
+  thread removes it. Active uploads keep their temp file alive via Origin.Posc.KeepaliveInterval.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Posc.KeepaliveInterval
+description: |+
+  How often the keepaliver thread updates the mtime of an active in-progress POSC file. Should be
+  smaller than Origin.Posc.FileTimeout.
+type: duration
+default: 19m
+components: ["origin"]
+---
+############################
+# Origin Metadata settings #
+############################
+name: Origin.Metadata.Enabled
+description: |+
+  Master switch for the V2 origin's object-commit metadata publisher. When true, the origin
+  posts a JSON event to Origin.Metadata.Endpoint after each successful upload close. The publish
+  is authenticated with a JWT signed by the origin's issuer key carrying the pelican.metadata
+  scope. Per-export overrides may further restrict or redirect the publishing.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.Endpoint
+description: |+
+  URL the origin POSTs object-commit events to when Origin.Metadata.Enabled is true. May be
+  overridden per-export via Origin.Exports[].Metadata.Endpoint.
+type: url
+default: ""
+components: ["origin"]
+---
+name: Origin.Metadata.Mode
+description: |+
+  Either "transactional" or "eventual". In transactional mode, the close blocks on the first
+  publish attempt; if it fails, the upload returns 5xx and the object is best-effort removed.
+  In eventual mode (the default), the close returns 2xx as soon as the publish row is durably
+  enqueued and a background worker drains the queue with retries and jitter. Per-export
+  overridable via Origin.Exports[].Metadata.Mode.
+type: string
+default: "eventual"
+components: ["origin"]
+---
+name: Origin.Metadata.RequestTimeout
+description: |+
+  Per-attempt HTTP timeout when posting to the metadata endpoint.
+type: duration
+default: 10s
+components: ["origin"]
+---
+name: Origin.Metadata.TokenLifetime
+description: |+
+  Lifetime of the JWT minted by the origin to authenticate to the metadata endpoint.
+type: duration
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.MinBackoff
+description: |+
+  Initial retry backoff in eventually-consistent mode. The actual sleep is uniformly jittered
+  in the range [0, computed].
+type: duration
+default: 30s
+components: ["origin"]
+---
+name: Origin.Metadata.MaxBackoff
+description: |+
+  Maximum retry backoff in eventually-consistent mode.
+type: duration
+default: 30m
+components: ["origin"]
+---
+name: Origin.Metadata.MaxInflight
+description: |+
+  Number of concurrent worker goroutines draining the metadata publish queue. Origin-wide.
+type: int
+default: 4
+components: ["origin"]
+---
+name: Origin.Metadata.RatePerSecond
+description: |+
+  Token-bucket rate limit (events per second) shared across all worker goroutines.
+type: int
+default: 10
+components: ["origin"]
+---
+name: Origin.Metadata.WarnAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "warning".
+type: duration
+default: 4h
+components: ["origin"]
+---
+name: Origin.Metadata.ErrorAfter
+description: |+
+  When the oldest pending row in the metadata publish queue exceeds this age, the origin
+  reports a metadata-service health state of "error". An origin in error state continues to
+  accept uploads.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.Metadata.MaxQueuedPerNamespace
+description: |+
+  Backpressure cap on the number of pending rows the eventual-mode metadata publish queue
+  will hold for a single namespace. Once a namespace reaches this many rows waiting to
+  publish, further eventual-mode uploads to that namespace are refused (the object is not
+  committed) until the backlog drains, so a stuck catalog cannot grow the queue without
+  bound. 0 disables the limit. Transactional-mode uploads are unaffected, since their rows
+  never outlive the request.
+type: int
+default: 0
+components: ["origin"]
+---
+name: Origin.Metadata.MaxQueuedBytesPerNamespace
+description: |+
+  Backpressure cap on the total size, in bytes, of the inline metadata blobs held by pending
+  eventual-mode publish rows for a single namespace. Once a namespace's pending blobs reach
+  this size, further eventual-mode uploads to that namespace are refused (the object is not
+  committed) until the backlog drains. This bounds at-rest queue growth in SQLite
+  independently of the row count. 0 disables the limit.
+type: int
+default: 0
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileEnabled
+description: |+
+  When true, the origin periodically sweeps its local object-metadata tracking database for
+  committed objects whose publish webhook was never delivered — for example because the
+  process crashed between the storage rename and the durable publish-queue write — and
+  re-enqueues them. Requires Origin.Metadata.TrackAccess (the sweep is driven by the local
+  commit record, so it never touches objects this origin did not write, which is essential
+  on a backend shared by multiple origins). No-op when metadata publishing is disabled.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileInterval
+description: |+
+  How often the crash-recovery reconcile sweep runs (it also runs once at startup). Lower
+  values shorten the worst-case delay before a publish lost to a crash is recovered, at the
+  cost of more frequent scans of the tracking database.
+type: duration
+default: 2h
+components: ["origin"]
+---
+name: Origin.Metadata.ReconcileSettleWindow
+description: |+
+  Minimum age (since last modification) an object must reach before the reconcile sweep will
+  consider re-publishing it. This must comfortably exceed the longest expected upload/write
+  cycle so the sweep never races an object another origin is still writing to the shared
+  backend, and so an in-flight first publish attempt is given time to land on its own. The
+  sweep additionally re-Stats each candidate and only republishes when the on-disk ETag
+  still matches the recorded commit, so a peer's overwrite is never misattributed.
+type: duration
+default: 6h
+components: ["origin"]
+---
+name: Origin.Metadata.AllowMultipart
+description: |+
+  When true, the V2 origin accepts uploads whose request body is multipart/form-data with
+  a reserved "metadata" part carrying an opaque per-object metadata blob (e.g. an XML
+  manifest). The blob is stored alongside the queue row and forwarded to the metadata
+  endpoint as a multipart/related body. When false, multipart-form PUTs are rejected with
+  415 Unsupported Media Type. Plain PUTs are unaffected either way.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.Metadata.MaxMetadataBytes
+description: |+
+  Hard cap on the size of the metadata part of a multipart upload. Larger metadata parts
+  cause the upload to be rejected with 413 Payload Too Large before any object bytes are
+  staged. The whole blob is held in memory during the request and stored inline in the
+  publish queue table, so this also bounds per-row size in SQLite.
+type: int
+default: 4194304
+components: ["origin"]
+---
+name: Origin.Metadata.MetadataPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the metadata part of a multipart
+  upload. Configurable so a downstream consumer with a different convention can be
+  accommodated without forking the origin.
+type: string
+default: "metadata"
+components: ["origin"]
+---
+name: Origin.Metadata.ObjectPartName
+description: |+
+  The reserved form-field name the V2 origin expects on the object body part of a
+  multipart upload. See Origin.Metadata.MetadataPartName for the metadata-side
+  configurability rationale.
+type: string
+default: "object"
+components: ["origin"]
+---
+############################
+#  Origin object-metadata  #
+############################
+name: Origin.Metadata.TrackAccess
+description: |+
+  Master per-origin switch for the local object-metadata tracking subsystem. When enabled,
+  the origin records per-object lifecycle data (commits, deletes, renames, observed external
+  changes, optional access timestamps) in its local SQLite database. This is independent of
+  Origin.Metadata.Enabled (the webhook publisher): you can enable tracking without webhooks
+  or webhooks without tracking. May be overridden per-export via
+  Origin.Exports[].Metadata.TrackAccess.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.TrackExtra
+description: |+
+  When true (and TrackAccess is enabled for the same namespace), the contents of the inbound
+  X-Pelican-Object-Metadata header are snapshotted into the object-metadata history table
+  for each event. When false, only the auto-collected fields (path, size, etag, mtime,
+  actor) are recorded. Useful for privacy-sensitive deployments where uploader-supplied
+  fields should not be persisted. Per-export overridable via
+  Origin.Exports[].Metadata.TrackExtra.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.Metadata.EtagPolicy
+description: |+
+  Strategy the origin uses to populate the ETag field when the underlying storage backend
+  does not supply one. Either "uuid" (mint a UUIDv4 at commit time, opaque, no I/O cost) or
+  "sha256" (stream a SHA-256 of the content during the POSC write; the resulting hex digest
+  becomes the ETag). The backend ETag is always preferred when present; this policy only
+  applies to backends that decline to supply one.
+type: string
+default: "uuid"
+components: ["origin"]
+---
+name: Origin.Metadata.AccessFlushInterval
+description: |+
+  How often the in-memory atime debouncer flushes accumulated last_accessed timestamps to
+  the database. Only meaningful when TrackAccess is enabled. A worst-case crash loses up to
+  this much access-time history; commit / delete / rename records are flushed durably and
+  are not affected.
+type: duration
+hidden: true
+default: 5m
+components: ["origin"]
+---
+name: Origin.Metadata.BatchFlushInterval
+description: |+
+  Maximum age of best-effort writes in the SQLite write-behind batcher before a flush is
+  forced. Smaller values reduce best-effort loss on crash at the cost of slightly more
+  frequent transactions. Durable writes (RecordCommit, RecordDelete, RecordRename, publish-
+  queue enqueue) always force an immediate flush regardless of this value.
+type: duration
+default: 50ms
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.BatchBufferSize
+description: |+
+  Capacity of the in-memory batcher channel. When full, best-effort writes block their
+  caller until a flush makes room (Stat-path back-pressure). The blocking behavior is
+  intentional: dropping observations silently was rejected at design time. Increase this
+  if you see batcher back-pressure in metrics.
+type: int
+default: 256
+hidden: true
+components: ["origin"]
+---
+name: Origin.Metadata.History.RetentionDays
+description: |+
+  How long (in days) object_metadata_history rows are kept before the background pruner
+  deletes them. 0 disables pruning (keep history forever). May be overridden per-export
+  via Origin.Exports[].Metadata.HistoryRetentionDays.
+type: int
+default: 90
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneInterval
+description: |+
+  How often the object-metadata-history pruner runs. The pruner deletes rows older than
+  the configured retention in bounded batches per pass.
+type: duration
+default: 1h
+components: ["origin"]
+---
+name: Origin.Metadata.History.PruneBatchSize
+description: |+
+  Maximum number of object_metadata_history rows the pruner deletes per pass per
+  namespace. Bounded to keep WAL pressure proportional.
+type: int
+default: 1000
+hidden: true
+components: ["origin"]
+---
+############################
 #   Local cache configs    #
 ############################
 name: LocalCache.RunLocation
@@ -1910,14 +2708,14 @@ description: |+
   The directory for the location of the cache data files - this is where the actual data in the cache is stored
   for the local cache.
 type: filename
-default: $PELICAN_LOCALCACHE_RUNLOCATION/cache
+default: ${LocalCache.RunLocation}/cache
 components: ["localcache"]
 ---
 name: LocalCache.Socket
 description: |+
   The location of the socket used for client communication for the local cache.
 type: filename
-default: $PELICAN_LOCALCACHE_RUNLOCATION/cache.sock
+default: ${LocalCache.RunLocation}/cache.sock
 components: ["localcache"]
 ---
 name: LocalCache.Size
@@ -2277,13 +3075,13 @@ type: int
 default: 8442
 components: ["cache"]
 ---
-name: Cache.LowWatermark
+name: Cache.LowWaterMark
 description: |+
   Whenever the cache initiates file purging, it will attempt to clean files until its cumulative disk
   usages reaches this value. Note that "cache disk usage" is calculated based on the cache's entire set of
   configured disks, not just data directories from those disks.
 
-  The value should be either a percentage integer of total available disk space (default is 90),
+  The value should be either a percentage integer of total available disk space (default is 85),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
 
@@ -2298,7 +3096,7 @@ description: |+
   When the cache's disk usage exceeds this value, file purging is triggered. Note that "cache disk usage"
   is calculated based on the cache's entire set of configured disks, not just data directories from those disks.
 
-  The value should be either a percentage integer of total available disk space (default is 95),
+  The value should be either a percentage integer of total available disk space (default is 89),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
 
@@ -2315,9 +3113,15 @@ description: |+
   cache will begin purging files until it reaches the `Cache.FilesNominal` value. If the cache's disk usage is still in
   excess of the `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase` value.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
@@ -2332,9 +3136,15 @@ description: |+
   the cache will begin purging files until it reaches this value. If the cache's disk usage is still in excess of the
   `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase`.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
   `pfc.diskusage`.
@@ -2347,9 +3157,15 @@ description: |+
   A value that sets the "base" cumulative size of files that can be stored in the cache's data directory. This is the
   stopping point for the cache's purging routines.
 
-  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
-  gigabytes, and terabytes, respectively.All `Cache.Files*Size` parameters must be less than the cache's calculated low
-  watermark, which may be configured as a percentage of total disk space from multiple disks.
+  Like the watermark values, this value may be given either as a percentage integer of total available disk space, or as
+  a number suffixed by k, m, g, or t (absolute sizes in kilo-, mega-, giga-, or tera- bytes). All `Cache.Files*Size`
+  parameters must be less than the cache's calculated low watermark, which may itself be configured as a percentage of
+  total disk space spanning multiple disks. Because these sizes must stay below the low watermark on a cache of any size,
+  percentages are usually the better choice.
+
+  This value is only used when `Cache.EnableLotman` is true. When Lotman is enabled and none of the `Cache.Files*Size`
+  parameters are set, they default to percentages of total disk that sit below the default low watermark (base 70,
+  nominal 75, max 80).
 
   For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for `pfc.diskusage`.
 type: string
@@ -2362,6 +3178,10 @@ description: |+
   to present X.509 client credentials in order to authenticate.  The configuration
   of the authorization for these clients must be done by the admin; Pelican
   does not support automatic VOMS authorization configuration.
+
+  This relies on the client presenting a certificate during the TLS handshake,
+  so Cache.EnableTLSClientAuth must also be set to true for VOMS authentication
+  to function.
 type: bool
 default: false
 components: ["cache"]
@@ -2415,6 +3235,108 @@ type: bool
 default: false
 components: ["cache"]
 hidden: true
+---
+name: Cache.WorkerCount
+description: |+
+  The number of concurrent transfer workers the V2 (persistent) cache uses to fetch objects from upstream
+  origins/caches on a cache miss.
+
+  The cache embeds the Pelican transfer engine, which otherwise defaults to the command-line client's
+  ${Client.WorkerCount} (a small value tuned for a single interactive client). That is far too low for a busy cache
+  serving many clients concurrently, so the cache uses this larger default instead.
+type: int
+default: 100
+components: ["cache"]
+---
+name: Cache.Throttle.PerOriginStarvingPercent
+description: |+
+  Upper bound, as a percentage of ${Cache.WorkerCount}, that any single upstream origin may
+  hold while its fetches are still "starving" (have not yet received a first byte of data).
+
+  A single misbehaving origin that accepts connections but never delivers bytes can, without
+  this limit, hold every worker until each connection times out (minutes), which makes the
+  cache unresponsive to healthy origins. When this percentage is reached for an origin, further
+  requests targeting that origin are subject to per-origin queueing and eventual 429 shedding.
+
+  Expressed as an integer 0-100. Set to 0 or a value >= 100 to disable this cap (any origin
+  may hold the entire pool).
+type: int
+default: 25
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.PerOriginActivePercent
+description: |+
+  Upper bound, as a percentage of ${Cache.WorkerCount}, that any single upstream origin may
+  hold in total (both starving and actively-transferring fetches).
+
+  This is the higher-limit sibling of ${Cache.Throttle.PerOriginStarvingPercent}: once a
+  fetch has produced at least one byte we consider it healthy and give it a larger share, but
+  we still cap the percentage so that a very large single origin cannot fully monopolise the
+  cache pool.
+
+  Expressed as an integer 0-100. Set to 0 or a value >= 100 to disable this cap.
+type: int
+default: 90
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.PendingBufferSize
+description: |+
+  Total number of upstream-fetch requests the cache's fair scheduler may hold in memory
+  waiting for a worker before it starts shedding load with HTTP 429 responses.
+
+  When the total pending count reaches this value, any additional incoming request is
+  failed immediately with a "too many requests" error rather than being enqueued — except
+  that an origin with nothing queued may always enqueue one request, so a few saturated
+  origins cannot lock every healthy origin out of admission (the buffer may transiently
+  exceed this value by up to one entry per active origin).
+
+  Set to 0 to disable the fair scheduler entirely (the cache falls back to the raw
+  first-come-first-served channel).
+type: int
+default: 200
+components: ["cache"]
+---
+name: Cache.Throttle.PerOriginPendingSize
+description: |+
+  Per-origin upper bound on the number of pending requests the cache's fair scheduler will
+  queue before it starts shedding load with HTTP 429 responses for that origin.
+
+  This is a per-origin sibling of ${Cache.Throttle.PendingBufferSize}: it prevents a single
+  bad origin from consuming the entire global pending buffer with requests that will never
+  be dispatched.
+type: int
+default: 50
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.EMAWindow
+description: |+
+  Time constant used when computing the exponentially-weighted moving average of active
+  workers per upstream origin. The EMA is used to weight the fair scheduler's random draw
+  across ready origins: origins that have consumed less of the pool recently are more
+  likely to be picked next.
+
+  Shorter values react faster to bursts; longer values are more stable but slower to
+  re-balance after a change.
+type: duration
+default: 30s
+hidden: true
+components: ["cache"]
+---
+name: Cache.Throttle.RetryAfter
+description: |+
+  The backoff duration advertised in the Retry-After header on any HTTP 429 the cache
+  returns: a fair-scheduler shed, a 429 passed through from the upstream it was fetching
+  from, or a prestage request refused because the prestage queue is full.
+
+  This is a hint for clients and external retriers; the cache does not enforce it, and
+  the Pelican client does not sleep on it. Rounded up to whole seconds on the wire.
+type: duration
+default: 60s
+hidden: true
+components: ["cache"]
 ---
 name: Cache.AllowedFederations
 description: |+
@@ -2494,7 +3416,7 @@ description: |+
   A filepath to the intended location of the cache's database.
 type: filename
 root_default: /var/lib/pelican/cache.sqlite
-default: $ConfigBase/cache.sqlite
+default: ${ConfigBase}/cache.sqlite
 components: ["cache"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
@@ -2514,7 +3436,7 @@ description: |+
   to prove the cache's membership in the federation. For example, Origins serving a namespace without DirectReads enabled require
   that all clients prove they come from within the federation.
 type: filename
-default: $ConfigBase/cache-fed-token
+default: ${ConfigBase}/cache-fed-token
 components: ["cache"]
 ---
 name: Cache.DisableClientX509
@@ -2537,6 +3459,61 @@ description: |+
   The cache eviction monitoring data includes information like the total space available, the space used, and the space used by each namespace.
 type: bool
 default: true
+components: ["cache"]
+---
+name: Cache.EnableChaosAPI
+description: |+
+  Enable the V2 cache's chaos/fault-injection admin API.
+
+  When true, the cache server registers an admin-authenticated endpoint
+  (POST /api/v1.0/cache/introspect/chaos) that deliberately corrupts or truncates
+  the on-disk data of a cached object. This is used by `pelican cache chaos` to
+  exercise the cache's integrity-detection paths.
+
+  This is a destructive testing feature and is disabled by default; it should
+  only be enabled in test/staging environments.
+type: bool
+default: false
+components: ["cache"]
+hidden: true
+---
+name: Cache.DataScanMode
+description: |+
+  Controls how the V2 (persistent) cache's periodic data-integrity scan re-verifies on-disk object data.
+
+  Valid values:
+    - "all" (default): every scan cycle re-reads and re-checksums all complete objects. Recommended when the cache
+      relies on Pelican for at-rest integrity.
+    - "once": each object's on-disk data is read back and checksummed exactly once (recording the checksum in the cache
+      database, and comparing it against the origin's reported checksum when one is available). Objects that have already
+      been verified are skipped on subsequent scan cycles. This is intended for deployments whose underlying storage
+      already guarantees at-rest integrity (for example ZFS with scrubbing), where repeatedly re-reading every object is
+      wasteful but recording an initial baseline checksum is still desired.
+
+  Important: "once" mode trusts the underlying storage to detect bitrot after the initial check. The cache cannot verify
+  that the storage actually scrubs, so it emits a loud startup warning and exports the `pelican_cache_data_scan_mode_once`
+  metric (set to 1) whenever this mode is active. To retain a floor of at-rest detection even in this mode, the scan still
+  re-verifies a small fraction of already-checked objects each cycle (see ${Cache.DataScanResampleInterval}).
+
+  Note that "once" mode cannot detect corruption that was present at ingest (before the first scan): the first scan records
+  whatever is on disk as the baseline. Detecting bad-at-ingest data requires a full-file or origin checksum on the
+  download/completion path, which is independent of this setting.
+
+  Unrecognized values are treated as "all".
+type: string
+default: all
+components: ["cache"]
+---
+name: Cache.DataScanResampleInterval
+description: |+
+  When ${Cache.DataScanMode} is "once", the data-integrity scan still re-verifies roughly 1 in N already-checked objects
+  on each cycle, so there is a nonzero floor of at-rest corruption detection rather than none. This is the value of N.
+
+  The default of 100 re-checks about 1% of already-verified objects per scan cycle. Set to 0 to disable re-sampling
+  entirely (pure "once": each object is verified exactly once and never re-checked). Has no effect when
+  ${Cache.DataScanMode} is "all".
+type: int
+default: 100
 components: ["cache"]
 ---
 name: Cache.EvictionMonitoringInterval
@@ -2647,7 +3624,7 @@ description: |+
 
   If not set, Server.ExternalWebUrl will be used instead.
 type: url
-default: $(Server.ExternalWebUrl)
+default: ${Server.ExternalWebUrl}
 components: ["director"]
 ---
 name: Director.DbLocation
@@ -2655,7 +3632,7 @@ description: |+
   A filepath to the intended location of the director's database, where server downtime info is stored.
 type: filename
 root_default: /var/lib/pelican/director.sqlite
-default: $ConfigBase/director.sqlite
+default: ${ConfigBase}/director.sqlite
 components: ["director"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
@@ -2779,7 +3756,7 @@ description: |+
   an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
 type: filename
 root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
-default: $ConfigBase/maxmind/GeoLite2-city.mmdb
+default: ${ConfigBase}/maxmind/GeoLite2-City.mmdb
 components: ["director"]
 ---
 name: Director.MinStatResponse
@@ -2990,10 +3967,25 @@ description: |+
   A filepath to the intended location of the namespace registry's database.
 type: filename
 root_default: /var/lib/pelican/registry.sqlite
-default: $ConfigBase/ns-registry.sqlite
+default: ${ConfigBase}/ns-registry.sqlite
 components: ["registry"]
 deprecated: true
 replacedby: ["Server.DbLocation"]
+---
+name: Registry.EnableOIDC
+description: |+
+  Indicate whether the registry should configure OAuth2/OIDC client APIs so
+  users can log in to the registry admin website via a third-party identity
+  provider (e.g. CILogon). When false the registry can still be operated
+  with local username/password accounts via the Pelican user/group scheme;
+  the OIDC routes and OAuth client setup are simply not initialized.
+
+  Historically the registry forced OIDC on regardless of this flag; setting
+  this to true preserves that behavior. Mirrors `Origin.EnableOIDC` /
+  `Cache.EnableOIDC` / `Director.EnableOIDC`.
+type: bool
+default: false
+components: ["registry"]
 ---
 name: Registry.RequireKeyChaining
 description: |+
@@ -3134,6 +4126,25 @@ default: false
 osdf_default: true
 components: ["registry"]
 ---
+name: Registry.InactiveRegistrationTimeout
+description: |+
+  How long a pending server registration can linger in the registry if it stops running after
+  registering itself. While an Origin or Cache is awaiting admin approval, the registry
+  records the last time the server polled its own registration metadata. If no contact is
+  received within this timeout, the registration and all its associated namespace entries are
+  deleted. Only registrations still in the Pending state are affected; registrations that have
+  already been approved or denied are never removed by this cleanup.
+type: duration
+default: 20m
+components: ["registry"]
+---
+name: Registry.InactiveRegistrationCleanupInterval
+description: |+
+  How often the registry runs the inactive server registration cleanup job.
+type: duration
+default: 5m
+components: ["registry"]
+---
 ############################
 #   Server-level configs   #
 ############################
@@ -3145,8 +4156,7 @@ description: |+
   If you override this filepath, you need to provide the matched-pair private key
   via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
 type: filename
-root_default: /etc/pelican/certificates/tls.crt
-default: "$ConfigBase/certificates/tls.crt"
+default: "${ConfigBase}/certificates/tls.crt"
 deprecated: true
 replacedby: "Server.TLSCertificateChain"
 components: ["cache", "director", "origin", "registry"]
@@ -3159,8 +4169,7 @@ description: |+
   If you override this filepath, you need to provide the matched-pair private key
   via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
 type: filename
-root_default: /etc/pelican/certificates/tls.crt
-default: "$ConfigBase/certificates/tls.crt"
+default: "${ConfigBase}/certificates/tls.crt"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateFile
@@ -3170,8 +4179,7 @@ description: |+
 
   Do not override this filepath unless you want to provide your TLS host certificate
 type: filename
-root_default: /etc/pelican/certificates/tlsca.pem
-default: "$ConfigBase/certificates/tlsca.pem"
+default: "${ConfigBase}/certificates/tlsca.pem"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateDirectory
@@ -3190,8 +4198,7 @@ description: |+
   The name of a file containing a private key corresponding to the TLSCACertificate.
   Used when running server components of Pelican.
 type: filename
-root_default: /etc/pelican/certificates/tlsca.key
-default: "$ConfigBase/certificates/tlsca.key"
+default: "${ConfigBase}/certificates/tlsca.key"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSKey
@@ -3200,8 +4207,7 @@ description: |+
   in the TLSCertificateChain.
   Used when running server components of Pelican.
 type: filename
-root_default: /etc/pelican/certificates/tls.key
-default: "$ConfigBase/certificates/tls.key"
+default: "${ConfigBase}/certificates/tls.key"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
@@ -3243,14 +4249,19 @@ description: |+
 
   Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`.
 type: url
-default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
+default: https://${Server.Hostname}:${Server.WebPort}
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.Hostname
 description: |+
-  The server's hostname, by default it's os.Hostname().
+  The server's hostname. Defaults to the system hostname as reported by the operating system
+  (via Go's os.Hostname, not the $HOSTNAME environment variable). This value is a "seed
+  parameter" — it is computed at runtime before any generated defaults run, so other
+  parameters that reference ${Server.Hostname} will resolve correctly. The $HOSTNAME
+  shown below is a documentary approximation; the actual value comes from os.Hostname().
+  Can be overridden if the server should advertise a different hostname externally.
 type: string
-default: none
+default: $HOSTNAME
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.HealthMonitoringPublic
@@ -3307,14 +4318,14 @@ description: |+
   If the server's web UI has not yet been configured, this file will
   contain the activation code necessary to turn it on.
 type: filename
-default: $ConfigBase/server-web-activation-code
+default: ${ConfigBase}/server-web-activation-code
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIPasswordFile
 description: |+
   A filepath specifying where the server's web UI password file should be stored.
 type: filename
-default: $ConfigBase/server-web-passwd
+default: ${ConfigBase}/server-web-passwd
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.SessionSecretFile
@@ -3323,9 +4334,10 @@ description: |+
 
   This is used for sending redirect request for OAuth2 authentication follow.
   This is also used for CSRF auth key.
+
+  The default content of the file is the hash of the concatenation of "pelican" and the DER form of the issuer key.
 type: filename
-default: $ConfigBase/session-secret
-  The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
+default: ${ConfigBase}/session-secret
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.WebReadOnly
@@ -3366,16 +4378,22 @@ name: Server.WebConfigFile
 description: |+
   A filepath to the file where web-based configuration changes are stored
 type: filename
-root_default: /etc/pelican/web-config.yaml
-default: "$ConfigBase/web-config.yaml"
+default: "${ConfigBase}/web-config.yaml"
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIAdminUsers
 description: |+
-  A string slice of "subject" claim of users to give admin permission for the server admin website,
-  who are authenticated through OAuth/OIDC.
+  A list of Pelican usernames to give admin permission for the server Web UI.
 
-  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+  Each entry is matched against the server-managed username only. Confirm the exact value
+  from the user's profile page in the Web UI after they have logged in once.
+
+  **Breaking change (v7.27):** entries were previously also matched against the user's
+  OIDC "subject" claim (e.g. a CILogon User Identifier such as
+  `http://cilogon.org/serverA/users/12345`) and the internal user ID. As of v7.27 those
+  values no longer grant admin permission; Pelican logs a startup error naming any such
+  entry. Replace each one with the user's Pelican username, or (recommended) grant admin
+  access via ${Server.AdminGroups} instead.
 type: stringSlice
 default: []
 components: ["cache", "director", "origin", "registry"]
@@ -3396,6 +4414,58 @@ description: |+
   listed in Server.UIAdminUsers or by belonging to a group listed in Server.AdminGroups.
 type: stringSlice
 default: []
+components: ["cache", "director", "origin", "registry"]
+---
+name: Server.UserAdminUsers
+description: |+
+  A list of Pelican usernames that are granted user administrator privileges.
+  User administrators can create, modify, and delete non-admin users and unprivileged groups.
+  They cannot modify the system admin user or system admin groups.
+type: stringSlice
+default: []
+components: ["origin", "registry"]
+---
+name: Server.UserAdminGroups
+description: |+
+  A list of group names whose members are granted user administrator privileges.
+  User administrators can create, modify, and delete non-admin users and unprivileged groups.
+type: stringSlice
+default: []
+components: ["origin", "registry"]
+---
+name: Server.CollectionAdminUsers
+description: |+
+  A list of Pelican usernames that are granted collection administrator privileges.
+  Collection administrators can create, modify, and delete collections and manage collection ACLs.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Server.CollectionAdminGroups
+description: |+
+  A list of group names whose members are granted collection administrator privileges.
+  Collection administrators can create, modify, and delete collections and manage collection ACLs.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Server.NewUserDefaultScopes
+description: |+
+  Scopes automatically granted to a user record when it is created. The
+  default `["web_ui.access"]` lets new users sign in to the web UI and
+  carry that capability through API tokens (which intersect against
+  effective scopes); operators can extend the list to give every new
+  account additional baseline capabilities.
+
+  Each entry must be a user-grantable scope (see `docs/scopes.yaml`,
+  entries with `userGrantable: true`); non-grantable scopes are
+  rejected at startup.
+
+  Changing this list affects ONLY accounts created after the change.
+  Pre-existing users were backfilled from this list once at upgrade
+  time; later edits do not retroactively grant or revoke scopes.
+type: stringSlice
+default: ["web_ui.access"]
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.StartupTimeout
@@ -3479,7 +4549,7 @@ description: |+
   A filepath to the intended location of the server's database.
 type: filename
 root_default: /var/lib/pelican/pelican.sqlite
-default: $ConfigBase/pelican.sqlite
+default: ${ConfigBase}/pelican.sqlite
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.DatabaseBackup.Location
@@ -3488,7 +4558,7 @@ description: |+
   Each backup file is compressed and encrypted using the server's issuer keys.
 type: filename
 root_default: /var/lib/pelican/backups
-default: $ConfigBase/backups
+default: ${ConfigBase}/backups
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.DatabaseBackup.Frequency
@@ -3565,6 +4635,52 @@ type: stringSlice
 default: []
 components: ["origin"]
 ---
+name: Server.GroupInviteLinkExpiration
+description: |+
+  The default duration before a group invite link expires.
+  This value is used when no explicit expiration is specified when creating an invite link.
+type: duration
+default: 168h
+components: ["origin", "registry"]
+---
+name: Server.AUPFile
+description: |+
+  Path to a Markdown-formatted Acceptable Use Policy (AUP) file.
+  When unset, Pelican serves a built-in default AUP that operators
+  should review and replace with their own. Set to "none" to disable
+  the AUP requirement entirely.
+  The file's content hash is used as the AUP version for tracking.
+type: filename
+default: ""
+components: ["origin", "registry"]
+---
+name: Server.AUPLastUpdated
+description: |+
+  Human-readable date the active AUP was last revised, e.g. "3 April 2026".
+  Rendered as a footer on the AUP page so users know how current the
+  policy text is. Optional; when unset no date footer is shown.
+type: string
+default: ""
+components: ["origin", "registry"]
+---
+name: Server.AUPCanonicalURL
+description: |+
+  Public URL where the canonical (latest) AUP can be found, e.g.
+  "https://osg-htc.org/end-user-aup". Rendered alongside the AUP
+  text as a permanent reference. Optional.
+type: url
+default: ""
+components: ["origin", "registry"]
+---
+name: Server.AutoEnrollUsernameClaims
+description: |+
+  An ordered list of JWT or user_info claims to use when auto-enrolling users via invite links.
+  When a user redeems an invite link and does not have an existing account, the system will try each claim in order and use the first non-empty value that is not already taken as the username.
+  Common claims include "preferred_username", "email", "name", and "sub".
+type: stringSlice
+default: ["preferred_username", "email", "sub"]
+components: ["origin", "registry"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
@@ -3620,7 +4736,7 @@ name: Issuer.IssuerClaimValue
 description: |+
   Contents of the issuer (`iss`) claim in the generated tokens
 type: string
-default: $(Server.ExternalWebUrl)
+default: ${Server.ExternalWebUrl}
 components: ["origin"]
 ---
 name: Issuer.AuthenticationSource
@@ -3693,6 +4809,8 @@ components: ["origin", "registry", "cache", "director"]
 name: Issuer.AccessTokenLifetime
 description: |+
   Lifetime of access tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -3702,6 +4820,8 @@ name: Issuer.AuthorizationCodeLifetime
 description: |+
   Lifetime of authorization codes and device codes issued by the
   embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 10m
 hidden: true
@@ -3710,6 +4830,8 @@ components: ["origin"]
 name: Issuer.IDTokenLifetime
 description: |+
   Lifetime of ID tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 1h
 hidden: true
@@ -3728,6 +4850,8 @@ components: ["origin"]
 name: Issuer.RefreshTokenLifetime
 description: |+
   Lifetime of refresh tokens issued by the embedded OAuth2 issuer.
+
+  Only takes effect when Origin.IssuerMode is set to "embedded".
 type: duration
 default: 168h
 hidden: true
@@ -3894,8 +5018,7 @@ description: |+
   This is a required parameter for the origin/cache/director server if
   `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
-root_default: /etc/pelican/oidc-client-id
-default: $ConfigBase/oidc-client-id
+default: ${ConfigBase}/oidc-client-id
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientID
@@ -3919,8 +5042,7 @@ description: |+
   This is a required parameter for the origin/cache/director server if
   `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
-root_default: /etc/pelican/oidc-client-secret
-default: $ConfigBase/oidc-client-secret
+default: ${ConfigBase}/oidc-client-secret
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.DeviceAuthEndpoint
@@ -4046,8 +5168,7 @@ description: |+
   If this file is not present, it will be auto-created with a default policy of
   blocking all indexing.
 type: filename
-root_default: /etc/pelican/robots.txt
-default: $ConfigBase/robots.txt
+default: ${ConfigBase}/robots.txt
 components: ["origin"]
 ---
 name: Xrootd.ScitokensConfig
@@ -4057,8 +5178,7 @@ description: |+
   This file allows arbitrary changes to the authorization configuration and will be merged with any
   auto-generated configuration; it's recommended for use by experts only.
 type: filename
-root_default: /etc/pelican/xrootd/scitokens.cfg
-default: $ConfigBase/xrootd/scitokens.cfg
+default: ${ConfigBase}/xrootd/scitokens.cfg
 components: ["cache", "origin"]
 ---
 name: Xrootd.Mount
@@ -4072,14 +5192,14 @@ name: Xrootd.MacaroonsKeyFile
 description: |+
   The filepath to a Macaroons key for setting up authorization in XRootD.
 type: string
-default: none
+default: ${ConfigBase}/macaroons-secret
 components: ["origin"]
 ---
 name: Xrootd.Authfile
 description: |+
   The filepath to an auth file for setting up authorization in XRootD.
 type: string
-default: none
+default: ${ConfigBase}/xrootd/authfile
 components: ["cache", "origin"]
 ---
 name: Xrootd.AuthRefreshInterval
@@ -4175,7 +5295,7 @@ description: |+
 
   For both cahces/origins the sitename will be displayed as the service's name in the federation's Director.
 type: string
-default: none
+default: ${Server.Hostname}
 components: ["cache", "origin"]
 ---
 name: Xrootd.MaxStartupWait
@@ -4249,7 +5369,7 @@ description: |+
   A filepath where Prometheus should host its monitoring data.
 type: string
 root_default: /var/lib/pelican/monitoring/data
-default: $ConfigBase/monitoring/data
+default: ${ConfigBase}/monitoring/data
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PortLower
@@ -4459,8 +5579,7 @@ description: |+
 
   A filepath to the location of the JWT used for authenticating amqp connection.
 type: filename
-default: $ConfigBase/shoveler-token
-root_default: /etc/pelican/shoveler-token
+default: ${ConfigBase}/shoveler-token
 components: ["origin", "cache"]
 ---
 name: Shoveler.StompUsername
@@ -4535,7 +5654,7 @@ description: |+
   the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
 type: filename
 root_default: /var/spool/pelican/shoveler/queue
-default: $ConfigBase/shoveler/queue
+default: ${ConfigBase}/shoveler/queue
 components: ["origin", "cache"]
 ---
 name: Shoveler.IPMapping
@@ -4625,7 +5744,7 @@ description: |+
   will be stored at `<path>/.lot/lotman_cpp.sqlite`.
 type: filename
 root_default: /var/lib/lotman
-default: $ConfigBase
+default: ${ConfigBase}
 components: ["cache"]
 ---
 name: Lotman.DbLocation
@@ -4637,7 +5756,7 @@ description: |+
   will be stored at <path>/.lot/lotman_cpp.sqlite.
 type: filename
 root_default: /var/lib/lotman
-default: $ConfigBase
+default: ${ConfigBase}
 deprecated: true
 replacedby: ["Lotman.LotHome"]
 components: ["cache"]
@@ -4889,7 +6008,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableCacheX509
@@ -4898,7 +6016,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["cache"]
 ---
 name: Topology.DisableOriginX509
@@ -4907,7 +6024,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["origin"]
 ---
 name: Topology.DisableCaches
@@ -4916,7 +6032,6 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableOrigins
@@ -4925,5 +6040,56 @@ description: |+
 type: bool
 hidden: true
 default: false
-osdf_default: false
 components: ["director", "registry"]
+---
+##############################
+#  Transfer-level Configs    #
+##############################
+name: Transfer.EnabledGroups
+description: |+
+  A list of group names whose members are permitted to use the transfer API.
+  When the transfer API is served by an origin, users with valid tokens
+  containing one of these groups will be granted access.
+  If empty, all authenticated users with a valid token bearing the
+  pelican.transfer scope are allowed.
+type: stringSlice
+default: []
+components: ["origin", "transfer"]
+---
+name: Transfer.CredentialIdleTimeout
+description: |+
+  The duration of inactivity after which stored credentials with no
+  associated active transfer jobs are automatically cleaned up.
+  Set to 0 to disable automatic credential cleanup.
+type: duration
+default: 168h
+components: ["origin", "transfer"]
+---
+name: Transfer.EnableOAuth2Clients
+description: |+
+  When enabled, the transfer server allows users to register OAuth2
+  client credentials (client ID and secret) that can be used for
+  token exchange workflows to obtain renewable access tokens.
+type: bool
+default: false
+components: ["origin", "transfer"]
+---
+name: Transfer.MaxConcurrentJobs
+description: |+
+  The maximum number of concurrent transfer jobs the transfer server
+  can process simultaneously.
+  Set to 0 or negative to use the default value (5).
+type: int
+default: 5
+components: ["origin", "transfer"]
+---
+name: Origin.EnableTransferAPI
+description: |+
+  When enabled, the origin serves the transfer API at /api/v1.0/transfer,
+  allowing authenticated users to submit and manage third-party copy
+  operations through the origin.
+  The transfer API provides credential management and job submission
+  capabilities for federated transfers.
+type: bool
+default: false
+components: ["origin"]

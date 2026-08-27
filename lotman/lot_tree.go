@@ -130,7 +130,7 @@ func pathContains(parent, child string) bool {
 // semantics would cause allocateQuotas to spread zero across the
 // entire namespace fleet. It continues to exist as a self-parented
 // sibling created by initLots.
-func buildLotTree(rootLot Lot, nsAds []server_structs.NamespaceAdV2, federationIssuer string) *lotTreeNode {
+func buildLotTree(rootLot Lot, nsAds []server_structs.NamespaceAd, federationIssuer string) *lotTreeNode {
 	root := &lotTreeNode{lot: rootLot}
 
 	// Collect candidate namespace nodes, normalised + de-duplicated.

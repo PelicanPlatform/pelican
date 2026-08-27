@@ -66,30 +66,80 @@ type TransferJob struct {
 	CancelFunc  context.CancelFunc
 	ctx         context.Context
 	wg          sync.WaitGroup
+	// lastProgressEmit is the Unix-nanos of the last broadcast progress event,
+	// used to throttle per-job progress notifications.
+	lastProgressEmit atomic.Int64
+	// subscriberCount is the number of active event-stream watchers. It gates the
+	// progress hot path: with no watchers, a per-chunk progress callback does no
+	// work beyond a single atomic load (no shared lock, no publish).
+	subscriberCount atomic.Int32
 }
 
 // TransferManager manages all transfer jobs and their execution
 type TransferManager struct {
-	jobs                   map[string]*TransferJob
-	transfers              map[string]*Transfer
-	store                  StoreInterface
-	mu                     sync.RWMutex
-	maxJobs                int
-	semaphore              chan struct{}
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	eg                     *errgroup.Group
+	jobs      map[string]*TransferJob
+	transfers map[string]*Transfer
+	store     StoreInterface
+	mu        sync.RWMutex
+	maxJobs   int
+	semaphore chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	eg        *errgroup.Group
+	// ownsEg is true when this manager created its own errgroup (no caller
+	// provided one via EgrpKey). In that case Shutdown() is responsible for
+	// waiting on the background goroutines; when a caller owns the errgroup,
+	// the caller waits and Shutdown() only signals cancellation.
+	ownsEg bool
+	// Job-event pub/sub for push (SSE) status delivery. Guarded by its own
+	// mutex so publishing a status change never contends with job execution.
+	subMu                  sync.Mutex
+	subscribers            map[string]map[int]chan JobEvent
+	nextSubID              int
 	backgroundTasksStarted bool
+	onJobTerminal          func(*TransferJob)
+}
+
+// SetJobCompletionCallback registers a function invoked exactly once per job
+// when it reaches a terminal state (completed, failed, or cancelled). The
+// callback runs on the job's own execution goroutine, after the terminal status
+// is recorded and before the job's WaitGroup is released, and it is not holding
+// the manager lock. The transfer server uses it to eagerly persist the terminal
+// outcome to its database rather than waiting for a client status poll.
+func (tm *TransferManager) SetJobCompletionCallback(cb func(*TransferJob)) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.onJobTerminal = cb
+}
+
+// fireJobTerminal runs the registered completion callback (if any) and then
+// publishes the terminal event to job subscribers. Safe to call unconditionally
+// at job teardown; a no-op unless the job is in a terminal state.
+func (tm *TransferManager) fireJobTerminal(job *TransferJob) {
+	tm.mu.RLock()
+	cb := tm.onJobTerminal
+	ev := jobEvent(job)
+	tm.mu.RUnlock()
+	if !IsTerminalStatus(ev.Status) {
+		return
+	}
+	if cb != nil {
+		cb(job)
+	}
+	tm.publishJobEvent(ev)
 }
 
 // NewTransferManager creates a new transfer manager
 func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreInterface) *TransferManager {
 	// Extract errgroup from context
 	eg, ok := ctx.Value(pelican_config.EgrpKey).(*errgroup.Group)
+	ownsEg := false
 	if !ok || eg == nil {
-		// No errgroup provided, create one
+		// No errgroup provided, create one — and take responsibility for
+		// waiting on it at Shutdown.
 		eg, ctx = errgroup.WithContext(ctx)
 		ctx = context.WithValue(ctx, pelican_config.EgrpKey, eg)
+		ownsEg = true
 	}
 
 	// Create TransferManager's own cancellable context for internal control
@@ -106,20 +156,27 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 	}
 
 	tm := &TransferManager{
-		jobs:      make(map[string]*TransferJob),
-		transfers: make(map[string]*Transfer),
-		store:     store,
-		maxJobs:   maxConcurrentJobs,
-		semaphore: make(chan struct{}, maxConcurrentJobs),
-		ctx:       managerCtx,
-		cancel:    cancel,
-		eg:        eg,
+		jobs:        make(map[string]*TransferJob),
+		transfers:   make(map[string]*Transfer),
+		store:       store,
+		maxJobs:     maxConcurrentJobs,
+		semaphore:   make(chan struct{}, maxConcurrentJobs),
+		ctx:         managerCtx,
+		cancel:      cancel,
+		eg:          eg,
+		ownsEg:      ownsEg,
+		subscribers: make(map[string]map[int]chan JobEvent),
 	}
 
 	// Attempt to recover incomplete jobs from database
 	if store != nil {
 		tm.recoverJobs()
 		tm.startBackgroundTasks()
+	} else {
+		// With no persistent store there is no archival task to evict terminal
+		// jobs, so run a lightweight in-memory reaper to bound memory (the
+		// transfer server runs the manager this way).
+		tm.startMemoryEviction()
 	}
 
 	return tm
@@ -271,10 +328,34 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 
 // CreateJob creates a new transfer job
 func (tm *TransferManager) CreateJob(requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
+	return tm.CreateJobWithID(uuid.New().String(), requests, options)
+}
+
+// CreateJobWithID submits a job under a caller-supplied ID instead of a
+// manager-generated one. This lets a caller durably record the job (e.g. in its
+// own database) under that ID BEFORE execution begins, so a completion callback
+// or a crash-recovery scan can rely on the record already existing. Behaves
+// identically to CreateJob otherwise.
+func (tm *TransferManager) CreateJobWithID(jobID string, requests []TransferRequest, options []client.TransferOption) (*TransferJob, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	jobID := uuid.New().String()
+	// Admission control: every job parks a goroutine on the concurrency
+	// semaphore, so cap the number of non-terminal jobs to keep a client from
+	// exhausting memory/goroutines by flooding submissions. Callers surface this
+	// as HTTP 429.
+	if bound := tm.maxJobs * maxQueuedJobFactor; bound > 0 {
+		active := 0
+		for _, j := range tm.jobs {
+			if !IsTerminalStatus(j.Status) {
+				active++
+			}
+		}
+		if active >= bound {
+			return nil, ErrTooManyJobs
+		}
+	}
+
 	jobCtx, jobCancel := context.WithCancel(tm.ctx)
 
 	job := &TransferJob{
@@ -349,9 +430,42 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 	return job, nil
 }
 
+// SnapshotJobResponse builds the API response for a job, reading the mutable
+// status fields under the read lock. Callers (e.g. CreateJobHandler) may invoke
+// this immediately after CreateJob, while the asynchronous executeJob goroutine
+// is concurrently updating job/transfer status, so the read must be
+// synchronized with those writes.
+func (tm *TransferManager) SnapshotJobResponse(job *TransferJob) JobResponse {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	transfers := make([]TransferResponse, len(job.Transfers))
+	for i, transfer := range job.Transfers {
+		transfers[i] = TransferResponse{
+			TransferID:  transfer.ID,
+			Operation:   transfer.Operation,
+			Source:      transfer.Source,
+			Destination: transfer.Destination,
+			Status:      transfer.Status,
+		}
+	}
+
+	return JobResponse{
+		JobID:     job.ID,
+		Status:    job.Status,
+		CreatedAt: job.CreatedAt,
+		Transfers: transfers,
+	}
+}
+
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
 	defer job.wg.Done() // Signal job completion
+	// Fire the terminal callback (if any) on every exit path — normal
+	// completion/failure and both cancellation paths all leave the job in a
+	// terminal state. Registered after wg.Done so (LIFO) it runs first, i.e. the
+	// terminal outcome is persisted before waiters observe completion.
+	defer tm.fireJobTerminal(job)
 
 	// Acquire semaphore slot
 	select {
@@ -368,6 +482,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 	job.Status = StatusRunning
 	job.StartedAt = &now
 	tm.mu.Unlock()
+	tm.publishJobEvent(JobEvent{JobID: job.ID, Status: StatusRunning})
 
 	// Persist status update to database
 	if tm.store != nil {
@@ -393,7 +508,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 			tm.updateJobStatus(job.ID, StatusCancelled, nil)
 			return
 		default:
-			if err := tm.executeTransfer(transfer, job.Options); err != nil {
+			if err := tm.executeTransfer(job, transfer, job.Options); err != nil {
 				log.Errorf("Transfer %s failed: %v", transfer.ID, err)
 				allSucceeded = false
 				anyFailed = true
@@ -432,7 +547,7 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 }
 
 // executeTransfer executes a single transfer
-func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.TransferOption) error {
+func (tm *TransferManager) executeTransfer(job *TransferJob, transfer *Transfer, options []client.TransferOption) error {
 	now := time.Now()
 	tm.mu.Lock()
 	transfer.Status = StatusRunning
@@ -459,10 +574,20 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 		log.Debugf("Transfer %s progress: %d/%d bytes (%.1f%%)",
 			transfer.ID, downloaded, totalSize,
 			float64(downloaded)/float64(totalSize)*100)
+
+		// Broadcast the job's aggregate progress to any SSE subscribers. This is
+		// lock-free and returns immediately when nobody is watching the job.
+		tm.publishJobProgress(job)
 	}
 
-	// Prepend callback to options so it's applied first
-	options = append([]client.TransferOption{client.WithCallback(progressCallback)}, options...)
+	// Prepend callback to options so it's applied first. Downloads run on a
+	// caller's behalf here just as they do from the command line, so they
+	// refuse collections on the same terms; the option is inert for uploads
+	// and prestage.
+	options = append([]client.TransferOption{
+		client.WithCallback(progressCallback),
+		client.WithRejectCollections(!transfer.Recursive),
+	}, options...)
 
 	var err error
 	var results []client.TransferResults
@@ -659,19 +784,26 @@ func (tm *TransferManager) CancelJob(jobID string) (int, int, error) {
 		}
 	}
 
-	job.Status = StatusCancelled
-	if job.CompletedAt == nil {
-		now := time.Now()
-		job.CompletedAt = &now
-	}
-
-	// Persist job cancellation to database
-	if tm.store != nil {
-		if err := tm.store.UpdateJobStatus(job.ID, StatusCancelled); err != nil {
-			log.Warnf("Failed to update cancelled job %s in database: %v", job.ID, err)
+	// Only relabel the job as cancelled if we actually cancelled something. If
+	// every transfer had already finished by the time we acquired the lock
+	// (cancelled == 0), the job genuinely reached its own terminal state and its
+	// completion callback already persisted it — relabeling to "cancelled" here
+	// would misreport a job that completed just before the cancel landed.
+	if cancelled > 0 {
+		job.Status = StatusCancelled
+		if job.CompletedAt == nil {
+			now := time.Now()
+			job.CompletedAt = &now
 		}
-		if err := tm.store.UpdateJobTimes(job.ID, nil, job.CompletedAt); err != nil {
-			log.Warnf("Failed to update cancelled job %s time in database: %v", job.ID, err)
+
+		// Persist job cancellation to database
+		if tm.store != nil {
+			if err := tm.store.UpdateJobStatus(job.ID, StatusCancelled); err != nil {
+				log.Warnf("Failed to update cancelled job %s in database: %v", job.ID, err)
+			}
+			if err := tm.store.UpdateJobTimes(job.ID, nil, job.CompletedAt); err != nil {
+				log.Warnf("Failed to update cancelled job %s time in database: %v", job.ID, err)
+			}
 		}
 	}
 
@@ -912,6 +1044,73 @@ func (tm *TransferManager) archiveCompletedJobs() {
 	}
 }
 
+// ErrTooManyJobs is returned by CreateJob(WithID) when the number of non-terminal
+// jobs is at the admission bound; callers map it to HTTP 429.
+var ErrTooManyJobs = errors.New("too many queued transfer jobs; retry later")
+
+// maxQueuedJobFactor bounds the number of non-terminal jobs a manager admits, as
+// a multiple of the concurrency limit (maxJobs). It is a var so tests can lower
+// it.
+var maxQueuedJobFactor = 100
+
+// memoryEvictionInterval and memoryEvictionGrace control the in-memory reaper
+// used when the manager has no persistent store. The grace matches
+// archiveCompletedJobs so a just-finished job stays observable to a status poll
+// or SSE stream. They are vars so tests can shorten them.
+var (
+	memoryEvictionInterval = 1 * time.Minute
+	memoryEvictionGrace    = 5 * time.Minute
+)
+
+// startMemoryEviction runs a periodic in-memory reaper. It is used only when the
+// manager has no store (otherwise archiveCompletedJobs handles eviction).
+func (tm *TransferManager) startMemoryEviction() {
+	log.Debug("Starting in-memory job eviction task")
+	tm.eg.Go(func() error {
+		ticker := time.NewTicker(memoryEvictionInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-tm.ctx.Done():
+				log.Debug("Stopping in-memory job eviction task")
+				return nil
+			case <-ticker.C:
+				tm.evictTerminalJobsFromMemory(memoryEvictionGrace)
+			}
+		}
+	})
+}
+
+// evictTerminalJobsFromMemory drops terminal jobs (and their transfers) that
+// finished more than grace ago from the in-memory maps. Unlike
+// archiveCompletedJobs it makes no store calls, so it bounds memory on a manager
+// with no persistent store. A job with active event-stream subscribers is kept
+// so a live SSE stream still resolves its terminal status.
+func (tm *TransferManager) evictTerminalJobsFromMemory(grace time.Duration) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	evicted := 0
+	for jobID, job := range tm.jobs {
+		if !IsTerminalStatus(job.Status) {
+			continue
+		}
+		if job.subscriberCount.Load() > 0 {
+			continue
+		}
+		if job.CompletedAt == nil || time.Since(*job.CompletedAt) <= grace {
+			continue
+		}
+		for _, transfer := range job.Transfers {
+			delete(tm.transfers, transfer.ID)
+		}
+		delete(tm.jobs, jobID)
+		evicted++
+	}
+	if evicted > 0 {
+		log.Debugf("Evicted %d terminal transfer job(s) from memory", evicted)
+	}
+}
+
 // updateActiveTransferProgress persists current progress for all active transfers
 func (tm *TransferManager) updateActiveTransferProgress() {
 	if tm.store == nil {
@@ -973,8 +1172,23 @@ func (tm *TransferManager) Shutdown() error {
 	// Cancel context to signal all background goroutines to stop
 	tm.cancel()
 
-	// The errgroup will wait for all goroutines to complete
-	log.Info("Transfer manager shutdown initiated (waiting handled by errgroup)")
+	// If this manager owns its errgroup, no caller is waiting on the
+	// background goroutines, so Shutdown must block until they have all
+	// exited. Otherwise they can keep writing to the store after Shutdown
+	// returns — e.g. a recovery-restarted job racing the caller's
+	// store.Close()/temp-dir cleanup (observed as flaky
+	// "unlinkat ...: directory not empty" in TestJobRecovery). When a caller
+	// provided the errgroup, the caller is responsible for waiting.
+	if tm.ownsEg {
+		log.Info("Waiting for transfer manager background goroutines to exit")
+		if err := tm.eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warnf("Transfer manager background goroutine returned error during shutdown: %v", err)
+			return err
+		}
+		return nil
+	}
+
+	log.Info("Transfer manager shutdown initiated (waiting handled by caller's errgroup)")
 	return nil
 }
 

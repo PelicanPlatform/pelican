@@ -18,6 +18,7 @@
 package web_ui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -202,6 +203,33 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		}
 	}
 
+	// At the Registry, a create from a registered server is a mirror push from an
+	// origin/cache. Bind the record to the authenticated caller so it can't be
+	// attributed to — nor, via the ownership guard, later "owned" by — another
+	// server, and so a server can't forge a federation-authored downtime. (The
+	// mirror already sets the token subject to its own ServerID, so this does not
+	// affect legitimate pushes.)
+	if config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) &&
+		ctx.GetString("AuthMethod") == "registered-server-token" {
+		if strings.EqualFold(downtimeInput.Source, server_structs.RegistryType.String()) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "A registered Origin/Cache server may not create a Registry-authored downtime",
+			})
+			return
+		}
+		downtimeInput.ServerID = ctx.GetString("TokenSubject")
+		// Resolve the display name from the registration DB by the authenticated
+		// server ID; never trust a body-supplied name that could target another
+		// server. (The Director resolves names itself in formatServerDowntimes,
+		// but the Registry web UI displays what is stored here.)
+		serverName, err := database.GetServerNameByID(downtimeInput.ServerID)
+		if err != nil {
+			log.Warningf("Failed to resolve server name for ID %s while creating downtime: %v", downtimeInput.ServerID, err)
+		}
+		downtimeInput.ServerName = serverName
+	}
+
 	downtime := server_structs.Downtime{
 		UUID:        idStr,
 		CreatedBy:   user,
@@ -218,7 +246,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 	// Mirror to Registry when running as Origin/Cache so downtime persists centrally (Director polls Registry for all sources)
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, downtime, http.MethodPost, idStr); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), downtime, http.MethodPost, idStr); err != nil {
 		log.Warningf("Failed to sync downtime creation to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -232,6 +260,13 @@ func HandleCreateDowntime(ctx *gin.Context) {
 					Status: server_structs.RespFailed,
 					Msg:    "Failed to load existing downtime with UUID " + idStr + " during create: " + getErr.Error(),
 				})
+				return
+			}
+
+			// This branch overwrites an existing record, so a POST to an existing
+			// UUID is an update in disguise. Enforce the same per-record ownership
+			// check as the update path against the STORED record before overwriting.
+			if denyIfUnauthorizedDowntimeMutation(ctx, existing, "update") {
 				return
 			}
 
@@ -325,20 +360,12 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	// Downtimes created by a server admin are read-only for federation admins
-	dtSourceServer := server_structs.NewServerType()
-	dtSourceServer.SetString(existingDowntime.Source)
-	if config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
-		// Allow updates from Origin/Cache on their own server
-		if ctx.GetString("AuthMethod") == "registered-server-token" && ctx.GetString("TokenSubject") == existingDowntime.ServerID {
-			// permitted
-		} else {
-			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Downtimes created by a server admin are read-only for federation admins",
-			})
-			return
-		}
+	// DowntimeAuthHandler only authenticates the caller (a federation admin or
+	// some registered server); it does not check who owns this downtime record.
+	// Enforce ownership here — otherwise any registered server could modify
+	// downtimes it does not own, including Registry-authored ones.
+	if denyIfUnauthorizedDowntimeMutation(ctx, existingDowntime, "update") {
+		return
 	}
 
 	user, _, _, err := GetUserGroups(ctx)
@@ -375,7 +402,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 
 	// Mirror updates to the Registry to keep the central downtime records consistent with local changes.
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, updatedDowntime, http.MethodPut, uuid); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), updatedDowntime, http.MethodPut, uuid); err != nil {
 		log.Warningf("Failed to sync downtime update to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -387,6 +414,102 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, updatedDowntime)
+}
+
+// downtimeMutationAuthorized decides whether a caller may update or delete a
+// downtime record. It is a pure function so the authorization logic can be
+// unit-tested without standing up a federation; action ("update"/"delete") is
+// only interpolated into the denial message.
+//
+// The check only applies at the Registry (atRegistry), which is the sole
+// cross-tenant surface — on an Origin/Cache's own web UI the local admin manages
+// that server's downtimes and the mutation is mirrored up to the Registry. At
+// the Registry:
+//   - A Registry-authored downtime may be mutated only via an admin cookie.
+//   - A server-authored downtime may be mutated only by that same server, i.e. a
+//     registered-server token whose subject matches the downtime's ServerID.
+//     Federation admins are deliberately excluded: a remote server's downtime is
+//     read-only at the Registry.
+//   - Exception (adminOwnsLocally): in a co-located deployment ("federation in a
+//     box") the Registry runs in the same process as the record's owning service
+//     (or the record has no source), so the local admin is the owner and may
+//     manage it via an admin cookie. Without this, a co-located admin would be
+//     locked out of the very downtimes they created.
+func downtimeMutationAuthorized(atRegistry bool, downtimeSource, authMethod, tokenSubject, downtimeServerID, action string, adminOwnsLocally bool) (bool, string) {
+	if !atRegistry {
+		return true, ""
+	}
+	src := server_structs.NewServerType()
+	src.SetString(downtimeSource)
+	if src == server_structs.RegistryType {
+		if authMethod == "admin-cookie" {
+			return true, ""
+		}
+		return false, "Only a federation administrator may " + action + " a Registry-authored downtime"
+	}
+	// Server-authored (origin/cache) or empty source.
+	if authMethod == "registered-server-token" && tokenSubject == downtimeServerID {
+		return true, ""
+	}
+	if adminOwnsLocally && authMethod == "admin-cookie" {
+		return true, ""
+	}
+	if authMethod == "admin-cookie" {
+		return false, "This downtime is owned by its authoring server and is read-only for federation administrators; only that server may " + action + " it at the Registry"
+	}
+	return false, "You do not have permission to " + action + " this server's downtime"
+}
+
+// downtimeSourceOwnedLocally reports whether this process runs the service that
+// authored the downtime (or the source is unset), i.e. fed-in-a-box.
+func downtimeSourceOwnedLocally(downtimeSource string) bool {
+	if downtimeSource == "" {
+		return true
+	}
+	src := server_structs.NewServerType()
+	if !src.SetString(downtimeSource) {
+		// Unknown downtime source: treat as local so a co-located admin isn't locked out.
+		return true
+	}
+	// Registry-authored downtimes are never treated as locally owned: at a
+	// Registry the ValidateServerType check below would trivially pass, wrongly
+	// granting the fed-in-a-box exception. Who may mutate them is decided by the
+	// Registry branch of downtimeMutationAuthorized instead.
+	if src == server_structs.RegistryType {
+		return false
+	}
+	return config.ValidateServerType([]server_structs.ServerType{src})
+}
+
+// denyIfUnauthorizedDowntimeMutation enforces per-record ownership for a downtime
+// mutation. If the caller is not allowed it logs the denial, writes a 403, and
+// returns true; otherwise it returns false and the caller proceeds.
+func denyIfUnauthorizedDowntimeMutation(ctx *gin.Context, dt *server_structs.Downtime, action string) bool {
+	atRegistry := config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType})
+	authMethod := ctx.GetString("AuthMethod")
+	tokenSubject := ctx.GetString("TokenSubject")
+	allowed, msg := downtimeMutationAuthorized(
+		atRegistry,
+		dt.Source,
+		authMethod,
+		tokenSubject,
+		dt.ServerID,
+		action,
+		downtimeSourceOwnedLocally(dt.Source),
+	)
+	if !allowed {
+		// The Registry is the cross-tenant surface, so a denial here is exactly the
+		// event an operator needs to see (a misconfigured/hostile server reaching for
+		// another tenant's downtime, or a rejected mirror push).
+		log.Warningf("Denied downtime %s at the Registry: uuid=%q source=%q serverID=%q authMethod=%q tokenSubject=%q clientIP=%q",
+			action, dt.UUID, dt.Source, dt.ServerID, authMethod, tokenSubject, ctx.ClientIP())
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return true
+	}
+	return false
 }
 
 func HandleDeleteDowntime(ctx *gin.Context) {
@@ -407,9 +530,17 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 		return
 	}
 
+	// DowntimeAuthHandler only authenticates the caller (a federation admin or
+	// some registered server); it does not check who owns this downtime record.
+	// Enforce ownership here — otherwise any registered server could delete
+	// another server's downtime.
+	if denyIfUnauthorizedDowntimeMutation(ctx, existingDowntime, "delete") {
+		return
+	}
+
 	// Mirror deletion to the Registry so the central DB removes the downtime as well.
 	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
-	if err := mirrorDowntimeToRegistry(ctx, *existingDowntime, http.MethodDelete, uuid); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx.Request.Context(), *existingDowntime, http.MethodDelete, uuid); err != nil {
 		log.Warningf("Failed to sync downtime deletion to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
@@ -421,6 +552,54 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Downtime deleted successfully"})
+}
+
+// HandleGetFederationInfo returns the resolved federation discovery info
+// (director, registry, JWK URLs, etc.) for any authenticated user. These
+// values are otherwise only reachable via the admin-only /config endpoint,
+// which prevents non-admin users from rendering basic federation links on
+// the dashboard. The values are not sensitive: directors publish them at
+// /.well-known/pelican-configuration for anonymous client discovery.
+func HandleGetFederationInfo(ctx *gin.Context) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to resolve federation info: " + err.Error(),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, fedInfo)
+}
+
+// HandleGetServerLocalMetadata returns the most recent locally cached server metadata
+// entry (just the current name/type) for Origins/Caches.
+func HandleGetServerLocalMetadata(ctx *gin.Context) {
+	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server metadata is not available on this server type",
+		})
+		return
+	}
+
+	entry, err := database.GetServerLocalMetadata()
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No server metadata recorded yet",
+			})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to fetch server metadata: " + err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, entry)
 }
 
 // HandleGetServerLocalMetadataHistory returns the locally cached server metadata history for Origins/Caches.
@@ -449,13 +628,25 @@ func HandleGetServerLocalMetadataHistory(ctx *gin.Context) {
 // mirrorDowntimeToRegistry forwards a downtime CRUD to the Registry, if the
 // current server has an Origin or Cache service. It uses the server's issuer key to mint a short-lived
 // service token and sets Authorization: Bearer <token>.
-func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, method string, id string) error {
+// The context must NOT be the *gin.Context. Gin pools its contexts and
+// reuses them for later requests, while net/http's transport keeps a
+// reference to whatever context an outbound request was built from until
+// that connection's read loop finishes -- reaching back into a context that
+// by then belongs to a different request. Pass ctx.Request.Context(), which
+// has the lifetime of the request being served.
+func mirrorDowntimeToRegistry(ctx context.Context, dt server_structs.Downtime, method string, id string) error {
 	if id == "" {
 		return errors.New("downtime ID is required")
 	}
 
 	// Only mirror downtime to Registry when this server is an Origin or Cache
 	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		return nil
+	}
+
+	// A standalone origin has no registry to mirror to; downtime it records is
+	// purely local bookkeeping for its own operators.
+	if config.IsStandaloneOrigin() {
 		return nil
 	}
 

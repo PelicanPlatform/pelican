@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,17 +81,24 @@ type (
 	// Thread-safe and will auto-renew the token throughout the lifetime
 	// of the process.  Satisfies the TokenProvider interface.
 	tokenGenerator struct {
-		DirResp                 *server_structs.DirectorResponse
+		DirResp *server_structs.DirectorResponse
+		// tokenIsExplicit reports whether the caller named the credential to use
+		// (WithToken, or a token option on the transfer).  A caller who picked a
+		// credential does not want it silently replaced by one acquired from an
+		// issuer some object server named.
+		tokenIsExplicit         bool
 		Destination             *pelican_url.PelicanURL
 		TokenLocation           string
 		TokenName               string
 		Operation               config.TokenOperation
 		EnableAcquire           bool
+		nonInteractive          bool // if true, never fall back to interactive (device-code) acquisition
 		Token                   atomic.Pointer[tokenInfo]
 		Iterator                *tokenContentIterator
 		Sync                    *singleflight.Group
 		authFailureMu           sync.Mutex
 		consecutiveAuthFailures int
+		externalProvider        TokenProvider // optional external provider; if set, Get() delegates to it
 	}
 
 	// An object that iterates through the various possible tokens
@@ -154,6 +162,13 @@ func (tg *tokenGenerator) SetTokenName(name string) {
 	tg.TokenName = name
 }
 
+// SetExternalProvider configures an external TokenProvider that
+// the generator delegates to on every Get() call.  This bypasses
+// the built-in token acquisition logic entirely.
+func (tg *tokenGenerator) SetExternalProvider(provider TokenProvider) {
+	tg.externalProvider = provider
+}
+
 // Force the use of a specific token for the lifetime of the generator
 func (tg *tokenGenerator) SetToken(contents string) {
 	info := tokenInfo{
@@ -161,17 +176,147 @@ func (tg *tokenGenerator) SetToken(contents string) {
 		Expiry:   time.Now().Add(100 * 365 * 24 * time.Hour), // 100 years should be enough for "forever"
 	}
 	tg.Token.Store(&info)
+	// An empty value names no credential, so it does not count as the caller
+	// having chosen one; WithToken("") must not quietly disable token hints.
+	if contents != "" {
+		tg.tokenIsExplicit = true
+	}
 }
 
-// Copy the contents
-func (tg *tokenGenerator) Copy() *tokenGenerator {
-	return &tokenGenerator{
-		DirResp:       tg.DirResp,
-		Destination:   tg.Destination,
-		Operation:     tg.Operation,
-		EnableAcquire: tg.EnableAcquire,
-		Sync:          new(singleflight.Group),
+// cacheToken records a credential that an endpoint has just accepted, so the
+// rest of the job -- the sibling files sharing this generator, and the checksum
+// request that follows a completed download -- reuses it instead of acquiring
+// one of its own.  The credential is stored under its own expiry, not pinned
+// like SetToken's.
+func (tg *tokenGenerator) cacheToken(contents string) {
+	if tg == nil || contents == "" {
+		return
 	}
+	_, expiry := tokenIsValid(contents)
+	tg.Token.Store(&tokenInfo{Contents: contents, Expiry: expiry})
+}
+
+// SetDirectorResponse records the authorization metadata gathered for this
+// transfer, whether a director supplied it or the object server answered for
+// itself.  Which one it was does not decide whether a later token hint may be
+// acted on; see canApplyTokenHint.
+func (tg *tokenGenerator) SetDirectorResponse(dirResp *server_structs.DirectorResponse) {
+	tg.DirResp = dirResp
+}
+
+// canApplyTokenHint reports whether this generator may act on the token hints
+// that objectServer returned alongside a rejection.
+//
+// A hint feeds credential acquisition: honoring the wrong one lets a server
+// choose the issuer a client authenticates against, which can mean posting a
+// stored refresh token to that issuer, registering an OAuth client with it, or
+// showing the user an interactive login prompt it controls.
+//
+// A client may take credential advice only from a host its user named.  The
+// host in the pelican:// URL is such a host: it serves the discovery document,
+// which names the director, the JWKS, and the issuers, so everything the client
+// goes on to believe about the federation already rests on it, and Pelican
+// assumes throughout that the host a user typed is not compromised.  A claim it
+// makes about its own namespaces therefore asks the client to believe nothing
+// it has not already staked the federation on.
+//
+// A host the client was merely *sent* to is not named in that sense.  A cache a
+// director selected, or an HTTP redirect target, holds only trust delegated by
+// someone else, and its hints are refused however plausible they look.
+//
+// Note the distinction is who chose the host, not whether a director exists: a
+// cache the user selected themselves (Client.PreferredCaches, -c) is named as
+// squarely as the URL's host and belongs here too.  Admitting it is left to the
+// change that gives explicitly-chosen caches their own standing, since nothing
+// in standalone mode needs it.
+func (tg *tokenGenerator) canApplyTokenHint(objectServer *url.URL) bool {
+	if tg == nil || objectServer == nil || tg.Destination == nil {
+		return false
+	}
+	// A caller who named a credential, or who supplies its own, is not asking
+	// to be advised.
+	if tg.tokenIsExplicit || tg.externalProvider != nil {
+		return false
+	}
+	// The discovery endpoint is the host from the user's pelican:// URL: see
+	// pelican_url, which overwrites whatever a discovery document claims with
+	// the host actually contacted, so a document cannot nominate a third party
+	// as the trust anchor.
+	discovery, err := url.Parse(tg.Destination.FedInfo.DiscoveryEndpoint)
+	if err != nil || discovery.Host == "" {
+		return false
+	}
+	// Scheme is compared along with host: the assumption is about a host
+	// reached the way the user asked to reach it, and a plaintext endpoint is
+	// not that for an https discovery host.
+	return strings.EqualFold(discovery.Host, objectServer.Host) &&
+		strings.EqualFold(discovery.Scheme, objectServer.Scheme)
+}
+
+// withTokenHint returns a generator that acquires a credential according to the
+// token hints an object server returned, leaving the receiver untouched.
+//
+// The receiver is shared by every file in a transfer job and read concurrently
+// by the job's workers, so neither the hint -- which is specific to one attempt
+// against one endpoint -- nor the fields the receiver mutates while serving
+// those workers may be copied out of it.  In particular TokenName is assigned
+// inside getToken under the receiver's singleflight, so the derived generator
+// leaves it empty and recomputes it from Destination.
+func (tg *tokenGenerator) withTokenHint(dirResp *server_structs.DirectorResponse) *tokenGenerator {
+	return &tokenGenerator{
+		DirResp:        dirResp,
+		Destination:    tg.Destination,
+		TokenLocation:  tg.TokenLocation,
+		Operation:      tg.Operation,
+		EnableAcquire:  tg.EnableAcquire,
+		nonInteractive: tg.nonInteractive,
+		Sync:           new(singleflight.Group),
+	}
+}
+
+// tokenHintKey identifies a hint by what it asks the client to go and get, so
+// that two workers handed the same hint are recognized as wanting the same
+// credential.
+//
+// The issuers are sorted because nothing promises a server lists them in a
+// stable order, and the same set arriving two ways has to produce one key --
+// otherwise the coalescing in tokenForHint quietly stops working in exactly the
+// case it exists for, and a job acquires once per worker.
+func tokenHintKey(dirResp *server_structs.DirectorResponse) string {
+	issuers := make([]string, 0, len(dirResp.XPelTokGenHdr.Issuers))
+	for _, u := range dirResp.XPelTokGenHdr.Issuers {
+		if u != nil {
+			issuers = append(issuers, u.String())
+		}
+	}
+	sort.Strings(issuers)
+
+	var b strings.Builder
+	b.WriteString("hint:")
+	b.WriteString(dirResp.XPelNsHdr.Namespace)
+	for _, issuer := range issuers {
+		b.WriteString("|")
+		b.WriteString(issuer)
+	}
+	return b.String()
+}
+
+// tokenForHint obtains a credential matching a token hint.
+//
+// Every file in a transfer job shares the receiver, and a recursive transfer can
+// have many of them rejected at once.  Running the acquisition through the
+// job's singleflight -- under a key naming the hint rather than the empty key
+// getToken uses -- collapses that burst into one attempt, so a job does not
+// register an OAuth client, or raise an interactive login prompt, once per file.
+func (tg *tokenGenerator) tokenForHint(dirResp *server_structs.DirectorResponse) (string, error) {
+	contents, err, _ := tg.Sync.Do(tokenHintKey(dirResp), func() (interface{}, error) {
+		return tg.withTokenHint(dirResp).Get()
+	})
+	if err != nil {
+		return "", err
+	}
+	token, _ := contents.(string)
+	return token, nil
 }
 
 func (tg *tokenGenerator) recordAuthFailure(statusCode int) (bool, error) {
@@ -425,7 +570,11 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
-		opts := config.TokenGenerationOpts{Operation: tg.Operation}
+		opts := config.TokenGenerationOpts{
+			Operation:      tg.Operation,
+			DiscoveryURL:   tg.Destination.FedInfo.DiscoveryEndpoint,
+			NonInteractive: tg.nonInteractive,
+		}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
@@ -458,6 +607,11 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 //
 // Thread-safe
 func (tg *tokenGenerator) Get() (token string, err error) {
+	// If an external provider is configured, delegate entirely to it.
+	if tg.externalProvider != nil {
+		return tg.externalProvider.Get()
+	}
+
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
@@ -490,7 +644,16 @@ func (tg *tokenGenerator) Get() (token string, err error) {
 func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
 	tok, err := token.UnsafeParseClaims(jwtSerialized)
 	if err != nil {
-		log.Warningln("Failed to parse token:", err)
+		// token.UnsafeParseClaims disables claim validation (jwt.WithValidate(false)),
+		// so in practice err here is never jwt.ErrTokenExpired -- only a structurally
+		// malformed token lands in this branch. The expired-token check is kept anyway
+		// as a defensive guard in case UnsafeParseClaims's validation behavior ever
+		// changes; today it's unreachable, so this always logs at Warning.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Failed to parse token:", err)
+		} else {
+			log.Warningln("Failed to parse token:", err)
+		}
 		return false
 	}
 
@@ -704,7 +867,17 @@ func isValidSciScope(authz string, operation config.TokenOperation) bool {
 func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 	tok, err := token.UnsafeParseClaims(jwtSerialized)
 	if err != nil {
-		log.Warningln("Failed to parse token:", err)
+		// token.UnsafeParseClaims disables claim validation (jwt.WithValidate(false)),
+		// so err here is never jwt.ErrTokenExpired in practice -- only a structurally
+		// malformed token reaches this branch (the real exp check happens below, via
+		// jwt.Validate). Kept as a defensive guard in case UnsafeParseClaims's
+		// validation behavior ever changes; today it's unreachable, so this always
+		// logs at Warning.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Failed to parse token:", err) // Only convert to debug message if it's indeed an expired token
+		} else {
+			log.Warningln("Failed to parse token:", err)
+		}
 		return
 	}
 
@@ -713,7 +886,13 @@ func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 	// that is just about to expire
 	// and might already be rejected by the server.
 	if err := jwt.Validate(tok); err != nil {
-		log.Warningln("Token is invalid:", err)
+		// Only report expired token in debug mode. It's very common.
+		// Report it every time as a warning message may scare users.
+		if errors.Is(err, jwt.ErrTokenExpired()) {
+			log.Debugln("Token is invalid:", err)
+		} else {
+			log.Warningln("Token is invalid:", err)
+		}
 		return false, tok.Expiration()
 	}
 
@@ -744,12 +923,13 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, errors.Errorf("issuer %s does not support dynamic client registration", issuerUrl)
 	}
 
+	scopes := []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"}
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		ResponseTypes:           []string{"code"},
 		ClientName:              "OSDF Command Line Client",
-		Scopes:                  []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
+		Scopes:                  scopes,
 	}}
 
 	resp, err := drcp.Register()
@@ -757,17 +937,69 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix:                  dirResp.XPelNsHdr.Namespace,
-		ClientID:                resp.ClientID,
-		ClientSecret:            resp.ClientSecret,
-		RegistrationAccessToken: resp.RegistrationAccessToken,
-		RegistrationClientURI:   resp.RegistrationClientURI,
+		Prefix: dirResp.XPelNsHdr.Namespace,
+		ClientRegistration: config.ClientRegistration{
+			ClientID:                resp.ClientID,
+			ClientSecret:            resp.ClientSecret,
+			ClientScopes:            scopes,
+			RegistrationAccessToken: resp.RegistrationAccessToken,
+			RegistrationClientURI:   resp.RegistrationClientURI,
+		},
 	}
 	return &newEntry, nil
 }
 
 // Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
+// refreshTokenEntry refreshes a single stored token in place using its prefix's
+// OAuth2 client registration and the given issuer's token endpoint. On success
+// it updates the entry's access token, expiration, and (when the issuer rotates
+// it) refresh token. It does NOT persist the change to disk. The OAuth2
+// refresh-token grant is non-interactive.
+func refreshTokenEntry(prefixEntry *config.PrefixEntry, tok *config.TokenEntry, issuer string) error {
+	if tok.RefreshToken == "" {
+		return errors.New("token has no refresh token")
+	}
+	issuerInfo, err := config.GetIssuerMetadata(issuer)
+	if err != nil {
+		return err
+	}
+	upstreamConfig := oauth2_upstream.Config{
+		ClientID:     prefixEntry.ClientID,
+		ClientSecret: prefixEntry.ClientSecret,
+		Endpoint: oauth2_upstream.Endpoint{
+			AuthURL:  issuerInfo.AuthURL,
+			TokenURL: issuerInfo.TokenURL,
+		},
+	}
+	upstreamToken := oauth2_upstream.Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		Expiry:       time.Unix(0, 0),
+	}
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, httpClient)
+	newToken, err := upstreamConfig.TokenSource(ctx, &upstreamToken).Token()
+	if err != nil {
+		return err
+	}
+	tok.AccessToken = newToken.AccessToken
+	// Some issuers omit expires_in on a refresh grant; golang.org/x/oauth2 then
+	// leaves Expiry as the zero time.Time, whose Unix() is a large negative
+	// number. The refresh loop reads that as "already expired" and would
+	// re-refresh this credential every cycle, hammering the issuer. Fall back to
+	// a conservative default lifetime so we refresh on a sane cadence instead.
+	if newToken.Expiry.IsZero() {
+		tok.Expiration = time.Now().Add(time.Hour).Unix()
+	} else {
+		tok.Expiration = newToken.Expiry.Unix()
+	}
+	if len(newToken.RefreshToken) != 0 {
+		tok.RefreshToken = newToken.RefreshToken
+	}
+	return nil
+}
+
 func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
 
 	log.Debugln("Acquiring a token from configuration and OAuth2")
@@ -798,13 +1030,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		return "", err
 	}
 
-	prefixIdx := -1
-	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == nsPrefix {
-			prefixIdx = idx
-			break
-		}
-	}
+	fc, prefixIdx := osdfConfig.FindOauthClient(opts.DiscoveryURL, nsPrefix)
 	var prefixEntry *config.PrefixEntry
 	newEntry := false
 	tryTokenGen := false
@@ -821,11 +1047,11 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", err
 		}
-		osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, *prefixEntry)
-		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+		fc.OauthClient = append(fc.OauthClient, *prefixEntry)
+		prefixEntry = &fc.OauthClient[len(fc.OauthClient)-1]
 		newEntry = true
 	} else {
-		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
+		prefixEntry = &fc.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
 
 			// Similarly, here, generate a token before registering a new client.
@@ -840,12 +1066,12 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				return "", err
 			}
-			osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+			fc.OauthClient[prefixIdx] = *prefixEntry
 			newEntry = true
 		}
 	}
 	if newEntry {
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 	}
@@ -871,37 +1097,15 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 
 	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
-		upstreamToken := oauth2_upstream.Token{
-			AccessToken:  tokenToRefresh.AccessToken,
-			RefreshToken: tokenToRefresh.RefreshToken,
-			Expiry:       time.Unix(0, 0),
-		}
-		issuerInfo, err := config.GetIssuerMetadata(issuer)
-		if err == nil {
-			upstreamConfig := oauth2_upstream.Config{
-				ClientID:     prefixEntry.ClientID,
-				ClientSecret: prefixEntry.ClientSecret,
-				Endpoint: oauth2_upstream.Endpoint{
-					AuthURL:  issuerInfo.AuthURL,
-					TokenURL: issuerInfo.TokenURL,
-				}}
-			client := &http.Client{Transport: config.GetTransport()}
-			ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, client)
-			source := upstreamConfig.TokenSource(ctx, &upstreamToken)
-			newToken, err := source.Token()
-			if err != nil {
-				log.Warningln("Failed to renew an expired token:", err)
-			} else {
-				tokenToRefresh.AccessToken = newToken.AccessToken
-				tokenToRefresh.Expiration = newToken.Expiry.Unix()
-				if len(newToken.RefreshToken) != 0 {
-					tokenToRefresh.RefreshToken = newToken.RefreshToken
-				}
-				if err = config.SaveConfigContents(&osdfConfig); err != nil {
-					log.Warningln("Failed to save new token to configuration file:", err)
-				}
-				return newToken.AccessToken, nil
+		if err := refreshTokenEntry(prefixEntry, tokenToRefresh, issuer); err != nil {
+			// Only report expired token in debug mode. It's very common.
+			// Report it every time as a warning message may scare users.
+			log.Debugln("Failed to renew an expired token:", err)
+		} else {
+			if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
+				log.Warningln("Failed to save new token to configuration file:", err)
 			}
+			return tokenToRefresh.AccessToken, nil
 		}
 	}
 
@@ -914,6 +1118,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 
+	// The only remaining option requires the interactive OAuth2 device-code
+	// flow. Callers without a controlling terminal (e.g. the client agent)
+	// set NonInteractive so we fail with an actionable error instead of
+	// blocking on a prompt the user will never see.
+	if opts.NonInteractive {
+		return "", error_codes.NewAuthorizationError(fmt.Errorf("no usable token in the wallet for %s and interactive acquisition is disabled; acquire credentials first (e.g. via the CLI)", destination.Path))
+	}
+
 	token, err := oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts)
 	if errors.Is(err, oauth2.ErrUnknownClient) {
 		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
@@ -923,8 +1135,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
-		osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
-		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+		// prefixIdx is -1 when this prefix was freshly registered earlier in
+		// this call (it was appended, not found at an index); only update the
+		// in-memory slice in place when we have a real index. UpsertPrefixEntry
+		// persists by Prefix match in either case.
+		if prefixIdx >= 0 {
+			fc.OauthClient[prefixIdx] = *prefixEntry
+		}
+		if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
@@ -950,7 +1168,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	Tokens := &prefixEntry.Tokens
 	*Tokens = append(*Tokens, *token)
 
-	if err = config.SaveConfigContents(&osdfConfig); err != nil {
+	if err = config.UpsertPrefixEntry(opts.DiscoveryURL, prefixEntry); err != nil {
 		log.Warningln("Failed to save new token to configuration file:", err)
 	}
 

@@ -49,6 +49,54 @@ func init() {
 	allowedPrefixesForCachesLastSetTimestamp.Store(0)
 }
 
+// allowedPrefixesInitWait bounds how long a cache advertisement will be held
+// waiting for the director's allowed-prefixes data to arrive.
+//
+// This is not the bound that usually governs. A Pelican cache advertises with
+// a client that sets no timeout of its own, so its transport does:
+// Transport.ResponseHeaderTimeout, 10s by default. That client gives up first,
+// the request context is cancelled, and the wait ends there -- so what
+// actually decides whether an ad survives is the advertiser's timeout, not
+// this constant. It sits just above that default to bound a caller willing to
+// wait longer, and to keep a goroutine from being parked indefinitely by one
+// that never hangs up.
+//
+// Widening the window is worthwhile even so: the registry fetch behind this
+// retries every second, so most of what used to be refused inside 3s is now
+// accepted. A registry that takes longer than the advertiser's timeout to come
+// up will still cost that cache an advertisement cycle, because nothing on the
+// advertising side retries -- see doAdvertise in launcher_utils/advertise.go.
+const allowedPrefixesInitWait = 15 * time.Second
+
+// waitForAllowedPrefixesForCaches blocks until the director has fetched the
+// allowed prefixes for caches at least once, reporting whether it did.
+//
+// It returns immediately once the data is present, and gives up when the
+// caller's context is cancelled or allowedPrefixesInitWait elapses.
+func waitForAllowedPrefixesForCaches(ctx context.Context) bool {
+	if allowedPrefixesForCachesLastSetTimestamp.Load() != 0 {
+		return true
+	}
+
+	deadline := time.NewTimer(allowedPrefixesInitWait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if allowedPrefixesForCachesLastSetTimestamp.Load() != 0 {
+				return true
+			}
+		case <-deadline.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 // convertListToSet converts a map of string to list of strings into a map of string to set of strings.
 func convertMapOfListToMapOfSet(input map[string][]string) map[string]map[string]struct{} {
 	result := make(map[string]map[string]struct{})

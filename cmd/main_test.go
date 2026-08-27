@@ -59,7 +59,16 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, ".")
+		// On Windows CI, build tags are restricted to "client" so we build
+		// the child binary with matching tags.  A client-only build covers
+		// all of the alias dispatch paths tested here (stashcp, *_plugin)
+		// and completes much faster than a full client+server build, keeping
+		// the test well within the 15-minute CI timeout.
+		buildTags := "client,server"
+		if runtime.GOOS == "windows" {
+			buildTags = "client"
+		}
+		buildCmd := exec.Command("go", "build", "-tags", buildTags, "-buildvcs=false", "-o", testPelicanBinary, ".")
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
 			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
@@ -296,9 +305,24 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Read and capture stdout and stderr.
-		gotBytes, _ := io.ReadAll(stdout)
-		errBytes, _ := io.ReadAll(stderr)
+		// Read stdout and stderr CONCURRENTLY. Reading one stream fully before
+		// the other can deadlock: if the child fills the unread stream's pipe
+		// buffer it blocks on write, while we block reading the first stream
+		// that never reaches EOF. The stashcp/plugin aliases emit help text and
+		// init logs to stderr, which on Windows (smaller pipe buffers) easily
+		// exceeds the buffer and previously hung the test until the CI timeout.
+		var gotBytes, errBytes []byte
+		var readWg sync.WaitGroup
+		readWg.Add(2)
+		go func() {
+			defer readWg.Done()
+			gotBytes, _ = io.ReadAll(stdout)
+		}()
+		go func() {
+			defer readWg.Done()
+			errBytes, _ = io.ReadAll(stderr)
+		}()
+		readWg.Wait()
 
 		// Wait for the command to finish.
 		err := cmd.Wait()

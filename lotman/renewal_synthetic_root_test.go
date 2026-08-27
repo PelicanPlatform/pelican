@@ -39,7 +39,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	defer server.Close()
 
 	// Set up server config like a real cache.
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 
@@ -54,7 +54,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 
 	// User's exact cache config.
 	require.NoError(t, param.Cache_HighWaterMark.Set("5g"))
-	require.NoError(t, param.Cache_LowWatermark.Set("4g"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("4g"))
 	require.NoError(t, param.Cache_FilesMaxSize.Set("3g"))
 
 	// Default lotman lifetimes/horizon (matches production).
@@ -68,7 +68,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	_ = config.InitServer(context.Background(), server_structs.CacheType)
 
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/my-prefix", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 		{Path: "/my-prefix2", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
@@ -104,7 +104,7 @@ func TestInitPlusRenewalUnderFilesMaxSize(t *testing.T) {
 	// startup. This is where the production cache reports
 	// "Hierarchy violation: peak concurrent dedicated_GB across children
 	// of parent lot 'root' is 6.0, which exceeds 3.0".
-	getAds := func() []server_structs.NamespaceAdV2 { return ads }
+	getAds := func() []server_structs.NamespaceAd { return ads }
 	runRenewalTick(getAds, time.Hour)
 
 	allAfterTick, err := ListAllLots()

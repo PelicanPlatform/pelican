@@ -22,6 +22,7 @@ import { PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
 import SubNavigation from '@/app/settings/components/SubNavigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { SettingsShellScopes } from '@/app/navigation';
 
 export const metadata = {
   title: {
@@ -43,6 +44,14 @@ export default function RootLayout({
           redirect
           trustThenValidate
           allowedRoles={['admin']}
+          // Admits scope-only holders (server.user_admin for the Users
+          // sub-page, pelican.log_read for the Logs sub-page). Per-page
+          // gates below tighten back to system-admin where appropriate
+          // (AUP editor, API tokens, etc.); SubNavigation hides items
+          // the caller can't reach. The scope list is shared with the
+          // subsystem sidebars' "Settings" entries so both surfaces
+          // admit the same set.
+          anyScopes={SettingsShellScopes}
           boxProps={{ width: '100%' }}
         >
           <PaddedContent>

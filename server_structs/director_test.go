@@ -21,7 +21,6 @@ package server_structs
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
@@ -29,132 +28,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestConversion(t *testing.T) {
-
-	credUrl, err := url.Parse("https://origin-url.org")
-	require.NoError(t, err, "error parsing test issuer url")
-
-	issUrl1, err := url.Parse("https://issuer1.org")
-	require.NoError(t, err, "error parsing test issuer url")
-
-	issUrl2, err := url.Parse("https://issuer2.org")
-	require.NoError(t, err, "error parsing test issuer url")
-
-	v2Ads := []NamespaceAdV2{{
-		Caps: Capabilities{
-			PublicReads: false,
-			Reads:       true,
-			Writes:      true,
-			DirectReads: false,
-			Listings:    true,
-		},
-		Path: "/foo/bar",
-		Generation: []TokenGen{{
-			Strategy:         "OAuth2",
-			MaxScopeDepth:    3,
-			CredentialIssuer: *credUrl,
-		}},
-		Issuer: []TokenIssuer{
-			{
-				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
-				IssuerUrl:       *issUrl1,
-				RestrictedPaths: []string{},
-			},
-			{
-				BasePaths:       []string{"/foo/bar/baz"},
-				IssuerUrl:       *issUrl2,
-				RestrictedPaths: []string{},
-			}},
-	},
-		{
-			Caps: Capabilities{
-				PublicReads: true,
-				Reads:       true,
-				Writes:      true,
-				DirectReads: false,
-				Listings:    true,
-			},
-			Path: "/baz/bar",
-		},
-	}
-
-	v1Ads := []NamespaceAdV1{
-		{
-			RequireToken:  true,
-			Path:          "/foo/bar",
-			Issuer:        *issUrl1,
-			MaxScopeDepth: 3,
-			Strategy:      "OAuth2",
-			BasePath:      "/foo/bar/baz",
-		},
-		{
-			RequireToken:  true,
-			Path:          "/foo/bar",
-			Issuer:        *issUrl1,
-			MaxScopeDepth: 3,
-			Strategy:      "OAuth2",
-			BasePath:      "/foo/bar/wazzit",
-		},
-		{
-			RequireToken:  true,
-			Path:          "/foo/bar",
-			Issuer:        *issUrl2,
-			MaxScopeDepth: 3,
-			Strategy:      "OAuth2",
-			BasePath:      "/foo/bar/baz",
-		},
-		{
-			RequireToken: false,
-			Path:         "/baz/bar",
-		},
-	}
-
-	v1Conv := ConvertNamespaceAdsV2ToV1(v2Ads)
-
-	require.Equal(t, v1Ads, v1Conv)
-
-	oAdV1 := OriginAdvertiseV1{
-		Name:        "OriginTest",
-		URL:         "https://origin-url.org",
-		WebURL:      "https://WebUrl.org",
-		Namespaces:  v1Ads,
-		Writes:      true,
-		DirectReads: false,
-	}
-
-	oAdV2 := OriginAdvertiseV2{
-		DataURL:    "https://origin-url.org",
-		WebURL:     "https://WebUrl.org",
-		Namespaces: v2Ads,
-		Caps: Capabilities{
-			PublicReads: true,
-			Writes:      true,
-			DirectReads: false,
-			Listings:    true,
-			Reads:       true,
-		},
-		Issuer: []TokenIssuer{
-			{
-				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
-				IssuerUrl:       *issUrl1,
-				RestrictedPaths: []string{},
-			},
-			{
-				BasePaths:       []string{"/foo/bar/baz"},
-				IssuerUrl:       *issUrl2,
-				RestrictedPaths: []string{},
-			},
-		},
-	}
-	oAdV2.Initialize("OriginTest")
-
-	OAdConv := ConvertOriginAdV1ToV2(oAdV1)
-	oAdV2.GenerationID = OAdConv.GenerationID
-	oAdV2.Expiration = OAdConv.Expiration
-
-	require.Equal(t, oAdV2, OAdConv)
-}
 
 func TestValidTokenStrategy(t *testing.T) {
 	t.Run("ValidOAuth2Strategy", func(t *testing.T) {
@@ -175,11 +48,8 @@ func TestValidTokenStrategy(t *testing.T) {
 func TestXPelNsParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Namespace": {"namespace=foo, require-token=true, collections-url=https://collections-url.org"},
-			},
-		})
+		h := http.Header{"X-Pelican-Namespace": {"namespace=foo, require-token=true, collections-url=https://collections-url.org"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, "foo", xPelNs.Namespace)
 		assert.True(t, xPelNs.RequireToken)
@@ -188,11 +58,8 @@ func TestXPelNsParsing(t *testing.T) {
 
 	t.Run("ParseMissingCollectionsUrl", func(t *testing.T) { // Signifies origins that don't enable listings
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Namespace": {"namespace=foo, require-token=true"},
-			},
-		})
+		h := http.Header{"X-Pelican-Namespace": {"namespace=foo, require-token=true"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, "foo", xPelNs.Namespace)
 		assert.True(t, xPelNs.RequireToken)
@@ -201,24 +68,18 @@ func TestXPelNsParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelNs := XPelNs{}
-		err := xPelNs.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"bar"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"bar"}}
+		err := xPelNs.ParseRawHeader(&h)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelNs.GetName()))
+		assert.Contains(t, err.Error(), fmt.Sprintf("o %s header found.", xPelNs.GetName()))
 	})
 }
 
 func TestXPelAuthParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelAuth := XPelAuth{}
-		err := xPelAuth.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Authorization": {"issuer=https://issuer1.com, issuer=https://issuer2.com"},
-			},
-		})
+		h := http.Header{"X-Pelican-Authorization": {"issuer=https://issuer1.com, issuer=https://issuer2.com"}}
+		err := xPelAuth.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Len(t, xPelAuth.Issuers, 2)
 		assert.Equal(t, "https://issuer1.com", xPelAuth.Issuers[0].String())
@@ -227,11 +88,8 @@ func TestXPelAuthParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelAuth := XPelAuth{}
-		err := xPelAuth.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"foo"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"foo"}}
+		err := xPelAuth.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(xPelAuth.Issuers))
 	})
@@ -240,11 +98,8 @@ func TestXPelAuthParsing(t *testing.T) {
 func TestXPelTokGenParsing(t *testing.T) {
 	t.Run("ParseValidRawResponse", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com, base-path=/foo/bar"},
-			},
-		})
+		h := http.Header{"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com, base-path=/foo/bar"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
 		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
@@ -257,11 +112,8 @@ func TestXPelTokGenParsing(t *testing.T) {
 
 	t.Run("ParseMissingBasePath", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com"},
-			},
-		})
+		h := http.Header{"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
 		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
@@ -273,16 +125,66 @@ func TestXPelTokGenParsing(t *testing.T) {
 
 	t.Run("ParseMissingHeader", func(t *testing.T) {
 		xPelTokGen := XPelTokGen{}
-		err := xPelTokGen.ParseRawResponse(&http.Response{
-			Header: map[string][]string{
-				"X-Pelican-foo": {"foo"},
-			},
-		})
+		h := http.Header{"X-Pelican-foo": {"foo"}}
+		err := xPelTokGen.ParseRawHeader(&h)
 		assert.NoError(t, err)
 		assert.Equal(t, StrategyType(""), xPelTokGen.Strategy)
 		assert.Equal(t, uint(0), xPelTokGen.MaxScopeDepth)
 		assert.Len(t, xPelTokGen.Issuers, 0)
 		assert.Len(t, xPelTokGen.BasePaths, 0)
+	})
+}
+
+func TestXPelCoordinateParsing(t *testing.T) {
+	t.Run("ParseValidCoordinate", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=43.0739,long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.NoError(t, err)
+		assert.InDelta(t, 43.0739, xPelCoord.Coordinate.Lat, 1e-9)
+		assert.InDelta(t, -89.3848, xPelCoord.Coordinate.Long, 1e-9)
+		assert.Equal(t, CoordinateSource(CoordinateSourceDeclared), xPelCoord.Coordinate.Source)
+		assert.Equal(t, uint16(0), xPelCoord.Coordinate.AccuracyRadius)
+	})
+
+	t.Run("ParseMissingHeader", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-foo": {"bar"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("no %s header found.", xPelCoord.GetName()))
+	})
+
+	t.Run("ParseMissingLat", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "latitude")
+	})
+
+	t.Run("ParseMissingLong", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=43.0739"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "longitude")
+	})
+
+	t.Run("ParseInvalidLat", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=not-a-number,long=-89.3848"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "latitude")
+	})
+
+	t.Run("ParseOutOfBoundsCoordinates", func(t *testing.T) {
+		xPelCoord := XPelCoordinate{}
+		h := http.Header{"X-Pelican-Coordinate": {"lat=91,long=0"}}
+		err := xPelCoord.ParseRawHeader(&h)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid coordinates")
 	})
 }
 
@@ -299,5 +201,133 @@ func TestServerBaseAdAfter(t *testing.T) {
 		ad2 := ServerBaseAd{}
 
 		assert.Equal(t, ad1.After(ad2), AdAfterUnknown)
+	})
+}
+
+func TestLongestNSMatch(t *testing.T) {
+	nsAd := func(path string) NamespaceAd { return NamespaceAd{Path: path} }
+
+	testCases := []struct {
+		name     string
+		reqPath  string
+		nsAds    []NamespaceAd
+		expected string // the Path of the ad expected back, or "" for no match
+	}{
+		{
+			name:     "prefers the deeper of two nested exports",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "ad order does not decide the winner",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar"), nsAd("/foo")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "falls back to the shallower export when the deeper one does not cover the path",
+			reqPath:  "/foo/other/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo",
+		},
+		{
+			name:     "matches a request path equal to the export prefix",
+			reqPath:  "/foo/bar",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "matches a request path equal to the export prefix with a trailing slash",
+			reqPath:  "/foo/bar/",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/bar")},
+			expected: "/foo/bar",
+		},
+		{
+			name:     "matches an export prefix stored with a trailing slash",
+			reqPath:  "/foo/bar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar/")},
+			expected: "/foo/bar/",
+		},
+		{
+			// Path boundaries, not raw string prefixes: /foobar is a sibling of
+			// /foo, not a child of it.
+			name:     "does not match a sibling whose name merely starts the same",
+			reqPath:  "/foobar/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo")},
+			expected: "",
+		},
+		{
+			name:     "a root export covers everything",
+			reqPath:  "/anything/at/all",
+			nsAds:    []NamespaceAd{nsAd("/")},
+			expected: "/",
+		},
+		{
+			name:     "a deeper export still beats a root export",
+			reqPath:  "/foo/bar",
+			nsAds:    []NamespaceAd{nsAd("/"), nsAd("/foo")},
+			expected: "/foo",
+		},
+		{
+			name:     "returns nil when nothing matches",
+			reqPath:  "/nowhere/object",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/bar")},
+			expected: "",
+		},
+		{
+			name:     "returns nil when there are no ads at all",
+			reqPath:  "/foo/bar",
+			nsAds:    nil,
+			expected: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LongestNSMatch(tc.reqPath, tc.nsAds)
+			if tc.expected == "" {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.expected, got.Path)
+		})
+	}
+}
+
+func TestSetXNamespaceHeaderWithCollections(t *testing.T) {
+	const collUrl = "https://origin.example.com:8443"
+
+	t.Run("AdvertisesCollectionsWhenListingsAllowed", func(t *testing.T) {
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{Reads: true, Listings: true},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=true, collections-url="+collUrl,
+			hdr.Get(XPelNs{}.GetName()))
+	})
+
+	t.Run("SuppressesCollectionsWhenListingsDenied", func(t *testing.T) {
+		// A collections-url the namespace will not answer PROPFIND for would
+		// send the client to a guaranteed error, so it is left out entirely.
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{Reads: true, Listings: false},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=true", hdr.Get(XPelNs{}.GetName()))
+		assert.NotContains(t, hdr.Get(XPelNs{}.GetName()), "collections-url")
+	})
+
+	t.Run("PublicReadsClearsRequireToken", func(t *testing.T) {
+		hdr := http.Header{}
+		SetXNamespaceHeaderWithCollections(hdr, collUrl, NamespaceAd{
+			Path: "/foo",
+			Caps: Capabilities{PublicReads: true, Reads: true, Listings: true},
+		})
+		assert.Equal(t, "namespace=/foo, require-token=false, collections-url="+collUrl,
+			hdr.Get(XPelNs{}.GetName()))
 	})
 }

@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -91,6 +92,16 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 		return nil, err
 	}
 
+	// The persistent cache has no XRootD process to launch the monitoring
+	// shoveler (which the XRootD-based cache does via xrootd config), so start
+	// it here when enabled.  This lets the in-process XRootD-style monitoring
+	// packets emitted on each served request reach the configured collectors.
+	if param.Shoveler_Enable.GetBool() {
+		if _, err := metrics.LaunchShoveler(ctx, egrp); err != nil {
+			return nil, errors.Wrap(err, "failed to launch monitoring shoveler for persistent cache")
+		}
+	}
+
 	cache.RegisterCacheAPI(engine, ctx, egrp)
 
 	cacheServer := &cache.CacheServer{}
@@ -114,7 +125,7 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Site-local caches aren't part of the federation, so they don't expect
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
-		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchDirectorTestFileCleanup(ctx, egrp)
 		// Federation token manager is started below, after the PersistentCache
 		// is created, so the token can be delivered in-memory via pc.SetFedToken.
 	}
@@ -287,7 +298,7 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 	// Site-local caches aren't part of the federation, so they don't expect
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
-		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchDirectorTestFileCleanup(ctx, egrp)
 		cache.LaunchFedTokManager(ctx, egrp, cacheServer, func(f *os.File) error {
 			// In drop-privileges mode, the token file is chown'ed to the xrootd user
 			// and group by xrdhttp-pelican plugin by passing command "9" to the plugin.
@@ -332,7 +343,20 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 				host = param.Server_Hostname.GetString()
 			}
 			currentPort := cacheUrl.Port()
-			if currentPort == "" || currentPort == "0" {
+			// Cache.Url's generated default is "https://${Server.Hostname}:${Cache.Port}"
+			// resolved at SetDefault time, so an operator who later sets Cache.Port=0
+			// (ephemeral) still ends up with a default Cache.Url that bakes in the
+			// original Cache.Port default (e.g. :8442). Trust SourceTracker: if the
+			// user didn't set Cache.Url, we own the port and should always rewrite it
+			// to match what XRootD actually bound to.
+			rewrite := currentPort == "" || currentPort == "0"
+			if !rewrite {
+				src, hasSrc := config.GetSourceTracker().Get(strings.ToLower(param.Cache_Url.GetName()))
+				if !hasSrc || src.Type == config.SourceDefault {
+					rewrite = true
+				}
+			}
+			if rewrite {
 				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
 				if err := param.Cache_Url.Set(cacheUrl.String()); err != nil {
 					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())

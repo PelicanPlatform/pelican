@@ -13,7 +13,9 @@ The 'config' command allows users to view, search, and see the documentation for
 ### Options
 
 ```
-  -h, --help   help for config
+  -h, --help             help for config
+  -s, --service string   Load config as if running the given service. Valid values: cache, origin, director, registry. Mutually exclusive with --config.
+      --with-discovery   Enable federation discovery to resolve Federation.DirectorUrl, Federation.RegistryUrl, etc. Without this flag, no network calls are made.
 ```
 
 ### Options inherited from parent commands

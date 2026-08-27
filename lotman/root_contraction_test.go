@@ -63,7 +63,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	// First boot: large cache + one namespace ad so a descendant lot is
 	// minted alongside root/default.
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	ads := []server_structs.NamespaceAdV2{
+	ads := []server_structs.NamespaceAd{
 		{Path: "/foo", Issuer: []server_structs.TokenIssuer{{IssuerUrl: *issuerURL}}},
 	}
 
@@ -93,7 +93,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	// existing database -- this is the exact scenario the user hit.
 	require.NoError(t, param.Cache_FilesMaxSize.Set("5m"))
 	require.NoError(t, param.Cache_HighWaterMark.Set("5m"))
-	require.NoError(t, param.Cache_LowWatermark.Set("4m"))
+	require.NoError(t, param.Cache_LowWaterMark.Set("4m"))
 
 	// Second boot against the SAME LotHome (do not run setupLotmanFromConf
 	// again -- that would generate a new tmp dir). Instead, drive
@@ -133,7 +133,7 @@ func TestInitSurvivesRootContraction(t *testing.T) {
 	require.NoError(t, param.Lotman_MaxLotLifetime.Set(10*time.Minute))
 	require.NoError(t, param.Lotman_MinFillerWidth.Set(0))
 
-	runRenewalTick(func() []server_structs.NamespaceAdV2 { return ads }, time.Second)
+	runRenewalTick(func() []server_structs.NamespaceAd { return ads }, time.Second)
 }
 
 func filterSentinels(names []string) []string {

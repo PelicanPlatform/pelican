@@ -34,13 +34,17 @@ import (
 )
 
 func checkConfigFileReadable(fileName string, errMsg string) error {
-	if _, err := os.Open(fileName); errors.Is(err, os.ErrNotExist) {
+	f, err := os.Open(fileName)
+	if errors.Is(err, os.ErrNotExist) {
 		return errors.New(fmt.Sprintf("%v: the specified path in the configuration (%v) "+
 			"does not exist", errMsg, fileName))
 	} else if err != nil {
 		return errors.New(fmt.Sprintf("%v; an error occurred when reading %v: %v", errMsg,
 			fileName, err.Error()))
 	}
+	// The open was only a readability probe; close it so we don't leak an FD
+	// on every server start (this runs per required config/cert file).
+	f.Close()
 	return nil
 }
 

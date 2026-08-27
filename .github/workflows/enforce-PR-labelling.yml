@@ -6,12 +6,18 @@ on:
     types: [opened, edited, labeled, unlabeled, synchronize]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # the job queries closingIssuesReferences
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Validate PR has labels
         id: check_labels

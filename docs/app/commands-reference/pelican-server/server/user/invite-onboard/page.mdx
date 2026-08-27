@@ -1,0 +1,44 @@
+---
+title: pelican server server user invite onboard
+---
+
+## pelican-server server user invite-onboard
+
+Generate a no-password onboarding invite (OIDC-only)
+
+### Synopsis
+
+Mint a single-use onboarding invite link. Hand the resulting URL
+to the user; when they follow it AFTER logging in via OIDC, an account is
+created for them and bound to the OIDC identity they used.
+
+Use this when you do NOT know the user's OIDC subject claim in advance.
+If you DO know it, prefer 'pelican server user create --sub --issuer'
+so the account is pre-bound and the user can be added to groups before
+their first login.
+
+```
+pelican-server server user invite-onboard [flags]
+```
+
+### Options
+
+```
+      --expires-in string   Optional expiration duration (e.g. '24h'); defaults to Server.GroupInviteLinkExpiration
+  -h, --help                help for invite-onboard
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server server user](/commands-reference/pelican-server/server/user/)	 - Manage users on a Pelican server

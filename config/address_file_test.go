@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -43,7 +43,7 @@ func TestWriteAddressFile(t *testing.T) {
 	}
 
 	// Set up ConfigDir
-	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.ConfigBase.Set(tmpDir))
 	setRuntimeDir(t)
 
 	t.Run("WriteAddressFileWithAllModules", func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestWriteAddressFile(t *testing.T) {
 	})
 
 	t.Run("WriteAddressFileOriginOnly", func(t *testing.T) {
-		require.NoError(t, param.ConfigDir.Set(tmpDir))
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://origin.example.com:9443"))
 		require.NoError(t, param.Origin_Url.Set("https://origin.example.com:9444"))
@@ -102,7 +102,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("WriteAddressFileDirectorOnly", func(t *testing.T) {
 		// Reset and set up new test parameters
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://director.example.com:8443"))
 
@@ -140,7 +140,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("AtomicWrite", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://atomic.example.com:8443"))
 
@@ -164,7 +164,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("ParseableFormat", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://parseable.example.com:8443"))
 		require.NoError(t, param.Origin_Url.Set("https://parseable.example.com:8444"))
@@ -200,7 +200,7 @@ func TestWriteAddressFile(t *testing.T) {
 	t.Run("ReadAddressFile", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 		setRuntimeDir(t)
 		require.NoError(t, param.Server_ExternalWebUrl.Set("https://read.example.com:8443"))
 		require.NoError(t, param.Origin_Url.Set("https://read.example.com:8444"))
@@ -226,7 +226,7 @@ func TestWriteAddressFile(t *testing.T) {
 		// Reset and set up with a different directory
 		viper.Reset()
 		nonExistentDir := filepath.Join(tmpDir, "nonexistent")
-		viper.Set("ConfigDir", nonExistentDir)
+		require.NoError(t, param.ConfigBase.Set(nonExistentDir))
 		viper.Set("RuntimeDir", nonExistentDir)
 
 		// Try to read the address file - should fail
@@ -234,4 +234,28 @@ func TestWriteAddressFile(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read address file")
 	})
+}
+
+// TestAddressFileIgnoresUnknownKeys pins the property that makes this format
+// safe to extend: a reader older than the writer must skip what it does not
+// recognize rather than fail. Without it, adding a key would break every
+// deployed CLI reading a newer server's file.
+func TestAddressFileIgnoresUnknownKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set(param.RuntimeDir.GetName(), tmpDir)
+
+	contents := "SERVER_EXTERNAL_WEB_URL=https://example.com:8444\n" +
+		"SOME_FUTURE_KEY=whatever it holds\n" +
+		"# a comment\n" +
+		"\n" +
+		"malformed line with no equals sign\n" +
+		"LOCAL_ISSUER_URL=https://example.com:8444/api/v1.0/origin\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "pelican.addresses"), []byte(contents), 0600))
+
+	got, err := ReadAddressFile()
+	require.NoError(t, err, "an unknown key, a comment, and a malformed line must not make the file unreadable")
+	assert.Equal(t, "https://example.com:8444", got.ServerExternalWebURL)
+	assert.Equal(t, "https://example.com:8444/api/v1.0/origin", got.LocalIssuerURL)
 }

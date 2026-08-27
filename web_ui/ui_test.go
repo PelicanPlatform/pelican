@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -42,8 +42,8 @@ import (
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
-	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
@@ -87,7 +87,7 @@ func setupWebUIEnv(t *testing.T) {
 
 	testCfgDir := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(testCfgDir))
+	require.NoError(t, param.ConfigBase.Set(testCfgDir))
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -118,7 +118,7 @@ func setupWebUIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal("Error making temp config dir:", err)
 	}
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
 	test_utils.MockFederationRoot(t, nil, nil)
@@ -202,9 +202,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 		route.ServeHTTP(r, req)
 
 		r = httptest.NewRecorder()
-		// This route **is** in ui.go/adminAccessPages,
-		// so we will check if the user is logged in and if not redirect to login
-		req, err = http.NewRequest("GET", "/view/origin", nil)
+		// /view/origin/ is intentionally NOT admin-walled at the
+		// middleware layer: the page itself dispatches AdminHome
+		// vs. NonAdminHome based on /whoami's role claim, so the
+		// gate would lock non-admins out of the home view they're
+		// designed to see. /view/cache/ stays admin-walled.
+		req, err = http.NewRequest("GET", "/view/cache", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
@@ -251,9 +254,13 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
-		// This route **is** in ui.go/adminAccessPages, and the user is not logged in as admin.
-		// Send them to the 403 page to explain why they can't access the page
-		req, err = http.NewRequest("GET", "/view/origin", nil)
+		// /view/cache/ remains admin-walled at the middleware layer
+		// (its page has no NonAdmin variant). Non-admins still get
+		// redirected to /view/403/ here. Origin is no longer
+		// admin-walled at the middleware level — its page handles
+		// non-admin visitors via NonAdminHome — so we exercise cache
+		// instead.
+		req, err = http.NewRequest("GET", "/view/cache", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
@@ -479,11 +486,62 @@ func TestMapPrometheusPath(t *testing.T) {
 	})
 }
 
+func TestRejectInvalidPathMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	t.Run("non-utf8-path-is-rejected", func(t *testing.T) {
+		// Simulate the overlong UTF-8 encoding attack seen in the Director panic.
+		// The raw path /api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file would
+		// trigger a Prometheus panic when used as a label value, so the request
+		// is rejected with 400 Bad Request rather than sanitized and passed on.
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./file"
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.True(t, c.IsAborted(), "request must be aborted")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "request must be rejected with 400 Bad Request")
+	})
+
+	t.Run("non-utf8-raw-path-is-rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/file.txt", nil)
+		req.URL.Path = "/api/v1.0/director/object/\xc0.\xc0./file"
+		req.URL.RawPath = "/api/v1.0/director/object/\xc0.\xc0./file"
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.True(t, c.IsAborted(), "request must be aborted")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "request must be rejected with 400 Bad Request")
+	})
+
+	t.Run("valid-utf8-path-passes-through-unchanged", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar.txt", nil)
+		c.Request = req
+
+		rejectInvalidPathMiddleware(c)
+
+		assert.False(t, c.IsAborted(), "valid request must not be aborted")
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar.txt", c.Request.URL.Path)
+	})
+}
+
 func TestServerHostRestart(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	require.NoError(t, param.IssuerKey.Set(filepath.Join(t.TempDir(), "issuer.jwk")))
+	// AuthHandler now requires the cookie's issuer/audience to match
+	// Server.ExternalWebUrl. Tokens minted below use https://example.com,
+	// so pin the param to match.
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
@@ -579,6 +637,38 @@ func TestServerHostRestart(t *testing.T) {
 	})
 }
 
+// ensureTestUserRow upserts an active User row whose ID matches the
+// supplied user_id. AuthHandler now revalidates the user record on
+// every cookie read (soft-delete / inactive-status revocation), so a
+// test cookie pointing at a user_id that isn't backed by a real row
+// would 401 with "Your account has been deactivated". Tests must
+// call this AFTER their DB setup is finalized (the cookie-mint
+// helpers below fire BEFORE the test installs its mock DB, so they
+// can't auto-insert reliably).
+//
+// We also pre-stamp the active AUP version onto the row so the
+// RequireAUPCompliance middleware doesn't 403 the test's first
+// admin-walled request. The default-AUP fallback kicks in for any
+// fresh test DB; without this, every group/user/scopes test would
+// have to thread an extra "accept AUP" round-trip just to exercise
+// the flow it actually cares about.
+func ensureTestUserRow(t *testing.T, userID string) {
+	t.Helper()
+	if userID == "" || database.ServerDatabase == nil {
+		return
+	}
+	_, aupVersion, _ := CurrentAUPVersion()
+	err := database.ServerDatabase.Clauses(clause.OnConflict{DoNothing: true}).Create(&database.User{
+		ID:         userID,
+		Username:   userID,
+		Sub:        userID,
+		Issuer:     "https://example.com",
+		Status:     database.UserStatusActive,
+		AUPVersion: aupVersion,
+	}).Error
+	require.NoError(t, err)
+}
+
 // Create an authentication token for testing purpose. This token can pass AuthHandler and AdminAuthHandler,
 // allowing tests to proceed without authentication constraints
 func generateTestAdminUserToken(t *testing.T) string {
@@ -659,7 +749,7 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -670,12 +760,15 @@ func TestApiToken(t *testing.T) {
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
-	api_token.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
 
 	migrateTestDB(t)
+	// AuthHandler now revalidates the user record on every cookie
+	// read; the synthetic admin cookie above points at user_id
+	// "admin-user", so we need a matching active row in the DB.
+	ensureTestUserRow(t, "admin-user")
 
 	testCases := []struct {
 		name string
@@ -913,7 +1006,7 @@ func TestGroupManagementAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
@@ -926,6 +1019,13 @@ func TestGroupManagementAPI(t *testing.T) {
 	require.NoError(t, err, "Error setting up mock origin DB")
 
 	migrateTestDB(t)
+	// AuthHandler revalidates the user record on every cookie read;
+	// the tests below mint cookies for the owner-user / other-user /
+	// admin-user subjects, so the matching User rows have to exist
+	// before AuthHandler runs.
+	ensureTestUserRow(t, "admin-user")
+	ensureTestUserRow(t, "owner-user")
+	ensureTestUserRow(t, "other-user")
 
 	t.Run("test-group-lifecycle", func(t *testing.T) {
 		// 1. Create a group as 'owner-user'
@@ -945,10 +1045,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		var createGroupResp map[string]string
+		// Decode just the id — Group has fields the loose map[string]string
+		// can't accept (members slice, time fields, the bool HasPassword
+		// on nested users). The other fields aren't relevant to this
+		// test, so a typed extractor is safer than relaxing the map type.
+		var createGroupResp struct {
+			ID string `json:"id"`
+		}
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
-		groupID := createGroupResp["id"]
+		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
 
 		// 2. Add a member to the group as 'owner-user'
@@ -965,10 +1071,15 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code)
 
-		var createUserResp map[string]string
+		// Decode just the id — the User struct serializes the bool
+		// HasPassword and time-typed fields that map[string]string can't
+		// accept. The id is all this test needs.
+		var createUserResp struct {
+			ID string `json:"id"`
+		}
 		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
 		require.NoError(t, err)
-		userID := createUserResp["id"]
+		userID := createUserResp.ID
 		require.NotEmpty(t, userID)
 
 		addMemberReq := map[string]string{"userId": userID}
@@ -1037,10 +1148,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		var createGroupResp map[string]string
+		// Decode just the id — Group has fields the loose map[string]string
+		// can't accept (members slice, time fields, the bool HasPassword
+		// on nested users). The other fields aren't relevant to this
+		// test, so a typed extractor is safer than relaxing the map type.
+		var createGroupResp struct {
+			ID string `json:"id"`
+		}
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
-		groupID := createGroupResp["id"]
+		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
 
 		// Fetch the group via GET /groups/:id
@@ -1089,28 +1206,55 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.Equal(t, newDescription, fetchedGroup["description"])
 	})
 
-	t.Run("test-only-admin-can-create-group", func(t *testing.T) {
-		// Test that a regular (non-admin) user cannot create a group
-		groupName := "test-admin-only-group"
-		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
+	t.Run("any-authenticated-user-can-create-group-but-not-eligible", func(t *testing.T) {
+		// The user-group design opens group creation to any
+		// authenticated caller so users can mint groups for their
+		// own collection ACLs and shares; the privileged twist is
+		// the AuthTemplateEligible bit, which only an admin /
+		// user-admin can set. We assert both halves: a non-admin
+		// create succeeds and the resulting row is NOT eligible,
+		// regardless of what the request asked for.
+		groupName := "test-non-admin-group"
+		createGroupReq := map[string]any{
+			"name":                 groupName,
+			"description":          "test group",
+			"authTemplateEligible": true, // non-admin must NOT have this honored
+		}
 		body, err := json.Marshal(createGroupReq)
 		require.NoError(t, err)
 
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		// Regular (non-admin) user should be rejected
 		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
+		ensureTestUserRow(t, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("expected 403 for non-admin, got %d: %s", recorder.Code, recorder.Body.String()))
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"non-admin create must succeed (body: %s)", recorder.Body.String())
 
-		// Admin user should succeed
+		var nonAdminGroup struct {
+			ID                   string `json:"id"`
+			AuthTemplateEligible bool   `json:"authTemplateEligible"`
+		}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&nonAdminGroup))
+		require.NotEmpty(t, nonAdminGroup.ID)
+		assert.False(t, nonAdminGroup.AuthTemplateEligible,
+			"non-admin must NOT be able to mint an authz-template-eligible group, even if the request body asked for one")
+
+		// Admin can mint AND mark eligible. Use a different name so
+		// it doesn't collide with the non-admin row above (group
+		// names are unique).
 		adminToken := generateTestAdminUserToken(t)
-		body, err = json.Marshal(createGroupReq)
+		adminGroupReq := map[string]any{
+			"name":                 "test-admin-eligible-group",
+			"description":          "test group",
+			"authTemplateEligible": true,
+		}
+		body, err = json.Marshal(adminGroupReq)
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -1121,11 +1265,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		var createGroupResp map[string]string
+		var createGroupResp struct {
+			ID                   string `json:"id"`
+			AuthTemplateEligible bool   `json:"authTemplateEligible"`
+		}
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
-		groupID := createGroupResp["id"]
+		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
+		assert.True(t, createGroupResp.AuthTemplateEligible,
+			"admin-created group with authTemplateEligible:true must be eligible")
 
 		// Verify the admin can manage the group members
 		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
@@ -1140,10 +1289,15 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code)
 
-		var createUserResp map[string]string
+		// Decode just the id — the User struct serializes the bool
+		// HasPassword and time-typed fields that map[string]string can't
+		// accept. The id is all this test needs.
+		var createUserResp struct {
+			ID string `json:"id"`
+		}
 		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
 		require.NoError(t, err)
-		userID := createUserResp["id"]
+		userID := createUserResp.ID
 		require.NotEmpty(t, userID)
 
 		addMemberReq := map[string]string{"userId": userID}
@@ -1164,6 +1318,10 @@ func TestGroupManagementAPI(t *testing.T) {
 		// Create a group as an admin user (groups require admin auth)
 		otherToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "not-creator")
 		adminToken := generateTestAdminUserToken(t)
+		// AuthHandler revalidates user existence on every cookie
+		// read; the synthetic cookies above need backing rows.
+		ensureTestUserRow(t, "not-creator")
+		ensureTestUserRow(t, "admin-user")
 
 		groupName := "test-delete-group"
 		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
@@ -1179,13 +1337,19 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
-		var createGroupResp map[string]string
+		// Decode just the id — Group has fields the loose map[string]string
+		// can't accept (members slice, time fields, the bool HasPassword
+		// on nested users). The other fields aren't relevant to this
+		// test, so a typed extractor is safer than relaxing the map type.
+		var createGroupResp struct {
+			ID string `json:"id"`
+		}
 		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createGroupResp))
-		groupID := createGroupResp["id"]
+		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
 
 		// Create a collection ACL entry referencing the group name (not group ID)
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "/test", database.VisibilityPrivate)
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "owner-user", "/test", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,
@@ -1237,14 +1401,19 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code)
 
-		var createUserResp map[string]string
+		// Decode just the id — the User struct serializes the bool
+		// HasPassword and time-typed fields that map[string]string can't
+		// accept. The id is all this test needs.
+		var createUserResp struct {
+			ID string `json:"id"`
+		}
 		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createUserResp))
-		userID := createUserResp["id"]
+		userID := createUserResp.ID
 		require.NotEmpty(t, userID)
 
 		// Create a collection ACL entry referencing the user's implicit personal group name
 		personalGroup := "user-" + username
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "/test2", database.VisibilityPrivate)
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "owner-user2", "/test2", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,

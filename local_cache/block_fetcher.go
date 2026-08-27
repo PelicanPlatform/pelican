@@ -175,7 +175,7 @@ func NewBlockFetcherV2(
 	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
 	// have their own Results() channel and cannot steal results intended for
 	// other callers sharing the same TransferEngine.
-	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode())
+	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create transfer client for block fetcher")
 	}
@@ -531,9 +531,11 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		return
 	}
 	sourceURL.Scheme = "pelican"
-	// The client's cache mode (set on the transfer client) causes
-	// queryDirector to route through the director's origin endpoint,
-	// so origins that disable direct clients are reachable.
+	// The client's cache mode (set on the transfer client, see
+	// useEmbeddedCacheMode) causes queryDirector to route through the
+	// director's origin endpoint, so origins that disable direct clients are
+	// reachable.  In site-local mode embedded mode is disabled and the
+	// director redirects us to other caches instead.
 
 	// Build transfer options with a byte range so we only download the
 	// blocks we actually need instead of the entire object.
@@ -733,10 +735,29 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 					op.err = result.Error
 					log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
 				}
-				// Store checksums from the transfer result on the download
-				// so that onComplete can persist them in metadata.
-				if result != nil {
-					dw.dl.checksums = clientChecksumsToCache(result)
+				// Persist checksums from the transfer result into the cache
+				// metadata.  We must do this here -- when the result arrives
+				// -- rather than relying on the BlockWriter's onComplete
+				// callback: the client only knows the checksums after the
+				// body finishes downloading (it fetches the origin's Digest
+				// and finalizes its own hashes post-transfer), but onComplete
+				// fires the moment the final block is written, before the
+				// result is delivered.  Persisting here (via the additive
+				// MergeMetadata) guarantees a subsequent HEAD/GET can relay a
+				// Digest header.
+				//
+				// Skip on transfer error -- those checksums describe a body we
+				// are about to discard (see PersistentCache's AdoptTransfer
+				// onExit, which evicts the failed-verification instance).
+				if result != nil && result.Error == nil {
+					checksums := clientChecksumsToCache(result)
+					dw.dl.checksums = checksums
+					if len(checksums) > 0 {
+						if err := bf.storage.MergeMetadata(bf.instanceHash,
+							&CacheMetadata{Checksums: checksums}); err != nil {
+							log.Warnf("Failed to persist checksums for %s: %v", bf.instanceHash, err)
+						}
+					}
 				}
 				bf.notifyAllChunks(op)
 				return nil

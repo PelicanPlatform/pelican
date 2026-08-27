@@ -172,6 +172,20 @@ type RangeReader struct {
 	// from the BlockFetcherV2 client tracking).
 	onClose func()
 
+	// completionDone / completionErr expose the terminal state of the
+	// backing download (if any).  completionDone is closed when the
+	// download finishes (success or error); completionErr returns its
+	// terminal error and is safe to call only after completionDone closes.
+	//
+	// These are consumed by WaitForCompletion to surface verification
+	// failures -- the origin's reported digest disagreeing with the bytes
+	// we received -- in the X-Transfer-Status trailer.  The failure is
+	// only known *after* the full body has been downloaded from the origin
+	// and the post-download digest comparison runs; a successful read of
+	// the cached blocks alone would otherwise mask it.
+	completionDone <-chan struct{}
+	completionErr  func() error
+
 	// repairAttempted is set after a repair cycle completes without fixing
 	// every corrupt block (i.e. the 32 MB cap was exhausted).  It prevents
 	// unbounded re-fetch loops on persistent disk corruption.  After a
@@ -580,6 +594,61 @@ func (rr *RangeReader) Close() error {
 		rr.onClose()
 	}
 	return err
+}
+
+// WaitForCompletion returns the terminal error of the backing download (if
+// any).  Intended to be called by the serving path *after* the body has
+// finished streaming, so that a post-download verification failure -- e.g.
+// the origin's reported digest disagreeing with the bytes received -- can be
+// surfaced to the client through the X-Transfer-Status trailer rather than
+// being silently masked by an otherwise-successful read of the cached blocks.
+//
+// Behavior depends on what the reader was asked to read:
+//
+//   - Full-object reads block until the download finishes (subject to ctx).
+//     The client is already waiting for the whole body, so the small extra
+//     wait for the post-body digest comparison is acceptable and necessary
+//     to detect verification failures.
+//
+//   - Partial-range reads do NOT block.  The client only asked for a slice
+//     (which may be a few KB of a multi-GB object); the backing download
+//     may still have far more body to fetch.  We only surface an error if
+//     verification has *already* completed -- never make the range response
+//     wait for the rest of the download.
+//
+// Returns nil when there is no backing download, the download completed
+// successfully, ctx is cancelled while waiting, or (in the partial-range
+// case) verification hasn't completed yet.
+func (rr *RangeReader) WaitForCompletion(ctx context.Context) error {
+	if rr == nil || rr.completionDone == nil {
+		return nil
+	}
+	if rr.isFullRead() {
+		select {
+		case <-rr.completionDone:
+			return rr.completionErr()
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	// Partial range: non-blocking peek.
+	select {
+	case <-rr.completionDone:
+		return rr.completionErr()
+	default:
+		return nil
+	}
+}
+
+// isFullRead reports whether this reader's range covers the entire object,
+// which is the condition under which WaitForCompletion may block.  An object
+// with unknown ContentLength (chunked / -1) is conservatively treated as
+// "not full" so we never block indefinitely waiting for a size we don't know.
+func (rr *RangeReader) isFullRead() bool {
+	return rr.meta != nil &&
+		rr.meta.ContentLength > 0 &&
+		rr.start == 0 &&
+		rr.end == rr.meta.ContentLength-1
 }
 
 // Seek implements io.Seeker (limited to within the range)

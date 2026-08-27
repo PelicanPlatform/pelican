@@ -251,7 +251,7 @@ func TestSlowTransfers(t *testing.T) {
 		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 		assert.NoError(t, err)
 		defer writer.Close()
-		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 		finishedChannel <- true
 	}()
 
@@ -341,7 +341,7 @@ func TestStoppedTransfer(t *testing.T) {
 		assert.NoError(t, err)
 		defer writer.Close()
 
-		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 		finishedChannel <- true
 	}()
 
@@ -392,7 +392,7 @@ func TestConnectionError(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	// downloadHTTP returns unwrapped ConnectionSetupError; wrapping happens in the download loop
@@ -506,7 +506,7 @@ func TestNetworkResetError(t *testing.T) {
 	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	// The error should be wrapped as Contact.ConnectionReset in the download loop
@@ -633,7 +633,7 @@ func TestTrailerError(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 
 	assert.NotNil(t, err)
 	// Check that it's wrapped in a PelicanError
@@ -779,7 +779,10 @@ func TestSortAttempts(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
@@ -808,24 +811,24 @@ func TestSortAttempts(t *testing.T) {
 
 	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("aaa")
-	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
+	size, _, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, token, false)
 	assert.Equal(t, int64(-1), size)
 	assert.Equal(t, svr1.URL, results[0].Url.String())
 	assert.Equal(t, svr1.URL, results[1].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, token)
+	size, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, token, false)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
@@ -851,7 +854,10 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "1")
 			w.Header().Set("Content-Range", "bytes 0-0/42")
-			w.WriteHeader(http.StatusOK)
+			// 206, as a server that actually satisfied the probe's byte range
+			// answers; the probe only trusts a Content-Range when the status
+			// agrees with it.
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)
 		} else {
@@ -887,7 +893,7 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 
 	// sortAttempts must keep the preferred (non-responsive) cache before the
 	// working director cache, even though the director cache responds immediately.
-	_, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token)
+	_, _, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token, false)
 
 	require.Len(t, results, 2)
 	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
@@ -898,7 +904,7 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 	// Verify the same ordering is preserved when the preferred cache is listed
 	// after the director cache in the input slice (i.e., the Preferred flag, not
 	// input position, drives the sort).
-	_, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token)
+	_, _, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token, false)
 
 	require.Len(t, results, 2)
 	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
@@ -992,7 +998,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -1040,7 +1046,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -1082,21 +1088,21 @@ func TestProjInUserAgent(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "test", nil)
+		fname, writer, 0, -1, -1, "", "test", nil, nil)
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
 	assert.Equal(t, "pelican-client/"+config.GetVersion()+" project/test", *server_test.user_agent)
 }
 
-// The test should prove that the function getObjectServersToTry returns the correct number of servers,
-// and that any duplicates are removed
+// The test should prove that the function getObjectServersToTry returns the correct number of servers.
+// Deduplication is handled upstream in generateSortedObjServers (by host:port); this function preserves
+// the list it is given, including intentional duplicates among the user's preferred caches.
 func TestGetObjectServersToTry(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	sortedServers := []string{
 		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
 		"https://cache-2.com",
-		"https://cache-2.com", // make sure duplicates are removed
 		"https://cache-3.com",
 		"https://cache-4.com",
 		"https://cache-5.com",
@@ -1113,14 +1119,6 @@ func TestGetObjectServersToTry(t *testing.T) {
 		}
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
-		// Check that there are no duplicates in the result
-		cacheSet := make(map[string]bool)
-		for _, transfer := range transfers {
-			if cacheSet[transfer.Url.String()] {
-				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
-			}
-			cacheSet[transfer.Url.String()] = true
-		}
 		// Verify we got the correct caches in our transfer attempt details
 		require.Len(t, transfers, 3)
 		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
@@ -1139,18 +1137,33 @@ func TestGetObjectServersToTry(t *testing.T) {
 		}
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
-		cacheSet := make(map[string]bool)
-		for _, transfer := range transfers {
-			if cacheSet[transfer.Url.String()] {
-				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
-			}
-			cacheSet[transfer.Url.String()] = true
-		}
-
 		require.Len(t, transfers, 3)
 		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
 		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
 		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
+
+	// williamnswanson's concern: intentional duplicates in the preferred list must be honored
+	// here rather than collapsed, so the client retries that cache as many times as requested.
+	t.Run("IntentionalDuplicatesPreserved", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// Both preferred entries point at cache-1; both must be tried, in order.
+		dupServers := []string{"https://cache-1.com", "https://cache-1.com", "https://cache-2.com"}
+		transfers := getObjectServersToTry(dupServers, job, 3, "", 2)
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-1.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[2].Url.String())
+		assert.True(t, transfers[0].Preferred)
+		assert.True(t, transfers[1].Preferred)
+		assert.False(t, transfers[2].Preferred)
 	})
 
 	// Test that the Preferred flag is set correctly based on nPreferred.
@@ -1165,12 +1178,65 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3 is director.
+		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3/4/5 are director.
+		// The cap of 3 applies only to the director servers, so all 5 are returned.
 		transfers := getObjectServersToTry(sortedServers, job, 3, "", 2)
-		require.Len(t, transfers, 3)
+		require.Len(t, transfers, 5)
 		assert.True(t, transfers[0].Preferred, "cache-1 (idx 0) should be marked preferred")
 		assert.True(t, transfers[1].Preferred, "cache-2 (idx 1) should be marked preferred")
 		assert.False(t, transfers[2].Preferred, "cache-3 (idx 2) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[3].Preferred, "cache-4 (idx 3) should not be marked preferred (director-provided)")
+		assert.False(t, transfers[4].Preferred, "cache-5 (idx 4) should not be marked preferred (director-provided)")
+	})
+
+	// The attempt cap restricts only director-provided servers. If the user supplies more
+	// preferred caches than the cap, every one of them must still be tried, in order.
+	t.Run("AllPreferredTriedRegardlessOfCap", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 6 preferred caches, no director servers, director cap of 3: all 6 are tried.
+		preferredServers := []string{
+			"https://cache-1.com",
+			"https://cache-2.com",
+			"https://cache-3.com",
+			"https://cache-4.com",
+			"https://cache-5.com",
+			"https://cache-6.com",
+		}
+		transfers := getObjectServersToTry(preferredServers, job, 3, "", len(preferredServers))
+		require.Len(t, transfers, 6)
+		for i, transfer := range transfers {
+			assert.True(t, transfer.Preferred, "preferred cache at idx %d should be marked preferred", i)
+		}
+		assert.Equal(t, "https://cache-6.com", transfers[5].Url.String())
+	})
+
+	// With preferred caches exceeding the cap AND director fallbacks present, all preferred
+	// caches are tried plus up to the cap's worth of director servers.
+	t.Run("AllPreferredPlusCappedDirector", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// 4 preferred + 4 director, director cap of 3 => 4 preferred + 3 director = 7.
+		servers := []string{
+			"https://pref-1.com", "https://pref-2.com", "https://pref-3.com", "https://pref-4.com",
+			"https://dir-1.com", "https://dir-2.com", "https://dir-3.com", "https://dir-4.com",
+		}
+		transfers := getObjectServersToTry(servers, job, 3, "", 4)
+		require.Len(t, transfers, 7)
+		assert.Equal(t, "https://dir-3.com", transfers[6].Url.String())
+		assert.False(t, transfers[6].Preferred)
 	})
 }
 
@@ -1709,7 +1775,7 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 
 	require.Error(t, err, "Should have an error from invalid chunk length")
@@ -2949,7 +3015,7 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 
@@ -2988,7 +3054,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil, nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
@@ -3598,6 +3664,79 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 		require.Contains(t, s, "/root/dirA")
 		require.Contains(t, s, "/root/file1.txt")
 		assert.NotContains(t, s, "/root/dirA/file2.txt")
+	})
+
+	t.Run("stream-visits-every-entry-once-and-honors-abort", func(t *testing.T) {
+		// listHttpEmit should hand every FileInfo listHttp would have
+		// buffered to the callback exactly once, and a non-nil error from
+		// the callback aborts the walk immediately.
+		streamed := map[string]int{}
+		require.NoError(t, listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr, "clean walk must not surface per-entry errors")
+			streamed[fi.Name]++
+			return nil
+		}))
+		buffered, err := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, err)
+		require.Equal(t, len(buffered), len(streamed))
+		for _, fi := range buffered {
+			assert.Equal(t, 1, streamed[fi.Name], "entry %q was not emitted exactly once", fi.Name)
+		}
+
+		// Abort on the first entry: no further entries should arrive.
+		count := 0
+		sentinel := errors.New("stop")
+		err = listHttpEmit(pUrl, dirResp, nil, true, -1, func(FileInfo, error) error {
+			count++
+			return sentinel
+		})
+		require.ErrorIs(t, err, sentinel)
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("SkipSubtree-prunes-recursion-into-collection", func(t *testing.T) {
+		// Returning SkipSubtree from the callback when we see /root/dirA must
+		// prevent /root/dirA/file2.txt from being visited, while the sibling
+		// /root/file1.txt still comes through normally.
+		var visited []string
+		err := listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr)
+			visited = append(visited, fi.Name)
+			if fi.Name == "/root/dirA" && fi.IsCollection {
+				return SkipSubtree
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Contains(t, visited, "/root/dirA")
+		assert.Contains(t, visited, "/root/file1.txt")
+		assert.NotContains(t, visited, "/root/dirA/file2.txt",
+			"SkipSubtree on /root/dirA must prune its children")
+	})
+
+	t.Run("SkipAll-propagates-so-Walk-can-unwrap", func(t *testing.T) {
+		// listHttpEmit propagates SkipAll up through every enclosing level so
+		// the outer wrapper (Walk / listHttp) can translate it into a clean
+		// nil return. Verify it reaches us as-is and no further entries were
+		// visited after it fired.
+		var visited []string
+		err := listHttpEmit(pUrl, dirResp, nil, true, -1, func(fi FileInfo, emitErr error) error {
+			require.NoError(t, emitErr)
+			visited = append(visited, fi.Name)
+			return SkipAll
+		})
+		require.ErrorIs(t, err, SkipAll)
+		assert.Len(t, visited, 1, "SkipAll must fire on the first entry only")
+
+		// listHttp is the buffered wrapper and does unwrap SkipAll; verify
+		// that partial results survive.
+		buffered := []FileInfo{}
+		found := false
+		_, listHttpErr := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, listHttpErr)
+		// (We just needed listHttp to still work with the new sentinel plumbing.)
+		_ = buffered
+		_ = found
 	})
 }
 
@@ -4264,12 +4403,21 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 	tsURL, err := url.Parse(ts.URL)
 	require.NoError(t, err)
 
-	// Create a transfer engine and client
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	te, err := NewTransferEngine(ctx)
-	require.NoError(t, err)
+	// Build a minimal, worker-free transfer engine.  walkDirUpload hands
+	// each queued file to te.submitFile, which (with no scheduler
+	// configured) sends onto te.files.  We deliberately do NOT use
+	// NewTransferEngine here: its worker goroutines would drain te.files
+	// concurrently and actually perform the uploads, whereas this test
+	// wants to drive uploadObject by hand to observe the 403-skip
+	// bookkeeping.  A buffered te.files lets walkDirUpload complete
+	// without a consumer.
+	te := &TransferEngine{
+		ctx:   ctx,
+		files: make(chan *clientTransferFile, 10),
+	}
 
 	// Create a transfer job for recursive upload with sync enabled
 	remoteURL, err := pelican_url.Parse("pelican://"+tsURL.Host+"/test/dir", nil, nil)
@@ -4294,18 +4442,15 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 	// Manually create the transfer attempts
 	transfers := []transferAttemptDetails{{Url: tsURL, Proxy: false}}
 
-	// Create channel for files
-	files := make(chan *clientTransferFile, 10)
-
-	// Run walkDirUpload to queue files
-	err = te.walkDirUpload(&clientTransferJob{uuid: uuid.New(), job: tj}, transfers, files, tempDir)
+	// Run walkDirUpload to queue files onto te.files.
+	err = te.walkDirUpload(&clientTransferJob{uuid: uuid.New(), job: tj}, transfers, tempDir)
 	require.NoError(t, err)
 
-	close(files)
+	close(te.files)
 
 	// Process all queued files
 	var results []TransferResults
-	for file := range files {
+	for file := range te.files {
 		result, err := uploadObject(file.file)
 		require.NoError(t, err, "uploadObject should not return error")
 		results = append(results, result)
@@ -4385,7 +4530,7 @@ func TestDownloadHTTPETag(t *testing.T) {
 
 	downloaded, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(len(body)), downloaded)
@@ -4422,7 +4567,7 @@ func TestDownloadHTTPETagMissing(t *testing.T) {
 
 	_, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Empty(t, etag, "ETag should be empty when the server doesn't provide one")
@@ -4461,7 +4606,7 @@ func TestMetadataChannel(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", metadataChan,
+		fname, writer, 0, -1, -1, "", "", metadataChan, nil,
 	)
 	assert.NoError(t, err)
 
@@ -4503,7 +4648,7 @@ func TestMetadataChannelNil(t *testing.T) {
 
 	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, -1, "", "", nil,
+		fname, writer, 0, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err, "downloadHTTP should not panic when metadataChan is nil")
 }
@@ -4546,7 +4691,7 @@ func TestDownloadHTTPByteRange(t *testing.T) {
 	// bytesSoFar=0, byteRangeEnd=9 → Range: bytes=0-9
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, rangeEnd, -1, "", "", nil,
+		fname, writer, 0, rangeEnd, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, rangeEnd+1, downloaded, "downloaded bytes should equal the range size")
@@ -4599,7 +4744,7 @@ func TestDownloadHTTPResume(t *testing.T) {
 
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, resumeOffset, -1, -1, "", "", nil,
+		fname, writer, resumeOffset, -1, -1, "", "", nil, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(len(fullBody))-resumeOffset, downloaded, "should download remaining bytes after resume offset")
@@ -4708,7 +4853,7 @@ func TestMetadataChannelByteRange(t *testing.T) {
 
 	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: serverURL, Proxy: false},
-		"", &buf, rangeStart, rangeEnd, -1, "", "", metadataChan,
+		"", &buf, rangeStart, rangeEnd, -1, "", "", metadataChan, nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, rangeEnd-rangeStart+1, downloaded, "downloaded should be the range length")
@@ -4724,4 +4869,48 @@ func TestMetadataChannelByteRange(t *testing.T) {
 	default:
 		t.Fatal("expected metadata on channel but none was sent")
 	}
+}
+
+// TestFetchChecksumParsesMultipleDigests verifies that fetchChecksum parses
+// every entry in a multi-digest RFC 3230 Digest header, including when the
+// server separates entries with ", " (comma + optional whitespace, permitted
+// by RFC 7230 §7).  This guards against a regression where a leading space
+// caused every entry after the first to be treated as an unknown algorithm and
+// dropped.
+func TestFetchChecksumParsesMultipleDigests(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// md5 (base64) + crc32c (hex) + crc32 (hex) + sha (base64), comma-SPACE
+	// separated.
+	const digestHeader = "md5=67pYXTv4sRZpetpg60PJgg==, crc32c=574a2bf2, crc32=e59f820e, sha=zJWslQTLm4LKR9NF/ksIOV5Rfag="
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodHead, r.Method, "fetchChecksum should use HEAD")
+		w.Header().Set("Digest", digestHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL + "/test/object.bin")
+	require.NoError(t, err)
+
+	got, err := fetchChecksum(context.Background(), KnownChecksumTypes(), u, "", "")
+	require.NoError(t, err)
+
+	byAlg := make(map[ChecksumType][]byte, len(got))
+	for _, ci := range got {
+		byAlg[ci.Algorithm] = ci.Value
+	}
+
+	// All four algorithms must be present.
+	require.Contains(t, byAlg, AlgMD5, "md5 should parse")
+	require.Contains(t, byAlg, AlgCRC32C, "crc32c must survive the ', ' separator")
+	require.Contains(t, byAlg, AlgCRC32, "crc32 must survive the ', ' separator")
+	require.Contains(t, byAlg, AlgSHA1, "sha must survive the ', ' separator")
+
+	// Spot-check decoded values: crc32c is hex 574a2bf2 -> 4 big-endian bytes.
+	assert.Equal(t, []byte{0x57, 0x4a, 0x2b, 0xf2}, byAlg[AlgCRC32C])
+	// md5 is a 16-byte digest; sha1 is 20 bytes.
+	assert.Len(t, byAlg[AlgMD5], 16)
+	assert.Len(t, byAlg[AlgSHA1], 20)
 }

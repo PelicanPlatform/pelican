@@ -179,7 +179,7 @@ func TestWaitUntilWorking(t *testing.T) {
 
 func TestFilterTopLevelPrefixes(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	namespaceAds := []server_structs.NamespaceAdV2{
+	namespaceAds := []server_structs.NamespaceAd{
 		{Path: "/foo"},
 		{Path: "/foo/bar"},
 		{Path: "/foo/bar/baz"},
@@ -215,13 +215,13 @@ type mockServer struct {
 	gid          int
 	pids         []int
 	serverType   server_structs.ServerType
-	namespaceAds []server_structs.NamespaceAdV2
+	namespaceAds []server_structs.NamespaceAd
 }
 
-func (m *mockServer) GetServerType() server_structs.ServerType           { return m.serverType }
-func (m *mockServer) SetNamespaceAds(ads []server_structs.NamespaceAdV2) { m.namespaceAds = ads }
-func (m *mockServer) GetNamespaceAds() []server_structs.NamespaceAdV2    { return m.namespaceAds }
-func (m *mockServer) CreateAdvertisement(name, id, serverUrl, serverWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
+func (m *mockServer) GetServerType() server_structs.ServerType         { return m.serverType }
+func (m *mockServer) SetNamespaceAds(ads []server_structs.NamespaceAd) { m.namespaceAds = ads }
+func (m *mockServer) GetNamespaceAds() []server_structs.NamespaceAd    { return m.namespaceAds }
+func (m *mockServer) CreateAdvertisement(name, id, serverUrl, serverWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertise, error) {
 	return nil, nil
 }
 func (m *mockServer) GetNamespaceAdsFromDirector() error { return nil }
@@ -250,7 +250,7 @@ func TestSetBrokerURL(t *testing.T) {
 		require.NoError(t, param.Origin_EnableBroker.Set(true))
 		setFederationParams("https://broker.example.com")
 
-		ad := &server_structs.OriginAdvertiseV2{}
+		ad := &server_structs.OriginAdvertise{}
 		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/prefix1", "/prefix2"})
 		require.NoError(t, err)
 		assert.Empty(t, ad.BrokerURL, "Broker URL should not be set when multiple prefixes are present")
@@ -263,7 +263,7 @@ func TestSetBrokerURL(t *testing.T) {
 		require.NoError(t, param.Cache_EnableBroker.Set(false))
 		setFederationParams("https://broker.example.com")
 
-		ad := &server_structs.OriginAdvertiseV2{}
+		ad := &server_structs.OriginAdvertise{}
 		err := SetBrokerURL(ad, server_structs.CacheType, []string{"/single"})
 		require.NoError(t, err)
 		assert.Empty(t, ad.BrokerURL, "Broker URL should not be set when broker is disabled")
@@ -277,7 +277,7 @@ func TestSetBrokerURL(t *testing.T) {
 		// Use a URL with invalid percent-encoding so url.Parse returns an error
 		setFederationParams("https://broker.example.com/%2")
 
-		ad := &server_structs.OriginAdvertiseV2{}
+		ad := &server_structs.OriginAdvertise{}
 		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/prefix"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Invalid Broker URL")
@@ -291,7 +291,7 @@ func TestSetBrokerURL(t *testing.T) {
 		require.NoError(t, param.Origin_EnableBroker.Set(true))
 		setFederationParams("https://broker.example.com")
 
-		ad := &server_structs.OriginAdvertiseV2{}
+		ad := &server_structs.OriginAdvertise{}
 		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/test/prefix"})
 		require.NoError(t, err)
 		require.NotEmpty(t, ad.BrokerURL)

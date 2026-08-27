@@ -2,6 +2,7 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/e2e/'],
   coverageDirectory: '.github/coverage',
   coverageReporters: ['json-summary'],
   globals: {

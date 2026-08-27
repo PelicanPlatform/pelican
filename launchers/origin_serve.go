@@ -24,7 +24,9 @@ import (
 	"context"
 	_ "embed"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
@@ -44,9 +47,16 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
+
+// originUsesXRootD reports whether the configured Origin.StorageType is served
+// by an XRootD process (as opposed to a native, in-process backend).
+func originUsesXRootD() bool {
+	return server_structs.OriginStorageType(param.Origin_StorageType.GetString()).UsesXRootD()
+}
 
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	originExports, err := server_utils.GetOriginExports()
@@ -54,9 +64,32 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, errors.Wrap(err, "failed to initialize origin exports")
 	}
 
+	// The transfer API authenticates clients with pelican.transfer tokens minted
+	// by the server's local issuer, and that issuer is only stood up in
+	// embedded-issuer mode (RegisterLocalProvider runs inside
+	// configureEmbeddedIssuer). In OA4MP mode no local issuer exists, so a
+	// transfer-enabled OA4MP origin could never issue or bootstrap its own
+	// transfer credentials. Fail fast rather than serve a transfer API that
+	// cannot mint tokens. (OA4MP is being retired in favor of the embedded
+	// issuer, at which point this restriction becomes vacuous.)
+	if param.Origin_EnableTransferAPI.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
+		return nil, errors.Errorf("the transfer API (%s=true) requires the embedded issuer, but %s is set to \"oa4mp\"; "+
+			"set %s to \"embedded\" or disable the transfer API",
+			param.Origin_EnableTransferAPI.GetName(), param.Origin_IssuerMode.GetName(), param.Origin_IssuerMode.GetName())
+	}
+
 	// Determine if we should use XRootD or native HTTP server
-	storageType := param.Origin_StorageType.GetString()
-	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
+	useXRootD := originUsesXRootD()
+
+	// A standalone origin never contacts a director or registry; every federation
+	// touchpoint below is skipped.  config.InitServer has already rejected the
+	// configurations where this mode cannot work (XRootD backends, co-located
+	// federation modules, DisableDirectClients).
+	standalone := config.IsStandaloneOrigin()
+	if standalone {
+		log.Infof("Origin is running in standalone mode (%s); it will not register at a registry or advertise to a director",
+			param.Origin_EnableStandaloneMode.GetName())
+	}
 
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
@@ -97,6 +130,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 			return nil, errors.Wrap(err, "failed to initialize Globus backend")
 		}
 		origin.LaunchGlobusTokenRefresh(ctx, egrp)
+	} else if param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobusv2) {
+		// For native Globus v2, we still use the existing Globus init for OAuth
+		// and DB management, but we don't persist tokens to disk.
+		if err := origin.InitGlobusBackend(originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize Globus v2 backend")
+		}
+		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
 
 	concLimit := param.Origin_Concurrency.GetInt()
@@ -107,10 +147,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Register Origin APIs
 	baseAPIGroup := engine.Group("/api/v1.0")
 
-	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
-	if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
-		return nil, err
+	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now.
+	// A standalone origin has no director to report to, so the endpoint (and the
+	// timeout watchdog behind it, which would otherwise flip the origin's health
+	// status to critical) is skipped entirely.
+	if !standalone {
+		originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
+		if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
+			return nil, err
+		}
+	} else {
+		log.Debugf("Skipping origin director-test API registration because %s is enabled", param.Origin_EnableStandaloneMode.GetName())
 	}
 
 	// Set up the APIs for the origin UI
@@ -119,13 +166,21 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	// When the director is co-located, it registers the root-level OIDC
-	// metadata (/.well-known/).  The origin registers its own copy under
-	// /api/v1.0/origin so its issuer URL is distinct from the
-	// federation's.  The standalone-origin case is handled by the
-	// root-level RegisterOIDCAPI call below.
+	// Publish this origin's OIDC discovery document and JWKS so other
+	// servers (e.g. a peer origin or a transfer server verifying a
+	// storage token this origin's embedded issuer minted) can resolve its
+	// signing keys via OIDC auto-discovery.  The served path must match
+	// GetServerIssuerURL(): when the director is co-located the origin's
+	// issuer URL is a sub-path (/api/v1.0/origin) so the federation's
+	// root-level metadata (registered by the director) stays distinct; a
+	// standalone origin's issuer URL is the bare web URL, so its metadata
+	// lives at the root.  Without the standalone branch the embedded
+	// issuer advertises a jwks_uri that nothing serves and cross-server
+	// token verification fails with a 404.
 	if modules.IsEnabled(server_structs.DirectorType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/api/v1.0/origin", web_ui.ServerHeaderMiddleware), false)
+	} else {
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
@@ -137,6 +192,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
 			}
 		case "oa4mp":
+			warnUnusedIssuerLifetimesKnobs()
 			oa4mpRouterGroup := baseAPIGroup.Group("/issuer")
 			if err = oa4mp.RegisterOA4MPProxy(oa4mpRouterGroup); err != nil {
 				return nil, err
@@ -208,8 +264,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 	// POSIXv2-specific initialization is deferred to OriginServeFinish()
 
-	// Launch origin file test maintenance (not XRootD specific)
-	origin.LaunchOriginFileTestMaintenance(ctx)
+	// Launch origin file test maintenance (not XRootD specific). It only cleans up
+	// after director- and self-tests, neither of which runs in standalone mode.
+	if !standalone {
+		origin.LaunchOriginFileTestMaintenance(ctx)
+	}
 	origin.LaunchDiskUsageCalculator(ctx, egrp)
 
 	return originServer, nil
@@ -225,7 +284,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 	// Handle POSIXv2 and SSH-specific initialization now that the web server is running
 	storageType := param.Origin_StorageType.GetString()
-	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
+	useXRootD := originUsesXRootD()
 	if !useXRootD {
 		// For SSH backend, initialize the SSH connection before setting up handlers
 		if storageType == string(server_structs.OriginStorageSSH) {
@@ -262,10 +321,42 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 			return errors.Wrap(err, "failed to initialize origin_serve handlers")
 		}
 
+		// For Globus v2, activate backends with tokens from the Globus init
+		if storageType == string(server_structs.OriginStorageGlobusv2) {
+			collections, err := origin.GetActivatedGlobusCollections()
+			if err != nil {
+				log.Warningf("Failed to get activated Globus collections: %v", err)
+			} else {
+				gBackends := origin_serve.GetGlobusBackends()
+				for _, col := range collections {
+					if gb, ok := gBackends[col.CollectionID]; ok {
+						gb.Activate(col.CollectionToken, col.TransferToken, col.HTTPSServer, col.OAuth2Config)
+						log.Infof("Activated Globus v2 backend for collection %s", col.CollectionID)
+					}
+				}
+			}
+			origin_serve.LaunchGlobusv2TokenRefresh(ctx, egrp)
+		}
+
+		// A standalone origin has no director sharing this web server, so its
+		// exports stay mounted at their federation prefix -- an object is served
+		// from the URL a client already knows, with nothing to redirect through.
 		directorEnabled := modules.IsEnabled(server_structs.DirectorType)
 		if err := origin_serve.RegisterHandlers(engine, directorEnabled); err != nil {
 			return errors.Wrap(err, "failed to register origin_serve handlers")
 		}
+
+		// Administrative introspection for the storage backend.  Registers
+		// nothing unless the backend actually has such an interface, so an
+		// origin on any other backend simply has no such routes.
+		//
+		// AuthHandler establishes who the caller is; AdminAuthHandler decides
+		// whether they are an administrator.  The pair is required: nothing
+		// else in this engine authenticates, and AdminAuthHandler alone reads
+		// an empty "User" from the context and 401s every request, so the
+		// routes would exist but be reachable by no one.
+		origin_serve.RegisterStorageAPI(engine.Group("/api/v1.0"),
+			web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
 		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
 		// Update Origin.Url to use the external web URL which is now set to the correct port.
@@ -278,18 +369,48 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
-	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
-	log.Debug("Register Origin")
-	extUrlStr := param.Server_ExternalWebUrl.GetString()
-	extUrl, _ := url.Parse(extUrlStr)
-	// Only use hostname:port
-	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
-		return err
+	// Register the transfer API on the origin if enabled
+	if err := transfer.RegisterTransferAPIForOrigin(ctx, engine, egrp); err != nil {
+		return errors.Wrap(err, "failed to register transfer API on origin")
 	}
-	log.Debug("Origin is registered")
-	for _, export := range originExports {
-		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+
+	// A standalone origin owns its namespaces outright: there is no registry to
+	// claim them at, and no director that would need the registration to route
+	// clients here.  Skipping this also keeps the "registry" component out of the
+	// health status the web UI renders.
+	if config.IsStandaloneOrigin() {
+		log.Debugf("Skipping Origin registration because standalone mode is enabled (see %s)", param.Origin_EnableStandaloneMode.GetName())
+		// The local metadata record is normally written as a side effect of
+		// advertising. Write it here so the web UI can still show a server name
+		// (and downtime records still carry one) without a director in the loop.
+		metadata, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
+		if err != nil {
+			return errors.Wrap(err, "failed to determine the standalone origin's server name")
+		}
+		if err := database.UpsertServerLocalMetadata(metadata); err != nil {
+			return errors.Wrapf(err, "failed to record server name %s in the local database", metadata.Name)
+		}
+		// A pelican:// URL names a federation, so the client still begins by
+		// asking this origin what services the federation has.  It answers with
+		// a document naming no director, which is what tells the client to
+		// resolve objects against this origin directly.
+		if err := origin.RegisterStandaloneFederationMetadata(engine); err != nil {
+			return errors.Wrap(err, "failed to register the standalone origin's federation metadata")
+		}
+	} else {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
+		log.Debug("Register Origin")
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
 			return err
+		}
+		log.Debug("Origin is registered")
+		for _, export := range originExports {
+			if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -299,6 +420,59 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 	})
 
 	return nil
+}
+
+// warnUnusedIssuerLifetimesKnobs logs a warning when an origin admin
+// explicitly configured one of the embedded-issuer token lifetime knobs
+// while running with Origin.IssuerMode set to "oa4mp". Those knobs only
+// affect the fosite-based "embedded" issuer; they are silently ignored
+// by the external OA4MP issuer.
+func warnUnusedIssuerLifetimesKnobs() {
+	lifetimeParams := []param.DurationParam{
+		param.Issuer_AccessTokenLifetime,
+		param.Issuer_AuthorizationCodeLifetime,
+		param.Issuer_IDTokenLifetime,
+		param.Issuer_RefreshTokenLifetime,
+	}
+
+	var explicitlySet []string
+	for _, p := range lifetimeParams {
+		// SourceTracker (rather than a plain zero-value check) is used to tell a
+		// user-supplied value apart from the parameter's own default, since the
+		// default is also loaded into viper and would otherwise look identical to
+		// an explicit setting.
+		src, hasSrc := config.GetSourceTracker().Get(strings.ToLower(p.GetName()))
+		if hasSrc && src.Type != config.SourceDefault {
+			explicitlySet = append(explicitlySet, p.GetName())
+		}
+	}
+
+	if len(explicitlySet) > 0 {
+		log.Warnf("The following embedded-issuer token lifetime settings are configured but will have "+
+			"no effect because Origin.IssuerMode is \"oa4mp\": %s. These settings only apply when "+
+			"Origin.IssuerMode is set to \"embedded\"; the external OA4MP issuer manages its own token "+
+			"lifetimes independently.", strings.Join(explicitlySet, ", "))
+	}
+}
+
+// webUIClientRedirectURI returns the OIDC redirect URI for the origin's
+// web UI object-browser page (app/origin/client/, served under the /view
+// basePath), derived from Server.ExternalWebUrl. It returns "" when the
+// web UI is disabled or no external web URL is configured.
+//
+// The browser client performs its PKCE login against this exact URI, so
+// the embedded issuer's public client must allow it or the login fails
+// silently — auto-deriving it saves origin admins from having to add it
+// to Issuer.RedirectUris by hand.
+func webUIClientRedirectURI() string {
+	if !param.Server_EnableUI.GetBool() {
+		return ""
+	}
+	extUrl := param.Server_ExternalWebUrl.GetString()
+	if extUrl == "" {
+		return ""
+	}
+	return strings.TrimRight(extUrl, "/") + "/view/origin/client/"
 }
 
 // configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
@@ -326,6 +500,19 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	}
 
 	registry := issuer.NewProviderRegistry()
+
+	// Redirect URIs allowed for the pre-allocated public client used by
+	// browser-based (PKCE) logins. Start from the admin-configured list
+	// and, when the origin's web UI is enabled, auto-add its
+	// object-browser page so a missing Issuer.RedirectUris entry doesn't
+	// silently break login. Computed once and shared by every per-export
+	// provider below.
+	publicClientID := param.Issuer_PublicClientID.GetString()
+	redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
+	if uiRedirect := webUIClientRedirectURI(); uiRedirect != "" && !slices.Contains(redirectURIs, uiRedirect) {
+		redirectURIs = append(redirectURIs, uiRedirect)
+		log.Debugf("Auto-added origin web UI redirect URI %q to embedded issuer public client", uiRedirect)
+	}
 
 	for _, export := range originExports {
 		// Only create an issuer for exports that need authentication
@@ -355,9 +542,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		}
 
 		// Seed the pre-allocated public client for browser-based flows (PKCE).
-		publicClientID := param.Issuer_PublicClientID.GetString()
 		if publicClientID != "" {
-			redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
 			if err := provider.EnsurePublicClient(ctx, publicClientID, redirectURIs); err != nil {
 				return errors.Wrapf(err, "failed to seed public client %q for namespace %s", publicClientID, namespace)
 			}
@@ -377,9 +562,21 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
 	}
 
-	if registry.First() == nil {
-		log.Info("Embedded OIDC issuer: no exports require authentication; no issuers registered")
-		return nil
+	// Register the server's "local" issuer into the shared registry. It is the
+	// generic local-identity issuer (iss = config.GetLocalIssuerUrl()) behind
+	// every local-identity OAuth flow, independent of any data-export namespace:
+	//   - the (group-gated) pelican.transfer scope the transfer middleware's
+	//     LocalIssuer check accepts, and
+	//   - the namespace-agnostic collection.* management scopes the collections
+	//     API accepts (verified by web_ui.AuthHandler, which also pins the issuer
+	//     to GetLocalIssuerUrl()).
+	// It is registered whenever the embedded issuer is enabled — not gated on any
+	// one feature — so those flows always have a discovery endpoint, and so a
+	// transfer-enabled origin can authenticate the CLI even with only public
+	// exports. (A standalone transfer server does the equivalent in its own
+	// launch path via transfer.RegisterLocalIssuer.)
+	if err := issuer.RegisterLocalProvider(ctx, egrp, registry, database.ServerDatabase, gracePeriod); err != nil {
+		return errors.Wrap(err, "failed to register local issuer")
 	}
 
 	// Apply a non-aborting middleware to the issuer route group so that

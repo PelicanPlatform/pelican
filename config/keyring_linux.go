@@ -83,3 +83,27 @@ func SavePassword(password []byte) error {
 	}
 	return nil
 }
+
+// ForgetPassword clears any cached credential-file password from the kernel
+// session keyring (and the in-memory fallback). It is used to "lock" the
+// wallet (e.g. by the client agent) without restarting the process.
+func ForgetPassword() {
+	for i := range savedPasswordVal {
+		savedPasswordVal[i] = 0
+	}
+	savedPasswordVal = make([]byte, 0)
+	savedPassword = false
+
+	keyring, err := keyctl.SessionKeyring()
+	if err != nil {
+		log.Debugln("Failed to get kernel session keyring:", err)
+		return
+	}
+	key, err := keyring.Search("osdf-oauth2-password")
+	if err != nil || key == nil {
+		return
+	}
+	if err := key.Unlink(); err != nil {
+		log.Debugln("Failed to unlink cached password from keyring:", err)
+	}
+}

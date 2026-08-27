@@ -36,11 +36,10 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
-	serverAdItems := serverAds.Items()
-	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
-	for _, item := range serverAdItems {
-		ad := item.Value()
+func listNamespacesFromOrigins() []server_structs.NamespaceAd {
+	ads := getServerAdsSnapshot()
+	namespaces := make([]server_structs.NamespaceAd, 0, len(ads))
+	for _, ad := range ads {
 		if ad.Type == server_structs.OriginType.String() {
 			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
@@ -51,8 +50,7 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 // List all advertisements in the TTL cache that match the serverType array
 func listAdvertisement(serverTypes []server_structs.ServerType) []*server_structs.Advertisement {
 	ads := make([]*server_structs.Advertisement, 0)
-	for _, item := range serverAds.Items() {
-		ad := item.Value()
+	for _, ad := range getServerAdsSnapshot() {
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType.String() {
 				ads = append(ads, ad)
@@ -103,6 +101,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go clientIpRandAssignmentCache.Start()
 	go clientIpGeoOverrideCache.Start()
 	go directorAds.Start()
+	go registeredNameCache.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		serverAd := i.Value().ServerAd
@@ -180,6 +179,8 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		directorAds.DeleteAll()
 		directorAds.Stop()
 		directorAdMutex.Unlock()
+		registeredNameCache.DeleteAll()
+		registeredNameCache.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
@@ -320,8 +321,8 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 				queryResult, err := server_utils.QueryMyPrometheus(ddlCtx, query)
 				if err != nil || queryResult.ResultType != "vector" {
 					// If the query failed or returned the wrong type, set IOLoad=-1 for all servers
-					for _, item := range serverAds.Items() {
-						item.Value().SetIOLoad(-1)
+					for _, ad := range getServerAdsSnapshot() {
+						ad.SetIOLoad(-1)
 					}
 					if err != nil {
 						log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)

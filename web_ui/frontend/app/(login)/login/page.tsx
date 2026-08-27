@@ -18,7 +18,15 @@
 
 'use client';
 
-import { Box, Button, Collapse, Skeleton, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Collapse,
+  Skeleton,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useContext, useEffect, useMemo, useState } from 'react';
 
@@ -35,12 +43,44 @@ import {
 import { login } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
-const AdminLogin = () => {
+// safeSameOriginPath validates a candidate returnURL and returns a
+// same-origin, path-only destination that is safe to hand to
+// window.location.href — or null if the candidate isn't safe.
+//
+// It parses the candidate against the current origin and requires the
+// resolved origin to match ours, which rejects:
+//   - absolute URLs to another site ("https://evil.example"),
+//   - protocol-relative "//host" and the "/\host" backslash variant that
+//     browsers normalize into a protocol-relative URL (open redirect),
+//   - "javascript:" URLs, which parse to an opaque (non-matching) origin
+//     (DOM-XSS via a script-scheme navigation).
+//
+// Crucially it returns only the parsed URL's path components
+// (pathname+search+hash), never the raw attacker-controlled string, so
+// the navigation sink can never receive a scheme or a foreign host. That
+// closes both the open-redirect and the client-side-XSS vectors.
+const safeSameOriginPath = (raw: string): string | null => {
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
+    return null;
+  }
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.origin !== window.location.origin) {
+      return null;
+    }
+    return parsed.pathname + parsed.search + parsed.hash;
+  } catch {
+    return null;
+  }
+};
+
+const PasswordLogin = () => {
   const dispatch = useContext(AlertDispatchContext);
 
   const router = useRouter();
   const { mutate } = useSWR('getUser', getUser);
 
+  let [username, setUsername] = useState<string>('');
   let [password, setPassword] = useState<string>('');
   let [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
@@ -71,30 +111,38 @@ const AdminLogin = () => {
     }
   }, [enabledServers, oauthServers]);
 
-  async function submit(password: string) {
+  async function submit(username: string, password: string) {
     setLoading(true);
 
     const response = await alertOnError(
-      async () => await login(password),
+      async () => await login(password, username),
       'Could not login',
       dispatch
     );
     if (response) {
       await mutate(getUser);
 
-      let returnUrl = getReturnUrl(window.location.href);
+      const returnUrl = getReturnUrl(window.location.href);
 
-      // If the returnUrl is going to the Pelican web app use the app router
+      // If the returnUrl is going to the Pelican web app use the app router.
+      // The router applies basePath ("/view") on its own, so strip it here.
       if (returnUrl && returnUrl.includes('/view')) {
-        router.push(returnUrl.replace(`/view`, ''));
-
-        // If the returnUrl isn't going to the Pelican app but is relative then use window location to navigate there
-      } else if (returnUrl && returnUrl.startsWith('/')) {
-        window.location.href = returnUrl;
-
-        // Default to going to the home page of the app
+        router.push(returnUrl.replace(`/view`, '') || '/');
       } else {
-        router.push('../');
+        // Otherwise it's a path outside the SPA route table, so use a full
+        // navigation — but only to a validated same-origin path. safePath
+        // is either the sanitized path-only destination or null; when
+        // null we fall back to the landing page rather than navigating to
+        // an attacker-controlled value. Use an absolute path for the
+        // fallback: relative hrefs to router.push behave inconsistently
+        // with Next's basePath (a non-admin with no returnURL appeared to
+        // "go nowhere" otherwise).
+        const safePath = returnUrl ? safeSameOriginPath(returnUrl) : null;
+        if (safePath) {
+          window.location.href = safePath;
+        } else {
+          router.push('/');
+        }
       }
     } else {
       setLoading(false);
@@ -103,14 +151,23 @@ const AdminLogin = () => {
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    submit(password);
+    submit(username, password);
   }
 
   const LoginComponent = (
     <form onSubmit={onSubmit} action='#'>
-      <Box display={'flex'} justifyContent={'center'}>
+      <Stack spacing={1.5}>
+        <TextField
+          label='Username'
+          size='small'
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete='username'
+          fullWidth
+        />
         <PasswordInput
           TextFieldProps={{
+            label: 'Password',
             InputProps: {
               onChange: (e) => {
                 setPassword(e.target.value);
@@ -118,18 +175,18 @@ const AdminLogin = () => {
             },
           }}
         />
-      </Box>
-      <Box display={'flex'} flexDirection={'column'}>
-        <LoadingButton
-          variant='outlined'
-          sx={{ margin: 'auto' }}
-          color={'primary'}
-          type={'submit'}
-          loading={loading}
-        >
-          <span>Login</span>
-        </LoadingButton>
-      </Box>
+        <Box display={'flex'} flexDirection={'column'}>
+          <LoadingButton
+            variant='outlined'
+            sx={{ margin: 'auto' }}
+            color={'primary'}
+            type={'submit'}
+            loading={loading}
+          >
+            <span>Login</span>
+          </LoadingButton>
+        </Box>
+      </Stack>
     </form>
   );
 
@@ -146,7 +203,7 @@ const AdminLogin = () => {
           variant={'text'}
           onClick={() => setToggled(!toggled)}
         >
-          Server Admin Login
+          Username + password login
         </Button>
         <Collapse in={toggled}>{LoginComponent}</Collapse>
       </Box>
@@ -233,7 +290,7 @@ export default function Home() {
               </Box>
             </>
           )}
-        {serverIntersect && <AdminLogin />}
+        {serverIntersect && <PasswordLogin />}
         {!serverIntersect && (
           <Skeleton
             variant={'rectangular'}

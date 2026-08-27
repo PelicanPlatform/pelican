@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -57,6 +57,15 @@ func setupMockRegistryDB(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
 
+	// A ":memory:" SQLite database is private to the connection that created it. Tests
+	// like the inactive registration cleanup run a goroutine that queries the DB
+	// concurrently with the main test, so if the pool opens a second connection it lands
+	// on a fresh, table-less database and queries fail intermittently with "no such
+	// table". Pin the pool to a single connection so every caller shares one DB.
+	sqlDB, err := mockDB.DB()
+	require.NoError(t, err, "Error getting underlying sql.DB from mock registry DB")
+	sqlDB.SetMaxOpenConns(1)
+
 	// Enable foreign key constraints for SQLite
 	err = database.ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err, "Error enabling foreign key constraints")
@@ -72,6 +81,8 @@ func setupMockRegistryDB(t *testing.T) {
 		&database.User{},
 		&database.Group{},
 		&database.GroupMember{},
+		&database.GroupInviteLink{},
+		&database.UserIdentity{},
 	)
 	require.NoError(t, err, "Failed to migrate DB tables")
 }
@@ -247,46 +258,6 @@ func TestGetNamespaceById(t *testing.T) {
 		defer resetMockRegistryDB(t)
 		_, err = getRegistrationById(100)
 		assert.Error(t, err)
-	})
-}
-
-func TestGetNamespaceStatusById(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	setupMockRegistryDB(t)
-	defer teardownMockRegistryDB(t)
-
-	t.Run("invalid-id", func(t *testing.T) {
-		_, err := getRegistrationStatusById(0)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid id")
-	})
-
-	t.Run("db-query-error", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		_, err := getRegistrationStatusById(1)
-		require.Error(t, err)
-	})
-
-	t.Run("valid-id-empty-admin-metadata", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		err := insertMockDBData([]server_structs.Registration{mockNamespace("/foo", "", "", server_structs.AdminMetadata{})})
-		require.NoError(t, err)
-		lastId, err := getLastNamespaceId()
-		require.NoError(t, err)
-		status, err := getRegistrationStatusById(lastId)
-		require.NoError(t, err)
-		assert.Equal(t, server_structs.RegUnknown, status)
-	})
-
-	t.Run("valid-id-non-empty-admin-metadata", func(t *testing.T) {
-		resetMockRegistryDB(t)
-		err := insertMockDBData([]server_structs.Registration{mockNamespace("/foo", "", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})})
-		require.NoError(t, err)
-		lastId, err := getLastNamespaceId()
-		require.NoError(t, err)
-		status, err := getRegistrationStatusById(lastId)
-		require.NoError(t, err)
-		assert.Equal(t, server_structs.RegApproved, status)
 	})
 }
 
@@ -890,7 +861,7 @@ func TestRegistryTopology(t *testing.T) {
 	registryDB := t.TempDir()
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(registryDB, "test.sqlite")))
 	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(svr.URL))
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)

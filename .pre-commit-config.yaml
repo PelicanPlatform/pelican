@@ -47,11 +47,14 @@ repos:
   # Check semantics.
   #
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.9.0
+    rev: v2.12.2
     hooks:
+      # These can be some of the more time-consuming checks.
+      # The "full" variant more closely matches the GitHub Actions.
       - id: golangci-lint
-        # This can be one of the more time-consuming checks.
-        stages: [pre-push, manual]
+        stages: [pre-push]
+      - id: golangci-lint-full
+        stages: [manual]
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
@@ -63,10 +66,10 @@ repos:
   #
   - repo: local
     hooks:
-      - id: npm-format-fix
+      - id: pnpm-format-fix
         name: reformat web frontend code
         language: system
-        entry: bash -c "cd web_ui/frontend && npm run format:fix"
+        entry: bash -c "cd web_ui/frontend && pnpm run format:fix"
         pass_filenames: false
         files: web_ui/frontend/.*
         # Web developer's personal preference.
@@ -78,6 +81,11 @@ repos:
         name: Format markdown files
         additional_dependencies:
           - mdformat-simple-breaks
+          # GFM table support: without it mdformat does not recognize
+          # pipe tables and, with --wrap no, collapses each table into a
+          # single unreadable line. The user/group + collection design
+          # docs are table-heavy, so preserve them as real tables.
+          - mdformat-gfm
         args: [--wrap, "no"]
         files: \.md$
   - repo: https://github.com/crate-ci/typos

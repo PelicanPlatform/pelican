@@ -870,6 +870,27 @@ func createTransferError(err error) (transferError *classad.ClassAd) {
 
 	isRetryable := client.IsRetryable(err)
 
+	// A cache throttle (HTTP 429) carries a machine-parseable reason and a
+	// Retry-After hint. The plugin protocol has no retry-delay field and the
+	// plugin must never sleep (HTCondor is timing it), so surface both in
+	// DeveloperData for external retriers and operators reading the job ad.
+	var throttled *client.CacheThrottleError
+	if errors.As(err, &throttled) {
+		if throttled.RetryAfter > 0 {
+			// Round up: a sub-second hint would truncate to 0, which reads as
+			// "no hint given" rather than "retry almost immediately".
+			secs := int64((throttled.RetryAfter + time.Second - 1) / time.Second)
+			if adErr := developerData.Set("RetryAfterSeconds", secs); adErr != nil {
+				log.Errorf("Failed to set RetryAfterSeconds: %s", adErr)
+			}
+		}
+		if throttled.Reason != "" {
+			if adErr := developerData.Set("ThrottleReason", throttled.Reason); adErr != nil {
+				log.Errorf("Failed to set ThrottleReason: %s", adErr)
+			}
+		}
+	}
+
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
 		err := developerData.Set("PelicanErrorCode", int64(pe.Code()))
@@ -1023,6 +1044,37 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 			log.Errorf("Failed to set IsRetryable1: %s", adErr)
 		}
 		transferError := createTransferError(err)
+		transferErrorData = append(transferErrorData, transferError)
+	}
+
+	// Handle result-level (post-transfer) errors that aren't attached to any individual
+	// attempt, e.g. a checksum mismatch: the download itself succeeded, so the error lives
+	// only on result.Error and neither the per-attempt loop nor the early-failure block
+	// above captured it. Without this, such a result would be reported as
+	// TransferSuccess=false with no ErrorType/PelicanErrorCode.
+	//
+	// The discriminator is whether the download succeeded, not whether transferErrorData is
+	// empty. On a failed download the client sets result.Error to the aggregate of the
+	// per-attempt errors we already recorded above, so re-adding it would double-count. On a
+	// successful download the client clears result.Error and only re-sets it from
+	// post-transfer verification, so it's a genuinely uncaptured result-level error. A
+	// successful download always ends on a passing attempt (the loop breaks on success),
+	// hence a nil Error on the last attempt. This also covers the failover case (an early
+	// attempt fails, a later one succeeds, then the checksum fails) that a len==0 guard
+	// would miss, leaving the fatal error unclassified while a recovered attempt's error
+	// stood in for it.
+	lastAttemptSucceeded := result != nil && len(result.Attempts) > 0 &&
+		result.Attempts[len(result.Attempts)-1].Error == nil
+	if result != nil && result.Error != nil && lastAttemptSucceeded {
+		adErr = developerData.Set("TransferError1", result.Error.Error())
+		if adErr != nil {
+			log.Errorf("Failed to set TransferError1: %s", adErr)
+		}
+		adErr = developerData.Set("IsRetryable1", client.IsRetryable(result.Error))
+		if adErr != nil {
+			log.Errorf("Failed to set IsRetryable1: %s", adErr)
+		}
+		transferError := createTransferError(result.Error)
 		transferErrorData = append(transferErrorData, transferError)
 	}
 

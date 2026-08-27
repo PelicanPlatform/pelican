@@ -21,6 +21,7 @@ package utils
 import (
 	"strconv"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,6 +201,108 @@ func TestValidateWatermark(t *testing.T) {
 
 			assert.Equal(t, compVal, val)
 			assert.Equal(t, tc.expectAbs, isAbs)
+		})
+	}
+}
+
+func TestEnsureValidUTF8(t *testing.T) {
+	t.Run("valid-utf8-unchanged", func(t *testing.T) {
+		input := "/api/v1.0/director/object/foo/bar/:path"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+		assert.True(t, utf8.ValidString(result))
+	})
+
+	t.Run("invalid-utf8-replaced", func(t *testing.T) {
+		// Simulate the overlong UTF-8 encoding attack seen in the panic
+		input := "/api/v1.0/director/object/\xc0.\xc0./\xc0.\xc0./:path"
+		result := EnsureValidUTF8(input)
+		assert.True(t, utf8.ValidString(result), "result should be valid UTF-8")
+		assert.False(t, utf8.ValidString(input), "input should be invalid UTF-8 (test sanity check)")
+	})
+
+	t.Run("empty-string", func(t *testing.T) {
+		result := EnsureValidUTF8("")
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("all-ascii", func(t *testing.T) {
+		input := "/simple/ascii/path"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("valid-multibyte-utf8", func(t *testing.T) {
+		// Valid multi-byte UTF-8 (Chinese characters) should pass through unchanged
+		input := "/path/\xe4\xb8\xad\xe6\x96\x87"
+		result := EnsureValidUTF8(input)
+		assert.Equal(t, input, result)
+		assert.True(t, utf8.ValidString(result))
+	})
+}
+
+func TestValidateLatLong(t *testing.T) {
+	tests := []struct {
+		name    string
+		lat     float64
+		long    float64
+		wantErr bool
+		errMsg  string
+	}{
+		{"valid Madison WI", 43.0739, -89.3848, false, ""},
+		{"valid equator/prime meridian", 0, 0, false, ""},
+		{"valid extremes", 90, 180, false, ""},
+		{"valid negative extremes", -90, -180, false, ""},
+		{"lat too high", 91, 0, true, "latitude"},
+		{"lat too low", -91, 0, true, "latitude"},
+		{"long too high", 0, 181, true, "longitude"},
+		{"long too low", 0, -181, true, "longitude"},
+		{"both out of bounds", 100, 200, true, "latitude"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateLatLong(tc.lat, tc.long)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestParseGeoLocationString(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLat   float64
+		wantLong  float64
+		wantErr   bool
+		errSubstr string
+	}{
+		{"valid Madison WI", "43.0739,-89.3848", 43.0739, -89.3848, false, ""},
+		{"valid with spaces", " 43.0739 , -89.3848 ", 43.0739, -89.3848, false, ""},
+		{"valid equator", "0,0", 0, 0, false, ""},
+		{"valid poles", "90,180", 90, 180, false, ""},
+		{"missing comma", "43.0739", 0, 0, true, "expected \"lat,lon\" format"},
+		{"bad lat", "abc,-89.3848", 0, 0, true, "latitude"},
+		{"bad long", "43.0739,xyz", 0, 0, true, "longitude"},
+		{"lat out of bounds", "91,0", 0, 0, true, "invalid coordinates"},
+		{"long out of bounds", "0,181", 0, 0, true, "invalid coordinates"},
+		{"empty string", "", 0, 0, true, "expected \"lat,lon\" format"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lat, long, err := ParseCoordinateStr(tc.input)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+			} else {
+				assert.NoError(t, err)
+				assert.InDelta(t, tc.wantLat, lat, 1e-9)
+				assert.InDelta(t, tc.wantLong, long, 1e-9)
+			}
 		})
 	}
 }

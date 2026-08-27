@@ -23,6 +23,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -30,6 +31,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,6 +135,82 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 		assert.Equal(t, "https://server1.com/foo", oServers[2].String())
 		assert.Equal(t, "https://server2.com/foo", oServers[3].String())
 		assert.Equal(t, "https://server3.com/foo", oServers[4].String())
+	})
+
+	// A preferred cache that also appears in the director's list must not be
+	// duplicated when the '+' fallback re-incorporates the director servers. The director
+	// copy (matched by host:port) is dropped; the preferred copy is kept up front.
+	t.Run("testPreferredCacheDedupedAgainstDirector", func(t *testing.T) {
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server2.com", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, nPreferred)
+		require.Len(t, oServers, 3)
+		// The preferred server2.com stays first (with the user's path), and the director's
+		// server2.com is filtered out, leaving server1.com and server3.com as fallbacks.
+		assert.Equal(t, "https://server2.com/", oServers[0].String())
+		assert.Equal(t, "https://server1.com/foo", oServers[1].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[2].String())
+	})
+
+	// A user may intentionally list the same cache more than once force repeated attempts.
+	// Those duplicates must be preserved, even though the director
+	// copy of that cache is still filtered out.
+	t.Run("testIntentionalPreferredDuplicatesPreserved", func(t *testing.T) {
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server1.com", Path: "/"},
+			{Scheme: "https", Host: "server1.com", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
+		require.Len(t, oServers, 4)
+		assert.Equal(t, "https://server1.com/", oServers[0].String())
+		assert.Equal(t, "https://server1.com/", oServers[1].String())
+		// Director's server1.com is dropped; server2.com and server3.com remain as fallbacks.
+		assert.Equal(t, "https://server2.com/foo", oServers[2].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[3].String())
+	})
+
+	// The same host on a different port is a distinct cache and must not be deduplicated.
+	t.Run("testSameHostDifferentPortNotDeduped", func(t *testing.T) {
+		portDirResp := server_structs.DirectorResponse{
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "server1.com:8443", Path: "/foo"},
+				{Scheme: "https", Host: "server1.com:8444", Path: "/foo"},
+			},
+		}
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "server1.com:8443", Path: "/"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(portDirResp, preferredOServers)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, nPreferred)
+		require.Len(t, oServers, 2)
+		assert.Equal(t, "https://server1.com:8443/", oServers[0].String())
+		assert.Equal(t, "https://server1.com:8444/foo", oServers[1].String())
+	})
+
+	// Duplicates within the director's own list are collapsed even when no preferred caches are set.
+	t.Run("testDirectorDuplicatesDeduped", func(t *testing.T) {
+		dupDirResp := server_structs.DirectorResponse{
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "server1.com", Path: "/foo"},
+				{Scheme: "https", Host: "server1.com", Path: "/bar"},
+				{Scheme: "https", Host: "server2.com", Path: "/foo"},
+			},
+		}
+		oServers, nPreferred, err := generateSortedObjServers(dupDirResp, []*url.URL{})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, nPreferred)
+		require.Len(t, oServers, 2)
+		assert.Equal(t, "https://server1.com/foo", oServers[0].String())
+		assert.Equal(t, "https://server2.com/foo", oServers[1].String())
 	})
 
 	// Test the function fails if the + character is not at the end of the list
@@ -794,5 +873,290 @@ func TestTokenIsAcceptable(t *testing.T) {
 		opts := config.TokenGenerationOpts{Operation: config.TokenWrite}
 		assert.True(t, tokenIsAcceptable(tok, "/ns/data", dirResp, opts),
 			"SciToken with bare 'write' scope should be accepted for write")
+	})
+}
+
+// TestWalkAsSeq exercises the iter.Seq2 adapter that backs WalkSeq. Testing
+// this layer directly (with a fake WalkFunc-based walker) covers the
+// semantics callers actually observe -- entries yielded once each, terminal
+// errors surfaced as a final (zero, err) tuple, and early-break aborting the
+// walk -- without needing a live director/webdav backend.
+func TestWalkAsSeq(t *testing.T) {
+	// A "walker" is a Walk-shaped primitive walkAsSeq wraps: it invokes
+	// fn(info, nil) for each successful entry and can optionally return a
+	// walk-level error at the end.
+	makeWalker := func(entries []FileInfo, finalErr error) func(fn WalkFunc) error {
+		return func(fn WalkFunc) error {
+			for _, e := range entries {
+				if err := fn(e, nil); err != nil {
+					return err
+				}
+			}
+			return finalErr
+		}
+	}
+
+	t.Run("yields every entry in order with no terminal error tuple on success", func(t *testing.T) {
+		entries := []FileInfo{
+			{Name: "/a.txt", Size: 1},
+			{Name: "/sub/b.txt", Size: 2},
+			{Name: "/sub/c.txt", Size: 3},
+		}
+		var got []FileInfo
+		terminals := 0
+		for info, err := range walkAsSeq(makeWalker(entries, nil)) {
+			if err != nil {
+				terminals++
+				continue
+			}
+			got = append(got, info)
+		}
+		assert.Equal(t, entries, got)
+		assert.Zero(t, terminals, "successful walk must not yield a terminal error tuple")
+	})
+
+	t.Run("propagates walk-level error via final tuple", func(t *testing.T) {
+		want := errors.New("boom")
+		entries := []FileInfo{{Name: "/a"}, {Name: "/b"}}
+		var got []FileInfo
+		var lastErr error
+		for info, err := range walkAsSeq(makeWalker(entries, want)) {
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			got = append(got, info)
+		}
+		assert.Equal(t, entries, got, "entries received before the error must still surface")
+		require.Error(t, lastErr)
+		assert.Contains(t, lastErr.Error(), "boom")
+	})
+
+	t.Run("propagates per-entry error inline without ending the walk", func(t *testing.T) {
+		// The walker can surface a per-subtree error mid-stream via
+		// fn(info, err). walkAsSeq must yield it as an ordinary iteration
+		// value (info + err) alongside the surrounding successful entries.
+		partial := FileInfo{Name: "/broken", IsCollection: true}
+		want := errors.New("read failed")
+		seq := walkAsSeq(func(fn WalkFunc) error {
+			if err := fn(FileInfo{Name: "/a"}, nil); err != nil {
+				return err
+			}
+			if err := fn(partial, want); err != nil {
+				return err
+			}
+			return fn(FileInfo{Name: "/c"}, nil)
+		})
+		var order []string
+		var errCount int
+		for info, err := range seq {
+			if err != nil {
+				errCount++
+				assert.Equal(t, partial, info, "per-entry error tuple must carry the failing path")
+				continue
+			}
+			order = append(order, info.Name)
+		}
+		assert.Equal(t, []string{"/a", "/c"}, order)
+		assert.Equal(t, 1, errCount)
+	})
+
+	t.Run("early break aborts the walker and suppresses terminal error", func(t *testing.T) {
+		entries := []FileInfo{
+			{Name: "/a"}, {Name: "/b"}, {Name: "/c"}, {Name: "/d"},
+		}
+		visited := 0
+		seq := walkAsSeq(func(fn WalkFunc) error {
+			for _, e := range entries {
+				visited++
+				if err := fn(e, nil); err != nil {
+					// The wrapper returns errStopIter; propagate it so the
+					// outer walker unwinds. walkAsSeq is expected to filter
+					// it before yielding a terminal-error tuple.
+					return err
+				}
+			}
+			return nil
+		})
+		var got []FileInfo
+		terminals := 0
+		for info, err := range seq {
+			if err != nil {
+				terminals++
+				continue
+			}
+			got = append(got, info)
+			if len(got) == 2 {
+				break
+			}
+		}
+		assert.Equal(t, entries[:2], got)
+		assert.Equal(t, 2, visited, "walker must not emit past the caller's break point")
+		assert.Zero(t, terminals, "early break must not surface a terminal error tuple")
+	})
+}
+
+// TestFanOutWalk exercises the concurrency plumbing that backs WalkMany
+// without needing a live director or webdav backend. It substitutes a
+// closure-based walker in place of walkOn so the test can observe how many
+// walks run concurrently, whether per-root errors surface as separate
+// components of the returned join, and that callbacks receive the correct
+// root attribution.
+func TestFanOutWalk(t *testing.T) {
+	t.Run("respects parallelism cap", func(t *testing.T) {
+		const roots = 8
+		const cap = 3
+
+		var (
+			inflight    atomic.Int32
+			maxInflight atomic.Int32
+		)
+		bump := func() {
+			cur := inflight.Add(1)
+			for {
+				prev := maxInflight.Load()
+				if cur <= prev || maxInflight.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+		}
+
+		rootNames := make([]string, roots)
+		for i := range rootNames {
+			rootNames[i] = fmt.Sprintf("root-%d", i)
+		}
+
+		// Every walker blocks on a signal so all in-flight walkers can race for
+		// the same peak count. release fires from a separate goroutine after a
+		// short delay -- long enough for every allowed slot to fill, short
+		// enough not to bloat the test.
+		release := make(chan struct{})
+		time.AfterFunc(75*time.Millisecond, func() { close(release) })
+		err := fanOutWalk(context.Background(), rootNames, cap,
+			func(root string, info FileInfo, emitErr error) error { return nil },
+			func(root string, cb WalkFunc) error {
+				bump()
+				defer inflight.Add(-1)
+				<-release
+				return nil
+			})
+		require.NoError(t, err)
+		// Under load, exactly `cap` walkers should have been in flight at once.
+		assert.LessOrEqual(t, int(maxInflight.Load()), cap,
+			"fanOutWalk must not exceed the parallelism cap")
+		assert.Greater(t, int(maxInflight.Load()), 1,
+			"parallelism cap > 1 must actually run walkers concurrently")
+	})
+
+	t.Run("defaults parallelism from param.Client_WorkerCount when non-positive", func(t *testing.T) {
+		// A single root means the cap collapses to len(roots), which is 1.
+		// The observable check is that a zero parallelism doesn't crash and
+		// that all roots are still walked.
+		visited := map[string]bool{}
+		var mu sync.Mutex
+		roots := []string{"a", "b", "c"}
+		require.NoError(t, fanOutWalk(context.Background(), roots, 0,
+			func(root string, info FileInfo, emitErr error) error { return nil },
+			func(root string, cb WalkFunc) error {
+				mu.Lock()
+				visited[root] = true
+				mu.Unlock()
+				return nil
+			}))
+		for _, r := range roots {
+			assert.True(t, visited[r], "root %q must be walked", r)
+		}
+	})
+
+	t.Run("per-root failures join into the returned error and do not stop other walks", func(t *testing.T) {
+		roots := []string{"good1", "bad1", "good2", "bad2"}
+		wantErr := errors.New("subtree failed")
+		var completed atomic.Int32
+		err := fanOutWalk(context.Background(), roots, 4,
+			func(root string, info FileInfo, emitErr error) error { return nil },
+			func(root string, cb WalkFunc) error {
+				completed.Add(1)
+				if strings.HasPrefix(root, "bad") {
+					return wantErr
+				}
+				return nil
+			})
+		require.Error(t, err)
+		assert.Equal(t, int32(len(roots)), completed.Load(),
+			"a failure in one walk must not short-circuit the others")
+		// errors.Join wraps a []error; the joined message must mention both
+		// failing roots so callers can attribute them.
+		msg := err.Error()
+		assert.Contains(t, msg, `walk "bad1"`)
+		assert.Contains(t, msg, `walk "bad2"`)
+		assert.NotContains(t, msg, `walk "good1"`, "successful roots must not appear in the joined error")
+	})
+
+	t.Run("callback receives correct root attribution and is safe under concurrency", func(t *testing.T) {
+		roots := []string{"root-x", "root-y", "root-z"}
+		observed := map[string]map[string]bool{
+			"root-x": {},
+			"root-y": {},
+			"root-z": {},
+		}
+		var mu sync.Mutex
+		err := fanOutWalk(context.Background(), roots, len(roots),
+			func(root string, info FileInfo, emitErr error) error {
+				require.NoError(t, emitErr)
+				mu.Lock()
+				observed[root][info.Name] = true
+				mu.Unlock()
+				return nil
+			},
+			func(root string, cb WalkFunc) error {
+				// Emit two entries per root; the root string is embedded in
+				// the entry name so miswired attribution is easy to spot.
+				if err := cb(FileInfo{Name: root + "/one"}, nil); err != nil {
+					return err
+				}
+				return cb(FileInfo{Name: root + "/two"}, nil)
+			})
+		require.NoError(t, err)
+		for _, r := range roots {
+			assert.Equal(t, map[string]bool{r + "/one": true, r + "/two": true}, observed[r],
+				"root %q must observe only its own entries", r)
+		}
+	})
+
+	t.Run("cancelled context surfaces per-root errors", func(t *testing.T) {
+		// A real walker checks ctx inside runWalk (e.g. director lookup returns
+		// ctx.Err()). The two paths in fanOutWalk's select -- "grab a semaphore
+		// slot" and "ctx.Done()" -- race non-deterministically when both are
+		// ready, so the test walker mirrors real behavior by returning ctx.Err()
+		// on its own. Either path (aborted-before-start or aborted-inside-walk)
+		// must surface as a per-root component of the joined error.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		roots := []string{"a", "b", "c"}
+		err := fanOutWalk(ctx, roots, 2,
+			func(root string, info FileInfo, emitErr error) error { return nil },
+			func(root string, cb WalkFunc) error {
+				return ctx.Err()
+			})
+		require.Error(t, err)
+		msg := err.Error()
+		for _, r := range roots {
+			assert.Contains(t, msg, fmt.Sprintf("walk %q", r),
+				"every root's failure must appear in the joined error")
+		}
+	})
+
+	t.Run("empty roots slice returns nil without spawning goroutines", func(t *testing.T) {
+		// WalkMany short-circuits at len(roots)==0; fanOutWalk itself never
+		// sees an empty slice via that call path, but if it does, it must
+		// still behave (no divide-by-zero on the parallelism cap and no
+		// goroutine leaks). Cover it directly here for safety.
+		err := fanOutWalk(context.Background(), nil, 4,
+			func(string, FileInfo, error) error { return nil },
+			func(string, WalkFunc) error {
+				t.Fatal("walker must not be invoked for an empty roots slice")
+				return nil
+			})
+		require.NoError(t, err)
 	})
 }

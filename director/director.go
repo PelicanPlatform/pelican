@@ -88,7 +88,7 @@ type (
 	// be at most one supported namespace for each server that's the "best match"
 	copyAd struct {
 		ServerAd    server_structs.ServerAd
-		NamespaceAd server_structs.NamespaceAdV2
+		NamespaceAd server_structs.NamespaceAd
 	}
 
 	// Special Director redirect errors
@@ -138,8 +138,12 @@ const (
 
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
-	minOriginVersion, _ = version.NewVersion("7.0.0")
-	minCacheVersion, _  = version.NewVersion("7.3.0")
+	// Origins >= 7.9.0 and caches >= 7.8.2 report their registry prefix in the
+	// advertisement; older versions do not and can no longer be verified, so the
+	// version gate rejects them here with an accurate "please update" message
+	// (the missing-registry-prefix check later is a defensive fallback).
+	minOriginVersion, _ = version.NewVersion("7.9.0")
+	minCacheVersion, _  = version.NewVersion("7.8.2")
 	// TODO: Consolidate the two maps into server_structs.Advertisement. [#1391]
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
@@ -370,7 +374,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 }
 
 // Generate the link header for the response, which encodes our metalink-prioritized list of redirect servers
-func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2) {
+func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd server_structs.NamespaceAd) {
 	reqPath := getObjectPathFromRequest(ctx)
 
 	// if err != nil, depth == 0, which is the default value for depth
@@ -409,82 +413,20 @@ func corsHeadersMiddleware(ginCtx *gin.Context) {
 // Generates the X-Pelican-Authorization header (when applicable) for responses that have
 // issued a request where token generation may be needed. This header informs the client
 // of the issuer that can be used to generate a token for the requested resource.
-func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
-	if len(namespaceAd.Issuer) != 0 {
-		issStrings := []string{}
-		for _, tokIss := range namespaceAd.Issuer {
-			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
-		}
-		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
-	}
+func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAd) {
+	server_structs.SetXAuthHeader(ginCtx.Writer.Header(), namespaceAd)
 }
 
 // Generates the X-Pelican-Token-Generation header (when applicable) for responses that have
 // issued a request where token generation may be needed.
-func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
-	if len(namespaceAd.Generation) != 0 {
-		tokenGen := ""
-		first := true
-		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
-		// to fix this because the token gen header uses the issuer URL from NamespaceAdV2.Generation.CredentialIssuer, whereas basepaths
-		// come from NamespaceAdV2.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
-		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
-		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
-		var basePath string
-		for _, issuer := range namespaceAd.Issuer {
-			if issuer.IssuerUrl.String() == namespaceAd.Generation[0].CredentialIssuer.String() {
-				if len(issuer.BasePaths) > 0 {
-					basePath = issuer.BasePaths[0]
-				}
-				break
-			}
-		}
-
-		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
-			string(namespaceAd.Generation[0].Strategy), basePath}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path"} {
-			hdrVal := hdrVals[idx]
-			if hdrVal == "" {
-				continue
-			} else if hdrKey == "max-scope-depth" && hdrVal == "0" {
-				// don't send a 0 max-scope-depth because it's malformed and probably means there should be no token generation header
-				continue
-			}
-			if !first {
-				tokenGen += ", "
-			}
-			first = false
-			tokenGen += hdrKey + "=" + hdrVal
-		}
-
-		if tokenGen != "" {
-			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
-		}
-	}
+func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAd) {
+	server_structs.SetXTokenGenHeader(ginCtx.Writer.Header(), namespaceAd)
 }
 
 // Generate the X-Pelican-Namespace header, which includes information about the namespace and whether token auth is required
 // for reading from this namespace
-func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) {
-	var collUrl string
-	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
-	for _, oAd := range oAds {
-		if oAd.Caps.Listings && bestNSAd.Caps.Listings {
-			if !bestNSAd.Caps.PublicReads && oAd.AuthURL != (url.URL{}) {
-				collUrl = oAd.AuthURL.String()
-				break
-			} else {
-				collUrl = oAd.URL.String()
-				break
-			}
-		}
-	}
-
-	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", bestNSAd.Path, !bestNSAd.Caps.PublicReads)
-	if collUrl != "" {
-		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
-	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
+func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAd) {
+	server_structs.SetXNamespaceHeader(ginCtx.Writer.Header(), oAds, bestNSAd)
 }
 
 // Generate the X-Pelican-Broker header using the first origin ad we find supporting
@@ -678,7 +620,7 @@ func mapQueriesToCaps(ctx *gin.Context) string {
 	return capsStr
 }
 
-func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) {
+func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAd, requestId uuid.UUID) {
 	reqPath := getObjectPathFromRequest(ctx)
 	if len(chosenAds) == 0 {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -968,7 +910,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				Path:   "/api/v1.0/director/healthTest",
 			},
 		}
-		monitoringNs := server_structs.NamespaceAdV2{
+		monitoringNs := server_structs.NamespaceAd{
 			Path: server_utils.MonitoringBaseNs,
 			Caps: server_structs.Capabilities{
 				PublicReads: true,
@@ -1140,6 +1082,69 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
+// resolveRegisteredServerName returns the server name registered under prefix at
+// the registry. It is a package variable so tests can stub it.
+var resolveRegisteredServerName = func(ctx context.Context, prefix string) (string, error) {
+	reg, err := server_utils.GetServerMetadataFromReg(ctx, prefix)
+	if err != nil {
+		return "", err
+	}
+	return reg.Name, nil
+}
+
+// registeredNameCache caches prefix → registered-name lookups so that
+// downtimeNameAuthorized doesn't cost a registry round-trip on every
+// advertisement. Registered names change rarely; lookup errors are not cached.
+var registeredNameCache = ttlcache.New(
+	ttlcache.WithTTL[string, string](10*time.Minute),
+	ttlcache.WithDisableTouchOnHit[string, string](),
+)
+
+// downtimeNameAuthorized guards the name-keyed downtime/routing filter against a
+// cross-server manipulation attack: the advertise token only authenticates the
+// server's registry prefix, not its free-form Name, so a server holding a valid
+// token for its own prefix could otherwise advertise another server's name and
+// mutate the victim's filter state — suppress it with a shutdown status or a
+// downtime entry, or clear the victim's active downtime by advertising its name
+// with an empty downtime list.
+func downtimeNameAuthorized(ctx context.Context, adName string, registryPrefix string) bool {
+	// The downtime/routing filter is a server concept; only a genuine origin or
+	// cache prefix may touch it. A namespace prefix (e.g. /foo/bar) must never
+	// mutate a server's downtime state, even one the caller legitimately controls
+	// and holds a valid advertise token for
+	if !server_structs.IsOriginNS(registryPrefix) && !server_structs.IsCacheNS(registryPrefix) {
+		log.Warningf("Ignoring downtime/status in advertisement from %q: registry prefix %q is not a server (origin/cache) prefix", adName, registryPrefix)
+		return false
+	}
+
+	var registeredName string
+	if item := registeredNameCache.Get(registryPrefix); item != nil {
+		registeredName = item.Value()
+	} else {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		name, err := resolveRegisteredServerName(lookupCtx, registryPrefix)
+		if err != nil || name == "" {
+			// Fail closed: without a positively-resolved registered name we cannot
+			// confirm the advertiser owns adName, so we do not let it mutate another
+			// server's filter state. Do not cache this non-result.
+			if err != nil {
+				log.Warningf("Ignoring downtime/status in advertisement from %q: could not resolve the server registered under %q: %v", adName, registryPrefix, err)
+			} else {
+				log.Warningf("Ignoring downtime/status in advertisement from %q: no server name is registered under %q", adName, registryPrefix)
+			}
+			return false
+		}
+		registeredNameCache.Set(registryPrefix, name, ttlcache.DefaultTTL)
+		registeredName = name
+	}
+	if registeredName != adName {
+		log.Warningf("Ignoring downtime/status in advertisement from %q: it does not match the name %q registered under prefix %q", adName, registeredName, registryPrefix)
+		return false
+	}
+	return true
+}
+
 func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
 	ctx.Set("serverType", sType.String())
 	tokens, present := ctx.Request.Header["Authorization"]
@@ -1165,19 +1170,30 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Check if the allowed prefixes for caches data from the registry
 	// has been initialized in the director
 	if sType == server_structs.CacheType {
-		// If the allowed prefix for caches data is not initialized,
-		// wait for it to be initialized for 3 seconds.
-		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
-			log.Warning("Allowed prefixes for caches data is not initialized. Waiting for initialization before continuing with processing cache server advertisement.")
-			start := time.Now()
-			// Wait until last set timestamp is updated
-			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
-				if time.Since(start) >= 3*time.Second {
-					log.Error("Allowed prefix for caches data was not initialized within the 3-second timeout")
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
+		// A cache ad that arrives before the director has its allowed prefixes
+		// cannot be judged yet, so hold it rather than turning it away. The
+		// registry fetch behind this retries every second until it succeeds,
+		// but a cache whose ad is refused does not offer itself again until
+		// its next advertisement -- Server.AdvertisementInterval, a minute by
+		// default, with no retry in between. Refusing therefore costs the
+		// federation a minute without this cache to settle a condition that
+		// usually clears in seconds.
+		if !waitForAllowedPrefixesForCaches(ctx.Request.Context()) {
+			log.Error("Allowed prefixes for caches data was not initialized before this cache advertisement had to be answered")
+			// Distinct from the stale case below: nothing is known to be
+			// wrong, the director is simply not ready, so say so with a
+			// retryable status rather than a 500.
+			//
+			// Note that Pelican's own advertiser does not read this hint --
+			// doAdvertise treats any failure alike and waits for its next
+			// cycle -- so this is correct HTTP for other clients rather than
+			// something that shortens the retry today.
+			ctx.Header("Retry-After", "1")
+			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "The Director has not yet fetched this cache's allowed prefixes from the Registry; please retry shortly.",
+			})
+			return
 		}
 
 		// If the allowed prefix for caches data is stale (older than 15 minutes),
@@ -1192,41 +1208,32 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		}
 	}
 
-	ad := server_structs.OriginAdvertiseV1{}
-	adV2 := server_structs.OriginAdvertiseV2{}
+	ad := server_structs.OriginAdvertise{}
 	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
 	if err != nil {
-		// Failed binding to a V1 type, so should now check to see if it's a V2 type
-		adV2 = server_structs.OriginAdvertiseV2{}
-		err2 := ctx.ShouldBindBodyWith(&adV2, binding.JSON)
-		if err2 != nil {
-			log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err, "original V1 error is", err)
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid %s registration", sType),
-			})
-			return
-		}
-	} else {
-		// If the OriginAdvertisement is a V1 type, convert to a V2 type
-		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
+		log.Debugf("Failed to parse %s registration from service %q at %s: %v", sType, service, ctx.RemoteIP(), err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("invalid %s registration: %v", sType, err),
+		})
+		return
 	}
 
 	// Check every namespace path to strip the trailing slash
-	for i := range adV2.Namespaces {
-		adV2.Namespaces[i].Path = server_utils.RemoveTrailingSlash(adV2.Namespaces[i].Path)
+	for i := range ad.Namespaces {
+		ad.Namespaces[i].Path = server_utils.RemoveTrailingSlash(ad.Namespaces[i].Path)
 	}
 
 	// Filter the advertised prefixes in the cache server ad
 	// based on the allowed prefixes for caches data.
 	if sType == server_structs.CacheType {
 		// Parse URL to extract hostname
-		parsedURL, err := url.Parse(adV2.DataURL)
+		parsedURL, err := url.Parse(ad.DataURL)
 		if err != nil {
 			log.Debugln("Failed to parse data URL for cache:", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
+				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", ad.DataURL, err.Error()),
 			})
 			return
 		}
@@ -1240,10 +1247,10 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		//
 		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
 		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
-			filteredNamespaces := []server_structs.NamespaceAdV2{}
+			filteredNamespaces := []server_structs.NamespaceAd{}
 			filteredPaths := []string{} // Collect filtered prefixes
 
-			for _, namespace := range adV2.Namespaces {
+			for _, namespace := range ad.Namespaces {
 				// Default allow for paths starting with "/pelican/"
 				if strings.HasPrefix(namespace.Path, "/pelican/") {
 					filteredNamespaces = append(filteredNamespaces, namespace)
@@ -1263,19 +1270,19 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				log.Infof("Filtered out prefixes: %v in the server ad for cache %s", filteredPaths, cacheHostname)
 			}
 
-			adV2.Namespaces = filteredNamespaces
+			ad.Namespaces = filteredNamespaces
 		}
 	}
 
 	// Set to ctx for metrics handler downstream
-	ctx.Set("serverName", adV2.Name)
-	ctx.Set("serverWebUrl", adV2.WebURL)
+	ctx.Set("serverName", ad.Name)
+	ctx.Set("serverWebUrl", ad.WebURL)
 
 	// Iterate over each advertised namespace and join the paths together
 	// into a string where each path is separated by a space
 	// i.e. "<path> <path> <path>"
 	var namespacePaths string
-	for _, namespace := range adV2.Namespaces {
+	for _, namespace := range ad.Namespaces {
 		path := namespace.Path
 		namespacePaths = fmt.Sprintf("%s %s", namespacePaths, path)
 	}
@@ -1285,17 +1292,44 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Verify server registration
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
 
-	registryPrefix := server_utils.RemoveTrailingSlash(adV2.RegistryPrefix)
-	verifyServer := true
+	registryPrefix := server_utils.RemoveTrailingSlash(ad.RegistryPrefix)
 	if registryPrefix == "" {
-		if sType == server_structs.OriginType {
-			// For origins < 7.9.0, they are not registered, and we skip the verification
-			verifyServer = false
-		} else {
-			// For caches <= 7.8.1, they don't have RegistryPrefix
-			// so we fall back to Name
-			registryPrefix = server_structs.GetCacheNs(adV2.Name)
-		}
+		// Every supported server (Pelican >= 7.9.0 origins, >= 7.8.2 caches) registers
+		// itself and reports its registry prefix in the ad; without the prefix the
+		// advertise token cannot be verified.
+		log.Warningf("Rejecting %s advertisement from %q: no registry prefix present in the ad", sType.String(), ad.Name)
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%s advertisement rejected: no registry prefix present in the ad. Ensure the server runs a supported Pelican version and is registered at the federation registry", sType.String()),
+		})
+		// This rejection happens before the advertise token is verified, so ad.Name
+		// is unauthenticated and attacker-controllable. Record it under a fixed label
+		// to avoid unbounded Prometheus label cardinality from bogus advertisements.
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": "unverified"}).Inc()
+		return
+	}
+
+	// The advertise token only proves the caller holds an approved key for the
+	// prefix it named; it does not prove that registry prefix is a server prefix.
+	// This ensures a caller cannot enroll an origin/cache with a namespace prefix,
+	// also cannot cross-register origin using cache's identity (or vice versa).
+	var prefixTypeOK bool
+	switch sType {
+	case server_structs.OriginType:
+		prefixTypeOK = server_structs.IsOriginNS(registryPrefix)
+	case server_structs.CacheType:
+		prefixTypeOK = server_structs.IsCacheNS(registryPrefix)
+	}
+	if !prefixTypeOK {
+		log.Warningf("Rejecting %s advertisement from %q: registry prefix %q is not a %s server prefix", sType.String(), ad.Name, registryPrefix, sType.String())
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%s advertisement rejected: registry prefix %q is not a valid %s registration prefix", sType.String(), registryPrefix, sType.String()),
+		})
+		// Reached before the advertise token is verified, so ad.Name is
+		// unauthenticated; use a fixed label to bound Prometheus cardinality.
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": "unverified"}).Inc()
+		return
 	}
 
 	approvalErrMsg := "You may find more information on " + param.Server_ExternalWebUrl.GetString()
@@ -1308,38 +1342,36 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		approvalErrMsg = fmt.Sprintf("Visit %s for help.", param.Director_SupportContactUrl.GetString())
 	}
 
-	if verifyServer {
-		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
-		if err != nil {
-			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
-				return
-			} else {
-				log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), adV2.Name, registryPrefix, err)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
-				})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
-				return
-			}
-		}
-		if !ok {
-			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
+	ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
+	if err != nil {
+		if err == adminApprovalErr {
+			log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), ad.Name)
+			ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+			return
+		} else {
+			log.Warningf("Failed to verify advertise token for %s %q (prefix %q): %v", sType.String(), ad.Name, registryPrefix, err)
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Authorization token verification failed. Token missing required scope",
+				Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 			})
-			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 			return
 		}
+	}
+	if !ok {
+		log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authorization token verification failed. Token missing required scope",
+		})
+		metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
+		return
 	}
 
 	// For origin, also verify namespace registrations
 	if sType == server_structs.OriginType {
-		for _, namespace := range adV2.Namespaces {
+		for _, namespace := range ad.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
 			ok, err := verifyAdvertiseToken(engineCtx, token, namespace.Path)
@@ -1347,26 +1379,26 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
-					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 					return
 				} else {
-					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), adV2.Name, err)
+					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), ad.Name, err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
-					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 					return
 				}
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid token scope\n",
-					sType, adV2.Name, namespace.Path)
+					sType, ad.Name, namespace.Path)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    "Authorization token verification failed. Token missing required scope",
 				})
-				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 				return
 			}
 		}
@@ -1375,130 +1407,153 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
 	// then we can fallback to the request version
 	// otherwise, we set the version to unknown because our sources of truth are not available
-	if adV2.Version == "" && reqVer != nil {
-		adV2.Version = reqVer.String()
-	} else if adV2.Version != "" && reqVer != nil {
-		parsedAdVersion, err := version.NewVersion(adV2.Version)
+	if ad.Version == "" && reqVer != nil {
+		ad.Version = reqVer.String()
+	} else if ad.Version != "" && reqVer != nil {
+		parsedAdVersion, err := version.NewVersion(ad.Version)
 		if err != nil {
 			// ad version was not a valid version, so we fallback to the request version
-			adV2.Version = reqVer.String()
+			ad.Version = reqVer.String()
 		} else if !parsedAdVersion.Equal(reqVer) {
-			// if the reqVer doesn't match the adV2.version, we should use the adV2.version
-			adV2.Version = parsedAdVersion.String()
+			// if the reqVer doesn't match the ad.version, we should use the ad.version
+			ad.Version = parsedAdVersion.String()
 		}
-	} else if adV2.Version == "" {
-		adV2.Version = "unknown"
+	} else if ad.Version == "" {
+		ad.Version = "unknown"
 	}
 
-	sn := adV2.Name
-	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
-	applyServerDowntimes(sn, adV2.Downtimes)
+	// The downtime/routing filter below is keyed by the advertised server name,
+	// which the advertise token does not authenticate — it only authenticates the
+	// registry prefix. downtimeNameAuthorized gates BOTH the downtime handling and
+	// the Status-driven shutdownFiltered entry: when the advertised name doesn't
+	// match the name registered under that prefix, we still accept the ad (a
+	// legitimate server may have a local sitename that differs from its
+	// registration) but skip all filter mutation, so a server can neither suppress
+	// nor resurrect routing for a name it doesn't own.
+	sn := ad.Name
+	if downtimeNameAuthorized(engineCtx, sn, registryPrefix) {
+		// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
+		applyServerDowntimes(sn, ad.Downtimes)
 
-	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
-	if adV2.Status != "" { // For backward compatibility, we only process this if it is set
-		// If the server is about to shutdown, we silently put it into downtime.
-		// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
-		if metrics.ParseHealthStatus(adV2.Status) == metrics.StatusShuttingDown {
-			filteredServersMutex.Lock()
-			// Inspect the existing downtime status for this server
-			existingFilterType, isServerFiltered := filteredServers[sn]
+		// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
+		if ad.Status != "" { // For backward compatibility, we only process this if it is set
+			// If the server is about to shutdown, we silently put it into downtime.
+			// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
+			if metrics.ParseHealthStatus(ad.Status) == metrics.StatusShuttingDown {
+				filteredServersMutex.Lock()
+				// Inspect the existing downtime status for this server
+				existingFilterType, isServerFiltered := filteredServers[sn]
 
-			// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
-			if !isServerFiltered || existingFilterType == tempAllowed {
-				filteredServers[sn] = shutdownFiltered
-				log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
-			}
-			filteredServersMutex.Unlock()
-		} else {
-			// If the server is back online, we flush out existing shutdown filter if it exists
-			filteredServersMutex.Lock()
-			if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
-				if existingFilterType == shutdownFiltered {
-					delete(filteredServers, sn)
-					log.Debugf("Removed the active downtime for server %s as it has come back online", sn)
+				// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
+				if !isServerFiltered || existingFilterType == tempAllowed {
+					filteredServers[sn] = shutdownFiltered
+					log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
 				}
+				filteredServersMutex.Unlock()
+			} else {
+				// If the server is back online, we flush out existing shutdown filter if it exists
+				filteredServersMutex.Lock()
+				if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
+					if existingFilterType == shutdownFiltered {
+						delete(filteredServers, sn)
+						log.Debugf("Removed the active downtime for server %s as it has come back online", sn)
+					}
+				}
+				filteredServersMutex.Unlock()
 			}
-			filteredServersMutex.Unlock()
 		}
+	} else {
+		// Name unauthorized for this prefix: do not touch filteredServers/serverDowntimes
+		// above, and clear the ad's Downtimes so they aren't persisted or forwarded to
+		// peer directors. Note ad.Status is intentionally left intact — it is still the
+		// server's own health report and is forwarded/stored — it just cannot drive a
+		// shutdownFiltered entry under an unverified name (that path is skipped above).
+		ad.Downtimes = nil
 	}
 
 	// Forward to other directors, if applicable
-	forwardServiceAd(engineCtx, &adV2, sType, nil)
+	forwardServiceAd(engineCtx, &ad, sType, nil)
 
 	// Correct any clock skews detected in the client
 	now := time.Now()
-	if skew := now.Sub(adV2.Now); !adV2.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
-		lifetime := adV2.GetExpiration().Sub(adV2.Now)
+	if skew := now.Sub(ad.Now); !ad.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
+		lifetime := ad.GetExpiration().Sub(ad.Now)
 		if lifetime > 0 {
-			adV2.Expiration = now.Add(lifetime)
+			ad.Expiration = now.Add(lifetime)
 		}
 	}
-	adV2.Now = time.Time{}
+	ad.Now = time.Time{}
 
-	finishRegisterServeAd(engineCtx, ctx, &adV2, sType)
+	finishRegisterServeAd(engineCtx, ctx, &ad, sType)
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
-func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
-	log.Debugf("finishRegisterServeAd received %+v", adV2)
-	st := adV2.StorageType
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType) {
+	log.Debugf("finishRegisterServeAd received %+v", ad)
+	st := ad.StorageType
 	// Defaults to POSIX
 	if st == "" {
 		st = server_structs.OriginStoragePosix
 	}
-	// Disable director test if the server isn't POSIX
-	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
-		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, adV2.Name, string(st))
-		adV2.DisableDirectorTest = true
+	// Disable director test if the server isn't POSIX-like (posix / posixv2).
+	// Remote-protocol backends (S3, HTTPS, Globus, etc.) cannot accept the
+	// probe-file write/read that the director test relies on.
+	if !st.SupportsSelfTest() && !ad.DisableDirectorTest {
+		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, ad.Name, string(st))
+		ad.DisableDirectorTest = true
 	}
 
-	adUrl, err := url.Parse(adV2.DataURL)
+	adUrl, err := url.Parse(ad.DataURL)
 	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.DataURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, ad.DataURL), // Origin.URL / Cache.URL
 		})
 		return
 	}
 
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+	adWebUrl, err := url.Parse(ad.WebURL)
+	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", ad.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s %s is not a valid URL", param.Server_ExternalWebUrl.GetName(), sType, adV2.WebURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. %s %s is not a valid URL", param.Server_ExternalWebUrl.GetName(), sType, ad.WebURL),
 		})
 		return
 	}
 
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	brokerUrl, err := url.Parse(ad.BrokerURL)
 	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		log.Warningf("Failed to parse broker URL %s: %s", ad.BrokerURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, ad.BrokerURL),
 		})
 	}
 
 	sAd := server_structs.ServerAd{
-		ServerID:            adV2.ServerID,
-		RegistryPrefix:      adV2.RegistryPrefix,
+		ServerID:            ad.ServerID,
+		RegistryPrefix:      ad.RegistryPrefix,
 		StorageType:         st,
-		DisableDirectorTest: adV2.DisableDirectorTest,
+		DisableDirectorTest: ad.DisableDirectorTest,
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,
 		BrokerURL:           *brokerUrl,
 		Type:                sType.String(),
-		Caps:                adV2.Caps,
-		RequiredFeatures:    adV2.RequiredFeatures,
+		Caps:                ad.Caps,
+		RequiredFeatures:    ad.RequiredFeatures,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
-		Downtimes:           adV2.Downtimes,
-		Status:              adV2.Status,
+		Downtimes:           ad.Downtimes,
+		Status:              ad.Status,
 	}
-	sAd.CopyFrom(adV2)
+	// If the server declared its own geolocation via GeoLocation config, honor it.
+	if ad.Coordinate != nil {
+		sAd.Coordinate = *ad.Coordinate
+	}
+	sAd.CopyFrom(ad)
 
-	recordAd(engineCtx, sAd, &adV2.Namespaces)
+	recordAd(engineCtx, sAd, &ad.Namespaces)
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }
@@ -1555,8 +1610,7 @@ func discoverOriginCache(ctx *gin.Context) {
 	}
 
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
-	for _, ad := range serverAds.Items() {
-		serverAd := ad.Value()
+	for _, serverAd := range getServerAdsSnapshot() {
 		if serverAd.WebURL.String() == "" {
 			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
@@ -1584,24 +1638,27 @@ func discoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func listNamespacesV1(ctx *gin.Context) {
-	namespaceAdsV2 := listNamespacesFromOrigins()
-
-	namespaceAdsV1 := server_structs.ConvertNamespaceAdsV2ToV1(namespaceAdsV2)
-
-	ctx.JSON(http.StatusOK, namespaceAdsV1)
+// listNamespacesV1Deprecated keeps the removed V1 namespace-listing path plumbed so it
+// returns a deprecation notice instead of a 404, and so no future handler is accidentally
+// bound to it. The V1 ad format is gone; this endpoint serves no data.
+func listNamespacesV1Deprecated(ctx *gin.Context) {
+	ctx.Header("Warning", `299 - "Deprecated API: use GET /api/v2.0/director/listNamespaces"`)
+	ctx.JSON(299, server_structs.SimpleApiResp{
+		Status: server_structs.RespFailed,
+		Msg:    "the GET /api/v1.0/director/listNamespaces endpoint is deprecated and no longer returns data; use GET /api/v2.0/director/listNamespaces",
+	})
 }
 
 func listNamespacesV2(ctx *gin.Context) {
-	namespacesAdsV2 := listNamespacesFromOrigins()
-	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
+	namespacesAds := listNamespacesFromOrigins()
+	namespacesAds = append(namespacesAds, server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
 			Reads:       true,
 		},
 		Path: server_utils.MonitoringBaseNs,
 	})
-	ctx.JSON(http.StatusOK, namespacesAdsV2)
+	ctx.JSON(http.StatusOK, namespacesAds)
 }
 
 func getPrefixByPath(ctx *gin.Context) {
@@ -1844,7 +1901,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/getFedToken", getFedToken)
-		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
+		directorAPIV1.GET("/listNamespaces", listNamespacesV1Deprecated)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)

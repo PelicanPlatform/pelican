@@ -10,6 +10,7 @@ This document describes the custom HTTP headers used throughout the Pelican plat
   - [X-Pelican-Debug](#x-pelican-debug)
   - [X-Pelican-User](#x-pelican-user)
   - [X-Transfer-Status](#x-transfer-status)
+  - [X-Pelican-Object-Metadata](#x-pelican-object-metadata)
 - [Response Headers](#response-headers)
   - [X-Pelican-Authorization](#x-pelican-authorization)
   - [X-Pelican-Token-Generation](#x-pelican-token-generation)
@@ -17,6 +18,10 @@ This document describes the custom HTTP headers used throughout the Pelican plat
   - [X-Pelican-Broker](#x-pelican-broker)
   - [X-Pelican-JobId](#x-pelican-jobid-response)
   - [X-Transfer-Status](#x-transfer-status-trailer)
+  - [X-Pelican-Metadata-Status](#x-pelican-metadata-status)
+  - [X-Pelican-Metadata-Query-Url / X-Pelican-Metadata-Manage-Url](#x-pelican-metadata-query-url--x-pelican-metadata-manage-url)
+- [Metadata Webhook Headers (Origin → External Catalog)](#metadata-webhook-headers-origin--external-catalog)
+  - [X-Pelican-Idempotency-Key](#x-pelican-idempotency-key)
 - [Other Headers](#other-headers)
   - [X-CSRF-Token](#x-csrf-token)
 
@@ -152,6 +157,29 @@ TE: trailers
 - Client must support HTTP trailers
 - Used in conjunction with the `TE` header
 - Response status is sent in the trailer (see [X-Transfer-Status Trailer](#x-transfer-status-trailer))
+
+---
+
+### X-Pelican-Object-Metadata
+
+**Direction:** Client → Origin (V2 / POSIXv2 origin)
+
+**Purpose:** Attaches uploader-supplied custom metadata to an object on upload, to be forwarded to the origin's configured metadata catalog when object-commit publishing is enabled.
+
+**Format:** A single [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651) Structured-Fields **dictionary**.
+
+**Description:** On a `PUT`, the origin parses this header and inlines its typed key/value pairs into the `object` field of the outbound webhook JSON. Structured Fields are used (rather than embedding JSON in a header) so values keep their type across intermediaries — e.g. `run_number=4172` round-trips as a JSON integer. The reserved keys `path`, `size`, `etag`, and `created_at` are origin-computed and cannot be overridden by the client. The client rejects a custom key that collides with a reserved key before sending the request, and the origin independently ignores (overwrites) any colliding key that still arrives.
+
+**Example:**
+
+```
+X-Pelican-Object-Metadata: experiment="atlas", run_number=4172, is_test=?0
+```
+
+**Notes:**
+
+- Only meaningful when `Origin.Metadata.Enabled` is true for the export.
+- See the [metadata publish design doc](metadata-publish-design.md) for the full webhook contract.
 
 ---
 
@@ -342,6 +370,80 @@ X-Transfer-Status: 500: unexpected EOF
 - Only sent if client sets `X-Transfer-Status: true` and `TE: trailers` headers
 - Allows error reporting even after response headers have been sent
 - Client must support HTTP trailers to receive this information
+
+---
+
+### X-Pelican-Metadata-Status
+
+**Direction:** Origin → Client (on the upload `PUT` response)
+
+**Purpose:** Tells the uploading client the outcome of the origin's *initial* attempt to publish the object-commit event to the metadata catalog.
+
+**Format:** One of `published`, `queued`, `rejected`.
+
+**Description:** When metadata publishing is enabled, the origin makes one synchronous publish attempt during the `PUT` so the client learns the result immediately:
+
+- `published` — the catalog accepted the event on the first try (nothing left to track).
+- `queued` — the first attempt failed transiently; the origin durably queued the event and a background worker will retry (eventual mode only). Accompanied by the query/manage URLs below.
+- `rejected` — the catalog permanently refused the event (HTTP 422); it will not be retried. Accompanied by the query/manage URLs so the client can inspect / clean it up.
+
+In transactional mode a failed publish fails the `PUT` itself (5xx), so only `published` is ever reported there.
+
+**Example:**
+
+```
+X-Pelican-Metadata-Status: queued
+```
+
+---
+
+### X-Pelican-Metadata-Query-Url / X-Pelican-Metadata-Manage-Url
+
+**Direction:** Origin → Client (on the upload `PUT` response, eventual mode)
+
+**Purpose:** Give the uploader unguessable **capability URLs** to check on, and cancel, its own queued publish — without needing a separate bearer token. Possession of the URL is the authorization.
+
+**Format:** Absolute URL.
+
+**Description:** Sent only when the event persists in the queue (`queued` or `rejected`). Each URL embeds a long random per-object token:
+
+- **Query URL** — `GET` returns the current publish state (`pending`/`rejected`, attempt count, last error). Read-only.
+- **Manage URL** — `GET` also returns state; `DELETE` cancels/deletes the queued publish. The manage token is required to cancel; the query token cannot.
+
+A `GET` that returns `404` means the token is unknown *or* the publish already completed successfully (successful rows are deleted). Operators can also manage the queue through the admin API (which is gated by the origin admin scope) — these capability URLs are the client-facing equivalent scoped to a single object.
+
+**Example:**
+
+```
+X-Pelican-Metadata-Query-Url: https://origin.example.org:8447/api/v1.0/origin_ui/metadata_publish/8Zreal0Random1Token2Here
+X-Pelican-Metadata-Manage-Url: https://origin.example.org:8447/api/v1.0/origin_ui/metadata_publish/9OtherRandomManageToken3
+```
+
+---
+
+## Metadata Webhook Headers (Origin → External Catalog)
+
+Headers the origin sets on the outbound object-commit webhook `POST` to a configured external metadata catalog.
+
+### X-Pelican-Idempotency-Key
+
+**Direction:** Origin → External Catalog
+
+**Purpose:** Lets the catalog dedupe redelivered events (the origin retries on failure, so the same event may arrive more than once).
+
+**Format:** UUID string (the event's `id`, repeated from the JSON body).
+
+**Description:** Every webhook `POST` carries this header set to the event's stable UUIDv4. Receivers that prefer HTTP-level dedup can key off it without parsing the body; the same value also appears as `id` in the JSON. The non-RFC `Idempotency-Key` name (still an IETF draft) is namespaced with the `X-Pelican-` prefix per project convention.
+
+**Example:**
+
+```
+X-Pelican-Idempotency-Key: 8d9d5f3e-4f5b-4f1e-9c1f-2a8a7b1d6c43
+```
+
+**Notes:**
+
+- The `POST` is also authenticated with a `Bearer` JWT carrying the `pelican.metadata:/<namespace>` scope (see the [metadata publish design doc](metadata-publish-design.md)).
 
 ---
 

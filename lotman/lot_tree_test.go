@@ -31,14 +31,14 @@ import (
 )
 
 // makeAds is a tiny helper that turns a list of namespace paths into
-// NamespaceAdV2 values with a single shared issuer. Tree shape only
+// NamespaceAd values with a single shared issuer. Tree shape only
 // depends on path containment, not on issuer identity, so the issuer
 // is constant for these table tests.
-func makeAds(paths ...string) []server_structs.NamespaceAdV2 {
+func makeAds(paths ...string) []server_structs.NamespaceAd {
 	issuerURL, _ := url.Parse("https://issuer.example/")
-	out := make([]server_structs.NamespaceAdV2, 0, len(paths))
+	out := make([]server_structs.NamespaceAd, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, server_structs.NamespaceAdV2{
+		out = append(out, server_structs.NamespaceAd{
 			Path: p,
 			Issuer: []server_structs.TokenIssuer{
 				{IssuerUrl: *issuerURL},

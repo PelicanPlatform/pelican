@@ -32,10 +32,10 @@ import (
 
 const mockPathPreix string = "/foo/bar/"
 
-func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceAdV2 {
-	namespaceAds := make([]server_structs.NamespaceAdV2, size)
+func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceAd {
+	namespaceAds := make([]server_structs.NamespaceAd, size)
 	for i := 0; i < size; i++ {
-		namespaceAds[i] = server_structs.NamespaceAdV2{
+		namespaceAds[i] = server_structs.NamespaceAd{
 			Caps: server_structs.Capabilities{
 				PublicReads: false,
 			},
@@ -53,7 +53,7 @@ func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceA
 	return namespaceAds
 }
 
-func namespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) bool {
+func namespaceAdContainsPath(ns []server_structs.NamespaceAd, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -180,11 +180,11 @@ func TestListServerAds(t *testing.T) {
 		}()
 		mockOriginAd := server_structs.Advertisement{
 			ServerAd:     mockOriginServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{},
+			NamespaceAds: []server_structs.NamespaceAd{},
 		}
 		mockCacheAd := server_structs.Advertisement{
 			ServerAd:     mockCacheServerAd,
-			NamespaceAds: []server_structs.NamespaceAdV2{},
+			NamespaceAds: []server_structs.NamespaceAd{},
 		}
 
 		serverAds.Set(mockOriginServerAd.URL.String(),

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -40,13 +40,14 @@ var (
 	callbacks   map[string]ConfigCallback
 	callbackMux sync.RWMutex
 	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
-)
 
-// ConfigDir is the typed parameter for the "ConfigDir" configuration key.
-// ConfigDir is not defined in parameters.yaml (it is a special internal key
-// injected directly into the Config struct), so its typed constant lives here
-// rather than in the generated parameters.go.
-var ConfigDir = StringParam{"ConfigDir"}
+	// SetHook, if non-nil, is invoked from MultiSet for each key being set.
+	// The config package registers a hook here so the SourceTracker can
+	// distinguish programmatic Set calls from defaults. Kept as a plain
+	// variable (no sync) because it is set once at package init from
+	// config.init and read only afterward.
+	SetHook func(key string)
+)
 
 // ConfigCallback is a function that is called when configuration changes.
 // It receives the old and new configuration.
@@ -392,10 +393,10 @@ func setField(fieldType reflect.Type, value any) reflect.Value {
 // Helper function to convert config struct to configWithType struct using reflection
 func convertStruct(srcVal, destVal reflect.Value) {
 	// If the source or destination is a pointer, get the underlying element
-	if srcVal.Kind() == reflect.Ptr {
+	if srcVal.Kind() == reflect.Pointer {
 		srcVal = srcVal.Elem()
 	}
-	if destVal.Kind() == reflect.Ptr {
+	if destVal.Kind() == reflect.Pointer {
 		destVal = destVal.Elem()
 	}
 
@@ -516,6 +517,9 @@ func MultiSet(keyValues map[string]any) error {
 	// Set all values in viper
 	for key, value := range keyValues {
 		viper.Set(key, value)
+		if SetHook != nil {
+			SetHook(key)
+		}
 	}
 
 	// Create new config from updated viper

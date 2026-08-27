@@ -128,36 +128,46 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		return errors.Wrap(err, "failed to initialize Globus backend: failed to get pelican user")
 	}
 
-	// Get xrootd group so XRootD can read the token files
-	xrootdGid, err := config.GetDaemonGID()
-	if err != nil {
-		return errors.Wrap(err, "failed to initialize Globus backend: failed to get xrootd gid")
+	ost := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+	if ost != server_structs.OriginStorageGlobus && ost != server_structs.OriginStorageGlobusv2 {
+		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus or Globusv2: %s",
+			param.Origin_StorageType.GetString())
 	}
 
-	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) != server_structs.OriginStorageGlobus {
-		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus: %s",
-			param.Origin_StorageType.GetString())
+	// For the XRootD-backed Globus origin, the token files must be group-readable
+	// by the xrootd daemon. The native Globusv2 backend is served directly by the
+	// pelican process, so the xrootd group does not apply -- own the files with
+	// the pelican user's own group instead.
+	tokenGid := puser.Gid
+	if ost == server_structs.OriginStorageGlobus {
+		xrootdGid, err := config.GetDaemonGID()
+		if err != nil {
+			return errors.Wrap(err, "failed to initialize Globus backend: failed to get xrootd gid")
+		}
+		tokenGid = xrootdGid
 	}
 	// Init map
 	globusExports = make(map[string]*globusExport)
 
 	// Check and setup token location
-	// Directories are owned by pelican:xrootd with mode 0750:
+	// Directories are owned by pelican:<tokenGid> with mode 0750:
 	// - pelican (owner) can write token files even after dropPrivileges
-	// - xrootd (group) can read token files at runtime
+	// - the group can read token files at runtime; for the XRootD-backed
+	//   Globus origin that group is xrootd, while the native Globusv2 backend
+	//   uses pelican's own group since no xrootd daemon is involved
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokFdr := filepath.Join(globusFdr, "tokens")
 	if err := os.MkdirAll(tokFdr, 0750); err != nil {
 		return errors.Wrapf(err, "failed to create directory for Globus tokens: %s", tokFdr)
 	}
-	if err = os.Chown(globusFdr, puser.Uid, xrootdGid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and xrootd gid %d for Globus config", globusFdr, puser.Uid, xrootdGid)
+	if err = os.Chown(globusFdr, puser.Uid, tokenGid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and gid %d for Globus config", globusFdr, puser.Uid, tokenGid)
 	}
 	if err = os.Chmod(globusFdr, 0750); err != nil {
 		return errors.Wrapf(err, "unable to change the permissions of %s for Globus config", globusFdr)
 	}
-	if err = os.Chown(tokFdr, puser.Uid, xrootdGid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and xrootd gid %d for Globus tokens", tokFdr, puser.Uid, xrootdGid)
+	if err = os.Chown(tokFdr, puser.Uid, tokenGid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and gid %d for Globus tokens", tokFdr, puser.Uid, tokenGid)
 	}
 
 	globusAuthCfg, err := GetGlobusOAuthCfg()
@@ -369,6 +379,43 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	})
 
 	return exps
+}
+
+// GlobusCollectionInfo holds exported Globus collection data for use by
+// native (non-XRootD) backends.
+type GlobusCollectionInfo struct {
+	CollectionID    string
+	HTTPSServer     string
+	CollectionToken *oauth2.Token
+	TransferToken   *oauth2.Token
+	OAuth2Config    *oauth2.Config
+}
+
+// GetActivatedGlobusCollections returns info about all activated Globus collections,
+// suitable for initializing native Globus v2 backends.
+func GetActivatedGlobusCollections() ([]GlobusCollectionInfo, error) {
+	globusExportsMutex.RLock()
+	defer globusExportsMutex.RUnlock()
+
+	authCfg, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Globus OAuth config: %w", err)
+	}
+
+	var result []GlobusCollectionInfo
+	for cid, exp := range globusExports {
+		if exp.Status != GlobusActivated {
+			continue
+		}
+		result = append(result, GlobusCollectionInfo{
+			CollectionID:    cid,
+			HTTPSServer:     exp.HttpsServer,
+			CollectionToken: exp.Token,
+			TransferToken:   exp.TransferToken,
+			OAuth2Config:    authCfg,
+		})
+	}
+	return result, nil
 }
 
 // Parse the OriginExport to add Globus status for each export for frontend RESTful API

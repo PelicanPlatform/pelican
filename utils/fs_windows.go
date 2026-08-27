@@ -32,6 +32,14 @@ func FileOwnerIDs(_ os.FileInfo) (uid, gid int, err error) {
 	return 0, 0, errors.New("POSIX file ownership (uid/gid) is not available on Windows")
 }
 
+// FileVFSID is not implemented on Windows. POSIX-like origins are not
+// meaningfully supported on Windows, and FileInfo from os.Stat does not
+// expose a stable per-file identifier in the same form as syscall.Stat_t.
+// Callers should fall back to (size, mtime) when this returns (_, _, false).
+func FileVFSID(_ os.FileInfo) (dev, ino uint64, ok bool) {
+	return 0, 0, false
+}
+
 // SameFilesystem on Windows optimistically returns true. POSIX Origins are not
 // meaningfully supported on Windows, so the cross-filesystem check is skipped.
 func SameFilesystem(_, _ string) (bool, error) {

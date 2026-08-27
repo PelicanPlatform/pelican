@@ -9,13 +9,30 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   go-linter:
-    name: Go
+    name: Go (${{ matrix.goos }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux is the canonical configuration, and the only one that
+          # runs the whole-program "unused" linter: on the cross legs,
+          # a symbol's only callers often sit in files that GOOS excludes,
+          # so every finding there would be an artifact of the split.
+          - goos: linux
+            args: --config=.golangci.yaml
+          - goos: darwin
+            args: --config=.golangci.yaml --disable=unused
+          - goos: windows
+            args: --config=.golangci.yaml --disable=unused
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set Go version
         # Determine the string to use in setup-go's "go-version" input.
@@ -25,14 +42,17 @@ jobs:
           echo "version=${version}.x" >> $GITHUB_OUTPUT
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
           cache: false
 
+      # Python is needed only by the pre-commit step below, which we run
+      # only on Linux.
       - name: Set up Python
-        uses: actions/setup-python@v6
+        if: matrix.goos == 'linux'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"
 
@@ -40,31 +60,69 @@ jobs:
       # because pre-commit (below) isn't configured to run them within the
       # CI actions.
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+        env:
+          GOOS: ${{ matrix.goos }}
         with:
-          version: v2.9.0
-          args: --config=.golangci.yaml
+          version: v2.12.2
+          args: ${{ matrix.args }}
+          # The action's cache key uses the runner's OS, not GOOS, and
+          # every leg runs on Linux. golangci-lint's own cache entries are
+          # content-addressed, so they are safe to load on any OS.
+          # In order to make the action's cache deterministic, we make
+          # GOOS=linux the canonical writer.
+          skip-save-cache: ${{ matrix.goos != 'linux' }}
 
+      # Run the pre-commit hooks only on Linux because they are
+      # platform-independent; running them on all platforms simply
+      # wastes resources.
       - name: Run pre-commit
-        uses: pre-commit/action@v3.0.1
+        if: matrix.goos == 'linux'
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
   web-linter:
     name: Web
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: "web_ui/frontend/package.json"
-          cache: "npm"
-          cache-dependency-path: "web_ui/frontend/package-lock.json"
           check-latest: true
+
+      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
+      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
+      # container-based jobs, where the Actions-provided Node.js is not
+      # co-located with an npm. Installing pnpm with the npm that setup-node has
+      # just put on PATH sidesteps that. The version comes from the
+      # "packageManager" field, so it always matches the lockfile.
+      - name: Set up pnpm
+        id: pnpm
+        working-directory: web_ui/frontend
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          # Resolve the store path in its own assignment rather than inline in
+          # the echo, so that a failure aborts the step instead of quietly
+          # caching an empty path. pnpm chooses the store location based on the
+          # working directory's filesystem, so resolve it where installs run.
+          store="$(pnpm store path)"
+          echo "store=${store}" >> "$GITHUB_OUTPUT"
+
+      # Replaces setup-node's "cache: pnpm", which cannot be used because it
+      # requires pnpm to already be installed when setup-node runs.
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Run Prettier
         run: |
           cd web_ui/frontend
-          npm ci
-          npm run format
+          pnpm install --frozen-lockfile
+          pnpm run format

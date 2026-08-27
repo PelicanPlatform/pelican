@@ -26,6 +26,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"strconv"
@@ -150,6 +151,14 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	resp.Body.Close()
 	// Go's http.Client follows redirects automatically, so 3XX codes
 	// won't appear here.  Reject anything other than 200 OK.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// Source throttled the request; carry the Retry-After hint on the
+		// retryable throttle error. A response to HEAD never carries a body,
+		// so there is no structured reason to read here -- the error is
+		// classified generically, which is still retryable.
+		err = newThrottleErrorFromResponse(resp, "", xfer.attempts[0].Url.Host)
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode),
 			wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("source HEAD returned HTTP %d", resp.StatusCode))}
@@ -196,7 +205,18 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	}
 
 	// COPY request to the destination
-	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
+	//
+	// Tell the scheduler (if any) the destination is alive as soon as the first
+	// byte of its response arrives.  The trace is scoped to the COPY so the
+	// earlier HEAD — which contacts the *source* — cannot satisfy it.
+	copyContext := ctx
+	if xfer.schedFirstByte != nil {
+		schedFirstByte := xfer.schedFirstByte
+		copyContext = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GotFirstResponseByte: func() { schedFirstByte() },
+		})
+	}
+	req, err = http.NewRequestWithContext(copyContext, "COPY", resolvedDestUrl.String(), nil)
 	if err != nil {
 		err = error_codes.NewParameterError(
 			errors.Wrapf(err, "unable to create COPY request for third-party-copy to %s", xfer.remoteURL.String()),
@@ -228,7 +248,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		var respBytes []byte
-		respBytes, err = io.ReadAll(resp.Body)
+		respBytes, err = io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		if err != nil {
 			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
 			err = error_codes.NewContactError(
@@ -247,6 +267,10 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
 					resp.StatusCode), Err: statusErr}
+			} else if resp.StatusCode == http.StatusTooManyRequests {
+				// Destination throttled the copy; classify with the structured
+				// reason + Retry-After hint like any other throttle response.
+				err = newThrottleErrorFromResponse(resp, string(respBytes), resolvedDestUrl.Host)
 			} else {
 				log.Errorf("TPC COPY to %s failed (HTTP status %d): %q", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
@@ -264,6 +288,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	defer ticker.Stop()
 
 	gotFirstByte := false
+	schedFirstByteSent := false
 MessageHandler:
 	for {
 		select {
@@ -281,6 +306,15 @@ MessageHandler:
 					err = error_codes.NewTransferError(msg.err)
 				}
 				break MessageHandler
+			}
+			// A parsed performance marker proves the destination is talking to
+			// us even if it reports no bytes moved yet, so it is a valid
+			// first-byte signal for the scheduler.  The hook is CAS-guarded by
+			// the scheduler, so firing here as well as from the httptrace on
+			// the COPY request is harmless — whichever happens first wins.
+			if !schedFirstByteSent && xfer.schedFirstByte != nil {
+				schedFirstByteSent = true
+				xfer.schedFirstByte()
 			}
 			downloaded = int64(msg.xferred)
 			if !gotFirstByte && downloaded > 0 {
@@ -479,7 +513,7 @@ func skipCopy(syncLevel SyncLevel, sourceInfo fs.FileInfo, destPath string, dest
 
 // walkDirCopy walks the remote source directory and emits individual TPC copy jobs
 // for each file found. This is used for recursive third-party-copy operations.
-func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcUrl *url.URL) error {
+func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, srcUrl *url.URL) error {
 	// Use the source director response to get the collections URL for listing
 	collUrl := job.job.srcDirResp.XPelNsHdr.CollectionsUrl
 	if collUrl == nil {
@@ -501,7 +535,7 @@ func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transf
 		}
 	}
 
-	return te.walkDirCopyHelper(job, transfers, files, srcUrl.Path, srcClient, destClient)
+	return te.walkDirCopyHelper(job, transfers, srcUrl.Path, srcClient, destClient)
 }
 
 // walkDirCopyHelper recursively walks the remote source directory and emits individual
@@ -509,7 +543,7 @@ func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transf
 // server URLs point to the individual file and the destination (via dirResp.ObjectServers)
 // is also adjusted to the corresponding destination path.
 // destWebDavClient may be nil if sync skip is disabled; used to stat destination files.
-func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
+func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
 	// Check for cancellation
 	if err := job.job.ctx.Err(); err != nil {
 		return err
@@ -537,7 +571,7 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 				return errors.Wrap(err, "failed to stat source path for copy")
 			}
 			if !info.IsDir() {
-				return te.emitCopyJob(job, transfers, files, remotePath, info, destWebDavClient)
+				return te.emitCopyJob(job, transfers, remotePath, info, destWebDavClient)
 			}
 			return nil
 		}
@@ -547,12 +581,12 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 	for _, info := range infos {
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
-			err := te.walkDirCopyHelper(job, transfers, files, newPath, webdavClient, destWebDavClient)
+			err := te.walkDirCopyHelper(job, transfers, newPath, webdavClient, destWebDavClient)
 			if err != nil {
 				return err
 			}
 		} else {
-			if err := te.emitCopyJob(job, transfers, files, newPath, info, destWebDavClient); err != nil {
+			if err := te.emitCopyJob(job, transfers, newPath, info, destWebDavClient); err != nil {
 				return err
 			}
 		}
@@ -565,7 +599,7 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 // to point at the individual file, computing the relative path within the source directory.
 // sourceInfo is the fs.FileInfo for the source file, used for sync skip checks.
 // destCollClient may be nil if sync skip is disabled; used to stat the destination file.
-func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
+func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
 	// Compute relative path of this file within the source directory
 	relPath := strings.TrimPrefix(srcFilePath, job.job.srcURL.Path)
 	relPath = strings.TrimPrefix(relPath, "/")
@@ -606,11 +640,11 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 		log.Debugln("Constructed source attempt URL for TPC copy:", fileURL.String(), "file:", srcFilePath)
 	}
 
+	// Counted before submission: a scheduler rejection produces a
+	// synthetic result right away, and runMux decrements on every
+	// result, so counting afterwards would race its delivery.
 	job.job.activeXfer.Add(1)
-	select {
-	case <-job.job.ctx.Done():
-		return job.job.ctx.Err()
-	case files <- &clientTransferFile{
+	if err := te.submitFile(job.job.ctx, &clientTransferFile{
 		uuid:  job.uuid,
 		jobId: job.job.uuid,
 		file: &transferFile{
@@ -629,8 +663,13 @@ func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transf
 			srcToken: job.job.srcToken,
 			attempts: srcAttempts,
 		},
-	}:
-		job.job.totalXfer += 1
+	}); err != nil {
+		if !errors.Is(err, ErrTooManyRequests) {
+			// Nothing was queued and no result is coming, so this
+			// file must not stay on the job's books.
+			job.job.uncountSubmission()
+			return err
+		}
 	}
 	return nil
 }

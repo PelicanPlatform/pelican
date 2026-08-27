@@ -1,0 +1,38 @@
+---
+title: pelican server server user aup record
+---
+
+## pelican-server server user aup record
+
+Record AUP acceptance on behalf of a user
+
+### Synopsis
+
+Record acceptance of the AUP for a user. Normally users sign the AUP
+themselves through /me/aup; this command is the admin escape hatch (e.g.
+for migrating an existing acceptance from another system).
+
+```
+pelican-server server user aup record <user-id> [flags]
+```
+
+### Options
+
+```
+  -h, --help             help for record
+      --version string   AUP version string the user is being recorded as accepting (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+```
+
+### SEE ALSO
+
+* [pelican-server server user aup](/commands-reference/pelican-server/server/user/aup/)	 - Manage a user's AUP acceptance record
