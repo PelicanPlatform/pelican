@@ -94,7 +94,7 @@ ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.11
+ARG XRDHTTP_PELICAN_VER=0.0.13
 ARG XRDHTTP_PELICAN_RELEASE=
 # ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_MULTIUSER_SRC_BUILD=false
@@ -331,8 +331,8 @@ ARG XROOTD_GID
 # We install from the selected OSG repo and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.6"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="6.1.1"
+ARG XROOTD_RELEASE="1.1.osg${OSG_SERIES}up.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
@@ -359,7 +359,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     xrootd-scitokens \
     xrootd-selinux \
     xrootd-voms \
-    xrdcl-http \
     \
     xrootd-devel \
     xrootd-client-devel \
@@ -374,8 +373,16 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     package_names+=(${package}-${XROOTD_VER}-${XROOTD_RELEASE})
   done
 
+  # In OSG 25, XRootD 6 packages come from the osg-upcoming repos.
+  osgrepoflags=(--enablerepo=${OSG_REPO})
+  case ${OSG_SERIES}.${OSG_REPO} in
+    25.osg) osgrepoflags+=(--enablerepo=osg-upcoming) ;;
+    25.osg-testing) osgrepoflags+=(--enablerepo=osg-upcoming-testing) ;;
+    25.osg-development) osgrepoflags+=(--enablerepo=osg-upcoming-development) ;;
+  esac
+
   # Install the pinned packages
-  dnf install -y --enablerepo=${OSG_REPO} "${package_names[@]}"
+  dnf install -y "${osgrepoflags[@]}" "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
@@ -416,6 +423,14 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
   set -o pipefail
 
+  # In OSG 25, XRootD 6 packages come from the osg-upcoming repos.
+  osgrepoflags=(--enablerepo=${OSG_REPO})
+  case ${OSG_SERIES}.${OSG_REPO} in
+    25.osg) osgrepoflags+=(--enablerepo=osg-upcoming) ;;
+    25.osg-testing) osgrepoflags+=(--enablerepo=osg-upcoming-testing) ;;
+    25.osg-development) osgrepoflags+=(--enablerepo=osg-upcoming-development) ;;
+  esac
+
   # Install the build requirements only if we actually need them, so that we
   # don't slow down the overall build unnecessarily.
 
@@ -424,7 +439,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   install_requirements() {
     if ! ${have_requirements}; then
       # nlohmann-json-devel and json-schema-validator-devel come from the
-      # OSG repos.
+      # OSG repos but are not xrootd-related so we don't have to enable the
+      # 'upcoming' repos.
       dnf install -y --enablerepo=${OSG_REPO} \
             cmake3 \
             gcc-c++ \
@@ -473,10 +489,10 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         else
           git checkout ${!VER}
         fi
-        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' rpm/${REPO}.spec
+        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' --with xrootd6 rpm/${REPO}.spec
       )
       # Install the package in case its a dependency of a later package.
-      dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+      dnf install -y "${osgrepoflags[@]}" /xrootd-build/RPMS/*/${REPO}-*.rpm
     fi
   }
 
@@ -524,6 +540,14 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   set -eux
   set -o pipefail
 
+  # In OSG 25, XRootD 6 packages come from the osg-upcoming repos.
+  osgrepoflags=(--enablerepo=${OSG_REPO})
+  case ${OSG_SERIES}.${OSG_REPO} in
+    25.osg) osgrepoflags+=(--enablerepo=osg-upcoming) ;;
+    25.osg-testing) osgrepoflags+=(--enablerepo=osg-upcoming-testing) ;;
+    25.osg-development) osgrepoflags+=(--enablerepo=osg-upcoming-development) ;;
+  esac
+
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
 
@@ -539,14 +563,17 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     elif [ -n "${!RELEASE-}" ]; then
-      dnf install -y --enablerepo=epel-testing --enablerepo=${OSG_REPO} ${REPO}-${!VER}-${!RELEASE}
+      dnf install -y --enablerepo=epel-testing "${osgrepoflags[@]}" ${REPO}-${!VER}-${!RELEASE}
     else
       # Non-release builds always install from osg-development -
       # these are the "hot-off-the-press" builds of software.
       # We _also_ need to enable osg-testing, because osg-development
       # only has the latest version of each package (and we may have an
       # older one pinned).
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing \
+            --enablerepo=osg-upcoming-development --enablerepo=osg-development \
+            --enablerepo=osg-upcoming-testing --enablerepo=osg-testing \
+            ${REPO}-${!VER}
     fi
   }
 
@@ -889,7 +916,8 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 
   # Install a kitchen sink's worth of development tools and libraries.
   # nlohmann-json-devel and json-schema-validator-devel come from the
-  # OSG repos.
+  # OSG repos but are not xrootd-related so we don't have to enable the
+  # 'upcoming' repos.
 
   dnf install -y --enablerepo=${OSG_REPO} \
         cmake3 \
