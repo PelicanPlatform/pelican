@@ -406,6 +406,11 @@ func monitorTPC(ctx context.Context, messages chan tpcStatus, body io.Reader) er
 	curStripe := 0
 	curStripeBytes := uint64(0)
 	var err error
+	// The WLCG spec ends the stream with exactly one verdict line, "success:"
+	// or "failure:".  Perf markers are optional; the verdict is not.  Its
+	// absence is tracked rather than assumed benign -- see the check after the
+	// loop for why.
+	sawVerdict := false
 Listener:
 	for scanner.Scan() {
 		text := scanner.Text()
@@ -440,8 +445,10 @@ Listener:
 			switch key {
 			case "failure":
 				err = errors.Errorf("TPC copy failed: %s", value)
+				sawVerdict = true
 				break Listener
 			case "success":
+				sawVerdict = true
 				break Listener
 			case "Stripe Index":
 				idx, pErr := strconv.Atoi(value)
@@ -468,6 +475,23 @@ Listener:
 	}
 	if err == nil {
 		err = scanner.Err()
+	}
+	// Falling out of the loop with no verdict and no read error means the
+	// destination closed the stream cleanly without ever saying how the copy
+	// went.  That is not a success: the client is not in the data path, so the
+	// verdict line is the only thing that ever reports one.  Treating silence
+	// as success reported a completed transfer -- with the source's full byte
+	// count attached, since TransferredBytes comes from the source HEAD -- for
+	// a copy that may have moved nothing at all, and exited 0.
+	//
+	// A body truncated mid-chunk does not land here: the transport surfaces
+	// that as an unexpected-EOF read error, which scanner.Err() reports above.
+	// This is the clean-close case -- a destination whose TPC handler exits
+	// without writing a verdict, or an intermediary that ends the stream
+	// early but properly.
+	if err == nil && !sawVerdict {
+		err = errors.New("the destination ended the third-party-copy stream without reporting success or failure; " +
+			"the copy cannot be assumed to have completed")
 	}
 	select {
 	case messages <- tpcStatus{
