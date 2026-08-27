@@ -50,7 +50,7 @@ import (
 
 // TestE2E_InitializeHandlers_EventualPublish is the "true standalone origin"
 // test: rather than hand-assembling the POSC + controller + webdav stack, it
-// boots the real handler wiring via InitializeHandlers(ctx, exports) — the
+// boots the real handler wiring via InitializeHandlers(ctx, egrp, exports) — the
 // exact handlers.go path where the eventual-mode bug lived — with POSC on, a
 // non-root export, eventual mode, a real SQLite ServerDatabase (migrations +
 // batcher), and real token auth. An authenticated PUT flows through the
@@ -106,7 +106,7 @@ func TestE2E_InitializeHandlers_EventualPublish(t *testing.T) {
 	t.Cleanup(ResetHandlers)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	if err := InitializeHandlers(ctx, exports); err != nil {
+	if err := InitializeHandlers(ctx, nil, exports); err != nil {
 		t.Fatalf("InitializeHandlers: %v", err)
 	}
 
@@ -208,7 +208,7 @@ func TestE2E_InitializeHandlers_LifecycleEvents(t *testing.T) {
 	t.Cleanup(ResetHandlers)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	if err := InitializeHandlers(ctx, exports); err != nil {
+	if err := InitializeHandlers(ctx, nil, exports); err != nil {
 		t.Fatalf("InitializeHandlers: %v", err)
 	}
 	egrp := &errgroup.Group{}
