@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build server && !windows
 
 /***************************************************************
  *
@@ -31,7 +31,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,16 +46,18 @@ import (
 func TestServerTrustedProxiesFromConfigFile(t *testing.T) {
 	server_utils.ResetTestState()
 
+	// t.TempDir's removal runs after the shutdown cleanup registered below
+	// (cleanups are LIFO), so the directory is not deleted while the servers
+	// are still using it.
+	tmpPath := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 
-	tmpPath, err := os.MkdirTemp("", "Pelican-TrustedProxies*")
-	require.NoError(t, err)
 	t.Cleanup(func() {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
-		require.NoError(t, os.RemoveAll(tmpPath))
 		server_utils.ResetTestState()
 	})
 
@@ -67,7 +68,7 @@ func TestServerTrustedProxiesFromConfigFile(t *testing.T) {
 	configFile := filepath.Join(tmpPath, "pelican.yaml")
 	require.NoError(t, os.WriteFile(configFile,
 		[]byte("Server:\n  TrustedProxies: [\"0.0.0.0/0\", \"::/0\"]\n"), 0644))
-	viper.Set("config", configFile)
+	require.NoError(t, param.SetRaw("config", configFile))
 
 	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
@@ -101,13 +102,31 @@ func TestServerTrustedProxiesFromConfigFile(t *testing.T) {
 	// Pelican's own hooks intact.
 	logHook := new(logrustest.Hook)
 	log.AddHook(logHook)
+	// Remove the hook on cleanup: it would otherwise stay on the global
+	// logger for the rest of the test binary, accumulating entries from
+	// background goroutines and leaking into any other test in this package.
+	// ReplaceHooks is used for its internal locking; only our hook is
+	// filtered out so Pelican's own hooks stay installed.
+	t.Cleanup(func() {
+		logger := log.StandardLogger()
+		current := logger.ReplaceHooks(make(log.LevelHooks))
+		filtered := make(log.LevelHooks)
+		for lvl, hooks := range current {
+			for _, h := range hooks {
+				if h != logHook {
+					filtered[lvl] = append(filtered[lvl], h)
+				}
+			}
+		}
+		logger.ReplaceHooks(filtered)
+	})
 
 	healthUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	require.NoError(t, server_utils.WaitUntilWorking(ctx, "GET", healthUrl, "registry", 200, false))
 
-	// Request over loopback with a spoofed X-Forwarded-For. Since 127.0.0.0/8
-	// is in the trusted-proxy list, gin must report the forwarded address as
-	// the client rather than the TCP peer.
+	// Send a probe with a spoofed X-Forwarded-For. Since every source is in
+	// the trusted-proxy list, gin must report the forwarded address as the
+	// client rather than the TCP peer.
 	const forwardedIP = "203.0.113.7"
 	const probePath = "/trusted-proxy-probe"
 	req, err := http.NewRequestWithContext(ctx, "GET", param.Server_ExternalWebUrl.GetString()+probePath, nil)
