@@ -329,8 +329,19 @@ func (e *ConnectionSetupError) Is(target error) bool {
 // StatusCodeError methods
 
 func (e *StatusCodeError) Error() string {
-	if int(*e) == http.StatusGatewayTimeout {
+	switch int(*e) {
+	case http.StatusGatewayTimeout:
 		return "cache timed out waiting on origin"
+	case http.StatusUnauthorized:
+		return fmt.Sprintf("server returned %d %s: no valid credential was presented for this object",
+			int(*e), http.StatusText(int(*e)))
+	case http.StatusForbidden:
+		return fmt.Sprintf("server returned %d %s: %s", int(*e), http.StatusText(int(*e)), credentialRefused)
+	case http.StatusNotFound:
+		// A 404 is only reachable from inside a namespace an origin serves, so
+		// it is always about the object, never the namespace.
+		return fmt.Sprintf("server returned %d %s: the object does not exist in this namespace",
+			int(*e), http.StatusText(int(*e)))
 	}
 	return fmt.Sprintf("server returned %d %s", int(*e), http.StatusText(int(*e)))
 }
@@ -722,7 +733,7 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 				parts = append(parts, "token expired at "+expiration.Format(time.RFC3339))
 				pde.expired = true
 			} else {
-				parts = append(parts, "token appears valid but was rejected by the server")
+				parts = append(parts, "token has not expired, so it likely does not cover this object's path")
 			}
 		}
 		if fedTokenContents != "" {
@@ -735,14 +746,14 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 					pde.expired = true
 				}
 			} else {
-				parts = append(parts, "federation token appears valid but was rejected by the server")
+				parts = append(parts, "federation token has not expired, so it likely does not cover this object's path")
 			}
 		}
 		var tokenDetail string
 		if len(parts) == 0 {
 			// No token was sent (e.g., public namespace accessed via a cache that doesn't know about it yet).
 			// Mark as retryable so the client can attempt at a different cache that isn't stale.
-			tokenDetail = "no token was provided"
+			tokenDetail = "no token was sent with the request"
 			pde.noToken = true
 		} else {
 			tokenDetail = strings.Join(parts, "; ")
@@ -750,7 +761,7 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 		if pde.message != "" {
 			pde.message = pde.message + " (" + tokenDetail + ")"
 		} else {
-			pde.message = "Permission denied: " + tokenDetail
+			pde.message = "permission denied: " + tokenDetail
 		}
 		return error_codes.NewAuthorizationError(pde), false, ""
 	}
