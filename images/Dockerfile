@@ -536,7 +536,10 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     else
       # Non-release builds always install from osg-development -
       # these are the "hot-off-the-press" builds of software.
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development ${REPO}-${!VER}
+      # We _also_ need to enable osg-testing, because osg-development
+      # only has the latest version of each package (and we may have an
+      # older one pinned).
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
     fi
   }
 
