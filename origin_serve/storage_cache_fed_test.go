@@ -195,9 +195,17 @@ Origin:
 	coldGets, coldHeads := backend.counts()
 	require.GreaterOrEqual(t, coldGets, 1, "cold read must fetch data from the backend")
 
-	dataFiles, metaFiles := countCacheFiles(t, cacheDir)
-	require.Equal(t, 1, dataFiles, "cold read should leave one cached object")
-	require.Equal(t, 1, metaFiles, "cold read should leave one sidecar")
+	// The copy is deliberately detached from the client: ServeContent writes
+	// exactly Content-Length bytes, so the download completes as soon as the
+	// last byte is readable, which is strictly before the fetch goroutine
+	// installs the sidecar that marks the entry complete.  Wait for the entry
+	// to land rather than assuming the client's completion implies it -- from
+	// outside the process there is no other signal, and asserting immediately
+	// is a race the client wins on a loaded machine.
+	require.Eventually(t, func() bool {
+		dataFiles, metaFiles := countCacheFiles(t, cacheDir)
+		return dataFiles == 1 && metaFiles == 1
+	}, 30*time.Second, 20*time.Millisecond, "cold read should leave one cached object and one sidecar")
 
 	// 2. Warm read: identical bytes, and the backend sees no traffic at all —
 	// the entry is fresh, so even the revalidation HEAD is skipped.
