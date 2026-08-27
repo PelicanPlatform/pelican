@@ -39,6 +39,7 @@
 ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
 ARG OSG_SERIES=25
+ARG OSG_REPO=osg-testing
 
 # For compiling custom/one-off releases of Pelican.
 # (We cannot supply a default value because GoReleaser will use it as-is.)
@@ -314,12 +315,13 @@ ARG TARGETPLATFORM
 ARG TARGETARCH
 ARG BASE_OS
 ARG OSG_SERIES
+ARG OSG_REPO
 ARG XROOTD_USERNAME
 ARG XROOTD_UID
 ARG XROOTD_GID
 
 # Pin the version of XRootD to ensure consistency across all installations.
-# We install from osg-testing (which contains tested packages) and pin the version.
+# We install from the selected OSG repo and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
 ARG XROOTD_VER="5.9.6"
@@ -365,8 +367,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     package_names+=(${package}-${XROOTD_VER}-${XROOTD_RELEASE})
   done
 
-  # Install the pinned packages from osg-testing.
-  dnf install -y --enablerepo=osg-testing "${package_names[@]}"
+  # Install the pinned packages
+  dnf install -y --enablerepo=${OSG_REPO} "${package_names[@]}"
 
   # Pelican is sensitive to the exact XRootD version that is
   # installed, so having just installed a specific set of packages,
@@ -399,6 +401,7 @@ ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
 ARG XROOTD_MULTIUSER_SRC_BUILD
 ARG XROOTD_MULTIUSER_VER
+ARG OSG_REPO
 
 WORKDIR /xrootd-build
 
@@ -413,7 +416,9 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   install_requirements() {
     if ! ${have_requirements}; then
-      dnf install -y \
+      # nlohmann-json-devel and json-schema-validator-devel come from the
+      # OSG repos.
+      dnf install -y --enablerepo=${OSG_REPO} \
             cmake3 \
             gcc-c++ \
             git \
@@ -503,6 +508,7 @@ ARG XROOTD_S3_HTTP_RELEASE
 ARG XROOTD_MULTIUSER_SRC_BUILD
 ARG XROOTD_MULTIUSER_VER
 ARG XROOTD_MULTIUSER_RELEASE
+ARG OSG_REPO
 
 RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -526,9 +532,11 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     elif [ -n "${!RELEASE-}" ]; then
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing ${REPO}-${!VER}-${!RELEASE}
+      dnf install -y --enablerepo=epel-testing --enablerepo=${OSG_REPO} ${REPO}-${!VER}-${!RELEASE}
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing ${REPO}-${!VER}
+      # Non-release builds always install from osg-development -
+      # these are the "hot-off-the-press" builds of software.
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development ${REPO}-${!VER}
     fi
   }
 
@@ -783,7 +791,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # Install HTCondor for integration tests, but forcibly remove the
   # Pelican packages that it pulls in so that there is zero chance tests
   # are run using the wrong binary.
-  dnf install -y condor
+  dnf install -y --enablerepo=${OSG_REPO} condor
   rpm -e --nodeps pelican pelican-osdf-compat
 
   # Add some normal user accounts for testing.
@@ -863,8 +871,10 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   cp ~/go/bin/gotestsum /usr/local/bin/gotestsum
 
   # Install a kitchen sink's worth of development tools and libraries.
+  # nlohmann-json-devel and json-schema-validator-devel come from the
+  # OSG repos.
 
-  dnf install -y \
+  dnf install -y --enablerepo=${OSG_REPO} \
         cmake3 \
         delve \
         docker \
