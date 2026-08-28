@@ -69,6 +69,11 @@ type (
 	}
 )
 
+// tokenAuthzTTL is the maximum lifetime of a cached token-authorization
+// result.  Individual entries may be given a shorter TTL when the token
+// itself expires sooner.
+const tokenAuthzTTL = 5 * time.Minute
+
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
 
@@ -104,8 +109,12 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
 	)
 
+	// Touch-on-hit must stay disabled: the token's exp is only checked in the
+	// loader, so letting a Get refresh the entry would keep an actively-used
+	// token authorized indefinitely past its expiry.
 	ac.tokenAuthz = ttlcache.New[string, authzResult](
-		ttlcache.WithTTL[string, authzResult](5*time.Minute),
+		ttlcache.WithTTL[string, authzResult](tokenAuthzTTL),
+		ttlcache.WithDisableTouchOnHit[string, authzResult](),
 		ttlcache.WithLoader[string, authzResult](ttlcache.LoaderFunc[string, authzResult](ac.loader)),
 	)
 
@@ -319,9 +328,9 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 	return
 }
 
-func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token string) *ttlcache.Item[string, authzResult] {
-	newAcls, tokenTrusted, tokenValidationErr := ac.getAcls(token)
-	if tokenValidationErr != nil && token == "" {
+func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], tokenStr string) *ttlcache.Item[string, authzResult] {
+	newAcls, tokenTrusted, tokenValidationErr := ac.getAcls(tokenStr)
+	if tokenValidationErr != nil && tokenStr == "" {
 		// Non-token-related error (e.g., namespace config issue) should
 		// be logged and result in a nil return.
 		log.Warningln("Failed to compute ACLs:", tokenValidationErr)
@@ -329,7 +338,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 	}
 
 	var tokenError string
-	if !tokenTrusted && token != "" {
+	if !tokenTrusted && tokenStr != "" {
 		// Include a human-readable reason so authorize() can return actionable
 		// deny reasons.  The underlying error is not exposed in full to avoid
 		// sensitive data leakage, but we include enough detail to be useful.
@@ -338,7 +347,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 		} else {
 			tokenError = "token validation failed"
 		}
-	} else if token == "" {
+	} else if tokenStr == "" {
 		// No token provided — public ACLs only.
 		tokenError = "no token provided"
 	}
@@ -346,11 +355,29 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 	// Use a shorter TTL for unrecognized tokens to bound memory usage
 	// from attackers sending many junk tokens (DoS mitigation).
 	ttl := ttlcache.DefaultTTL
-	if !tokenTrusted && token != "" {
+	if !tokenTrusted && tokenStr != "" {
 		ttl = 30 * time.Second
+	} else if tokenTrusted {
+		// Cap the cache entry's lifetime at the token's own expiry (plus the
+		// clock-skew leeway the verifier grants) so the cached authorization
+		// never outlives the token itself.  getAcls has already verified the
+		// token's signature, so the claims can be trusted despite the unsafe
+		// parse.
+		if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
+			if exp := tok.Expiration(); !exp.IsZero() {
+				remaining := time.Until(exp) + token.ClockSkewLeeway
+				if remaining <= 0 {
+					log.Warningln("Rejecting expired token")
+					return nil
+				}
+				if remaining < tokenAuthzTTL {
+					ttl = remaining
+				}
+			}
+		}
 	}
 
-	item := cache.Set(token, authzResult{scopes: newAcls, tokenError: tokenError}, ttl)
+	item := cache.Set(tokenStr, authzResult{scopes: newAcls, tokenError: tokenError}, ttl)
 	return item
 }
 
