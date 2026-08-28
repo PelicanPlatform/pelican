@@ -78,6 +78,11 @@ type (
 
 var globalAuthConfig *authConfig
 
+// tokenAuthzTTL is the maximum lifetime of a cached token-authorization
+// result.  Individual entries may be given a shorter TTL when the token
+// itself expires sooner.
+const tokenAuthzTTL = 5 * time.Minute
+
 // hasPathPrefix checks if the request path is under the authorized prefix.
 // Unlike strings.HasPrefix, this checks path boundaries to prevent
 // access to /foo/bar2 when only /foo/bar is authorized.
@@ -173,8 +178,12 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
 	)
 
+	// Touch-on-hit must stay disabled: the token's exp is only checked in the
+	// loader, so letting a Get refresh the entry would keep an actively-used
+	// token authorized indefinitely past its expiry.
 	ac.tokenAuthz = ttlcache.New[string, cachedTokenInfo](
-		ttlcache.WithTTL[string, cachedTokenInfo](5*time.Minute),
+		ttlcache.WithTTL[string, cachedTokenInfo](tokenAuthzTTL),
+		ttlcache.WithDisableTouchOnHit[string, cachedTokenInfo](),
 		ttlcache.WithLoader[string, cachedTokenInfo](ttlcache.LoaderFunc[string, cachedTokenInfo](ac.loader)),
 	)
 
@@ -435,10 +444,26 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 		return nil
 	}
 
-	// Extract issuer from the token (claims are unverified at this point; used only for logging)
+	// Re-parse the claims to pick up the issuer (for logging) and the expiry.
+	// getAcls has already verified the token's signature and validity, so the
+	// claims can be trusted despite the unsafe parse.
 	issuer := ""
+	ttl := ttlcache.DefaultTTL
 	if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
 		issuer = tok.Issuer()
+		// Cap the cache entry's lifetime at the token's own expiry (plus the
+		// clock-skew leeway the verifier grants) so the cached authorization
+		// never outlives the token itself.
+		if exp := tok.Expiration(); !exp.IsZero() {
+			remaining := time.Until(exp) + token.ClockSkewLeeway
+			if remaining <= 0 {
+				log.Warningln("Rejecting expired token")
+				return nil
+			}
+			if remaining < tokenAuthzTTL {
+				ttl = remaining
+			}
+		}
 	}
 
 	// Extract user information from the token at cache time (only once)
@@ -455,7 +480,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 		UserInfo: userInfo,
 		Issuer:   issuer,
 	}
-	item := cache.Set(tokenStr, info, ttlcache.DefaultTTL)
+	item := cache.Set(tokenStr, info, ttl)
 	return item
 }
 
