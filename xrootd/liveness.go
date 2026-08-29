@@ -45,7 +45,8 @@ var (
 )
 
 // LaunchXrootdLivenessCheck starts a goroutine that periodically verifies the locally-launched
-// XRootD daemon still answers new connections.  When XRootD has not answered for
+// XRootD daemon still answers new connections.  Once Xrootd.LivenessCheckFailureThreshold
+// checks in a row have failed and XRootD has been unreachable for
 // Xrootd.LivenessMaxUnresponsiveTime, the daemon is shut down (SIGTERM, then SIGKILL) so that
 // the service manager can replace it; Pelican's usual handling of an unexpected XRootD exit
 // then takes the rest of the server down with it.
@@ -63,15 +64,34 @@ func LaunchXrootdLivenessCheck(ctx context.Context, egrp *errgroup.Group, isCach
 	})
 }
 
+// nextCheckDelay returns how long to wait before the next liveness check, given how long the
+// check that just finished took.
+//
+// The interval is a minimum spacing rather than an added delay: after a failure only the
+// remainder of the interval is waited out, so a check that already outran the interval is
+// retried immediately instead of stretching the time XRootD spends wedged.  A successful
+// check is free to pace itself further out, so it simply waits the whole interval.
+func nextCheckDelay(interval, checkDuration time.Duration, succeeded bool) time.Duration {
+	if succeeded {
+		return interval
+	}
+	if remaining := interval - checkDuration; remaining > 0 {
+		return remaining
+	}
+	return 0
+}
+
 // runXrootdLivenessCheck is the body of the liveness monitor.  It returns when the context is
 // cancelled or once it has shut a hung XRootD down.
 func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 	// XRootD was just launched; give it until the first failure window before holding
 	// it responsible for anything.
 	lastSuccess := time.Now()
+	consecutiveFailures := 0
+	delay := param.Xrootd_LivenessCheckInterval.GetDuration()
 
 	for {
-		timer := time.NewTimer(param.Xrootd_LivenessCheckInterval.GetDuration())
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -79,10 +99,14 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 		case <-timer.C:
 		}
 
+		interval := param.Xrootd_LivenessCheckInterval.GetDuration()
+
 		// A deliberate restart stops and relaunches XRootD; the gap in service is
 		// expected, so it must not count against the daemon.
 		if daemon.IsExpectedRestart() {
 			lastSuccess = time.Now()
+			consecutiveFailures = 0
+			delay = interval
 			continue
 		}
 
@@ -92,29 +116,40 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 			// hold the clock rather than working toward a kill.
 			log.WithError(err).Debug("Skipping XRootD liveness check")
 			lastSuccess = time.Now()
+			consecutiveFailures = 0
+			delay = interval
 			continue
 		}
 
+		checkStart := time.Now()
 		probeErr := probeXrootdFn(ctx, addr, param.Xrootd_LivenessCheckTimeout.GetDuration())
 		if ctx.Err() != nil {
 			return
 		}
+		delay = nextCheckDelay(interval, time.Since(checkStart), probeErr == nil)
+
 		if probeErr == nil {
 			log.Tracef("XRootD liveness check against %s succeeded", addr)
 			lastSuccess = time.Now()
+			consecutiveFailures = 0
 			continue
 		}
 
+		consecutiveFailures++
 		unresponsiveFor := time.Since(lastSuccess)
 		maxUnresponsive := param.Xrootd_LivenessMaxUnresponsiveTime.GetDuration()
-		if unresponsiveFor < maxUnresponsive {
-			log.Warnf("XRootD liveness check against %s failed (%v); XRootD has been unresponsive for %s of the permitted %s",
-				addr, probeErr, unresponsiveFor.Round(time.Second), maxUnresponsive)
+		failureThreshold := param.Xrootd_LivenessCheckFailureThreshold.GetInt()
+
+		// Both conditions must hold: enough checks have failed to rule out a single
+		// unlucky probe, and XRootD has been unreachable for longer than it is allowed.
+		if consecutiveFailures < failureThreshold || unresponsiveFor < maxUnresponsive {
+			log.Warnf("XRootD liveness check against %s failed (%v); %d consecutive failures over %s, and XRootD is shut down after %d failures spanning %s",
+				addr, probeErr, consecutiveFailures, unresponsiveFor.Round(time.Second), failureThreshold, maxUnresponsive)
 			continue
 		}
 
-		log.Errorf("XRootD at %s has not responded to a liveness check for %s (limit %s); shutting the daemon down",
-			addr, unresponsiveFor.Round(time.Second), maxUnresponsive)
+		log.Errorf("XRootD at %s has failed %d consecutive liveness checks and has not responded for %s (limit %s); shutting the daemon down",
+			addr, consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical,
 			"XRootD was unresponsive for "+unresponsiveFor.Round(time.Second).String()+" and is being shut down")
 		shutdownXrootdFn(isCache)
