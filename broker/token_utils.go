@@ -268,19 +268,29 @@ func verifyToken(ctx context.Context, tokenStr, namespace, audience string, requ
 	}
 
 	// Verification failed.  A namespace's registered keys churn as services
-	// re-register or rotate them, so before rejecting, check whether the token
-	// was signed by a key we simply have not seen yet; the keys are otherwise
-	// only re-read on their revalidation schedule.  Parsing the token again is
-	// confined to this path so that the common case pays for one parse.
-	if kid := signingKeyId(tokenStr); kid != "" && keyset != nil {
-		if _, found := keyset.LookupKeyID(kid); !found {
-			refreshed, refreshErr := refreshNamespaceKeys(ctx, namespace)
-			if refreshErr != nil {
-				log.Debugf("Failed to re-read keys for namespace %s after seeing unknown key ID %s: %v", namespace, kid, refreshErr)
-			} else if refreshed != nil {
-				if verifyErr = verify(refreshed); verifyErr == nil {
-					ok = true
-					return
+	// re-register or rotate them, so before rejecting, consider whether the
+	// token was signed by a key we have not seen yet; the keys are otherwise
+	// only re-read on their revalidation schedule.
+	//
+	// Deciding that costs another parse of the token, so it is worth reaching
+	// only when it could change the answer.  A rejected claim -- expired,
+	// wrong audience, insufficient scope -- says nothing about the keys, and
+	// neither does a signature failure while the throttle would refuse to
+	// re-read them anyway.  Both checks are cheap and both are common: the
+	// first covers ordinary expired tokens, the second covers a caller sending
+	// a run of tokens with made-up signing keys.
+	cache := getNamespaceKeys()
+	if errors.Is(verifyErr, token.ErrTokenSignature) && keyset != nil && cache != nil && cache.CanRefresh(namespace) {
+		if kid := signingKeyId(tokenStr); kid != "" {
+			if _, found := keyset.LookupKeyID(kid); !found {
+				refreshed, refreshErr := refreshNamespaceKeys(ctx, namespace)
+				if refreshErr != nil {
+					log.Debugf("Failed to re-read keys for namespace %s after seeing unknown key ID %s: %v", namespace, kid, refreshErr)
+				} else if refreshed != nil {
+					if verifyErr = verify(refreshed); verifyErr == nil {
+						ok = true
+						return
+					}
 				}
 			}
 		}

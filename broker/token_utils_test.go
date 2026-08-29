@@ -24,6 +24,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -406,6 +407,83 @@ func TestVerifyToken_StopsAfterNamespaceDeregistered(t *testing.T) {
 					"rather than being carried to the staleness ceiling")
 		})
 	}
+}
+
+// TestVerifyToken_BogusTokensDoNotDriveRegistryTraffic verifies that a caller
+// sending a run of tokens signed by keys the registry never issued cannot turn
+// each one into a registry fetch.  The unknown key ID is the signal that makes
+// the broker re-read a namespace's keys, so it is exactly what such a caller
+// would aim at.
+func TestVerifyToken_BogusTokensDoNotDriveRegistryTraffic(t *testing.T) {
+	registry := newJwksTestServer(t)
+	registry.rotateTo(t, "key-1")
+
+	ctx := setupBrokerKeyTest(t, registry.server.URL)
+	const prefix = "/caches/example"
+	const audience = "https://broker.example.com"
+
+	// Prime the keys so the run below starts from a normal state.
+	_, _, err := getRegistryIssuerInfo(ctx, prefix)
+	require.NoError(t, err)
+	fetchesBefore := registry.fetchCount()
+
+	// Each token is signed by a key of its own, so every one names a key ID the
+	// cached set does not contain.
+	for i := 0; i < 25; i++ {
+		attacker := generateSigningKey(t, fmt.Sprintf("bogus-%d", i))
+		tok := mintBrokerToken(t, attacker, prefix, audience, token_scopes.Broker_Reverse)
+		ok, _ := verifyToken(ctx, tok, prefix, audience, token_scopes.Broker_Reverse)
+		require.False(t, ok, "a token signed by an unknown key must not verify")
+	}
+
+	assert.LessOrEqual(t, registry.fetchCount()-fetchesBefore, 1,
+		"a run of tokens with unknown signing keys should not become a run of registry fetches")
+}
+
+// TestVerifyToken_ExpiredTokenDoesNotRefresh verifies that a rejected claim does
+// not send the broker back to the registry: the keys are not in question.
+func TestVerifyToken_ExpiredTokenDoesNotRefresh(t *testing.T) {
+	registry := newJwksTestServer(t)
+	key := registry.rotateTo(t, "key-1")
+
+	withNamespaceKeyRetryInterval(t, 0)
+	ctx := setupBrokerKeyTest(t, registry.server.URL)
+	const prefix = "/caches/example"
+	const audience = "https://broker.example.com"
+
+	_, _, err := getRegistryIssuerInfo(ctx, prefix)
+	require.NoError(t, err)
+	fetchesBefore := registry.fetchCount()
+
+	iss, err := getRegistryIssValue(prefix)
+	require.NoError(t, err)
+	expired, err := jwt.NewBuilder().
+		Issuer(iss).
+		Subject("test-subject").
+		Audience([]string{audience}).
+		IssuedAt(time.Now().Add(-time.Hour)).
+		Expiration(time.Now().Add(-30*time.Minute)).
+		Claim("scope", token_scopes.Broker_Reverse.String()).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(expired, jwt.WithKey(jwa.ES256, key))
+	require.NoError(t, err)
+
+	ok, _ := verifyToken(ctx, string(signed), prefix, audience, token_scopes.Broker_Reverse)
+	require.False(t, ok, "an expired token must not verify")
+	assert.Equal(t, fetchesBefore, registry.fetchCount(),
+		"a rejected claim says nothing about the keys, so it should not trigger a re-read")
+}
+
+// generateSigningKey makes a signing key that no registry vouches for.
+func generateSigningKey(t *testing.T, kid string) jwk.Key {
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	key, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, key.Set(jwk.KeyIDKey, kid))
+	require.NoError(t, key.Set(jwk.AlgorithmKey, jwa.ES256))
+	return key
 }
 
 // withNamespaceKeyRetryInterval sets the fetch throttle for the duration of a
