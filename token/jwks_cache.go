@@ -20,6 +20,8 @@ package token
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -67,12 +69,13 @@ type JwksCache struct {
 type JwksUrlResolver func(ctx context.Context) (string, error)
 
 type jwksCacheOptions struct {
-	ttl          time.Duration
-	capacity     uint64
-	revalidate   time.Duration
-	maxStale     time.Duration
-	retry        time.Duration
-	fetchTimeout time.Duration
+	ttl           time.Duration
+	capacity      uint64
+	revalidate    time.Duration
+	maxStale      time.Duration
+	retry         time.Duration
+	fetchTimeout  time.Duration
+	dropOnAbsence bool
 }
 
 type JwksCacheOption func(*jwksCacheOptions)
@@ -113,6 +116,56 @@ func WithJwksFetchTimeout(d time.Duration) JwksCacheOption {
 	return func(o *jwksCacheOptions) { o.fetchTimeout = d }
 }
 
+// WithJwksDropOnAbsence makes the cache discard an issuer's keys when the
+// issuer is reachable and reports that they should not be used: HTTP 404 or
+// 410 (no such issuer) or 403 (known but not permitted).  Verification then
+// fails immediately rather than coasting on cached keys until the staleness
+// ceiling.
+//
+// Enable it only where those codes are known to mean revocation.  Pelican's
+// registry says exactly that: 404 for a namespace that is not registered, 403
+// for one whose approval has been withdrawn.  For a general OIDC issuer the
+// same codes are more likely to be a misconfigured proxy, and dropping keys
+// would turn that into an outage.
+//
+// The report has to be repeated before the keys are dropped, so that a single
+// bad response cannot revoke a namespace.
+func WithJwksDropOnAbsence() JwksCacheOption {
+	return func(o *jwksCacheOptions) { o.dropOnAbsence = true }
+}
+
+// JwksFetchError reports a JWKS endpoint that answered with something other
+// than a keyset.
+type JwksFetchError struct {
+	URL        string
+	StatusCode int
+}
+
+func (e *JwksFetchError) Error() string {
+	return fmt.Sprintf("JWKS endpoint %s returned HTTP %d", e.URL, e.StatusCode)
+}
+
+// IsAbsence reports whether the issuer is telling us these keys should not be
+// used, as opposed to being unable to answer.  A server that is reachable
+// enough to say "no such issuer" (404, 410) or "not permitted" (403) has given
+// a real answer; a timeout, a refused connection, or a 5xx has not.
+func (e *JwksFetchError) IsAbsence() bool {
+	switch e.StatusCode {
+	case http.StatusNotFound, http.StatusGone, http.StatusForbidden:
+		return true
+	}
+	return false
+}
+
+// absenceConfirmations is how many consecutive absence reports it takes to drop
+// an issuer's keys.  More than one, so that a single bad response from a
+// misconfigured or half-migrated registry cannot revoke a namespace.
+const absenceConfirmations = 2
+
+// maxJwksBytes bounds how much of a JWKS response is read, so a misbehaving or
+// hostile endpoint cannot feed unbounded data into the parser.
+const maxJwksBytes = 1 << 20
+
 const (
 	defaultJwksTTL          = time.Hour
 	defaultJwksRevalidate   = 15 * time.Minute
@@ -133,6 +186,10 @@ type jwksEntry struct {
 	set         jwk.Set
 	lastGood    time.Time
 	lastAttempt time.Time
+	// absences counts consecutive reports from the issuer that these keys
+	// should not be used.  Reset by anything else, so an outage in the middle
+	// of a run of them does not carry the count forward.
+	absences int
 }
 
 func (e *jwksEntry) keys() (jwk.Set, time.Time) {
@@ -160,6 +217,32 @@ func (e *jwksEntry) recordSuccess(url string, set jwk.Set) {
 	e.url = url
 	e.set = set
 	e.lastGood = time.Now()
+	e.absences = 0
+}
+
+// recordAbsence notes that the issuer reported these keys should not be used,
+// and reports how many such reports have arrived in a row.
+func (e *jwksEntry) recordAbsence() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.absences++
+	return e.absences
+}
+
+// clearAbsences forgets the run of absence reports, so that an unrelated
+// failure does not count toward dropping the keys.
+func (e *jwksEntry) clearAbsences() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.absences = 0
+}
+
+// dropKeys discards the cached keys, so the next lookup has to fetch.
+func (e *jwksEntry) dropKeys() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.set = nil
+	e.lastGood = time.Time{}
 }
 
 func (e *jwksEntry) resolvedUrl() string {
@@ -296,6 +379,39 @@ func (c *JwksCache) Set(key string, set jwk.Set) {
 	entry.recordSuccess(entry.resolvedUrl(), set)
 }
 
+// fetchJwks retrieves and parses a keyset.  It checks the HTTP status itself
+// rather than using jwk.Fetch, which does not: without that check a non-200
+// response reaches the parser and surfaces as a confusing parse failure, and
+// the status code that says whether the issuer actually answered is lost.
+func fetchJwks(ctx context.Context, url string) (jwk.Set, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to build a request for %s", url)
+	}
+
+	client := &http.Client{Transport: config.GetBasicTransport()}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to reach %s", url)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, &JwksFetchError{URL: url, StatusCode: resp.StatusCode}
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJwksBytes))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read the response from %s", url)
+	}
+
+	set, err := jwk.Parse(body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse the keyset from %s", url)
+	}
+	return set, nil
+}
+
 func (c *JwksCache) entry(key string) *jwksEntry {
 	item := c.entries.Get(key)
 	if item == nil {
@@ -327,10 +443,22 @@ func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, res
 			url = resolved
 		}
 
-		client := &http.Client{Transport: config.GetBasicTransport()}
-		set, err := jwk.Fetch(fetchCtx, url, jwk.WithHTTPClient(client))
+		set, err := fetchJwks(fetchCtx, url)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to fetch public keys for %s from %s", key, url)
+			var fetchErr *JwksFetchError
+			if errors.As(err, &fetchErr) && fetchErr.IsAbsence() {
+				// The issuer answered, and the answer is that these keys are
+				// not to be used.  Wait for it to say so more than once before
+				// acting, so one bad response cannot revoke an issuer.
+				if seen := entry.recordAbsence(); c.opts.dropOnAbsence && seen >= absenceConfirmations {
+					log.Warningf("Discarding cached public keys for %s: %v (reported %d times in a row)", key, err, seen)
+					entry.dropKeys()
+					c.entries.Delete(key)
+				}
+			} else {
+				entry.clearAbsences()
+			}
+			return nil, errors.Wrapf(err, "failed to fetch public keys for %s", key)
 		}
 		entry.recordSuccess(url, set)
 		log.Debugf("Fetched %d public key(s) for %s from %s", set.Len(), key, url)

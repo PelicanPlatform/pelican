@@ -72,8 +72,17 @@ type jwksTestServer struct {
 	mu      sync.Mutex
 	keys    jwk.Set
 	down    bool
+	status  int
 	fetches int
 	server  *httptest.Server
+}
+
+// setStatus makes the stand-in registry answer with the given status, as it
+// does for a namespace that is not registered (404) or not approved (403).
+func (s *jwksTestServer) setStatus(code int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = code
 }
 
 func newJwksTestServer(t *testing.T) *jwksTestServer {
@@ -84,6 +93,11 @@ func newJwksTestServer(t *testing.T) *jwksTestServer {
 		s.fetches++
 		if s.down {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if s.status != 0 {
+			w.WriteHeader(s.status)
+			_, _ = w.Write([]byte(`{"status":"error","msg":"namespace prefix was not found"}`))
 			return
 		}
 		data, err := json.Marshal(s.keys)
@@ -310,6 +324,45 @@ func TestRefreshNamespaceKeys_RateLimited(t *testing.T) {
 		assert.Nil(t, set, "a refresh inside the throttle window should be suppressed")
 	}
 	assert.Equal(t, fetchesAfterFirst, registry.fetchCount(), "the registry should not be contacted")
+}
+
+// TestVerifyToken_StopsAfterNamespaceDeregistered verifies that a namespace the
+// registry no longer vouches for stops verifying promptly, rather than being
+// carried by its cached keys until the staleness ceiling.  The registry answers
+// 404 for a prefix that is not registered and 403 for one whose approval has
+// been withdrawn; both are how an administrator removes a service.
+func TestVerifyToken_StopsAfterNamespaceDeregistered(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			registry := newJwksTestServer(t)
+			key := registry.rotateTo(t, "key-1")
+
+			withNamespaceKeyRetryInterval(t, 0)
+			ctx := setupBrokerKeyTest(t, registry.server.URL)
+			const prefix = "/caches/example"
+			const audience = "https://broker.example.com"
+
+			tok := mintBrokerToken(t, key, prefix, audience, token_scopes.Broker_Reverse)
+			ok, err := verifyToken(ctx, tok, prefix, audience, token_scopes.Broker_Reverse)
+			require.NoError(t, err)
+			require.True(t, ok)
+
+			// The namespace is removed from the registry.  Cached keys stay
+			// usable until they next come up for revalidation, so drive the
+			// refreshes the revalidation schedule would perform; the keys are
+			// dropped once the registry has repeated itself.
+			registry.setStatus(status)
+			for i := 0; i < 2; i++ {
+				_, err = refreshNamespaceKeys(ctx, prefix)
+				require.Error(t, err)
+			}
+
+			ok, _ = verifyToken(ctx, tok, prefix, audience, token_scopes.Broker_Reverse)
+			assert.False(t, ok,
+				"a de-registered namespace should stop verifying once the registry has said so, "+
+					"rather than being carried to the staleness ceiling")
+		})
+	}
 }
 
 // withNamespaceKeyRetryInterval sets the fetch throttle for the duration of a
