@@ -44,6 +44,7 @@ type jwksServer struct {
 	mu      sync.Mutex
 	keys    jwk.Set
 	down    bool
+	status  int
 	fetches int
 	server  *httptest.Server
 }
@@ -56,6 +57,12 @@ func newJwksServer(t *testing.T) *jwksServer {
 		s.fetches++
 		if s.down {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if s.status != 0 {
+			// Mimic the registry, which answers with a JSON error document.
+			w.WriteHeader(s.status)
+			_, _ = w.Write([]byte(`{"status":"error","msg":"namespace prefix was not found"}`))
 			return
 		}
 		data, err := json.Marshal(s.keys)
@@ -92,6 +99,15 @@ func (s *jwksServer) setDown(down bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.down = down
+}
+
+// setStatus makes the server answer every request with the given status,
+// standing in for a registry reporting that a namespace is unregistered (404)
+// or no longer approved (403).  Zero restores normal service.
+func (s *jwksServer) setStatus(code int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = code
 }
 
 func (s *jwksServer) fetchCount() int {
@@ -271,6 +287,128 @@ func TestJwksCache_EvictsLeastRecentlyUsed(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.LessOrEqual(t, kc.entries.Len(), 2, "the cache must not grow past its capacity")
+}
+
+// TestJwksCache_DropsKeysWhenIssuerReportsAbsence verifies that an issuer which
+// is reachable and says the keys should not be used causes them to be
+// discarded, rather than served until the staleness ceiling.  This is how a
+// de-registered or de-approved namespace stops verifying promptly.
+func TestJwksCache_DropsKeysWhenIssuerReportsAbsence(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusGone, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			issuer := newJwksServer(t)
+			issuer.rotateTo(t, "key-1")
+			kc := newTestJwksCache(t,
+				WithJwksDropOnAbsence(),
+				WithJwksRevalidateInterval(0), // always due for revalidation
+				WithJwksRetryInterval(0),
+			)
+
+			_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+			require.NoError(t, err)
+
+			issuer.setStatus(status)
+
+			// Each read serves the cached keys and revalidates behind it, so the
+			// keys drop once the issuer has repeated itself.
+			require.Eventually(t, func() bool {
+				_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+				return err != nil
+			}, 5*time.Second, 10*time.Millisecond, "keys should stop being served once the issuer reports them absent")
+		})
+	}
+}
+
+// TestJwksCache_KeepsKeysOnSingleAbsence verifies that one bad response does not
+// revoke an issuer: a registry that 404s once and then recovers should leave
+// verification undisturbed.
+func TestJwksCache_KeepsKeysOnSingleAbsence(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t,
+		WithJwksDropOnAbsence(),
+		WithJwksRetryInterval(0),
+	)
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err)
+
+	// One absence, then the issuer is healthy again.
+	issuer.setStatus(http.StatusNotFound)
+	_, err = kc.Refresh(context.Background(), "issuer-a", issuer.resolver())
+	require.Error(t, err)
+	issuer.setStatus(0)
+
+	set, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err, "a single absence must not discard the keys")
+	require.NotNil(t, set)
+	_, found := set.LookupKeyID("key-1")
+	assert.True(t, found)
+}
+
+// TestJwksCache_KeepsKeysWhenIssuerCannotAnswer verifies that the drop applies
+// only to real answers: an issuer that is down, however many times, leaves the
+// cached keys in place.
+func TestJwksCache_KeepsKeysWhenIssuerCannotAnswer(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t,
+		WithJwksDropOnAbsence(),
+		WithJwksRetryInterval(0),
+	)
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err)
+
+	issuer.setDown(true)
+	for i := 0; i < 5; i++ {
+		_, err = kc.Refresh(context.Background(), "issuer-a", issuer.resolver())
+		require.Error(t, err)
+	}
+
+	set, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err, "an unreachable issuer must not discard the keys")
+	require.NotNil(t, set)
+	_, found := set.LookupKeyID("key-1")
+	assert.True(t, found)
+}
+
+// TestJwksCache_AbsenceIgnoredWithoutOption verifies that the drop is opt-in:
+// without it, a 404 is just another failed fetch and the keys keep serving.
+func TestJwksCache_AbsenceIgnoredWithoutOption(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t, WithJwksRetryInterval(0))
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err)
+
+	issuer.setStatus(http.StatusNotFound)
+	for i := 0; i < 5; i++ {
+		_, err = kc.Refresh(context.Background(), "issuer-a", issuer.resolver())
+		require.Error(t, err)
+	}
+
+	set, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err, "without the option, keys should still be served")
+	require.NotNil(t, set)
+}
+
+// TestJwksCache_ReportsHttpStatus verifies that a non-200 response is reported
+// as such, rather than reaching the parser and surfacing as a parse failure.
+func TestJwksCache_ReportsHttpStatus(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	issuer.setStatus(http.StatusNotFound)
+	kc := newTestJwksCache(t, WithJwksRetryInterval(0))
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.Error(t, err)
+
+	var fetchErr *JwksFetchError
+	require.ErrorAs(t, err, &fetchErr)
+	assert.Equal(t, http.StatusNotFound, fetchErr.StatusCode)
+	assert.True(t, fetchErr.IsAbsence())
 }
 
 // TestJwksCache_ResolverFailure verifies that a resolver error is reported and

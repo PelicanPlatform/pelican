@@ -73,6 +73,12 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 	setNamespaceKeys(token.NewJwksCache(ctx, egrp,
 		token.WithJwksCapacity(namespaceKeyCapacity),
 		token.WithJwksRetryInterval(namespaceKeyRetryInterval),
+		// The registry's answers here are specific: 404 for a namespace that is
+		// not registered, 403 for one whose approval has been withdrawn.  Those
+		// are the two ways a federation administrator removes a service, so
+		// stop trusting the cached keys instead of serving them until the
+		// staleness ceiling.
+		token.WithJwksDropOnAbsence(),
 	))
 
 	egrp.Go(func() error {
