@@ -23,10 +23,8 @@ package xrootd
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"net"
-	"net/http"
-	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -37,55 +35,95 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-// trustTestServer points the probe's TLS settings at a test server's own certificate, so the
-// handshake completes rather than failing verification.
-func trustTestServer(t *testing.T, srv *httptest.Server) {
+// generateHostCert issues a host certificate from Pelican's own generated CA, the same way a
+// real server gets one.  Because config.GetTransport picks up Server.TLSCACertificateFile as
+// a trust root, the probe verifies a server using this certificate without any test-only
+// plumbing in the code under test.
+func generateHostCert(t *testing.T) tls.Certificate {
 	t.Helper()
-	pool := x509.NewCertPool()
-	pool.AddCert(srv.Certificate())
-	livenessTLSConfigFn = func(_ string) *tls.Config {
-		return &tls.Config{RootCAs: pool, ServerName: "example.com", MinVersion: tls.VersionTLS12}
-	}
-	t.Cleanup(func() { livenessTLSConfigFn = livenessTLSConfig })
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	tmpDir := t.TempDir()
+	require.NoError(t, param.Server_TLSCertificateChain.Set(filepath.Join(tmpDir, "tls.crt")))
+	require.NoError(t, param.Server_TLSKey.Set(filepath.Join(tmpDir, "tls.key")))
+	require.NoError(t, param.Server_TLSCACertificateFile.Set(filepath.Join(tmpDir, "tlsca.pem")))
+	require.NoError(t, param.Server_TLSCAKey.Set(filepath.Join(tmpDir, "tlscakey.pem")))
+	require.NoError(t, param.Server_Hostname.Set("localhost"))
+	require.NoError(t, config.GenerateCert())
+
+	cert, err := tls.LoadX509KeyPair(param.Server_TLSCertificateChain.GetString(), param.Server_TLSKey.GetString())
+	require.NoError(t, err)
+	return cert
+}
+
+// startTLSListener serves TLS with the given certificates, completing handshakes and then
+// hanging up.  The probe exchanges no data, so there is nothing else to serve.
+func startTLSListener(t *testing.T, certs []tls.Certificate) net.Listener {
+	t.Helper()
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: certs, MinVersion: tls.VersionTLS12})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				if tlsConn, ok := conn.(*tls.Conn); ok {
+					_ = tlsConn.HandshakeContext(context.Background())
+				}
+			}()
+		}
+	}()
+	return listener
 }
 
 // TestProbeXrootdEndpointResponsive verifies a peer that completes a verified TLS handshake
 // is considered alive.
 func TestProbeXrootdEndpointResponsive(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	t.Cleanup(srv.Close)
-	trustTestServer(t, srv)
+	listener := startTLSListener(t, []tls.Certificate{generateHostCert(t)})
 
-	require.NoError(t, probeXrootdEndpoint(context.Background(), srv.Listener.Addr().String(), 10*time.Second))
+	// The probe reports a peer that answers with an unusable TLS response as alive too, so
+	// confirm separately that this certificate genuinely verifies.  Otherwise this test
+	// would keep passing if the trust plumbing broke.
+	verified, err := tls.Dial("tcp", listener.Addr().String(), livenessTLSConfig("127.0.0.1"))
+	require.NoError(t, err, "the generated host certificate should verify against Pelican's own CA")
+	require.NoError(t, verified.Close())
+
+	require.NoError(t, probeXrootdEndpoint(context.Background(), listener.Addr().String(), 10*time.Second))
 }
 
 // TestProbeXrootdEndpointUntrustedCertificate verifies that a certificate the probe cannot
 // verify is not treated as a hung daemon.  XRootD answered, which is the whole question; a
 // certificate problem is a different failure and must not get the daemon killed.
 func TestProbeXrootdEndpointUntrustedCertificate(t *testing.T) {
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
+	// A host certificate from a CA this process then forgets about: the server presents a
+	// perfectly good certificate that the probe has no way to verify.
+	cert := generateHostCert(t)
+	require.NoError(t, param.Server_TLSCACertificateFile.Set(filepath.Join(t.TempDir(), "absent-ca.pem")))
+	listener := startTLSListener(t, []tls.Certificate{cert})
 
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	t.Cleanup(srv.Close)
-
-	// The default settings do not trust httptest's throwaway CA, so verification fails.
-	require.NoError(t, probeXrootdEndpoint(context.Background(), srv.Listener.Addr().String(), 10*time.Second))
+	require.NoError(t, probeXrootdEndpoint(context.Background(), listener.Addr().String(), 10*time.Second))
 }
 
-// TestProbeXrootdEndpointNoListener verifies a refused connection is a failure.
-func TestProbeXrootdEndpointNoListener(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr := listener.Addr().String()
-	require.NoError(t, listener.Close())
-
-	err = probeXrootdEndpoint(context.Background(), addr, 10*time.Second)
+// TestProbeXrootdEndpointConnectFailure verifies a failed TCP connect is a probe failure.
+//
+// Port 0 is used rather than a listener that was opened and closed: the latter frees the port
+// back to the ephemeral range, where a concurrently running test can bind it and turn this
+// into a passing connection.  Nothing can ever be listening on port 0, so the connect fails
+// on every platform with no dependence on what else the test binary is doing.
+func TestProbeXrootdEndpointConnectFailure(t *testing.T) {
+	err := probeXrootdEndpoint(context.Background(), "127.0.0.1:0", 10*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to connect to the XRootD endpoint")
 }
@@ -128,12 +166,11 @@ func TestProbeXrootdEndpointRespondsWithoutTLS(t *testing.T) {
 }
 
 func TestProbeXrootdEndpointHonorsCancelledContext(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	t.Cleanup(srv.Close)
+	listener := startTLSListener(t, []tls.Certificate{generateHostCert(t)})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	require.Error(t, probeXrootdEndpoint(ctx, srv.Listener.Addr().String(), 10*time.Second))
+	require.Error(t, probeXrootdEndpoint(ctx, listener.Addr().String(), 10*time.Second))
 }
 
 // TestProbeXrootdEndpointCancelledMidHandshake verifies that a shutdown partway through a
