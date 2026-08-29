@@ -1,7 +1,8 @@
 import React, { useContext, useRef, useState } from 'react';
 import { green, red } from '@mui/material/colors';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
-import { Check, Delete, Person } from '@mui/icons-material';
+import { Check, Delete, Edit, Person } from '@mui/icons-material';
+import Link from 'next/link';
 import { Alert, RegistryNamespace, User } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon, userOwnsNamespace } from '@/components/Namespace/index';
@@ -113,6 +114,20 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                     </IconButton>
                   </Tooltip>
                 </>
+              )}
+              {(authenticated?.role == 'admin' ||
+                userOwnsNamespace(authenticated, namespace)) && (
+                <Tooltip title={'Edit and Resubmit Registration'}>
+                  <Link
+                    href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
+                  >
+                    <IconButton
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    >
+                      <Edit />
+                    </IconButton>
+                  </Link>
+                </Tooltip>
               )}
             </Box>
           </Box>

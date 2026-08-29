@@ -1378,6 +1378,52 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
 	})
 
+	t.Run("reg-user-edit-of-denied-ns-resubmits-as-pending", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		mockNs := server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Description: "oldDescription",
+				Institution: "1000",
+				UserID:      "u-mock-id", // same as currently signed-in user
+				Status:      server_structs.RegDenied,
+				SiteName:    "test-site-name",
+			},
+		}
+
+		err = insertMockDBData([]server_structs.Registration{mockNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// The owner fixes the problem that led to the denial and resubmits
+		updatedNs := mockNs
+		updatedNs.AdminMetadata.Description = "newDescription"
+
+		mockNsBytes, err := json.Marshal(updatedNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "newDescription", got.AdminMetadata.Description)
+		// The edit moved the registration back into the review queue
+		assert.Equal(t, server_structs.RegPending, got.AdminMetadata.Status)
+	})
+
 	t.Run("admin-can-change-anybody", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
