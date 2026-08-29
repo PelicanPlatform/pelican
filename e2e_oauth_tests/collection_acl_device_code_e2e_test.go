@@ -46,7 +46,7 @@
 // (or for users not in the ACL'd group) the same token-mint pipeline
 // must NOT produce a storage scope for the collection's namespace.
 
-package fed_tests
+package oauth_tests
 
 import (
 	"bytes"

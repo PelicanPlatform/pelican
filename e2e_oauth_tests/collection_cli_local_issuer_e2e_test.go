@@ -34,7 +34,7 @@
 //   - the local issuer is registered even without the transfer API, and
 //   - the local issuer mints the namespace-agnostic collection.* scopes.
 
-package fed_tests
+package oauth_tests
 
 import (
 	"context"

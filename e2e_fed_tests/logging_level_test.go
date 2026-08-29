@@ -45,7 +45,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 	srvURL := param.Server_ExternalWebUrl.GetString()
 
 	// Write current config to a temporary file so the subprocess can access issuer keys

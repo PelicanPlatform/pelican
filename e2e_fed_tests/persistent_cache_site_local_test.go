@@ -112,7 +112,7 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Build the pelican binary used for the site-local cache child process.
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	// Enable the persistent cache for the in-process (upstream) cache.
 	require.NoError(t, param.Cache_EnableV2.Set(true))

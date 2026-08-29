@@ -59,6 +59,7 @@ Pelican is a data federation platform that allows users to serve and access data
 - `director/` - Director service for federation coordination
 - `docs/` - Documentation and parameter definitions (use one sentence per line for markdown files)
 - `e2e_fed_tests/` - End-to-end federation tests
+- `e2e_oauth_tests/` - End-to-end tests for the OAuth device-code and issuer flows, split out of `e2e_fed_tests/` to keep either package well inside the per-package test timeout
 - `error_codes/` - Error code definitions and helpers
 - `features/` - Feature/version compatibility definitions and generated metadata
 - `fed_test_utils/` - Shared utilities for federation tests
@@ -346,7 +347,7 @@ API endpoints are documented using OpenAPI V2.0 (Swagger). The specification liv
 
 - Unit tests for individual functions and components
 - Integration tests for service interactions
-- End-to-end tests in `e2e_fed_tests/`
+- End-to-end tests in `e2e_fed_tests/` and `e2e_oauth_tests/`
 - Test utilities in `test_utils/` and `fed_test_utils/`
 
 ## Security Considerations

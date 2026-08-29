@@ -41,6 +41,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // This file is the binary-vs-binary counterpart to cmd/origin_standalone_test.go.
@@ -357,7 +358,7 @@ func createToken(t *testing.T, ctx context.Context, cliPath, clientConfigDir, to
 // process and drives it entirely with the pelican client binary run as further
 // OS processes.
 func TestStandaloneOriginCliEndToEnd(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -567,7 +568,7 @@ func TestStandaloneOriginCliEndToEnd(t *testing.T) {
 // would be consistent with an origin that tolerates a missing federation for
 // reasons having nothing to do with the feature under test.
 func TestStandaloneOriginCliFederatedControl(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
