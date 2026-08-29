@@ -21,19 +21,16 @@ package local_cache
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"path"
 	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -41,15 +38,13 @@ import (
 
 type (
 	authConfig struct {
-		ns         atomic.Pointer[[]server_structs.NamespaceAd]
-		issuers    atomic.Pointer[map[string]bool]
-		issuerKeys *ttlcache.Cache[string, authConfigItem]
+		ns      atomic.Pointer[[]server_structs.NamespaceAd]
+		issuers atomic.Pointer[map[string]bool]
+		// ctx bounds key fetches.  They are shared between requests, so they
+		// must not be tied to whichever request happened to trigger one.
+		ctx        context.Context
+		issuerKeys *token.JwksCache
 		tokenAuthz *ttlcache.Cache[string, authzResult]
-	}
-
-	authConfigItem struct {
-		set jwk.Set
-		err error
 	}
 
 	acls []token_scopes.ResourceScope
@@ -77,37 +72,13 @@ const tokenAuthzTTL = 5 * time.Minute
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
 
-	loader := ttlcache.LoaderFunc[string, authConfigItem](
-		func(cache *ttlcache.Cache[string, authConfigItem], issuerUrl string) *ttlcache.Item[string, authConfigItem] {
-			var ar *jwk.Cache
-			jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
-			if err != nil {
-				log.Errorln("Failed to lookup JWKS URL:", err)
-			} else {
-				ar = jwk.NewCache(ctx)
-				client := &http.Client{Transport: config.GetBasicTransport()}
-				if err = ar.Register(jwksUrl.String(), jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-					log.Errorln("Failed to register JWKS URL with cache: ", err)
-				} else {
-					log.Debugln("Setting public key cache for issuer", issuerUrl)
-				}
-			}
-
-			ttl := ttlcache.DefaultTTL
-			var item *ttlcache.Item[string, authConfigItem]
-			if ar != nil {
-				item = cache.Set(issuerUrl, authConfigItem{set: jwk.NewCachedSet(ar, jwksUrl.String()), err: nil}, ttl)
-			} else {
-				ttl = time.Duration(5 * time.Minute)
-				item = cache.Set(issuerUrl, authConfigItem{set: nil, err: err}, ttl)
-			}
-			return item
-		},
-	)
-	ac.issuerKeys = ttlcache.New[string, authConfigItem](
-		ttlcache.WithTTL[string, authConfigItem](15*time.Minute),
-		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
-	)
+	// Issuer keys are fetched and aged by the shared cache, which serves the
+	// last keys it retrieved through an issuer outage and stops trusting them
+	// once they are too old to confirm.  The key space here comes from the
+	// namespaces the director advertises rather than from a request, so no
+	// capacity bound is needed.
+	ac.ctx = ctx
+	ac.issuerKeys = token.NewJwksCache(ctx, egrp)
 
 	// Touch-on-hit must stay disabled: the token's exp is only checked in the
 	// loader, so letting a Get refresh the entry would keep an actively-used
@@ -119,23 +90,28 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	)
 
 	egrp.Go(func() error {
-		ac.issuerKeys.Start()
-		return nil
-	})
-	egrp.Go(func() error {
 		ac.tokenAuthz.Start()
 		return nil
 	})
 	egrp.Go(func() error {
 		<-ctx.Done()
-		ac.issuerKeys.Stop()
-		ac.issuerKeys.DeleteAll()
 		ac.tokenAuthz.Stop()
 		ac.tokenAuthz.DeleteAll()
 		return nil
 	})
 
 	return
+}
+
+// issuerJwksResolver locates an issuer's JWKS through OIDC discovery.
+func issuerJwksResolver(issuerUrl string) token.JwksUrlResolver {
+	return func(ctx context.Context) (string, error) {
+		jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to look up the JWKS URL for issuer %s", issuerUrl)
+		}
+		return jwksUrl.String(), nil
+	}
 }
 
 func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAd) error {
@@ -222,28 +198,17 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		return
 	}
 
-	issuerConfItem := ac.issuerKeys.Get(issuer)
-	if issuerConfItem == nil {
-		err = errors.Errorf("unable to determine keys for issuer %s", issuer)
+	if ac.issuerKeys == nil {
+		err = errors.New("issuer key cache is not initialized")
+		return
+	}
+	keyset, err := ac.issuerKeys.Keys(ac.ctx, issuer, issuerJwksResolver(issuer))
+	if err != nil {
+		err = errors.Wrapf(err, "unable to determine keys for issuer %s", issuer)
 		return
 	}
 
-	issuerConf := issuerConfItem.Value()
-	if issuerConf.err != nil {
-		err = issuerConf.err
-		return
-	}
-
-	item := issuerConfItem.Value()
-	if item.set == nil {
-		if item.err == nil {
-			err = item.err
-		} else {
-			err = errors.Errorf("failed to fetch public key set")
-		}
-		return
-	}
-	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
+	tok, err = token.VerifyWithKeyset(tokenStr, keyset)
 	if err != nil {
 		err = errors.Wrap(err, "unable to get resource scopes because verification failed")
 		return
