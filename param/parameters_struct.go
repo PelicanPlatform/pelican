@@ -595,6 +595,7 @@ type Config struct {
 		DisableLivenessCheck bool `mapstructure:"disablelivenesscheck" yaml:"DisableLivenessCheck"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
 		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
+		LivenessCheckFailureThreshold int `mapstructure:"livenesscheckfailurethreshold" yaml:"LivenessCheckFailureThreshold"`
 		LivenessCheckInterval time.Duration `mapstructure:"livenesscheckinterval" yaml:"LivenessCheckInterval"`
 		LivenessCheckTimeout time.Duration `mapstructure:"livenesschecktimeout" yaml:"LivenessCheckTimeout"`
 		LivenessMaxUnresponsiveTime time.Duration `mapstructure:"livenessmaxunresponsivetime" yaml:"LivenessMaxUnresponsiveTime"`
@@ -1188,6 +1189,7 @@ type configWithType struct {
 		DisableLivenessCheck struct { Type string; Value bool }
 		EnableLocalMonitoring struct { Type string; Value bool }
 		HttpMaxDelay struct { Type string; Value time.Duration }
+		LivenessCheckFailureThreshold struct { Type string; Value int }
 		LivenessCheckInterval struct { Type string; Value time.Duration }
 		LivenessCheckTimeout struct { Type string; Value time.Duration }
 		LivenessMaxUnresponsiveTime struct { Type string; Value time.Duration }

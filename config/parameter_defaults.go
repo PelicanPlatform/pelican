@@ -1002,6 +1002,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Xrootd_EnableLocalMonitoring.GetName(), true)
 	// Xrootd.HttpMaxDelay
 	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
+	// Xrootd.LivenessCheckFailureThreshold
+	v.SetDefault(param.Xrootd_LivenessCheckFailureThreshold.GetName(), 3)
 	// Xrootd.LivenessCheckInterval
 	v.SetDefault(param.Xrootd_LivenessCheckInterval.GetName(), "1m")
 	// Xrootd.LivenessCheckTimeout

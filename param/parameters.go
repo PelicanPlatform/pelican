@@ -601,6 +601,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Xrootd.DisableLivenessCheck": false,
 	"Xrootd.EnableLocalMonitoring": false,
 	"Xrootd.HttpMaxDelay": false,
+	"Xrootd.LivenessCheckFailureThreshold": false,
 	"Xrootd.LivenessCheckInterval": false,
 	"Xrootd.LivenessCheckTimeout": false,
 	"Xrootd.LivenessMaxUnresponsiveTime": false,
@@ -1018,6 +1019,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Transfer.MaxConcurrentJobs": func(c *Config) int { return c.Transfer.MaxConcurrentJobs },
 	"Transport.MaxIdleConns": func(c *Config) int { return c.Transport.MaxIdleConns },
 	"Xrootd.DetailedMonitoringPort": func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
+	"Xrootd.LivenessCheckFailureThreshold": func(c *Config) int { return c.Xrootd.LivenessCheckFailureThreshold },
 	"Xrootd.LocalMonitoringPort": func(c *Config) int { return c.Xrootd.LocalMonitoringPort },
 	"Xrootd.ManagerPort": func(c *Config) int { return c.Xrootd.ManagerPort },
 	"Xrootd.MaxThreads": func(c *Config) int { return c.Xrootd.MaxThreads },
@@ -1917,6 +1919,7 @@ var allParameterNames = []string{
 	"Xrootd.DisableLivenessCheck",
 	"Xrootd.EnableLocalMonitoring",
 	"Xrootd.HttpMaxDelay",
+	"Xrootd.LivenessCheckFailureThreshold",
 	"Xrootd.LivenessCheckInterval",
 	"Xrootd.LivenessCheckTimeout",
 	"Xrootd.LivenessMaxUnresponsiveTime",
@@ -2251,6 +2254,7 @@ var (
 	Transfer_MaxConcurrentJobs = IntParam{"Transfer.MaxConcurrentJobs"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_LivenessCheckFailureThreshold = IntParam{"Xrootd.LivenessCheckFailureThreshold"}
 	Xrootd_LocalMonitoringPort = IntParam{"Xrootd.LocalMonitoringPort"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
@@ -2802,6 +2806,7 @@ func init() {
 		"Transfer.MaxConcurrentJobs": Transfer_MaxConcurrentJobs,
 		"Transport.MaxIdleConns": Transport_MaxIdleConns,
 		"Xrootd.DetailedMonitoringPort": Xrootd_DetailedMonitoringPort,
+		"Xrootd.LivenessCheckFailureThreshold": Xrootd_LivenessCheckFailureThreshold,
 		"Xrootd.LocalMonitoringPort": Xrootd_LocalMonitoringPort,
 		"Xrootd.ManagerPort": Xrootd_ManagerPort,
 		"Xrootd.MaxThreads": Xrootd_MaxThreads,

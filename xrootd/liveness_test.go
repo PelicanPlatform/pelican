@@ -176,9 +176,17 @@ func TestTrackedPIDsForRole(t *testing.T) {
 	assert.Equal(t, []int{21}, trackedPIDsForRole(false))
 }
 
-// livenessTestSetup configures the liveness knobs for a fast, deterministic loop and
-// returns a counter of shutdown requests plus the probe result the loop should see.
-func livenessTestSetup(t *testing.T, maxUnresponsive time.Duration) (*atomic.Int32, *atomic.Bool) {
+// livenessHarness drives runXrootdLivenessCheck without a real XRootD on the other end.
+type livenessHarness struct {
+	shutdowns        atomic.Int32
+	probes           atomic.Int32
+	probesAtShutdown atomic.Int32
+	probeFails       atomic.Bool
+}
+
+// newLivenessHarness configures the liveness knobs for a fast, deterministic loop and
+// installs stub probe/shutdown implementations.
+func newLivenessHarness(t *testing.T, maxUnresponsive time.Duration) *livenessHarness {
 	t.Helper()
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
@@ -186,13 +194,17 @@ func livenessTestSetup(t *testing.T, maxUnresponsive time.Duration) (*atomic.Int
 	require.NoError(t, param.Origin_Port.Set(1))
 	require.NoError(t, param.Xrootd_LivenessCheckInterval.Set(time.Millisecond))
 	require.NoError(t, param.Xrootd_LivenessCheckTimeout.Set(time.Second))
+	require.NoError(t, param.Xrootd_LivenessCheckFailureThreshold.Set(3))
 	require.NoError(t, param.Xrootd_LivenessMaxUnresponsiveTime.Set(maxUnresponsive))
 
-	var shutdowns atomic.Int32
-	var probeFails atomic.Bool
-	shutdownXrootdFn = func(isCache bool) { shutdowns.Add(1) }
+	h := &livenessHarness{}
+	shutdownXrootdFn = func(isCache bool) {
+		h.probesAtShutdown.Store(h.probes.Load())
+		h.shutdowns.Add(1)
+	}
 	probeXrootdFn = func(ctx context.Context, addr string, timeout time.Duration) error {
-		if probeFails.Load() {
+		h.probes.Add(1)
+		if h.probeFails.Load() {
 			return errors.New("simulated unresponsive XRootD")
 		}
 		return nil
@@ -201,25 +213,55 @@ func livenessTestSetup(t *testing.T, maxUnresponsive time.Duration) (*atomic.Int
 		shutdownXrootdFn = shutdownHungXrootd
 		probeXrootdFn = probeXrootdEndpoint
 	})
-	return &shutdowns, &probeFails
+	return h
+}
+
+func (h *livenessHarness) run(t *testing.T) (context.CancelFunc, chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runXrootdLivenessCheck(ctx, false)
+	}()
+	return cancel, done
+}
+
+func (h *livenessHarness) noShutdown() func() bool {
+	return func() bool { return h.shutdowns.Load() > 0 }
+}
+
+// TestNextCheckDelay pins down the pacing rule: the interval is a floor on the spacing
+// between checks, not a delay bolted onto every one of them.
+func TestNextCheckDelay(t *testing.T) {
+	interval := time.Minute
+
+	t.Run("success waits the whole interval", func(t *testing.T) {
+		assert.Equal(t, interval, nextCheckDelay(interval, time.Second, true))
+		// Even a slow success is allowed to pace itself further out.
+		assert.Equal(t, interval, nextCheckDelay(interval, 5*time.Minute, true))
+	})
+
+	t.Run("quick failure waits out the remainder", func(t *testing.T) {
+		assert.Equal(t, 40*time.Second, nextCheckDelay(interval, 20*time.Second, false))
+	})
+
+	t.Run("failure longer than the interval retries immediately", func(t *testing.T) {
+		assert.Equal(t, time.Duration(0), nextCheckDelay(interval, interval, false))
+		assert.Equal(t, time.Duration(0), nextCheckDelay(interval, 3*time.Minute, false))
+	})
 }
 
 // TestLivenessCheckShutsDownUnresponsiveXrootd verifies a sustained probe failure ends in a
 // shutdown, and not before the permitted unresponsive window has elapsed.
 func TestLivenessCheckShutsDownUnresponsiveXrootd(t *testing.T) {
 	const maxUnresponsive = 150 * time.Millisecond
-	shutdowns, probeFails := livenessTestSetup(t, maxUnresponsive)
-	probeFails.Store(true)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	h := newLivenessHarness(t, maxUnresponsive)
+	h.probeFails.Store(true)
 
 	start := time.Now()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runXrootdLivenessCheck(ctx, false)
-	}()
+	cancel, done := h.run(t)
+	t.Cleanup(cancel)
 
 	select {
 	case <-done:
@@ -227,21 +269,35 @@ func TestLivenessCheckShutsDownUnresponsiveXrootd(t *testing.T) {
 		t.Fatal("liveness check did not shut XRootD down")
 	}
 	assert.GreaterOrEqual(t, time.Since(start), maxUnresponsive)
-	assert.Equal(t, int32(1), shutdowns.Load())
+	assert.Equal(t, int32(1), h.shutdowns.Load())
+}
+
+// TestLivenessCheckRequiresRepeatedFailures verifies that no single failed check can take
+// XRootD down, however long the daemon has been unresponsive.  The unresponsive-time gate is
+// wide open here so the failure count is the only thing holding the shutdown back.
+func TestLivenessCheckRequiresRepeatedFailures(t *testing.T) {
+	h := newLivenessHarness(t, 0)
+	require.NoError(t, param.Xrootd_LivenessCheckFailureThreshold.Set(3))
+	h.probeFails.Store(true)
+
+	cancel, done := h.run(t)
+	t.Cleanup(cancel)
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("liveness check did not shut XRootD down")
+	}
+	assert.GreaterOrEqual(t, h.probesAtShutdown.Load(), int32(3),
+		"XRootD was shut down after fewer than the required consecutive failures")
 }
 
 // TestLivenessCheckToleratesResponsiveXrootd verifies a healthy XRootD is never shut down.
 func TestLivenessCheckToleratesResponsiveXrootd(t *testing.T) {
-	shutdowns, _ := livenessTestSetup(t, 10*time.Millisecond)
+	h := newLivenessHarness(t, 10*time.Millisecond)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runXrootdLivenessCheck(ctx, false)
-	}()
-
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 200*time.Millisecond, 10*time.Millisecond)
+	cancel, done := h.run(t)
+	assert.Never(t, h.noShutdown(), 200*time.Millisecond, 10*time.Millisecond)
 
 	cancel()
 	select {
@@ -251,24 +307,19 @@ func TestLivenessCheckToleratesResponsiveXrootd(t *testing.T) {
 	}
 }
 
-// TestLivenessCheckRecoveryResetsClock verifies that a single successful probe clears the
-// accumulated unresponsive time.
+// TestLivenessCheckRecoveryResetsClock verifies that a single successful probe clears both
+// the accumulated unresponsive time and the consecutive-failure count.
 func TestLivenessCheckRecoveryResetsClock(t *testing.T) {
-	shutdowns, probeFails := livenessTestSetup(t, 100*time.Millisecond)
-	probeFails.Store(true)
+	h := newLivenessHarness(t, 100*time.Millisecond)
+	h.probeFails.Store(true)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runXrootdLivenessCheck(ctx, false)
-	}()
+	cancel, done := h.run(t)
 
 	// Let the failures accumulate for a while, then recover before the limit would
 	// have been reached had the clock kept running.
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 50*time.Millisecond, 5*time.Millisecond)
-	probeFails.Store(false)
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 200*time.Millisecond, 10*time.Millisecond)
+	assert.Never(t, h.noShutdown(), 50*time.Millisecond, 5*time.Millisecond)
+	h.probeFails.Store(false)
+	assert.Never(t, h.noShutdown(), 200*time.Millisecond, 10*time.Millisecond)
 
 	cancel()
 	<-done
@@ -277,19 +328,13 @@ func TestLivenessCheckRecoveryResetsClock(t *testing.T) {
 // TestLivenessCheckIgnoresExpectedRestart verifies the monitor holds its fire while a
 // deliberate XRootD restart is in flight.
 func TestLivenessCheckIgnoresExpectedRestart(t *testing.T) {
-	shutdowns, probeFails := livenessTestSetup(t, 50*time.Millisecond)
-	probeFails.Store(true)
+	h := newLivenessHarness(t, 50*time.Millisecond)
+	h.probeFails.Store(true)
 	daemon.SetExpectedRestart(true)
 	t.Cleanup(func() { daemon.SetExpectedRestart(false) })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runXrootdLivenessCheck(ctx, false)
-	}()
-
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 250*time.Millisecond, 10*time.Millisecond)
+	cancel, done := h.run(t)
+	assert.Never(t, h.noShutdown(), 250*time.Millisecond, 10*time.Millisecond)
 
 	cancel()
 	<-done
@@ -298,18 +343,12 @@ func TestLivenessCheckIgnoresExpectedRestart(t *testing.T) {
 // TestLivenessCheckSkipsWithoutPort verifies that a server whose XRootD port is unknown is
 // never killed on the strength of our own confusion.
 func TestLivenessCheckSkipsWithoutPort(t *testing.T) {
-	shutdowns, probeFails := livenessTestSetup(t, 50*time.Millisecond)
-	probeFails.Store(true)
+	h := newLivenessHarness(t, 50*time.Millisecond)
+	h.probeFails.Store(true)
 	require.NoError(t, param.Origin_Port.Set(0))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runXrootdLivenessCheck(ctx, false)
-	}()
-
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 250*time.Millisecond, 10*time.Millisecond)
+	cancel, done := h.run(t)
+	assert.Never(t, h.noShutdown(), 250*time.Millisecond, 10*time.Millisecond)
 
 	cancel()
 	<-done
@@ -318,8 +357,8 @@ func TestLivenessCheckSkipsWithoutPort(t *testing.T) {
 // TestLaunchXrootdLivenessCheckDisabled verifies the hidden kill switch restores the
 // historical, purely-passive behavior.
 func TestLaunchXrootdLivenessCheckDisabled(t *testing.T) {
-	shutdowns, probeFails := livenessTestSetup(t, time.Millisecond)
-	probeFails.Store(true)
+	h := newLivenessHarness(t, time.Millisecond)
+	h.probeFails.Store(true)
 	require.NoError(t, param.Xrootd_DisableLivenessCheck.Set(true))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -327,7 +366,7 @@ func TestLaunchXrootdLivenessCheckDisabled(t *testing.T) {
 	egrp, egrpCtx := errgroup.WithContext(ctx)
 	LaunchXrootdLivenessCheck(egrpCtx, egrp, false)
 
-	assert.Never(t, func() bool { return shutdowns.Load() > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	assert.Never(t, h.noShutdown(), 100*time.Millisecond, 10*time.Millisecond)
 	cancel()
 	require.NoError(t, egrp.Wait())
 }
