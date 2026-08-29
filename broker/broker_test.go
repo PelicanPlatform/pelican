@@ -407,8 +407,10 @@ func TestRetrieveTimeout(t *testing.T) {
 
 	assert.Equal(t, server_structs.RespPollTimeout, brokerResp.Status)
 
-	ctx, cancelFunc := context.WithTimeout(ctx, 50*time.Millisecond)
+	// Use a separate variable: reassigning ctx here would race with the
+	// goroutines above that are reading it.
+	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancelFunc()
-	_, err = doRetrieveRequest(t, ctx, 10*time.Second)
+	_, err = doRetrieveRequest(t, timeoutCtx, 10*time.Second)
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }
