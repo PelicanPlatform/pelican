@@ -65,7 +65,7 @@ func TestGetAcls_PublicNamespaceWithInvalidToken(t *testing.T) {
 	require.NoError(t, ac.updateConfig(nsAds))
 
 	t.Run("EmptyToken", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("")
+		acls, trusted, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		assert.True(t, trusted, "empty token should be treated as trusted (no token)")
 		require.Len(t, acls, 1)
@@ -74,7 +74,7 @@ func TestGetAcls_PublicNamespaceWithInvalidToken(t *testing.T) {
 	})
 
 	t.Run("GarbageToken", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("not-a-real-jwt")
+		acls, trusted, _, err := ac.getAcls("not-a-real-jwt")
 		require.NoError(t, err)
 		assert.False(t, trusted, "garbage token should not be trusted")
 		require.Len(t, acls, 1, "Public ACLs must still be granted")
@@ -108,7 +108,7 @@ func TestGetAcls_MixedNamespaces(t *testing.T) {
 	require.NoError(t, ac.updateConfig(nsAds))
 
 	t.Run("InvalidTokenGetsOnlyPublicACLs", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("bad-token")
+		acls, trusted, _, err := ac.getAcls("bad-token")
 		require.NoError(t, err)
 		assert.False(t, trusted)
 
@@ -202,7 +202,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		// Only the public namespace contributes (no valid token).
 		require.Len(t, acls, 1)
@@ -229,7 +229,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		// Only the child's public namespace contributes.
 		require.Len(t, acls, 1)
@@ -253,7 +253,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		require.Len(t, acls, 2)
 
@@ -482,7 +482,7 @@ func TestGetResourceScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actualScopes, actualIssuer, actualError := ac.getResourceScopes(tt.token)
+			actualScopes, actualIssuer, _, actualError := ac.getResourceScopes(tt.token)
 			require.ErrorIs(t, actualError, tt.wantError)
 			require.Equal(t, tt.wantIssuer, actualIssuer)
 			assert.ElementsMatch(t, tt.wantScope, actualScopes)

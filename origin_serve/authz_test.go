@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -814,10 +813,17 @@ func TestGetResourceScopes(t *testing.T) {
 	keySet := jwk.NewSet()
 	require.NoError(t, keySet.AddKey(pubKey))
 
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, ctx := errgroup.WithContext(ctx)
+	t.Cleanup(func() {
+		cancel()
+		_ = egrp.Wait()
+	})
+
 	ac := &authConfig{}
 	ac.issuers.Store(&map[string]bool{issuer: true})
-	ac.issuerKeys = ttlcache.New[string, authConfigItem]()
-	ac.issuerKeys.Set(issuer, authConfigItem{set: keySet}, ttlcache.NoTTL)
+	ac.issuerKeys = token.NewJwksCache(ctx, egrp)
+	ac.issuerKeys.Set(issuer, keySet)
 
 	tests := []struct {
 		name      string
@@ -848,7 +854,7 @@ func TestGetResourceScopes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tok := createTestToken(t, key, issuer, "test-user", nil, tt.scope)
-			scopes, gotIssuer, err := ac.getResourceScopes(tok)
+			scopes, gotIssuer, _, err := ac.getResourceScopes(tok)
 			require.NoError(t, err)
 			assert.Equal(t, issuer, gotIssuer)
 			assert.ElementsMatch(t, tt.wantScope, scopes)
