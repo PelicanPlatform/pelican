@@ -30,7 +30,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -394,10 +393,8 @@ func setupTokenAuthConfig(t *testing.T, ac *authConfig, issuer string) jwk.Key {
 
 	// Pre-populate the issuer key cache so getResourceScopes never tries
 	// to look up the JWKS over the network.
-	if ac.issuerKeys == nil {
-		ac.issuerKeys = ttlcache.New[string, authConfigItem]()
-	}
-	ac.issuerKeys.Set(issuer, authConfigItem{set: pubKeySet}, ttlcache.NoTTL)
+	require.NotNil(t, ac.issuerKeys, "authConfig must be built with newAuthConfig")
+	ac.issuerKeys.Set(issuer, pubKeySet)
 
 	issuerURL, err := url.Parse(issuer)
 	require.NoError(t, err)
@@ -434,7 +431,14 @@ func createToken(t *testing.T, tc token.TokenConfig, privKey jwk.Key, issuer str
 // parses the token fields. Especially, this test focus on translating the
 // SciTokens scopes of a trusted token into the equivalent WLCG scopes.
 func TestGetResourceScopes(t *testing.T) {
-	ac := &authConfig{}
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, ctx := errgroup.WithContext(ctx)
+	t.Cleanup(func() {
+		cancel()
+		_ = egrp.Wait()
+	})
+
+	ac := newAuthConfig(ctx, egrp)
 	issuer := "https://issuer.example.com"
 	res := "/private"
 	privKey := setupTokenAuthConfig(t, ac, issuer)

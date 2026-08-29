@@ -283,6 +283,19 @@ func (c *JwksCache) Refresh(ctx context.Context, key string, resolve JwksUrlReso
 	return c.fetch(ctx, key, entry, resolve)
 }
 
+// Set installs a keyset directly, as though it had just been fetched.  It is
+// for callers that obtain an issuer's keys through some channel other than an
+// HTTP fetch, and for tests that would otherwise have to stand up a JWKS
+// endpoint.  The keys age from here like any other, so they are revalidated
+// against the issuer once they pass the revalidate interval.
+func (c *JwksCache) Set(key string, set jwk.Set) {
+	entry := c.entry(key)
+	if entry == nil {
+		return
+	}
+	entry.recordSuccess(entry.resolvedUrl(), set)
+}
+
 func (c *JwksCache) entry(key string) *jwksEntry {
 	item := c.entries.Get(key)
 	if item == nil {
