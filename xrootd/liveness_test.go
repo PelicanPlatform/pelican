@@ -22,6 +22,8 @@ package xrootd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -40,12 +42,39 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-// TestProbeXrootdEndpointResponsive verifies a peer that completes a TLS handshake is
-// considered alive.
+// trustTestServer points the probe's TLS settings at a test server's own certificate, so the
+// handshake completes rather than failing verification.
+func trustTestServer(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	livenessTLSConfigFn = func(_ string) *tls.Config {
+		return &tls.Config{RootCAs: pool, ServerName: "example.com", MinVersion: tls.VersionTLS12}
+	}
+	t.Cleanup(func() { livenessTLSConfigFn = livenessTLSConfig })
+}
+
+// TestProbeXrootdEndpointResponsive verifies a peer that completes a verified TLS handshake
+// is considered alive.
 func TestProbeXrootdEndpointResponsive(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	t.Cleanup(srv.Close)
+	trustTestServer(t, srv)
 
+	require.NoError(t, probeXrootdEndpoint(context.Background(), srv.Listener.Addr().String(), 10*time.Second))
+}
+
+// TestProbeXrootdEndpointUntrustedCertificate verifies that a certificate the probe cannot
+// verify is not treated as a hung daemon.  XRootD answered, which is the whole question; a
+// certificate problem is a different failure and must not get the daemon killed.
+func TestProbeXrootdEndpointUntrustedCertificate(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(srv.Close)
+
+	// The default settings do not trust httptest's throwaway CA, so verification fails.
 	require.NoError(t, probeXrootdEndpoint(context.Background(), srv.Listener.Addr().String(), 10*time.Second))
 }
 
@@ -114,14 +143,21 @@ func TestProbeXrootdEndpointCancelledMidHandshake(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
-	accepted := make(chan struct{})
+	// Signalled once the ClientHello has arrived.  Accepting is not enough on its own:
+	// the kernel completes the handshake out of the backlog, so the probe's DialContext
+	// may not have returned yet and a cancel here would land on the dial rather than on
+	// the handshake this test is about.
+	helloReceived := make(chan struct{})
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		defer conn.Close()
-		close(accepted)
+		if _, err := conn.Read(make([]byte, 1)); err != nil {
+			return
+		}
+		close(helloReceived)
 		// Hold the connection open without ever answering the ClientHello.
 		<-time.After(30 * time.Second)
 	}()
@@ -132,16 +168,36 @@ func TestProbeXrootdEndpointCancelledMidHandshake(t *testing.T) {
 		probeErr <- probeXrootdEndpoint(ctx, listener.Addr().String(), 30*time.Second)
 	}()
 
-	<-accepted
+	select {
+	case <-helloReceived:
+	case <-time.After(30 * time.Second):
+		t.Fatal("probe never sent a ClientHello")
+	}
 	cancel()
 
 	select {
 	case err := <-probeErr:
 		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
 		assert.Contains(t, err.Error(), "interrupted")
 	case <-time.After(30 * time.Second):
 		t.Fatal("probe did not return after its context was cancelled")
 	}
+}
+
+// TestLivenessTLSConfigServerName guards against an empty ServerName, which crypto/tls
+// rejects out of hand -- the probe would read that instant failure as XRootD answering and
+// stop checking anything at all.
+func TestLivenessTLSConfigServerName(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	assert.Equal(t, "localhost", livenessTLSConfig("localhost").ServerName,
+		"an unset Server.Hostname must fall back to the dialed host")
+
+	require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+	assert.Equal(t, "origin.example.com", livenessTLSConfig("localhost").ServerName,
+		"the certificate's name should win over the loopback address we dial")
 }
 
 func TestXrootdLivenessAddress(t *testing.T) {
@@ -268,9 +324,12 @@ func TestNextCheckDelay(t *testing.T) {
 // failures.  The timings here are scaled down, and the probe deliberately runs longer than
 // the interval so the immediate-retry path is the one under test.
 func TestLivenessCheckRetriesFailuresWithinTheWindow(t *testing.T) {
-	h := newLivenessHarness(t, 150*time.Millisecond)
-	require.NoError(t, param.Xrootd_LivenessCheckInterval.Set(20*time.Millisecond))
-	h.probeDelay.Store(int64(30 * time.Millisecond))
+	// A check cycle costs about 50ms here against a 400ms window, so the loop has room
+	// for eight or so checks; the assertion below only needs three, which keeps the
+	// test honest on a loaded CI machine without reaching for a longer runtime.
+	h := newLivenessHarness(t, 400*time.Millisecond)
+	require.NoError(t, param.Xrootd_LivenessCheckInterval.Set(10*time.Millisecond))
+	h.probeDelay.Store(int64(40 * time.Millisecond))
 	h.probeFails.Store(true)
 
 	cancel, done := h.run(t)

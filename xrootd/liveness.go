@@ -32,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -40,8 +41,9 @@ import (
 // Test seams for the liveness monitor; overriding these lets the loop be
 // exercised without a real XRootD process on the other end.
 var (
-	probeXrootdFn    = probeXrootdEndpoint
-	shutdownXrootdFn = shutdownHungXrootd
+	probeXrootdFn       = probeXrootdEndpoint
+	shutdownXrootdFn    = shutdownHungXrootd
+	livenessTLSConfigFn = livenessTLSConfig
 )
 
 // LaunchXrootdLivenessCheck starts a goroutine that periodically verifies the locally-launched
@@ -186,9 +188,14 @@ func probeXrootdEndpoint(parentCtx context.Context, addr string, timeout time.Du
 	}
 	defer conn.Close()
 
-	// The handshake is never completed against a verified identity -- the only question is
-	// whether bytes come back -- so certificate validation is intentionally skipped.
-	tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true}) // #nosec G402 -- liveness probe; no data is exchanged
+	// Fall back to the host we dialed if the server has no configured hostname; an empty
+	// ServerName makes crypto/tls fail the handshake immediately, which would look like
+	// XRootD answering and quietly neuter the whole check.
+	host, _, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		host = addr
+	}
+	tlsConn := tls.Client(conn, livenessTLSConfigFn(host))
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		if parentCtx.Err() != nil {
 			// Pelican is shutting down; the probe learned nothing either way.
@@ -204,6 +211,29 @@ func probeXrootdEndpoint(parentCtx context.Context, addr string, timeout time.Du
 		log.Debugf("XRootD at %s responded to the liveness check with a TLS error, which still counts as alive: %v", addr, err)
 	}
 	return nil
+}
+
+// livenessTLSConfig returns the TLS settings for the probe: Pelican's own trust roots, and
+// the name the server's certificate is issued for rather than the loopback address dialed.
+//
+// Whether verification succeeds does not actually change the verdict -- a rejected
+// certificate is still XRootD answering, and probeXrootdEndpoint treats any non-timeout
+// error as alive -- so a certificate problem can never be mistaken for a hung daemon.
+// Verifying anyway keeps the probe honest and avoids carrying a disabled certificate check
+// around in the tree.
+func livenessTLSConfig(fallbackHost string) *tls.Config {
+	cfg := &tls.Config{}
+	if transport := config.GetTransport(); transport != nil && transport.TLSClientConfig != nil {
+		cfg = transport.TLSClientConfig.Clone()
+	}
+	cfg.ServerName = param.Server_Hostname.GetString()
+	if cfg.ServerName == "" {
+		cfg.ServerName = fallbackHost
+	}
+	if cfg.MinVersion == 0 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	return cfg
 }
 
 // isProbeTimeout reports whether err means the peer never answered, as opposed to answering
