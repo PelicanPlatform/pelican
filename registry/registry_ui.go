@@ -706,10 +706,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		// A fully-valid submission moves an auto-registered (Incomplete)
 		// registration into the admin review queue. Partially-filled updates
 		// (e.g. an admin correcting an unclaimed registration) keep it Incomplete.
-		if existingStatus == server_structs.RegIncomplete {
+		// Denial is likewise not final: editing a Denied registration (e.g. to
+		// fix the problem that led to the denial) resubmits it as Pending for
+		// another round of review.
+		if existingStatus == server_structs.RegIncomplete || existingStatus == server_structs.RegDenied {
 			if verr := config.GetValidate().Struct(ns); verr == nil {
 				if serr := updateRegistrationStatusById(ns.ID, server_structs.RegPending, ""); serr != nil {
-					log.Errorf("Failed to promote registration %d from Incomplete to Pending: %v", ns.ID, serr)
+					log.Errorf("Failed to promote registration %d from %s to Pending: %v", ns.ID, existingStatus, serr)
 					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
 						Msg:    "Registration was updated but could not be submitted for review"})
