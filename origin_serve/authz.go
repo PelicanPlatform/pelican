@@ -206,7 +206,10 @@ func (ac *authConfig) updateConfig(exports []server_utils.OriginExport) error {
 	return nil
 }
 
-func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+// getResourceScopes verifies the token and returns the scopes it carries, its
+// issuer, and its expiration.  The expiration comes from the verified token so
+// that callers do not have to parse it a second time.
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, expiration time.Time, err error) {
 	if tokenStr == "" {
 		return
 	}
@@ -308,6 +311,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		}
 	}
 
+	expiration = tok.Expiration()
 	scopes = token_scopes.ParseResourceScopeString(tok)
 
 	return
@@ -350,12 +354,12 @@ func (ac *authConfig) SetTokenHintHeaders(hdr http.Header, resource string) {
 }
 
 // Given a token, calculate the corresponding access control list
-func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
+func (ac *authConfig) getAcls(token string) (newAcls acls, issuer string, expiration time.Time, err error) {
 	exports := ac.exports.Load()
 	if exports == nil {
 		return
 	}
-	resources, issuer, err := ac.getResourceScopes(token)
+	resources, issuer, expiration, err := ac.getResourceScopes(token)
 	if err != nil {
 		return
 	}
@@ -404,32 +408,26 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 }
 
 func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tokenStr string) *ttlcache.Item[string, cachedTokenInfo] {
-	acls, err := ac.getAcls(tokenStr)
+	acls, issuer, expiration, err := ac.getAcls(tokenStr)
 	if err != nil {
 		// If the token is not a valid one signed by a known issuer, do not keep it in memory (avoids a DoS)
 		log.Warningln("Rejecting invalid token:", err)
 		return nil
 	}
 
-	// Re-parse the claims to pick up the issuer (for logging) and the expiry.
-	// getAcls has already verified the token's signature and validity, so the
-	// claims can be trusted despite the unsafe parse.
-	issuer := ""
+	// Cap the cache entry's lifetime at the token's own expiry, plus the clock
+	// skew leeway the verifier grants, so the cached authorization never
+	// outlives the token itself.  The expiry comes from the token getAcls
+	// verified, so it needs no separate parse.
 	ttl := ttlcache.DefaultTTL
-	if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
-		issuer = tok.Issuer()
-		// Cap the cache entry's lifetime at the token's own expiry (plus the
-		// clock-skew leeway the verifier grants) so the cached authorization
-		// never outlives the token itself.
-		if exp := tok.Expiration(); !exp.IsZero() {
-			remaining := time.Until(exp) + token.ClockSkewLeeway
-			if remaining <= 0 {
-				log.Warningln("Rejecting expired token")
-				return nil
-			}
-			if remaining < tokenAuthzTTL {
-				ttl = remaining
-			}
+	if !expiration.IsZero() {
+		remaining := time.Until(expiration) + token.ClockSkewLeeway
+		if remaining <= 0 {
+			log.Warningln("Rejecting expired token")
+			return nil
+		}
+		if remaining < tokenAuthzTTL {
+			ttl = remaining
 		}
 	}
 

@@ -180,7 +180,10 @@ func nsAdsAuthzEqual(old, new []server_structs.NamespaceAd) bool {
 	return true
 }
 
-func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+// getResourceScopes verifies the token and returns the scopes it carries, its
+// issuer, and its expiration.  The expiration comes from the verified token so
+// that callers do not have to parse it a second time.
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, expiration time.Time, err error) {
 	if tokenStr == "" {
 		return
 	}
@@ -214,6 +217,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		return
 	}
 
+	expiration = tok.Expiration()
 	scopes = token_scopes.ParseResourceScopeString(tok)
 
 	return
@@ -250,12 +254,12 @@ func calcResourceScopes(rs token_scopes.ResourceScope, basePaths []string, restr
 // Public namespaces always grant read ACLs regardless of the token's
 // validity.  An invalid or untrusted token only prevents private-namespace
 // ACLs from being generated; it is not an error.
-func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, err error) {
+func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, expiration time.Time, err error) {
 	namespaces := ac.ns.Load()
 	if namespaces == nil {
 		return
 	}
-	resources, issuer, tokenErr := ac.getResourceScopes(token)
+	resources, issuer, expiration, tokenErr := ac.getResourceScopes(token)
 	tokenTrusted = (tokenErr == nil)
 	if tokenErr != nil && token != "" {
 		log.Debugln("Token validation failed (public ACLs still granted):", tokenErr)
@@ -294,7 +298,7 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 }
 
 func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], tokenStr string) *ttlcache.Item[string, authzResult] {
-	newAcls, tokenTrusted, tokenValidationErr := ac.getAcls(tokenStr)
+	newAcls, tokenTrusted, expiration, tokenValidationErr := ac.getAcls(tokenStr)
 	if tokenValidationErr != nil && tokenStr == "" {
 		// Non-token-related error (e.g., namespace config issue) should
 		// be logged and result in a nil return.
@@ -322,23 +326,18 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], tokenSt
 	ttl := ttlcache.DefaultTTL
 	if !tokenTrusted && tokenStr != "" {
 		ttl = 30 * time.Second
-	} else if tokenTrusted {
-		// Cap the cache entry's lifetime at the token's own expiry (plus the
-		// clock-skew leeway the verifier grants) so the cached authorization
-		// never outlives the token itself.  getAcls has already verified the
-		// token's signature, so the claims can be trusted despite the unsafe
-		// parse.
-		if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
-			if exp := tok.Expiration(); !exp.IsZero() {
-				remaining := time.Until(exp) + token.ClockSkewLeeway
-				if remaining <= 0 {
-					log.Warningln("Rejecting expired token")
-					return nil
-				}
-				if remaining < tokenAuthzTTL {
-					ttl = remaining
-				}
-			}
+	} else if tokenTrusted && !expiration.IsZero() {
+		// Cap the cache entry's lifetime at the token's own expiry, plus the
+		// clock skew leeway the verifier grants, so the cached authorization
+		// never outlives the token itself.  The expiry comes from the token
+		// getAcls verified, so it needs no separate parse.
+		remaining := time.Until(expiration) + token.ClockSkewLeeway
+		if remaining <= 0 {
+			log.Warningln("Rejecting expired token")
+			return nil
+		}
+		if remaining < tokenAuthzTTL {
+			ttl = remaining
 		}
 	}
 
