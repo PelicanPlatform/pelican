@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package xrootd_test
 
 import (
 	"os"
@@ -33,18 +33,24 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// livenessConfig shortens the hidden liveness knobs so the monitor reacts within the
-// lifetime of a unit test instead of the ten minutes it allows in production.  The
-// proportions mirror the shipped defaults, so three checks fail inside the window before
-// XRootD is shut down.
-const livenessConfig = `
+// livenessFedConfig is a minimal origin export plus the hidden liveness knobs, shortened so
+// the monitor reacts within the lifetime of a test instead of the ten minutes it allows in
+// production.  The proportions mirror the shipped defaults, so three checks fail inside the
+// window before XRootD is shut down.
+const livenessFedConfig = `
+Origin:
+  StorageType: "posix"
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test-namespace
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
 Xrootd:
-  LivenessCheckInterval: 1s
-  LivenessCheckTimeout: 2s
-  LivenessMaxUnresponsiveTime: 7s
+  LivenessCheckInterval: 200ms
+  LivenessCheckTimeout: 400ms
+  LivenessMaxUnresponsiveTime: 1400ms
 `
 
-func processExists(pid int) bool {
+func livenessProcessExists(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil || process == nil {
 		return false
@@ -61,7 +67,7 @@ func TestXRootDLivenessKillsHungProcess(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces+livenessConfig)
+	ft := fed_test_utils.NewFedTest(t, livenessFedConfig)
 	// Killing XRootD takes the rest of the server down with it; that is the point of
 	// the test, not a teardown failure.
 	ft.AllowServerFailure()
@@ -76,7 +82,7 @@ func TestXRootDLivenessKillsHungProcess(t *testing.T) {
 		// Revive anything Pelican did not manage to kill so the process table is
 		// left clean even when the assertion below fails.
 		for _, pid := range pids {
-			if processExists(pid) {
+			if livenessProcessExists(pid) {
 				_ = syscall.Kill(pid, syscall.SIGCONT)
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
@@ -85,7 +91,7 @@ func TestXRootDLivenessKillsHungProcess(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		for _, pid := range pids {
-			if processExists(pid) {
+			if livenessProcessExists(pid) {
 				return false
 			}
 		}
