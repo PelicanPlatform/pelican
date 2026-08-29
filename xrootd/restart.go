@@ -79,6 +79,7 @@ func ResetRestartState() {
 	advertiseServersFn = func(_ context.Context, _ []server_structs.XRootDServer) error { return nil }
 	probeXrootdFn = probeXrootdEndpoint
 	shutdownXrootdFn = shutdownHungXrootd
+	livenessTLSConfigFn = livenessTLSConfig
 	ClearXrootdDaemons()
 }
 
