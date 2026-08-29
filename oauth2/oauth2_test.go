@@ -110,8 +110,10 @@ func TestVerificationURLHandler(t *testing.T) {
 		// the embedder to show alongside it.
 		assert.Equal(t, "https://issuer.example.com/device?user_code=ABCD-EFGH", recorder.calls[0].verificationURL)
 		assert.Empty(t, recorder.calls[0].userCode)
-		// Pelican's own announcement is unchanged by the handler being there.
-		assert.Contains(t, out.String(), "https://issuer.example.com/device?user_code=ABCD-EFGH")
+		// The handler REPLACES the terminal announcement: an embedder that
+		// has somewhere better to put the URL does not also get it sprayed
+		// across a terminal nobody is watching.
+		assert.Empty(t, out.String(), "nothing should be printed while a handler is installed")
 	})
 
 	t.Run("handler-gets-the-uri-and-the-code", func(t *testing.T) {
@@ -124,7 +126,7 @@ func TestVerificationURLHandler(t *testing.T) {
 		require.Len(t, recorder.calls, 1)
 		assert.Equal(t, "https://issuer.example.com/device", recorder.calls[0].verificationURL)
 		assert.Equal(t, "ABCD-EFGH", recorder.calls[0].userCode)
-		assert.Contains(t, out.String(), "https://issuer.example.com/device")
+		assert.Empty(t, out.String(), "nothing should be printed while a handler is installed")
 	})
 
 	t.Run("handler-can-be-replaced-and-removed", func(t *testing.T) {
@@ -145,7 +147,12 @@ func TestVerificationURLHandler(t *testing.T) {
 		recorder := captureVerificationURLs(t)
 		// An issuer response naming neither URI is malformed, but it should
 		// not send an embedder off to open the empty string.
-		announceVerification(&strings.Builder{}, &DeviceAuth{UserCode: "ABCD-EFGH"})
+		out := &strings.Builder{}
+		announceVerification(out, &DeviceAuth{UserCode: "ABCD-EFGH"})
 		assert.Empty(t, recorder.calls)
+		// With no URL there is nothing to hand over, so the printed output
+		// stays as the only record that a flow was attempted -- the one case
+		// where an installed handler does not suppress it.
+		assert.Contains(t, out.String(), "To approve credentials")
 	})
 }
