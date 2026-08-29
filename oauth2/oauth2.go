@@ -46,11 +46,17 @@ import (
 // otherwise it is verification_uri and userCode is the code to enter there.
 // The handler is called only when the issuer named a URL at all.
 //
-// It runs on the goroutine driving the flow, after the URL has been written
-// to stderr and before polling begins, so a handler that blocks delays the
-// user's own approval.  It must not be treated as the only way the user is
-// told: AcquireToken prints the URL whether or not a handler is installed,
-// and a handler that fails silently leaves that output as the fallback.
+// It runs on the goroutine driving the flow, before polling begins, so a
+// handler that blocks delays the user's own approval.
+//
+// An installed handler REPLACES Pelican's own announcement rather than adding
+// to it: while one is installed the URL is not written to stderr.  An embedder
+// installs a handler precisely because the terminal is not where its user is
+// looking -- a page, a desktop notification, a GUI -- and printing there
+// anyway is at best noise in a log the user never reads.  The consequence is
+// that the handler is the ONLY way the user learns where to approve, so one
+// that drops the URL silently leaves the flow with nothing to show, and it
+// polls until it expires.
 type VerificationURLHandler func(verificationURL, userCode string)
 
 var verificationURLHandler atomic.Pointer[VerificationURLHandler]
@@ -113,39 +119,46 @@ func trimPath(pathName string, maxDepth int) string {
 }
 
 // announceVerification tells the user where to approve the pending device-flow
-// authorization request, writing the instructions to w and then handing the
-// same URL to the installed VerificationURLHandler, if there is one.
+// authorization request: through the installed VerificationURLHandler if there
+// is one, and otherwise by writing the instructions to w.
 //
 // Which URL the user needs depends on the issuer.  A verification_uri_complete
 // already carries the user code, so it suffices on its own; a plain
 // verification_uri has to be paired with the code the user then types there.
 //
-// The write to w happens unconditionally and first, so a handler can only add
-// a way for the user to reach the URL, never take one away.
+// Exactly one of the two announcements happens, so an embedder that has
+// somewhere better to put the URL does not also spray it across a terminal
+// nobody is watching.  A response naming no URL at all is the exception: there
+// is nothing to hand a handler, so the printed output remains as the only
+// record that a flow was attempted.
 func announceVerification(w io.Writer, deviceAuth *DeviceAuth) {
+	// A verification_uri_complete carries the code already; a plain
+	// verification_uri needs it alongside.
 	verificationURL, userCode := deviceAuth.VerificationURIComplete, ""
-	if len(verificationURL) > 0 {
+	complete := verificationURL != ""
+	if !complete {
+		verificationURL, userCode = deviceAuth.VerificationURI, deviceAuth.UserCode
+	}
+
+	if verificationURL != "" {
+		if handler := verificationURLHandler.Load(); handler != nil {
+			(*handler)(verificationURL, userCode)
+			return
+		}
+	}
+
+	if complete {
 		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
 		fmt.Fprintln(w, "")
 		fmt.Fprintln(w, verificationURL)
-	} else {
-		verificationURL, userCode = deviceAuth.VerificationURI, deviceAuth.UserCode
-		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL:")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, verificationURL)
-		fmt.Fprintln(w, "\nand enter the following code")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, userCode)
-	}
-
-	// A malformed response naming no URL at all leaves nothing worth handing
-	// over; the printed output above is still the user's record of it.
-	if verificationURL == "" {
 		return
 	}
-	if handler := verificationURLHandler.Load(); handler != nil {
-		(*handler)(verificationURL, userCode)
-	}
+	fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL:")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, verificationURL)
+	fmt.Fprintln(w, "\nand enter the following code")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, userCode)
 }
 
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
