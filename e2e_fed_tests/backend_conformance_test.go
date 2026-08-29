@@ -155,7 +155,7 @@ func TestBackendConformance(t *testing.T) {
 			if backend.afterFed != nil {
 				backend.afterFed(t, ft)
 			}
-			token := getTempTokenForTest(t)
+			token := fed_test_utils.TempWriteToken(t)
 			if backend.token != nil {
 				token = backend.token(t)
 			}

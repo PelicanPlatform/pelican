@@ -22,7 +22,7 @@
 // cache. These tests stress the block fetcher, bitmap merge operators, seekable
 // reader, and active download deduplication under concurrent load.
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func uploadTestFile(ctx context.Context, t *testing.T, ft *fed_test_utils.FedTes
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -81,7 +81,7 @@ func primeCache(ctx context.Context, t *testing.T, ft *fed_test_utils.FedTest, p
 	_, err := client.DoGet(ctx, pelicanURL, downloadFile, false, client.WithToken(ft.Token))
 	require.NoError(t, err)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ctx, t, objectPath, testToken)
 	return cacheURL
 }
@@ -178,7 +178,7 @@ func TestConcurrent_FullReads_SameObject(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_full.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_full.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	const numReaders = 20
 
 	var wg sync.WaitGroup
@@ -218,7 +218,7 @@ func TestConcurrent_RangeReads_DifferentRanges(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_ranges.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_ranges.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Define a variety of range requests spanning different blocks
 	type rangeSpec struct {
@@ -284,7 +284,7 @@ func TestConcurrent_RangeReads_BlockBoundaries(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_boundaries.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_boundaries.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// All ranges deliberately straddle block boundaries
 	type rangeSpec struct {
@@ -354,7 +354,7 @@ func TestConcurrent_CacheMiss_SameObject(t *testing.T) {
 	uploadTestFile(ft.Ctx, t, ft, "concurrent_miss.bin", content)
 
 	// Get the cache URL without priming
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss.bin", testToken)
 
 	const numReaders = 15
@@ -393,7 +393,7 @@ func TestConcurrent_CacheMiss_RangeReads(t *testing.T) {
 	content := generateTestData(24000) // ~6 blocks
 	uploadTestFile(ft.Ctx, t, ft, "concurrent_miss_range.bin", content)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss_range.bin", testToken)
 
 	type rangeSpec struct {
@@ -459,7 +459,7 @@ func TestConcurrent_MultipleObjects(t *testing.T) {
 		cacheURL string
 	}, numObjects)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	for i := 0; i < numObjects; i++ {
 		// Vary sizes: some inline (<4KB), some disk-backed
@@ -519,7 +519,7 @@ func TestConcurrent_MixedFullAndRangeReads(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_mixed.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_mixed.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	type readSpec struct {
 		rangeHeader string // empty = full read
@@ -584,7 +584,7 @@ func TestConcurrent_LargeFile_ManySmallRanges(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_large.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_large.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Generate 50 random 1KB range reads spread across the file
 	const numRanges = 50
@@ -647,7 +647,7 @@ func TestConcurrent_InlineStorage_Reads(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_inline.txt", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_inline.txt")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	const numReaders = 20
 
 	var wg sync.WaitGroup
@@ -691,7 +691,7 @@ func TestConcurrent_RandomData_Integrity(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_random.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_random.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Mix of full reads and range reads
 	type readSpec struct {
@@ -751,7 +751,7 @@ func TestConcurrent_SuffixRange(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_suffix.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_suffix.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	fileSize := len(content)
 
 	type rangeSpec struct {
@@ -809,7 +809,7 @@ func TestConcurrent_HeadAndGet(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_head_get.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_head_get.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	type requestSpec struct {
 		method      string
@@ -912,7 +912,7 @@ func TestConcurrent_ConditionalAndFullReads(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_conditional.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_conditional.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Get the ETag from an initial request
 	initialResult := doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
@@ -1011,7 +1011,7 @@ func TestConcurrent_ThunderingHerd_SameRange_CacheHit(t *testing.T) {
 	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "herd_hit.bin", content)
 	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/herd_hit.bin")
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// All goroutines request the exact same range that spans two blocks.
 	const rangeStart = 4000
@@ -1056,7 +1056,7 @@ func TestConcurrent_ThunderingHerd_SameRange_CacheMiss(t *testing.T) {
 	// Upload but do NOT prime the cache — all readers hit a miss.
 	uploadTestFile(ft.Ctx, t, ft, "herd_miss.bin", content)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/herd_miss.bin", testToken)
 
 	const rangeStart = 4000

@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package cache_tests
 
 import (
 	"bytes"
@@ -203,7 +203,7 @@ func TestScheduler_BurstRejects429(t *testing.T) {
 	const clientPrefix = "client-burst"
 	payload := bytes.Repeat([]byte("scheduler-burst-test-"), 256*1024/21+1)[:256*1024]
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	stageBurstObjects(t, ft, httpPrefix, payload, nRequests)
 
 	// Phase 1: raw HTTP against the cache.
@@ -341,7 +341,7 @@ func TestScheduler_BurstRejects429(t *testing.T) {
 	// is served from local storage and never reaches the scheduler), and a
 	// fresh token avoids the one-minute lifetime of the phase-1 token, which
 	// phase 1 may well have burned through waiting on 40 KB/s fetches.
-	clientToken := getTempTokenForTest(t)
+	clientToken := fed_test_utils.TempWriteToken(t)
 	stageBurstObjects(t, ft, clientPrefix, payload, nRequests)
 
 	downloadDir := t.TempDir()

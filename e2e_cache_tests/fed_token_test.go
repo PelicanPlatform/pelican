@@ -25,7 +25,7 @@
 // Origin.DisableDirectClients enabled.  Such origins reject
 // requests that lack a token issued by the federation.
 
-package fed_tests
+package cache_tests
 
 import (
 	_ "embed"
@@ -91,7 +91,7 @@ func TestFedToken_DisableDirectClients(t *testing.T) {
 	// authorization on the origin side.  The cache still requires one for
 	// its own auth check, and it must also present the federation token
 	// to the origin.
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_test.bin", token)
 
@@ -123,7 +123,7 @@ func TestFedToken_DisableDirectClients_SecondFetch(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
 	require.NoError(t, os.WriteFile(filePath, content, 0644))
 
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_second.bin", token)
 
 	// First fetch — cache miss, downloads from origin
@@ -174,7 +174,7 @@ func TestFedToken_DirectFetchWithoutFedToken(t *testing.T) {
 	req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, directURL, nil)
 	require.NoError(t, err)
 	// Deliberately do NOT set a federation token — only a regular user token.
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	httpClient := &http.Client{Transport: config.GetTransport()}
@@ -206,7 +206,7 @@ func TestFedToken_PosixOrigin(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
 	require.NoError(t, os.WriteFile(filePath, content, 0644))
 
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_posix.bin", token)
 
 	resp := fetchFromCache(t, ft, cacheURL, nil)
@@ -238,7 +238,7 @@ func TestFedToken_NonPublicReads(t *testing.T) {
 	// For a non-public namespace the cache must present both a user
 	// token (for storage.read authorization) and a federation token
 	// (to satisfy DisableDirectClients).
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_reads.bin", token)
 
 	resp := fetchFromCache(t, ft, cacheURL, nil)
