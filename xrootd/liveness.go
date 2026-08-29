@@ -23,6 +23,7 @@ package xrootd
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -41,9 +42,8 @@ import (
 // Test seams for the liveness monitor; overriding these lets the loop be
 // exercised without a real XRootD process on the other end.
 var (
-	probeXrootdFn       = probeXrootdEndpoint
-	shutdownXrootdFn    = shutdownHungXrootd
-	livenessTLSConfigFn = livenessTLSConfig
+	probeXrootdFn    = probeXrootdEndpoint
+	shutdownXrootdFn = shutdownHungXrootd
 )
 
 // LaunchXrootdLivenessCheck starts a goroutine that periodically verifies the locally-launched
@@ -130,7 +130,7 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 		delay = nextCheckDelay(interval, time.Since(checkStart), probeErr == nil)
 
 		if probeErr == nil {
-			log.Tracef("XRootD liveness check against %s succeeded", addr)
+			log.Debugf("XRootD liveness check against %s succeeded", addr)
 			lastSuccess = time.Now()
 			consecutiveFailures = 0
 			continue
@@ -142,6 +142,9 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 		if unresponsiveFor < maxUnresponsive {
 			log.Warnf("XRootD liveness check against %s failed (%v); %d consecutive failures over %s of the permitted %s",
 				addr, probeErr, consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive)
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning,
+				fmt.Sprintf("XRootD has failed %d consecutive liveness checks over %s; it is shut down after %s",
+					consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive))
 			continue
 		}
 
@@ -195,7 +198,7 @@ func probeXrootdEndpoint(parentCtx context.Context, addr string, timeout time.Du
 	if splitErr != nil {
 		host = addr
 	}
-	tlsConn := tls.Client(conn, livenessTLSConfigFn(host))
+	tlsConn := tls.Client(conn, livenessTLSConfig(host))
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		if parentCtx.Err() != nil {
 			// Pelican is shutting down; the probe learned nothing either way.
