@@ -380,6 +380,10 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 	}
 	xrootd.StoreRestartInfo(pids, launch, cacheServer, true, useCMSD, privileged)
 
+	// Watch for an XRootD that stops answering connections entirely; must follow
+	// StoreRestartInfo so the monitor can find the PIDs it may need to signal.
+	xrootd.LaunchXrootdLivenessCheck(ctx, egrp, true)
+
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
 	xrootd.RegisterXrootdLoggingCallback(ctx)

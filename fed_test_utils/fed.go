@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +64,10 @@ type (
 		Ctx             context.Context
 		Egrp            *errgroup.Group
 		Pids            []int
+
+		// tolerateServerFailure lets teardown accept an error from the server errgroup;
+		// see AllowServerFailure.
+		tolerateServerFailure atomic.Bool
 	}
 )
 
@@ -70,6 +75,14 @@ var (
 	//go:embed resources/default.yaml
 	fedTestDefaultConfig string
 )
+
+// AllowServerFailure tells the federation teardown to tolerate an error from the server
+// errgroup instead of failing the test.  Use it in tests that deliberately break a server
+// component -- for example, by wedging XRootD so Pelican shuts it down -- where the
+// resulting shutdown error is the expected outcome rather than a regression.
+func (ft *FedTest) AllowServerFailure() {
+	ft.tolerateServerFailure.Store(true)
+}
 
 // Start up a new Pelican federation for unit testing.
 //
@@ -112,7 +125,10 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	t.Cleanup(func() {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
+			if !ft.tolerateServerFailure.Load() {
+				require.NoError(t, err)
+			}
+			t.Logf("Ignoring expected server error during teardown: %v", err)
 		}
 		err := os.RemoveAll(tmpPath)
 		require.NoError(t, err)
