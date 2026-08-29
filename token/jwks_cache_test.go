@@ -45,6 +45,7 @@ type jwksServer struct {
 	keys    jwk.Set
 	down    bool
 	status  int
+	delay   time.Duration
 	fetches int
 	server  *httptest.Server
 }
@@ -52,21 +53,32 @@ type jwksServer struct {
 func newJwksServer(t *testing.T) *jwksServer {
 	s := &jwksServer{keys: jwk.NewSet()}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Snapshot the state and release the lock before answering, so a
+		// deliberately slow response does not block the test's own accessors.
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		s.fetches++
-		if s.down {
+		down, status, delay := s.down, s.status, s.delay
+		var data []byte
+		var marshalErr error
+		if !down && status == 0 {
+			data, marshalErr = json.Marshal(s.keys)
+		}
+		s.mu.Unlock()
+
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		if down {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		if s.status != 0 {
+		if status != 0 {
 			// Mimic the registry, which answers with a JSON error document.
-			w.WriteHeader(s.status)
+			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"status":"error","msg":"namespace prefix was not found"}`))
 			return
 		}
-		data, err := json.Marshal(s.keys)
-		if err != nil {
+		if marshalErr != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -108,6 +120,13 @@ func (s *jwksServer) setStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status = code
+}
+
+// setDelay makes every response take at least d, standing in for a slow issuer.
+func (s *jwksServer) setDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delay = d
 }
 
 func (s *jwksServer) fetchCount() int {
@@ -228,6 +247,36 @@ func TestJwksCache_RevalidatesInBackground(t *testing.T) {
 		_, found := set.LookupKeyID("key-2")
 		return found
 	}, 5*time.Second, 10*time.Millisecond, "the rotated key should be picked up by the background refresh")
+}
+
+// TestJwksCache_RevalidationDoesNotBlockCallers verifies that revalidation
+// happens behind the request rather than in front of it: once keys are cached,
+// no lookup waits on the issuer, however slow it is.  Only a cold lookup, with
+// nothing cached to serve, pays for the fetch.
+func TestJwksCache_RevalidationDoesNotBlockCallers(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t,
+		WithJwksRevalidateInterval(0), // always due for revalidation
+		WithJwksRetryInterval(0),
+	)
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err)
+
+	// From here on the issuer is slow enough that waiting on it would be
+	// obvious in the timings below.
+	issuer.setDelay(500 * time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		set, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		require.NotNil(t, set)
+		assert.Less(t, elapsed, 100*time.Millisecond,
+			"a lookup with keys cached should not wait on the issuer (took %v)", elapsed)
+	}
 }
 
 // TestJwksCache_ThrottlesAttempts verifies that a down issuer is not contacted

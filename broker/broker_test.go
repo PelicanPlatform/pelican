@@ -180,7 +180,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	})
 	require.NoError(t, err)
 
-	namespaceKeys = nil
+	setNamespaceKeys(nil)
 	LaunchNamespaceKeyMaintenance(ctx, egrp)
 }
 

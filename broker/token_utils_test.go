@@ -65,6 +65,49 @@ func TestGetCacheHostnameFromToken(t *testing.T) {
 	assert.Equal(t, "https://cache.com", hostname)
 }
 
+// TestGetRegistryIssValue_RejectsTraversal verifies that a namespace prefix
+// cannot walk out of the registry's API path.  The prefix arrives in the
+// request body before the caller's token is verified and is joined into the
+// registry URL, and joining cleans the result, so ".." segments would silently
+// aim the key lookup at some other path on the registry.
+func TestGetRegistryIssValue_RejectsTraversal(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	test_utils.InitClient(t, nil)
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
+		RegistryEndpoint: "https://registry.example.com",
+	}, nil)
+
+	t.Run("Rejected", func(t *testing.T) {
+		for _, prefix := range []string{
+			"",
+			"caches/example",
+			"../../../../evil",
+			"/caches/../../origins/secret",
+			"/caches/x/../../../../../../etc/passwd",
+			"/caches/./example",
+		} {
+			_, err := getRegistryIssValue(prefix)
+			assert.Error(t, err, "prefix %q should be rejected", prefix)
+		}
+	})
+
+	t.Run("Accepted", func(t *testing.T) {
+		// A cache's prefix embeds the cache's URL, so a prefix is not required
+		// to survive path cleaning unchanged.
+		for _, prefix := range []string{
+			"/caches/example",
+			"/origins/example",
+			"/caches/https://cache.example.com",
+			"/foo/bar/baz",
+		} {
+			iss, err := getRegistryIssValue(prefix)
+			require.NoError(t, err, "prefix %q should be accepted", prefix)
+			assert.Contains(t, iss, "https://registry.example.com/api/v1.0/registry")
+		}
+	})
+}
+
 // jwksTestServer is a stand-in registry that serves a namespace's JWKS.  Its
 // key set can be rotated and the whole server can be taken "down" to simulate
 // a registry outage, while counting the fetches it actually served.
