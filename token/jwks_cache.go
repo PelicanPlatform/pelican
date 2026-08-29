@@ -32,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
 )
@@ -62,6 +63,11 @@ type JwksCache struct {
 	opts    jwksCacheOptions
 	entries *ttlcache.Cache[string, *jwksEntry]
 	group   singleflight.Group
+	// limiter caps outbound fetches across all keys.  The per-key throttle
+	// does nothing against a caller that varies the key, so without this a
+	// stream of unknown issuers would become a stream of requests to whoever
+	// serves them.
+	limiter *rate.Limiter
 }
 
 // JwksUrlResolver returns the JWKS URL for a cache key.  It is called once per
@@ -76,6 +82,8 @@ type jwksCacheOptions struct {
 	retry         time.Duration
 	fetchTimeout  time.Duration
 	dropOnAbsence bool
+	fetchRate     float64
+	fetchBurst    int
 }
 
 type JwksCacheOption func(*jwksCacheOptions)
@@ -114,6 +122,17 @@ func WithJwksRetryInterval(d time.Duration) JwksCacheOption {
 // WithJwksFetchTimeout bounds a single JWKS fetch.
 func WithJwksFetchTimeout(d time.Duration) JwksCacheOption {
 	return func(o *jwksCacheOptions) { o.fetchTimeout = d }
+}
+
+// WithJwksFetchRate caps outbound fetches across all keys, in requests per
+// second with the given burst.  The per-key throttle bounds how often one
+// issuer is contacted; this bounds the total, which is what a caller that
+// varies the key would otherwise get around.
+func WithJwksFetchRate(perSecond float64, burst int) JwksCacheOption {
+	return func(o *jwksCacheOptions) {
+		o.fetchRate = perSecond
+		o.fetchBurst = burst
+	}
 }
 
 // WithJwksDropOnAbsence makes the cache discard an issuer's keys when the
@@ -171,6 +190,13 @@ const (
 	defaultJwksRevalidate   = 15 * time.Minute
 	defaultJwksRetry        = 30 * time.Second
 	defaultJwksFetchTimeout = 10 * time.Second
+
+	// A federation has tens of issuers in active use, each fetched a few times
+	// an hour, so these bind only on a caller working through issuers it has
+	// invented.  The burst covers a cold start where many issuers are looked up
+	// at once.
+	defaultJwksFetchRate  = 5
+	defaultJwksFetchBurst = 32
 
 	// defaultJwksMaxStale is deliberately long enough to ride out an issuer
 	// outage that starts on a Friday and is not looked at until Monday.
@@ -260,6 +286,8 @@ func NewJwksCache(ctx context.Context, egrp *errgroup.Group, options ...JwksCach
 		maxStale:     defaultJwksMaxStale,
 		retry:        defaultJwksRetry,
 		fetchTimeout: defaultJwksFetchTimeout,
+		fetchRate:    defaultJwksFetchRate,
+		fetchBurst:   defaultJwksFetchBurst,
 	}
 	for _, o := range options {
 		o(&opts)
@@ -289,6 +317,9 @@ func NewJwksCache(ctx context.Context, egrp *errgroup.Group, options ...JwksCach
 		ctx:     ctx,
 		opts:    opts,
 		entries: ttlcache.New(cacheOpts...),
+	}
+	if opts.fetchRate > 0 && opts.fetchBurst > 0 {
+		kc.limiter = rate.NewLimiter(rate.Limit(opts.fetchRate), opts.fetchBurst)
 	}
 
 	egrp.Go(func() error {
@@ -412,6 +443,21 @@ func fetchJwks(ctx context.Context, url string) (jwk.Set, error) {
 	return set, nil
 }
 
+// CanRefresh reports whether a refresh for this key would be attempted rather
+// than turned away by the throttle.  Callers use it to skip work they would
+// only do in order to decide whether to refresh; it is advisory, since the
+// throttle is re-checked when the fetch actually runs.
+func (c *JwksCache) CanRefresh(key string) bool {
+	item := c.entries.Get(key)
+	if item == nil || item.Value() == nil {
+		return true
+	}
+	entry := item.Value()
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	return entry.lastAttempt.IsZero() || time.Since(entry.lastAttempt) >= c.opts.retry
+}
+
 func (c *JwksCache) entry(key string) *jwksEntry {
 	item := c.entries.Get(key)
 	if item == nil {
@@ -426,6 +472,13 @@ func (c *JwksCache) entry(key string) *jwksEntry {
 func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, resolve JwksUrlResolver) (jwk.Set, error) {
 	ch := c.group.DoChan(key, func() (interface{}, error) {
 		if !entry.beginAttempt(c.opts.retry) {
+			return nil, nil
+		}
+		// Shed rather than queue: waiting here would let a caller working
+		// through invented issuers pile up goroutines, which is the thing the
+		// cap is for.  A caller that already has keys keeps serving them.
+		if c.limiter != nil && !c.limiter.Allow() {
+			log.Debugf("Skipping a key fetch for %s: the cache is at its fetch rate limit", key)
 			return nil, nil
 		}
 
@@ -451,9 +504,13 @@ func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, res
 				// not to be used.  Wait for it to say so more than once before
 				// acting, so one bad response cannot revoke an issuer.
 				if seen := entry.recordAbsence(); c.opts.dropOnAbsence && seen >= absenceConfirmations {
+					// Drop the keys but keep the entry: it carries the time of
+					// the last attempt, which is what stops a namespace that
+					// keeps being asked for, and keeps being reported absent,
+					// from producing a fetch per request.  The TTL reclaims it
+					// once the requests stop.
 					log.Warningf("Discarding cached public keys for %s: %v (reported %d times in a row)", key, err, seen)
 					entry.dropKeys()
-					c.entries.Delete(key)
 				}
 			} else {
 				entry.clearAbsences()

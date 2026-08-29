@@ -24,6 +24,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -295,6 +296,57 @@ func TestJwksCache_ThrottlesAttempts(t *testing.T) {
 		require.Error(t, err)
 	}
 	assert.Equal(t, 1, issuer.fetchCount(), "repeated requests must not each contact a down issuer")
+}
+
+// TestJwksCache_CapsFetchesAcrossKeys verifies the bound that matters against a
+// caller who varies the key: the per-key throttle does nothing there, so the
+// cache limits fetches in aggregate.
+func TestJwksCache_CapsFetchesAcrossKeys(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t,
+		WithJwksRetryInterval(0), // per-key throttle disabled; only the cap is left
+		WithJwksFetchRate(1, 4),
+	)
+
+	// Every key is new, so each lookup would fetch if nothing capped it.
+	for i := 0; i < 50; i++ {
+		_, _ = kc.Keys(context.Background(), fmt.Sprintf("issuer-%d", i), issuer.resolver())
+	}
+
+	assert.LessOrEqual(t, issuer.fetchCount(), 8,
+		"a run of unknown issuers should not become a run of fetches (saw %d)", issuer.fetchCount())
+}
+
+// TestJwksCache_AbsenceKeepsThrottleState verifies that discarding keys does not
+// discard the record of when the issuer was last asked.  Losing it would let a
+// namespace that is being requested constantly, and reported absent every time,
+// produce a fetch per request.
+func TestJwksCache_AbsenceKeepsThrottleState(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t, WithJwksDropOnAbsence(), WithJwksRetryInterval(0))
+
+	_, err := kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+	require.NoError(t, err)
+
+	// Two absences discard the keys.
+	issuer.setStatus(http.StatusNotFound)
+	for i := 0; i < 2; i++ {
+		_, err = kc.Refresh(context.Background(), "issuer-a", issuer.resolver())
+		require.Error(t, err)
+	}
+
+	// From here the throttle should govern, so a burst of lookups for the same
+	// namespace must not each contact the issuer.
+	kc.opts.retry = time.Hour
+	before := issuer.fetchCount()
+	for i := 0; i < 10; i++ {
+		_, err = kc.Keys(context.Background(), "issuer-a", issuer.resolver())
+		require.Error(t, err, "the namespace has no usable keys")
+	}
+	assert.Equal(t, before, issuer.fetchCount(),
+		"dropping keys must not reset the throttle and let every request fetch")
 }
 
 // TestJwksCache_CollapsesConcurrentFetches verifies that a burst of concurrent
