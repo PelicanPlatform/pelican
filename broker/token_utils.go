@@ -22,7 +22,7 @@ import (
 	"context"
 	"net/url"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -38,13 +38,10 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-var (
-	// namespaceKeys caches the registry's public keys for each namespace,
-	// keyed by namespace prefix.  Guarded by namespaceKeysMu: it is installed
-	// at startup and cleared at shutdown while requests may be reading it.
-	namespaceKeys   *token.JwksCache
-	namespaceKeysMu sync.RWMutex
-)
+// namespaceKeys caches the registry's public keys for each namespace, keyed by
+// namespace prefix.  It is installed at startup and cleared at shutdown while
+// requests may be reading it, so it is swapped atomically.
+var namespaceKeys atomic.Pointer[token.JwksCache]
 
 // namespaceKeyCapacity bounds how many namespaces are tracked at once.  The
 // prefix is taken from the request before the caller's token has been verified,
@@ -89,15 +86,11 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 }
 
 func getNamespaceKeys() *token.JwksCache {
-	namespaceKeysMu.RLock()
-	defer namespaceKeysMu.RUnlock()
-	return namespaceKeys
+	return namespaceKeys.Load()
 }
 
 func setNamespaceKeys(cache *token.JwksCache) {
-	namespaceKeysMu.Lock()
-	defer namespaceKeysMu.Unlock()
-	namespaceKeys = cache
+	namespaceKeys.Store(cache)
 }
 
 // registryJwksResolver returns the location of the registry's JWKS for the
@@ -112,9 +105,36 @@ func registryJwksResolver(prefix string) token.JwksUrlResolver {
 	}
 }
 
+// validateNamespacePrefix rejects a prefix that would not address the namespace
+// it names.  The prefix reaches us from the request body, before the caller's
+// token has been verified, and it is joined into the registry's URL path;
+// joining cleans the result, so ".." segments would silently walk out of the
+// registry's API path and point the lookup somewhere else on the registry.
+func validateNamespacePrefix(prefix string) error {
+	if prefix == "" {
+		return errors.New("namespace prefix is empty")
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		return errors.Errorf("namespace prefix %q does not begin with '/'", prefix)
+	}
+	// Only relative segments are rejected.  Cache prefixes legitimately embed a
+	// URL (/caches/https://cache.com), so the prefix is not required to survive
+	// path.Clean unchanged -- just to not walk upward.
+	for _, segment := range strings.Split(prefix, "/") {
+		if segment == "." || segment == ".." {
+			return errors.Errorf("namespace prefix %q contains a relative path segment", prefix)
+		}
+	}
+	return nil
+}
+
 // Given a namespace prefix, return the value that should be used
 // by the `iss` claim in a token for this federation's registry.
 func getRegistryIssValue(prefix string) (iss string, err error) {
+	if err = validateNamespacePrefix(prefix); err != nil {
+		return
+	}
+
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
 		return
