@@ -34,12 +34,14 @@ import (
 )
 
 // livenessConfig shortens the hidden liveness knobs so the monitor reacts within the
-// lifetime of a unit test instead of the ten minutes it allows in production.
+// lifetime of a unit test instead of the ten minutes it allows in production.  The
+// proportions mirror the shipped defaults, so three checks fail inside the window before
+// XRootD is shut down.
 const livenessConfig = `
 Xrootd:
   LivenessCheckInterval: 1s
   LivenessCheckTimeout: 2s
-  LivenessMaxUnresponsiveTime: 3s
+  LivenessMaxUnresponsiveTime: 7s
 `
 
 func processExists(pid int) bool {

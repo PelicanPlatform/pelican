@@ -182,6 +182,8 @@ type livenessHarness struct {
 	probes           atomic.Int32
 	probesAtShutdown atomic.Int32
 	probeFails       atomic.Bool
+	// probeDelay, in nanoseconds, is how long a stub probe pretends to take.
+	probeDelay atomic.Int64
 }
 
 // newLivenessHarness configures the liveness knobs for a fast, deterministic loop and
@@ -194,7 +196,6 @@ func newLivenessHarness(t *testing.T, maxUnresponsive time.Duration) *livenessHa
 	require.NoError(t, param.Origin_Port.Set(1))
 	require.NoError(t, param.Xrootd_LivenessCheckInterval.Set(time.Millisecond))
 	require.NoError(t, param.Xrootd_LivenessCheckTimeout.Set(time.Second))
-	require.NoError(t, param.Xrootd_LivenessCheckFailureThreshold.Set(3))
 	require.NoError(t, param.Xrootd_LivenessMaxUnresponsiveTime.Set(maxUnresponsive))
 
 	h := &livenessHarness{}
@@ -204,6 +205,14 @@ func newLivenessHarness(t *testing.T, maxUnresponsive time.Duration) *livenessHa
 	}
 	probeXrootdFn = func(ctx context.Context, addr string, timeout time.Duration) error {
 		h.probes.Add(1)
+		if delay := time.Duration(h.probeDelay.Load()); delay > 0 {
+			// A real probe blocks until it answers or its context ends.
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		if h.probeFails.Load() {
 			return errors.New("simulated unresponsive XRootD")
 		}
@@ -252,6 +261,30 @@ func TestNextCheckDelay(t *testing.T) {
 	})
 }
 
+// TestLivenessCheckRetriesFailuresWithinTheWindow guards the property that makes a single
+// unlucky probe insufficient on its own: a failed check is retried as soon as the interval
+// allows, so several of them fit inside the unresponsive window before a shutdown fires.
+// With the shipped defaults (1m interval, 3m timeout, 10m window) that works out to three
+// failures.  The timings here are scaled down, and the probe deliberately runs longer than
+// the interval so the immediate-retry path is the one under test.
+func TestLivenessCheckRetriesFailuresWithinTheWindow(t *testing.T) {
+	h := newLivenessHarness(t, 150*time.Millisecond)
+	require.NoError(t, param.Xrootd_LivenessCheckInterval.Set(20*time.Millisecond))
+	h.probeDelay.Store(int64(30 * time.Millisecond))
+	h.probeFails.Store(true)
+
+	cancel, done := h.run(t)
+	t.Cleanup(cancel)
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("liveness check did not shut XRootD down")
+	}
+	assert.GreaterOrEqual(t, h.probesAtShutdown.Load(), int32(3),
+		"XRootD was shut down without retrying the failed check inside the unresponsive window")
+}
+
 // TestLivenessCheckShutsDownUnresponsiveXrootd verifies a sustained probe failure ends in a
 // shutdown, and not before the permitted unresponsive window has elapsed.
 func TestLivenessCheckShutsDownUnresponsiveXrootd(t *testing.T) {
@@ -270,26 +303,6 @@ func TestLivenessCheckShutsDownUnresponsiveXrootd(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, time.Since(start), maxUnresponsive)
 	assert.Equal(t, int32(1), h.shutdowns.Load())
-}
-
-// TestLivenessCheckRequiresRepeatedFailures verifies that no single failed check can take
-// XRootD down, however long the daemon has been unresponsive.  The unresponsive-time gate is
-// wide open here so the failure count is the only thing holding the shutdown back.
-func TestLivenessCheckRequiresRepeatedFailures(t *testing.T) {
-	h := newLivenessHarness(t, 0)
-	require.NoError(t, param.Xrootd_LivenessCheckFailureThreshold.Set(3))
-	h.probeFails.Store(true)
-
-	cancel, done := h.run(t)
-	t.Cleanup(cancel)
-
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("liveness check did not shut XRootD down")
-	}
-	assert.GreaterOrEqual(t, h.probesAtShutdown.Load(), int32(3),
-		"XRootD was shut down after fewer than the required consecutive failures")
 }
 
 // TestLivenessCheckToleratesResponsiveXrootd verifies a healthy XRootD is never shut down.

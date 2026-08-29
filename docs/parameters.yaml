@@ -5346,16 +5346,6 @@ default: 1m
 hidden: true
 components: ["cache", "origin"]
 ---
-name: Xrootd.LivenessCheckFailureThreshold
-description: |+
-  The number of consecutive liveness checks that must fail before Pelican will shut XRootD
-  down.  This is a floor rather than the whole condition: `Xrootd.LivenessMaxUnresponsiveTime`
-  must also have elapsed since the last successful check.
-type: int
-default: 3
-hidden: true
-components: ["cache", "origin"]
----
 name: Xrootd.LivenessCheckTimeout
 description: |+
   The maximum amount of time a single XRootD liveness check may take before it is considered
@@ -5370,8 +5360,11 @@ name: Xrootd.LivenessMaxUnresponsiveTime
 description: |+
   How long the local XRootD endpoint may go without a successful liveness check before
   Pelican shuts the daemon down.  The clock starts at the last successful check (or, if no
-  check has ever succeeded, at the time XRootD was launched).  At least
-  `Xrootd.LivenessCheckFailureThreshold` checks must have failed as well.
+  check has ever succeeded, at the time XRootD was launched).
+
+  Because a failed check is retried as soon as `Xrootd.LivenessCheckInterval` allows, this
+  window spans several failed checks at the default timings rather than acting on a single
+  one.
 type: duration
 default: 10m
 hidden: true

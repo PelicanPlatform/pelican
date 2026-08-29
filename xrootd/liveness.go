@@ -45,8 +45,7 @@ var (
 )
 
 // LaunchXrootdLivenessCheck starts a goroutine that periodically verifies the locally-launched
-// XRootD daemon still answers new connections.  Once Xrootd.LivenessCheckFailureThreshold
-// checks in a row have failed and XRootD has been unreachable for
+// XRootD daemon still answers new connections.  When XRootD has not answered for
 // Xrootd.LivenessMaxUnresponsiveTime, the daemon is shut down (SIGTERM, then SIGKILL) so that
 // the service manager can replace it; Pelican's usual handling of an unexpected XRootD exit
 // then takes the rest of the server down with it.
@@ -138,13 +137,9 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 		consecutiveFailures++
 		unresponsiveFor := time.Since(lastSuccess)
 		maxUnresponsive := param.Xrootd_LivenessMaxUnresponsiveTime.GetDuration()
-		failureThreshold := param.Xrootd_LivenessCheckFailureThreshold.GetInt()
-
-		// Both conditions must hold: enough checks have failed to rule out a single
-		// unlucky probe, and XRootD has been unreachable for longer than it is allowed.
-		if consecutiveFailures < failureThreshold || unresponsiveFor < maxUnresponsive {
-			log.Warnf("XRootD liveness check against %s failed (%v); %d consecutive failures over %s, and XRootD is shut down after %d failures spanning %s",
-				addr, probeErr, consecutiveFailures, unresponsiveFor.Round(time.Second), failureThreshold, maxUnresponsive)
+		if unresponsiveFor < maxUnresponsive {
+			log.Warnf("XRootD liveness check against %s failed (%v); %d consecutive failures over %s of the permitted %s",
+				addr, probeErr, consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive)
 			continue
 		}
 
