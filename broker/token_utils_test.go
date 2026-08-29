@@ -30,7 +30,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -153,7 +152,7 @@ func setupBrokerKeyTest(t *testing.T, registryEndpoint string) context.Context {
 		_ = egrp.Wait()
 	})
 
-	namespaceKeys = nil
+	setNamespaceKeys(nil)
 	LaunchNamespaceKeyMaintenance(ctx, egrp)
 	return ctx
 }
@@ -178,8 +177,9 @@ func mintBrokerToken(t *testing.T, key jwk.Key, prefix, audience string, scope t
 	return string(signed)
 }
 
-// TestGetRegistryIssuerInfo_LoadFailures verifies that namespace key loading
-// failures surface as errors rather than panics.
+// TestGetRegistryIssuerInfo_LoadFailures verifies that an unreachable registry
+// surfaces as an error, and that calling in before the cache is initialized
+// does the same rather than panicking.
 func TestGetRegistryIssuerInfo_LoadFailures(t *testing.T) {
 	// Point the federation at a registry endpoint that refuses connections.
 	ctx := setupBrokerKeyTest(t, "https://127.0.0.1:1")
@@ -187,26 +187,27 @@ func TestGetRegistryIssuerInfo_LoadFailures(t *testing.T) {
 	_, _, err := getRegistryIssuerInfo(ctx, "/caches/example")
 	require.Error(t, err)
 
-	// A prefix the loader declines to cache at all must produce an error,
-	// not a nil-pointer panic.  Restore the launched cache via Cleanup so the
-	// shutdown goroutine stops the right (started) cache even if this check
-	// panics.
-	orig := namespaceKeys
-	t.Cleanup(func() { namespaceKeys = orig })
-	namespaceKeys = ttlcache.New[string, *jwk.Cache]()
+	// Restore the launched cache via Cleanup so the shutdown goroutine still
+	// sees it even if the check below fails.
+	orig := getNamespaceKeys()
+	t.Cleanup(func() { setNamespaceKeys(orig) })
+	setNamespaceKeys(nil)
 	_, _, err = getRegistryIssuerInfo(ctx, "/caches/other")
 	require.Error(t, err)
 }
 
 // TestGetRegistryIssuerInfo_RecoversAfterRegistryOutage verifies that a
-// namespace whose first JWKS fetch failed is retried on the next request.  The
-// jwk cache marks an entry as fetched even when the attempt failed, so without
-// an explicit refresh such a fetcher would never fetch again.
+// namespace whose first fetch failed is retried on a later request rather than
+// being stuck with no keys.
 func TestGetRegistryIssuerInfo_RecoversAfterRegistryOutage(t *testing.T) {
 	registry := newJwksTestServer(t)
 	registry.rotateTo(t, "key-1")
 	registry.setDown(true)
 
+	// Stand in for the throttle window having elapsed between the two
+	// requests below; TestRefreshNamespaceKeys_RateLimited covers the throttle
+	// itself.
+	withNamespaceKeyRetryInterval(t, 0)
 	ctx := setupBrokerKeyTest(t, registry.server.URL)
 	const prefix = "/caches/example"
 
@@ -259,10 +260,9 @@ func TestVerifyToken_PicksUpRotatedKey(t *testing.T) {
 	registry := newJwksTestServer(t)
 	firstKey := registry.rotateTo(t, "key-1")
 
-	// Let the rotation path fire without waiting out the rate limit.
-	orig := jwksForcedRefreshInterval
-	jwksForcedRefreshInterval = 0
-	t.Cleanup(func() { jwksForcedRefreshInterval = orig })
+	// Let the rotation path fire without waiting out the throttle.  This is read
+	// when the cache is built, so it has to be set before the setup below.
+	withNamespaceKeyRetryInterval(t, 0)
 
 	ctx := setupBrokerKeyTest(t, registry.server.URL)
 	const prefix = "/caches/example"
@@ -288,13 +288,14 @@ func TestVerifyToken_PicksUpRotatedKey(t *testing.T) {
 	assert.False(t, ok, "a token signed by the retired key should be rejected")
 }
 
-// TestRefreshNamespaceKeys_RateLimited verifies that forced refreshes are
+// TestRefreshNamespaceKeys_RateLimited verifies that out-of-band refreshes are
 // throttled, so a stream of tokens naming unknown key IDs cannot become a
 // stream of registry fetches.
 func TestRefreshNamespaceKeys_RateLimited(t *testing.T) {
 	registry := newJwksTestServer(t)
 	registry.rotateTo(t, "key-1")
 
+	withNamespaceKeyRetryInterval(t, time.Hour)
 	ctx := setupBrokerKeyTest(t, registry.server.URL)
 	const prefix = "/caches/example"
 
@@ -302,19 +303,20 @@ func TestRefreshNamespaceKeys_RateLimited(t *testing.T) {
 	require.NoError(t, err)
 	fetchesAfterFirst := registry.fetchCount()
 
-	// The initial fetch just happened, so a forced refresh is suppressed.
-	set, err := refreshNamespaceKeys(ctx, prefix)
-	require.NoError(t, err)
-	assert.Nil(t, set, "a refresh within the rate-limit window should be suppressed")
+	// The initial fetch just happened, so a refresh is suppressed.
+	for i := 0; i < 3; i++ {
+		set, err := refreshNamespaceKeys(ctx, prefix)
+		require.NoError(t, err)
+		assert.Nil(t, set, "a refresh inside the throttle window should be suppressed")
+	}
 	assert.Equal(t, fetchesAfterFirst, registry.fetchCount(), "the registry should not be contacted")
+}
 
-	// With the window elapsed, the refresh goes through.
-	orig := jwksForcedRefreshInterval
-	jwksForcedRefreshInterval = 0
-	t.Cleanup(func() { jwksForcedRefreshInterval = orig })
-
-	set, err = refreshNamespaceKeys(ctx, prefix)
-	require.NoError(t, err)
-	require.NotNil(t, set, "a refresh outside the rate-limit window should proceed")
-	assert.Greater(t, registry.fetchCount(), fetchesAfterFirst)
+// withNamespaceKeyRetryInterval sets the fetch throttle for the duration of a
+// test.  The cache reads it when it is built, so callers must set it before
+// launching the key cache.
+func withNamespaceKeyRetryInterval(t *testing.T, d time.Duration) {
+	orig := namespaceKeyRetryInterval
+	namespaceKeyRetryInterval = d
+	t.Cleanup(func() { namespaceKeyRetryInterval = orig })
 }
