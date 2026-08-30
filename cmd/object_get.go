@@ -27,14 +27,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -74,13 +72,12 @@ func getMain(cmd *cobra.Command, args []string) {
 
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -89,8 +86,7 @@ func getMain(cmd *cobra.Command, args []string) {
 	if isAsync {
 		// Validate arguments
 		if len(args) < 2 {
-			log.Errorln("No Source or Destination\nTry 'pelican object get --help' for more information.")
-			os.Exit(1)
+			exitWithError(1, "No Source or Destination\nTry 'pelican object get --help' for more information.")
 		}
 		source := args[:len(args)-1]
 		dest := args[len(args)-1]
@@ -98,9 +94,8 @@ func getMain(cmd *cobra.Command, args []string) {
 		// Ensure server is running, starting it if necessary
 		apiClient, err := ensureClientAgentRunning(cmd.Context(), 5)
 		if err != nil {
-			log.Errorln("Failed to ensure API server is running:", err)
-			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
-			os.Exit(1)
+			reportError("Failed to ensure API server is running:", err)
+			exitWithError(1, "You can manually start it with 'pelican client-api serve --daemonize'")
 		}
 
 		// Get flags for transfer options
@@ -111,8 +106,7 @@ func getMain(cmd *cobra.Command, args []string) {
 		// Get preferred caches
 		caches, err := getPreferredCaches()
 		if err != nil {
-			log.Errorln("Failed to get preferred caches:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to get preferred caches:", err)
 		}
 
 		// Convert caches to strings
@@ -148,16 +142,14 @@ func getMain(cmd *cobra.Command, args []string) {
 				warmItems[i] = asyncWarmItem{url: src, write: false}
 			}
 			if err := warmWalletForAsync(ctx, apiClient, warmItems); err != nil {
-				log.Errorln("Failed to prepare credentials for async transfer:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to prepare credentials for async transfer:", err)
 			}
 		}
 
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {
-			log.Errorln("Failed to create job:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to create job:", err)
 		}
 
 		if outputJSON {
@@ -167,8 +159,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			}
 			jsonBytes, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
-				log.Errorln("Failed to marshal JSON:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to marshal JSON:", err)
 			}
 			fmt.Println(string(jsonBytes))
 		} else {
@@ -185,22 +176,19 @@ func getMain(cmd *cobra.Command, args []string) {
 			// Wait with a reasonable timeout (e.g., 1 hour)
 			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
 			if err != nil {
-				log.Errorln("Error waiting for job:", err)
-				os.Exit(1)
+				exitWithError(1, "Error waiting for job:", err)
 			}
 
 			// Get final status
 			finalStatus, err := apiClient.GetJobStatus(ctx, jobID)
 			if err != nil {
-				log.Errorln("Error getting final job status:", err)
-				os.Exit(1)
+				exitWithError(1, "Error getting final job status:", err)
 			}
 
 			if outputJSON {
 				jsonBytes, err := json.MarshalIndent(finalStatus, "", "  ")
 				if err != nil {
-					log.Errorln("Failed to marshal JSON:", err)
-					os.Exit(1)
+					exitWithError(1, "Failed to marshal JSON:", err)
 				}
 				fmt.Println(string(jsonBytes))
 			} else {
@@ -231,8 +219,7 @@ func getMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Len of source:", len(args))
 	if len(args) < 2 {
-		log.Errorln("No Source or Destination\nTry 'pelican object get --help' for more information.")
-		os.Exit(1)
+		exitWithError(1, "No Source or Destination\nTry 'pelican object get --help' for more information.")
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
@@ -244,14 +231,12 @@ func getMain(cmd *cobra.Command, args []string) {
 			packOption = "auto"
 		}
 		if _, err := client.GetBehavior(packOption); err != nil {
-			log.Errorln(err)
-			os.Exit(1)
+			exitWithError(1, err)
 		}
 		for i, src := range source {
 			newSrc, err := addQueryParam(src, "pack", packOption)
 			if err != nil {
-				log.Errorln("Failed to process --pack option:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to process --pack option:", err)
 			}
 			source[i] = newSrc
 		}
@@ -264,12 +249,10 @@ func getMain(cmd *cobra.Command, args []string) {
 			// Check for conflicting prefercached parameter
 			u, err := url.Parse(src)
 			if err != nil {
-				log.Errorln("Failed to parse URL:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to parse URL:", err)
 			}
 			if u.Query().Has("prefercached") {
-				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
-				os.Exit(1)
+				exitWithError(1, "Cannot use --direct flag with URLs that have '?prefercached' query parameter")
 			}
 
 			if u.RawQuery != "" {
@@ -288,17 +271,14 @@ func getMain(cmd *cobra.Command, args []string) {
 	// as options.
 	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln("Failed to get preferred caches:", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get preferred caches:", err)
 	}
 
 	if len(source) > 1 {
 		if destStat, err := os.Stat(dest); err != nil {
-			log.Errorln("Destination does not exist")
-			os.Exit(1)
+			exitWithError(1, "Destination does not exist")
 		} else if !destStat.IsDir() {
-			log.Errorln("Destination is not a directory")
-			os.Exit(1)
+			exitWithError(1, "Destination is not a directory")
 		}
 	}
 
@@ -331,26 +311,9 @@ func getMain(cmd *cobra.Command, args []string) {
 	if attemptErr != nil {
 		// Print the list of errors
 		if handleCredentialPasswordError(attemptErr) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
-		errMsg := attemptErr.Error()
-		var pe error_codes.PelicanError
-		var te *client.TransferErrors
-		if errors.As(attemptErr, &te) {
-			errMsg = te.UserError()
-		}
-		if errors.Is(attemptErr, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(attemptErr) {
-				log.Errorln("Errors are retryable")
-				os.Exit(11)
-			}
-			os.Exit(1)
-		}
+		exitTransferFailure(attemptErr, "Failure getting "+lastSrc)
 	}
 
 	// No failures so we can write the transfer stats

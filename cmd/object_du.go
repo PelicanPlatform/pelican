@@ -108,19 +108,19 @@ type duReport struct {
 func duMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	if err := config.InitClient(); err != nil {
-		log.Errorln(err)
+		reportError(err)
 		if client.IsRetryable(err) {
-			os.Exit(11)
+			exitWithFlush(11)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 
 	if len(args) == 0 {
-		log.Errorln("no path provided")
+		reportError("no path provided")
 		if helpErr := cmd.Help(); helpErr != nil {
 			log.Errorln("failed to print help:", helpErr)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")
@@ -235,7 +235,7 @@ func duMain(cmd *cobra.Command, args []string) error {
 	if anyFailure {
 		// Match GNU du: totals were still printed, but the exit status reflects
 		// that at least one subtree could not be read.
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	return nil
 }

@@ -53,7 +53,7 @@ func printConfig(useJSON bool) {
 	config, err := config.GetCredentialConfigContents()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to get credential configuration contents:", err)
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	var config_b []byte
 	if useJSON {
@@ -63,7 +63,7 @@ func printConfig(useJSON bool) {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to convert object to YAML:", err)
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	fmt.Println(string(config_b))
 }
@@ -88,14 +88,14 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 			input_config_b, err := os.ReadFile(args[0])
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to read config file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 
 			input_config := config.CredentialConfig{}
 			err = yaml.Unmarshal(input_config_b, &input_config)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to parse config file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 
 			// Serialize the overwrite against any concurrent credential-file
@@ -105,7 +105,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 			})
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to save replaced configuration file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
@@ -118,10 +118,10 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 			err := config.ResetPassword()
 			if err != nil {
 				if handleIncorrectPassword(err, incorrectPasswordResetMessage) {
-					os.Exit(1)
+					exitWithFlush(1)
 				}
 				fmt.Fprintln(os.Stderr, "Failed to reset password:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
@@ -133,7 +133,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := config.DeleteCredentials(); err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to delete local credentials:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
@@ -143,14 +143,14 @@ func printOauthConfig() {
 	config, err := config.GetCredentialConfigContents()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	fc := config.GetFederationCredentials(param.Federation_DiscoveryUrl.GetString())
 	clientList := &fc.OauthClient
 	config_b, err := yaml.Marshal(&clientList)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to convert object to YAML:", err)
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	fmt.Println(string(config_b))
 
@@ -173,7 +173,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 
 			default:
 				fmt.Fprintln(os.Stderr, "Unknown value for operation type (must be 'read' or 'write')", args[0])
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 
 			pUrl, err := pelican_url.Parse(
@@ -183,12 +183,12 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to parse URL:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), pUrl, httpMethod, "")
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get director info for path:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 
 			opts := config.TokenGenerationOpts{
@@ -201,7 +201,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			token, err := client.AcquireToken(pUrl.GetRawUrl(), dirResp, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 
 			fmt.Println(token)
@@ -247,7 +247,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 			})
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
@@ -260,7 +260,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Run: func(cmd *cobra.Command, args []string) {
 			if args[1] != "client_id" && args[1] != "client_secret" {
 				fmt.Fprintln(os.Stderr, "Unknown attribute to set:", args[1])
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 			// Hold the credential-file lock across the read-modify-write and
 			// re-read the wallet inside it.
@@ -288,11 +288,11 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 			})
 			if notPresent {
 				fmt.Fprintln(os.Stderr, "Prefix to set was not present")
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
@@ -325,7 +325,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 			})
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to save configuration file:", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		},
 	})
