@@ -2,7 +2,9 @@ import { Callout } from 'nextra/components'
 
 # Managing Users and Groups
 
-This page collects the day-to-day tasks an administrator performs on a Pelican server's user and group records, plus the handful of things every signed-in user does for themselves.
+Access to a collection is granted to a **group**, never to a person directly — so before you can give someone access, they need an account on this server and a group to put them in.
+This page covers both: creating and running groups, the account tasks an administrator does around them, and the handful of things every signed-in user does for themselves.
+For the granting itself, see [Managing Access to a Collection](/managing-data-access/collections-and-shares).
 For the model behind these tasks — what a user is, what a group is, and how a scope reaches a caller — read [How Access Control Works](/managing-data-access/access-control-model).
 For the authoritative "who may do this", read the [Permissions Reference](/managing-data-access/permissions-reference).
 
@@ -119,7 +121,7 @@ Deactivating is the reversible option.
 Setting a user's status to `inactive` stops the account from authenticating; because authorization is recomputed on every request, live sessions stop working on the next request rather than when a token expires.
 
 Deleting is not reversible.
-Along with the user record, Pelican removes the account's group memberships and every collection ACL row written against its personal `user-<username>` group.
+Along with the account, Pelican removes its group memberships and every collection access grant written against its personal `user-<username>` group.
 
 Deletion is available on all three surfaces.
 The web interface has no activate/deactivate control, so status changes are a CLI or API task.
@@ -152,14 +154,14 @@ Those attempts return `403` with `user administrators cannot modify system admin
 
 *Any signed-in user can create a group — see [Group administration](/managing-data-access/permissions-reference#group-administration).*
 
-Group creation is open to everyone because users need groups of their own to write collection ACLs and share ACLs against.
+Group creation is open to everyone because users need groups of their own to grant access on their collections and shares.
 What a self-created group cannot do is act as bearer authority; see [Make a group usable in authorization templates and admin lists](#make-a-group-usable-in-authorization-templates-and-admin-lists) below.
 
-The group **name** is the machine-readable handle that ACLs and policy strings match on.
+The group **name** is the machine-readable name that access grants and policy settings match on.
 It is 2 to 64 characters drawn from letters, digits, `.`, `_`, `@`, and `-`, has to start with a letter or digit, may not contain `/` or `..`, and may not start with `user-` — that prefix is reserved for the implicit personal group every account carries.
 The **display name** and **description** are free-form labels and never take part in an authorization decision.
 
-Once the group exists, use it in a collection ACL: see [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
+Once the group exists, use it to grant access to a collection: see [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
 
 ### Web UI
 
@@ -194,7 +196,7 @@ Holding `server.user_admin` alone does not let you edit a group's membership.
 3. To remove someone, click the remove icon beside their row and confirm.
 
 The **ADD MEMBER** picker reads the server-wide user list, so it appears only for system administrators; a group owner or administrator who is not one invites people with a link instead.
-Removing a member never relinquishes ownership — the owner stays the owner even after their membership row is deleted.
+Removing a member never relinquishes ownership — the owner stays the owner even after their membership is deleted.
 
 ### CLI
 
@@ -244,7 +246,7 @@ The recipient redeems at `POST /api/v1.0/invites/redeem`.
 
 *Requires group ownership or `server.admin` — see [Group administration](/managing-data-access/permissions-reference#group-administration).*
 
-A group has exactly one owner, and the owner is the only principal who can hand the group to someone else, name an administrator, or delete it — and the only one who cannot leave it.
+A group has exactly one owner, and the owner is the only one who can hand the group to someone else, name an administrator, or delete it — and the only one who cannot leave it.
 Transfer ownership first if you want out.
 
 A group administrator handles membership and metadata day to day, and may be a single user or another group, so you can point one team's admin at a second team.
@@ -273,7 +275,7 @@ pelican-server server group set-ownership <group-id> --admin-id <id> --admin-typ
 
 [`Issuer.AuthorizationTemplates`](/parameters#Issuer-AuthorizationTemplates) and the `Server.*AdminGroups` settings — [`Server.AdminGroups`](/parameters#Server-AdminGroups) and [`Server.UserAdminGroups`](/parameters#Server-UserAdminGroups) among them — match on a group's *name*, and they only trust a name that carries the auth-template-eligibility flag.
 Set the flag on a group before you name it in one of those settings; without it, the entry matches nothing.
-Collection ACLs do not consult the flag, so a group used only in an ACL never needs it.
+Collection access grants do not consult the flag, so a group used only for collection access never needs it.
 For why the flag exists, see [Where a scope can come from](/managing-data-access/access-control-model#where-a-scope-can-come-from).
 
 You can set the flag at creation time if you hold `server.admin` or `server.user_admin`.

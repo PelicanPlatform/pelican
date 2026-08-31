@@ -35,7 +35,7 @@ import { Callout } from 'nextra/components'
 */}
 
 This page is the authoritative answer to "who is allowed to do this, and what does the server return when they are not?"
-Instructions for carrying out the tasks themselves live in [Managing Users and Groups](/managing-data-access/users-and-groups) and [Collections and Shares](/managing-data-access/collections-and-shares); the reasoning behind the model lives in [How Access Control Works](/managing-data-access/access-control-model).
+Instructions for carrying out the tasks themselves live in [Managing Users and Groups](/managing-data-access/users-and-groups) and [Managing Access to a Collection](/managing-data-access/collections-and-shares); the reasoning behind the model lives in [How Access Control Works](/managing-data-access/access-control-model).
 
 In the tables below, `yes` and `no` state whether that role may perform the action, and `—` marks a combination that cannot arise.
 **Ordinary user** means an account that holds no management scope and no ownership or administrator role on the record in question.
@@ -54,7 +54,7 @@ In the tables below, `yes` and `no` state whether that role may perform the acti
 ## Management scopes
 
 These are the only scopes the management API accepts on a grant.
-A data-plane scope (`storage.*`, `collection.*`, `share.access`) can never be handed to a user or a group through this surface; the issuer mints those onto tokens directly.
+A data-plane scope (`storage.*`, `collection.*`, `share.access`) can never be handed to a user or a group through the management API; the issuer mints those onto tokens directly.
 `GET /api/v1.0/scopes` returns the same catalogue to any signed-in caller.
 
 | Scope | What it permits | Notes |
@@ -90,7 +90,7 @@ An API token re-intersects its stored scopes against its creator's *current* eff
 
 ## User administration
 
-The whole `/api/v1.0/users` surface requires `server.admin` or `server.user_admin` at the route, plus AUP compliance.
+Every `/api/v1.0/users` endpoint requires `server.admin` or `server.user_admin` at the route, plus AUP compliance.
 Ordinary users reach none of it; their equivalents live under `/api/v1.0/me`.
 
 | Action | System admin | User admin | Ordinary user |
@@ -150,13 +150,14 @@ Listing a group's scope grants is described as open to anyone who can see the gr
 
 Also normative:
 
-- Deleting a group also deletes its invite links, its membership rows, and every collection ACL row naming it.
+- Deleting a group also deletes its invite links, its memberships, and every collection ACL entry naming it.
 - Group names beginning `user-` are reserved for the implicit personal group and are rejected at creation and at rename.
 - Adding someone who is already a member succeeds and changes nothing.
 
 ## Collection administration
 
-Collections sit behind authentication only — signing in is enough to reach the endpoints, and authorization is decided per row.
+Collections sit behind authentication only — signing in is enough to reach the endpoints, and authorization is decided per collection.
+A collection's **access control list** (**ACL**) is the set of entries naming which group holds `read` or `write` on it.
 A role on a collection maps to capabilities as follows.
 
 | Role | Capabilities |
@@ -193,7 +194,7 @@ Also normative:
 - A collection's owner can be changed but never cleared; clearing it returns `400` with `ownerId cannot be empty`.
 - A collection's namespace has to sit inside a prefix this origin already exports, and is canonicalised before both the prefix check and storage.
 - A collection cannot widen what its export permits.
-- Refusals on this surface are reported as `404`, not `403`; see [Response codes](#response-codes).
+- Refusals here are reported as `404`, not `403`; see [Response codes](#response-codes).
 
 ## Share administration
 
@@ -204,7 +205,7 @@ Also normative:
 | Who owns the new share | The caller who created it, not the parent's owner. |
 | Share of a share | Refused. |
 | Share namespace | Equal to, or a path-descendant of, the parent's namespace. Defaults to the parent's namespace. |
-| Share defaults | Visibility is private unless set to public; sharing is forced off on the new row. |
+| Share defaults | Visibility is private unless set to public; sharing is forced off on the new share. |
 | Managing the share | The share is itself a collection, so [Collection administration](#collection-administration) applies to it, with the share's creator holding owner authority. |
 | Effective access through the share | The weaker of the recipient's role on the share and the share owner's current role on the parent, computed when a token is issued. |
 | Token contents | `share.access:/<share-id>` plus the clamped storage scopes. Management-plane `collection.*` scopes are not clamped. |
@@ -245,7 +246,7 @@ A token issued for a share carries `share.access:/<share-id>` alongside its stor
 That scope tells the origin to serve objects under the share's prefix as the share's *owner* rather than as the person presenting the token — which is what makes delegated access work.
 It is minted by the issuer only; it is not a scope you can grant to a user or a group.
 
-When matching ACL rows for a caller, Pelican expands the caller's group list with the memberships recorded on the server, the implicit `user-<username>` personal group, and `@authenticated` when the caller has any identity at all.
+When matching ACL entries for a caller, Pelican expands the caller's group list with the memberships recorded on the server, the implicit `user-<username>` personal group, and `@authenticated` when the caller has any identity at all.
 
 ## Acceptable Use Policy gate
 
@@ -279,7 +280,7 @@ Full request and response schemas are in the [API browser](/api-docs).
 | `204 No Content` | The change was applied. These endpoints return no body. |
 | `400 Bad Request` | A malformed body, a missing required field, or a name or namespace that failed validation. Also `ownerId cannot be empty` on a collection. |
 | `401 Unauthorized` | No valid session or token — or the account was deactivated or deleted after the credential was issued, which is checked on every request. |
-| `403 Forbidden` | You are authenticated but hold neither the scope nor the row-level authority the action needs. Also returned for a cross-origin cookie-authenticated write, which is rejected as a CSRF risk. |
+| `403 Forbidden` | You are authenticated but hold neither the scope nor the ownership or ACL access the action needs. Also returned for a cross-origin cookie-authenticated write, which is rejected as a CSRF risk. |
 | `403 Forbidden` with `requires_aup: true` and `aup_version` | You have not accepted the current Acceptable Use Policy. See [Acceptable Use Policy gate](#acceptable-use-policy-gate). |
 | `404 Not Found` | The record does not exist, **or** it exists and you are not allowed to see it. Endpoints that would otherwise confirm a record exists return `404` rather than `403` when you are not allowed to see it. A `404` on a collection or group you believe exists usually means you lack access, not that it is missing. |
 | `409 Conflict` | `Sharing is not enabled on this collection`, or `Shares are not supported on multi-user origin backends`. |
@@ -302,7 +303,7 @@ An entry that is an OIDC subject rather than a Pelican username grants nothing, 
 
 - [How Access Control Works](/managing-data-access/access-control-model) — the model behind these tables.
 - [Managing Users and Groups](/managing-data-access/users-and-groups) — how to carry out the user and group tasks.
-- [Collections and Shares](/managing-data-access/collections-and-shares) — how to carry out the collection and share tasks.
+- [Managing Access to a Collection](/managing-data-access/collections-and-shares) — how to carry out the collection and share tasks.
 - [API browser](/api-docs) — request and response schemas for every endpoint named here.
 - [`pelican-server server user`](/commands-reference/pelican-server/server/user) and [`pelican-server server group`](/commands-reference/pelican-server/server/group) — generated CLI reference.
 - [`pelican-server origin collection`](/commands-reference/pelican-server/origin/collection) — generated CLI reference for collections.
