@@ -1,6 +1,6 @@
 export default {
-    "access-control-model": "How Access Control Works",
+    "collections-and-shares": "Managing Access to a Collection",
     "users-and-groups": "Managing Users and Groups",
-    "collections-and-shares": "Collections and Shares",
     "permissions-reference": "Permissions Reference",
+    "access-control-model": "How Access Control Works",
 }
