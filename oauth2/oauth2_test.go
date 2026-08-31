@@ -19,11 +19,14 @@
 package oauth2
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // verificationCall records one invocation of a VerificationURLHandler.
@@ -154,5 +157,41 @@ func TestVerificationURLHandler(t *testing.T) {
 		// stays as the only record that a flow was attempted -- the one case
 		// where an installed handler does not suppress it.
 		assert.Contains(t, out.String(), "To approve credentials")
+	})
+}
+
+func TestVerificationTargetAvailable(t *testing.T) {
+	skipVar := config.GetPreferredPrefix().String() + "_SKIP_TERMINAL_CHECK"
+
+	stdoutIsTerminal := func(t *testing.T) bool {
+		t.Helper()
+		fileInfo, err := os.Stdout.Stat()
+		return err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+	}
+
+	t.Run("no-terminal-no-handler-no-escape-is-refused", func(t *testing.T) {
+		if stdoutIsTerminal(t) {
+			t.Skip("stdout is a terminal here, so the case under test cannot arise")
+		}
+		t.Setenv(skipVar, "")
+		SetVerificationURLHandler(nil)
+		assert.False(t, verificationTargetAvailable())
+	})
+
+	t.Run("a-handler-is-a-target-without-a-terminal", func(t *testing.T) {
+		if stdoutIsTerminal(t) {
+			t.Skip("stdout is a terminal here, so this proves nothing about the handler")
+		}
+		t.Setenv(skipVar, "")
+		captureVerificationURLs(t)
+		// This is the whole point of the change: an embedder showing the URL
+		// on a page has somewhere to put it, and no terminal.
+		assert.True(t, verificationTargetAvailable())
+	})
+
+	t.Run("the-escape-hatch-still-works", func(t *testing.T) {
+		t.Setenv(skipVar, "1")
+		SetVerificationURLHandler(nil)
+		assert.True(t, verificationTargetAvailable())
 	})
 }
