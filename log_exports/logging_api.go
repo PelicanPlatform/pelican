@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -279,7 +281,8 @@ func checkLoggingPrefixCollision() error {
 		// report; whatever asked for them will have surfaced it already.
 		// Skipping the guard is safe for the same reason: if the exports could
 		// not be loaded here, the WebDAV handlers could not have mounted their
-		// catch-alls from them either, so there is nothing to collide with.
+		// catch-all routes from them either, so there is nothing to collide
+		// with.
 		return nil
 	}
 	for _, export := range exports {

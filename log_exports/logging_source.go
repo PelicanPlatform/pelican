@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -330,7 +332,7 @@ func (r *activeFileReader) Coverage(ctx context.Context) (time.Time, bool, error
 	}
 
 	// The scan is bounded: normally the very first line is an entry, but a
-	// file whose head is unparseable garbage must not make every request walk
+	// file whose head is unparsable garbage must not make every request walk
 	// it end to end looking for one.  Giving up reports "covers nothing",
 	// which errs in the safe direction -- the response becomes no-store rather
 	// than immutable.

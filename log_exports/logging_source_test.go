@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -220,7 +222,7 @@ func TestActiveFileSourceCoverage(t *testing.T) {
 		assert.Equal(t, base, oldest.UTC())
 	})
 
-	t.Run("skips leading unparseable lines", func(t *testing.T) {
+	t.Run("skips leading unparsable lines", func(t *testing.T) {
 		src := writeLog(t, "not a log line at all\n"+logLine(base, "info", "first"))
 		oldest, ok := coverageOf(t, src)
 		require.True(t, ok)
