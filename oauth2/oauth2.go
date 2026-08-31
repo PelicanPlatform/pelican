@@ -76,6 +76,12 @@ var verificationURLHandler atomic.Pointer[VerificationURLHandler]
 // first consequence is that Pelican judges the token the copy obtained
 // unacceptable and opens a second device flow -- so the user approves twice.
 //
+// Installing a handler also lifts AcquireToken's terminal requirement, which
+// exists so that a flow is never started with no way to tell the user where to
+// approve it.  A handler is another such way, so an embedder with no terminal
+// -- a program under a service manager, or one whose output is redirected --
+// can acquire a token where it previously could not.
+//
 // It is safe to call at any time, including while a flow is in progress.
 func SetVerificationURLHandler(handler VerificationURLHandler) {
 	if handler == nil {
@@ -161,8 +167,37 @@ func announceVerification(w io.Writer, deviceAuth *DeviceAuth) {
 	fmt.Fprintln(w, userCode)
 }
 
+// verificationTargetAvailable reports whether there is anywhere to send the
+// verification URL a device flow is about to produce.
+//
+// A device flow is worthless if nobody ever sees that URL, which is what the
+// terminal requirement has always been about: a program with no terminal had
+// no way to tell its user where to approve, so failing early beat polling for
+// an approval that could never come.
+//
+// An installed VerificationURLHandler is an embedder saying it has somewhere
+// else to put the URL -- a page, a desktop notification, a GUI -- so it meets
+// that requirement without a terminal, and it is exactly the case the handler
+// exists for. A program that opens a browser for its user is often started
+// from a terminal nobody is watching, and under a service manager it may have
+// no terminal at all; refusing there would make the handler unusable in the
+// situation it was added to serve.
+func verificationTargetAvailable() bool {
+	if verificationURLHandler.Load() != nil {
+		return true
+	}
+	if len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) > 0 {
+		return true
+	}
+	// Stat fails on a closed or exotic descriptor, which is not a terminal
+	// either; the previous form dereferenced the nil FileInfo that comes back
+	// with the error.
+	fileInfo, err := os.Stdout.Stat()
+	return err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+}
+
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
-	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
+	if !verificationTargetAvailable() {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
 
