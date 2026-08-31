@@ -14,8 +14,8 @@ This reads the entire object from disk, decrypts it, and verifies
 that stored checksums (if any) match the actual data.
 
 Example:
-  pelican cache introspect verify pelican://my-federation/data/file.dat
-  pelican cache introspect verify /data/file.dat --etag="abc123"
+  pelican-server cache introspect verify pelican://my-federation/data/file.dat
+  pelican-server cache introspect verify /data/file.dat --etag="abc123"
 
 ```
 pelican-server cache introspect verify <object-url> [flags]
