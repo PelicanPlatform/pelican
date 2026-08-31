@@ -261,9 +261,9 @@ func TestMetricsPrometheusIntegration(t *testing.T) {
 }
 
 // TestMetricsRecordedForAuthRejection is a regression test for the middleware
-// ordering in RegisterHandlers. httpMetricsMiddleware must run before
+// ordering in RegisterHandlers. HttpMetricsMiddleware must run before
 // authMiddleware so that auth-rejected requests (401/403) are still counted
-// in Prometheus. If the ordering were reversed, httpMetricsMiddleware would
+// in Prometheus. If the ordering were reversed, HttpMetricsMiddleware would
 // never execute for rejected requests and the dashboard would undercount.
 func TestMetricsRecordedForAuthRejection(t *testing.T) {
 	metrics.HttpRequestsTotal.Reset()

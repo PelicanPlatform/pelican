@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
+	"github.com/pelicanplatform/pelican/log_exports"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	issuer "github.com/pelicanplatform/pelican/oauth2/issuer"
@@ -357,6 +358,29 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		// routes would exist but be reachable by no one.
 		origin_serve.RegisterStorageAPI(engine.Group("/api/v1.0"),
 			web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
+		// HTTP access to this origin's own logs, under /pelican/logging.
+		//
+		// Registers nothing unless the admin opted in, so an origin that has
+		// not enabled log export simply has no such route.
+		//
+		// No AuthHandler/AdminAuthHandler pair here, unlike the storage API
+		// above: callers are federation clients presenting a token scoped to
+		// the logging namespace, not web-UI administrators, and the token may
+		// arrive as a query parameter because the Director's redirect drops
+		// the Authorization header.  The handler verifies it itself.
+		//
+		// The middleware choices are this launcher's: log_exports serves any
+		// server type, so the origin's HTTP transfer metrics -- whose labels
+		// are origin-specific -- are attached here, where the server type is
+		// known.  A cache launcher must supply its own equivalent.
+		//
+		// Mounted inside this branch, so it follows the POSIXv2 origin and an
+		// XRootD origin never gets the route.
+		if err := log_exports.RegisterLoggingExportAPI(ctx, engine, server_structs.OriginType,
+			web_ui.ServerHeaderMiddleware, origin_serve.HttpMetricsMiddleware()); err != nil {
+			return errors.Wrap(err, "failed to register the logging namespace handler")
+		}
 
 		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
 		// Update Origin.Url to use the external web URL which is now set to the correct port.

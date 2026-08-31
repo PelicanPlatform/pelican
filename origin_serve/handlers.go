@@ -535,10 +535,13 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// httpMetricsMiddleware tracks Prometheus HTTP metrics for WebDAV requests.
+// HttpMetricsMiddleware tracks Prometheus HTTP metrics for WebDAV requests.
+// Exported so launchers can attach the same accounting to the origin's other
+// HTTP surfaces (the log export routes); the labels it records are
+// origin-specific, so it must not be reused on other server types.
 // It runs before authMiddleware so that rejected requests are still counted
 // in the Prometheus dashboard (total requests, duration, errors, bytes).
-func httpMetricsMiddleware() gin.HandlerFunc {
+func HttpMetricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		method := c.Request.Method
@@ -648,7 +651,7 @@ func xrdMonitoringMiddleware() gin.HandlerFunc {
 		}
 
 		// Attach a monitoringTracker to the I/O wrappers (already
-		// installed by httpMetricsMiddleware) so that periodic isXfr
+		// installed by HttpMetricsMiddleware) so that periodic isXfr
 		// records are emitted during long-running transfers.
 		var tracker *monitoringTracker
 		knownSize := c.Request.ContentLength // PUT size; -1 if unknown
@@ -665,7 +668,7 @@ func xrdMonitoringMiddleware() gin.HandlerFunc {
 		c.Next()
 
 		// Read final byte counts from the I/O wrappers. These are the
-		// same wrappers that httpMetricsMiddleware created; they have been
+		// same wrappers that HttpMetricsMiddleware created; they have been
 		// accumulating bytes throughout the entire handler chain.
 		var bytesIn, bytesOut int64
 		if v, ok := c.Get(ctxKeyRequestReader); ok {
@@ -1359,7 +1362,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
-		group.Use(httpMetricsMiddleware())
+		group.Use(HttpMetricsMiddleware())
 		group.Use(authMiddleware())
 		group.Use(xrdMonitoringMiddleware())
 		group.Use(listingModeMiddleware())

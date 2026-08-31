@@ -45,7 +45,7 @@ func setupTestServer() *gin.Engine {
 	router := gin.New()
 
 	// Add metrics middleware
-	router.Use(httpMetricsMiddleware())
+	router.Use(HttpMetricsMiddleware())
 
 	// Add test handlers
 	router.GET("/test", func(c *gin.Context) {

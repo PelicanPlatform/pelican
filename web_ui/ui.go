@@ -910,6 +910,11 @@ func mapPrometheusPath(c *gin.Context) string {
 		url = "/api/v1.0/director/healthTest/:testfile"
 		return url
 	}
+	// Log export names one time window per path, so left alone every hour ever
+	// requested would become its own series.
+	if strings.HasPrefix(url, "/pelican/logging/") {
+		return "/pelican/logging/:sitename/:object"
+	}
 	// Only keeps two level depth for object access
 	if strings.HasPrefix(url, "/api/v1.0/director/object/") {
 		objectPath := strings.TrimPrefix(path.Clean(url), "/api/v1.0/director/object/")
