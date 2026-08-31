@@ -1,0 +1,372 @@
+import { Callout } from 'nextra/components'
+
+# Collections and Shares
+
+A **collection** is a prefix inside a namespace your origin already exports, together with the groups allowed to read or write it.
+A **share** is a child collection an ordinary user creates to hand part of their own access to someone else.
+This page is the task list for both: how to create a collection, wire up its groups, hand it to the person who is responsible for it, and let that person delegate onward.
+
+The running example throughout is the one the design was built for.
+An origin administrator creates a collection for a principal investigator, Dr. Reyes.
+Dr. Reyes owns it but does not run it day to day — her postdocs do, as the collection's **admin group**.
+The postdocs then give the lab's undergraduates `read` and the graduate students `write`.
+
+If you want the model behind these tasks rather than the tasks themselves, read [How Access Control Works](/managing-data-access/access-control-model).
+For the authoritative "who may do this", see the [Permissions Reference](/managing-data-access/permissions-reference).
+
+## Before you start
+
+Three things need to be true before any of this works.
+
+1. **The export exists.**
+   A collection is access control *inside* an exported namespace, not a way to publish new storage.
+   Export the storage first — see [Serving an Origin](/federating-your-data/origin) — then create a collection at that prefix or below it.
+2. **You hold `server.collection_admin` (or `server.admin`) to create a collection.**
+   Running one afterwards does not require it: the owner and the admin group manage the collection with no management scope at all.
+   See [Collection administration](/managing-data-access/permissions-reference#collection-administration).
+3. **The groups you want to put in the ACL exist**, or you are willing to create them as you go.
+   Any signed-in user can create a group; see [Create a group](/managing-data-access/users-and-groups#create-a-group).
+
+The `pelican-server origin collection` commands ship in the `pelican-server` binary.
+They find your origin by asking the Director (so `Federation.DirectorUrl` has to be configured), then send you through a browser device-code approval to obtain a token — you do not need shell access on the origin host, but you do need a browser and an account on that origin.
+In a federation with more than one origin the commands target the first origin the Director returns, so prefer the web interface when several origins are registered.
+Flags and syntax live in the generated [`pelican-server origin collection`](/commands-reference/pelican-server/origin/collection) reference; request and response bodies live in the [API browser](/api-docs).
+
+## Create a collection
+
+*Requires `server.collection_admin` or `server.admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+### Web UI
+
+The **ONBOARD COLLECTION** form does the whole example in one pass: the collection, its owner, and its three groups.
+
+1. In the Origin web interface, open **Collections** in the left sidebar.
+2. Click **ONBOARD COLLECTION**.
+3. Under **Collection**, fill in:
+   - **Name** — a short human-readable name, for example `Reyes Lab`.
+   - **Exported namespace** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back to you as you type.
+   - **Description** and **Visibility** (`Private` or `Public`).
+4. Under **Ownership**, choose who owns the collection.
+   The default is you; use **Pick an existing user** to name Dr. Reyes, **Create a new user** if she has no account yet, or **Send an ownership invite** to mint a link she redeems herself.
+5. Under **Access Control**, fill in the three group rows — the `admin` row becomes the collection's admin group, the `write` row and the `read` row become ACL grants.
+   Each row can either create a fresh group or attach one that already exists.
+   Disable any row you do not need.
+6. Click **ONBOARD COLLECTION** at the bottom of the form.
+
+**QUICK CREATE** is the escape hatch: it creates the collection only (**Name**, **Namespace**, **Description**, **Visibility**, and optional **Reader Group** / **Writer Group** / **Admin Group** pickers), leaving ownership and the rest of the ACLs for the edit page.
+
+### CLI
+
+```bash copy
+pelican-server origin collection create \
+  --name "Reyes Lab" \
+  --namespace /CoolScienceOrg/reyes-lab \
+  --description "Storage area for the Reyes lab" \
+  --visibility private
+```
+
+The command prints the new collection, including its ID.
+You need that ID for every later command on this collection.
+
+### API
+
+`POST /api/v1.0/origin_ui/collections`, with the name, namespace, description, visibility and any initial metadata in the body.
+The response carries the new collection's ID.
+See [/api-docs](/api-docs) for the exact shape.
+
+## Choose a namespace for the collection
+
+The namespace is not cosmetic — it is spliced into the storage scopes on every token minted for the collection, so the rules are enforced strictly.
+
+- It has to sit **inside a prefix this origin exports**, either equal to an exported prefix or a path-descendant of one.
+  `/CoolScienceOrg/reyes-lab` is accepted under an export of `/CoolScienceOrg`; it is not accepted under an export of `/CoolScience`, because a prefix only matches at a path boundary.
+- It is **canonicalised before it is checked and before it is stored**, so `/a/b/../c` becomes `/a/c` and both the export check and the eventual token scope see the same value.
+- Whitespace, control characters and `:` are rejected outright.
+
+Several collections can live under one export, which is the usual arrangement: one export of `/CoolScienceOrg`, one collection per lab beneath it.
+
+<Callout type="info">
+A collection can only narrow or subdivide what the export already permits.
+If the export itself is public, a private collection at that prefix does not make the objects unreadable.
+For choosing sensible prefixes in the first place, see [Namespace Prefixes and How To Choose One](/federating-your-data/choosing-namespaces).
+</Callout>
+
+## Grant read or write access to a group
+
+*Requires the collection's owner, a member of its admin group, or `server.collection_admin` — a `write` ACL is not enough to edit ACLs. See [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+Grants are written against **groups**, never against individual users.
+To give one person access, put them in a group — every user also has an implicit personal group named `user-<username>` you can name in an ACL directly.
+Roles are `read` and `write`; a grant may carry an expiry, after which it stops matching.
+
+### Web UI
+
+1. Open **Collections**, find the collection, and click the **Edit collection** (pencil) icon on its row.
+2. Scroll to **Access groups**.
+3. In **Add group**, pick the group — `reyes-undergrads` for the read grant.
+4. Set **Role** to `Read` or `Write`.
+5. Click **ADD**.
+6. Repeat for `reyes-grads` with **Role** `Write`.
+
+Existing rows are listed above the picker with their role; the trash icon beside a row revokes it.
+
+### CLI
+
+```bash copy
+pelican-server origin collection acl grant <collection-id> \
+  --group-id reyes-undergrads --role read
+
+pelican-server origin collection acl grant <collection-id> \
+  --group-id reyes-grads --role write
+```
+
+`--group-id` accepts either the group's internal ID or its name; Pelican stores the canonical name on the ACL row either way.
+`--role` accepts `read` or `write`.
+See [`collection acl`](/commands-reference/pelican-server/origin/collection/acl).
+
+### API
+
+`POST /api/v1.0/origin_ui/collections/{id}/acl` with the group and role, and an optional expiry.
+`DELETE` on the same path revokes a row.
+See [/api-docs](/api-docs).
+
+<Callout type="info">
+`owner` is not a role you can grant here.
+Ownership is a field on the collection, and full management authority is the admin group — see the two sections below.
+Older collections may still show a legacy `owner` ACL row; it is safe to revoke once the owner and admin group are set.
+</Callout>
+
+## Grant access to every signed-in user
+
+*Same prerequisite as the section above.*
+
+`@authenticated` is a virtual ACL target that matches every caller who is signed in, regardless of group membership.
+Use it when the answer to "who may read this?" is "anyone with an account on this server".
+
+In the web interface it appears at the top of the **Add group** picker as **All authenticated users**, marked *Virtual group · matches every signed-in caller*.
+Pick it, choose a role, and click **ADD**, exactly as for a real group.
+On the CLI and the API, pass `@authenticated` where you would pass a group.
+
+Two things it does not do.
+It does not make the collection public — visibility controls who can *see that the collection exists*, and is a separate field.
+And it never appears in a token's group claim, because it is not a real group: it cannot be created, joined, or listed as a member.
+Anonymous callers do not match it either; a request with no identity at all is not "authenticated".
+
+## Delegate day-to-day management to an admin group
+
+*Requires the collection's owner, an existing admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+The admin group is how Dr. Reyes stays responsible for the collection without running it.
+Her postdocs' group becomes the admin group, and from then on they add and remove the undergraduate and graduate groups themselves.
+
+Admin-group members can edit the collection's name, description, visibility and sharing setting, read and write its metadata, grant and revoke ACLs, and reassign the admin group.
+They cannot transfer ownership and they cannot delete the collection — both stay with the owner.
+
+### Web UI
+
+1. Open the collection's **Edit collection** page.
+2. In the **Ownership** panel, use the **Admin group (optional)** picker to select `reyes-postdocs`.
+3. Click **SAVE CHANGES**.
+
+Clearing the picker removes the admin group.
+Once one is set, a **Manage admin group →** link appears beside it so you can jump straight to that group's membership page.
+
+### API
+
+`PATCH /api/v1.0/origin_ui/collections/{id}` with the admin group's ID.
+See [/api-docs](/api-docs).
+
+There is no CLI path for this today: `pelican-server origin collection update` covers the descriptive fields only, so the admin group is set from the web interface or the API.
+
+## Hand a collection to its owner
+
+*Requires the current owner or `server.collection_admin`; admin-group members cannot transfer — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+Every collection has exactly one owner, and it can be moved but never cleared — a `PATCH` that empties `ownerId` is refused.
+There are two routes, depending on whether the new owner already has an account.
+
+**If they do**, set the owner directly.
+On the collection's **Edit collection** page, pick them in the **Owner** field and click **SAVE CHANGES**.
+If you hold `server.user_admin` the picker lists every user on the server; otherwise it offers only the collection's own people — the current owner, admin-group members, and members of any group in the ACL.
+The API equivalent is `PATCH /api/v1.0/origin_ui/collections/{id}` with the new owner's user ID.
+
+**If they do not**, mint an ownership-transfer invite.
+The recipient signs in (self-enrolling through OIDC if this is their first visit), redeems the link, and becomes the owner at that moment; the previous owner loses ownership simultaneously.
+These links are always single-use.
+
+1. On the **Edit collection** page, scroll to **Transfer via invite link**.
+2. Click **GENERATE TRANSFER LINK**.
+3. Copy the URL with **COPY URL**.
+
+From the CLI:
+
+```bash copy
+pelican-server origin collection ownership-invite create <collection-id>
+```
+
+See [`collection ownership-invite`](/commands-reference/pelican-server/origin/collection/ownership-invite).
+The API equivalent is `POST /api/v1.0/origin_ui/collections/{id}/ownership-invites`.
+
+<Callout type="warning">
+Pelican mints the link and shows you the token exactly once; delivering it to the right person is your job.
+Pelican does not send email.
+</Callout>
+
+## Turn on sharing
+
+*Requires the collection's owner, an admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+Shares are off by default.
+Turning them on lets anyone who holds `read` on the collection delegate part of that access onward — useful when a graduate student has to give an outside collaborator one directory and holds no management scope of their own.
+It creates nothing by itself; it only makes share creation reachable for the collection's readers.
+
+1. Open the collection's **Edit collection** page.
+2. Under **Details**, switch on **Allow users to create shares**.
+3. Click **SAVE CHANGES**.
+
+The API equivalent is `PATCH /api/v1.0/origin_ui/collections/{id}` with the sharing flag.
+There is no CLI flag for this setting today, so it is a web-interface or API task.
+
+<Callout type="warning">
+Shares are not supported when the origin runs a multi-user POSIX backend ([`Origin.Multiuser`](/parameters#Origin-Multiuser)).
+Serving share data means acting as the share's owner, and the multi-user backend cannot safely re-target the operating-system identity it serves a request under.
+Creating a share on such an origin is refused with `409`, and if multi-user mode is turned on after shares already exist, any token carrying `share.access` is rejected outright rather than quietly falling back to the presenter's identity.
+</Callout>
+
+## Create a share
+
+*Requires `read` on the parent collection, with sharing enabled on it — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+A share is a collection, so everything you already know about ACLs applies to it.
+What makes it a share is the parent link, and the constraints that come with it:
+
+- **You own the share, not the parent's owner.** You hold owner authority on the share row and manage it yourself.
+- **The namespace has to equal the parent's or sit beneath it.** Leave it blank to inherit the parent's namespace exactly.
+- **Shares start private**, and sharing is forced off on the new share — you cannot create a share of a share.
+
+Access through a share is always the weaker of two things: what the share grants its recipient, and what the share's owner can currently do on the parent collection.
+That intersection is recomputed each time a token is *issued*, so if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
+A share cannot be used to delegate access its owner no longer has.
+
+<Callout type="warning">
+Refreshing an existing token does not re-run the intersection.
+The issuer re-grants the scopes already stored on the session, so an already-issued token keeps its original access until it expires and a new authorization is performed.
+Plan for access changes to take effect on the next issuance, not immediately.
+</Callout>
+
+### Web UI
+
+1. Open **Collections** and find the parent collection.
+   The share icon appears on its row only when sharing is enabled there.
+2. Click the **Create share** (share) icon.
+3. In the **Create share of …** dialog, fill in **Share name**, an optional **Description**, and optionally a **Namespace (optional)** beneath the parent's — leave it blank to use the parent's namespace.
+4. Choose a **Visibility**.
+5. Click **CREATE SHARE**.
+
+Shares appear in the collections list alongside collections, tagged with a **share** chip.
+
+### API
+
+`POST /api/v1.0/origin_ui/collections/{id}/shares`, where `{id}` is the parent collection.
+`GET` on the same path lists a parent's shares.
+
+There is no `pelican-server origin collection share` command family, so outside the web interface this is an API-only task.
+These two endpoints are also not yet described in the [API browser](/api-docs) — the surrounding collection endpoints are.
+
+## Give people access to a share
+
+*Requires the share's owner (or `server.collection_admin`) — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+Because a share is a collection, you grant access to it exactly as in [Grant read or write access to a group](#grant-read-or-write-access-to-a-group) — same **Access groups** panel on the share's edit page, same `acl grant` command, same endpoint, with the share's ID in place of the collection's.
+`@authenticated` works here too.
+
+The difference is whose identity the data is served as.
+Objects reached through a share are served as the share's *owner*, not as the person presenting the token, which is why the intersection above is enforced — the share owner stays accountable for everything read or written through the share.
+See [Data access](/managing-data-access/permissions-reference#data-access) for the scope the issuer mints to arrange that.
+
+## Revoke access
+
+*Prerequisites vary by lever — see [Collection administration](/managing-data-access/permissions-reference#collection-administration) and [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+Three levers, in increasing order of blast radius.
+
+1. **Remove the person from the group.**
+   Everything else keeps working; only that person loses the access the group carried.
+   See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
+2. **Revoke the ACL row**, or let its expiry pass.
+   The whole group loses that role on that collection.
+   Use the trash icon beside the row under **Access groups**, `pelican-server origin collection acl revoke`, or `DELETE /api/v1.0/origin_ui/collections/{id}/acl`.
+3. **Remove a share owner's access to the parent.**
+   This clamps or empties every token minted through every share that person owns, because the intersection is recomputed on each issuance.
+
+All three take effect the next time a token is *issued*, not against tokens already in the field.
+An access token minted before you revoked keeps working until it expires, and the one after it is smaller or empty.
+Deleting a group is the blunt version of lever 2 — it removes every collection ACL row that names that group, everywhere.
+
+<Callout type="warning">
+Refreshing a token does not re-run these checks.
+The issuer re-grants the scopes already stored on the session, so a session that keeps refreshing holds its original data access until that session ends and the holder authorizes again.
+Revocation is not a way to cut off an active session immediately.
+</Callout>
+
+## Delete a collection or share
+
+*Requires the owner or `server.collection_admin`; admin-group members cannot delete — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+Deleting a collection removes its ACL rows, its metadata and its member rows along with it.
+Deleting a share is the same operation — a share is a collection — and is done by the share's owner.
+
+### Web UI
+
+On the **Collections** page, click the **Delete collection** (trash) icon on the row.
+The icon is shown to callers who can edit the row, which is a slightly wider set than those who can delete it, so an admin-group member may see it and get an error.
+
+### CLI
+
+```bash copy
+pelican-server origin collection delete <collection-id>
+```
+
+### API
+
+`DELETE /api/v1.0/origin_ui/collections/{id}`.
+
+<Callout type="warning">
+Deleting a collection does not delete any objects under its namespace.
+It removes the access-control record; the data stays exactly where the export put it, governed by the export alone.
+</Callout>
+
+## Troubleshooting
+
+**`403 you must hold server.collection_admin (or server.admin) to create a collection`**
+Signing in is enough to *reach* the collections API, but not to create a collection.
+Ask a system administrator to grant you `server.collection_admin`, or to create the collection and transfer it to you.
+
+**`Namespace '…' is not within a prefix exported by this origin`**
+The path is outside every export, or it looks like a match but is not one at a path boundary (`/data/foo` is not inside an export of `/data/foobar`).
+Check the origin's exports, then re-check after canonicalisation — `/a/b/../c` is stored and validated as `/a/c`.
+
+**`409 Sharing is not enabled on this collection`**
+The parent collection's owner has not switched on **Allow users to create shares**.
+See [Turn on sharing](#turn-on-sharing).
+
+**`409 Shares are not supported on multi-user origin backends`**
+This origin runs a multi-user POSIX backend, where serving data as the share's owner is not possible.
+Grant access on the collection itself instead of creating a share.
+
+**`404 collection not found` on a collection you are sure exists**
+Endpoints that would otherwise confirm a record exists return `404` rather than `403` when you are not allowed to see it.
+A `404` on a collection or group you believe exists usually means you lack access, not that it is missing.
+This is also what a non-owner sees when they try to transfer ownership or mint an ownership invite.
+
+**`cannot create a share of an existing share`**
+Shares are one hop deep.
+Create the share from the original collection, or ask its owner to grant the person access directly.
+
+**`ownerId cannot be empty; transfer to a real user instead`**
+Ownership can move but not be cleared.
+Name a replacement owner, or mint an ownership-transfer invite.
+
+**A `write` ACL holder cannot change the ACLs.**
+That is intentional: `write` covers the data and the collection's descriptive fields, not who else gets in.
+Put them in the admin group if they should manage access.
