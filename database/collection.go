@@ -328,10 +328,12 @@ const (
 // based on the IdP claim every login" is wrong — see LookupOrBootstrapUser
 // for the correct first-login / return-visit flow.
 type User struct {
-	ID          string     `gorm:"primaryKey" json:"id"`
-	Username    string     `gorm:"not null;uniqueIndex:idx_user_username_live" json:"username"`
-	Sub         string     `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
-	Issuer      string     `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
+	ID       string `gorm:"primaryKey" json:"id"`
+	Username string `gorm:"not null;uniqueIndex:idx_user_username_live" json:"username"`
+	// Identities live in user_identities — all of them, equally. The row
+	// used to carry a "primary" (sub, issuer) inline, which split the
+	// uniqueness invariants across two tables that no constraint could
+	// span; see the 20260824130000_unify_user_identities migration.
 	Status      UserStatus `gorm:"not null;default:active" json:"status"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 	DisplayName string     `gorm:"not null;default:''" json:"displayName"`
@@ -1678,31 +1680,105 @@ func GetUserByUsername(db *gorm.DB, username string) (*User, error) {
 // be explicit; the function nonetheless ignores creator when the user
 // already exists.
 func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, creator Creator) (*User, error) {
-	user := &User{}
-	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
+	user, err := GetUserByIdentity(db, sub, issuer)
 	if err == nil {
-		// User found, return existing user
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	// User not found, create one.
 	created, createErr := CreateUser(db, username, sub, issuer, creator)
 	if createErr == nil {
 		return created, nil
 	}
-	// A concurrent request may have created the same (sub, issuer) user between
-	// our SELECT above and this INSERT, tripping a UNIQUE constraint. For a
-	// get-or-create that is not a failure: if the row now exists, return it so
-	// concurrent first-time authentications don't spuriously fail (a 500 on the
-	// losing request). Re-fetch by the exact (sub, issuer) we were asked for, so
-	// an unrelated username/issuer collision still surfaces the original error.
-	if getErr := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error; getErr == nil {
+	// A concurrent request may have created the same identity between our
+	// SELECT and this INSERT, tripping a UNIQUE constraint. For a
+	// get-or-create that is not a failure: if the identity now exists, return
+	// its user so concurrent first-time authentications don't spuriously fail.
+	if user, getErr := GetUserByIdentity(db, sub, issuer); getErr == nil {
 		return user, nil
 	}
 	return nil, createErr
+}
+
+// GetOrCreateLocalUser resolves a username that was authenticated against this
+// server's own credentials (htpasswd, or a stored password) to its account,
+// creating it on first sight and linking the local identity if it is missing.
+//
+// It differs from GetOrCreateUser in falling back to a *username* match, which
+// is safe here and nowhere else: the username is itself the credential that was
+// just verified against this server, so there is no third party who could
+// choose which account it lands on. Doing the same for an external issuer would
+// be the classic claim-based account-takeover hole — which is why the external
+// token-exchange path never calls this.
+//
+// It also makes local login independent of Server.ExternalWebUrl. That URL is
+// part of the local issuer string, so before unification a port change or a
+// test harness binding a real port could strand the account behind an identity
+// nobody would look up again.
+func GetOrCreateLocalUser(db *gorm.DB, username, localIssuer string, creator Creator) (*User, error) {
+	if username == "" || localIssuer == "" {
+		return nil, errors.New("username and localIssuer are required")
+	}
+	if user, err := GetUserByIdentity(db, username, localIssuer); err == nil {
+		return user, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	existing := &User{}
+	err := db.Where("username = ?", username).First(existing).Error
+	if err == nil {
+		// The account is here but this local identity is not linked to it —
+		// either it predates unification or the issuer string has changed.
+		if _, linkErr := CreateUserIdentity(db, existing.ID, username, localIssuer); linkErr != nil {
+			// ErrIssuerAlreadyLinked means the account already holds an identity
+			// at this issuer under a different sub — which happens after an
+			// admin rename, since the identity keeps its original sub while the
+			// username moves. The account IS the right one to return; it just
+			// authenticates by username, not by that sub. Treat it as success.
+			if errors.Is(linkErr, ErrIssuerAlreadyLinked) {
+				return existing, nil
+			}
+			// Losing a race to link is likewise fine; the identity exists either way.
+			if _, getErr := GetUserByIdentity(db, username, localIssuer); getErr != nil {
+				return nil, linkErr
+			}
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	created, createErr := CreateUser(db, username, username, localIssuer, creator)
+	if createErr == nil {
+		return created, nil
+	}
+	if user, getErr := GetUserByIdentity(db, username, localIssuer); getErr == nil {
+		return user, nil
+	}
+	return nil, createErr
+}
+
+// createUserWithIdentity inserts a user row and, when a (sub, issuer) is
+// supplied, its identity row — in one transaction, so an account can never
+// exist with the identity half of the write missing.
+func createUserWithIdentity(db *gorm.DB, user *User, sub, issuer string) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		if sub == "" || issuer == "" {
+			return nil
+		}
+		slug, err := generateSlug()
+		if err != nil {
+			return err
+		}
+		return tx.Create(&UserIdentity{ID: slug, UserID: user.ID, Sub: sub, Issuer: issuer}).Error
+	})
 }
 
 func GetUserByID(db *gorm.DB, id string) (*User, error) {
@@ -1728,15 +1804,12 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string, creator
 	newUser := &User{
 		ID:                  slug,
 		Username:            username,
-		Sub:                 sub,
-		Issuer:              issuer,
 		CreatedBy:           creatorOrUnknown(creator.UserID),
 		CreatorAuthMethod:   creator.AuthMethod,
 		CreatorAuthMethodID: creator.AuthMethodID,
 	}
-	if err := db.Create(newUser).Error; err != nil {
-		// Check if the error is a unique constraint violation
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	if err := createUserWithIdentity(db, newUser, sub, issuer); err != nil {
+		if isUniqueConstraintError(err) {
 			return nil, errors.New("user shares either username or (sub and iss) with another")
 		}
 		return nil, err
@@ -1783,46 +1856,21 @@ func CreateLocalUser(db *gorm.DB, username, displayName, localIssuer string, cre
 	user := &User{
 		ID:                  slug,
 		Username:            username,
-		Sub:                 username,
-		Issuer:              localIssuer,
 		DisplayName:         displayName,
 		CreatedBy:           creatorOrUnknown(creator.UserID),
 		CreatorAuthMethod:   creator.AuthMethod,
 		CreatorAuthMethodID: creator.AuthMethodID,
 	}
-	if err := db.Create(user).Error; err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	// Local accounts get an identity at the local issuer like any other, so
+	// that nothing has to special-case "this user authenticates by password".
+	if err := createUserWithIdentity(db, user, username, localIssuer); err != nil {
+		if isUniqueConstraintError(err) {
 			return nil, errors.New("user shares either username or (sub and iss) with another")
 		}
 		return nil, err
 	}
 	ApplyDefaultUserScopes(db, user.ID, creator)
 	return user, nil
-}
-
-func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
-	updates := make(map[string]interface{})
-	if username != nil {
-		if err := ValidateIdentifier(*username); err != nil {
-			return err
-		}
-		updates["username"] = *username
-	}
-	if sub != nil {
-		updates["sub"] = *sub
-	}
-	if issuer != nil {
-		updates["issuer"] = *issuer
-	}
-
-	if len(updates) == 0 {
-		return nil
-	}
-
-	if err := db.Model(&User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
 }
 
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user
@@ -1847,33 +1895,11 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 	//    its bypass off that username, and the htpasswd login path has
 	//    historically created the row with sub == username == "admin"
 	//    and issuer == externalURL — so we follow the same shape.
-	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		slug, slugErr := generateSlug()
-		if slugErr != nil {
-			return slugErr
-		}
-		admin = User{
-			ID:        slug,
-			Username:  "admin",
-			Sub:       "admin",
-			Issuer:    externalURL,
-			CreatedBy: CreatorSelfEnrolled,
-		}
-		if createErr := db.Create(&admin).Error; createErr != nil {
-			// A unique-constraint conflict here means another goroutine
-			// got there first; re-query and fall through.
-			if !strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
-				return createErr
-			}
-			if reErr := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error; reErr != nil {
-				return reErr
-			}
-		}
-	} else if err != nil {
+	adminUser, err := GetOrCreateLocalUser(db, "admin", externalURL, Creator{UserID: CreatorSelfEnrolled})
+	if err != nil {
 		return err
 	}
+	admin := *adminUser
 
 	// 2. Backfill ownerless groups onto the admin. Without this, the
 	//    "no created_by fallback for visibility" rule (per the design
@@ -1900,7 +1926,7 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 // Validation, uniqueness checks, and the actual UPDATE happen in a
 // single transaction so a failed sub update can't leave the row in a
 // half-renamed state.
-func RenameUser(db *gorm.DB, id, newUsername, localIssuer string) error {
+func RenameUser(db *gorm.DB, id, newUsername string) error {
 	if err := ValidateIdentifier(newUsername); err != nil {
 		return err
 	}
@@ -1912,13 +1938,10 @@ func RenameUser(db *gorm.DB, id, newUsername, localIssuer string) error {
 		if user.Username == newUsername {
 			return nil
 		}
+		// Only the username moves. An identity's `sub` is what the issuer
+		// calls this person and is not ours to rewrite; password login now
+		// resolves by username alone, so nothing needs them kept in lockstep.
 		updates := map[string]interface{}{"username": newUsername}
-		// Local-issuer accounts: keep the primary sub in lockstep so
-		// password login (which looks up by (username, issuer) and
-		// validates against the row's password_hash) keeps working.
-		if localIssuer != "" && user.Issuer == localIssuer {
-			updates["sub"] = newUsername
-		}
 		if err := tx.Model(&User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return err
 		}
@@ -1946,6 +1969,18 @@ func RenameUser(db *gorm.DB, id, newUsername, localIssuer string) error {
 // On a return-visit (identity already linked) the username is left alone:
 // once an account exists, only an administrator may rename it.
 func LookupOrBootstrapUser(db *gorm.DB, sub, issuer, displayName string, usernameCandidates []string) (*User, error) {
+	return LookupOrBootstrapUserWithCreator(db, sub, issuer, displayName, usernameCandidates, CreatorSelf())
+}
+
+// LookupOrBootstrapUserWithCreator is LookupOrBootstrapUser with an explicit
+// creator stamp for accounts it has to mint.
+//
+// The web-login path self-enrolls (CreatorSelf); the external token-exchange
+// path passes CreatorExternalExchange plus the trusted-issuer row ID, so that
+// accounts an external IdP dragged in stay identifiable after the fact. The
+// lookup half of the function behaves identically either way — the creator is
+// only consulted when a new row is actually created.
+func LookupOrBootstrapUserWithCreator(db *gorm.DB, sub, issuer, displayName string, usernameCandidates []string, creator Creator) (*User, error) {
 	if sub == "" || issuer == "" {
 		return nil, errors.New("sub and issuer are required")
 	}
@@ -1954,8 +1989,12 @@ func LookupOrBootstrapUser(db *gorm.DB, sub, issuer, displayName string, usernam
 	}
 
 	// Existing identity → reuse the user, only refresh the human label.
-	existing := &User{}
-	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(existing).Error
+	//
+	// This resolves through GetUserByIdentity, which sees every identity. It
+	// used to query the users table directly, so an identity an admin had
+	// *linked* was invisible here and the user's next sign-in minted a second
+	// account instead of logging them into the one they were linked to.
+	existing, err := GetUserByIdentity(db, sub, issuer)
 	if err == nil {
 		if displayName != "" && existing.DisplayName != displayName {
 			if updErr := db.Model(existing).Update("display_name", displayName).Error; updErr != nil {
@@ -1986,7 +2025,7 @@ func LookupOrBootstrapUser(db *gorm.DB, sub, issuer, displayName string, usernam
 
 	// Walk the sanitized candidates trying to claim a free username.
 	for _, candidate := range sanitized {
-		user, createErr := tryCreateUser(db, candidate, sub, issuer, displayName, CreatorSelf())
+		user, createErr := tryCreateUser(db, candidate, sub, issuer, displayName, creator)
 		if createErr == nil {
 			return user, nil
 		}
@@ -2023,7 +2062,7 @@ func LookupOrBootstrapUser(db *gorm.DB, sub, issuer, displayName string, usernam
 			// still gets an account; an admin can rename later.
 			candidate = "user-" + hex.EncodeToString(suffix)
 		}
-		user, createErr := tryCreateUser(db, candidate, sub, issuer, displayName, CreatorSelf())
+		user, createErr := tryCreateUser(db, candidate, sub, issuer, displayName, creator)
 		if createErr == nil {
 			return user, nil
 		}
@@ -2045,14 +2084,12 @@ func tryCreateUser(db *gorm.DB, username, sub, issuer, displayName string, creat
 	user := &User{
 		ID:                  slug,
 		Username:            username,
-		Sub:                 sub,
-		Issuer:              issuer,
 		DisplayName:         displayName,
 		CreatedBy:           creatorOrUnknown(creator.UserID),
 		CreatorAuthMethod:   creator.AuthMethod,
 		CreatorAuthMethodID: creator.AuthMethodID,
 	}
-	if err := db.Create(user).Error; err != nil {
+	if err := createUserWithIdentity(db, user, sub, issuer); err != nil {
 		return nil, err
 	}
 	ApplyDefaultUserScopes(db, user.ID, creator)
@@ -2776,6 +2813,19 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 			return err
 		}
 
+		// Hard-delete the account's identities. The user row is soft-deleted
+		// (its tombstone stays for audit and FK resolution), but user_identities
+		// has no soft-delete column and its (sub, issuer) unique index is not
+		// partial — so a left-behind row would reserve that identity forever and
+		// re-enrollment of the same person would fail with a UNIQUE violation.
+		// The identities carry no audit value the tombstoned user row lacks, so
+		// they are removed outright, freeing the identity for reuse — the
+		// re-enrollment invariant the 20260503120000 partial-index migration
+		// established for usernames, applied here to identities.
+		if err := tx.Where("user_id = ?", user.ID).Delete(&UserIdentity{}).Error; err != nil {
+			return err
+		}
+
 		// Finally, delete the user itself.
 		if err := tx.Delete(&user).Error; err != nil {
 			return err
@@ -3483,47 +3533,112 @@ func ClearAUPAgreement(db *gorm.DB, userID string) error {
 
 // --- User Identity CRUD ---
 
-// CreateUserIdentity associates a new identity (sub + issuer) with an existing user.
+// Identity-linking failures callers need to distinguish. They map to distinct
+// HTTP statuses and, more importantly, to distinct things an admin should do
+// next: take the identity from its current owner, pick a different issuer, or
+// give the account a password first.
+var (
+	// ErrIdentityClaimed means the (sub, issuer) belongs to another user.
+	// AdoptUserIdentity is how it gets moved.
+	ErrIdentityClaimed = errors.New("identity is already linked to a different user")
+	// ErrIdentityAlreadyLinked means this user already holds this exact identity.
+	ErrIdentityAlreadyLinked = errors.New("identity is already linked to this user")
+	// ErrIssuerAlreadyLinked means the user already has a different identity at
+	// this issuer; one per issuer per user keeps two people from sharing an
+	// account.
+	ErrIssuerAlreadyLinked = errors.New("user already has an identity at this issuer")
+	// ErrLastCredential means unlinking would leave the account with no way to
+	// authenticate at all.
+	ErrLastCredential = errors.New("cannot unlink the last identity of an account with no password; the user would have no way to sign in")
+)
+
+// CreateUserIdentity links an authentication identity to a user.
+//
+// Both invariants — a (sub, issuer) belongs to at most one user, and a user has
+// at most one identity per issuer — are now plain unique indexes on this single
+// table, so they hold for every writer rather than only for the ones that
+// remembered to check. The work here is turning a constraint violation into an
+// error message that says which rule was broken.
 func CreateUserIdentity(db *gorm.DB, userID, sub, issuer string) (*UserIdentity, error) {
 	if userID == "" || sub == "" || issuer == "" {
 		return nil, errors.New("userID, sub, and issuer are required")
 	}
-
-	// Cross-table check: per the design contract, a user has at most
-	// one identity per issuer — counting BOTH the secondary identities
-	// in this table AND the primary identity carried on the User row.
-	// SQLite has no cross-table constraint mechanism, so we enforce
-	// it here. (The within-table check is redundant with the unique
-	// index on (user_id, issuer); it's still useful for a clearer
-	// error message.)
-	var primary User
-	if err := db.First(&primary, "id = ?", userID).Error; err != nil {
+	if err := db.First(&User{}, "id = ?", userID).Error; err != nil {
 		return nil, err
-	}
-	if primary.Issuer == issuer {
-		return nil, errors.New("user already has an identity at this issuer (the primary one)")
 	}
 
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
 	}
-
-	identity := &UserIdentity{
-		ID:     slug,
-		UserID: userID,
-		Sub:    sub,
-		Issuer: issuer,
-	}
+	identity := &UserIdentity{ID: slug, UserID: userID, Sub: sub, Issuer: issuer}
 
 	if result := db.Create(identity); result.Error != nil {
-		if strings.Contains(result.Error.Error(), "UNIQUE constraint failed") {
-			return nil, errors.New("identity (sub, issuer) is already linked, or the user already has an identity at this issuer")
+		if isUniqueConstraintError(result.Error) {
+			return nil, describeIdentityConflict(db, userID, sub, issuer)
 		}
 		return nil, result.Error
 	}
-
 	return identity, nil
+}
+
+// describeIdentityConflict turns a UNIQUE violation into a message naming the
+// rule that was broken, so a caller trying to relink an identity is told which
+// situation they are in rather than being handed a constraint name.
+func describeIdentityConflict(db *gorm.DB, userID, sub, issuer string) error {
+	var existing UserIdentity
+	if err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(&existing).Error; err == nil {
+		if existing.UserID == userID {
+			return ErrIdentityAlreadyLinked
+		}
+		return ErrIdentityClaimed
+	}
+	return ErrIssuerAlreadyLinked
+}
+
+// AdoptUserIdentity moves an existing identity onto another user.
+//
+// With one table this is a single-row update, which is what makes correcting a
+// mis-enrollment a reversible edit rather than an account deletion: previously
+// the identity to be moved was the stray account's *primary* one, unremovable
+// except by deleting that account and everything it owned.
+//
+// It intentionally does NOT apply the last-credential guard to the SOURCE
+// account. Adopting the sole identity off a stray auto-enrolled account is the
+// common case, and that account is meant to be reviewed and deleted afterward;
+// refusing to strand it would defeat the purpose. The caller (see the admin
+// handler) is responsible for noticing and cleaning up a source left with no
+// way to sign in.
+func AdoptUserIdentity(db *gorm.DB, targetUserID, sub, issuer string) (*UserIdentity, error) {
+	if targetUserID == "" || sub == "" || issuer == "" {
+		return nil, errors.New("targetUserID, sub, and issuer are required")
+	}
+	var identity UserIdentity
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&User{}, "id = ?", targetUserID).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("sub = ? AND issuer = ?", sub, issuer).First(&identity).Error; err != nil {
+			return err
+		}
+		if identity.UserID == targetUserID {
+			return nil
+		}
+		res := tx.Model(&UserIdentity{}).Where("id = ?", identity.ID).
+			Update("user_id", targetUserID)
+		if res.Error != nil {
+			if isUniqueConstraintError(res.Error) {
+				return ErrIssuerAlreadyLinked
+			}
+			return res.Error
+		}
+		identity.UserID = targetUserID
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &identity, nil
 }
 
 // ListUserIdentities returns all identities for a given user.
@@ -3535,46 +3650,62 @@ func ListUserIdentities(db *gorm.DB, userID string) ([]UserIdentity, error) {
 	return identities, nil
 }
 
-// DeleteUserIdentity removes a specific *secondary* identity row.
-// Returns gorm.ErrRecordNotFound if no row matches (identity ID
-// unknown, or it belongs to a different user) — same observable
-// behavior either way, so handlers don't need to distinguish "wrong
-// user" from "doesn't exist" and accidentally leak existence.
+// DeleteUserIdentity unlinks one of a user's identities.
 //
-// This function only operates on the user_identities table; the
-// primary identity carried on the User row is intentionally not
-// removable here. See the user/group design contract.
+// Any identity may be unlinked now that none of them is structurally special —
+// previously the one carried on the user row could not be removed at all, which
+// is what made correcting a mis-enrollment require deleting the whole account.
+//
+// The one guard is that a user must retain some way to authenticate: unlinking
+// the last identity is refused unless the account also has a password.
+//
+// Returns gorm.ErrRecordNotFound if no row matches (unknown identity, or it
+// belongs to a different user) — same observable behavior either way, so
+// handlers can't accidentally leak existence.
 func DeleteUserIdentity(db *gorm.DB, identityID, userID string) error {
-	result := db.Where("id = ? AND user_id = ?", identityID, userID).Delete(&UserIdentity{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return db.Transaction(func(tx *gorm.DB) error {
+		var identity UserIdentity
+		if err := tx.Where("id = ? AND user_id = ?", identityID, userID).First(&identity).Error; err != nil {
+			return err
+		}
+
+		var remaining int64
+		if err := tx.Model(&UserIdentity{}).Where("user_id = ? AND id <> ?", userID, identityID).
+			Count(&remaining).Error; err != nil {
+			return err
+		}
+		if remaining == 0 {
+			hasPassword, err := userHasPassword(tx, userID)
+			if err != nil {
+				return err
+			}
+			if !hasPassword {
+				return ErrLastCredential
+			}
+		}
+
+		result := tx.Where("id = ? AND user_id = ?", identityID, userID).Delete(&UserIdentity{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
-// GetUserByIdentity looks up a user by an identity (sub + issuer), checking both
-// the primary user table and the user_identities table.
+// GetUserByIdentity resolves an authenticated (sub, issuer) pair to its user.
+//
+// One table, one query. This used to consult the users table first and
+// user_identities second, which made a user's "primary" identity outrank their
+// linked ones and let the two tables disagree about who owned a pair.
 func GetUserByIdentity(db *gorm.DB, sub, issuer string) (*User, error) {
-	// First check the primary user table
-	user := &User{}
-	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
-	if err == nil {
-		return user, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	// Check the user_identities table
 	var identity UserIdentity
 	if err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(&identity).Error; err != nil {
 		return nil, err
 	}
-
-	// Found via identity, look up the user
+	user := &User{}
 	if err := db.First(user, "id = ?", identity.UserID).Error; err != nil {
 		return nil, err
 	}
