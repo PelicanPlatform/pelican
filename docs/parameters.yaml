@@ -4340,6 +4340,24 @@ type: filename
 default: ${ConfigBase}/session-secret
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.ConfigReadOnly
+description: |+
+  When enabled, the configuration API refuses to change the server's configuration:
+  state changing requests to `/api/v1.0/config` (PATCH, POST, PUT, DELETE) are rejected
+  and the web UI renders its configuration page as a read-only view.
+
+  Use this on servers whose configuration is managed outside of Pelican -- by Puppet,
+  Ansible, a container image, etc. -- so that a web UI administrator cannot introduce
+  drift by writing to `Server.WebConfigFile`.
+
+  Unlike `Server.WebReadOnly`, this affects only the configuration API; every other web
+  UI route keeps accepting state changing methods. Since the configuration API is the
+  only way to change this value from the web UI, enabling it means it can only be
+  disabled again by editing a configuration file and restarting the server.
+type: bool
+default: false
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.WebReadOnly
 description: |+
   When enabled, web UI routes that employ the read-only middleware will reject state changing HTTP

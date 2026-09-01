@@ -16,6 +16,7 @@ export type IntegerFieldProps = {
   name: string;
   value: number;
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (x: number) => void;
 };
 
@@ -24,6 +25,7 @@ const IntegerField = ({
   name,
   value,
   focused,
+  readOnly,
 }: IntegerFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
 
@@ -47,6 +49,7 @@ const IntegerField = ({
       label={name}
       variant={'outlined'}
       focused={focused}
+      InputProps={{ readOnly }}
       value={bufferValue}
       onChange={(e) => {
         setBufferValue(e.target.value);

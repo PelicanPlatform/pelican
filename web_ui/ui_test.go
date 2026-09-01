@@ -1499,6 +1499,55 @@ func TestReadOnlyMiddleware(t *testing.T) {
 	})
 }
 
+// TestConfigReadOnlyMiddleware exercises Server.ConfigReadOnly: it must freeze
+// the config API's write methods without touching the rest of the web UI.
+func TestConfigReadOnlyMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	defer server_utils.ResetTestState()
+
+	route := gin.New()
+	configGroup := route.Group("/api/v1.0/config")
+	configGroup.Use(ConfigReadOnlyMiddleware)
+	{
+		configGroup.GET("", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		configGroup.PATCH("", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		configGroup.POST("", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		configGroup.PUT("", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		configGroup.DELETE("", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+	}
+
+	serve := func(t *testing.T, method string) *http.Response {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(method, "/api/v1.0/config", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		return r.Result()
+	}
+
+	writeMethods := []string{http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodDelete}
+
+	t.Run("allows-writes-by-default", func(t *testing.T) {
+		server_utils.ResetTestState()
+		for _, method := range writeMethods {
+			assert.Equal(t, http.StatusOK, serve(t, method).StatusCode, method)
+		}
+	})
+
+	t.Run("blocks-writes-when-enabled", func(t *testing.T) {
+		server_utils.ResetTestState()
+		require.NoError(t, param.Server_ConfigReadOnly.Set(true))
+		for _, method := range writeMethods {
+			assert.Equal(t, http.StatusForbidden, serve(t, method).StatusCode, method)
+		}
+	})
+
+	t.Run("allows-GET-when-enabled", func(t *testing.T) {
+		server_utils.ResetTestState()
+		require.NoError(t, param.Server_ConfigReadOnly.Set(true))
+		assert.Equal(t, http.StatusOK, serve(t, http.MethodGet).StatusCode)
+	})
+}
+
 // TestIsSafeRedirectURL exercises the open-redirect guard used by the
 // OAuth login flow. Anything that could send a user to a third-party
 // host on success must be rejected; only same-origin relative paths
