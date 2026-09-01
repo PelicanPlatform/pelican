@@ -91,6 +91,16 @@ As long as you have an internet connection and know how to access the object via
 Visit [Getting Started - Accessing Data](/getting-started/accessing-data) to get started with the Pelican CLI.
 To learn more about the Pelican Clients, visit [Getting Data With Pelican](/getting-data-with-pelican).
 
+### Why does Pelican ask me to password-protect my local credentials?
+
+When you use the Pelican CLI to transfer protected data, it saves your authorization locally so you don't have to re-authenticate via a web browser for every command. Pelican asks you to set a password to encrypt this token wallet for three main reasons:
+
+* **Shared Research Environments:** Research often happens on shared login nodes or institutional clusters. While standard file permissions offer basic protection, an encrypted wallet ensures that your data access remains private even if someone else manages to access your configuration files.
+* **Protecting Your "Data Identity":** Your Pelican tokens are tied to your institutional identity (e.g., via CILogon). If these tokens were stolen, an attacker could act as *you* within the data federation—potentially utilizing your data quotas or accessing sensitive datasets you have permission to view.
+* **Convenience without Compromise:** By using a password to "unlock" your wallet for a session, you gain the speed of CLI-driven data transfers without leaving raw, unencrypted credentials sitting on the disk of a remote server.
+
+For a deeper look at how Pelican protects your research identity and manages local sessions, see [Working with Protected Data](../auth).
+
 ### Why do `osdf:///` URLs use 3 slashes instead of two slashes like regular URLs?
 
 >**TL;DR:** `osdf:///` URLs use three slashes because the `osdf` scheme inherently specifies the networked system, making the federation hostname redundant.
