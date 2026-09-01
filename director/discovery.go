@@ -199,6 +199,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		JwksUri:                    jwksUri,
 		BrokerEndpoint:             brokerUrl,
 		DirectorAdvertiseEndpoints: param.Server_DirectorUrls.GetStringSlice(),
+		AnycastEndpoint:            param.Director_AnycastUrl.GetString(),
 	}
 
 	jsonData, err := json.MarshalIndent(rs, "", "  ")
