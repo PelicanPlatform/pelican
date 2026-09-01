@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -35,9 +33,9 @@
 //	                            covered by any lot in the timeline.
 //
 // All time values are Unix milliseconds. The data plane is intentionally
-// pure so it can be unit-tested with synthetic Lot slices. The FFI-side
+// pure so it can be unit-tested with synthetic Lot slices. The lot-store
 // helpers that fetch the actual Lot population from the lotman DB live in
-// scoped_query.go (renewal/GC ticks) so timeline.go has zero FFI surface.
+// scoped_query.go (renewal/GC ticks) so timeline.go touches no lot store.
 
 package lotman
 

@@ -7,6 +7,7 @@ local
 web_ui/frontend/app/api/docs/pelican-swagger.yaml
 .goreleaser.dev.yml
 .goreleaser.generated.yml
+.goreleaser.lotman.generated.yml
 .DS_Store
 .idea
 pelican.yaml
@@ -32,3 +33,12 @@ e2e_fed_tests.test
 # `go build ./cmd/sample_metadata_server`.
 /sample_metadata_server
 /cmd/sample_metadata_server/sample_metadata_server
+
+# `go build ./lotman/cshared` drops its output here, named after the package
+# directory. The shared library is built via `make lotman-shared` instead.
+/lotman/cshared/cshared
+
+# On-disk queue segments and their lock file, left in the package directory by
+# a test that opens its queue with a relative path.
+/local_cache/*.dque
+/local_cache/lock.lock

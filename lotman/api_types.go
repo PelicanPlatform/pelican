@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -31,7 +29,7 @@ package lotman
 //   - All public JSON and form field names are camelCase. The internal
 //     lotman Lot/MPA/LotPath/RestrictiveMPA/LotUsage/AvailableCapacity
 //     types use snake_case keys because that schema is the wire format
-//     used to communicate with the lotman C library; the API boundary
+//     of the historical lotman JSON schema (see lotman/lotjson); the API boundary
 //     translates between the two via the *Input request DTOs and the
 //     project*Response helpers below.
 
