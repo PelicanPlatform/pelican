@@ -127,7 +127,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
             lg: 6,
           }}
         >
-          <Box sx={{mt: error || readOnly ? 2 : 0}}>
+          <Box sx={{ mt: error || readOnly ? 2 : 0 }}>
             {error && (
               <Alert severity={'warning'}>{(error as Error).message}</Alert>
             )}
