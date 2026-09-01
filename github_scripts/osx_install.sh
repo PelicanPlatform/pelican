@@ -59,7 +59,7 @@ popd
 # Add patches to xrootd source code if needed
 git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout v5.9.6-pelican
+git checkout v6.1.1-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -112,23 +112,23 @@ sudo mkdir -p "$xrootd_libdir"
 # Symlink the versioned .dylib files (macOS naming) that plugins reference at runtime
 sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.0.dylib" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.dylib" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdS3-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-6.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-6.so" "$xrootd_libdir"
 # Provide unversioned aliases to match production config names
-sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir/libXrdHTTPServer.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir/libXrdS3.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir/libXrdOssHttp.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir/libXrdOssGlobus.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir/libXrdOssS3.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir/libXrdOssFilter.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir/libXrdOssPosc.so"
-sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir/libXrdN2NPrefix.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-6.so" "$xrootd_libdir/libXrdHTTPServer.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdS3-6.so" "$xrootd_libdir/libXrdS3.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-6.so" "$xrootd_libdir/libXrdOssHttp.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-6.so" "$xrootd_libdir/libXrdOssGlobus.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-6.so" "$xrootd_libdir/libXrdOssS3.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-6.so" "$xrootd_libdir/libXrdOssFilter.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-6.so" "$xrootd_libdir/libXrdOssPosc.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-6.so" "$xrootd_libdir/libXrdN2NPrefix.so"
 popd
 
 popd
