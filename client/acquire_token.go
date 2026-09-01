@@ -99,6 +99,18 @@ type (
 		authFailureMu           sync.Mutex
 		consecutiveAuthFailures int
 		externalProvider        TokenProvider // optional external provider; if set, Get() delegates to it
+		// usingUnacceptableToken records that getToken deliberately settled on
+		// a credential it could not vouch for -- the "the user knows better"
+		// fallback below.  Two things read it.  The warning is emitted only on
+		// the transition, so a job does not repeat the same sentence about the
+		// same credential once per file.  And Get() stops clearing the cache
+		// over that credential: the clear exists to force a fresh acquisition,
+		// but getToken returns the fallback *before* it ever reaches the
+		// acquire branch, so re-running it just re-walks every token location
+		// on disk to arrive at the same answer.  SetDirectorResponse resets
+		// the flag, since a new authorization picture can make the credential
+		// acceptable (or newly worth complaining about).
+		usingUnacceptableToken atomic.Bool
 	}
 
 	// An object that iterates through the various possible tokens
@@ -202,6 +214,10 @@ func (tg *tokenGenerator) cacheToken(contents string) {
 // acted on; see canApplyTokenHint.
 func (tg *tokenGenerator) SetDirectorResponse(dirResp *server_structs.DirectorResponse) {
 	tg.DirResp = dirResp
+	// A different authorization picture deserves a fresh verdict on whatever
+	// credential is cached: what looked unacceptable against the old issuers
+	// and base paths may be fine against these.
+	tg.usingUnacceptableToken.Store(false)
 }
 
 // canApplyTokenHint reports whether this generator may act on the token hints
@@ -562,7 +578,17 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 		if tokenLoc == "" {
 			tokenLoc = tg.TokenLocation
 		}
-		log.Warningf("Using provided token %q even though it does not appear to be acceptable to perform transfer", tokenLoc)
+		if !tg.usingUnacceptableToken.Swap(true) {
+			if tokenLoc != "" {
+				log.Warningf("Using provided token %q even though it does not appear to be acceptable to perform transfer", tokenLoc)
+			} else {
+				dest := "the requested object"
+				if tg.Destination != nil {
+					dest = tg.Destination.String()
+				}
+				log.Warningf("Using a discovered token even though it does not appear to be acceptable to perform transfer to %s", dest)
+			}
+		}
 		tg.Token.Store(&potentialTokens[0])
 		token = potentialTokens[0].Contents
 		err = nil
@@ -616,7 +642,8 @@ func (tg *tokenGenerator) Get() (token string, err error) {
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
 		// if AcquireToken is enabled and the token is unacceptable, clear the cache and force a new token to be generated
-		if tg.EnableAcquire && tg.DirResp != nil && !tokenIsAcceptable(info.Contents, tg.Destination.Path, *tg.DirResp, config.TokenGenerationOpts{Operation: tg.Operation}) {
+		if tg.EnableAcquire && tg.DirResp != nil && !tg.usingUnacceptableToken.Load() &&
+			!tokenIsAcceptable(info.Contents, tg.Destination.Path, *tg.DirResp, config.TokenGenerationOpts{Operation: tg.Operation}) {
 			tg.Token.Store(nil) // clear the cache and force a new token to be generated
 			log.Debugln("Token is not acceptable; clearing cache")
 		} else {
