@@ -323,6 +323,57 @@ func TestTokenHintIgnoredFromHostTheUserDidNotName(t *testing.T) {
 	assert.Equal(t, int32(0), atomic.LoadInt32(&stats.served))
 }
 
+// TestTokenHintHonoredFromCacheTheUserNamed is the other half of the boundary
+// above.  The endpoint is again not the host in the pelican:// URL -- but here
+// the user picked it themselves with -c, and having sent their request to that
+// cache on purpose, they are asking what it says about what it will accept.
+//
+// The fixture is TestTokenHintIgnoredFromHostTheUserDidNotName with one
+// difference: the same server is now among the caches the caller named.  The
+// opposite outcome is what shows that naming it is what decides this.
+func TestTokenHintHonoredFromCacheTheUserNamed(t *testing.T) {
+	stageTwoCredentials(t)
+
+	body := "hello cache"
+	var stats hintServerStats
+	svr := httptest.NewServer(countingTokenHintHandler(body, &stats))
+	t.Cleanup(svr.Close)
+
+	transfer, tok := newHintTransfer(t, svr.URL, hintTransferOpts{
+		discoveryEndpoint: "https://the-host-the-user-named.example.com",
+		directorEndpoint:  "https://director.example.com",
+	})
+	named, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+	tok.setNamedObjServers([]*url.URL{named})
+
+	res, err := downloadObject(transfer)
+	require.NoError(t, err)
+	require.NoError(t, res.Error, "a cache the user named may say what token it wants")
+	assert.Equal(t, int64(len(body)), res.TransferredBytes)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&stats.rejected))
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&stats.served), int32(1))
+}
+
+// TestNamedCachesReachTheTokenGenerator pins the wiring between the two: the
+// caches a caller names on a job are the ones the job's generator will take
+// advice from.  Every job type shares this path, and a copy's source side reads
+// from them too.
+func TestNamedCachesReachTheTokenGenerator(t *testing.T) {
+	cache, err := url.Parse("https://cache.example.com:8443")
+	require.NoError(t, err)
+
+	tj := &TransferJob{
+		token:    NewTokenGenerator(nil, nil, config.TokenRead, false),
+		srcToken: NewTokenGenerator(nil, nil, config.TokenSharedRead, false),
+	}
+	applyJobOptions(tj, []TransferOption{WithCaches(cache)})
+
+	assert.Equal(t, []*url.URL{cache}, tj.token.namedObjServers)
+	assert.Equal(t, []*url.URL{cache}, tj.srcToken.namedObjServers,
+		"a copy reads from the caches the caller named as well")
+}
+
 // TestTokenHintDoesNotDisplaceExplicitToken pins that a caller who named a
 // credential keeps it.  Acting on a hint here would swap a credential the user
 // chose for one acquired from an issuer the server named.
@@ -401,6 +452,55 @@ func TestCanApplyTokenHint(t *testing.T) {
 	t.Run("no-discovery-endpoint", func(t *testing.T) {
 		tg := NewTokenGenerator(&pelican_url.PelicanURL{Path: "/protected/obj"}, nil, config.TokenRead, false)
 		assert.False(t, tg.canApplyTokenHint(objectServer))
+	})
+
+	// A cache the user picked is named as squarely as the URL's host, so the
+	// cases below are about which endpoint their choice actually refers to.
+	namedCache := func(t *testing.T, named string) *tokenGenerator {
+		t.Helper()
+		u, err := url.Parse(named)
+		require.NoError(t, err)
+		tg := newGen()
+		tg.Destination.FedInfo.DiscoveryEndpoint = "https://the-host-the-user-named.example.com"
+		tg.setNamedObjServers([]*url.URL{u})
+		return tg
+	}
+
+	t.Run("cache-the-user-named", func(t *testing.T) {
+		assert.True(t, namedCache(t, "https://origin.example.com:8444").canApplyTokenHint(objectServer))
+	})
+
+	t.Run("cache-the-user-named-as-a-bare-hostname", func(t *testing.T) {
+		// What url.Parse makes of "origin.example.com:8444" is a scheme and an
+		// opaque part, not a host; the transfer resolves it into a host anyway,
+		// so the gate has to read it the same way.
+		assert.True(t, namedCache(t, "origin.example.com:8444").canApplyTokenHint(objectServer),
+			"a preferred cache written without a scheme still names this endpoint")
+		assert.True(t, namedCache(t, "//origin.example.com:8444").canApplyTokenHint(objectServer))
+	})
+
+	t.Run("cache-the-user-named-on-another-port", func(t *testing.T) {
+		assert.False(t, namedCache(t, "https://origin.example.com:9999").canApplyTokenHint(objectServer),
+			"a cache on another port is another service")
+	})
+
+	t.Run("cache-the-user-named-answering-in-the-clear", func(t *testing.T) {
+		plaintext, err := url.Parse("http://origin.example.com:8444")
+		require.NoError(t, err)
+		assert.False(t, namedCache(t, "https://origin.example.com:8444").canApplyTokenHint(plaintext),
+			"advice in the clear is not from the host the user named as https")
+	})
+
+	t.Run("plus-sentinel-names-nothing", func(t *testing.T) {
+		assert.False(t, namedCache(t, "+").canApplyTokenHint(objectServer),
+			"the '+' that appends the director's own list is not a host")
+	})
+
+	t.Run("cache-the-user-named-does-not-admit-the-others", func(t *testing.T) {
+		other, err := url.Parse("https://some-other-cache.example.com:8443")
+		require.NoError(t, err)
+		assert.False(t, namedCache(t, "https://origin.example.com:8444").canApplyTokenHint(other),
+			"naming one cache says nothing about the rest of the director's list")
 	})
 
 	t.Run("nil-destination", func(t *testing.T) {
