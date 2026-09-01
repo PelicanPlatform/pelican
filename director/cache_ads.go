@@ -246,7 +246,15 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 //  3. Set up the server `stat` call utilities
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
-func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAd) (updatedAd server_structs.ServerAd) {
+//
+// nameAuthorized reports whether the caller confirmed that the advertised
+// server name is the one registered under the ad's registry prefix. The
+// advertise token authenticates the prefix, not the name, so anything keyed
+// by name -- retiring a shutting-down server, or evicting the ad of a server
+// that appears to have moved -- must not act on an unverified claim. Callers
+// that have not checked (topology ads, which carry no registration to check
+// against) pass false and get storage without those side effects.
+func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAd, nameAuthorized bool) (updatedAd server_structs.ServerAd) {
 	if sAd.URL.String() == "" {
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
@@ -298,6 +306,19 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	} else {
 		// If there is no existing ad, the status weight will be set to the current raw weight
 		populateEWMAStatusWeight(&sAd, nil)
+	}
+
+	// A shutting-down server's final ad removes its cache entry outright.
+	// The name-keyed downtime filter alone is not enough: when a replacement
+	// server shares the name (the normal rollout case), the replacement's
+	// next healthy ad clears that filter — which used to resurrect the old
+	// server's still-cached ad for the remainder of its TTL.
+	if nameAuthorized && metrics.ParseHealthStatus(sAd.Status) == metrics.StatusShuttingDown {
+		log.Infof("Server %s (%s) advertised it is shutting down; removing it from matchmaking", sAd.Name, sAd.URL.String())
+		serverAds.Delete(rawURL)
+		serverAds.Delete(httpURL)
+		serverAds.Delete(httpsURL)
+		return
 	}
 
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
