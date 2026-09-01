@@ -1,4 +1,3 @@
-
 if(!process.env.VERSIONS && process.env.NODE_ENV !== 'development') {
 	throw new Exception("Missing required env variable VERSIONS");
 } else {
@@ -8,20 +7,19 @@ if(!process.env.VERSIONS && process.env.NODE_ENV !== 'development') {
 const versions = eval(process.env.VERSIONS);
 
 export default {
-	"about-pelican": "About Pelican",
-	"install": "Installing Pelican",
-	"parameters": "Configuration",
-	"getting-started": "Getting Started",
-	"getting-data-with-pelican": "Getting Data with Pelican",
-	"federating-your-data": "Federating Your Data",
-	"managing-data-access": "Managing Data Access",
-	"operating-a-federation": "Operating a Federation",
-	"managing-your-server": "Managing Your Server",
-	"monitoring-pelican-services": "Monitoring Pelican Services",
-	"advanced-concepts": "Advanced Concepts",
-	"getting-help": "Getting Help",
-	"api-docs": "API Documentation",
-	"commands-reference": "Commands Reference",
+	// Canonical sources for pages that more than one section carries. Next.js does
+	// not route "_"-prefixed folders, and "display: hidden" keeps them out of the
+	// page map, so these files are reachable only through the section stubs that
+	// re-export them.
+	"_shared": { "display": "hidden" },
+
+	// app/page.tsx is a redirect, not a doc page
+	"index": { "display": "hidden" },
+
+	"accessing-your-data": { "type": "page", "title": "Accessing Your Data" },
+	"sharing-your-data": { "type": "page", "title": "Sharing Your Data" },
+	"federation-services": { "type": "page", "title": "Running Federation Services" },
+
 	"versions": {
 		"title": "Versions",
 		"type": "menu",

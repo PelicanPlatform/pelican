@@ -1,0 +1,40 @@
+---
+title: pelican server origin pstore du
+---
+
+## pelican-server origin pstore du
+
+Report space used
+
+### Synopsis
+
+Report the space a subtree occupies, and the store's overall usage.
+
+Sizes are object content lengths; the store's total additionally reflects the
+per-block overhead that encrypted blocks carry on disk.
+
+```
+pelican-server origin pstore du [path] [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for du
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+      --location string     Store directory (defaults to Origin.PStoreLocation)
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin pstore](/sharing-your-data/commands-reference/pelican-server/origin/pstore/)	 - Inspect and repair a Pelican store

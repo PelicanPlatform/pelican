@@ -1,0 +1,71 @@
+---
+title: pelican server origin pstore metadata backup
+---
+
+## pelican-server origin pstore metadata-backup
+
+Back up the store's metadata (not its object data)
+
+### Synopsis
+
+Back up the store's metadata to a file.
+
+THIS DOES NOT BACK UP OBJECT DATA. It covers the catalog: the directory tree,
+and each object's size, checksums, and where its blocks live. Restoring it
+gives back the namespace, not the bytes.
+
+An origin cannot re-fetch what it loses. Object data on disk is encrypted and
+named by hash; the namespace, each object's data key, its size, and its
+checksums all live in the catalog, so a store whose catalog is gone is a
+directory of unreadable bytes.
+
+A metadata backup covers the catalog only. Restoring one is useful only
+alongside:
+
+  - the object data, which ordinary filesystem backup tools handle; and
+  - masterkey.json in the store directory, which wraps the encryption key and
+    is itself protected by the origin's issuer keys.
+
+The backup is always encrypted. A snapshot is a logical dump: it holds every
+object path and the salt that keeps on-disk filenames unguessable, so there is
+no option to write one in the clear.
+
+The body is encrypted under a key belonging to this file alone, derived from the
+origin's backup key and a random salt stored in the file. The backup key itself
+travels inside the file, sealed to every issuer key that is current now, so any
+one of them opens it. Pass --key-file to seal it to a backup key of your own
+instead of the origin's issuer keys.
+
+Three things open the finished file: any of those issuer keys, the backup key
+from "pstore metadata-backup-key", or this one file's own key from "pstore
+metadata-backup-key &lt;file&gt;".
+
+Set Origin.PStoreMetadataBackupLocation to have the origin back itself up on a
+timer, which works while it is running. This command is for taking one by hand.
+
+```
+pelican-server origin pstore metadata-backup <file> [flags]
+```
+
+### Options
+
+```
+  -h, --help              help for metadata-backup
+      --key-file string   Seal the backup to the backup key in this file instead of the origin's issuer keys
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+      --location string     Store directory (defaults to Origin.PStoreLocation)
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin pstore](/federation-services/commands-reference/pelican-server/origin/pstore/)	 - Inspect and repair a Pelican store

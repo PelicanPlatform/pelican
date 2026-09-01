@@ -1,0 +1,88 @@
+---
+title: pelican server origin pstore metadata backup key
+---
+
+## pelican-server origin pstore metadata-backup-key
+
+Print the key that opens this origin's metadata backups, or one file's own key
+
+### Synopsis
+
+Print a metadata backup key. There are two of them, and which one you get
+depends on whether you name a file.
+
+  metadata-backup-key            the BACKUP KEY: opens EVERY metadata backup
+                                 this origin has written or will write
+  metadata-backup-key &lt;file&gt;     that ONE FILE'S KEY: opens exactly the named
+                                 backup and no other
+
+Keys are DERIVED, not generated. The backup key comes from the origin's issuer
+keys, and a file's key comes from the backup key plus a random salt stored in
+that file, so running either form twice prints the same answer. There is nothing
+to create, configure, or lose track of, and metadata backups are always
+encrypted whether or not this command is ever run.
+
+WITHOUT A FILE -- the backup key, for escrow.
+
+Every backup carries this key inside it, sealed to each issuer key that was
+current when the backup was written, so a restore on the origin itself needs
+nothing but those issuer keys. This form exists for when they are gone too. Save
+what it prints somewhere the backups are not, and any backup can still be
+restored on a machine that has never seen this origin:
+
+  pelican-server origin pstore metadata-backup-key > /etc/pelican/pstore-backup.key
+  chmod 600 /etc/pelican/pstore-backup.key
+  pelican-server origin pstore metadata-restore --key-file /etc/pelican/pstore-backup.key &lt;file&gt;
+
+A metadata backup and this key together are equivalent to the store's namespace
+in cleartext, so keep them apart.
+
+WITH A FILE -- that file's own key, for handing out one backup.
+
+Each backup is encrypted under a key of its very own. This form reads the salt
+out of the named file and re-derives that key, using the origin's issuer keys or,
+with --key-file, an escrowed backup key -- so an operator holding only the
+escrowed key can still produce a specific file's key without the issuer keys:
+
+  pelican-server origin pstore metadata-backup-key /backups/pstore-metadata-....pmb
+  pelican-server origin pstore metadata-restore --file-key thatfile.key /backups/pstore-metadata-....pmb
+
+The printed key opens THAT file only. It says nothing about any other backup, so
+it is what to give to whoever is restoring one archive, rather than the backup
+key above.
+
+Rotating the origin's issuer keys changes what the no-file form prints. Backups
+written before the rotation are still opened by the key printed before it, and by
+the issuer keys they were sealed to that survived it -- so re-run this after a
+rotation and keep both.
+
+These keys are specific to pstore metadata backups. They descend from a
+different label than the server database's backup key and will not open a
+database backup.
+
+```
+pelican-server origin pstore metadata-backup-key [backup-file] [flags]
+```
+
+### Options
+
+```
+  -h, --help              help for metadata-backup-key
+      --key-file string   Derive the named file's key from the backup key in this file instead of the origin's issuer keys
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+      --location string     Store directory (defaults to Origin.PStoreLocation)
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin pstore](/sharing-your-data/commands-reference/pelican-server/origin/pstore/)	 - Inspect and repair a Pelican store

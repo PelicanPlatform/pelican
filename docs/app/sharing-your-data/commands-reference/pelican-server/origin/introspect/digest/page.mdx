@@ -1,0 +1,34 @@
+---
+title: pelican server origin introspect digest
+---
+
+## pelican-server origin introspect digest
+
+Show an object's recorded checksums from the running origin
+
+```
+pelican-server origin introspect digest <path> [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for digest
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                Emit raw JSON instead of a table
+  -L, --log string          Specified log output file
+      --server string       Origin web URL (defaults to this host's Server.ExternalWebUrl)
+  -t, --token string        Path to admin token file (auto-generated from the local issuer key if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin introspect](/sharing-your-data/commands-reference/pelican-server/origin/introspect/)	 - Inspect a running origin's storage backend

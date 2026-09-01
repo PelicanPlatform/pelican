@@ -1,0 +1,1352 @@
+[
+  {
+    "source": "/about-pelican",
+    "destination": "/accessing-your-data/about-pelican",
+    "permanent": true
+  },
+  {
+    "source": "/about-pelican/core-concepts",
+    "destination": "/accessing-your-data/about-pelican/core-concepts",
+    "permanent": true
+  },
+  {
+    "source": "/accessing-your-data",
+    "destination": "/accessing-your-data/overview",
+    "permanent": true
+  },
+  {
+    "source": "/advanced-concepts/auth",
+    "destination": "/accessing-your-data/authorization",
+    "permanent": true
+  },
+  {
+    "source": "/advanced-concepts/plugin",
+    "destination": "/accessing-your-data/htcondor-plugin",
+    "permanent": true
+  },
+  {
+    "source": "/advanced-concepts/server",
+    "destination": "/sharing-your-data/admin-credentials",
+    "permanent": true
+  },
+  {
+    "source": "/api-docs",
+    "destination": "/federation-services/api",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference",
+    "destination": "/sharing-your-data/commands-reference",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/apikey",
+    "destination": "/federation-services/commands-reference/pelican-server/apikey",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/apikey/generate",
+    "destination": "/federation-services/commands-reference/pelican-server/apikey/generate",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache",
+    "destination": "/federation-services/commands-reference/pelican-server/cache",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/chaos",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/chaos",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/chaos/corrupt",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/chaos/corrupt",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/chaos/truncate",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/chaos/truncate",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/evict",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/evict",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/consistency",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/consistency",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/disk-usage",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/disk-usage",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/etags",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/etags",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/list",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/metadata",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/metadata",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/stats",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/stats",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/introspect/verify",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/introspect/verify",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/purge",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/purge",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/cache/serve",
+    "destination": "/federation-services/commands-reference/pelican-server/cache/serve",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/config",
+    "destination": "/federation-services/commands-reference/pelican-server/config",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/config/describe",
+    "destination": "/federation-services/commands-reference/pelican-server/config/describe",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/config/dump",
+    "destination": "/federation-services/commands-reference/pelican-server/config/dump",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/config/get",
+    "destination": "/federation-services/commands-reference/pelican-server/config/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/config/summary",
+    "destination": "/federation-services/commands-reference/pelican-server/config/summary",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/prefix",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/prefix",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/prefix/add",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/prefix/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/prefix/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/prefix/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/prefix/print",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/prefix/print",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/prefix/set",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/prefix/set",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/print",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/print",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/replace",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/replace",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/reset-local",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/reset-local",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/reset-password",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/reset-password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/token",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/token",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/token/get",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/token/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/credentials/token/setup",
+    "destination": "/federation-services/commands-reference/pelican-server/credentials/token/setup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/director",
+    "destination": "/federation-services/commands-reference/pelican-server/director",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/director/serve",
+    "destination": "/federation-services/commands-reference/pelican-server/director/serve",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/downtime",
+    "destination": "/federation-services/commands-reference/pelican-server/downtime",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/downtime/create",
+    "destination": "/federation-services/commands-reference/pelican-server/downtime/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/downtime/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/downtime/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/downtime/list",
+    "destination": "/federation-services/commands-reference/pelican-server/downtime/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/downtime/update",
+    "destination": "/federation-services/commands-reference/pelican-server/downtime/update",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/generate",
+    "destination": "/federation-services/commands-reference/pelican-server/generate",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/generate/password",
+    "destination": "/federation-services/commands-reference/pelican-server/generate/password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/key",
+    "destination": "/federation-services/commands-reference/pelican-server/key",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/key/create",
+    "destination": "/federation-services/commands-reference/pelican-server/key/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/namespace",
+    "destination": "/federation-services/commands-reference/pelican-server/namespace",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/namespace/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/namespace/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/namespace/list",
+    "destination": "/federation-services/commands-reference/pelican-server/namespace/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/namespace/register",
+    "destination": "/federation-services/commands-reference/pelican-server/namespace/register",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin",
+    "destination": "/federation-services/commands-reference/pelican-server/origin",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/acl",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/acl",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/acl/grant",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/acl/grant",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/acl/list",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/acl/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/acl/revoke",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/acl/revoke",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/create",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/get",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/list",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/metadata",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/metadata",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/metadata/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/metadata/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/metadata/get",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/metadata/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/metadata/set",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/metadata/set",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/ownership-invite",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/ownership-invite",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/ownership-invite/create",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/ownership-invite/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/collection/update",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/collection/update",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/config",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/config",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/introspect",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/introspect",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/introspect/digest",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/introspect/digest",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/introspect/ls",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/introspect/ls",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/introspect/stat",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/introspect/stat",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/introspect/usage",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/introspect/usage",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer/client",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer/client",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer/client/create",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer/client/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer/client/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer/client/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer/client/list",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer/client/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/issuer/client/update",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/issuer/client/update",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/object-metadata",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/object-metadata",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/object-metadata/get",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/object-metadata/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/object-metadata/history",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/object-metadata/history",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/object-metadata/list",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/object-metadata/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/digest",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/digest",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/du",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/du",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/export",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/export",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/fsck",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/fsck",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/ls",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/ls",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/metadata-backup",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/metadata-backup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/metadata-backup-key",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/metadata-backup-key",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/metadata-restore",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/metadata-restore",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/pstore/stat",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/pstore/stat",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/serve",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/serve",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/token",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/token",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/token/create",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/token/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/token/verify",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/token/verify",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/web-ui",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/web-ui",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/origin/web-ui/reset-password",
+    "destination": "/federation-services/commands-reference/pelican-server/origin/web-ui/reset-password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/registry",
+    "destination": "/federation-services/commands-reference/pelican-server/registry",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/registry/serve",
+    "destination": "/federation-services/commands-reference/pelican-server/registry/serve",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server",
+    "destination": "/federation-services/commands-reference/pelican-server/server",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup/create",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup/info",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup/info",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup/restore",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup/restore",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/database/backup/verify",
+    "destination": "/federation-services/commands-reference/pelican-server/server/database/backup/verify",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/add-member",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/add-member",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/create",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/get",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/invite",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/invite",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/invite/create",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/invite/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/invite/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/invite/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/invite/redeem",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/invite/redeem",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/invite/revoke",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/invite/revoke",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/list-members",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/list-members",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/remove-member",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/remove-member",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/scope",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/scope",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/scope/grant",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/scope/grant",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/scope/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/scope/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/scope/revoke",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/scope/revoke",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/set-ownership",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/set-ownership",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/group/update",
+    "destination": "/federation-services/commands-reference/pelican-server/server/group/update",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/set-logging-level",
+    "destination": "/federation-services/commands-reference/pelican-server/server/set-logging-level",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/aup",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/aup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/aup/clear",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/aup/clear",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/aup/record",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/aup/record",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/clear-password",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/clear-password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/create",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/get",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/identity",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/identity",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/identity/add",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/identity/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/identity/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/identity/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/identity/remove",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/identity/remove",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/invite-onboard",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/invite-onboard",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/invite-password",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/invite-password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/list-password-invites",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/list-password-invites",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/scope",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/scope",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/scope/grant",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/scope/grant",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/scope/list",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/scope/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/scope/revoke",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/scope/revoke",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/set-status",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/set-status",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/server/user/update",
+    "destination": "/federation-services/commands-reference/pelican-server/server/user/update",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/token",
+    "destination": "/federation-services/commands-reference/pelican-server/token",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/token/create",
+    "destination": "/federation-services/commands-reference/pelican-server/token/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/credential",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/credential",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/credential/add",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/credential/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/credential/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/credential/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/credential/list",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/credential/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/oauth-client",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/oauth-client",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/oauth-client/add",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/oauth-client/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/oauth-client/delete",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/oauth-client/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican-server/transfer/oauth-client/list",
+    "destination": "/federation-services/commands-reference/pelican-server/transfer/oauth-client/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/client-agent",
+    "destination": "/accessing-your-data/commands-reference/pelican/client-agent",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/client-agent/start",
+    "destination": "/accessing-your-data/commands-reference/pelican/client-agent/start",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/client-agent/status",
+    "destination": "/accessing-your-data/commands-reference/pelican/client-agent/status",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/client-agent/stop",
+    "destination": "/accessing-your-data/commands-reference/pelican/client-agent/stop",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/client-agent/warm",
+    "destination": "/accessing-your-data/commands-reference/pelican/client-agent/warm",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/config",
+    "destination": "/accessing-your-data/commands-reference/pelican/config",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/config/describe",
+    "destination": "/accessing-your-data/commands-reference/pelican/config/describe",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/config/dump",
+    "destination": "/accessing-your-data/commands-reference/pelican/config/dump",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/config/get",
+    "destination": "/accessing-your-data/commands-reference/pelican/config/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/config/summary",
+    "destination": "/accessing-your-data/commands-reference/pelican/config/summary",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/prefix",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/prefix",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/prefix/add",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/prefix/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/prefix/delete",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/prefix/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/prefix/print",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/prefix/print",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/prefix/set",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/prefix/set",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/print",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/print",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/replace",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/replace",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/reset-local",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/reset-local",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/reset-password",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/reset-password",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/token",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/token",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/token/get",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/token/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/credentials/token/setup",
+    "destination": "/accessing-your-data/commands-reference/pelican/credentials/token/setup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/job",
+    "destination": "/accessing-your-data/commands-reference/pelican/job",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/job/cancel",
+    "destination": "/accessing-your-data/commands-reference/pelican/job/cancel",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/job/list",
+    "destination": "/accessing-your-data/commands-reference/pelican/job/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/job/status",
+    "destination": "/accessing-your-data/commands-reference/pelican/job/status",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/namespace",
+    "destination": "/accessing-your-data/commands-reference/pelican/namespace",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/namespace/delete",
+    "destination": "/accessing-your-data/commands-reference/pelican/namespace/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/namespace/list",
+    "destination": "/accessing-your-data/commands-reference/pelican/namespace/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/namespace/register",
+    "destination": "/accessing-your-data/commands-reference/pelican/namespace/register",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object",
+    "destination": "/accessing-your-data/commands-reference/pelican/object",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/copy",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/copy",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/du",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/du",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/evict",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/evict",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/get",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/get",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/ls",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/ls",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/put",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/put",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/share",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/share",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/stat",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/stat",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/object/sync",
+    "destination": "/accessing-your-data/commands-reference/pelican/object/sync",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/plugin",
+    "destination": "/accessing-your-data/commands-reference/pelican/plugin",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/plugin/stage",
+    "destination": "/accessing-your-data/commands-reference/pelican/plugin/stage",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/plugin/transfer",
+    "destination": "/accessing-your-data/commands-reference/pelican/plugin/transfer",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/rclone",
+    "destination": "/accessing-your-data/commands-reference/pelican/rclone",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/rclone/install",
+    "destination": "/accessing-your-data/commands-reference/pelican/rclone/install",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/rclone/setup",
+    "destination": "/accessing-your-data/commands-reference/pelican/rclone/setup",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/token",
+    "destination": "/accessing-your-data/commands-reference/pelican/token",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/token/create",
+    "destination": "/accessing-your-data/commands-reference/pelican/token/create",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/credential",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/credential",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/credential/add",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/credential/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/credential/delete",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/credential/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/credential/list",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/credential/list",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/oauth-client",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/oauth-client",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/oauth-client/add",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/oauth-client/add",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/oauth-client/delete",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/oauth-client/delete",
+    "permanent": true
+  },
+  {
+    "source": "/commands-reference/pelican/transfer/oauth-client/list",
+    "destination": "/accessing-your-data/commands-reference/pelican/transfer/oauth-client/list",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data",
+    "destination": "/sharing-your-data/federating-your-data",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/choosing-namespaces",
+    "destination": "/sharing-your-data/federating-your-data/choosing-namespaces",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/generating-tokens",
+    "destination": "/sharing-your-data/federating-your-data/generating-tokens",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/globus-backend",
+    "destination": "/sharing-your-data/federating-your-data/globus-backend",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/origin",
+    "destination": "/sharing-your-data/federating-your-data/origin",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/s3-backend",
+    "destination": "/sharing-your-data/federating-your-data/s3-backend",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/ssh-backend",
+    "destination": "/sharing-your-data/federating-your-data/ssh-backend",
+    "permanent": true
+  },
+  {
+    "source": "/federating-your-data/standalone-origin",
+    "destination": "/sharing-your-data/federating-your-data/standalone-origin",
+    "permanent": true
+  },
+  {
+    "source": "/federation-services",
+    "destination": "/federation-services/overview",
+    "permanent": true
+  },
+  {
+    "source": "/getting-data-with-pelican",
+    "destination": "/accessing-your-data/overview",
+    "permanent": true
+  },
+  {
+    "source": "/getting-data-with-pelican/auth",
+    "destination": "/accessing-your-data/protected-data",
+    "permanent": true
+  },
+  {
+    "source": "/getting-data-with-pelican/client",
+    "destination": "/accessing-your-data/command-line",
+    "permanent": true
+  },
+  {
+    "source": "/getting-data-with-pelican/fsspec",
+    "destination": "/accessing-your-data/fsspec",
+    "permanent": true
+  },
+  {
+    "source": "/getting-help",
+    "destination": "/accessing-your-data/faqs",
+    "permanent": true
+  },
+  {
+    "source": "/getting-help/faqs",
+    "destination": "/accessing-your-data/faqs",
+    "permanent": true
+  },
+  {
+    "source": "/getting-help/troubleshooting",
+    "destination": "/accessing-your-data/troubleshooting",
+    "permanent": true
+  },
+  {
+    "source": "/getting-started",
+    "destination": "/accessing-your-data/getting-started",
+    "permanent": true
+  },
+  {
+    "source": "/getting-started/accessing-data",
+    "destination": "/accessing-your-data/accessing-data",
+    "permanent": true
+  },
+  {
+    "source": "/install",
+    "destination": "/accessing-your-data/install",
+    "permanent": true
+  },
+  {
+    "source": "/install/alpine",
+    "destination": "/accessing-your-data/install/alpine",
+    "permanent": true
+  },
+  {
+    "source": "/install/conda",
+    "destination": "/accessing-your-data/install/conda",
+    "permanent": true
+  },
+  {
+    "source": "/install/debian",
+    "destination": "/accessing-your-data/install/debian",
+    "permanent": true
+  },
+  {
+    "source": "/install/docker",
+    "destination": "/accessing-your-data/install/docker",
+    "permanent": true
+  },
+  {
+    "source": "/install/linux-binary",
+    "destination": "/accessing-your-data/install/linux-binary",
+    "permanent": true
+  },
+  {
+    "source": "/install/macos",
+    "destination": "/accessing-your-data/install/macos",
+    "permanent": true
+  },
+  {
+    "source": "/install/rhel",
+    "destination": "/accessing-your-data/install/rhel",
+    "permanent": true
+  },
+  {
+    "source": "/install/windows",
+    "destination": "/accessing-your-data/install/windows",
+    "permanent": true
+  },
+  {
+    "source": "/managing-data-access",
+    "destination": "/sharing-your-data/overview",
+    "permanent": true
+  },
+  {
+    "source": "/managing-data-access/access-control-model",
+    "destination": "/sharing-your-data/access-control-model",
+    "permanent": true
+  },
+  {
+    "source": "/managing-data-access/collections-and-shares",
+    "destination": "/sharing-your-data/collections-and-shares",
+    "permanent": true
+  },
+  {
+    "source": "/managing-data-access/permissions-reference",
+    "destination": "/sharing-your-data/permissions-reference",
+    "permanent": true
+  },
+  {
+    "source": "/managing-data-access/users-and-groups",
+    "destination": "/sharing-your-data/users-and-groups",
+    "permanent": true
+  },
+  {
+    "source": "/managing-your-server/managing-downtime",
+    "destination": "/federation-services/managing-downtime",
+    "permanent": true
+  },
+  {
+    "source": "/monitoring-pelican-services/grafana",
+    "destination": "/federation-services/monitoring/grafana",
+    "permanent": true
+  },
+  {
+    "source": "/monitoring-pelican-services/prometheus",
+    "destination": "/federation-services/monitoring/prometheus",
+    "permanent": true
+  },
+  {
+    "source": "/operating-a-federation",
+    "destination": "/federation-services/overview",
+    "permanent": true
+  },
+  {
+    "source": "/operating-a-federation/cache",
+    "destination": "/federation-services/cache",
+    "permanent": true
+  },
+  {
+    "source": "/operating-a-federation/cache/site-local-cache",
+    "destination": "/federation-services/cache/site-local-cache",
+    "permanent": true
+  },
+  {
+    "source": "/operating-a-federation/director",
+    "destination": "/federation-services/director",
+    "permanent": true
+  },
+  {
+    "source": "/operating-a-federation/registry",
+    "destination": "/federation-services/registry",
+    "permanent": true
+  },
+  {
+    "source": "/parameters",
+    "destination": "/sharing-your-data/configuration",
+    "permanent": true
+  },
+  {
+    "source": "/sharing-your-data",
+    "destination": "/sharing-your-data/overview",
+    "permanent": true
+  }
+]
