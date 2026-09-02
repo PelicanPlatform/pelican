@@ -996,10 +996,18 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Xrootd.DetailedMonitoringPort
 	v.SetDefault(param.Xrootd_DetailedMonitoringPort.GetName(), 9930)
+	// Xrootd.DisableLivenessCheck
+	v.SetDefault(param.Xrootd_DisableLivenessCheck.GetName(), false)
 	// Xrootd.EnableLocalMonitoring
 	v.SetDefault(param.Xrootd_EnableLocalMonitoring.GetName(), true)
 	// Xrootd.HttpMaxDelay
 	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
+	// Xrootd.LivenessCheckInterval
+	v.SetDefault(param.Xrootd_LivenessCheckInterval.GetName(), "1m")
+	// Xrootd.LivenessCheckTimeout
+	v.SetDefault(param.Xrootd_LivenessCheckTimeout.GetName(), "3m")
+	// Xrootd.LivenessMaxUnresponsiveTime
+	v.SetDefault(param.Xrootd_LivenessMaxUnresponsiveTime.GetName(), "10m")
 	// Xrootd.MacaroonsKeyFile
 	{
 		val := "${ConfigBase}/macaroons-secret"

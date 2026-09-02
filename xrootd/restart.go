@@ -77,6 +77,8 @@ func ResetRestartState() {
 	preRestartFn = runGlobalPreRestart
 	postRestartFn = runGlobalPostRestart
 	advertiseServersFn = func(_ context.Context, _ []server_structs.XRootDServer) error { return nil }
+	probeXrootdFn = probeXrootdEndpoint
+	shutdownXrootdFn = shutdownHungXrootd
 	ClearXrootdDaemons()
 }
 
@@ -173,52 +175,7 @@ func RestartXrootd(opCtx context.Context, serverCtx context.Context, oldPids []i
 	}
 
 	// Step 1: Gracefully shutdown existing XRootD processes
-	log.Debug("Sending SIGTERM to existing XRootD processes")
-	for _, pid := range oldPids {
-		if pid <= 1 {
-			log.Warnf("Skipping restart signal for critical PID %d", pid)
-			continue
-		}
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-			log.WithError(err).Warnf("Failed to send SIGTERM to PID %d", pid)
-		}
-	}
-
-	// Wait for graceful shutdown with timeout
-	shutdownTimeout := param.Xrootd_ShutdownTimeout.GetDuration()
-	shutdownDeadline := time.Now().Add(shutdownTimeout)
-	for time.Now().Before(shutdownDeadline) {
-		allDead := true
-		for _, pid := range oldPids {
-			process, err := os.FindProcess(pid)
-			if err == nil && process != nil {
-				if err := process.Signal(syscall.Signal(0)); err == nil {
-					allDead = false
-					break
-				}
-			}
-		}
-		if allDead {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	// Force kill any remaining processes
-	for _, pid := range oldPids {
-		if pid <= 1 {
-			continue
-		}
-		process, err := os.FindProcess(pid)
-		if err == nil && process != nil {
-			if err := process.Signal(syscall.Signal(0)); err == nil {
-				log.Warnf("Force killing PID %d that did not respond to SIGTERM", pid)
-				if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-					log.WithError(err).Errorf("Failed to send SIGKILL to PID %d", pid)
-				}
-			}
-		}
-	}
+	terminateProcesses(oldPids, param.Xrootd_ShutdownTimeout.GetDuration())
 
 	// Step 2: Reconfigure XRootD runtime directory
 	log.Debug("Reconfiguring XRootD runtime directory")
@@ -270,6 +227,73 @@ func RestartXrootd(opCtx context.Context, serverCtx context.Context, oldPids []i
 
 	log.Infof("XRootD restart complete with new PIDs: %v", newPids)
 	return newPids, nil
+}
+
+// terminateProcesses shuts a set of processes down with the customary SIGTERM, wait, SIGKILL
+// sequence, giving them up to timeout to exit on their own.
+func terminateProcesses(pids []int, timeout time.Duration) {
+	log.Debugf("Sending SIGTERM to processes %v", pids)
+	for _, pid := range pids {
+		if pid <= 1 {
+			log.Warnf("Skipping shutdown signal for critical PID %d", pid)
+			continue
+		}
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			log.WithError(err).Warnf("Failed to send SIGTERM to PID %d", pid)
+		}
+	}
+
+	// Wait for graceful shutdown with timeout
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !anyProcessAlive(pids) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Force kill any remaining processes
+	for _, pid := range pids {
+		if pid <= 1 {
+			continue
+		}
+		if processAlive(pid) {
+			log.Warnf("Force killing PID %d that did not respond to SIGTERM", pid)
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+				log.WithError(err).Errorf("Failed to send SIGKILL to PID %d", pid)
+			}
+		}
+	}
+}
+
+func processAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil || process == nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+func anyProcessAlive(pids []int) bool {
+	for _, pid := range pids {
+		if processAlive(pid) {
+			return true
+		}
+	}
+	return false
+}
+
+// trackedPIDsForRole returns a snapshot of the PIDs tracked for a single server role.
+func trackedPIDsForRole(isCache bool) []int {
+	restartInfosMu.RLock()
+	defer restartInfosMu.RUnlock()
+	var pids []int
+	for _, info := range restartInfos {
+		if info.isCache == isCache {
+			pids = append(pids, info.pids...)
+		}
+	}
+	return pids
 }
 
 func collectTrackedServers(infos []restartInfo) []server_structs.XRootDServer {
