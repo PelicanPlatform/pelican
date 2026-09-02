@@ -125,10 +125,11 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	t.Cleanup(func() {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			if !ft.tolerateServerFailure.Load() {
+			if ft.tolerateServerFailure.Load() {
+				t.Logf("Ignoring expected server error during teardown: %v", err)
+			} else {
 				require.NoError(t, err)
 			}
-			t.Logf("Ignoring expected server error during teardown: %v", err)
 		}
 		err := os.RemoveAll(tmpPath)
 		require.NoError(t, err)
