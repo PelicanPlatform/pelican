@@ -331,7 +331,7 @@ ARG XROOTD_GID
 # We install from the selected OSG repo and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.6"
+ARG XROOTD_VER="5.9.7"
 ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
