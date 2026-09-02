@@ -733,7 +733,10 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 				parts = append(parts, "token expired at "+expiration.Format(time.RFC3339))
 				pde.expired = true
 			} else {
-				parts = append(parts, "token has not expired, so it likely does not cover this object's path")
+				// Expiry is the one cause we can rule out from the token alone.
+				// The server does not tell us which of the remaining checks
+				// failed, so name them rather than asserting a single cause.
+				parts = append(parts, "token has not expired, so the cause is one of the server's other checks: its scopes may not cover this object's path or the requested operation, or the server may not accept its issuer or audience")
 			}
 		}
 		if fedTokenContents != "" {
@@ -746,14 +749,14 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 					pde.expired = true
 				}
 			} else {
-				parts = append(parts, "federation token has not expired, so it likely does not cover this object's path")
+				parts = append(parts, "federation token has not expired, so the cause is one of the server's other checks: its scopes may not cover this object's path or the requested operation, or the server may not accept its issuer or audience")
 			}
 		}
 		var tokenDetail string
 		if len(parts) == 0 {
 			// No token was sent (e.g., public namespace accessed via a cache that doesn't know about it yet).
 			// Mark as retryable so the client can attempt at a different cache that isn't stale.
-			tokenDetail = "no token was sent with the request"
+			tokenDetail = "no token was sent with the request, but the server requires one for this object"
 			pde.noToken = true
 		} else {
 			tokenDetail = strings.Join(parts, "; ")
