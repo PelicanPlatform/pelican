@@ -1,0 +1,66 @@
+import { Callout } from 'nextra/components'
+
+# Director Test
+
+The Director periodically runs file transfer tests against every Origin and Cache in the federation to verify they are healthy and responding
+(every `Director.OriginCacheHealthTestInterval`, 15s by default).
+A server that repeatedly fails these tests is marked unhealthy and taken out of client redirection.
+
+The test mechanism differs between Origins and Caches.
+
+## How the Director Tests an Origin
+
+For an Origin, the Director performs a full write–read–delete cycle with a real file:
+
+1. PUT a small test file to the Origin under the `/pelican/monitoring/directorTest` namespace, which maps to a directory on the Origin's local disk.
+2. GET the file back and verify its content.
+3. DELETE the file.
+
+Because the delete only happens after a successful download, test files persist on an Origin's disk only when a test cycle fails partway through.
+
+## How the Director Tests a Cache
+
+For a Cache, the Director performs a single GET of a synthetic path such as `/pelican/monitoring/directorTest/<director-hostname>/<YYYY-MM-DD>/director-test-<timestamp>.txt` and checks the response body against a known test string.
+No origin is involved: the Director itself serves the file content from its `/api/v1.0/director/healthTest` API, acting as the upstream for the request.
+
+Although the Director never uploads anything on the Cache, the Cache's XRootD proxy file cache (PFC) stores each fetched test object on disk as a side effect of caching it: a small (~100 byte) data file plus a companion `.cinfo` metadata file.
+After each successful test cycle, the Director evicts the previous cycle's test files by POSTing to the Cache.
+
+## Test File Cleanup on Caches
+
+Before Pelican v7.27, cache's test files accumulated in a single flat `/pelican/monitoring/directorTest/` directory, growing to tens of thousands of entries and leading to disk/inode exhaustion.
+The files were only ever removed when the cache's *total* disk usage crossed the XRootD PFC high watermark and the LRU purge swept them out as the oldest-accessed objects.
+Since v7.27, test files are organized per-director and per-day, and are cleaned up by two complementary mechanisms.
+
+### Test File Layout
+
+Director test files on a Cache live under:
+
+```
+/pelican/monitoring/directorTest/<director-hostname>/<YYYY-MM-DD>/director-test-<timestamp>.txt
+```
+
+In federations with multiple Directors, each Director writes only into its own `<director-hostname>` subtree and only cleans up files it created, so Directors never interfere with each other's in-flight tests.
+The daily subdirectories keep any single directory small and allow whole days to be removed at once.
+
+### How Cleanup Works
+
+**Director-initiated eviction (primary).**
+After each successful test cycle, the Director asks the Cache to evict the previous cycle's test file by calling `POST /api/v1.0/cache/evictTestFile` with a federation-issued token.
+The Cache validates the token and the requested path (it must match the director test layout above), then evicts the file through its local XRootD evict API.
+
+**Cache-side daily sweep (backup).**
+Each Cache also runs its own cleanup at startup and every 24 hours thereafter.
+It deletes day-directories older than today in each Director's subtree and trims today's directory down to the most recent test object (the data file and its `.cinfo` are always removed together), catching files the Director missed due to evict API errors, network failures or restarts.
+
+### What to Expect on Disk
+
+A successful eviction does **not** immediately remove the file from disk. It marks the file as a purge candidate in XRootD's cache (PFC), and the bytes are unlinked later by PFC's periodic purge cycle, which only acts once disk usage crosses the configured high-water mark. Old test files remaining visible on the filesystem is therefore normal and harmless; they are reclaimed automatically under disk pressure.
+
+When `Server.DropPrivileges` is enabled, the Pelican process cannot delete XRootD-owned files directly, so the daily sweep also routes removals through the evict API and empty day-directories may persist until XRootD's own housekeeping removes them.
+
+## Related Configuration
+
+- `Director.OriginCacheHealthTestInterval`: how often the Director tests each Origin/Cache (default `15s`).
+- `Server.Hostname` (on the Director): the hostname used for the per-director subtree; the Director errors at startup if it cannot be determined.
+- Director tests are distinct from the Origin/Cache's own self-tests, which are controlled by `Origin.SelfTest` and `Cache.SelfTest`.
