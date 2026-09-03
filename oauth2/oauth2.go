@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -35,6 +36,60 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// VerificationURLHandler is called with the address a user must visit to
+// approve a device-flow authorization request, and the code they must enter
+// once there.
+//
+// verificationURL is the issuer's verification_uri_complete when it supplied
+// one, in which case the URL already carries the code and userCode is empty;
+// otherwise it is verification_uri and userCode is the code to enter there.
+// The handler is called only when the issuer named a URL at all.
+//
+// It runs on the goroutine driving the flow, before polling begins, so a
+// handler that blocks delays the user's own approval.
+//
+// An installed handler REPLACES Pelican's own announcement rather than adding
+// to it: while one is installed the URL is not written to stderr.  An embedder
+// installs a handler precisely because the terminal is not where its user is
+// looking -- a page, a desktop notification, a GUI -- and printing there
+// anyway is at best noise in a log the user never reads.  The consequence is
+// that the handler is the ONLY way the user learns where to approve, so one
+// that drops the URL silently leaves the flow with nothing to show, and it
+// polls until it expires.
+type VerificationURLHandler func(verificationURL, userCode string)
+
+var verificationURLHandler atomic.Pointer[VerificationURLHandler]
+
+// SetVerificationURLHandler installs handler as the process-wide destination
+// for device-flow verification URLs, replacing any previous one.  A nil
+// handler removes the current one.
+//
+// This exists so that a program embedding Pelican can bring the URL to its
+// user by whatever means suits it -- opening a browser, raising a desktop
+// notification, showing it in a GUI -- without reimplementing the flow.  Every
+// step AcquireToken performs around the announcement is unexported: deciding
+// whether a cached token would have done (client.tokenIsAcceptable), dynamic
+// client registration (client.registerClient), scope construction (trimPath),
+// refresh (client.refreshTokenEntry), and local minting (client.generateToken).
+// An embedder that copied them to reach the URL would drift from them, and the
+// first consequence is that Pelican judges the token the copy obtained
+// unacceptable and opens a second device flow -- so the user approves twice.
+//
+// Installing a handler also lifts AcquireToken's terminal requirement, which
+// exists so that a flow is never started with no way to tell the user where to
+// approve it.  A handler is another such way, so an embedder with no terminal
+// -- a program under a service manager, or one whose output is redirected --
+// can acquire a token where it previously could not.
+//
+// It is safe to call at any time, including while a flow is in progress.
+func SetVerificationURLHandler(handler VerificationURLHandler) {
+	if handler == nil {
+		verificationURLHandler.Store(nil)
+		return
+	}
+	verificationURLHandler.Store(&handler)
+}
 
 func deviceCodeSupported(grantTypes *[]string) bool {
 	for _, grant := range *grantTypes {
@@ -69,8 +124,80 @@ func trimPath(pathName string, maxDepth int) string {
 	return "/" + path.Join(pathComponents[0:maxLength]...)
 }
 
+// announceVerification tells the user where to approve the pending device-flow
+// authorization request: through the installed VerificationURLHandler if there
+// is one, and otherwise by writing the instructions to w.
+//
+// Which URL the user needs depends on the issuer.  A verification_uri_complete
+// already carries the user code, so it suffices on its own; a plain
+// verification_uri has to be paired with the code the user then types there.
+//
+// Exactly one of the two announcements happens, so an embedder that has
+// somewhere better to put the URL does not also spray it across a terminal
+// nobody is watching.  A response naming no URL at all is the exception: there
+// is nothing to hand a handler, so the printed output remains as the only
+// record that a flow was attempted.
+func announceVerification(w io.Writer, deviceAuth *DeviceAuth) {
+	// A verification_uri_complete carries the code already; a plain
+	// verification_uri needs it alongside.
+	verificationURL, userCode := deviceAuth.VerificationURIComplete, ""
+	complete := verificationURL != ""
+	if !complete {
+		verificationURL, userCode = deviceAuth.VerificationURI, deviceAuth.UserCode
+	}
+
+	if verificationURL != "" {
+		if handler := verificationURLHandler.Load(); handler != nil {
+			(*handler)(verificationURL, userCode)
+			return
+		}
+	}
+
+	if complete {
+		fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, verificationURL)
+		return
+	}
+	fmt.Fprintln(w, "To approve credentials for this operation, please navigate to the following URL:")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, verificationURL)
+	fmt.Fprintln(w, "\nand enter the following code")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, userCode)
+}
+
+// verificationTargetAvailable reports whether there is anywhere to send the
+// verification URL a device flow is about to produce.
+//
+// A device flow is worthless if nobody ever sees that URL, which is what the
+// terminal requirement has always been about: a program with no terminal had
+// no way to tell its user where to approve, so failing early beat polling for
+// an approval that could never come.
+//
+// An installed VerificationURLHandler is an embedder saying it has somewhere
+// else to put the URL -- a page, a desktop notification, a GUI -- so it meets
+// that requirement without a terminal, and it is exactly the case the handler
+// exists for. A program that opens a browser for its user is often started
+// from a terminal nobody is watching, and under a service manager it may have
+// no terminal at all; refusing there would make the handler unusable in the
+// situation it was added to serve.
+func verificationTargetAvailable() bool {
+	if verificationURLHandler.Load() != nil {
+		return true
+	}
+	if len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) > 0 {
+		return true
+	}
+	// Stat fails on a closed or exotic descriptor, which is not a terminal
+	// either; the previous form dereferenced the nil FileInfo that comes back
+	// with the error.
+	fileInfo, err := os.Stdout.Stat()
+	return err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+}
+
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
-	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
+	if !verificationTargetAvailable() {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
 
@@ -140,18 +267,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 		return nil, errors.Wrapf(err, "Failed to perform device code flow with URL %s", issuerInfo.DeviceAuthURL)
 	}
 
-	if len(deviceAuth.VerificationURIComplete) > 0 {
-		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
-	} else {
-		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL:")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
-		fmt.Fprintln(os.Stderr, "\nand enter the following code")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, deviceAuth.UserCode)
-	}
+	announceVerification(os.Stderr, deviceAuth)
 
 	upstream_token, err := oauth2Config.Poll(ctx, deviceAuth)
 	if err != nil {
