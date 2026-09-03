@@ -63,13 +63,13 @@ func runSSHHelper(cmd *cobra.Command, args []string) {
 			output, err := ssh_posixv2.HelperStatusCmd()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 			fmt.Println(output)
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", sshHelperCommand)
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -83,6 +83,6 @@ func runSSHHelper(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 	if err := ssh_posixv2.RunHelper(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Helper error: %v\n", err)
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 }

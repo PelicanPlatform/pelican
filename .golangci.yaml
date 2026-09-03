@@ -36,9 +36,23 @@ run:
 
 linters:
   enable:
+    - forbidigo
     - misspell
   disable:
     - staticcheck
+  settings:
+    forbidigo:
+      # Match against the resolved package, so a local variable named "os"
+      # cannot trip the rule and a dot-import cannot slip past it.
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.Exit$
+          pkg: ^os$
+          msg: >-
+            os.Exit runs no defers, so the asynchronous log writer never drains
+            and the line explaining the exit is lost -- the process dies
+            silently. Use exitWithError/exitWithErrorf to report a fatal error,
+            or exitWithFlush when the message has already been reported.
   exclusions:
     generated: lax
     presets:
@@ -51,6 +65,15 @@ linters:
       - builtin$
       - examples$
       - reference$
+    rules:
+      # The os.Exit ban is about the CLI's log-writer drain, so it applies only
+      # to the command package. The one sanctioned call, inside exitWithFlush
+      # itself, carries a //nolint:forbidigo directive.
+      - linters: [forbidigo]
+        path-except: ^cmd/
+      # A test binary's own exit does not go through the CLI's shutdown path.
+      - linters: [forbidigo]
+        path: _test\.go$
 formatters:
   enable:
     - gofmt

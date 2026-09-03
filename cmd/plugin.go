@@ -144,7 +144,7 @@ func stashPluginMain(args []string) {
 			// Attempt to write our file and bail
 			writeClassadOutputAndBail(1, resultAds)
 
-			os.Exit(1) //exit here just in case
+			exitWithFlush(1) //exit here just in case
 		}
 	}()
 
@@ -176,10 +176,10 @@ func stashPluginMain(args []string) {
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf, pelican\"")
 			fmt.Println("StartdAttrs = \"PelicanPluginVersion\"")
-			os.Exit(0)
+			exitWithFlush(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
 			config.PrintPelicanVersion(os.Stdout)
-			os.Exit(0)
+			exitWithFlush(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
 			upload = true
@@ -196,15 +196,13 @@ func stashPluginMain(args []string) {
 			config.SetLogging(log.DebugLevel)
 		} else if args[0] == "-get-caches" {
 			if len(args) < 2 {
-				log.Errorln("-get-caches requires an argument")
-				os.Exit(1)
+				exitWithError(1, "-get-caches requires an argument")
 			}
 			testCachePath = args[1]
 			args = args[1:]
 			getCaches = true
 		} else if strings.HasPrefix(args[0], "-") {
-			log.Errorln("Do not understand the option:", args[0])
-			os.Exit(1)
+			exitWithError(1, "Do not understand the option:", args[0])
 		} else {
 			// Must be the start of a source / destination
 			break
@@ -239,14 +237,13 @@ func stashPluginMain(args []string) {
 		// Attempt to write our file and bail
 		writeClassadOutputAndBail(1, resultAds)
 
-		os.Exit(1) //exit here just in case
+		exitWithFlush(1) //exit here just in case
 	}
 
 	if getCaches {
 		urls, err := client.GetObjectServerHostnames(context.Background(), testCachePath)
 		if err != nil {
-			log.Errorln("Failed to get object server URLs:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to get object server URLs:", err)
 		}
 
 		serversToTry := client.ObjectServersToTry
@@ -257,7 +254,7 @@ func stashPluginMain(args []string) {
 		for _, url := range urls[:serversToTry] {
 			fmt.Println(url)
 		}
-		os.Exit(0)
+		exitWithFlush(0)
 	}
 
 	var source []string
@@ -266,7 +263,7 @@ func stashPluginMain(args []string) {
 
 	if len(args) == 0 && (infile == "" || outfile == "") {
 		fmt.Fprint(os.Stderr, "No source or destination specified\n")
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 
 	var workChan chan PluginTransfer
@@ -274,15 +271,13 @@ func stashPluginMain(args []string) {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
 		if err != nil {
-			log.Errorln("Failed to open infile:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to open infile:", err)
 		}
 		defer infileFile.Close()
 		// Read in classad from stdin
 		transfers, err = readMultiTransfers(*bufio.NewReader(infileFile))
 		if err != nil {
-			log.Errorln("Failed to read in from stdin:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to read in from stdin:", err)
 		}
 		workChan = make(chan PluginTransfer, len(transfers))
 		for _, transfer := range transfers {
@@ -300,8 +295,7 @@ func stashPluginMain(args []string) {
 			workChan <- PluginTransfer{url: srcUrl, localFile: dest}
 		}
 	} else {
-		log.Errorln("Must provide both source and destination as argument")
-		os.Exit(1)
+		exitWithError(1, "Must provide both source and destination as argument")
 	}
 	close(workChan)
 
@@ -319,8 +313,7 @@ func stashPluginMain(args []string) {
 		var err error
 		outputFile, err = os.Create(outfile)
 		if err != nil {
-			log.Errorln("Failed to open outfile:", err)
-			os.Exit(FailedOutfile) // unique error code to give us info
+			exitWithError(FailedOutfile, "Failed to open outfile:", err)
 		}
 		defer outputFile.Close()
 	}
@@ -387,16 +380,16 @@ func stashPluginMain(args []string) {
 
 	tmpSuccess, retryable, err := writeOutfile(err, resultAds, outputFile)
 	if err != nil {
-		os.Exit(FailedOutfile)
+		exitWithFlush(FailedOutfile)
 	}
 	success = tmpSuccess && success
 
 	if success {
-		os.Exit(0)
+		exitWithFlush(0)
 	} else if retryable {
-		os.Exit(Retryable)
+		exitWithFlush(Retryable)
 	} else {
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 }
 
@@ -411,8 +404,7 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classad.ClassAd) {
 		var err error
 		outputFile, err = os.Create(outfile)
 		if err != nil {
-			log.Errorln("Failed to open outfile:", err)
-			os.Exit(FailedOutfile) // Code of 3 to let us know that the outfile failed to be created
+			exitWithError(FailedOutfile, "Failed to open outfile:", err)
 		}
 		defer outputFile.Close()
 	}
@@ -427,8 +419,7 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classad.ClassAd) {
 		exitCode = 11
 	}
 
-	log.Errorln("Failure with pelican plugin. Exiting...")
-	os.Exit(exitCode)
+	exitWithError(exitCode, "Failure with pelican plugin. Exiting...")
 }
 
 // runPluginWorker performs the appropriate download or upload functions for the plugin as well as
