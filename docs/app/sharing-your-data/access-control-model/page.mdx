@@ -1,0 +1,142 @@
+import { Callout } from 'nextra/components'
+
+# How Access Control Works
+
+A Pelican server answers two questions about every request: who is asking, and are they allowed.
+This page explains how it answers them.
+For the authoritative "who may do what", go to the [Permissions Reference](/sharing-your-data/permissions-reference).
+
+## What access control is built from
+
+A **user** is who you are.
+A **group** is a name that several users answer to.
+A **scope** is a permission the server has attached to a user or to a group.
+A **collection** is a named prefix inside an exported namespace together with the list of groups allowed to read or write it.
+A **share** is a child collection an ordinary user creates to hand part of their own access to someone else.
+
+Authentication produces a user; authorization is always evaluated from the scopes and group memberships that user currently has, never from anything carried in the credential itself.
+That is why revoking a group membership or a scope takes effect on the next request rather than when a token expires.
+
+## Who you are, and what you may do
+
+### Users are for authentication, not authorization
+
+An account exists so the server can recognize you across sessions and attribute actions to you; it carries no permissions of its own.
+Most accounts appear by themselves on first sign-in, which is safe precisely because existence grants nothing.
+Each user has one or more identities — an (issuer, subject) pair per login method — and an identity proves you are the same person as last time and nothing more.
+A pair belongs to at most one user, so accounts cannot be quietly shared, and a subject that resembles somebody's name never confers that person's privileges.
+
+Only the username is matched when the server decides whether you may act.
+The display name is a label for humans, and the internal ID is an identifier that appears in URLs because something has to address the record.
+
+That has a consequence worth knowing before you edit a configuration file.
+The username-matched administrator lists, such as [`Server.UIAdminUsers`](/sharing-your-data/configuration#Server-UIAdminUsers), compare against the server-managed username only, so an entry that is an OIDC subject grants nothing at all.
+Administrator access for people identified by their identity provider comes from [`Server.AdminGroups`](/sharing-your-data/configuration#Server-AdminGroups) instead, which matches on group names.
+
+### Groups are how authorization is written down
+
+Because users hold no permissions, everything that grants permission is written against a group: collection access grants, admin lists, and authorization templates all name groups.
+Membership arrives from two directions — Pelican's own records, and the group names your login token asserts, filtered to names this server actually knows.
+The two are unioned, which is why someone added to a group in the web interface sees the effect immediately instead of waiting for their identity provider to catch up.
+
+Two names are synthesized rather than created.
+Every user implicitly belongs to a personal group named `user-` followed by their username, which is how you grant access to one person without a second kind of grant.
+`@authenticated` is the virtual target meaning "every signed-in caller", added to your group list whenever you have any identity at all.
+Neither can be created or joined, and neither can collide with a real group name.
+
+Within a group there are three positions.
+The owner may transfer ownership, delegate an administrator, and delete the group, and is the one member who cannot simply leave.
+The administrator — a user or another group — handles membership and metadata day to day but cannot transfer or delete.
+Members are everyone else and can always leave, which is why membership is never used to express a restriction.
+
+See [Managing Users and Groups](/sharing-your-data/users-and-groups) for how to create and run one.
+
+### Scopes name what an account may do
+
+A scope is a named capability attached to an account or a group, and four of them shape this section.
+`web_ui.access` is the baseline: the account may sign in and use the interface at all.
+`server.user_admin` covers managing other people's accounts, `server.collection_admin` covers creating collections, and `server.admin` is the master scope that implies both.
+
+Scopes are not free-form.
+The management API accepts only scopes from a fixed, user-grantable catalogue.
+A data-access scope such as `storage.read` is not in the catalogue, so no amount of granting through the management API can hand one out.
+Data-plane scopes are minted by the issuer, from collection access grants, and by no other route.
+The full catalogue is on the [Permissions Reference](/sharing-your-data/permissions-reference#management-scopes).
+
+### Where a scope can come from
+
+Your effective scopes are not stored anywhere; they are recomputed on every request from several sources unioned together: direct grants on your account, grants on any group you belong to, grants on any group your login token asserts by name, and the operator's configuration lists.
+
+The two kinds of source differ in how you take a permission back.
+Configuration-derived grants are evaluated live against the file, so editing the configuration withdraws them; database grants are withdrawn by revoking the grant.
+Neither undoes the other, and a scope that arrived from configuration will not appear in a user's list of direct grants.
+Two smaller behaviors follow the same "recompute, don't remember" principle.
+New accounts receive the baseline named by [`Server.NewUserDefaultScopes`](/sharing-your-data/configuration#Server-NewUserDefaultScopes) at creation time only.
+API tokens re-intersect against the creator's *current* effective scopes on every use, so a long-lived credential shrinks as its owner's privileges shrink.
+
+Group creation itself is open.
+Any signed-in user can create a group, because users need groups of their own to grant access on their collections and shares.
+What a self-created group cannot do is act as bearer authority: [`Issuer.AuthorizationTemplates`](/sharing-your-data/configuration#Issuer-AuthorizationTemplates) and the [`Server.AdminGroups`](/sharing-your-data/configuration#Server-AdminGroups) settings match on a group's *name*, so a group you named yourself must not automatically start matching them.
+Each group therefore carries an auth-template-eligibility flag, and only a system administrator can turn it on for an existing group.
+Collection access grants do not consult the flag.
+
+## How access to data is granted
+
+### Collections control access inside a namespace you already export
+
+Exporting storage says which prefixes this origin serves and whether reads and writes are permitted there at all.
+A collection is the finer-grained layer on top: a prefix *inside* an already-exported namespace, plus the grants saying which groups may read or write it.
+It may be a sub-path rather than the whole export, so one export can carry many collections.
+
+A collection cannot widen what the export permits.
+If the export does not allow writes, no grant on a collection inside it produces a usable write.
+Collections narrow and delegate; they never enlarge.
+
+Three kinds of authority attach to a collection.
+The owner is one user, responsible for it, and the only one who can transfer or delete it.
+The admin group runs it day to day and can do everything except transfer and delete.
+Each grant gives one group `read` or `write`, optionally until an expiry; holding `write` is authority over the collection's data, not over its access control.
+
+Visibility is a separate axis: a public collection has its existence visible to callers who hold no access to it, and a private one does not appear in their listing at all.
+Visibility grants no data access, and `@authenticated` — which does grant data access to every signed-in caller — does not make a collection public.
+
+Your role on a collection is what becomes data access: owner or `write` yields read, modify, and create on that collection's namespace, `read` yields read alone, and no role yields nothing, because there is no implicit floor.
+See [Managing Access to a Collection](/sharing-your-data/collections-and-shares) for the tasks, and [Data access](/sharing-your-data/permissions-reference#data-access) for the full mapping.
+
+### Shares delegate access you already hold
+
+Creating a collection needs `server.collection_admin`, and most people who want to share data do not have it and should not need it — which is what shares are for.
+A share is a child collection created by someone who already holds read access on the parent, once the parent's owner has turned sharing on.
+The creator owns the share, so they can grant access on it exactly as a collection owner would, without gaining any new privilege on the parent.
+A share's prefix has to be the parent's namespace or a path beneath it, shares start private, and a share of a share is refused.
+
+Data reached through a share is served as the share's *owner*, not as the person presenting the token.
+That is what makes delegated access work, and it is why the share owner stays accountable for everything read or written through the share.
+
+Access through a share is always the weaker of two things: what the share grants its recipient, and what the share's owner can currently do on the parent collection.
+That intersection is recomputed each time a token is *issued*, so if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
+A share cannot be used to delegate access its owner no longer has.
+
+<Callout type="warning">
+Refreshing an existing token does not re-run the intersection.
+The issuer re-grants the scopes already stored on the session, so an already-issued token keeps its original access until it expires and a new authorization is performed.
+Plan for access changes to take effect on the next issuance, not immediately.
+</Callout>
+
+Shares are not supported when the origin runs a multi-user POSIX backend ([`Origin.Multiuser`](/sharing-your-data/configuration#Origin-Multiuser)).
+Serving share data means acting as the share's owner, and the multi-user backend cannot safely re-target the operating-system identity it serves a request under.
+
+## Three checks decide every request
+
+Knowing which check refused you is usually enough to fix the problem.
+
+The **login gate** establishes who you are and whether your account is still active.
+A deactivated account fails here on its next request, without waiting for a token to expire.
+
+The **management-API gate** compares your effective scopes against what the route requires.
+The Acceptable Use Policy gate sits alongside it: where a policy is configured, you must accept the current version before the user, group, and self-service APIs will answer you.
+Reading the policy, accepting it, and signing out stay reachable so an unsigned user can get unstuck.
+See [Acceptable Use Policy gate](/sharing-your-data/permissions-reference#acceptable-use-policy-gate) for which surfaces are gated.
+
+The **ownership and access check** decides whether you may act on this particular collection or group: are you its owner, are you in its admin group, does a grant match one of your groups, and has that entry expired.
+This is the layer that clamps a share against its owner's current access, and the layer a `write` grant passes for data but not for changing who else has access.

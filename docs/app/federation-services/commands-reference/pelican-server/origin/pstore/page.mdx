@@ -1,0 +1,50 @@
+---
+title: pelican server origin pstore
+---
+
+## pelican-server origin pstore
+
+Inspect and repair a Pelican store
+
+### Synopsis
+
+Inspect the contents of an origin backed by the Pelican store ("pstore").
+
+A pstore keeps its namespace in an encrypted database and its objects in
+encrypted block files, so its contents cannot be examined with ordinary
+filesystem tools. These commands read the store directly.
+
+The origin must be stopped: the store holds its directory lock exclusively.
+
+The store location comes from Origin.PStoreLocation, or from --location.
+
+### Options
+
+```
+  -h, --help              help for pstore
+      --location string   Store directory (defaults to Origin.PStoreLocation)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin](/federation-services/commands-reference/pelican-server/origin/)	 - Operate a Pelican origin service
+* [pelican-server origin pstore digest](/federation-services/commands-reference/pelican-server/origin/pstore/digest/)	 - Show the checksums recorded for an object
+* [pelican-server origin pstore du](/federation-services/commands-reference/pelican-server/origin/pstore/du/)	 - Report space used
+* [pelican-server origin pstore export](/federation-services/commands-reference/pelican-server/origin/pstore/export/)	 - Write objects out as ordinary files
+* [pelican-server origin pstore fsck](/federation-services/commands-reference/pelican-server/origin/pstore/fsck/)	 - Check the store's internal consistency
+* [pelican-server origin pstore ls](/federation-services/commands-reference/pelican-server/origin/pstore/ls/)	 - List a directory in the store
+* [pelican-server origin pstore metadata-backup](/federation-services/commands-reference/pelican-server/origin/pstore/metadata-backup/)	 - Back up the store's metadata (not its object data)
+* [pelican-server origin pstore metadata-backup-key](/federation-services/commands-reference/pelican-server/origin/pstore/metadata-backup-key/)	 - Print the key that opens this origin's metadata backups, or one file's own key
+* [pelican-server origin pstore metadata-restore](/federation-services/commands-reference/pelican-server/origin/pstore/metadata-restore/)	 - Restore a metadata backup into an empty store
+* [pelican-server origin pstore stat](/federation-services/commands-reference/pelican-server/origin/pstore/stat/)	 - Show an object's metadata

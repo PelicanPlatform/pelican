@@ -1,0 +1,26 @@
+# Managing Data Access
+
+Pelican decides who may read and write the objects your origin serves.
+This section is about controlling that: creating a **collection** over part of your storage, deciding which groups can read or write it, and handing day-to-day control to the people who own the data.
+
+It does not cover exporting storage in the first place.
+A collection controls access *inside* a namespace your origin already exports; see [Federating Your Data](/sharing-your-data/federating-your-data) to create the export.
+
+## The shape of the job
+
+Granting access takes three pieces, and they always fit together the same way:
+
+1. **A collection** marks the prefix you want to control — a dataset, a project directory, a research group's storage area.
+2. **A group** is who you grant to. Access is never granted to a person directly; you put people in a group and grant the group.
+3. **A grant** ties the two together, giving that group `read` or `write` on the collection.
+
+Once that is set up, the collection's owner and its admin group run it without needing any server-wide privilege — and the people they grant access to can pass a subset of it on to their own collaborators as a **share**.
+
+## Start where your question is
+
+- **Giving people access to a dataset** — [Managing Access to a Collection](/sharing-your-data/collections-and-shares). Creating a collection, granting a group read or write, delegating day-to-day management, handing over ownership, and letting users share access they already hold.
+- **Getting the people and groups in place first** — [Managing Users and Groups](/sharing-your-data/users-and-groups). Accounts, password and onboarding links, group membership, and invite links.
+- **Working out why a request was refused** — [Permissions Reference](/sharing-your-data/permissions-reference). Who may do what, what each response code means, and where a scope can come from.
+- **Understanding the model behind all of it** — [How Access Control Works](/sharing-your-data/access-control-model). Why accounts carry no permissions, why everything is granted to groups, and what happens on each request.
+
+Each task page states the privilege it needs and links to the reference for the detail.

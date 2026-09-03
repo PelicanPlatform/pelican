@@ -1,0 +1,37 @@
+---
+title: pelican server origin object metadata list
+---
+
+## pelican-server origin object-metadata list
+
+List live (non-deleted) objects in a namespace
+
+```
+pelican-server origin object-metadata list [flags]
+```
+
+### Options
+
+```
+  -h, --help               help for list
+      --limit int          Maximum rows per page (capped at 1000) (default 100)
+      --namespace string   Federation prefix to list (required)
+      --offset int         Pagination offset
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican origin (e.g. https://my-origin.com:8447)
+  -t, --token string        Path to the admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin object-metadata](/sharing-your-data/commands-reference/pelican-server/origin/object-metadata/)	 - Inspect the origin's local object-metadata tracking database

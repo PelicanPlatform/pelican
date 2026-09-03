@@ -1,0 +1,45 @@
+---
+title: pelican client agent warm
+---
+
+## pelican client-agent warm
+
+Acquire credentials for objects and unlock the agent's wallet
+
+### Synopsis
+
+Acquire the credentials needed to transfer the given objects, prompting
+interactively if necessary, and unlock the running client agent's wallet so it
+can use and refresh those credentials on your behalf.
+
+By default a read credential is acquired for each object; pass --write to also
+acquire write/delete scopes (e.g. for uploads). Objects in public namespaces
+that require no token are skipped.
+
+```
+pelican client-agent warm <url>... [flags]
+```
+
+### Options
+
+```
+  -h, --help    help for warm
+      --write   Also acquire write/delete credentials (e.g. for uploads)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --pid-file string     Path to the PID file (default: ~/.pelican/client-agent.pid)
+      --socket string       Path to the Unix domain socket (default: ~/.pelican/client-agent.sock)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican client-agent](/accessing-your-data/commands-reference/pelican/client-agent/)	 - Manage the Pelican client agent server

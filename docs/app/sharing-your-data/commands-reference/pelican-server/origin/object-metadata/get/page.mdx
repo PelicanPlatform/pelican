@@ -1,0 +1,37 @@
+---
+title: pelican server origin object metadata get
+---
+
+## pelican-server origin object-metadata get
+
+Get one object's live row (and optional history)
+
+```
+pelican-server origin object-metadata get [flags]
+```
+
+### Options
+
+```
+  -h, --help               help for get
+      --history int        If >0, also include the most recent N history rows
+      --namespace string   Federation prefix of the object (required)
+      --path string        Federation-rooted path of the object (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican origin (e.g. https://my-origin.com:8447)
+  -t, --token string        Path to the admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin object-metadata](/sharing-your-data/commands-reference/pelican-server/origin/object-metadata/)	 - Inspect the origin's local object-metadata tracking database

@@ -1,0 +1,405 @@
+import { Callout } from 'nextra/components'
+
+# Managing Users and Groups
+
+Access to a collection is granted to a **group**, never to a person directly — so before you can give someone access, they need an account on this server and a group to put them in.
+This page covers both: creating and running groups, the account tasks an administrator does around them, and the handful of things every signed-in user does for themselves.
+For the granting itself, see [Managing Access to a Collection](/sharing-your-data/collections-and-shares).
+For the model behind these tasks — what a user is, what a group is, and how a scope reaches a caller — read [How Access Control Works](/sharing-your-data/access-control-model).
+For the authoritative "who may do this", read the [Permissions Reference](/sharing-your-data/permissions-reference).
+
+## Before you start
+
+Every section below opens with a one-line prerequisite naming the scope the task calls for.
+Beyond that, what you need depends on the method.
+
+- **Web interface:** your server's web URL and an account holding that scope.
+- **Command line:** a shell on the server host. The `pelican-server server user` and `pelican-server server group` commands drive the local server's admin API with a token they mint from the server's own issuer key, so they only work where that key is readable, and they read `Server.ExternalWebUrl` to find the API. Full flag lists live in the generated reference for [`server user`](/federation-services/commands-reference/pelican-server/server/user) and [`server group`](/federation-services/commands-reference/pelican-server/server/group).
+- **API:** a login cookie or an API token whose creator holds that scope. The Swagger browser at [`/api-docs`](/sharing-your-data/api) carries every request and response shape; this page never repeats them.
+
+<Callout type="info">
+Several tasks below produce an invite link.
+Pelican mints the link and shows you the token exactly once; delivering it to the right person is your job.
+Pelican does not send email.
+</Callout>
+
+## Add a user
+
+*Requires `server.admin` or `server.user_admin` — see [User administration](/sharing-your-data/permissions-reference#user-administration).*
+
+Most accounts appear by themselves the first time someone signs in through your configured OIDC provider.
+Create one by hand when you want to pre-provision: add the person to groups, grant a scope, or hand them a password before they have ever logged in.
+
+A **local account** needs only a username; the person sets a password later by redeeming an invite.
+An **OIDC-linked account** also carries a subject and issuer pair, and the next login matching that pair claims it.
+
+### Web UI
+
+1. Go to **Settings** → **Users** and click **ADD USER**.
+2. Choose **Local (username + password)** or **External (OIDC)**.
+3. Fill in **Username** and, optionally, **Display name**. For an external user, also fill in **Sub** and **Issuer** from your identity provider.
+4. Click **CREATE USER**.
+5. For a local account, the page offers **GENERATE PASSWORD-SET INVITE**. Click it and copy the URL, or click **SKIP FOR NOW** and mint the invite later.
+
+### CLI
+
+```bash copy
+# Local account — hand out a password invite afterwards
+pelican-server server user create --username alice --display-name "Alice Chen"
+
+# OIDC account, subject known in advance
+pelican-server server user create --username alice \
+    --sub abc-123 --issuer https://oidc.example.org/
+```
+
+### API
+
+`POST /api/v1.0/users` with a `username`, optionally a `displayName`, and — for an OIDC account — both `sub` and `issuer`.
+
+New accounts are granted the scopes named in [`Server.NewUserDefaultScopes`](/sharing-your-data/configuration#Server-NewUserDefaultScopes).
+Later edits to that setting do not apply to accounts that already exist.
+
+## Let a user set a password
+
+*Requires `server.admin` or `server.user_admin` — see [User administration](/sharing-your-data/permissions-reference#user-administration).*
+
+Administrators never see or choose a password.
+Instead you mint a single-use, time-bounded invite and hand over the link; the person picks their own password when they redeem it.
+The link's lifetime comes from [`Server.GroupInviteLinkExpiration`](/sharing-your-data/configuration#Server-GroupInviteLinkExpiration) unless you override it.
+
+### Web UI
+
+1. Go to **Settings** → **Users** and click the edit icon on the user's row.
+2. Under **Password setup**, click **GENERATE PASSWORD-SET INVITE**.
+3. Copy the URL from the box that appears and deliver it. It is shown only once.
+4. To disable password login on a compromised account, click **CLEAR LOCAL PASSWORD** under **Local password** and confirm.
+
+The same panel lists every invite ever issued for that user, so you can see whether one is already outstanding before minting another.
+
+### CLI
+
+```bash copy
+pelican-server server user invite-password <user-id>
+pelican-server server user list-password-invites <user-id>
+pelican-server server user clear-password <user-id>
+```
+
+### API
+
+`POST /api/v1.0/users/:id/password-invite` mints the link, `GET /api/v1.0/users/:id/password-invites` lists them, and `DELETE /api/v1.0/users/:id/password` clears the password.
+
+A user who already has a password can rotate or remove it themselves from their profile page, but a user with none cannot grow one on their own — an admin-minted invite is the only path.
+
+## Creating an onboarding link
+
+*Requires `server.admin` or `server.user_admin` — see [User administration](/sharing-your-data/permissions-reference#user-administration).*
+
+Use an onboarding link when you want to invite someone whose OIDC subject you do not know in advance.
+The link creates no account up front; the recipient signs in through your identity provider first, and the identity they used claims a new account when they redeem.
+There is no web-interface control for this link today, so it is a CLI or API task.
+
+### CLI
+
+```bash copy
+pelican-server server user invite-onboard
+```
+
+The command prints the token, its expiry, and a redemption URL to hand over.
+
+### API
+
+`POST /api/v1.0/invites/onboarding`.
+
+The recipient signs in, opens the **Redeem invite** page, pastes the token if the URL did not carry it, and clicks **CONTINUE**.
+An onboarding link names no group, so redeeming it simply establishes the account.
+
+## Deactivate or delete a user
+
+*Requires `server.admin` or `server.user_admin`, with limits — see [User administration](/sharing-your-data/permissions-reference#user-administration).*
+
+Deactivating is the reversible option.
+Setting a user's status to `inactive` stops the account from authenticating; because authorization is recomputed on every request, live sessions stop working on the next request rather than when a token expires.
+
+Deleting is not reversible.
+Along with the account, Pelican removes its group memberships and every collection access grant written against its personal `user-<username>` group.
+
+Deletion is available on all three surfaces.
+The web interface has no activate/deactivate control, so status changes are a CLI or API task.
+
+### Web UI
+
+Go to **Settings** → **Users** and use the **Delete** control on the user's row.
+
+### CLI
+
+```bash copy
+pelican-server server user set-status <user-id> --status inactive
+pelican-server server user delete <user-id>
+```
+
+### API
+
+`PUT /api/v1.0/users/:id/status` with a `status` of `active` or `inactive`, and `DELETE /api/v1.0/users/:id`.
+
+<Callout type="warning">
+A user administrator can deactivate another account but cannot currently delete one.
+The route admits `server.user_admin`, and the check that runs afterwards refuses unless the caller is a system administrator or the target is the caller's own account.
+A user administrator who tries gets a `403`; ask a system administrator to perform the deletion, or deactivate instead.
+</Callout>
+
+A user administrator also cannot rename, deactivate, delete, or mint a password invite for a system administrator's account.
+Those attempts return `403` with `user administrators cannot modify system admin accounts`.
+
+## Create a group
+
+*Any signed-in user can create a group — see [Group administration](/sharing-your-data/permissions-reference#group-administration).*
+
+Group creation is open to everyone because users need groups of their own to grant access on their collections and shares.
+What a self-created group cannot do is act as bearer authority; see [Make a group usable in authorization templates and admin lists](#make-a-group-usable-in-authorization-templates-and-admin-lists) below.
+
+The group **name** is the machine-readable name that access grants and policy settings match on.
+It is 2 to 64 characters drawn from letters, digits, `.`, `_`, `@`, and `-`, has to start with a letter or digit, may not contain `/` or `..`, and may not start with `user-` — that prefix is reserved for the implicit personal group every account carries.
+The **display name** and **description** are free-form labels and never take part in an authorization decision.
+
+Once the group exists, use it to grant access to a collection: see [Grant read or write access to a group](/sharing-your-data/collections-and-shares#grant-read-or-write-access-to-a-group).
+
+### Web UI
+
+1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
+2. Click **CREATE GROUP**.
+3. Fill in **Group Name** and, optionally, **Description**.
+4. Leave **Add me as a member of this group** checked if you want to be a member as well as the owner. Creating a group makes you its owner but does not make you a member.
+5. Click **CREATE**.
+
+### CLI
+
+```bash copy
+pelican-server server group create --name cms-analysis --description "CMS analysis team"
+```
+
+### API
+
+`POST /api/v1.0/groups`.
+
+## Add and remove group members
+
+*Requires group ownership, a group administrator delegation, or `server.admin` — see [Group administration](/sharing-your-data/permissions-reference#group-administration).*
+
+The person you add needs an account on this server already.
+Adding someone who is already a member succeeds and changes nothing.
+Holding `server.user_admin` alone does not let you edit a group's membership.
+
+### Web UI
+
+1. Open **Groups** and expand the group, or open its detail page.
+2. Under **Members**, click **ADD MEMBER**, pick the user, and click **ADD MEMBER** again in the dialog.
+3. To remove someone, click the remove icon beside their row and confirm.
+
+The **ADD MEMBER** picker reads the server-wide user list, so it appears only for system administrators; a group owner or administrator who is not one invites people with a link instead.
+Removing a member never relinquishes ownership — the owner stays the owner even after their membership is deleted.
+
+### CLI
+
+```bash copy
+pelican-server server group add-member <group-id> --user-id <user-id>
+pelican-server server group remove-member <group-id> --user-id <user-id>
+pelican-server server group list-members <group-id>
+```
+
+### API
+
+`POST /api/v1.0/groups/:id/members`, `DELETE /api/v1.0/groups/:id/members/:userId`, and `GET /api/v1.0/groups/:id/members`.
+
+## Invite people to a group with a link
+
+*Requires group ownership, a group administrator delegation, or `server.admin` — see [Group administration](/sharing-your-data/permissions-reference#group-administration).*
+
+An invite link is how a group owner brings in people they cannot look up.
+A single-use link admits one person; a multi-use link admits everyone who holds it until it expires or you revoke it.
+Expiry defaults to [`Server.GroupInviteLinkExpiration`](/sharing-your-data/configuration#Server-GroupInviteLinkExpiration).
+
+The recipient has to be signed in and, if your server has an Acceptable Use Policy, AUP-compliant before they can redeem — nobody gets conscripted into a group as a side effect of following a link.
+
+### Web UI
+
+1. Open the group's detail page. The **Invite links** panel appears for owners and group administrators only.
+2. Set **Single use** on or off, and set **Expires in** to a Go duration such as `168h`, `24h`, or `30m`.
+3. Click **GENERATE INVITE LINK** and copy the URL. It is shown only once.
+4. To withdraw a link, click the revoke icon on its row.
+
+Listed links show a short token ID rather than the token itself, which is safe to quote in a ticket or an audit log.
+
+### CLI
+
+```bash copy
+pelican-server server group invite create <group-id> --single-use --expires-in 24h
+pelican-server server group invite list <group-id>
+pelican-server server group invite revoke <group-id> <link-id>
+```
+
+### API
+
+`POST /api/v1.0/groups/:id/invites`, `GET /api/v1.0/groups/:id/invites`, and `DELETE /api/v1.0/groups/:id/invites/:linkId`.
+The recipient redeems at `POST /api/v1.0/invites/redeem`.
+
+## Transfer group ownership or delegate a group administrator
+
+*Requires group ownership or `server.admin` — see [Group administration](/sharing-your-data/permissions-reference#group-administration).*
+
+A group has exactly one owner, and the owner is the only one who can hand the group to someone else, name an administrator, or delete it — and the only one who cannot leave it.
+Transfer ownership first if you want out.
+
+A group administrator handles membership and metadata day to day, and may be a single user or another group, so you can point one team's admin at a second team.
+An administrator cannot transfer ownership and cannot delete the group.
+
+### Web UI
+
+1. Open the group's detail page and find the **Ownership** section.
+2. Click the edit icon beside **Owner**, pick the new owner, and save.
+3. Click the edit icon beside **Administrator**, choose **None**, **User**, or **Group**, pick the target, and save.
+
+### CLI
+
+```bash copy
+pelican-server server group set-ownership <group-id> --owner-id <user-id>
+pelican-server server group set-ownership <group-id> --admin-id <id> --admin-type group
+```
+
+### API
+
+`PUT /api/v1.0/groups/:id/ownership` with `ownerId`, `adminId`, and `adminType` as needed.
+
+## Make a group usable in authorization templates and admin lists
+
+*Turning the flag on for an existing group requires `server.admin` — see [Group administration](/sharing-your-data/permissions-reference#group-administration).*
+
+[`Issuer.AuthorizationTemplates`](/sharing-your-data/configuration#Issuer-AuthorizationTemplates) and the `Server.*AdminGroups` settings — [`Server.AdminGroups`](/sharing-your-data/configuration#Server-AdminGroups) and [`Server.UserAdminGroups`](/sharing-your-data/configuration#Server-UserAdminGroups) among them — match on a group's *name*, and they only trust a name that carries the auth-template-eligibility flag.
+Set the flag on a group before you name it in one of those settings; without it, the entry matches nothing.
+Collection access grants do not consult the flag, so a group used only for collection access never needs it.
+For why the flag exists, see [Where a scope can come from](/sharing-your-data/access-control-model#where-a-scope-can-come-from).
+
+You can set the flag at creation time if you hold `server.admin` or `server.user_admin`.
+Changing it afterwards is system-admin-only, so a user administrator who tries gets a `403`.
+There is no CLI flag for eligibility, which makes this a web-interface or API task.
+
+### Web UI
+
+- **At creation:** in the **Create New Group** dialog, tick **Auth-template eligible**. The checkbox is rendered only for callers who can set it.
+- **Afterwards:** open the group's detail page and flip the **Auth template** switch. Everyone else sees the current state as a read-only `eligible` or `ineligible` chip.
+
+### API
+
+`PATCH /api/v1.0/groups/:id` with `authTemplateEligible`.
+
+<Callout type="warning">
+The web interface renders the **Auth template** switch for user administrators as well as system administrators, but the server accepts the change only from a system administrator.
+A user administrator who flips the switch sees the request fail.
+</Callout>
+
+The same `PATCH` endpoint is where a group's display name and description are edited, and where a system administrator renames a group.
+The web interface has no control for those fields today; use `pelican-server server group update` or the API.
+
+## Grant a management scope to a user or group
+
+*Requires `server.admin` — see [Management scopes](/sharing-your-data/permissions-reference#management-scopes).*
+
+A `server.user_admin` holder can read scope grants but cannot create or revoke them, because granting a scope to yourself is exactly the self-elevation the split is there to prevent.
+Granting a scope to a group elevates every member of that group, now and in the future, so prefer a direct grant on a user unless you want the membership list to control the privilege.
+
+Two listings answer different questions.
+`GET /api/v1.0/users/:id/scopes` returns only the rows granted directly to that user.
+`GET /api/v1.0/me/scopes` returns your own *effective* set — direct grants, plus everything inherited from your groups and from the operator's admin-list configuration.
+Config-derived grants never appear in the direct listing; you take those back by editing the configuration file, not by revoking a row.
+See [Sources of a scope](/sharing-your-data/permissions-reference#sources-of-a-scope) for every path a grant can arrive by and how to withdraw each one.
+
+### Web UI
+
+1. For a user: **Settings** → **Users**, edit the user, and scroll to **Scopes**. For a group: open the group's detail page and find its scopes panel. Both panels are rendered for system administrators only.
+2. Pick an entry from **Pick a scope to grant** — the picker offers only scopes the management API will accept — and click **GRANT**.
+3. To revoke, click the × on the scope's chip.
+
+### CLI
+
+```bash copy
+pelican-server server user scope list <user-id>
+pelican-server server user scope grant <user-id> --scope server.user_admin
+pelican-server server group scope revoke <group-id> <scope>
+```
+
+### API
+
+`POST` and `DELETE` on `/api/v1.0/users/:id/scopes` and `/api/v1.0/groups/:id/scopes`.
+
+## Manage your own account
+
+*Any signed-in user.*
+
+Everything here targets the caller and needs no administrative scope.
+The `pelican-server` commands act as a server administrator rather than as you, so self-service is a web-interface or API task.
+
+### Web UI
+
+Open the user menu and choose **Profile**.
+
+- **Display name** — edit the field and click **SAVE**. Your username is read-only; changing it is an administrator's job.
+- **Local password** — **RESET PASSWORD** asks for your current password and a new one; **REMOVE PASSWORD** disables username-and-password login while leaving linked OIDC identities working. Both appear only when a password is already set.
+- **Effective scopes** — the full set the server computes for you right now.
+- **Linked identities** — unlink a secondary identity with the unlink icon. Your primary identity is marked `managed by admin`.
+- **Your groups** — click **LEAVE**, then **CONFIRM LEAVE**. You cannot leave a group you own; transfer ownership first.
+
+### API
+
+`GET /api/v1.0/me`, `PATCH /api/v1.0/me`, `PUT` and `DELETE` on `/api/v1.0/me/password`, `GET /api/v1.0/me/groups`, `DELETE /api/v1.0/me/groups/:id`, `GET` and `DELETE` on `/api/v1.0/me/identities`, and `GET /api/v1.0/me/scopes`.
+
+## Accept the Acceptable Use Policy
+
+If your server has an Acceptable Use Policy configured, you must accept the current version before you can use the user, group, or self-service management APIs.
+Until you do, those endpoints return `403` with `requires_aup: true` and the version you need to accept, and the web interface sends you to the acceptance page.
+Three things stay reachable so you can get unstuck: reading the policy, accepting it, and signing out.
+Editing the policy is also exempt, so rotating it cannot lock out the administrator who rotated it.
+
+**To accept it as a user:** the interface takes you to the **Acceptable Use Policy** page on its own and returns you afterwards to where you were headed.
+Read the policy and click **I AGREE**.
+
+**To edit the policy** — *requires `server.admin`* — go to **Settings** → **AUP**, edit the Markdown on the left, optionally fill in **Last updated (footer)**, and click **SAVE AS NEW ACTIVE VERSION**.
+Saving rotates the version, which re-prompts every user on the server on their next visit.
+
+**To re-prompt one user** — *requires `server.admin` or `server.user_admin`* — go to **Settings** → **Users**, edit the user, and click **CLEAR AUP ACCEPTANCE**.
+The CLI equivalents are `pelican-server server user aup clear <user-id>` and `pelican-server server user aup record <user-id> --version <version>`.
+
+To switch the requirement off entirely, set [`Server.AUPFile`](/sharing-your-data/configuration#Server-AUPFile) to `none`.
+
+## Troubleshooting
+
+**`403` with `requires_aup: true`.**
+You have not accepted the current Acceptable Use Policy.
+Open the acceptance page, read the policy, and click **I AGREE**; see [Accept the Acceptable Use Policy](#accept-the-acceptable-use-policy) and the [Acceptable Use Policy gate](/sharing-your-data/permissions-reference#acceptable-use-policy-gate).
+
+**`403` when granting or revoking a scope.**
+Scope grants are system-admin-only.
+Holding `server.user_admin` lets you list grants but not change them.
+
+**`403` when deleting another user.**
+A user administrator can only delete their own account.
+Deactivate the account instead, or ask a system administrator.
+
+**`403 user administrators cannot modify system admin accounts`.**
+A `server.user_admin` holder cannot rename, deactivate, delete, or mint a password invite for an account that holds `server.admin`.
+
+**`404` on a group you believe exists.**
+Endpoints that would otherwise confirm a record exists return `404` rather than `403` when you are not allowed to see it.
+A `404` on a collection or group you believe exists usually means you lack access, not that it is missing.
+
+**A group name is rejected.**
+Names are 2 to 64 characters of letters, digits, `.`, `_`, `@`, and `-`, must start with a letter or digit, and may not contain `/` or `..`.
+`user-` is reserved.
+See [Identifier rules](/sharing-your-data/permissions-reference#identifier-rules).
+
+**An entry in an admin list grants nothing.**
+[`Server.UIAdminUsers`](/sharing-your-data/configuration#Server-UIAdminUsers) and [`Server.UserAdminUsers`](/sharing-your-data/configuration#Server-UserAdminUsers) match on usernames, not on OIDC subjects; [`Server.AdminGroups`](/sharing-your-data/configuration#Server-AdminGroups) and [`Server.UserAdminGroups`](/sharing-your-data/configuration#Server-UserAdminGroups) match on group names.
+An OIDC subject placed in one of the user lists never matches anything.
+A group named in one of the group lists only counts if the group is auth-template eligible.
+
+**A user cannot change their own password.**
+The self-service rotate and remove controls refuse on an account with no password set.
+Mint a password-set invite instead; see [Let a user set a password](#let-a-user-set-a-password).

@@ -1,0 +1,39 @@
+---
+title: pelican server origin pstore digest
+---
+
+## pelican-server origin pstore digest
+
+Show the checksums recorded for an object
+
+### Synopsis
+
+Show the checksums computed when the object was written.
+
+These are the values the origin serves in response to Want-Digest.
+
+```
+pelican-server origin pstore digest <path> [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for digest
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+      --location string     Store directory (defaults to Origin.PStoreLocation)
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server origin pstore](/sharing-your-data/commands-reference/pelican-server/origin/pstore/)	 - Inspect and repair a Pelican store

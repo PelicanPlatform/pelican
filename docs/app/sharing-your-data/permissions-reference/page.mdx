@@ -1,0 +1,310 @@
+import { Callout } from 'nextra/components'
+
+# Permissions Reference
+
+{/*
+  MAINTAINER NOTE — this page is a hand-transcribed matrix of guards that
+  live in code. When any of the following change, re-check every table here
+  before merging:
+
+    web_ui/ui.go              route groups and their middleware chains
+    web_ui/authentication.go  AuthHandler, AdminAuthHandler,
+                              UserAdminAuthHandler, RequireAUPCompliance,
+                              Check{Admin,UserAdmin,CollectionAdmin}
+    web_ui/scopes.go          EffectiveScopesForIdentity (config-derived
+                              grants, the server.admin implication)
+    web_ui/groups.go          per-target guards on /users/* and /groups/*
+    web_ui/me.go              the self-service surface
+    web_ui/password_invite.go password-invite and password-clear guards
+    web_ui/aup.go             AUP source resolution and version
+    database/collection.go    CanSeeGroup, CanManageGroup, isGroupOwnerOnly,
+                              validateACL, CallerIsCollectionOwner[OrAdmin],
+                              DeleteUser, DeleteGroup, CreateShare, MinRole,
+                              EffectiveCollectionRole
+    database/scopes.go        EffectiveScopes, DefaultUserScopesFromConfig
+    database/identifiers.go   ValidateIdentifier, ValidateDisplayName,
+                              CleanNamespacePath
+    origin/collections.go     callerIsCollectionAdmin and the per-handler
+                              admin-bypass flags
+    oa4mp/proxy.go            what a minted access token ends up carrying
+    token_scopes/token_scopes.go and docs/scopes.yaml  the scope catalogue
+
+  Where a route comment and a database-layer guard disagree, this page
+  documents the intersection (the behaviour a caller actually observes).
+  Those places are marked with a warning callout in the rendered page.
+*/}
+
+This page is the authoritative answer to "who is allowed to do this, and what does the server return when they are not?"
+Instructions for carrying out the tasks themselves live in [Managing Users and Groups](/sharing-your-data/users-and-groups) and [Managing Access to a Collection](/sharing-your-data/collections-and-shares); the reasoning behind the model lives in [How Access Control Works](/sharing-your-data/access-control-model).
+
+In the tables below, `yes` and `no` state whether that role may perform the action, and `—` marks a combination that cannot arise.
+**Ordinary user** means an account that holds no management scope and no ownership or administrator role on the record in question.
+
+## Roles
+
+| Role | How you become one | Reach |
+|---|---|---|
+| System administrator | Holds `server.admin`: a direct grant, membership of an auth-template-eligible group named in [`Server.AdminGroups`](/sharing-your-data/configuration#Server-AdminGroups), a username in [`Server.UIAdminUsers`](/sharing-your-data/configuration#Server-UIAdminUsers), or the built-in `admin` account. | Every management surface on this server. Implies `server.user_admin` and `server.collection_admin`. |
+| User administrator | Holds `server.user_admin`: a direct grant, or a match in [`Server.UserAdminUsers`](/sharing-your-data/configuration#Server-UserAdminUsers) / [`Server.UserAdminGroups`](/sharing-your-data/configuration#Server-UserAdminGroups). | The user surface and group listing. Cannot grant scopes, cannot manage linked identities, and cannot act on a system administrator's account. |
+| Collection administrator | Holds `server.collection_admin`: a direct grant, or a match in [`Server.CollectionAdminUsers`](/sharing-your-data/configuration#Server-CollectionAdminUsers) / [`Server.CollectionAdminGroups`](/sharing-your-data/configuration#Server-CollectionAdminGroups). | Creates collections, and sees and manages every collection on the server. |
+| Collection owner / group owner | Named as the owner on the collection or group row. | Full authority on that one record, including the transfer and delete operations nobody else gets. |
+| Collection admin-group member / group administrator | A member of the group named as the collection's admin group, or the user or group delegated as a group's administrator. | Day-to-day management of that one record. Never transfer, never delete. |
+| Ordinary user | Any account that signs in successfully. New accounts receive [`Server.NewUserDefaultScopes`](/sharing-your-data/configuration#Server-NewUserDefaultScopes), which by default is `web_ui.access`. | Their own account, groups they create or belong to, and collections and shares they are named on. |
+
+## Management scopes
+
+These are the only scopes the management API accepts on a grant.
+A data-plane scope (`storage.*`, `collection.*`, `share.access`) can never be handed to a user or a group through the management API; the issuer mints those onto tokens directly.
+`GET /api/v1.0/scopes` returns the same catalogue to any signed-in caller.
+
+| Scope | What it permits | Notes |
+|---|---|---|
+| `web_ui.access` | Sign in to the web interface and the cookie-authenticated APIs. | Granted to new accounts by default. Granting it explicitly also lets API tokens carry web-interface access. |
+| `server.admin` | Every user, group, collection, and server setting. | Implies `server.user_admin` and `server.collection_admin`. |
+| `server.user_admin` | Create and manage non-administrator users, mint password-set and onboarding invites, and see every group. | Does not include scope grants, identity linking, or any action targeting a system administrator. |
+| `server.collection_admin` | Create collections, and see and manage every collection and its ACLs. | Does not include the user or group surfaces. |
+| `pelican.log_read` | Read the server's recent log buffer, through the log viewer or the `/api/v1.0/logs` endpoints. | Separable from `server.admin` rather than implied by it, because it exposes everything the server logs. |
+| `monitoring.query` | Read the server's metrics through its Prometheus-compatible query endpoint. | Login cookies carry this only for system administrators; other holders reach the endpoint with a bearer or API token. |
+| `pelican.transfer` | Submit, view, and cancel transfer jobs through the transfer API. | Not granted by default. |
+
+## Sources of a scope
+
+A caller's effective scope set is recomputed on every request as the union of the sources below.
+It is never read from the presented credential, which is why revoking a grant or a membership takes effect on the next request rather than when a token expires.
+
+| Source | Where it lives | How to take it back |
+|---|---|---|
+| A direct grant on the user | The server database | Revoke the grant. System administrators only. |
+| A grant on a group the user is recorded as a member of | The server database | Revoke the group's grant, or remove the user from the group. |
+| A grant on a group whose name the user's login credential asserts | The server database, matched by group name; asserted names with no matching group are ignored | Revoke the group's grant, or stop the identity provider asserting the name. |
+| The configuration admin lists — `Server.UIAdminUsers`, `Server.AdminGroups`, `Server.UserAdminUsers`, `Server.UserAdminGroups`, `Server.CollectionAdminUsers`, `Server.CollectionAdminGroups` — and the built-in `admin` username | The configuration file; evaluated live and never mirrored into the database | Edit the configuration file. Revoking a database grant has no effect on these. |
+| The `server.admin` implication | Applied after both sources above | Take back `server.admin`. |
+
+Two filters apply to the result.
+Group matches against the configuration lists and against [`Issuer.AuthorizationTemplates`](/sharing-your-data/configuration#Issuer-AuthorizationTemplates) are restricted to groups flagged auth-template-eligible.
+The whole set is then filtered to the catalogue in [Management scopes](#management-scopes), so a scope that is not user-grantable can never arrive by this path.
+
+Two further rules govern the edges.
+New accounts are granted `Server.NewUserDefaultScopes` at creation, and later edits to that setting do not apply retroactively.
+An API token re-intersects its stored scopes against its creator's *current* effective set on every use, so a token cannot outlive the authority it was minted from.
+
+## User administration
+
+Every `/api/v1.0/users` endpoint requires `server.admin` or `server.user_admin` at the route, plus AUP compliance.
+Ordinary users reach none of it; their equivalents live under `/api/v1.0/me`.
+
+| Action | System admin | User admin | Ordinary user |
+|---|---|---|---|
+| List users, read any user | yes | yes | no |
+| Create a user | yes | yes | no |
+| Rename or relabel a user | yes | yes, except on a system administrator's account | no |
+| Activate or deactivate a user | yes | yes, except on a system administrator's account | no |
+| Delete a user | yes | only their own account — see below | no |
+| Mint a password-set invite | yes | yes, except on a system administrator's account | no |
+| Clear a user's password | yes | yes, except on a system administrator's account | own account only, and only if a password is already set |
+| Record a user's AUP acceptance | yes | yes | own acceptance only |
+| Clear a user's AUP acceptance | yes | yes, except on a system administrator's account | no |
+| List a user's direct scope grants | yes | yes | own effective scopes only |
+| Grant or revoke a user's scope | yes | no | no |
+| List a user's linked identities | yes | yes | own identities only |
+| Add or remove a linked identity | yes | no | may unlink their own secondary identities only |
+| Mint a user-onboarding invite | yes | yes | no |
+| Edit own display name | yes | yes | yes |
+| Rotate own password | only if one is already set | only if one is already set | only if one is already set |
+
+<Callout type="warning">
+The route comment on user deletion says a user administrator may delete users, but the database layer refuses unless the caller is a system administrator or the target is the caller themselves.
+The behaviour you will observe is that a holder of `server.user_admin` can delete only their own account; every other target returns `403`.
+Deactivating an account is the operation a user administrator can actually perform, and it revokes live sessions on the next request.
+</Callout>
+
+## Group administration
+
+Two helpers decide most of this surface.
+**Visible to** you means: you are a system administrator, the group's owner, its administrator, a recorded member, or your login credential asserts the group's name.
+**Manageable by** you means: you are a system administrator, the group's owner, or its administrator.
+User administrators are in neither helper — their extra reach over ordinary users is that they see every group in the listing.
+
+| Action | System admin | User admin | Group owner | Group administrator | Member | Ordinary user |
+|---|---|---|---|---|---|---|
+| Create a group | yes | yes | — | — | — | yes |
+| Set auth-template eligibility at creation | yes | yes | — | — | — | the request field is forced off |
+| List groups | all | all | visible only | visible only | visible only | visible only |
+| Read one group, list its members | if visible, else `404` | if visible, else `404` | yes | yes | yes | if visible |
+| Edit display name or description | yes | no | yes | yes | no | no |
+| Rename a group | yes | no | no | no | no | no |
+| Change auth-template eligibility after creation | yes | no | no | no | no | no |
+| Add or remove members | yes | no | yes | yes | no | no |
+| Create, list, or revoke invite links | yes | no | yes | yes | no | no |
+| Transfer ownership, set the administrator | yes | no | yes | no | no | no |
+| Delete a group | yes | no | yes | no | no | no |
+| Leave a group | as a member, yes | as a member, yes | no — transfer ownership first | yes | yes | yes |
+| List a group's scope grants | yes | yes | yes | yes | yes | yes |
+| Grant or revoke a group's scope | yes | no | no | no | no | no |
+
+<Callout type="warning">
+Two rows diverge from what the route comments imply.
+Auth-template eligibility is settable by a user administrator **at group creation** only; changing it afterwards requires `server.admin`.
+Listing a group's scope grants is described as open to anyone who can see the group, but the handler performs no visibility check: any signed-in, AUP-compliant caller who knows a group's internal ID can read that group's grants.
+</Callout>
+
+Also normative:
+
+- Deleting a group also deletes its invite links, its memberships, and every collection ACL entry naming it.
+- Group names beginning `user-` are reserved for the implicit personal group and are rejected at creation and at rename.
+- Adding someone who is already a member succeeds and changes nothing.
+
+## Collection administration
+
+Collections sit behind authentication only — signing in is enough to reach the endpoints, and authorization is decided per collection.
+A collection's **access control list** (**ACL**) is the set of entries naming which group holds `read` or `write` on it.
+A role on a collection maps to capabilities as follows.
+
+| Role | Capabilities |
+|---|---|
+| `read` | Read the collection, its metadata, and its objects. |
+| `write` | The above, plus edit the collection's descriptive fields, its metadata, and read its ACL list. |
+| Owner or admin-group member | The above, plus grant and revoke ACLs and reassign the admin group. |
+| Owner only | The above, plus transfer ownership and delete the collection. |
+
+| Action | System / collection admin | Collection owner | Admin-group member | Group with `write` | Group with `read` | Ordinary user |
+|---|---|---|---|---|---|---|
+| Create a collection | yes | — | — | — | — | no (`403`), unless presenting a bearer token that carries an explicit `collection.create` scope |
+| See a collection in the listing | all | own | yes | yes | yes | public collections only |
+| Read one collection | any | yes | yes | yes | yes | public only |
+| Edit name, description, visibility, sharing | yes | yes | yes | yes | no | no |
+| Read the collection's metadata | only with a role on the collection — see below | yes | yes | yes | yes | no |
+| Write or delete metadata | yes | yes | yes | yes | no | no |
+| Read the ACL list | yes | yes | yes | yes | no | no |
+| Grant or revoke an ACL | yes | yes | yes | no | no | no |
+| Reassign the admin group | yes | yes | yes | no | no | no |
+| Transfer ownership, by patch or by invite | yes | yes | no | no | no | no |
+| Redeem an ownership invite | — | — | — | — | — | any authenticated holder of the link |
+| Delete a collection | yes | yes | no | no | no | no |
+| List candidate owners | yes | yes | yes | yes | yes | public collections only |
+
+<Callout type="warning">
+Reading a collection's metadata is the one collection operation with no administrator bypass and no public-visibility fallback.
+A holder of `server.collection_admin` who is not the owner, not in the admin group, and not on an ACL gets `404` on the metadata endpoint even though the collection itself is readable to them, and metadata on a public collection is not readable without a role on that collection.
+Every other collection operation honours the administrator bypass.
+</Callout>
+
+Also normative:
+
+- A collection's owner can be changed but never cleared; clearing it returns `400` with `ownerId cannot be empty`.
+- A collection's namespace has to sit inside a prefix this origin already exports, and is canonicalised before both the prefix check and storage.
+- A collection cannot widen what its export permits.
+- Refusals here are reported as `404`, not `403`; see [Response codes](#response-codes).
+
+## Share administration
+
+| Question | Answer |
+|---|---|
+| Who may create a share | A caller with `read` or better on the parent collection, when the parent has sharing enabled and [`Origin.Multiuser`](/sharing-your-data/configuration#Origin-Multiuser) is off. |
+| Refusals | `409` when the origin runs a multi-user backend, `409` when sharing is not enabled on the parent, `404` when you have no access to the parent. |
+| Who owns the new share | The caller who created it, not the parent's owner. |
+| Share of a share | Refused. |
+| Share namespace | Equal to, or a path-descendant of, the parent's namespace. Defaults to the parent's namespace. |
+| Share defaults | Visibility is private unless set to public; sharing is forced off on the new share. |
+| Managing the share | The share is itself a collection, so [Collection administration](#collection-administration) applies to it, with the share's creator holding owner authority. |
+| Effective access through the share | The weaker of the recipient's role on the share and the share owner's current role on the parent, computed when a token is issued. |
+| Token contents | `share.access:/<share-id>` plus the clamped storage scopes. Management-plane `collection.*` scopes are not clamped. |
+| A share token at a multi-user origin | Refused outright, with no fallback to the presenter's identity. |
+
+The intersection is recomputed each time a token is *issued*: if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
+
+<Callout type="warning">
+Refreshing an existing token does not re-run the intersection.
+The issuer re-grants the scopes already stored on the session, so an already-issued token keeps its original access until it expires and a new authorization is performed.
+Access changes take effect on the next issuance, not immediately.
+</Callout>
+
+<Callout type="warning">
+Shares are not supported when the origin runs a multi-user POSIX backend (`Origin.Multiuser`).
+Serving share data means acting as the share's owner, and the multi-user backend cannot safely re-target the operating-system identity it serves a request under.
+Creating a share on such an origin is refused with `409`, and if multi-user mode is turned on after shares already exist, any token carrying `share.access` is rejected outright rather than quietly falling back to the presenter's identity.
+</Callout>
+
+## Data access
+
+An access token's data-plane scopes are derived from the caller's role on each collection they can reach, keyed by that collection's namespace.
+
+| Role on the collection | Data-plane scopes minted for its namespace |
+|---|---|
+| Owner or `write` | `storage.read`, `storage.modify`, `storage.create` |
+| `read` | `storage.read` |
+| None | nothing |
+
+Management-plane scopes are minted alongside them, keyed by collection ID rather than namespace: owner yields `collection.read`, `collection.modify` and `collection.delete`; `write` yields `collection.read` and `collection.modify`; `read` yields `collection.read`.
+
+The collection's namespace is made issuer-relative before it is spliced into a scope.
+A collection outside the issuer's namespace receives management-plane scopes only.
+
+The group names that matched an ACL are echoed in the token's group claim, with `@authenticated` excluded — it is a virtual ACL target rather than a real group, and never appears in a token.
+
+A token issued for a share carries `share.access:/<share-id>` alongside its storage scopes.
+That scope tells the origin to serve objects under the share's prefix as the share's *owner* rather than as the person presenting the token — which is what makes delegated access work.
+It is minted by the issuer only; it is not a scope you can grant to a user or a group.
+
+When matching ACL entries for a caller, Pelican expands the caller's group list with the memberships recorded on the server, the implicit `user-<username>` personal group, and `@authenticated` when the caller has any identity at all.
+
+## Acceptable Use Policy gate
+
+If your server has an Acceptable Use Policy configured, you must accept the current version before you can use the user, group, or self-service management APIs.
+Until you do, those endpoints return `403` with `requires_aup: true` and the version you need to accept, and the web interface sends you to the acceptance page.
+Three things stay reachable so you can get unstuck: reading the policy, accepting it, and signing out.
+Editing the policy is also exempt, so rotating it cannot lock out the administrator who rotated it.
+
+The collections and shares API is not behind this gate.
+Neither is redeeming a collection-ownership invite — becoming an owner does not by itself grant management-policy authority.
+
+| Behind the gate | Exempt from the gate |
+|---|---|
+| Everything under `/api/v1.0/groups` | `GET /api/v1.0/me` and `POST /api/v1.0/me/aup` |
+| Everything under `/api/v1.0/users` | `GET /api/v1.0/aup` and `GET /api/v1.0/aup/:version`, both unauthenticated |
+| Everything under `/api/v1.0/me` other than the two exempt routes | `PUT /api/v1.0/aup` and `GET /api/v1.0/aup/versions`, both system-administrator-only |
+| `POST /api/v1.0/invites/redeem` | `POST /api/v1.0/invites/redeem/collection-ownership` |
+| `POST /api/v1.0/invites/onboarding` | `POST /api/v1.0/invites/redeem/password` and `GET /api/v1.0/invites/info`, both unauthenticated |
+| | The whole `/api/v1.0/origin_ui/collections` surface, including shares |
+| | `GET /api/v1.0/scopes` |
+
+[`Server.AUPFile`](/sharing-your-data/configuration#Server-AUPFile) set to `none` removes the requirement entirely.
+
+## Response codes
+
+One row per meaning, not per endpoint.
+Full request and response schemas are in the [API browser](/sharing-your-data/api).
+
+| Code | What it means |
+|---|---|
+| `204 No Content` | The change was applied. These endpoints return no body. |
+| `400 Bad Request` | A malformed body, a missing required field, or a name or namespace that failed validation. Also `ownerId cannot be empty` on a collection. |
+| `401 Unauthorized` | No valid session or token — or the account was deactivated or deleted after the credential was issued, which is checked on every request. |
+| `403 Forbidden` | You are authenticated but hold neither the scope nor the ownership or ACL access the action needs. Also returned for a cross-origin cookie-authenticated write, which is rejected as a CSRF risk. |
+| `403 Forbidden` with `requires_aup: true` and `aup_version` | You have not accepted the current Acceptable Use Policy. See [Acceptable Use Policy gate](#acceptable-use-policy-gate). |
+| `404 Not Found` | The record does not exist, **or** it exists and you are not allowed to see it. Endpoints that would otherwise confirm a record exists return `404` rather than `403` when you are not allowed to see it. A `404` on a collection or group you believe exists usually means you lack access, not that it is missing. |
+| `409 Conflict` | `Sharing is not enabled on this collection`, or `Shares are not supported on multi-user origin backends`. |
+
+## Identifier rules
+
+| Field | Rule |
+|---|---|
+| Username, group name | 2 to 64 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `@` and `-`; has to start with a letter or a digit. `/` is rejected, and so is any occurrence of `..`. |
+| Group name, additionally | Cannot start with `user-`, which is reserved for the implicit personal group every user belongs to. |
+| Display name | Optional; up to 128 characters of any printable Unicode, with ASCII control characters rejected. Never used for an authorization decision. |
+| Internal ID | Generated by the server. It appears in URLs and API paths as a routing handle and is not a credential. |
+| Collection or share namespace | An absolute `/`-rooted path with no whitespace, no control characters, and no `:`. Canonicalised before it is checked against the export prefix and before it is stored, so the path that is checked is the path that ends up in a token scope. |
+| ACL target | A group name, or the virtual target `@authenticated`. The leading `@` is rejected by identifier validation, so the virtual target can never collide with a real group name. |
+
+Configuration admin lists match on the username only.
+An entry that is an OIDC subject rather than a Pelican username grants nothing, and the server logs an error naming it at startup.
+
+## Where to go next
+
+- [How Access Control Works](/sharing-your-data/access-control-model) — the model behind these tables.
+- [Managing Users and Groups](/sharing-your-data/users-and-groups) — how to carry out the user and group tasks.
+- [Managing Access to a Collection](/sharing-your-data/collections-and-shares) — how to carry out the collection and share tasks.
+- [API browser](/sharing-your-data/api) — request and response schemas for every endpoint named here.
+- [`pelican-server server user`](/federation-services/commands-reference/pelican-server/server/user) and [`pelican-server server group`](/federation-services/commands-reference/pelican-server/server/group) — generated CLI reference.
+- [`pelican-server origin collection`](/federation-services/commands-reference/pelican-server/origin/collection) — generated CLI reference for collections.
+- [Parameters](/sharing-your-data/configuration) — the admin-list settings, `Server.NewUserDefaultScopes`, `Server.AUPFile`, and `Origin.Multiuser`.

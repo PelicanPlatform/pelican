@@ -1,0 +1,15 @@
+export default {
+    "aup": "pelican-server server user aup",
+    "clear-password": "pelican-server server user clear-password",
+    "create": "pelican-server server user create",
+    "delete": "pelican-server server user delete",
+    "get": "pelican-server server user get",
+    "identity": "pelican-server server user identity",
+    "invite-onboard": "pelican-server server user invite-onboard",
+    "invite-password": "pelican-server server user invite-password",
+    "list": "pelican-server server user list",
+    "list-password-invites": "pelican-server server user list-password-invites",
+    "scope": "pelican-server server user scope",
+    "set-status": "pelican-server server user set-status",
+    "update": "pelican-server server user update",
+}

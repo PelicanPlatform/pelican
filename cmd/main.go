@@ -38,8 +38,9 @@ var cliDispatchHook func(execName string, args []string) (bool, error)
 // after Execute() returns an error (e.g., origin config help text).
 var cliExecErrorHook func(err error)
 
-//go:generate go run -tags client . generate-docs docs/app/commands-reference/pelican
-//go:generate go run -tags server . generate-docs docs/app/commands-reference/pelican-server
+//go:generate go run -tags client . generate-docs docs/app/accessing-your-data/commands-reference/pelican
+//go:generate go run -tags server . generate-docs docs/app/federation-services/commands-reference/pelican-server
+//go:generate go run -tags server . generate-docs docs/app/sharing-your-data/commands-reference/pelican-server
 func main() {
 	logging.SetupLogBuffering()
 	// On a panic (or any unwind), flip the log writer to synchronous mode first

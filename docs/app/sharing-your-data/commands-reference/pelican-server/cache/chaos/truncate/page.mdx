@@ -1,0 +1,51 @@
+---
+title: pelican server cache chaos truncate
+---
+
+## pelican-server cache chaos truncate
+
+Truncate a cached object's on-disk data
+
+### Synopsis
+
+Remove bytes from the end of one of a cached object's on-disk chunk files,
+dropping trailing block(s). The cache detects the missing/short data on a cold
+read or during the data scan.
+
+By default the last chunk is truncated by one block; use --chunk and
+--drop-bytes to control which chunk and how much is removed.
+
+Examples:
+  pelican cache chaos truncate pelican://my-federation/data/file.dat
+  pelican cache chaos truncate /data/file.dat --drop-bytes 65536
+  pelican cache chaos truncate --instance &lt;hash&gt; --chunk 0
+
+```
+pelican-server cache chaos truncate <object-url> [flags]
+```
+
+### Options
+
+```
+      --chunk int        Chunk index to truncate (default: the last chunk) (default -1)
+      --drop-bytes int   Bytes to remove from the end of the chunk file (default: one block)
+  -h, --help             help for truncate
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+      --etag string         Select the object version by ETag (default: latest)
+  -f, --federation string   Pelican federation to utilize
+      --instance string     Select the object version by instance hash
+      --json                Output in JSON format
+  -L, --log string          Specified log output file
+  -t, --token string        Path to admin token file (auto-generated if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server cache chaos](/sharing-your-data/commands-reference/pelican-server/cache/chaos/)	 - Inject corruption into cached objects (fault-injection testing)
