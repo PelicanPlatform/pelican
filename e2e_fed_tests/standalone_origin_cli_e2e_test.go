@@ -21,7 +21,6 @@
 package fed_tests
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -32,7 +31,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -40,7 +38,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // This file is the binary-vs-binary counterpart to cmd/origin_standalone_test.go.
@@ -115,11 +115,10 @@ func startStandaloneOrigin(t *testing.T, ctx context.Context, cliPath string) *s
 
 	configPath := writeStandaloneConfig(t, configDir, runtimeDir, storageDir, issuerKeysDir, true)
 
-	var output bytes.Buffer
-	var outputMu sync.Mutex
+	var output fed_test_utils.LockedWriter
 	cmd := exec.CommandContext(ctx, cliPath, "origin", "serve", "--config", configPath)
 	cmd.Env = pelicanEnv()
-	cmd.Stdout = &lockedWriter{w: &output, mu: &outputMu}
+	cmd.Stdout = &output
 	cmd.Stderr = cmd.Stdout
 	require.NoError(t, cmd.Start(), "failed to start the standalone origin")
 
@@ -127,8 +126,6 @@ func startStandaloneOrigin(t *testing.T, ctx context.Context, cliPath string) *s
 	go func() { exited <- cmd.Wait() }()
 
 	snapshot := func() string {
-		outputMu.Lock()
-		defer outputMu.Unlock()
 		return output.String()
 	}
 
@@ -357,7 +354,7 @@ func createToken(t *testing.T, ctx context.Context, cliPath, clientConfigDir, to
 // process and drives it entirely with the pelican client binary run as further
 // OS processes.
 func TestStandaloneOriginCliEndToEnd(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -567,7 +564,7 @@ func TestStandaloneOriginCliEndToEnd(t *testing.T) {
 // would be consistent with an origin that tolerates a missing federation for
 // reasons having nothing to do with the feature under test.
 func TestStandaloneOriginCliFederatedControl(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -585,9 +582,8 @@ func TestStandaloneOriginCliFederatedControl(t *testing.T) {
 	cmd := exec.CommandContext(ctx, cliPath, "origin", "serve", "--config", configPath)
 	cmd.Env = pelicanEnv()
 
-	var output bytes.Buffer
-	var outputMu sync.Mutex
-	cmd.Stdout = &lockedWriter{w: &output, mu: &outputMu}
+	var output fed_test_utils.LockedWriter
+	cmd.Stdout = &output
 	cmd.Stderr = cmd.Stdout
 	require.NoError(t, cmd.Start())
 
@@ -601,14 +597,10 @@ func TestStandaloneOriginCliFederatedControl(t *testing.T) {
 
 	select {
 	case err := <-exited:
-		outputMu.Lock()
-		defer outputMu.Unlock()
 		require.Error(t, err, "a federated origin with no discovery URL must not start; output:\n%s", output.String())
 		assert.Contains(t, strings.ToLower(output.String()), strings.ToLower(param.Federation_DiscoveryUrl.GetName()),
 			"expected the startup failure to name the missing federation configuration; output:\n%s", output.String())
 	case <-time.After(120 * time.Second):
-		outputMu.Lock()
-		defer outputMu.Unlock()
 		t.Fatalf("federated origin with no discovery URL neither started nor exited; output:\n%s", output.String())
 	}
 }

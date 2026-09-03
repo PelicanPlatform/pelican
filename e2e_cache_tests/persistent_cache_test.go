@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -111,7 +111,7 @@ func TestPersistentCache_BasicDownload(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/cache_test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	transferResultsUpload, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 	require.NotEmpty(t, transferResultsUpload)
@@ -176,7 +176,7 @@ func TestPersistentCache_AgeHeader(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/age_test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -248,7 +248,7 @@ func TestPersistentCache_ConditionalRequest(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/etag_test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -322,7 +322,7 @@ func TestPersistentCache_RangeRequest(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/range_test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -387,7 +387,7 @@ func TestPersistentCache_StatsAPI(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/stats_test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -438,7 +438,7 @@ func TestPersistentCache_MultipleObjects(t *testing.T) {
 	require.NotNil(t, ft)
 
 	localTmpDir := t.TempDir()
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create and upload multiple test files
 	for i := 1; i <= 3; i++ {

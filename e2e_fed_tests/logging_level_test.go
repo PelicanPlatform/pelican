@@ -43,9 +43,9 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	ft := fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 	srvURL := param.Server_ExternalWebUrl.GetString()
 
 	// Write current config to a temporary file so the subprocess can access issuer keys

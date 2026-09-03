@@ -57,27 +57,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// originServerURL returns the https://host:port string for the running origin.
-func originServerURL() string {
-	return fmt.Sprintf("https://%s:%d",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-}
-
-// skipUnlessXattrs ensures the filesystem under tmpPath supports user xattrs,
-// which the checksum-cache layer requires. macOS tmpfs / some Linux mounts
-// silently reject these.
-func skipUnlessXattrs(t *testing.T, tmpPath string) {
-	t.Helper()
-	probe := filepath.Join(tmpPath, ".xattr-probe")
-	if err := os.WriteFile(probe, []byte("x"), 0o644); err != nil {
-		t.Skipf("could not write probe file: %v", err)
-	}
-	defer os.Remove(probe)
-	if err := xattr.Set(probe, "user.test.pelican", []byte("y")); err != nil {
-		t.Skipf("xattrs not supported on this filesystem: %v", err)
-	}
-}
-
 // expectedCRC32CHex returns the RFC 3230-style 8-char lowercase hex CRC32C
 // digest of the given content, matching origin_serve.rfc3230Value's encoding.
 func expectedCRC32CHex(content []byte) string {
@@ -124,7 +103,7 @@ func TestPosixv2_DefaultDigestIsCRC32C(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	storage := t.TempDir()
-	skipUnlessXattrs(t, storage)
+	fed_test_utils.SkipUnlessXattrs(t, storage)
 
 	originConfig := fmt.Sprintf(`
 Origin:
@@ -145,11 +124,11 @@ Director:
 	backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "default_crc32c.txt")
 	require.NoError(t, os.WriteFile(backendFile, content, 0o644))
 
-	tok := getTempTokenForTest(t)
+	tok := fed_test_utils.TempWriteToken(t)
 	httpClient := config.GetClientNoRedirect()
 
 	req, err := http.NewRequest(http.MethodHead,
-		originServerURL()+"/api/v1.0/origin/data/test/default_crc32c.txt", nil)
+		fed_test_utils.OriginServerURL()+"/api/v1.0/origin/data/test/default_crc32c.txt", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	// Deliberately omit Want-Digest so the server has to pick the default.
@@ -196,7 +175,7 @@ func TestPosixv2_UploadCachesDefaultChecksum(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	storage := t.TempDir()
-	skipUnlessXattrs(t, storage)
+	fed_test_utils.SkipUnlessXattrs(t, storage)
 
 	originConfig := fmt.Sprintf(`
 Origin:
@@ -221,7 +200,7 @@ Director:
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/obj.bin",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	tok := getTempTokenForTest(t)
+	tok := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, local, uploadURL, false, client.WithToken(tok))
 	require.NoError(t, err)
 
@@ -278,7 +257,7 @@ func TestPosixv2_DoGetVerifiesChecksum_ThroughCache(t *testing.T) {
 			}
 
 			storage := t.TempDir()
-			skipUnlessXattrs(t, storage)
+			fed_test_utils.SkipUnlessXattrs(t, storage)
 
 			originConfig := fmt.Sprintf(`
 Origin:
@@ -305,7 +284,7 @@ Director:
 			objectURL := fmt.Sprintf("pelican://%s:%d/test/verify.bin",
 				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-			tok := getTempTokenForTest(t)
+			tok := fed_test_utils.TempWriteToken(t)
 			_, err := client.DoPut(ft.Ctx, local, objectURL, false, client.WithToken(tok))
 			require.NoError(t, err)
 
@@ -412,13 +391,13 @@ Director:
 	require.Equal(t, int64(sz), mustSize(t, a))
 	require.Equal(t, int64(sz), mustSize(t, b))
 
-	tok := getTempTokenForTest(t)
+	tok := fed_test_utils.TempWriteToken(t)
 	httpClient := config.GetClientNoRedirect()
 
 	etagOf := func(name string) string {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodGet,
-			originServerURL()+"/api/v1.0/origin/data/test/"+name, nil)
+			fed_test_utils.OriginServerURL()+"/api/v1.0/origin/data/test/"+name, nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		resp, err := httpClient.Do(req)
@@ -475,10 +454,10 @@ Director:
 	path := filepath.Join(ft.Exports[0].StoragePrefix, "etag_rt.bin")
 	require.NoError(t, os.WriteFile(path, []byte("conditional payload"), 0o644))
 
-	tok := getTempTokenForTest(t)
+	tok := fed_test_utils.TempWriteToken(t)
 	httpClient := config.GetClientNoRedirect()
 
-	url := originServerURL() + "/api/v1.0/origin/data/test/etag_rt.bin"
+	url := fed_test_utils.OriginServerURL() + "/api/v1.0/origin/data/test/etag_rt.bin"
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	require.NoError(t, err)

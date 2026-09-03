@@ -84,7 +84,7 @@ Director:
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/xattr_test.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -255,7 +255,7 @@ Director:
 	require.Equal(t, 2, len(ft.Exports), "Should have two exports")
 
 	// Get token
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Upload a file to test1 export
 	testContent1 := "Content for test1"
@@ -348,7 +348,7 @@ Director:
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/multi_checksum_test.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -428,7 +428,7 @@ Director:
 	backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "head_checksum_test.txt")
 	require.NoError(t, os.WriteFile(backendFile, testContent, 0644))
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create HTTP client that skips TLS verification for testing
 	httpClient := &http.Client{
@@ -508,7 +508,7 @@ Director:
 	backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "rfc3230_test.txt")
 	require.NoError(t, os.WriteFile(backendFile, testContent, 0644))
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create HTTP client that skips TLS verification for testing
 	httpClient := &http.Client{

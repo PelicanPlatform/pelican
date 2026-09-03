@@ -22,7 +22,7 @@
 // (If-None-Match, If-Modified-Since) and Cache-Control behavior. These tests
 // verify RFC 7232 compliance for the POSIXv2 origin backend and persistent cache.
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -65,7 +65,7 @@ func setupTestFileOnOrigin(ctx context.Context, t *testing.T, ft *fed_test_utils
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 
@@ -74,7 +74,7 @@ func setupTestFileOnOrigin(ctx context.Context, t *testing.T, ft *fed_test_utils
 
 // makeRequest makes an HTTP request to the origin with optional conditional headers
 func makeRequest(ctx context.Context, t *testing.T, url string, headers map[string]string) *http.Response {
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+testToken)
@@ -433,7 +433,7 @@ func TestCache_IfNoneMatch_CachedContent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get cache URL
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
 
 	// First request to cache - get ETag
@@ -478,7 +478,7 @@ func TestCache_IfModifiedSince_CachedContent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get cache URL
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
 
 	// Get Last-Modified from cache
