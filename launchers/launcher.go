@@ -250,6 +250,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		log.Info("Transfer module enabled")
 	}
 
+	// The cache is the only module launched after the web engine is up (it
+	// must wait for the director to be working), while its database must be
+	// initialized here, before the engine starts serving: web handlers
+	// dereference database.ServerDatabase and a request arriving in the
+	// window between engine start and CacheServe would panic (issue #3709).
+	if modules.IsEnabled(server_structs.CacheType) {
+		if err = database.InitServerDatabase(server_structs.CacheType); err != nil {
+			return
+		}
+	}
+
 	// Start periodic database backup routine
 	database.LaunchPeriodicBackup(ctx, egrp)
 
