@@ -22,7 +22,13 @@ The --expiration flag accepts the following formats:
 
 Note: Use either 'Z' for UTC or a timezone offset like '-05:00', not both.
 
-Examples:
+```
+pelican-server apikey generate [flags]
+```
+
+### Examples
+
+```
   # Generate an API key that never expires
   pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration never
 
@@ -34,9 +40,6 @@ Examples:
 
   # Generate an API key with a timezone offset
   pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T18:59:59-05:00
-
-```
-pelican-server apikey generate [flags]
 ```
 
 ### Options

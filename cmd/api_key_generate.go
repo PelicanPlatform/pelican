@@ -58,10 +58,8 @@ The --expiration flag accepts the following formats:
   - RFC3339 with timezone offset  e.g. 2025-12-31T18:59:59-05:00
   - Date only (ISO 8601)          e.g. 2025-12-31 (interpreted as midnight UTC)
 
-Note: Use either 'Z' for UTC or a timezone offset like '-05:00', not both.
-
-Examples:
-  # Generate an API key that never expires
+Note: Use either 'Z' for UTC or a timezone offset like '-05:00', not both.`,
+		Example: `  # Generate an API key that never expires
   pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration never
 
   # Generate an API key expiring on a specific date
@@ -72,7 +70,8 @@ Examples:
 
   # Generate an API key with a timezone offset
   pelican apikey generate --server https://my-origin.com:8447 --scopes "monitoring.query" --expiration 2025-12-31T18:59:59-05:00`,
-		RunE: generateApiKey,
+		RunE:         generateApiKey,
+		SilenceUsage: true,
 	}
 
 	apiKeyScopes     string
