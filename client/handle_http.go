@@ -4557,7 +4557,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 					if resp.StatusCode == http.StatusForbidden {
 						pde := &PermissionDeniedError{}
 						if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
-							pde.message = "Permission denied: " + trimmed
+							pde.message = "permission denied: " + credentialRefused + "; server said: " + trimmed
 						}
 						wrapped = error_codes.NewAuthorizationError(pde)
 					} else {
@@ -4575,7 +4575,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			// wrapDownloadError.
 			pde := &PermissionDeniedError{}
 			if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
-				pde.message = "Permission denied: " + trimmed
+				pde.message = "permission denied: " + credentialRefused + "; server said: " + trimmed
 			}
 			authErr := error_codes.NewAuthorizationError(pde)
 			return 0, 0, -1, serverVersion, "", authErr
@@ -5806,7 +5806,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: the object does not exist in this namespace"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// XRootD workaround!
 			// If you attempt a directory listing on a path that is actually a file,
@@ -6124,7 +6124,7 @@ func listHttpEmit(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Dire
 // the caller should emit that info instead of the error.
 func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.FileInfo, error) {
 	if gowebdav.IsErrNotFound(err) {
-		return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
+		return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: the object does not exist in this namespace"))
 	}
 	// Two different errors can mean "this path is an object, not a
 	// collection". An XRootD origin answers ReadDir on a plain object with a
@@ -6638,7 +6638,7 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				} else if gowebdav.IsErrNotFound(err) {
-					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at endpoint %s", dest.String(), endpoint.String())
+					err = errors.Wrapf(ErrObjectNotFound, "the object %s does not exist in this namespace (reported by %s)", dest.String(), endpoint.String())
 					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return

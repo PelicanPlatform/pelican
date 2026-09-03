@@ -39,9 +39,15 @@ type PermissionDeniedError struct {
 	noToken bool // true when no token was sent (e.g., public namespace via stale cache)
 }
 
+// credentialRefused is what a 403 actually means, for the reader who does not
+// know the status codes. It is only ever a credential problem: an authorized
+// request for an object that is not there gets a 404, and a namespace no origin
+// serves never reaches a server at all, because the director answers 404 first.
+const credentialRefused = "your credential does not grant access to this object"
+
 func (e *PermissionDeniedError) Error() string {
 	if e.message == "" {
-		return "permission denied"
+		return "permission denied: " + credentialRefused
 	}
 	return e.message
 }

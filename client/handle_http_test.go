@@ -3810,8 +3810,8 @@ func TestWrapDownloadError(t *testing.T) {
 
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
-		// With no tokens at all, it should say "no token was provided"
-		assert.Contains(t, wrappedPde.message, "no token was provided", "Message should indicate no token")
+		// With no tokens at all, it should say that none was sent
+		assert.Contains(t, wrappedPde.message, "no token was sent with the request", "Message should indicate no token")
 		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when no token was sent")
 		assert.True(t, wrappedPde.noToken, "noToken should be set when no token was sent")
 		assert.True(t, IsRetryable(wrappedErr), "Should be retryable so client can attempt token acquisition")

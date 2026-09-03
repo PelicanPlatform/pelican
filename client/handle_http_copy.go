@@ -557,7 +557,7 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 	})
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: source object not found"))
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: the source object does not exist in this namespace"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// XRootD workaround: a directory listing on a file path returns 500.
 			// Stat the path; if it is a file, emit a single copy job.
