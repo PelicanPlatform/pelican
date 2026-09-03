@@ -1,0 +1,251 @@
+import { Callout } from 'nextra/components'
+
+# Managing Users and Groups
+
+The origin grants access to [**collections**](/managing-data-access/collections-and-shares) based on **group membership**; so, to provide an individual with a
+access to data, the origin's administrator - or the delegated [user administrator](/managing-data-access/permissions-reference#user-administration) - must configure
+user accounts and manage group membership.  This page provides short guides for the administrator to
+
+* Adding a user to the origin: Creating the account and (optionally) setting a password.
+* Deactivating a user: Removing their access to the origin and its data
+* Creating a group and managing membership: Adding, inviting, or removing users from a group
+* Delegating group management: Controlling who has permission to make membership
+* Authorizing other access beyond data: Allowing users or groups to view monitoring data or become user administrators themselves.
+
+Additionally, there is a guide, applicable to any user, on managing their own account.
+For the model behind these tasks (what a user is, what a group is, and how a scope reaches a caller) read [How Access Control Works](/managing-data-access/access-control-model).
+For more details, read the [Permissions Reference](/managing-data-access/permissions-reference).
+
+## Before you start
+
+Each guide below uses the origin's **web interface**; to follow along, you must know the origin's URL and have an existing account with the user administrator
+privilege (`server.admin` or `server.user_admin`; see [User administration](/managing-data-access/permissions-reference#user-administration)).
+At the end of the guide, an equivalent **command line** example is given for more advanced administrators.  The command line examples
+assume you are logged into the origin's host or container and have read access to the origin's keys (typically in `/etc/pelican/issuer-keys/`)
+to authorize the action.
+
+Additionally, one can use direct **API** access to invoke the command over the REST interface; the documentation at [`/api-docs`](/api-docs) carries every request and response shape but
+API access is not otherwise covered here.
+
+<Callout type="info">
+Several tasks below produce an invite link.
+Pelican creates the link and displays it exactly once; it is the administrator's responsibility to send it securely to the target user.
+Pelican does not send email.
+</Callout>
+
+## Add a user
+
+Most origins are integrated with Single Sign On (SSO) and are set to auto-create an account the first time a user logs in via SSO.  However, an
+administrator can pre-create an account, enabling logins via a password reset link or through providing SSO information.
+
+Pre-creating allows one to add the person to groups or grant a permissions before the first login.
+
+1. In the browser, go to **Settings** → **Users** and click **ADD USER**.
+2. Choose **Local (username + password)** or **External (OIDC)**.  The latter only appears if the origin has SSO enabled.
+3. Fill in **Username** and, optionally, **Display name**. For a SSO-based user, also fill in **Sub** ("subject"; typically, it's the SSO username) and **Issuer** (URL of the SSO) from your identity provider.
+4. Click **CREATE USER**.
+5. For a local account, the page offers **GENERATE PASSWORD-SET INVITE**. Click it and copy the URL, or click **SKIP FOR NOW** and mint the invite later.
+
+### CLI
+
+```bash copy
+# Local account — hand out a password invite afterwards
+pelican-server server user create --username alice --display-name "Alice Chen"
+
+# OIDC account, subject known in advance
+pelican-server server user create --username alice \
+    --sub abc-123 --issuer https://oidc.example.org/
+```
+
+## Let a user set a password
+
+Administrators never set passwords for users; instead they mint a single-use, time-bounded invite and hand over the link (typically,
+emailing it to an individual).  The person sets their own password when they redeem it.
+The link lifetime defaults to the value of [`Server.GroupInviteLinkExpiration`](/parameters#Server-GroupInviteLinkExpiration).
+
+1. Go to **Settings** → **Users** and click the edit icon on the user's row.
+2. Under **Password setup**, click **GENERATE PASSWORD-SET INVITE**.
+3. Copy the URL from the box that appears and deliver it. It is shown only once.
+4. To disable password login, click **CLEAR LOCAL PASSWORD** under **Local password** and confirm.
+
+The same panel lists every invite ever issued for that user, so you can see whether one is already outstanding before minting another.
+
+### CLI
+
+```bash copy
+pelican-server server user invite-password <user-id>
+pelican-server server user list-password-invites <user-id>
+pelican-server server user clear-password <user-id>
+```
+
+## Creating an onboarding link
+
+Use an onboarding link when you want to invite someone to use the origin whose SSO identity is not currently known; while some SSO's use human-friendly usernames,
+the default provider for Pelican (CILogon) randomly generates names.  A CILogon name may be of the form `http://cilogon.org/serverA/users/67294` and not known to
+the user or administrator.
+
+By using an onboarding link, the new account is associated with the SSO account of the individual who clicked on the link.
+After clicking on the link, the recipient signs in through the identity provider first, and then accepts the invite.
+
+[TODO: the generated text claimed there is no such UI.  This is wrong; add instructions/screenshots here.]
+
+### CLI
+
+```bash copy
+pelican-server server user invite-onboard
+```
+
+The command prints the token, its expiry, and a redemption URL to hand over.
+
+## Deactivate or delete a user
+
+Deactivating is reversible: deactivate when you want to stop the account from being used.
+Because authorization is recomputed periodically, live sessions stop working shortly after deactivation (exact time differs based on configuration; by
+default, it is 15 minutes).
+
+Deleting is not reversible.
+Along with the account, Pelican removes group memberships.  There is no "undelete" functionality.
+
+To delete, go to **Settings** → **Users** and use the **Delete** control on the user's row.
+
+### CLI
+
+```bash copy
+pelican-server server user set-status <user-id> --status inactive
+pelican-server server user delete <user-id>
+```
+
+## Create a group
+
+*Any signed-in user can create a group; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+Group creation is open to any user, allowing them to grant access to their own collections and shares.
+Groups created by unprivileged users, however, cannot be used for Pelican's authorization templates mechanism or be referenced from the configuration variables granting administrator access.
+
+The group **name** is the machine-readable name (such as `reyes-lab-writers`); it is 2 to 64 characters drawn from letters, digits, `.`, `_`, `@`, and `-` and must start with a letter or digit.
+The **display name** and **description** are free-form labels for human readability.
+
+Once the group exists, use it to grant access to a collection: see [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
+
+1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
+2. Click **CREATE GROUP**.
+3. Fill in **Group Name** and, optionally, **Description**.
+4. Leave **Add me as a member of this group** checked if you want to be a member as well as the owner. Creating a group makes you its owner but does not make you a member.
+5. Click **CREATE**.
+
+### CLI
+
+```bash copy
+pelican-server server group create --name cms-analysis --description "CMS analysis team"
+```
+
+## Add and remove group members
+
+*Requires group ownership/administrator privilege or server user administration privilege.*
+
+Each group has an owner (individual user account); optionally, there may be an "administrator group".  Either the owner or a member of the administrator group can manage group membership
+
+1. Open **Groups** and expand the group, or open its detail page.
+2. Under **Members**, click **ADD MEMBER**, pick the user, and click **ADD MEMBER** again in the dialog.
+3. To remove someone, click the remove icon beside their row and confirm.
+
+For administrators, the **ADD MEMBER** drop-down shows all users at the server.  Otherwise, it only shows users in groups the owner is a member of.
+
+Removing a member does not relinquish ownership; the owner remains the owner even after their membership is deleted.
+
+### CLI
+
+```bash copy
+pelican-server server group add-member <group-id> --user-id <user-id>
+pelican-server server group remove-member <group-id> --user-id <user-id>
+pelican-server server group list-members <group-id>
+```
+
+## Invite people to a group with a link
+
+*Requires group ownership/administrator privilege or server user administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+An invite link is how a group owner brings in people they cannot look up.
+A single-use link admits one person; a multi-use link admits everyone who holds it until it expires or you revoke it.
+Expiration time defaults to [`Server.GroupInviteLinkExpiration`](/parameters#Server-GroupInviteLinkExpiration).
+
+The recipient must sign in to their user account and, if your server has an Acceptable Use Policy (AUP) policy, agree to the AUP.  Once signed in, the user may accept the invite to join the group.
+
+1. Open the group's detail page. The **Invite links** panel appears for owners and group administrators only.
+2. Set **Single use** on or off, and set **Expires in** to a duration such as `168h`, `24h`, or `30m`.
+3. Click **GENERATE INVITE LINK** and copy the URL. It is shown only once.
+4. To withdraw a link, click the revoke icon on its row.
+
+Listed links show a short ID rather than the token; the ID is safe to quote in a ticket or an audit log.
+
+### CLI
+
+```bash copy
+pelican-server server group invite create <group-id> --single-use --expires-in 24h
+pelican-server server group invite list <group-id>
+pelican-server server group invite revoke <group-id> <link-id>
+```
+
+## Transfer group ownership or delegate a group administrator
+
+*Requires group ownership or server administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+A group has exactly one owner; only the owner can transfer ownership, name an administrator group, or delete it.
+
+A group administrator manages group membership on behalf of the owner.
+An administrator cannot transfer ownership and cannot delete the group.
+
+1. Open the group's detail page and find the **Ownership** section.
+2. Click the edit icon beside **Owner**, pick the new owner, and save.
+3. Click the edit icon beside **Administrator**, choose **None**, **User**, or **Group**, pick the target, and save.
+
+### CLI
+
+```bash copy
+pelican-server server group set-ownership <group-id> --owner-id <user-id>
+pelican-server server group set-ownership <group-id> --admin-id <id> --admin-type group
+```
+
+## Make a group usable in authorization templates and admin lists
+
+*Turning the flag on for an existing group requires server administrator privileges — see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+[`Issuer.AuthorizationTemplates`](/parameters#Issuer-AuthorizationTemplates) and the `Server.*AdminGroups` settings provide groups with special privileges to access data or administer the server.
+Since unprivileged users can groups as well, the administrator must mark groups as compatible with these settings; this is the special `auth-template-eligibility` flag.
+For more information, see [Where a scope can come from?](/managing-data-access/access-control-model#where-a-scope-can-come-from).
+
+You can set the flag at creation time if you are a server administrator.
+
+- **At creation:** in the **Create New Group** dialog, tick **Auth-template eligible**. The checkbox is rendered only for callers who can set it.
+- **Afterwards:** open the group's detail page and flip the **Auth template** switch. Everyone else sees the current state as a read-only `eligible` or `ineligible` chip.
+
+## Grant a scope to a user or group
+
+*Requires server administrator privilege; see [Management scopes](/managing-data-access/permissions-reference#management-scopes).*
+
+Scopes provide specific permissions to a user or group beyond data access.  Scopes may allow access to monitoring, collection management, or user management.
+
+1. For a user: **Settings** → **Users**, edit the user, and scroll to **Scopes**. For a group: open the group's detail page and find its scopes panel. Both panels are rendered for system administrators only.
+2. Pick an entry from **Pick a scope to grant** — the picker offers only scopes the management API will accept — and click **GRANT**.
+3. To revoke, click the × on the scope's chip.
+
+### CLI
+
+```bash copy
+pelican-server server user scope list <user-id>
+pelican-server server user scope grant <user-id> --scope server.user_admin
+pelican-server server group scope revoke <group-id> <scope>
+```
+
+## Manage your own account
+
+*Any signed-in user.*
+
+Open the user menu and choose **Profile**.
+
+- **Display name** — edit the field and click **SAVE**. Your username is read-only; changing it is an administrator's job.
+- **Local password** — **RESET PASSWORD** asks for your current password and a new one; **REMOVE PASSWORD** disables username-and-password login while leaving linked OIDC identities working. Both appear only when a password is already set.
+- **Effective scopes** — the full set the server computes for you right now.
+- **Linked identities** — unlink a secondary identity with the unlink icon. Your primary identity is marked `managed by admin`.
+- **Your groups** — click **LEAVE**, then **CONFIRM LEAVE**. You cannot leave a group you own; transfer ownership first.
+
