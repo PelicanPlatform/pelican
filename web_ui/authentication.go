@@ -66,6 +66,11 @@ type (
 		Authenticated bool     `json:"authenticated"`
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
+		// UserId is the stable Pelican user ID from the user database.
+		// Surfaced so the frontend can match records (e.g. registry
+		// registration ownership) that reference users by ID rather
+		// than by login username.
+		UserId string `json:"user_id,omitempty"`
 		// DisplayName is the human label from the User row (if any).
 		// Surfaced here so the navbar's user menu can render it
 		// without a second /me round-trip on every page mount.
@@ -1217,6 +1222,7 @@ func whoamiHandler(ctx *gin.Context) {
 	} else {
 		res.Authenticated = true
 		res.User = user
+		res.UserId = userId
 
 		// Set header to carry CSRF token
 		ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))

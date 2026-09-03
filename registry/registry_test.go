@@ -290,7 +290,9 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		result, ok := resStruct.Results["/incomplete-prefix"]
 		require.True(t, ok)
 		assert.False(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
+		// The registration has no owner (empty UserID), so the link points to
+		// the claim page instead of the edit page
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/claim/?id=")
 		assert.Contains(t, result.Msg, "Incomplete registration:")
 	})
 
@@ -310,7 +312,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 					"/complete-prefix",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 			},
 		)
@@ -355,19 +357,19 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 					"/complete-prefix-1",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 				mockNamespace(
 					"/complete-prefix-2",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 				mockNamespace(
 					"/foo/bar",
 					mockJWKS,
 					"",
-					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution", Description: "mock description"},
 				),
 			},
 		)

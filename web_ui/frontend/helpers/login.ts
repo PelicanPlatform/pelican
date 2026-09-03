@@ -101,6 +101,8 @@ export const getUser = async (): Promise<User> => {
     const user = {
       authenticated: json['authenticated'],
       user: json['user'] == '' ? null : json['user'],
+      // Stable Pelican user ID; used alongside `user` for ownership checks
+      user_id: json['user_id'] || undefined,
       role: json['role'] == '' ? null : json['role'],
       // Optional human label from the User row. Always-mounted UI
       // (e.g. the navbar's user menu) prefers this over `user`.
