@@ -329,8 +329,9 @@ func (h *logRingBufferHook) Fire(entry *log.Entry) error {
 //
 // The effective level comes from GetEffectiveLogLevel (which knows about
 // the hook-based filtering initFilterLogging installs); logrus's own
-// GetLevel is often pinned to TraceLevel so hooks see everything even when
-// the operator asked for info-only output.
+// GetLevel can sit above the operator's configured level while a registered
+// RegexpFilter needs to observe more verbose entries (see logrusLevelFor),
+// so it is not a reliable statement of what the operator asked for.
 func shouldBuffer(level log.Level) bool {
 	if level <= log.InfoLevel {
 		return true

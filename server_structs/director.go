@@ -601,6 +601,11 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 // LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
 // For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
 // ad for `/foo/bar`.  Returns nil if no ad matches.
+//
+// The returned ad is a copy, detached from the provided slice, so callers may
+// hold or mutate it freely -- important on the director, where namespaceAds
+// is live TTL-cache memory read concurrently by other goroutines. Only the
+// single best match is copied; the scan itself does not allocate.
 func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	// Normalize incoming path if needed --> adding the trailing / makes
 	// basic prefix matching safer
@@ -608,30 +613,38 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 		reqPath += "/"
 	}
 
-	var bestFedPrefix string
-	var bestNamespace *NamespaceAd
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
-
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
+	// bestLen tracks the length of the best "/"-terminated prefix matched so
+	// far; any real match has nsLen >= 1, so 0 doubles as "nothing yet".
+	bestLen := 0
+	bestIdx := -1
+	for idx := range namespaceAds {
+		// Normalize stored namespace paths. Compare without allocating: a
+		// path lacking the trailing "/" must be a proper prefix of reqPath
+		// with a "/" as the next byte (reqPath is already "/"-terminated).
+		nsPath := namespaceAds[idx].Path
+		nsLen := len(nsPath)
+		if strings.HasSuffix(nsPath, "/") {
+			if !strings.HasPrefix(reqPath, nsPath) {
+				continue
+			}
+		} else {
+			if len(reqPath) <= nsLen || reqPath[nsLen] != '/' || reqPath[:nsLen] != nsPath {
+				continue
+			}
+			nsLen++ // account for the implied trailing "/"
 		}
 
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
-			continue
-		}
-
-		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
+		if nsLen > bestLen {
+			bestLen = nsLen
+			bestIdx = idx
 		}
 	}
 
-	return bestNamespace
+	if bestIdx < 0 {
+		return nil
+	}
+	bestNamespace := namespaceAds[bestIdx]
+	return &bestNamespace
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
