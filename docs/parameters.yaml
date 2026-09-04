@@ -4969,7 +4969,7 @@ description: |+
   - read /home/bbockelm
   - modify /home/bbockelm
   - read /projects/dept_a
-  - create /projects_dept_a
+  - create /projects/dept_a
   - read /data/dept_a
   - read /data/dept_b
 type: object
