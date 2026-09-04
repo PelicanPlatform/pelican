@@ -530,11 +530,12 @@ func (fs *httpsFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, 
 	}
 
 	return &httpsFileInfo{
-		name:    path.Base(name),
-		size:    resp.ContentLength,
-		modTime: parseHTTPDate(resp.Header.Get("Last-Modified")),
-		isDir:   false,
-		etag:    resp.Header.Get("ETag"),
+		name:         path.Base(name),
+		size:         resp.ContentLength,
+		modTime:      parseHTTPDate(resp.Header.Get("Last-Modified")),
+		isDir:        false,
+		etag:         resp.Header.Get("ETag"),
+		cacheControl: resp.Header.Get("Cache-Control"),
 	}, nil
 }
 
@@ -603,14 +604,18 @@ func (auth *simpleBearerAuthenticator) Clone() gowebdav.Authenticator {
 // HTTPS/WebDAV server.  Returned by httpsFileInfo.Sys() when populated.
 type HTTPSFileSysInfo struct {
 	ETag string
+	// CacheControl is the upstream response's Cache-Control header, if any
+	// (only available in HTTP-only mode; WebDAV PROPFIND does not carry it).
+	CacheControl string
 }
 
 type httpsFileInfo struct {
-	name    string
-	size    int64
-	modTime time.Time
-	isDir   bool
-	etag    string
+	name         string
+	size         int64
+	modTime      time.Time
+	isDir        bool
+	etag         string
+	cacheControl string
 }
 
 func (fi *httpsFileInfo) Name() string      { return fi.name }
@@ -624,8 +629,8 @@ func (fi *httpsFileInfo) ModTime() time.Time {
 }
 func (fi *httpsFileInfo) IsDir() bool { return fi.isDir }
 func (fi *httpsFileInfo) Sys() interface{} {
-	if fi.etag != "" {
-		return &HTTPSFileSysInfo{ETag: fi.etag}
+	if fi.etag != "" || fi.cacheControl != "" {
+		return &HTTPSFileSysInfo{ETag: fi.etag, CacheControl: fi.cacheControl}
 	}
 	return nil
 }
