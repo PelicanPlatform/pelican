@@ -487,6 +487,7 @@ type Config struct {
 		AutoEnrollUsernameClaims []string `mapstructure:"autoenrollusernameclaims" yaml:"AutoEnrollUsernameClaims"`
 		CollectionAdminGroups []string `mapstructure:"collectionadmingroups" yaml:"CollectionAdminGroups"`
 		CollectionAdminUsers []string `mapstructure:"collectionadminusers" yaml:"CollectionAdminUsers"`
+		ConfigReadOnly bool `mapstructure:"configreadonly" yaml:"ConfigReadOnly"`
 		DatabaseBackup struct {
 			Frequency time.Duration `mapstructure:"frequency" yaml:"Frequency"`
 			Location string `mapstructure:"location" yaml:"Location"`
@@ -1076,6 +1077,7 @@ type configWithType struct {
 		AutoEnrollUsernameClaims struct { Type string; Value []string }
 		CollectionAdminGroups struct { Type string; Value []string }
 		CollectionAdminUsers struct { Type string; Value []string }
+		ConfigReadOnly struct { Type string; Value bool }
 		DatabaseBackup struct {
 			Frequency struct { Type string; Value time.Duration }
 			Location struct { Type string; Value string }

@@ -791,6 +791,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_AdvertisementInterval.GetName(), "1m")
 	// Server.AutoEnrollUsernameClaims
 	v.SetDefault(param.Server_AutoEnrollUsernameClaims.GetName(), []string{"preferred_username", "email", "sub"})
+	// Server.ConfigReadOnly
+	v.SetDefault(param.Server_ConfigReadOnly.GetName(), false)
 	// Server.DatabaseBackup.Frequency
 	v.SetDefault(param.Server_DatabaseBackup_Frequency.GetName(), "24h")
 	// Server.DatabaseBackup.Location
