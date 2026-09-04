@@ -3236,6 +3236,127 @@ default: false
 components: ["cache"]
 hidden: true
 ---
+name: Cache.S3StorageTargets
+description: |+
+  A list of S3 storage targets the V2 (persistent) cache uses as additional object storage.
+  Once an object is fully downloaded to a local storage directory, the cache uploads it
+  (unencrypted) to a configured S3 bucket when the object size meets or exceeds
+  ${Cache.S3UploadThreshold}; the local copy is then removed and the object is served from S3.
+
+  Each entry is an object with the following keys:
+
+  - **ServiceUrl** (string, required): S3 endpoint URL (e.g. `https://s3.us-east-1.amazonaws.com`).
+  - **Region** (string, optional): the S3 region; defaults to `us-east-1`.
+  - **Bucket** (string, required): the bucket that holds cached objects.
+  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **UrlStyle** (string, optional): `path` (default) or `virtual` bucket addressing.
+  - **AccessKeyfile** (string, optional): file containing the S3 access key ID.
+  - **SecretKeyfile** (string, optional): file containing the S3 secret key.
+    Both keyfiles must be provided together; when omitted, the ambient AWS credential
+    chain is used.
+  - **MaxSize** (string, required): maximum bytes of cache data stored in the bucket
+    (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
+  - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
+    watermarks as a percentage of MaxSize.  When omitted they follow
+    ${Cache.HighWaterMark} and ${Cache.LowWaterMark} if those are expressed as
+    percentages; absolute-byte watermarks are not applied to buckets, which fall back
+    to the built-in 90%/80% defaults instead.
+
+  Example YAML:
+  ```yaml
+  Cache:
+    S3StorageTargets:
+      - ServiceUrl: https://s3.example.com
+        Region: us-east-1
+        Bucket: pelican-cache
+        Prefix: objects
+        MaxSize: 10TB
+        AccessKeyfile: /etc/pelican/s3-access
+        SecretKeyfile: /etc/pelican/s3-secret
+  ```
+
+  **The cache assumes exclusive ownership of the bucket (or of the configured
+  Prefix within it).**  Its consistency sweep deletes any object under the prefix
+  it does not recognize, and crash recovery aborts all in-progress multipart
+  uploads there — do not share the prefix with other applications or with a
+  second cache instance.
+
+  **Objects on an S3 target are protected differently from objects on local disk.**
+  On disk the cache encrypts every block and authenticates it on read, so tampering
+  and disclosure both require breaking the encryption.  A tiered object is stored as
+  plaintext, and the cache verifies only its size:
+
+  - Anyone who can *read* the bucket can read every object tiered to it, including
+    objects from namespaces that require a token through Pelican.
+  - Anyone who can *write* the bucket can replace an object's bytes with content of
+    the same length, and the cache will serve it — with the origin's ETag and
+    checksums attached — without detecting the substitution.  The periodic data-
+    integrity scan does not checksum tiered objects.
+
+  Treat the bucket as part of the cache's trust boundary: give the cache a
+  dedicated least-privilege credential, keep the bucket private (no anonymous or
+  cross-account access), prefer an `https` endpoint, and consider server-side
+  encryption plus versioning or object lock.  Operators who need the on-disk
+  guarantees for a given namespace should not tier it — raise
+  ${Cache.S3UploadThreshold} above the object sizes involved.
+
+  This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
+  warning and ignores S3 targets otherwise.
+type: object
+default: none
+components: ["cache"]
+---
+name: Cache.S3UploadThreshold
+description: |+
+  The minimum object size for the V2 cache to tier a completed object to an S3 storage
+  target configured via ${Cache.S3StorageTargets}.  Objects smaller than this threshold
+  stay on local storage.  Accepts byte units (e.g. "4MB", "512MB", "1TB"); the
+  suffixes are binary multiples.
+type: string
+default: 4MB
+components: ["cache"]
+---
+name: Cache.S3DisableRedirect
+description: |+
+  When objects are stored on an S3 storage target (${Cache.S3StorageTargets}), the V2 cache
+  by default redirects GET requests to a pre-signed S3 URL so clients download directly from
+  the bucket.  Set this to true to instead proxy the object bytes through the cache.
+
+  The pre-signed URL is self-authenticating and never carries the client's Pelican bearer
+  token.  Spec-compliant HTTP clients (including Pelican's own client) drop the Authorization
+  header when following a redirect, unless the destination is the host they connected to or a
+  subdomain of it — so when a request carries such a header and the bucket endpoint falls
+  inside the cache's own DNS domain, the cache proxies that request instead of redirecting it,
+  rather than relying on the operator to notice.
+
+  Enable this option (proxy instead of redirect) if you serve private namespaces to clients
+  that forward Authorization even across unrelated hosts, contrary to the specification
+  (e.g. `curl --location-trusted`).
+
+  Note that bytes served by redirect do not pass through the cache, so they are not counted
+  in the cache's transfer monitoring.  Proxying restores that accounting at the cost of
+  moving the data through the cache.
+type: bool
+default: false
+components: ["cache"]
+---
+name: Cache.S3PresignExpiry
+description: |+
+  The lifetime of pre-signed S3 URLs handed to clients when serving objects from an S3
+  storage target via redirect (see ${Cache.S3DisableRedirect}).
+type: duration
+default: 5m
+components: ["cache"]
+---
+name: Cache.S3PresignEvictionHold
+description: |+
+  How long after handing out a pre-signed S3 URL the referenced object is protected from
+  cache eviction.  This prevents deleting an object out from under a client that is still
+  downloading it via a pre-signed URL.  Should be at least ${Cache.S3PresignExpiry}.
+type: duration
+default: 5m
+components: ["cache"]
+---
 name: Cache.WorkerCount
 description: |+
   The number of concurrent transfer workers the V2 (persistent) cache uses to fetch objects from upstream

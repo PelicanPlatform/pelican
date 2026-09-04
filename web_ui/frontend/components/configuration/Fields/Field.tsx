@@ -23,6 +23,8 @@ import {
   ParameterInputProps,
   PolicyDefinition,
   PolicyDefinitionForm,
+  S3StorageTarget,
+  S3StorageTargetForm,
   StorageDir,
   StorageDirForm,
   StringField,
@@ -223,6 +225,17 @@ const Field = ({
               value={value as StorageDir[]}
               Form={StorageDirForm}
               keyGetter={(v) => v.path}
+            />
+          );
+        case 'S3StorageTargets':
+          return (
+            <ObjectField
+              focused={focused}
+              onChange={handleChange<S3StorageTarget[]>}
+              name={name}
+              value={value as S3StorageTarget[]}
+              Form={S3StorageTargetForm}
+              keyGetter={(v) => v.serviceurl + '/' + v.bucket}
             />
           );
         default:
