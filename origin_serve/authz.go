@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -50,17 +49,15 @@ type (
 		// change rather than per request: SetTokenHintHeaders runs on every
 		// request a standalone origin serves, and rebuilding the ads there costs
 		// a url.Parse per issuer per request.  Swapped together with exports.
-		nsAds      atomic.Pointer[[]server_structs.NamespaceAd]
-		issuers    atomic.Pointer[map[string]bool]
-		audiences  []string // accepted audience values (origin URL + wildcards)
-		issuerKeys *ttlcache.Cache[string, authConfigItem]
+		nsAds     atomic.Pointer[[]server_structs.NamespaceAd]
+		issuers   atomic.Pointer[map[string]bool]
+		audiences []string // accepted audience values (origin URL + wildcards)
+		// ctx bounds key fetches.  They are shared between requests, so they
+		// must not be tied to whichever request happened to trigger one.
+		ctx        context.Context
+		issuerKeys *token.JwksCache
 		tokenAuthz *ttlcache.Cache[string, cachedTokenInfo]
 		userMapper *UserMapper // Maps JWT claims to local users/groups
-	}
-
-	authConfigItem struct {
-		set jwk.Set
-		err error
 	}
 
 	// cachedTokenInfo stores authorization scopes, user info, and issuer for a token
@@ -77,6 +74,11 @@ type (
 )
 
 var globalAuthConfig *authConfig
+
+// tokenAuthzTTL is the maximum lifetime of a cached token-authorization
+// result.  Individual entries may be given a shorter TTL when the token
+// itself expires sooner.
+const tokenAuthzTTL = 5 * time.Minute
 
 // hasPathPrefix checks if the request path is under the authorized prefix.
 // Unlike strings.HasPrefix, this checks path boundaries to prevent
@@ -141,61 +143,46 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	refreshInterval := param.Origin_UserMapfileRefreshInterval.GetDuration()
 	ac.userMapper.StartPeriodicRefresh(refreshInterval)
 
-	loader := ttlcache.LoaderFunc[string, authConfigItem](
-		func(cache *ttlcache.Cache[string, authConfigItem], issuerUrl string) *ttlcache.Item[string, authConfigItem] {
-			var ar *jwk.Cache
-			jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
-			if err != nil {
-				log.Errorln("Failed to lookup JWKS URL:", err)
-			} else {
-				ar = jwk.NewCache(ctx)
-				client := &http.Client{Transport: config.GetBasicTransport()}
-				if err = ar.Register(jwksUrl.String(), jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-					log.Errorln("Failed to register JWKS URL with cache: ", err)
-				} else {
-					log.Debugln("Setting public key cache for issuer", issuerUrl)
-				}
-			}
+	// Issuer keys are fetched and aged by the shared cache, which serves the
+	// last keys it retrieved through an issuer outage and stops trusting them
+	// once they are too old to confirm.  The key space here comes from the
+	// export configuration rather than from a request, so no capacity bound is
+	// needed.
+	ac.ctx = ctx
+	ac.issuerKeys = token.NewJwksCache(ctx, egrp)
 
-			ttl := ttlcache.DefaultTTL
-			var item *ttlcache.Item[string, authConfigItem]
-			if ar != nil {
-				item = cache.Set(issuerUrl, authConfigItem{set: jwk.NewCachedSet(ar, jwksUrl.String()), err: nil}, ttl)
-			} else {
-				ttl = time.Duration(5 * time.Minute)
-				item = cache.Set(issuerUrl, authConfigItem{set: nil, err: err}, ttl)
-			}
-			return item
-		},
-	)
-	ac.issuerKeys = ttlcache.New[string, authConfigItem](
-		ttlcache.WithTTL[string, authConfigItem](15*time.Minute),
-		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
-	)
-
+	// Touch-on-hit must stay disabled: the token's exp is only checked in the
+	// loader, so letting a Get refresh the entry would keep an actively-used
+	// token authorized indefinitely past its expiry.
 	ac.tokenAuthz = ttlcache.New[string, cachedTokenInfo](
-		ttlcache.WithTTL[string, cachedTokenInfo](5*time.Minute),
+		ttlcache.WithTTL[string, cachedTokenInfo](tokenAuthzTTL),
+		ttlcache.WithDisableTouchOnHit[string, cachedTokenInfo](),
 		ttlcache.WithLoader[string, cachedTokenInfo](ttlcache.LoaderFunc[string, cachedTokenInfo](ac.loader)),
 	)
 
-	egrp.Go(func() error {
-		ac.issuerKeys.Start()
-		return nil
-	})
 	egrp.Go(func() error {
 		ac.tokenAuthz.Start()
 		return nil
 	})
 	egrp.Go(func() error {
 		<-ctx.Done()
-		ac.issuerKeys.Stop()
-		ac.issuerKeys.DeleteAll()
 		ac.tokenAuthz.Stop()
 		ac.tokenAuthz.DeleteAll()
 		return nil
 	})
 
 	return
+}
+
+// issuerJwksResolver locates an issuer's JWKS through OIDC discovery.
+func issuerJwksResolver(issuerUrl string) token.JwksUrlResolver {
+	return func(ctx context.Context) (string, error) {
+		jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to look up the JWKS URL for issuer %s", issuerUrl)
+		}
+		return jwksUrl.String(), nil
+	}
 }
 
 func (ac *authConfig) updateConfig(exports []server_utils.OriginExport) error {
@@ -219,7 +206,10 @@ func (ac *authConfig) updateConfig(exports []server_utils.OriginExport) error {
 	return nil
 }
 
-func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+// getResourceScopes verifies the token and returns the scopes it carries, its
+// issuer, and its expiration.  The expiration comes from the verified token so
+// that callers do not have to parse it a second time.
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, expiration time.Time, err error) {
 	if tokenStr == "" {
 		return
 	}
@@ -270,28 +260,17 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		return
 	}
 
-	issuerConfItem := ac.issuerKeys.Get(issuer)
-	if issuerConfItem == nil {
-		err = errors.Errorf("unable to determine keys for issuer %s", issuer)
+	if ac.issuerKeys == nil {
+		err = errors.New("issuer key cache is not initialized")
+		return
+	}
+	keyset, err := ac.issuerKeys.Keys(ac.ctx, issuer, issuerJwksResolver(issuer))
+	if err != nil {
+		err = errors.Wrapf(err, "unable to determine keys for issuer %s", issuer)
 		return
 	}
 
-	issuerConf := issuerConfItem.Value()
-	if issuerConf.err != nil {
-		err = issuerConf.err
-		return
-	}
-
-	item := issuerConfItem.Value()
-	if item.set == nil {
-		if item.err != nil {
-			err = item.err
-		} else {
-			err = errors.Errorf("failed to fetch public key set")
-		}
-		return
-	}
-	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
+	tok, err = token.VerifyWithKeyset(tokenStr, keyset)
 	if err != nil {
 		// Token signature or claims validation failed — mark as unverified
 		tokenErr := NewTokenValidationError("failed to verify token signature or claims").
@@ -332,6 +311,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		}
 	}
 
+	expiration = tok.Expiration()
 	scopes = token_scopes.ParseResourceScopeString(tok)
 
 	return
@@ -374,12 +354,12 @@ func (ac *authConfig) SetTokenHintHeaders(hdr http.Header, resource string) {
 }
 
 // Given a token, calculate the corresponding access control list
-func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
+func (ac *authConfig) getAcls(token string) (newAcls acls, issuer string, expiration time.Time, err error) {
 	exports := ac.exports.Load()
 	if exports == nil {
 		return
 	}
-	resources, issuer, err := ac.getResourceScopes(token)
+	resources, issuer, expiration, err := ac.getResourceScopes(token)
 	if err != nil {
 		return
 	}
@@ -428,17 +408,27 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 }
 
 func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tokenStr string) *ttlcache.Item[string, cachedTokenInfo] {
-	acls, err := ac.getAcls(tokenStr)
+	acls, issuer, expiration, err := ac.getAcls(tokenStr)
 	if err != nil {
 		// If the token is not a valid one signed by a known issuer, do not keep it in memory (avoids a DoS)
 		log.Warningln("Rejecting invalid token:", err)
 		return nil
 	}
 
-	// Extract issuer from the token (claims are unverified at this point; used only for logging)
-	issuer := ""
-	if tok, err := token.UnsafeParseClaims(tokenStr); err == nil {
-		issuer = tok.Issuer()
+	// Cap the cache entry's lifetime at the token's own expiry, plus the clock
+	// skew leeway the verifier grants, so the cached authorization never
+	// outlives the token itself.  The expiry comes from the token getAcls
+	// verified, so it needs no separate parse.
+	ttl := ttlcache.DefaultTTL
+	if !expiration.IsZero() {
+		remaining := time.Until(expiration) + token.ClockSkewLeeway
+		if remaining <= 0 {
+			log.Warningln("Rejecting expired token")
+			return nil
+		}
+		if remaining < tokenAuthzTTL {
+			ttl = remaining
+		}
 	}
 
 	// Extract user information from the token at cache time (only once)
@@ -455,7 +445,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 		UserInfo: userInfo,
 		Issuer:   issuer,
 	}
-	item := cache.Set(tokenStr, info, ttlcache.DefaultTTL)
+	item := cache.Set(tokenStr, info, ttl)
 	return item
 }
 

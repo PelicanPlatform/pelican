@@ -469,7 +469,7 @@ func authMiddleware() gin.HandlerFunc {
 		// not need scopes matching the origin's exports.
 		if disableDirectClients && federationCtx == nil && len(fedIssuers) > 0 {
 			for _, tok := range tokens {
-				_, issuer, fedErr := ac.getResourceScopes(tok)
+				_, issuer, _, fedErr := ac.getResourceScopes(tok)
 				if fedErr != nil {
 					continue
 				}

@@ -21,19 +21,16 @@ package local_cache
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"path"
 	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -41,15 +38,13 @@ import (
 
 type (
 	authConfig struct {
-		ns         atomic.Pointer[[]server_structs.NamespaceAd]
-		issuers    atomic.Pointer[map[string]bool]
-		issuerKeys *ttlcache.Cache[string, authConfigItem]
+		ns      atomic.Pointer[[]server_structs.NamespaceAd]
+		issuers atomic.Pointer[map[string]bool]
+		// ctx bounds key fetches.  They are shared between requests, so they
+		// must not be tied to whichever request happened to trigger one.
+		ctx        context.Context
+		issuerKeys *token.JwksCache
 		tokenAuthz *ttlcache.Cache[string, authzResult]
-	}
-
-	authConfigItem struct {
-		set jwk.Set
-		err error
 	}
 
 	acls []token_scopes.ResourceScope
@@ -69,64 +64,54 @@ type (
 	}
 )
 
+// tokenAuthzTTL is the maximum lifetime of a cached token-authorization
+// result.  Individual entries may be given a shorter TTL when the token
+// itself expires sooner.
+const tokenAuthzTTL = 5 * time.Minute
+
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
 
-	loader := ttlcache.LoaderFunc[string, authConfigItem](
-		func(cache *ttlcache.Cache[string, authConfigItem], issuerUrl string) *ttlcache.Item[string, authConfigItem] {
-			var ar *jwk.Cache
-			jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
-			if err != nil {
-				log.Errorln("Failed to lookup JWKS URL:", err)
-			} else {
-				ar = jwk.NewCache(ctx)
-				client := &http.Client{Transport: config.GetBasicTransport()}
-				if err = ar.Register(jwksUrl.String(), jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-					log.Errorln("Failed to register JWKS URL with cache: ", err)
-				} else {
-					log.Debugln("Setting public key cache for issuer", issuerUrl)
-				}
-			}
+	// Issuer keys are fetched and aged by the shared cache, which serves the
+	// last keys it retrieved through an issuer outage and stops trusting them
+	// once they are too old to confirm.  The key space here comes from the
+	// namespaces the director advertises rather than from a request, so no
+	// capacity bound is needed.
+	ac.ctx = ctx
+	ac.issuerKeys = token.NewJwksCache(ctx, egrp)
 
-			ttl := ttlcache.DefaultTTL
-			var item *ttlcache.Item[string, authConfigItem]
-			if ar != nil {
-				item = cache.Set(issuerUrl, authConfigItem{set: jwk.NewCachedSet(ar, jwksUrl.String()), err: nil}, ttl)
-			} else {
-				ttl = time.Duration(5 * time.Minute)
-				item = cache.Set(issuerUrl, authConfigItem{set: nil, err: err}, ttl)
-			}
-			return item
-		},
-	)
-	ac.issuerKeys = ttlcache.New[string, authConfigItem](
-		ttlcache.WithTTL[string, authConfigItem](15*time.Minute),
-		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
-	)
-
+	// Touch-on-hit must stay disabled: the token's exp is only checked in the
+	// loader, so letting a Get refresh the entry would keep an actively-used
+	// token authorized indefinitely past its expiry.
 	ac.tokenAuthz = ttlcache.New[string, authzResult](
-		ttlcache.WithTTL[string, authzResult](5*time.Minute),
+		ttlcache.WithTTL[string, authzResult](tokenAuthzTTL),
+		ttlcache.WithDisableTouchOnHit[string, authzResult](),
 		ttlcache.WithLoader[string, authzResult](ttlcache.LoaderFunc[string, authzResult](ac.loader)),
 	)
 
-	egrp.Go(func() error {
-		ac.issuerKeys.Start()
-		return nil
-	})
 	egrp.Go(func() error {
 		ac.tokenAuthz.Start()
 		return nil
 	})
 	egrp.Go(func() error {
 		<-ctx.Done()
-		ac.issuerKeys.Stop()
-		ac.issuerKeys.DeleteAll()
 		ac.tokenAuthz.Stop()
 		ac.tokenAuthz.DeleteAll()
 		return nil
 	})
 
 	return
+}
+
+// issuerJwksResolver locates an issuer's JWKS through OIDC discovery.
+func issuerJwksResolver(issuerUrl string) token.JwksUrlResolver {
+	return func(ctx context.Context) (string, error) {
+		jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to look up the JWKS URL for issuer %s", issuerUrl)
+		}
+		return jwksUrl.String(), nil
+	}
 }
 
 func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAd) error {
@@ -195,7 +180,10 @@ func nsAdsAuthzEqual(old, new []server_structs.NamespaceAd) bool {
 	return true
 }
 
-func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
+// getResourceScopes verifies the token and returns the scopes it carries, its
+// issuer, and its expiration.  The expiration comes from the verified token so
+// that callers do not have to parse it a second time.
+func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.ResourceScope, issuer string, expiration time.Time, err error) {
 	if tokenStr == "" {
 		return
 	}
@@ -213,33 +201,23 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		return
 	}
 
-	issuerConfItem := ac.issuerKeys.Get(issuer)
-	if issuerConfItem == nil {
-		err = errors.Errorf("unable to determine keys for issuer %s", issuer)
+	if ac.issuerKeys == nil {
+		err = errors.New("issuer key cache is not initialized")
+		return
+	}
+	keyset, err := ac.issuerKeys.Keys(ac.ctx, issuer, issuerJwksResolver(issuer))
+	if err != nil {
+		err = errors.Wrapf(err, "unable to determine keys for issuer %s", issuer)
 		return
 	}
 
-	issuerConf := issuerConfItem.Value()
-	if issuerConf.err != nil {
-		err = issuerConf.err
-		return
-	}
-
-	item := issuerConfItem.Value()
-	if item.set == nil {
-		if item.err == nil {
-			err = item.err
-		} else {
-			err = errors.Errorf("failed to fetch public key set")
-		}
-		return
-	}
-	tok, err = token.VerifyWithKeyset(tokenStr, item.set)
+	tok, err = token.VerifyWithKeyset(tokenStr, keyset)
 	if err != nil {
 		err = errors.Wrap(err, "unable to get resource scopes because verification failed")
 		return
 	}
 
+	expiration = tok.Expiration()
 	scopes = token_scopes.ParseResourceScopeString(tok)
 
 	return
@@ -276,12 +254,12 @@ func calcResourceScopes(rs token_scopes.ResourceScope, basePaths []string, restr
 // Public namespaces always grant read ACLs regardless of the token's
 // validity.  An invalid or untrusted token only prevents private-namespace
 // ACLs from being generated; it is not an error.
-func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, err error) {
+func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, expiration time.Time, err error) {
 	namespaces := ac.ns.Load()
 	if namespaces == nil {
 		return
 	}
-	resources, issuer, tokenErr := ac.getResourceScopes(token)
+	resources, issuer, expiration, tokenErr := ac.getResourceScopes(token)
 	tokenTrusted = (tokenErr == nil)
 	if tokenErr != nil && token != "" {
 		log.Debugln("Token validation failed (public ACLs still granted):", tokenErr)
@@ -319,9 +297,9 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 	return
 }
 
-func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token string) *ttlcache.Item[string, authzResult] {
-	newAcls, tokenTrusted, tokenValidationErr := ac.getAcls(token)
-	if tokenValidationErr != nil && token == "" {
+func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], tokenStr string) *ttlcache.Item[string, authzResult] {
+	newAcls, tokenTrusted, expiration, tokenValidationErr := ac.getAcls(tokenStr)
+	if tokenValidationErr != nil && tokenStr == "" {
 		// Non-token-related error (e.g., namespace config issue) should
 		// be logged and result in a nil return.
 		log.Warningln("Failed to compute ACLs:", tokenValidationErr)
@@ -329,7 +307,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 	}
 
 	var tokenError string
-	if !tokenTrusted && token != "" {
+	if !tokenTrusted && tokenStr != "" {
 		// Include a human-readable reason so authorize() can return actionable
 		// deny reasons.  The underlying error is not exposed in full to avoid
 		// sensitive data leakage, but we include enough detail to be useful.
@@ -338,7 +316,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 		} else {
 			tokenError = "token validation failed"
 		}
-	} else if token == "" {
+	} else if tokenStr == "" {
 		// No token provided — public ACLs only.
 		tokenError = "no token provided"
 	}
@@ -346,11 +324,24 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 	// Use a shorter TTL for unrecognized tokens to bound memory usage
 	// from attackers sending many junk tokens (DoS mitigation).
 	ttl := ttlcache.DefaultTTL
-	if !tokenTrusted && token != "" {
+	if !tokenTrusted && tokenStr != "" {
 		ttl = 30 * time.Second
+	} else if tokenTrusted && !expiration.IsZero() {
+		// Cap the cache entry's lifetime at the token's own expiry, plus the
+		// clock skew leeway the verifier grants, so the cached authorization
+		// never outlives the token itself.  The expiry comes from the token
+		// getAcls verified, so it needs no separate parse.
+		remaining := time.Until(expiration) + token.ClockSkewLeeway
+		if remaining <= 0 {
+			log.Warningln("Rejecting expired token")
+			return nil
+		}
+		if remaining < tokenAuthzTTL {
+			ttl = remaining
+		}
 	}
 
-	item := cache.Set(token, authzResult{scopes: newAcls, tokenError: tokenError}, ttl)
+	item := cache.Set(tokenStr, authzResult{scopes: newAcls, tokenError: tokenError}, ttl)
 	return item
 }
 
