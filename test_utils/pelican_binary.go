@@ -35,16 +35,35 @@ var (
 	pelicanBinaryErr  error
 )
 
-// PelicanBinary builds the pelican CLI once per test process and returns its path.
+// PelicanBinaryEnvVar names a prebuilt pelican CLI for the tests to use instead of building
+// their own.  Several packages need the binary and each test process would otherwise pay for
+// its own build, so CI builds it once up front and points the whole run at it.
+const PelicanBinaryEnvVar = "PELICAN_TEST_BINARY"
+
+// PelicanBinary returns a path to the pelican CLI, building it once per test process.
 //
-// The build is expensive, so callers within a package share a single binary.  Note that
-// this is per test *process*: each package that needs the CLI pays for its own build.
-//
-// Pair this with CleanupPelicanBinary in the package's TestMain to remove the binary once
-// the package's tests are done.
+// If PELICAN_TEST_BINARY names an executable, that is used and nothing is built.  Otherwise
+// the CLI is built into a temp directory and shared by every caller in the package; pair
+// that with CleanupPelicanBinary in the package's TestMain to remove it afterwards.
 func PelicanBinary(t *testing.T) string {
 	t.Helper()
 	pelicanBinaryOnce.Do(func() {
+		if prebuilt := os.Getenv(PelicanBinaryEnvVar); prebuilt != "" {
+			info, err := os.Stat(prebuilt)
+			if err != nil {
+				pelicanBinaryErr = fmt.Errorf("%s is set to %q, which cannot be read: %w",
+					PelicanBinaryEnvVar, prebuilt, err)
+				return
+			}
+			if info.IsDir() || info.Mode()&0111 == 0 {
+				pelicanBinaryErr = fmt.Errorf("%s is set to %q, which is not an executable file",
+					PelicanBinaryEnvVar, prebuilt)
+				return
+			}
+			pelicanBinaryPath = prebuilt
+			return
+		}
+
 		pelicanBinaryDir, pelicanBinaryErr = os.MkdirTemp("", "pelican-e2e-binary-*")
 		if pelicanBinaryErr != nil {
 			pelicanBinaryErr = fmt.Errorf("failed to create temp directory for the pelican binary: %w", pelicanBinaryErr)
