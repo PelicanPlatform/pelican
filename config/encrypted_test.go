@@ -19,6 +19,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,4 +173,30 @@ func TestDecryptString(t *testing.T) {
 		assert.Equal(t, firstKeyID, keyIdUsedInEncryption)
 		assert.Equal(t, secret, decrypted)
 	})
+}
+
+// TestGetPasswordRejectsNonTerminalStdin guards the regression that made every
+// non-interactive run print a password prompt nobody could answer: /dev/null is a
+// character device, so testing os.Stdin's file mode for ModeCharDevice reported it as a
+// terminal.  Ask the terminal itself instead.
+func TestGetPasswordRejectsNonTerminalStdin(t *testing.T) {
+	devNull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = devNull.Close() })
+
+	stderrRead, stderrWrite, err := os.Pipe()
+	require.NoError(t, err)
+
+	oldStdin, oldStderr := os.Stdin, os.Stderr
+	os.Stdin, os.Stderr = devNull, stderrWrite
+	_, passErr := GetPassword(true)
+	os.Stdin, os.Stderr = oldStdin, oldStderr
+	require.NoError(t, stderrWrite.Close())
+
+	prompt, err := io.ReadAll(stderrRead)
+	require.NoError(t, err)
+
+	require.Error(t, passErr)
+	assert.Contains(t, passErr.Error(), "not connected to a terminal")
+	assert.Empty(t, string(prompt), "must not prompt for a password when stdin is not a terminal")
 }

@@ -298,6 +298,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_AuthenticationSource.GetName(), "OIDC")
 	// Issuer.AuthorizationCodeLifetime
 	v.SetDefault(param.Issuer_AuthorizationCodeLifetime.GetName(), "10m")
+	// Issuer.DeviceCodePollingInterval
+	v.SetDefault(param.Issuer_DeviceCodePollingInterval.GetName(), "5s")
 	// Issuer.DisableGroupAutoCreation
 	v.SetDefault(param.Issuer_DisableGroupAutoCreation.GetName(), false)
 	// Issuer.DynamicClientStaleTimeout
