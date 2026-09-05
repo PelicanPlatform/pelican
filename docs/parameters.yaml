@@ -4684,6 +4684,23 @@ components: ["origin", "registry"]
 ################################
 #   Issuer's Configurations    #
 ################################
+name: Issuer.DeviceCodePollingInterval
+description: |+
+  How often a client may poll the token endpoint while waiting for a user to approve an
+  OAuth2 device-code request.
+
+  This value is both advertised to the client in the `interval` field of the device
+  authorization response and enforced server-side: polling more often than this is answered
+  with `slow_down`.  RFC 8628 specifies 5 seconds, which is the default; it is exposed only
+  so tests can drive the flow faster than a human would.
+
+  Because the `interval` field is expressed in whole seconds, values below one second are
+  advertised as one second, though the server-side rate limit still uses the exact value.
+type: duration
+default: 5s
+hidden: true
+components: ["origin", "registry"]
+---
 name: Issuer.DynamicClientStaleTimeout
 description: |+
   Maximum duration of inactivity before a dynamically registered client

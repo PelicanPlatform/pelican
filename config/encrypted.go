@@ -220,7 +220,11 @@ func ConvertX25519Key(ed25519_sk []byte) [32]byte {
 }
 
 func GetPassword(newFile bool) ([]byte, error) {
-	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+	// Ask the terminal itself rather than inferring from the file mode.  /dev/null is a
+	// character device, so a ModeCharDevice test passes for any non-interactive run whose
+	// stdin is /dev/null -- systemd, cron, a container entrypoint, CI -- and we would go
+	// on to print a password prompt nobody can answer and fail the read afterwards.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return nil, errors.New("Cannot read password; not connected to a terminal")
 	}
 	if newFile {

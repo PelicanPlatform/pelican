@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/ory/fosite"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // DeviceCodeHandler implements the OAuth 2.0 Device Authorization Grant (RFC 8628).
@@ -51,6 +53,27 @@ type DeviceAuthorizationResponse struct {
 	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
 	ExpiresIn               int    `json:"expires_in"`
 	Interval                int    `json:"interval,omitempty"`
+}
+
+// pollingInterval is the minimum spacing the issuer requires between device-code polls.
+// It is advertised to clients and enforced server-side; see Issuer.DeviceCodePollingInterval.
+func pollingInterval() time.Duration {
+	if interval := param.Issuer_DeviceCodePollingInterval.GetDuration(); interval > 0 {
+		return interval
+	}
+	return 5 * time.Second
+}
+
+// advertisedPollingIntervalSeconds renders the polling interval for the device authorization
+// response, whose "interval" field is whole seconds.  Sub-second intervals round up to one so
+// the field never reads as 0, which clients treat as "unset" and replace with their own
+// default; the server-side rate limit still honors the exact configured value.
+func advertisedPollingIntervalSeconds() int {
+	seconds := int(pollingInterval() / time.Second)
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
 }
 
 // HandleDeviceAuthorizationRequest creates a new device code session.
@@ -92,7 +115,7 @@ func (h *DeviceCodeHandler) HandleDeviceAuthorizationRequest(ctx context.Context
 		VerificationURI:         verificationURI,
 		VerificationURIComplete: fmt.Sprintf("%s?user_code=%s", verificationURI, userCode),
 		ExpiresIn:               int(expiresIn.Seconds()),
-		Interval:                5,
+		Interval:                advertisedPollingIntervalSeconds(),
 	}, nil
 }
 
