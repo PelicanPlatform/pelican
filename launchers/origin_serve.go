@@ -254,6 +254,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 		xrootd.StoreRestartInfo(pids, launch, originServer, false, useCMSD, privileged)
 
+		// Watch for an XRootD that stops answering connections entirely; must follow
+		// StoreRestartInfo so the monitor can find the PIDs it may need to signal.
+		xrootd.LaunchXrootdLivenessCheck(ctx, egrp, false)
+
 		// Register callback for xrootd logging configuration changes
 		// This must be done after LaunchDaemons so the server has PIDs
 		xrootd.RegisterXrootdLoggingCallback(ctx)

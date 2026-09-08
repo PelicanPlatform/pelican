@@ -592,8 +592,12 @@ type Config struct {
 		ConfigUpdateFailureTimeout time.Duration `mapstructure:"configupdatefailuretimeout" yaml:"ConfigUpdateFailureTimeout"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
+		DisableLivenessCheck bool `mapstructure:"disablelivenesscheck" yaml:"DisableLivenessCheck"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
 		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
+		LivenessCheckInterval time.Duration `mapstructure:"livenesscheckinterval" yaml:"LivenessCheckInterval"`
+		LivenessCheckTimeout time.Duration `mapstructure:"livenesschecktimeout" yaml:"LivenessCheckTimeout"`
+		LivenessMaxUnresponsiveTime time.Duration `mapstructure:"livenessmaxunresponsivetime" yaml:"LivenessMaxUnresponsiveTime"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		LocalMonitoringPort int `mapstructure:"localmonitoringport" yaml:"LocalMonitoringPort"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
@@ -1181,8 +1185,12 @@ type configWithType struct {
 		ConfigUpdateFailureTimeout struct { Type string; Value time.Duration }
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
+		DisableLivenessCheck struct { Type string; Value bool }
 		EnableLocalMonitoring struct { Type string; Value bool }
 		HttpMaxDelay struct { Type string; Value time.Duration }
+		LivenessCheckInterval struct { Type string; Value time.Duration }
+		LivenessCheckTimeout struct { Type string; Value time.Duration }
+		LivenessMaxUnresponsiveTime struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
 		LocalMonitoringPort struct { Type string; Value int }
 		MacaroonsKeyFile struct { Type string; Value string }

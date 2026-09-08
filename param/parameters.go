@@ -598,8 +598,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"Xrootd.ConfigUpdateFailureTimeout": false,
 	"Xrootd.DetailedMonitoringHost": false,
 	"Xrootd.DetailedMonitoringPort": false,
+	"Xrootd.DisableLivenessCheck": false,
 	"Xrootd.EnableLocalMonitoring": false,
 	"Xrootd.HttpMaxDelay": false,
+	"Xrootd.LivenessCheckInterval": false,
+	"Xrootd.LivenessCheckTimeout": false,
+	"Xrootd.LivenessMaxUnresponsiveTime": false,
 	"Xrootd.LocalMonitoringHost": false,
 	"Xrootd.LocalMonitoringPort": false,
 	"Xrootd.MacaroonsKeyFile": false,
@@ -1189,6 +1193,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Topology.DisableOrigins": func(c *Config) bool { return c.Topology.DisableOrigins },
 	"Transfer.EnableOAuth2Clients": func(c *Config) bool { return c.Transfer.EnableOAuth2Clients },
 	"Xrootd.AutoShutdownEnabled": func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
+	"Xrootd.DisableLivenessCheck": func(c *Config) bool { return c.Xrootd.DisableLivenessCheck },
 	"Xrootd.EnableLocalMonitoring": func(c *Config) bool { return c.Xrootd.EnableLocalMonitoring },
 }
 
@@ -1313,6 +1318,9 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Xrootd.AuthRefreshInterval": func(c *Config) time.Duration { return c.Xrootd.AuthRefreshInterval },
 	"Xrootd.ConfigUpdateFailureTimeout": func(c *Config) time.Duration { return c.Xrootd.ConfigUpdateFailureTimeout },
 	"Xrootd.HttpMaxDelay": func(c *Config) time.Duration { return c.Xrootd.HttpMaxDelay },
+	"Xrootd.LivenessCheckInterval": func(c *Config) time.Duration { return c.Xrootd.LivenessCheckInterval },
+	"Xrootd.LivenessCheckTimeout": func(c *Config) time.Duration { return c.Xrootd.LivenessCheckTimeout },
+	"Xrootd.LivenessMaxUnresponsiveTime": func(c *Config) time.Duration { return c.Xrootd.LivenessMaxUnresponsiveTime },
 	"Xrootd.MaxStartupWait": func(c *Config) time.Duration { return c.Xrootd.MaxStartupWait },
 	"Xrootd.ShutdownTimeout": func(c *Config) time.Duration { return c.Xrootd.ShutdownTimeout },
 }
@@ -1906,8 +1914,12 @@ var allParameterNames = []string{
 	"Xrootd.ConfigUpdateFailureTimeout",
 	"Xrootd.DetailedMonitoringHost",
 	"Xrootd.DetailedMonitoringPort",
+	"Xrootd.DisableLivenessCheck",
 	"Xrootd.EnableLocalMonitoring",
 	"Xrootd.HttpMaxDelay",
+	"Xrootd.LivenessCheckInterval",
+	"Xrootd.LivenessCheckTimeout",
+	"Xrootd.LivenessMaxUnresponsiveTime",
 	"Xrootd.LocalMonitoringHost",
 	"Xrootd.LocalMonitoringPort",
 	"Xrootd.MacaroonsKeyFile",
@@ -2349,6 +2361,7 @@ var (
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
 	Transfer_EnableOAuth2Clients = BoolParam{"Transfer.EnableOAuth2Clients"}
 	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
+	Xrootd_DisableLivenessCheck = BoolParam{"Xrootd.DisableLivenessCheck"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
@@ -2445,6 +2458,9 @@ var (
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
 	Xrootd_ConfigUpdateFailureTimeout = DurationParam{"Xrootd.ConfigUpdateFailureTimeout"}
 	Xrootd_HttpMaxDelay = DurationParam{"Xrootd.HttpMaxDelay"}
+	Xrootd_LivenessCheckInterval = DurationParam{"Xrootd.LivenessCheckInterval"}
+	Xrootd_LivenessCheckTimeout = DurationParam{"Xrootd.LivenessCheckTimeout"}
+	Xrootd_LivenessMaxUnresponsiveTime = DurationParam{"Xrootd.LivenessMaxUnresponsiveTime"}
 	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
 	Xrootd_ShutdownTimeout = DurationParam{"Xrootd.ShutdownTimeout"}
 )
@@ -2890,6 +2906,7 @@ func init() {
 		"Topology.DisableOrigins": Topology_DisableOrigins,
 		"Transfer.EnableOAuth2Clients": Transfer_EnableOAuth2Clients,
 		"Xrootd.AutoShutdownEnabled": Xrootd_AutoShutdownEnabled,
+		"Xrootd.DisableLivenessCheck": Xrootd_DisableLivenessCheck,
 		"Xrootd.EnableLocalMonitoring": Xrootd_EnableLocalMonitoring,
 		"Cache.DefaultCacheTimeout": Cache_DefaultCacheTimeout,
 		"Cache.EvictionMonitoringInterval": Cache_EvictionMonitoringInterval,
@@ -2983,6 +3000,9 @@ func init() {
 		"Xrootd.AuthRefreshInterval": Xrootd_AuthRefreshInterval,
 		"Xrootd.ConfigUpdateFailureTimeout": Xrootd_ConfigUpdateFailureTimeout,
 		"Xrootd.HttpMaxDelay": Xrootd_HttpMaxDelay,
+		"Xrootd.LivenessCheckInterval": Xrootd_LivenessCheckInterval,
+		"Xrootd.LivenessCheckTimeout": Xrootd_LivenessCheckTimeout,
+		"Xrootd.LivenessMaxUnresponsiveTime": Xrootd_LivenessMaxUnresponsiveTime,
 		"Xrootd.MaxStartupWait": Xrootd_MaxStartupWait,
 		"Xrootd.ShutdownTimeout": Xrootd_ShutdownTimeout,
 		"GeoIPOverrides": GeoIPOverrides,

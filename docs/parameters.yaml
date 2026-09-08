@@ -5316,6 +5316,60 @@ type: duration
 default: 1m
 components: ["cache", "origin"]
 ---
+name: Xrootd.DisableLivenessCheck
+description: |+
+  Disables the periodic liveness check of the locally-launched XRootD daemon.
+
+  Pelican periodically opens a TCP connection to the local XRootD endpoint and waits for
+  XRootD itself to respond.  If XRootD has not responded to any check for
+  `Xrootd.LivenessMaxUnresponsiveTime`, Pelican concludes the daemon is wedged and shuts it
+  down with the usual SIGTERM / wait / SIGKILL sequence, allowing the service manager to
+  restart a working instance.
+
+  Setting this to `true` restores the historical, purely-passive behavior where a hung XRootD
+  is only reported through the health endpoint.
+type: bool
+default: false
+hidden: true
+components: ["cache", "origin"]
+---
+name: Xrootd.LivenessCheckInterval
+description: |+
+  The minimum time between liveness checks of the local XRootD endpoint.
+
+  Checks never overlap.  After a successful check Pelican waits the full interval before
+  looking again; after a failed one it waits only for the remainder of the interval, so a
+  check that already ran longer than this is retried immediately rather than adding more
+  delay to an XRootD that is already in trouble.
+type: duration
+default: 1m
+hidden: true
+components: ["cache", "origin"]
+---
+name: Xrootd.LivenessCheckTimeout
+description: |+
+  The maximum amount of time a single XRootD liveness check may take before it is considered
+  a failure.  This is deliberately generous: it should only elapse when XRootD is not
+  servicing new connections at all, not when it is merely busy.
+type: duration
+default: 3m
+hidden: true
+components: ["cache", "origin"]
+---
+name: Xrootd.LivenessMaxUnresponsiveTime
+description: |+
+  How long the local XRootD endpoint may go without a successful liveness check before
+  Pelican shuts the daemon down.  The clock starts at the last successful check (or, if no
+  check has ever succeeded, at the time XRootD was launched).
+
+  Because a failed check is retried as soon as `Xrootd.LivenessCheckInterval` allows, this
+  window spans several failed checks at the default timings rather than acting on a single
+  one.
+type: duration
+default: 10m
+hidden: true
+components: ["cache", "origin"]
+---
 name: Xrootd.HttpMaxDelay
 description: |+
   Configures the maximum amount of time the XRootD HTTP layer will continue internal retries
