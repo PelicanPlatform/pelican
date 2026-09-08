@@ -18,16 +18,16 @@ One story runs through this page, so that every task has a reason behind it inst
 
 **Riptide University** runs a Pelican origin in front of its research storage, already exporting the prefix `/riptide-university`.
 The **Reyes Lab** studies nearshore currents, and has just come back from a field season with several terabytes of instrument data that its collaborators need to reach.
-Over the sections below, the lab's collection gets created, handed to the people who run it, opened up to students, and eventually shared with a collaborator at another institution.
+Over the sections below, the lab's collection gets created, handed to the people who run it, and opened up to students — and one student's own thesis material is delegated to an outside examiner.
 
 | Person | Role in the story | Group |
 | --- | --- | --- |
 | Dana Cho | Origin administrator, Riptide University Research Computing. Holds `server.collection_admin`. | — |
 | Dr. Elena Reyes | Principal investigator. Owns the collection and answers for it. | — |
 | Dr. Priya Raman | Postdoc. Runs the collection day to day. | `reyes-postdocs` — the admin group |
-| Wes Danforth | Graduate student. Processes each new deployment. | `reyes-grads` — `write` |
+| Wes Danforth | Graduate student. Processes each new deployment; finishing a thesis this year. | `reyes-grads` — `write` |
 | Tomás Vela and Bea Nkemelu | Undergraduates on a senior project. Read the processed data, never overwrite it. | `reyes-undergrads` — `read` |
-| Dr. Hollis Park | Collaborator at Cape Meridian Marine Lab, with no Reyes Lab affiliation at all. | `park-lab` — `read`, through a share |
+| Dr. Hollis Park | External thesis committee member at Cape Meridian Marine Lab, with no Reyes Lab affiliation at all. | `user-hpark` — `read`, through Wes's share |
 
 ## Before you start
 
@@ -36,11 +36,13 @@ Three things need to be true before any of this works.
 1. **The export exists.**
    A collection is access control *inside* an exported namespace, not a way to publish new storage.
    Export the storage first — see [Serving an Origin](/federating-your-data/origin) — then create a collection at that prefix or below it.
-   Riptide University's storage is exported at `/riptide-university` before Dana touches the Collections page.
+
+   > Riptide University's storage is exported at `/riptide-university` long before Dana touches the Collections page.
 2. **You hold `server.collection_admin` (or `server.admin`) to create a collection.**
    Running one afterwards does not require it: the owner and the admin group manage the collection with no management scope at all.
-   That is the whole point of the handoff below — Dana needs the scope once, and Dr. Reyes and Dr. Raman never need it.
    See [Collection administration](/managing-data-access/permissions-reference#collection-administration).
+
+   > That is the whole point of the handoff below: Dana needs the scope once, and Dr. Reyes and Dr. Raman never need it at all.
 3. **The groups you want to give access to exist**, or you are willing to create them as you go.
    Any signed-in user can create a group; see [Create a group](/managing-data-access/users-and-groups#create-a-group).
 
@@ -60,52 +62,34 @@ The **ONBOARD COLLECTION** form does the whole thing in one pass: the collection
 1. In the Origin web interface, open **Collections** in the left sidebar.
 2. Click **ONBOARD COLLECTION**.
 3. Under **Collection**, fill in:
-   - **Name** — a short human-readable name, for example `Reyes Lab`.
-   - **Exported namespace** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. Dana picks `/riptide-university` and types `reyes-lab`. The full path is shown back as you type.
-   - **Description** and **Visibility** (`Private` or `Public`). Dana writes "Nearshore current data, Reyes Lab" and leaves it `Private`.
+   - **Name** — a short human-readable name.
+   - **Exported prefix** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back as you type. *If only one namespace is served from this origin you won't have a dropdown.*
+   - **Description** and **Visibility** (`Private` or `Public`).
+
+   > Dana names it `Reyes Lab`, picks `/riptide-university namespace from the dropdown and types prefix `reyes-lab/nearshore-current` beside it, describes it as "Nearshore current data, Reyes Lab", and leaves it `Private`.
+
 4. Under **Ownership**, choose who owns the collection.
-   The default is you; use **Pick an existing user** to name Dr. Reyes, **Create a new user** if she has no account yet, or **Send an ownership invite** to mint a link she redeems herself.
-   Dana has never seen Dr. Reyes sign in, so this becomes an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
+   The default is you; use **Pick an existing user** to name them, **Create a new user** if they have no account yet, or **Send an ownership invite** to mint a link they redeem themselves.
+
+   > Dr. Reyes has never signed in to the origin, so Dana reaches for an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
 5. Under **Access Control**, fill in the three group rows — the `admin` row becomes the collection's admin group, the `write` row and the `read` row become access grants.
    Each row can either create a fresh group or attach one that already exists.
 
    > Dana creates `reyes-postdocs` as the admin group and `reyes-grads` with `write`, and leaves the `read` row disabled for now because the undergraduates have not joined yet.
 6. Click **ONBOARD COLLECTION** at the bottom of the form.
 
-One form, and Dana is done: the lab now runs its own access control, and Research Computing is out of the loop for everything that follows.
+> One form, and Dana is done: the lab now runs its own access control, and Research Computing is out of the loop for everything that follows.
 
 **QUICK CREATE** is the escape hatch: it creates the collection only (**Name**, **Namespace**, **Description**, **Visibility**, and optional **Reader Group** / **Writer Group** / **Admin Group** pickers), leaving ownership and the rest of the access grants for the edit page.
 
-## Choose a namespace for the collection
-
-> Dana's first attempt was `/riptide/reyes-lab`, which the form refused.
-> The export is `/riptide-university`, and `/riptide` is not a shorter way of saying it — a prefix only matches at a path boundary.
-
-The namespace is not cosmetic — it is spliced into the storage scopes on every token minted for the collection, so the rules are enforced strictly.
-
-- It has to sit **inside a prefix this origin exports**, either equal to an exported prefix or a path-descendant of one.
-  `/riptide-university/reyes-lab` is accepted under an export of `/riptide-university`; it is not accepted under an export of `/riptide`, because a prefix only matches at a path boundary.
-- It is **canonicalised before it is checked and before it is stored**, so `/a/b/../c` becomes `/a/c` and both the export check and the eventual token scope see the same value.
-- Whitespace, control characters and `:` are rejected outright.
-
-Several collections can live under one export, which is the usual arrangement: one export of `/riptide-university`, one collection per lab beneath it.
-The Reyes Lab is one of nine collections Dana has onboarded under that export this year.
-
-<Callout type="info">
-A collection can only narrow or subdivide what the export already permits.
-If the export itself is public, a private collection at that prefix does not make the objects unreadable.
-For choosing sensible prefixes in the first place, see [Namespace Prefixes and How To Choose One](/federating-your-data/choosing-namespaces).
-</Callout>
-
 ## Grant read or write access to a group
 
-*Requires the collection's owner, a member of its admin group, or `server.collection_admin` — a `write` grant is not enough to change who else has access. See [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+*Requires a member of the collection's admin group, the collection's owner, or `server.collection_admin` — a `write` grant is not enough to change who else has access. See [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
 > Two weeks into the semester, Tomás Vela and Bea Nkemelu join the lab for a senior project.
 > They need to read the processed deployment files, and they must not be able to overwrite them — one accidental upload over a calibrated dataset would cost the lab a month.
 > Dr. Raman puts both of them in `reyes-undergrads` and grants that group `read`.
 > Wes Danforth, who uploads each new deployment, is already in `reyes-grads`, which gets `write`.
-> Dr. Raman does all of it from the admin group, without asking Research Computing for anything.
 
 Grants are written against **groups**, never against individual users.
 To give one person access, put them in a group — every user also has an implicit personal group named `user-<username>` you can grant to directly.
@@ -113,37 +97,14 @@ Roles are `read` and `write`; a grant may carry an expiry, after which it stops 
 
 1. Open **Collections**, find the collection, and click the **Edit collection** (pencil) icon on its row.
 2. Scroll to **Access groups**.
-3. In **Add group**, pick the group — `reyes-undergrads` for the read grant.
+3. In **Add group**, pick the group.
 4. Set **Role** to `Read` or `Write`.
 5. Click **ADD**.
-6. Repeat for `reyes-grads` with **Role** `Write`.
+6. Repeat for each further group you want to grant.
+
+   > Dr. Raman adds `reyes-undergrads` with **Role** `Read`, then repeats the three steps for `reyes-grads` with **Role** `Write`.
 
 Existing rows are listed above the picker with their role; the trash icon beside a row revokes it.
-
-<Callout type="info">
-`owner` is not a role you can grant here.
-Ownership is a field on the collection, and full management authority is the admin group — see the two sections below.
-Older collections may still show a legacy `owner` grant; it is safe to revoke once the owner and admin group are set.
-</Callout>
-
-## Grant access to every signed-in user
-
-*Same prerequisite as the section above.*
-
-> The lab produces one derived product — a weekly tide-gauge summary — that any Riptide student or staff member should be able to pull for a class project, while the raw instrument data stays restricted.
-> Dana onboards a second collection at `/riptide-university/reyes-lab/public-summaries` with the same admin group, and Dr. Raman grants `@authenticated` `read` on it.
-> Nobody has to maintain a campus-wide group, and the raw data above it is untouched.
-
-`@authenticated` is a virtual target that matches every caller who is signed in, regardless of group membership.
-Use it when the answer to "who may read this?" is "anyone with an account on this server".
-
-In the web interface it appears at the top of the **Add group** picker as **All authenticated users**, marked *Virtual group · matches every signed-in caller*.
-Pick it, choose a role, and click **ADD**, exactly as for a real group.
-
-Two things it does not do.
-It does not make the collection public — visibility controls who can *see that the collection exists*, and is a separate field.
-And it never appears in a token's group claim, because it is not a real group: it cannot be created, joined, or listed as a member.
-Anonymous callers do not match it either; a request with no identity at all is not "authenticated".
 
 ## Delegate day-to-day management to an admin group
 
@@ -157,8 +118,10 @@ Admin-group members can edit the collection's name, description, visibility and 
 They cannot transfer ownership and they cannot delete the collection — both stay with the owner.
 
 1. Open the collection's **Edit collection** page.
-2. In the **Ownership** panel, use the **Admin group (optional)** picker to select `reyes-postdocs`.
+2. In the **Ownership** panel, use the **Admin group (optional)** picker to select the group.
 3. Click **SAVE CHANGES**.
+
+   > Dr. Reyes picks `reyes-postdocs`, and from then on Dr. Raman's group handles the student groups.
 
 Clearing the picker removes the admin group.
 Once one is set, a **Manage admin group →** link appears beside it so you can jump straight to that group's membership page.
@@ -172,34 +135,29 @@ Once one is set, a **Manage admin group →** link appears beside it so you can 
 > Dr. Reyes signs in for the first time, redeems it, and owns the collection from that moment; Dana's ownership ends in the same instant.
 > Three years later, when Dr. Reyes moves to another university and Dr. Raman takes over the project, the same page moves ownership again — this time directly, because Dr. Raman already has an account.
 
-Every collection has exactly one owner, and it can be moved but never cleared — a `PATCH` that empties `ownerId` is refused.
+Every collection has exactly one owner, and it can be moved but never cleared.
 There are two routes, depending on whether the new owner already has an account.
 
-**If they do**, set the owner directly.
+### If the owner has an account
+
 On the collection's **Edit collection** page, pick them in the **Owner** field and click **SAVE CHANGES**.
+
 If you hold `server.user_admin` the picker lists every user on the server; otherwise it offers only the collection's own people — the current owner, admin-group members, and members of any group already granted access.
 
-**If they do not**, mint an ownership-transfer invite.
+### If the owner does not have an account
+
+Mint an ownership-transfer invite.
 The recipient signs in (self-enrolling through OIDC if this is their first visit), redeems the link, and becomes the owner at that moment; the previous owner loses ownership simultaneously.
 These links are always single-use.
 
 1. On the **Edit collection** page, scroll to **Transfer via invite link**.
 2. Click **GENERATE TRANSFER LINK**.
 3. Copy the URL with **COPY URL**.
-
-<Callout type="warning">
-Pelican mints the link and shows you the token exactly once; delivering it to the right person is your job.
-Pelican does not send email.
-</Callout>
+4. Send this link to the new owner of the collection.
 
 ## Turn on sharing
 
 *Requires the collection's owner, an admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
-
-> Dr. Hollis Park at Cape Meridian Marine Lab wants the March deployment — one directory, not the lab's whole archive, and Dr. Park has no Riptide affiliation to hang a group membership on.
-> Wes Danforth, who ran that deployment, is the obvious person to arrange it, and Wes holds no management scope whatsoever.
-> Dr. Reyes switches sharing on for the collection.
-> That does not give Dr. Park anything yet; it means Wes can now hand out part of the access Wes already has, without anyone granting Wes new privileges to do it.
 
 Shares are off by default.
 Turning them on lets anyone who holds `read` on the collection delegate part of that access onward.
@@ -211,34 +169,27 @@ It creates nothing by itself; it only makes share creation reachable for the col
 
 <Callout type="warning">
 Shares are not supported when the origin runs a multi-user POSIX backend ([`Origin.Multiuser`](/parameters#Origin-Multiuser)).
-Serving share data means acting as the share's owner, and the multi-user backend cannot safely re-target the operating-system identity it serves a request under.
-Creating a share on such an origin is refused with `409`, and if multi-user mode is turned on after shares already exist, any token carrying `share.access` is rejected outright rather than quietly falling back to the presenter's identity.
 </Callout>
 
 ## Create a share
 
 *Requires `read` on the parent collection, with sharing enabled on it — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
 
-> Wes creates a share named `Park Lab — Deployment 12`, scoped to `/riptide-university/reyes-lab/deployments/2026-03`.
-> Wes owns it, so Wes manages it, and Dr. Park sees exactly that one deployment and nothing else in the lab's archive.
-> The arrangement is also self-limiting: if Wes graduates and drops off the `reyes-grads` grant, the share stops issuing usable tokens by itself, with nobody having to remember it exists.
+> The graduate student Wes has a set of interns working on an experimental data transformation.
+> Wes creates a share that his interns can access and write data too under a folder he created for them.
+> When Wes graduates his interns will automatically lose access to this space when Wes does.
 
 A share is a collection, so everything you already know about granting access applies to it.
 What makes it a share is the parent link, and the constraints that come with it:
 
 - **You own the share, not the parent's owner.** You hold owner authority on the share and manage it yourself.
+- **It is bound to you.** Data read through it is served as you, and its access is re-intersected with your own access to the parent on every issuance — so a share can never outgrow the person who made it, and it fades as they do.
 - **The namespace has to equal the parent's or sit beneath it.** Leave it blank to inherit the parent's namespace exactly.
 - **Shares start private**, and sharing is forced off on the new share — you cannot create a share of a share.
 
 Access through a share is always the weaker of two things: what the share grants its recipient, and what the share's owner can currently do on the parent collection.
 That intersection is recomputed each time a token is *issued*, so if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
 A share cannot be used to delegate access its owner no longer has.
-
-<Callout type="warning">
-Refreshing an existing token does not re-run the intersection.
-The issuer re-grants the scopes already stored on the session, so an already-issued token keeps its original access until it expires and a new authorization is performed.
-Plan for access changes to take effect on the next issuance, not immediately.
-</Callout>
 
 To create one:
 
@@ -255,15 +206,12 @@ Shares appear in the collections list alongside collections, tagged with a **sha
 
 *Requires the share's owner (or `server.collection_admin`) — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
 
-> Dr. Park's postdocs need the deployment too, so Wes grants the `park-lab` group `read` on the share rather than naming Dr. Park alone.
-> Cape Meridian then manages its own end: when someone joins or leaves Dr. Park's lab, that is a membership change at Cape Meridian, and Wes never hears about it.
+> Wes grants `read` to intern Sophia alone, through the implicit personal group `user-sophia` — one reader, no group to keep current.
 
 Because a share is a collection, you grant access to it exactly as in [Grant read or write access to a group](#grant-read-or-write-access-to-a-group) — same **Access groups** panel on the share's edit page, with the share's ID in place of the collection's.
-`@authenticated` works here too.
 
 The difference is whose identity the data is served as.
 Objects reached through a share are served as the share's *owner*, not as the person presenting the token, which is why the intersection above is enforced — the share owner stays accountable for everything read or written through the share.
-So every byte Cape Meridian reads through this share is read as Wes.
 See [Data access](/managing-data-access/permissions-reference#data-access) for the scope the issuer mints to arrange that.
 
 ## Revoke access
@@ -273,7 +221,7 @@ See [Data access](/managing-data-access/permissions-reference#data-access) for t
 > Three things end in the same May, and each one calls for a different lever.
 > Bea graduates while Tomás stays on for a master's — Dr. Raman removes Bea from `reyes-undergrads` and touches nothing else.
 > The senior project itself wraps up, so the `reyes-undergrads` read grant comes off the collection entirely.
-> And Wes finishes the degree and drops to `read` on the parent, which quietly clamps the Cape Meridian share to read as well, without anyone editing the share.
+> And Wes defends and leaves, so the `reyes-grads` grant goes — which empties the intern share on its next issuance, without anyone editing the share.
 
 Three levers, in increasing order of blast radius.
 
@@ -290,19 +238,9 @@ All three take effect the next time a token is *issued*, not against tokens alre
 An access token minted before you revoked keeps working until it expires, and the one after it is smaller or empty.
 Deleting a group is the blunt version of lever 2 — it removes every collection grant that names that group, everywhere.
 
-<Callout type="warning">
-Refreshing a token does not re-run these checks.
-The issuer re-grants the scopes already stored on the session, so a session that keeps refreshing holds its original data access until that session ends and the holder authorizes again.
-Revocation is not a way to cut off an active session immediately.
-</Callout>
-
 ## Delete a collection or share
 
 *Requires the owner or `server.collection_admin`; admin-group members cannot delete — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
-
-> The Deployment 12 paper comes out and the collaboration is finished, so Wes deletes the Cape Meridian share — Wes owns it, so Wes is the one who can.
-> Years later the whole dataset is archived with a DOI elsewhere and Dr. Raman, now the owner, deletes the collection.
-> The four terabytes do not go anywhere: deleting the collection removes the access-control record, and the objects remain under `/riptide-university`, governed by Dana's export alone.
 
 Deleting a collection removes its grants, its metadata and its list of member objects along with it.
 Deleting a share is the same operation — a share is a collection — and is done by the share's owner.
@@ -358,38 +296,3 @@ The two share endpoints are also not yet described in the [API browser](/api-doc
 
 On the command line and the API, `@authenticated` goes wherever you would pass a group name, and `--group-id` accepts either a group's internal ID or its name — Pelican stores the canonical name on the grant either way.
 The command line and the API call a collection's set of grants its **ACL** (access control list), which is why the subcommand is `acl grant`; see [`collection acl`](/commands-reference/pelican-server/origin/collection/acl).
-
-## Troubleshooting
-
-**`403 you must hold server.collection_admin (or server.admin) to create a collection`**
-Signing in is enough to *reach* the collections API, but not to create a collection.
-Ask a system administrator to grant you `server.collection_admin`, or to create the collection and transfer it to you — which is exactly the route Dana and Dr. Reyes take above.
-
-**`Namespace '…' is not within a prefix exported by this origin`**
-The path is outside every export, or it looks like a match but is not one at a path boundary (`/riptide/reyes-lab` is not inside an export of `/riptide-university`).
-Check the origin's exports, then re-check after canonicalisation — `/a/b/../c` is stored and validated as `/a/c`.
-
-**`409 Sharing is not enabled on this collection`**
-The parent collection's owner has not switched on **Allow users to create shares**.
-See [Turn on sharing](#turn-on-sharing).
-
-**`409 Shares are not supported on multi-user origin backends`**
-This origin runs a multi-user POSIX backend, where serving data as the share's owner is not possible.
-Grant access on the collection itself instead of creating a share.
-
-**`404 collection not found` on a collection you are sure exists**
-Endpoints that would otherwise confirm a record exists return `404` rather than `403` when you are not allowed to see it.
-A `404` on a collection or group you believe exists usually means you lack access, not that it is missing.
-This is also what a non-owner sees when they try to transfer ownership or mint an ownership invite.
-
-**`cannot create a share of an existing share`**
-Shares are one hop deep.
-Create the share from the original collection, or ask its owner to grant the person access directly.
-
-**`ownerId cannot be empty; transfer to a real user instead`**
-Ownership can move but not be cleared.
-Name a replacement owner, or mint an ownership-transfer invite.
-
-**A `write` grant does not let you change who else has access.**
-`write` covers the data and the collection's descriptive fields, not who else gets in.
-Wes can upload a deployment and cannot add anybody to the lab; put someone in the admin group if they should manage access.

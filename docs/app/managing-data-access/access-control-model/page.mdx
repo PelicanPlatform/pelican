@@ -92,6 +92,11 @@ A collection cannot widen what the export permits.
 If the export does not allow writes, no grant on a collection inside it produces a usable write.
 Collections narrow and delegate; they never enlarge.
 
+That narrowing is relative to the export, not to other collections.
+Collections do not nest: two whose prefixes overlap are independent records, and their grants are unioned rather than resolved most-specific-first.
+Each grant mints a scope on its own prefix, and a scope covers every path beneath it, so a collection deeper in the tree can widen access to its sub-path but can never restrict what a shallower collection already grants — there is no negative role and no subtraction anywhere in the model.
+So the depth at which a collection is created is a floor on how finely access can be split inside it, and a namespace cannot be edited afterwards.
+
 Three kinds of authority attach to a collection.
 The owner is one user, responsible for it, and the only one who can transfer or delete it.
 The admin group runs it day to day and can do everything except transfer and delete.
