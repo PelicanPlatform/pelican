@@ -43,6 +43,10 @@ type ErrorType struct {
 
 var requiredErrorKeys = [4]string{"code", "clientExitCode", "description", "retryable"}
 
+// retryableExitCode is the exit code reserved for retryable errors, and
+// required of exactly those. Every parsed entry is checked against it.
+const retryableExitCode = 11
+
 // GenErrorCodes takes the error_codes.yaml file (located: ../docs/error_codes.yaml) and generates the error_codes/error_codes.go file
 func GenErrorCodes() {
 	filename, _ := filepath.Abs("../docs/error_codes.yaml")
@@ -110,6 +114,19 @@ func GenErrorCodes() {
 		description, ok := entry["description"].(string)
 		if !ok {
 			panic(fmt.Sprintf("Error: listed entry number %d from yaml, 'description' attribute is not a string: Current values are: %v", i, value))
+		}
+
+		// Exit code 11 is reserved for retryable errors and required of all of
+		// them, so that a wrapper deciding whether to resubmit can read the exit
+		// status alone. Enforced here rather than left to review because a
+		// violation is silent: the generated code compiles either way, and the
+		// first symptom is a job that will not retry a transient failure, or one
+		// that retries a permanent one until it exhausts its attempts.
+		if retryable != (exitCode == retryableExitCode) {
+			if retryable {
+				panic(fmt.Sprintf("Error: entry '%s' is retryable but has clientExitCode %d; every retryable error must use %d", errorType, exitCode, retryableExitCode))
+			}
+			panic(fmt.Sprintf("Error: entry '%s' is not retryable but claims clientExitCode %d, which is reserved for retryable errors", errorType, retryableExitCode))
 		}
 
 		errors = append(errors, ErrorType{Raw: camelErrorName, Display: displayName, ExitCode: exitCode,

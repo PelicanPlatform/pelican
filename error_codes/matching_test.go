@@ -183,3 +183,31 @@ func TestSentinelCarriesNoCause(t *testing.T) {
 	assert.Nil(t, ErrAuthorization.Unwrap())
 	assert.NotEqual(t, fmt.Sprint(ErrAuthorization), fmt.Sprint(NewAuthorizationError(errors.New("boom"))))
 }
+
+// Exit code 11 means "a resubmission could succeed", so it must be carried by
+// exactly the retryable classifications: a retryable error exiting 5 tells a
+// wrapper not to bother, and a permanent one exiting 11 makes it retry until it
+// runs out of attempts. Generation rejects a table that breaks this; the test
+// pins the generated result, which is what callers actually read.
+//
+// The converse direction matters as much as the forward one, which is why this
+// asserts an equivalence rather than just checking the retryable entries.
+func TestRetryableExitCodeIsExactlyEleven(t *testing.T) {
+	const retryableExitCode = 11
+
+	for _, sentinel := range sentinels {
+		t.Run(sentinel.errorType, func(t *testing.T) {
+			if sentinel.retryable {
+				assert.Equal(t, retryableExitCode, sentinel.exitCode,
+					"%s is retryable, so it must exit %d", sentinel.errorType, retryableExitCode)
+			} else {
+				assert.NotEqual(t, retryableExitCode, sentinel.exitCode,
+					"%s is not retryable, so it must not claim the retryable exit code", sentinel.errorType)
+				assert.Positive(t, sentinel.exitCode,
+					"%s needs a non-retryable exit code in 1-10", sentinel.errorType)
+				assert.Less(t, sentinel.exitCode, retryableExitCode,
+					"%s needs a non-retryable exit code in 1-10", sentinel.errorType)
+			}
+		})
+	}
+}
