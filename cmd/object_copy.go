@@ -430,7 +430,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 			errMsg = msg
 		}
 		log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
-		if client.ShouldRetry(err) {
+		// ShouldRetry(result), not ShouldRetry(err): err is a stale variable
+		// from earlier in this function, so this tested the wrong value.
+		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
