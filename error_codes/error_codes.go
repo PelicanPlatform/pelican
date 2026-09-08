@@ -67,14 +67,14 @@ var (
 	}
 	ErrResolution_Timeout = &PelicanError{
 		errorType:   "Resolution.Timeout",
-		exitCode:    5,
+		exitCode:    11,
 		code:        2001,
 		retryable:   true,
 		description: "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
 	}
 	ErrResolution_ConnectionFailure = &PelicanError{
 		errorType:   "Resolution.ConnectionFailure",
-		exitCode:    5,
+		exitCode:    11,
 		code:        2002,
 		retryable:   true,
 		description: "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
@@ -116,14 +116,14 @@ var (
 	}
 	ErrContact_ConnectionReset = &PelicanError{
 		errorType:   "Contact.ConnectionReset",
-		exitCode:    6,
+		exitCode:    11,
 		code:        3005,
 		retryable:   true,
 		description: "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
 	}
 	ErrContact_ConnectionSetup = &PelicanError{
 		errorType:   "Contact.ConnectionSetup",
-		exitCode:    6,
+		exitCode:    11,
 		code:        3006,
 		retryable:   true,
 		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
@@ -172,77 +172,77 @@ var (
 	}
 	ErrTransfer = &PelicanError{
 		errorType:   "Transfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6000,
 		retryable:   true,
 		description: "The client started transferring the file but did not complete it for some reason, or if the file failed post-transfer validation.",
 	}
 	ErrTransfer_StoppedTransfer = &PelicanError{
 		errorType:   "Transfer.StoppedTransfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6001,
 		retryable:   true,
 		description: "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
 	}
 	ErrTransfer_SlowTransfer = &PelicanError{
 		errorType:   "Transfer.SlowTransfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6002,
 		retryable:   true,
 		description: "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
 	}
 	ErrTransfer_TimedOut = &PelicanError{
 		errorType:   "Transfer.TimedOut",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6003,
 		retryable:   true,
 		description: "The client started transferring data but the transfer timed out.",
 	}
 	ErrTransfer_HeaderTimeout = &PelicanError{
 		errorType:   "Transfer.HeaderTimeout",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6004,
 		retryable:   true,
 		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
 	}
 	ErrTransfer_DirectorTimeout = &PelicanError{
 		errorType:   "Transfer.DirectorTimeout",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6005,
 		retryable:   true,
 		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
 	}
 	ErrTransfer_ChecksumMismatch = &PelicanError{
 		errorType:   "Transfer.ChecksumMismatch",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6006,
 		retryable:   true,
 		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
 	}
 	ErrTransfer_ChecksumMissing = &PelicanError{
 		errorType:   "Transfer.ChecksumMissing",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6007,
 		retryable:   true,
 		description: "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
 	}
 	ErrTransfer_OriginUnresponsive = &PelicanError{
 		errorType:   "Transfer.OriginUnresponsive",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6008,
 		retryable:   true,
 		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 	}
 	ErrTransfer_OriginSlow = &PelicanError{
 		errorType:   "Transfer.OriginSlow",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6009,
 		retryable:   true,
 		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
 	}
 	ErrTransfer_CacheOverloaded = &PelicanError{
 		errorType:   "Transfer.CacheOverloaded",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6010,
 		retryable:   true,
 		description: "A server rejected the request because it was at capacity. When a cache's fair scheduler reports this reason, its global pending buffer was full and the cache is saturated across all the origins it serves rather than being held up by any single one of them. This is also the generic classification for a 429 that carries no more specific reason, including one from a Pelican service other than a cache. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
@@ -319,7 +319,7 @@ func NewResolutionError(err error) *PelicanError {
 func NewResolution_TimeoutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Resolution.Timeout",
-		exitCode:    5,
+		exitCode:    11,
 		code:        2001,
 		retryable:   true,
 		description: "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
@@ -330,7 +330,7 @@ func NewResolution_TimeoutError(err error) *PelicanError {
 func NewResolution_ConnectionFailureError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Resolution.ConnectionFailure",
-		exitCode:    5,
+		exitCode:    11,
 		code:        2002,
 		retryable:   true,
 		description: "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
@@ -396,7 +396,7 @@ func NewContact_RegistryError(err error) *PelicanError {
 func NewContact_ConnectionResetError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Contact.ConnectionReset",
-		exitCode:    6,
+		exitCode:    11,
 		code:        3005,
 		retryable:   true,
 		description: "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
@@ -407,7 +407,7 @@ func NewContact_ConnectionResetError(err error) *PelicanError {
 func NewContact_ConnectionSetupError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Contact.ConnectionSetup",
-		exitCode:    6,
+		exitCode:    11,
 		code:        3006,
 		retryable:   true,
 		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
@@ -484,7 +484,7 @@ func NewSpecification_FileAlreadyExistsError(err error) *PelicanError {
 func NewTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6000,
 		retryable:   true,
 		description: "The client started transferring the file but did not complete it for some reason, or if the file failed post-transfer validation.",
@@ -495,7 +495,7 @@ func NewTransferError(err error) *PelicanError {
 func NewTransfer_StoppedTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.StoppedTransfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6001,
 		retryable:   true,
 		description: "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
@@ -506,7 +506,7 @@ func NewTransfer_StoppedTransferError(err error) *PelicanError {
 func NewTransfer_SlowTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.SlowTransfer",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6002,
 		retryable:   true,
 		description: "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
@@ -517,7 +517,7 @@ func NewTransfer_SlowTransferError(err error) *PelicanError {
 func NewTransfer_TimedOutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.TimedOut",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6003,
 		retryable:   true,
 		description: "The client started transferring data but the transfer timed out.",
@@ -528,7 +528,7 @@ func NewTransfer_TimedOutError(err error) *PelicanError {
 func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.HeaderTimeout",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6004,
 		retryable:   true,
 		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
@@ -539,7 +539,7 @@ func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
 func NewTransfer_DirectorTimeoutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.DirectorTimeout",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6005,
 		retryable:   true,
 		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
@@ -550,7 +550,7 @@ func NewTransfer_DirectorTimeoutError(err error) *PelicanError {
 func NewTransfer_ChecksumMismatchError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.ChecksumMismatch",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6006,
 		retryable:   true,
 		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
@@ -561,7 +561,7 @@ func NewTransfer_ChecksumMismatchError(err error) *PelicanError {
 func NewTransfer_ChecksumMissingError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.ChecksumMissing",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6007,
 		retryable:   true,
 		description: "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
@@ -572,7 +572,7 @@ func NewTransfer_ChecksumMissingError(err error) *PelicanError {
 func NewTransfer_OriginUnresponsiveError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.OriginUnresponsive",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6008,
 		retryable:   true,
 		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
@@ -583,7 +583,7 @@ func NewTransfer_OriginUnresponsiveError(err error) *PelicanError {
 func NewTransfer_OriginSlowError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.OriginSlow",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6009,
 		retryable:   true,
 		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
@@ -594,7 +594,7 @@ func NewTransfer_OriginSlowError(err error) *PelicanError {
 func NewTransfer_CacheOverloadedError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.CacheOverloaded",
-		exitCode:    9,
+		exitCode:    11,
 		code:        6010,
 		retryable:   true,
 		description: "A server rejected the request because it was at capacity. When a cache's fair scheduler reports this reason, its global pending buffer was full and the cache is saturated across all the origins it serves rather than being held up by any single one of them. This is also the generic classification for a 429 that carries no more specific reason, including one from a Pelican service other than a cache. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
