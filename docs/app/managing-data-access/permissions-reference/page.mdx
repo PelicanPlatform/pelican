@@ -194,6 +194,7 @@ Also normative:
 - A collection's owner can be changed but never cleared; clearing it returns `400` with `ownerId cannot be empty`.
 - A collection's namespace has to sit inside a prefix this origin already exports, and is canonicalised before both the prefix check and storage.
 - A collection cannot widen what its export permits.
+- A collection's prefixes are unioned, not resolved most-specific-first: a deeper collection can widen access to its sub-path but cannot restrict what a shallower collection grants. Nothing rejects the overlap at creation, and a namespace carries no uniqueness constraint.
 - Refusals here are reported as `404`, not `403`; see [Response codes](#response-codes).
 
 ## Share administration
