@@ -263,23 +263,25 @@ func prestageMain(cmd *cobra.Command, args []string) {
 		if handleCredentialPasswordError(err) {
 			os.Exit(1)
 		}
+		// The message and the exit code are separate lookups, not one
+		// if/else: a TransferErrors accumulator carries its own per-attempt
+		// message, while the classification that names the exit code can sit
+		// inside it.
 		errMsg := err.Error()
-		var pe error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(err, &te) {
 			errMsg = te.UserError()
+		} else if msg, ok := error_codes.Message(err); ok {
+			errMsg = msg
 		}
-		if errors.Is(err, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
-			log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(err) {
-				log.Errorln("Errors are retryable")
-				os.Exit(11)
-			}
-			os.Exit(1)
+		log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
+		if client.ShouldRetry(err) {
+			log.Errorln("Errors are retryable")
+			os.Exit(11)
 		}
+		if code, ok := error_codes.ExitCodeFor(err); ok {
+			os.Exit(code)
+		}
+		os.Exit(1)
 	}
 }
