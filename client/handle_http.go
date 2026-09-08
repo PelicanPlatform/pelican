@@ -3457,6 +3457,19 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		if result.err != nil && collection.throttleErr == nil && errors.Is(result.err, ErrTooManyRequests) {
 			collection.throttleErr = result.err
 		}
+		// Likewise a 404: the endpoint answered, just not the question the
+		// probe asked. Without this the answer is dropped here and the caller
+		// reports that nobody would say whether the path is a collection, when
+		// in fact a server said the path is not there.
+		if result.err != nil && !collection.notFound {
+			var hep *HttpErrResp
+			var sce *StatusCodeError
+			if errors.Is(result.err, ErrObjectNotFound) ||
+				(errors.As(result.err, &hep) && hep.Code == http.StatusNotFound) ||
+				(errors.As(result.err, &sce) && int(*sce) == http.StatusNotFound) {
+				collection.notFound = true
+			}
+		}
 		if result.err != nil {
 			// If an attempt to contact the remote cache failed, log a message (unless we purposely
 			// canceled the attempt).
@@ -3560,13 +3573,23 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				err = collection.throttleErr
 				return
 			}
+			// A server said the path is not there. That is a definitive answer
+			// about the object, so report the missing object rather than the
+			// failure to determine collection-ness -- and classify it as such,
+			// since Resolution means the server was never reached at all.
+			if collection.notFound {
+				err = error_codes.NewSpecification_FileNotFoundError(
+					errors.Wrapf(ErrObjectNotFound, "the object %s does not exist in this namespace", transfer.remoteURL.Path),
+				)
+				return
+			}
 			// Downloading anyway is how the caller ends up with a directory
 			// listing saved as though it were their object. An endpoint that
 			// cannot answer a PROPFIND for the path it is about to serve is
 			// not one to take a GET on faith from, so refuse and say why.
 			err = error_codes.NewResolutionError(
 				errors.Errorf(
-					"no object server could confirm whether %s is a collection; refusing to download",
+					"no object server could be reached to say whether %s exists or is a collection; refusing to download",
 					transfer.remoteURL.Path),
 			)
 			return
@@ -6931,6 +6954,13 @@ type collectionAnswer struct {
 	// declined to say" is not. Reporting the latter for the former would tell
 	// a client to give up on a cache that only asked it to wait.
 	throttleErr error
+	// notFound records that an endpoint said the path is not there. Kept for
+	// the same reason as throttleErr: it explains why the collection question
+	// went unanswered. A 404 is an answer about the object, so reporting
+	// "nobody would say whether it is a collection" instead would bury a plain
+	// missing object under a message about collection detection. Ranked below
+	// throttleErr, because "ask again later" outranks a sibling's "not here".
+	notFound bool
 }
 
 // objectCached checks if a given URL is present at the first cache in the
