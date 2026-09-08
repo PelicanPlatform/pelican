@@ -5511,8 +5511,15 @@ Loop:
 				sce := StatusCodeError(response.StatusCode)
 				// Wrap StatusCodeError with appropriate PelicanError based on status code
 				wrappedErr := wrapStatusCodeError(&sce)
-				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-					response.StatusCode), wrappedErr}
+				msg := fmt.Sprintf("request failed (HTTP status %d)", response.StatusCode)
+				if response.StatusCode == http.StatusForbidden {
+					// Same reading as the sync branch above: an upload asks for
+					// storage.create and only asks for storage.modify when
+					// Client.EnableOverwrites is set (see uploadTokenOperation),
+					// so an object that is already there is the usual cause.
+					msg += ": the object likely already exists, and this upload's credential may create objects but not replace them; set Client.EnableOverwrites to replace it"
+				}
+				lastError = &HttpErrResp{response.StatusCode, msg, wrappedErr}
 				break Loop
 			}
 			break Loop
