@@ -596,3 +596,50 @@ func TestBuildPropfindMultistatus(t *testing.T) {
 		assert.NotContains(t, string(body), "<D:collection")
 	})
 }
+
+// A director that resolves no origins for a path answers with Specification
+// (5000), the generic member of the family, not Specification.FileNotFound
+// (5011). The local cache must still re-export that as a 404: it is a
+// definitive "nothing in the federation serves this", and a 500 would instead
+// tell the caller the cache itself had failed and invite a pointless retry.
+//
+// Only these two members of the family qualify. FileNotCreated and
+// FileAlreadyExists are write-path answers and must not become 404s on a read.
+func TestHandleErrorSpecificationFamilyMapping(t *testing.T) {
+	reqLog := log.NewEntry(log.New())
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "Specification",
+			err:        error_codes.NewSpecificationError(errors.New("the director could not resolve the path")),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "SpecificationFileNotFound",
+			err:        error_codes.NewSpecification_FileNotFoundError(errors.New("object does not exist at origin")),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "SpecificationFileAlreadyExists",
+			err:        error_codes.NewSpecification_FileAlreadyExistsError(errors.New("object already exists")),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "Authorization",
+			err:        error_codes.NewAuthorizationError(errors.New("credential refused")),
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleError(rec, tt.err, false, reqLog)
+			assert.Equal(t, tt.wantStatus, rec.Code)
+		})
+	}
+}
