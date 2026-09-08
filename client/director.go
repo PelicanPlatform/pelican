@@ -337,12 +337,23 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 			return
 		} else {
 			// If not already a PelicanError, wrap it appropriately
-			var pe *error_codes.PelicanError
-			if !errors.As(err, &pe) {
+			if !errors.Is(err, error_codes.ErrPelican) {
 				// Check if this is a timeout error and use the appropriate retryable error type
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {
 					err = errors.Wrapf(error_codes.NewTransfer_DirectorTimeoutError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+				} else if dirResp != nil && dirResp.StatusCode == http.StatusNotFound {
+					// The director answered, and its answer was definitive:
+					// nothing in the federation serves this path. Reporting
+					// Contact.Director here claims the client failed to reach
+					// the director, which is not what happened, and sends the
+					// reader off to check the network instead of the path.
+					err = errors.Wrapf(error_codes.NewSpecificationError(err), "the director at %s could not resolve %s", pUrl.FedInfo.DirectorEndpoint, pUrl.Path)
+				} else if dirResp != nil && (dirResp.StatusCode == http.StatusUnauthorized || dirResp.StatusCode == http.StatusForbidden) {
+					// Likewise the director answered here -- it refused the
+					// credential (it returns 401 for an expired token). That is
+					// an Authorization failure, not a failure to reach it.
+					err = errors.Wrapf(error_codes.NewAuthorizationError(err), "the director at %s refused the credential for %s", pUrl.FedInfo.DirectorEndpoint, pUrl.Path)
 				} else {
 					err = errors.Wrapf(error_codes.NewContact_DirectorError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 				}
