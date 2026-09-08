@@ -21,12 +21,16 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/logging"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // cliDispatchHook allows builds to handle special exec-name-based dispatch
@@ -72,7 +76,42 @@ func main() {
 func exitWithFlush(code int) {
 	logging.EnterSyncMode()
 	logging.FlushLogs(false)
-	os.Exit(code)
+	os.Exit(code) //nolint:forbidigo // the one place the process is allowed to exit
+}
+
+// reportError logs a message that explains a failing exit and, when
+// Logging.LogLocation sends the log to a file, also writes it to stderr.
+//
+// Without that mirror the terminal gets nothing at all -- the exit status is
+// the only signal -- because file logging redirects every level, including the
+// line explaining the failure. A line or two on the way out is not the log
+// spam that LogLocation exists to avoid; it is the part the user has to see.
+//
+// Arguments are formatted as by log.Errorln/fmt.Fprintln, so a call reads the
+// same as the log.Errorln it replaces. Use it for the lines leading up to an
+// exitWithError, which reports the final line itself.
+func reportError(args ...any) {
+	log.Errorln(args...)
+	if param.Logging_LogLocation.GetString() != "" {
+		fmt.Fprintln(os.Stderr, args...)
+	}
+}
+
+// reportErrorf is reportError with printf-style formatting.
+func reportErrorf(format string, args ...any) {
+	reportError(fmt.Sprintf(format, args...))
+}
+
+// exitWithError reports a fatal error and terminates with the given code.
+func exitWithError(code int, args ...any) {
+	reportError(args...)
+	exitWithFlush(code)
+}
+
+// exitWithErrorf is exitWithError with printf-style formatting.
+func exitWithErrorf(code int, format string, args ...any) {
+	reportError(fmt.Sprintf(format, args...))
+	exitWithFlush(code)
 }
 
 func handleCLI(args []string) error {

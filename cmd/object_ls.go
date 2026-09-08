@@ -66,25 +66,24 @@ func listMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")
 
 	if len(args) < 1 {
-		log.Errorln("no location provided")
+		reportError("no location provided")
 		err = cmd.Help()
 		if err != nil {
 			log.Errorln("failed to print out help:", err)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	object := args[len(args)-1]
 
@@ -131,20 +130,10 @@ func listMain(cmd *cobra.Command, args []string) error {
 	// Exit with failure
 	if err != nil {
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		// Print the list of errors
-		errMsg := err.Error()
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		log.Errorln("Failure getting " + object + ": " + errMsg)
-		if client.ShouldRetry(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
-		}
-		os.Exit(1)
+		exitTransferFailure(err, "Failure getting "+object)
 	}
 
 	filteredInfos := []client.FileInfo{}

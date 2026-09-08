@@ -169,12 +169,11 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -187,17 +186,16 @@ func putMain(cmd *cobra.Command, args []string) {
 		// guard on the synchronous path).
 		for _, f := range []string{"metadata-file", "metadata-body", "metadata-content-type"} {
 			if v, _ := cmd.Flags().GetString(f); v != "" {
-				log.Errorf("--%s is not yet supported with --async", f)
-				os.Exit(1)
+				exitWithErrorf(1, "--%s is not yet supported with --async", f)
 			}
 		}
 		// Validate arguments
 		if len(args) < 2 {
-			log.Errorln("No Source or Destination")
+			reportError("No Source or Destination")
 			if err := cmd.Help(); err != nil {
 				log.Errorln("Failed to print out help:", err)
 			}
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		source := args[:len(args)-1]
 		dest := args[len(args)-1]
@@ -205,9 +203,8 @@ func putMain(cmd *cobra.Command, args []string) {
 		// Ensure server is running, starting it if necessary
 		apiClient, err := ensureClientAgentRunning(cmd.Context(), 5)
 		if err != nil {
-			log.Errorln("Failed to ensure API server is running:", err)
-			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
-			os.Exit(1)
+			reportError("Failed to ensure API server is running:", err)
+			exitWithError(1, "You can manually start it with 'pelican client-api serve --daemonize'")
 		}
 
 		// Get flags for transfer options
@@ -237,16 +234,14 @@ func putMain(cmd *cobra.Command, args []string) {
 		// explicit token file was provided.
 		if tokenLocation == "" {
 			if err := warmWalletForAsync(ctx, apiClient, []asyncWarmItem{{url: dest, write: true}}); err != nil {
-				log.Errorln("Failed to prepare credentials for async transfer:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to prepare credentials for async transfer:", err)
 			}
 		}
 
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {
-			log.Errorln("Failed to create job:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to create job:", err)
 		}
 
 		if outputJSON {
@@ -256,8 +251,7 @@ func putMain(cmd *cobra.Command, args []string) {
 			}
 			jsonBytes, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
-				log.Errorln("Failed to marshal JSON:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to marshal JSON:", err)
 			}
 			fmt.Println(string(jsonBytes))
 		} else {
@@ -274,22 +268,19 @@ func putMain(cmd *cobra.Command, args []string) {
 			// Wait with a reasonable timeout (e.g., 1 hour)
 			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
 			if err != nil {
-				log.Errorln("Error waiting for job:", err)
-				os.Exit(1)
+				exitWithError(1, "Error waiting for job:", err)
 			}
 
 			// Get final status
 			finalStatus, err := apiClient.GetJobStatus(ctx, jobID)
 			if err != nil {
-				log.Errorln("Error getting final job status:", err)
-				os.Exit(1)
+				exitWithError(1, "Error getting final job status:", err)
 			}
 
 			if outputJSON {
 				jsonBytes, err := json.MarshalIndent(finalStatus, "", "  ")
 				if err != nil {
-					log.Errorln("Failed to marshal JSON:", err)
-					os.Exit(1)
+					exitWithError(1, "Failed to marshal JSON:", err)
 				}
 				fmt.Println(string(jsonBytes))
 			} else {
@@ -320,13 +311,12 @@ func putMain(cmd *cobra.Command, args []string) {
 	if checksumAlgorithm != "" {
 		checksumType := client.ChecksumFromHttpDigest(checksumAlgorithm)
 		if checksumType == client.AlgUnknown {
-			log.Errorln("Unknown checksum algorithm:", checksumAlgorithm)
+			reportError("Unknown checksum algorithm:", checksumAlgorithm)
 			var validAlgorithms []string
 			for _, alg := range client.KnownChecksumTypes() {
 				validAlgorithms = append(validAlgorithms, client.HttpDigestFromChecksum(alg))
 			}
-			log.Errorln("Valid algorithms are:", strings.Join(validAlgorithms, ", "))
-			os.Exit(1)
+			exitWithError(1, "Valid algorithms are:", strings.Join(validAlgorithms, ", "))
 		}
 		options = append(options, client.WithRequestChecksums([]client.ChecksumType{checksumType}))
 	}
@@ -341,11 +331,11 @@ func putMain(cmd *cobra.Command, args []string) {
 	}
 
 	if len(args) < 2 {
-		log.Errorln("No Source or Destination")
+		reportError("No Source or Destination")
 		if err := cmd.Help(); err != nil {
 			log.Errorln("Failed to print out help:", err)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
@@ -357,14 +347,12 @@ func putMain(cmd *cobra.Command, args []string) {
 			packOption = "auto"
 		}
 		if _, err := client.GetBehavior(packOption); err != nil {
-			log.Errorln(err)
-			os.Exit(1)
+			exitWithError(1, err)
 		}
 		var err error
 		dest, err = addQueryParam(dest, "pack", packOption)
 		if err != nil {
-			log.Errorln("Failed to process --pack option:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to process --pack option:", err)
 		}
 	}
 
@@ -372,25 +360,22 @@ func putMain(cmd *cobra.Command, args []string) {
 	if checksumsFile != "" {
 		parts := strings.SplitN(checksumsFile, ":", 2)
 		if len(parts) != 2 {
-			log.Errorln("invalid format for --checksums. Expected ALGORITHM:FILENAME")
-			os.Exit(1)
+			exitWithError(1, "invalid format for --checksums. Expected ALGORITHM:FILENAME")
 		}
 		algName, manifestPath := parts[0], parts[1]
 		checksumType := client.ChecksumFromHttpDigest(algName)
 		if checksumType == client.AlgUnknown {
-			log.Errorln("Unknown checksum algorithm:", algName)
+			reportError("Unknown checksum algorithm:", algName)
 			var validAlgorithms []string
 			for _, alg := range client.KnownChecksumTypes() {
 				validAlgorithms = append(validAlgorithms, client.HttpDigestFromChecksum(alg))
 			}
-			log.Errorln("Valid algorithms are:", strings.Join(validAlgorithms, ", "))
-			os.Exit(1)
+			exitWithError(1, "Valid algorithms are:", strings.Join(validAlgorithms, ", "))
 		}
 		log.Debugln("Parsing manifest file:", manifestPath)
 		manifestEntries, err := parseManifest(manifestPath)
 		if err != nil {
-			log.Errorf("failed to parse manifest file %s: %v", manifestPath, err)
-			os.Exit(1)
+			exitWithErrorf(1, "failed to parse manifest file %s: %v", manifestPath, err)
 		}
 
 		manifestMap := make(map[string]string)
@@ -401,12 +386,10 @@ func putMain(cmd *cobra.Command, args []string) {
 		for _, src := range source {
 			expectedChecksum, ok := manifestMap[src]
 			if !ok {
-				log.Errorf("source file %s not found in checksums manifest", src)
-				os.Exit(1)
+				exitWithErrorf(1, "source file %s not found in checksums manifest", src)
 			}
 			if err := verifyFileChecksum(src, expectedChecksum, checksumType); err != nil {
-				log.Errorf("checksum validation failed for %s: %v", src, err)
-				os.Exit(1)
+				exitWithErrorf(1, "checksum validation failed for %s: %v", src, err)
 			}
 			log.Infof("Checksum verified for %s", src)
 		}
@@ -433,8 +416,7 @@ func putMain(cmd *cobra.Command, args []string) {
 			options = append(options, client.WithObjectMetadataContentType(ct))
 		}
 	} else if ct, _ := cmd.Flags().GetString("metadata-content-type"); ct != "" {
-		log.Errorln("--metadata-content-type was supplied without --metadata-body; nothing to override")
-		os.Exit(1)
+		exitWithError(1, "--metadata-content-type was supplied without --metadata-body; nothing to override")
 	}
 
 	var result error
@@ -533,20 +515,10 @@ func putMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if result != nil {
 		if handleCredentialPasswordError(result) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		// Print the list of errors
-		errMsg := result.Error()
-		var te *client.TransferErrors
-		if errors.As(result, &te) {
-			errMsg = te.UserError()
-		}
-		log.Errorln("Failure putting " + lastSrc + ": " + errMsg)
-		if client.ShouldRetry(result) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
-		}
-		os.Exit(1)
+		exitTransferFailure(result, "Failure putting "+lastSrc)
 	}
 
 	transferStatsFile, _ := cmd.Flags().GetString("transfer-stats")

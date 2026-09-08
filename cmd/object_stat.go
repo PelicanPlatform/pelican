@@ -23,10 +23,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -60,13 +58,12 @@ func statMain(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -81,24 +78,24 @@ func statMain(cmd *cobra.Command, args []string) {
 		for _, checksum := range checksums {
 			checksumType := client.ChecksumFromHttpDigest(checksum)
 			if checksumType == client.AlgUnknown {
-				log.Errorf("Unknown checksum type: %s", checksum)
+				reportErrorf("Unknown checksum type: %s", checksum)
 				err = cmd.Help()
 				if err != nil {
 					log.Errorln("Failed to print out help:", err)
 				}
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 			checksumTypes = append(checksumTypes, checksumType)
 		}
 	}
 
 	if len(args) < 1 {
-		log.Errorln("No object provided")
+		reportError("No object provided")
 		err = cmd.Help()
 		if err != nil {
 			log.Errorln("Failed to print out help:", err)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	object := args[len(args)-1]
 
@@ -109,28 +106,17 @@ func statMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if err != nil {
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		// Print the list of errors
-		errMsg := err.Error()
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		log.Errorln("Failure getting " + object + ": " + errMsg)
-		if client.ShouldRetry(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
-		}
-		os.Exit(1)
+		exitTransferFailure(err, "Failure getting "+object)
 	}
 
 	if jsn {
 		// Print our stat info in JSON format:
 		jsonData, err := json.Marshal(statInfo)
 		if err != nil {
-			log.Errorf("Failed to parse object/collection stat info to JSON format: %v", err)
-			os.Exit(1)
+			exitWithErrorf(1, "Failed to parse object/collection stat info to JSON format: %v", err)
 		}
 		fmt.Println(string(jsonData))
 		return

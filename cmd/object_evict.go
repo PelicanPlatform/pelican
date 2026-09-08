@@ -22,15 +22,11 @@ package main
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 var (
@@ -75,12 +71,11 @@ func objectEvictMain(cmd *cobra.Command, args []string) error {
 
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")
@@ -94,25 +89,9 @@ func objectEvictMain(cmd *cobra.Command, args []string) error {
 	message, err := client.DoEvict(ctx, source, immediate, options...)
 	if err != nil {
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
-		errMsg := err.Error()
-		var pe error_codes.PelicanError
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		if errors.Is(err, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure evicting " + source + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		}
-		log.Errorln("Failure evicting " + source + ": " + errMsg)
-		if client.ShouldRetry(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
-		}
-		os.Exit(1)
+		exitTransferFailure(err, "Failure evicting "+source)
 	}
 
 	fmt.Println(message)
