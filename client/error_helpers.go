@@ -336,7 +336,14 @@ func (e *StatusCodeError) Error() string {
 		return fmt.Sprintf("server returned %d %s: no valid credential was presented for this object",
 			int(*e), http.StatusText(int(*e)))
 	case http.StatusForbidden:
-		return fmt.Sprintf("server returned %d %s: %s", int(*e), http.StatusText(int(*e)), credentialRefused)
+		// Reached by uploads as well as downloads, and can have different causes:
+		// a download's 403 is about the credential, while an upload's
+		// can alo mean the object is already there, because an upload asks
+		// for storage.create and adds storage.modify only when
+		// Client.EnableOverwrites is set (see uploadTokenOperation). The
+		// status code cannot tell them apart, so state both;
+		return fmt.Sprintf("server returned %d %s: either %s, or the object already exists and replacing it is not permitted",
+			int(*e), http.StatusText(int(*e)), credentialRefused)
 	case http.StatusNotFound:
 		// A 404 is only reachable from inside a namespace an origin serves, so
 		// it is always about the object, never the namespace.
