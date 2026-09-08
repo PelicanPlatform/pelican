@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -115,6 +116,16 @@ func GenErrorCodes() {
 			Code: code, Retryable: retryable, Description: description})
 	}
 
+	// The sentinel lookup table is ordered most-specific-first, so that a
+	// Authorization.TokenNotFound error is tested against ErrAuthorization_TokenNotFound
+	// before ErrAuthorization -- both match it, and the narrower one is the answer.
+	// Within a depth the yaml order is kept, so the table stays diffable.
+	specificFirst := make([]ErrorType, len(errors))
+	copy(specificFirst, errors)
+	sort.SliceStable(specificFirst, func(i, j int) bool {
+		return strings.Count(specificFirst[i].Raw, ".") > strings.Count(specificFirst[j].Raw, ".")
+	})
+
 	// Create the file to be generated
 	f, err := os.Create("../error_codes/error_codes.go")
 	if err != nil {
@@ -124,8 +135,10 @@ func GenErrorCodes() {
 
 	err = errorTemplate.Execute(f, struct {
 		PelicanErrors []ErrorType
+		SpecificFirst []ErrorType
 	}{
 		PelicanErrors: errors,
+		SpecificFirst: specificFirst,
 	})
 
 	if err != nil {
@@ -206,6 +219,33 @@ type PelicanError struct {
 	description string
 	err         error
 }
+
+// One sentinel per error type. These are the values to compare against with
+// errors.Is when the question is "is this that error":
+//
+//	if errors.Is(err, error_codes.ErrAuthorization) { ... }
+//
+// Matching is hierarchical, so the line above is also true of an
+// Authorization.TokenNotFound error.
+//
+// A sentinel carries the taxonomy's identity and its documented exit code but
+// never a wrapped cause, so it is safe to share and must not be passed to Wrap.
+// Use the New*Error constructors to build an error to return.
+var (
+{{range $idx, $pelicanError := .PelicanErrors}}	Err{{$pelicanError.Display}} = &PelicanError{
+		errorType:   "{{$pelicanError.Raw}}",
+		exitCode:    {{$pelicanError.ExitCode}},
+		code:        {{$pelicanError.Code}},
+		retryable:   {{$pelicanError.Retryable}},
+		description: "{{$pelicanError.Description}}",
+	}
+{{end}})
+
+// sentinels is ordered most-specific-first, so that ExitCodeFor returns the
+// narrowest classification that matches rather than its parent category.
+var sentinels = []*PelicanError{
+{{range $idx, $pelicanError := .SpecificFirst}}	Err{{$pelicanError.Display}},
+{{end}}}
 {{range $idx, $pelicanError := .PelicanErrors}}
 func New{{$pelicanError.Display}}Error(err error) *PelicanError {
 	return &PelicanError{

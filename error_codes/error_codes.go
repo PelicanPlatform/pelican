@@ -32,6 +32,257 @@ type PelicanError struct {
 	err         error
 }
 
+// One sentinel per error type. These are the values to compare against with
+// errors.Is when the question is "is this that error":
+//
+//	if errors.Is(err, error_codes.ErrAuthorization) { ... }
+//
+// Matching is hierarchical, so the line above is also true of an
+// Authorization.TokenNotFound error.
+//
+// A sentinel carries the taxonomy's identity and its documented exit code but
+// never a wrapped cause, so it is safe to share and must not be passed to Wrap.
+// Use the New*Error constructors to build an error to return.
+var (
+	ErrParameter = &PelicanError{
+		errorType:   "Parameter",
+		exitCode:    4,
+		code:        1000,
+		retryable:   false,
+		description: "If the client failed to start, or was started with invalid parameters, or otherwise believes what it was asked to do is impossible or the request itself is malformed.",
+	}
+	ErrParameter_FileNotFound = &PelicanError{
+		errorType:   "Parameter.FileNotFound",
+		exitCode:    4,
+		code:        1011,
+		retryable:   false,
+		description: "If the client was started with a file that does not exist.",
+	}
+	ErrResolution = &PelicanError{
+		errorType:   "Resolution",
+		exitCode:    5,
+		code:        2000,
+		retryable:   false,
+		description: "Indicates that the client failed to even attempt to contact the server.",
+	}
+	ErrResolution_Timeout = &PelicanError{
+		errorType:   "Resolution.Timeout",
+		exitCode:    5,
+		code:        2001,
+		retryable:   true,
+		description: "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
+	}
+	ErrResolution_ConnectionFailure = &PelicanError{
+		errorType:   "Resolution.ConnectionFailure",
+		exitCode:    5,
+		code:        2002,
+		retryable:   true,
+		description: "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
+	}
+	ErrContact = &PelicanError{
+		errorType:   "Contact",
+		exitCode:    6,
+		code:        3000,
+		retryable:   false,
+		description: "The client attempted to contact the server at its resolved address and failed to do so.",
+	}
+	ErrContact_Director = &PelicanError{
+		errorType:   "Contact.Director",
+		exitCode:    6,
+		code:        3001,
+		retryable:   false,
+		description: "The client attempted to contact the director at its found address but failed to do so.",
+	}
+	ErrContact_Cache = &PelicanError{
+		errorType:   "Contact.Cache",
+		exitCode:    11,
+		code:        3002,
+		retryable:   true,
+		description: "The client attempted to contact the cache but failed to do so.",
+	}
+	ErrContact_Origin = &PelicanError{
+		errorType:   "Contact.Origin",
+		exitCode:    6,
+		code:        3003,
+		retryable:   false,
+		description: "The client attempted to contact the origin but failed to do so.",
+	}
+	ErrContact_Registry = &PelicanError{
+		errorType:   "Contact.Registry",
+		exitCode:    6,
+		code:        3004,
+		retryable:   false,
+		description: "The client attempted to contact the registry (usually through the director) but failed to do so.",
+	}
+	ErrContact_ConnectionReset = &PelicanError{
+		errorType:   "Contact.ConnectionReset",
+		exitCode:    6,
+		code:        3005,
+		retryable:   true,
+		description: "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
+	}
+	ErrContact_ConnectionSetup = &PelicanError{
+		errorType:   "Contact.ConnectionSetup",
+		exitCode:    6,
+		code:        3006,
+		retryable:   true,
+		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
+	}
+	ErrAuthorization = &PelicanError{
+		errorType:   "Authorization",
+		exitCode:    7,
+		code:        4000,
+		retryable:   false,
+		description: "The client contacted the server but failed to authenticate, or failed to authorize, or if the server replied with an authorization error when the file was requested or sent.",
+	}
+	ErrAuthorization_TokenNotFound = &PelicanError{
+		errorType:   "Authorization.TokenNotFound",
+		exitCode:    7,
+		code:        4010,
+		retryable:   false,
+		description: "The client requires a credential or token for the transfer but none was discovered or could be generated. The user may need to provide credentials or configure token acquisition.",
+	}
+	ErrSpecification = &PelicanError{
+		errorType:   "Specification",
+		exitCode:    8,
+		code:        5000,
+		retryable:   false,
+		description: "If the client successfully contacted the server and received a definitive response that the desired file was not present or could not be created. Usually the submitters fault.",
+	}
+	ErrSpecification_FileNotFound = &PelicanError{
+		errorType:   "Specification.FileNotFound",
+		exitCode:    8,
+		code:        5011,
+		retryable:   false,
+		description: "If the client successfully contacted the server but the desired file does not exist for download. The user might have entered the wrong URL or the file might not yet be at the specified origin.",
+	}
+	ErrSpecification_FileNotCreated = &PelicanError{
+		errorType:   "Specification.FileNotCreated",
+		exitCode:    8,
+		code:        5002,
+		retryable:   false,
+		description: "If the client successfully contacted the server but the desired file for upload could not be created.",
+	}
+	ErrSpecification_FileAlreadyExists = &PelicanError{
+		errorType:   "Specification.FileAlreadyExists",
+		exitCode:    8,
+		code:        5012,
+		retryable:   false,
+		description: "If the client attempted to upload a file but the remote object already exists at the destination and overwrites are not enabled.",
+	}
+	ErrTransfer = &PelicanError{
+		errorType:   "Transfer",
+		exitCode:    9,
+		code:        6000,
+		retryable:   true,
+		description: "The client started transferring the file but did not complete it for some reason, or if the file failed post-transfer validation.",
+	}
+	ErrTransfer_StoppedTransfer = &PelicanError{
+		errorType:   "Transfer.StoppedTransfer",
+		exitCode:    9,
+		code:        6001,
+		retryable:   true,
+		description: "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
+	}
+	ErrTransfer_SlowTransfer = &PelicanError{
+		errorType:   "Transfer.SlowTransfer",
+		exitCode:    9,
+		code:        6002,
+		retryable:   true,
+		description: "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
+	}
+	ErrTransfer_TimedOut = &PelicanError{
+		errorType:   "Transfer.TimedOut",
+		exitCode:    9,
+		code:        6003,
+		retryable:   true,
+		description: "The client started transferring data but the transfer timed out.",
+	}
+	ErrTransfer_HeaderTimeout = &PelicanError{
+		errorType:   "Transfer.HeaderTimeout",
+		exitCode:    9,
+		code:        6004,
+		retryable:   true,
+		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
+	}
+	ErrTransfer_DirectorTimeout = &PelicanError{
+		errorType:   "Transfer.DirectorTimeout",
+		exitCode:    9,
+		code:        6005,
+		retryable:   true,
+		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
+	}
+	ErrTransfer_ChecksumMismatch = &PelicanError{
+		errorType:   "Transfer.ChecksumMismatch",
+		exitCode:    9,
+		code:        6006,
+		retryable:   true,
+		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
+	}
+	ErrTransfer_ChecksumMissing = &PelicanError{
+		errorType:   "Transfer.ChecksumMissing",
+		exitCode:    9,
+		code:        6007,
+		retryable:   true,
+		description: "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
+	}
+	ErrTransfer_OriginUnresponsive = &PelicanError{
+		errorType:   "Transfer.OriginUnresponsive",
+		exitCode:    9,
+		code:        6008,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin has accepted connections but is not delivering data (the origin appears unresponsive). The cache shed the request to keep its worker pool available for healthy origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+	}
+	ErrTransfer_OriginSlow = &PelicanError{
+		errorType:   "Transfer.OriginSlow",
+		exitCode:    9,
+		code:        6009,
+		retryable:   true,
+		description: "A cache refused to admit the upstream fetch because the origin is transferring data but is already holding its fair share of the cache's worker pool. The cache shed the request to keep the pool available for other origins. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+	}
+	ErrTransfer_CacheOverloaded = &PelicanError{
+		errorType:   "Transfer.CacheOverloaded",
+		exitCode:    9,
+		code:        6010,
+		retryable:   true,
+		description: "A server rejected the request because it was at capacity. When a cache's fair scheduler reports this reason, its global pending buffer was full and the cache is saturated across all the origins it serves rather than being held up by any single one of them. This is also the generic classification for a 429 that carries no more specific reason, including one from a Pelican service other than a cache. The Retry-After hint is surfaced on the client's typed throttle error for external retriers to honor; the Pelican client itself does not sleep on it.",
+	}
+)
+
+// sentinels is ordered most-specific-first, so that ExitCodeFor returns the
+// narrowest classification that matches rather than its parent category.
+var sentinels = []*PelicanError{
+	ErrParameter_FileNotFound,
+	ErrResolution_Timeout,
+	ErrResolution_ConnectionFailure,
+	ErrContact_Director,
+	ErrContact_Cache,
+	ErrContact_Origin,
+	ErrContact_Registry,
+	ErrContact_ConnectionReset,
+	ErrContact_ConnectionSetup,
+	ErrAuthorization_TokenNotFound,
+	ErrSpecification_FileNotFound,
+	ErrSpecification_FileNotCreated,
+	ErrSpecification_FileAlreadyExists,
+	ErrTransfer_StoppedTransfer,
+	ErrTransfer_SlowTransfer,
+	ErrTransfer_TimedOut,
+	ErrTransfer_HeaderTimeout,
+	ErrTransfer_DirectorTimeout,
+	ErrTransfer_ChecksumMismatch,
+	ErrTransfer_ChecksumMissing,
+	ErrTransfer_OriginUnresponsive,
+	ErrTransfer_OriginSlow,
+	ErrTransfer_CacheOverloaded,
+	ErrParameter,
+	ErrResolution,
+	ErrContact,
+	ErrAuthorization,
+	ErrSpecification,
+	ErrTransfer,
+}
+
 func NewParameterError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Parameter",
