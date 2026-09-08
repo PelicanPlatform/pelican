@@ -749,7 +749,7 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 					pde.expired = true
 				}
 			} else {
-				parts = append(parts, "federation token has not expired, so the cause is one of the server's other checks: its scopes may not cover this object's path or the requested operation, or the server may not accept its issuer or audience")
+				parts = append(parts, "federation token has not expired, so either its scopes do not cover this object's path or the requested operation, or the server does not accept its issuer or audience")
 			}
 		}
 		var tokenDetail string
