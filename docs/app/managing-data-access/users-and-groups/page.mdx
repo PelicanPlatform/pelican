@@ -46,17 +46,6 @@ Pre-creating allows one to add the person to groups or grant a permissions befor
 4. Click **CREATE USER**.
 5. For a local account, the page offers **GENERATE PASSWORD-SET INVITE**. Click it and copy the URL, or click **SKIP FOR NOW** and mint the invite later.
 
-### CLI
-
-```bash copy
-# Local account — hand out a password invite afterwards
-pelican-server server user create --username alice --display-name "Alice Chen"
-
-# OIDC account, subject known in advance
-pelican-server server user create --username alice \
-    --sub abc-123 --issuer https://oidc.example.org/
-```
-
 ## Let a user set a password
 
 Administrators never set passwords for users; instead they mint a single-use, time-bounded invite and hand over the link (typically,
@@ -70,32 +59,20 @@ The link lifetime defaults to the value of [`Server.GroupInviteLinkExpiration`](
 
 The same panel lists every invite ever issued for that user, so you can see whether one is already outstanding before minting another.
 
-### CLI
-
-```bash copy
-pelican-server server user invite-password <user-id>
-pelican-server server user list-password-invites <user-id>
-pelican-server server user clear-password <user-id>
-```
-
-## Creating an onboarding link
+## Creating a group onboarding link
 
 Use an onboarding link when you want to invite someone to use the origin whose SSO identity is not currently known; while some SSO's use human-friendly usernames,
 the default provider for Pelican (CILogon) randomly generates names.  A CILogon name may be of the form `http://cilogon.org/serverA/users/67294` and not known to
 the user or administrator.
 
-By using an onboarding link, the new account is associated with the SSO account of the individual who clicked on the link.
+By using an onboarding link, a new account is created and associated with the SSO account of the individual who clicked on the link.
 After clicking on the link, the recipient signs in through the identity provider first, and then accepts the invite.
 
-[TODO: the generated text claimed there is no such UI.  This is wrong; add instructions/screenshots here.]
-
-### CLI
-
-```bash copy
-pelican-server server user invite-onboard
-```
-
-The command prints the token, its expiry, and a redemption URL to hand over.
+1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
+2. Search and Click to expand the Group you wish to onboard the user to.
+3. Navigate the **Invite Links** section
+4. Toggle **Single Use** if you want just one person to use this link, adjust the expiration of the link as needed and click **Generate Invite Link**.
+5. Copy and send the URL to the user you wish to onboard.
 
 ## Deactivate or delete a user
 
@@ -107,13 +84,6 @@ Deleting is not reversible.
 Along with the account, Pelican removes group memberships.  There is no "undelete" functionality.
 
 To delete, go to **Settings** → **Users** and use the **Delete** control on the user's row.
-
-### CLI
-
-```bash copy
-pelican-server server user set-status <user-id> --status inactive
-pelican-server server user delete <user-id>
-```
 
 ## Create a group
 
@@ -133,12 +103,6 @@ Once the group exists, use it to grant access to a collection: see [Grant read o
 4. Leave **Add me as a member of this group** checked if you want to be a member as well as the owner. Creating a group makes you its owner but does not make you a member.
 5. Click **CREATE**.
 
-### CLI
-
-```bash copy
-pelican-server server group create --name cms-analysis --description "CMS analysis team"
-```
-
 ## Add and remove group members
 
 *Requires group ownership/administrator privilege or server user administration privilege.*
@@ -152,14 +116,6 @@ Each group has an owner (individual user account); optionally, there may be an "
 For administrators, the **ADD MEMBER** drop-down shows all users at the server.  Otherwise, it only shows users in groups the owner is a member of.
 
 Removing a member does not relinquish ownership; the owner remains the owner even after their membership is deleted.
-
-### CLI
-
-```bash copy
-pelican-server server group add-member <group-id> --user-id <user-id>
-pelican-server server group remove-member <group-id> --user-id <user-id>
-pelican-server server group list-members <group-id>
-```
 
 ## Invite people to a group with a link
 
@@ -178,14 +134,6 @@ The recipient must sign in to their user account and, if your server has an Acce
 
 Listed links show a short ID rather than the token; the ID is safe to quote in a ticket or an audit log.
 
-### CLI
-
-```bash copy
-pelican-server server group invite create <group-id> --single-use --expires-in 24h
-pelican-server server group invite list <group-id>
-pelican-server server group invite revoke <group-id> <link-id>
-```
-
 ## Transfer group ownership or delegate a group administrator
 
 *Requires group ownership or server administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
@@ -198,13 +146,6 @@ An administrator cannot transfer ownership and cannot delete the group.
 1. Open the group's detail page and find the **Ownership** section.
 2. Click the edit icon beside **Owner**, pick the new owner, and save.
 3. Click the edit icon beside **Administrator**, choose **None**, **User**, or **Group**, pick the target, and save.
-
-### CLI
-
-```bash copy
-pelican-server server group set-ownership <group-id> --owner-id <user-id>
-pelican-server server group set-ownership <group-id> --admin-id <id> --admin-type group
-```
 
 ## Make a group usable in authorization templates and admin lists
 
@@ -228,14 +169,6 @@ Scopes provide specific permissions to a user or group beyond data access.  Scop
 1. For a user: **Settings** → **Users**, edit the user, and scroll to **Scopes**. For a group: open the group's detail page and find its scopes panel. Both panels are rendered for system administrators only.
 2. Pick an entry from **Pick a scope to grant** — the picker offers only scopes the management API will accept — and click **GRANT**.
 3. To revoke, click the × on the scope's chip.
-
-### CLI
-
-```bash copy
-pelican-server server user scope list <user-id>
-pelican-server server user scope grant <user-id> --scope server.user_admin
-pelican-server server group scope revoke <group-id> <scope>
-```
 
 ## Manage your own account
 
