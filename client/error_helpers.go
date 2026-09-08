@@ -736,7 +736,7 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 				// Expiry is the one cause we can rule out from the token alone.
 				// The server does not tell us which of the remaining checks
 				// failed, so name them rather than asserting a single cause.
-				parts = append(parts, "token has not expired, so the cause is one of the server's other checks: its scopes may not cover this object's path or the requested operation, or the server may not accept its issuer or audience")
+				parts = append(parts, "token has not expired, so either its scopes do not cover this object's path or the requested operation, or the server does not accept its issuer or audience")
 			}
 		}
 		if fedTokenContents != "" {
