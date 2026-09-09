@@ -336,12 +336,9 @@ func (e *StatusCodeError) Error() string {
 		return fmt.Sprintf("server returned %d %s: no valid credential was presented for this object",
 			int(*e), http.StatusText(int(*e)))
 	case http.StatusForbidden:
-		// Reached by uploads as well as downloads, and can have different causes:
-		// a download's 403 is about the credential, while an upload's
-		// can alo mean the object is already there, because an upload asks
-		// for storage.create and adds storage.modify only when
-		// Client.EnableOverwrites is set (see uploadTokenOperation). The
-		// status code cannot tell them apart, so state both;
+		// Reads and writes both land here and the status code alone does not
+		// say which check the server failed, so state both causes rather than
+		// picking one.
 		return fmt.Sprintf("server returned %d %s: either %s, or the object already exists and replacing it is not permitted",
 			int(*e), http.StatusText(int(*e)), credentialRefused)
 	case http.StatusNotFound:

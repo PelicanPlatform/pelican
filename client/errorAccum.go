@@ -39,16 +39,9 @@ type PermissionDeniedError struct {
 	noToken bool // true when no token was sent (e.g., public namespace via stale cache)
 }
 
-// credentialRefused is what a 403 on a read means, for the reader who does not
-// know the status codes: an authorized request for an object that is not there
-// gets a 404, and a namespace no origin serves never reaches a server at all,
-// because the director answers 404 first, so what is left is the credential.
-//
-// It covers reads only. A 403 on an upload usually means the opposite — the
-// object already exists, and an upload's credential covers creation but not
-// replacement unless Client.EnableOverwrites is set — so PermissionDeniedError
-// (built solely on the download paths) states this as the cause, while
-// StatusCodeError, which both operations reach, offers it as one of two.
+// credentialRefused spells out the 403 above for a reader who does not know
+// the status codes. It describes a read; a write's 403 has other causes, so
+// callers on a write path should say what a refusal means there instead.
 const credentialRefused = "your credential does not grant access to this object"
 
 func (e *PermissionDeniedError) Error() string {
