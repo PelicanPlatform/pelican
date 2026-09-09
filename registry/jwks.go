@@ -45,12 +45,13 @@ import (
 // This is deliberately more lenient than config.stripPrivateKeys, which is used
 // for the server's own trusted keys where any bad key is a hard error.
 func publicJWKSForServing(set jwk.Set) (jwk.Set, error) {
-	// The callback never returns an error, so ProjectPublicJWKS cannot fail
-	// here: every unpublishable key is logged and skipped.
-	out, _ := config.ProjectPublicJWKS(set, func(k jwk.Key, err error) error {
+	out, err := config.ProjectPublicJWKS(set, func(k jwk.Key, err error) error {
 		log.Warnf("Skipping key %q while publishing JWKS: %v", k.KeyID(), err)
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	if set.Len() > 0 && out.Len() == 0 {
 		return nil, errors.Errorf(
 			"all %d stored key(s) are unpublishable; refusing to serve an empty JWKS",

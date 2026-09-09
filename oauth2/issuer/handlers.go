@@ -175,9 +175,9 @@ func handleDispatch(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationRead(provider)(ctx)
-	case action == ".well-known/issuer.jwks" && ctx.Request.Method == http.MethodGet:
+	case action == strings.TrimPrefix(oidcJWKSSuffix, "/") && ctx.Request.Method == http.MethodGet:
 		handleNamespaceJWKS(provider)(ctx)
-	case action == ".well-known/openid-configuration":
+	case action == strings.TrimPrefix(oidcDiscoverySuffix, "/"):
 		handleIssuerDiscovery(provider)(ctx)
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
@@ -293,7 +293,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":                      serviceURI + "/.well-known/issuer.jwks",
+			"jwks_uri":                      serviceURI + oidcJWKSSuffix,
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
