@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -663,6 +664,134 @@ func TestAudienceValidation(t *testing.T) {
 			assert.Equal(t, tt.authorized, authorized, "audience check should match expected result")
 		})
 	}
+}
+
+// newTestIssuerServer generates a signing key and starts an HTTP server that
+// publishes its public half via JWKS along with the OpenID discovery document.
+// It returns the signing key and the issuer URL.
+func newTestIssuerServer(t *testing.T) (jwk.Key, string) {
+	key := generateTestKey(t)
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, pubKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(pubKey))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(jwks)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		cfg := map[string]interface{}{
+			"issuer":   "http://" + r.Host,
+			"jwks_uri": "http://" + r.Host + "/jwks",
+		}
+		data, _ := json.Marshal(cfg)
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return key, server.URL
+}
+
+// createTestTokenWithExpiration is like createTestToken but with an explicit
+// expiration time; the WLCG wildcard audience is always included.
+func createTestTokenWithExpiration(t *testing.T, key jwk.Key, issuer string, subject string, exp time.Time, scopes string) string {
+	tok, err := jwt.NewBuilder().
+		Issuer(issuer).
+		Subject(subject).
+		IssuedAt(time.Now().Add(-5*time.Minute)).
+		Expiration(exp).
+		Claim("scope", scopes).
+		Audience([]string{"https://wlcg.cern.ch/jwt/v1/any"}).
+		Build()
+	require.NoError(t, err)
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// TestTokenAuthzCacheClampsToTokenExpiry verifies the fixes for issue #3696:
+// a cached authorization entry must not outlive the token that produced it,
+// and a cache read must not extend the entry's lifetime (touch-on-hit).
+func TestTokenAuthzCacheClampsToTokenExpiry(t *testing.T) {
+	key, issuerURL := newTestIssuerServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp := &errgroup.Group{}
+
+	exports := []server_utils.OriginExport{
+		{
+			FederationPrefix: "/data",
+			StoragePrefix:    "/tmp/data",
+			IssuerUrls:       []string{issuerURL},
+			Capabilities: server_structs.Capabilities{
+				Reads: true,
+			},
+		},
+	}
+	require.NoError(t, InitAuthConfig(ctx, egrp, exports))
+	ac := GetAuthConfig()
+
+	tokenLifetime := 30 * time.Second
+	now := time.Now()
+	tokenStr := createTestTokenWithExpiration(t, key, issuerURL, "alice", now.Add(tokenLifetime), "storage.read:/file.txt")
+
+	require.True(t, ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr),
+		"a currently-valid token should authorize")
+
+	item := ac.tokenAuthz.Get(tokenStr)
+	require.NotNil(t, item)
+	maxExpiry := now.Add(tokenLifetime + token.ClockSkewLeeway + 10*time.Second)
+	assert.True(t, item.ExpiresAt().Before(maxExpiry),
+		"cache entry expiry %v should be clamped near the token's exp, not the default TTL", item.ExpiresAt())
+
+	// A read must not push the entry's expiry out.  Let the wall clock advance
+	// so that a touch-on-hit, if present, would produce a visibly later expiry.
+	firstExpiry := item.ExpiresAt()
+	time.Sleep(20 * time.Millisecond)
+	require.True(t, ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr))
+	item = ac.tokenAuthz.Get(tokenStr)
+	require.NotNil(t, item)
+	assert.True(t, firstExpiry.Equal(item.ExpiresAt()),
+		"a cache read must not extend the entry's expiry (was %v, now %v)", firstExpiry, item.ExpiresAt())
+}
+
+// TestTokenAuthzRejectsExpiredToken verifies that a token whose exp is past
+// (beyond the verifier's clock-skew leeway) is denied and never cached.
+func TestTokenAuthzRejectsExpiredToken(t *testing.T) {
+	key, issuerURL := newTestIssuerServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp := &errgroup.Group{}
+
+	exports := []server_utils.OriginExport{
+		{
+			FederationPrefix: "/data",
+			StoragePrefix:    "/tmp/data",
+			IssuerUrls:       []string{issuerURL},
+			Capabilities: server_structs.Capabilities{
+				Reads: true,
+			},
+		},
+	}
+	require.NoError(t, InitAuthConfig(ctx, egrp, exports))
+	ac := GetAuthConfig()
+
+	tokenStr := createTestTokenWithExpiration(t, key, issuerURL, "alice",
+		time.Now().Add(-2*token.ClockSkewLeeway), "storage.read:/file.txt")
+
+	assert.False(t, ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr),
+		"an expired token must not authorize")
+	assert.Nil(t, ac.tokenAuthz.Get(tokenStr), "an expired token must not be cached")
 }
 
 // BenchmarkPathPrefixCheck benchmarks path prefix validation
