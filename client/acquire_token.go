@@ -330,10 +330,13 @@ func (tg *tokenGenerator) recordAuthFailure(statusCode int) (bool, error) {
 	// Retry up to 3 times before giving up
 	maxRetries := 3
 	if tg.consecutiveAuthFailures <= maxRetries {
-		return true, errors.Errorf("authorization failed with status %d; retrying with a fresh credential", statusCode)
+		return true, error_codes.NewAuthorizationError(
+			errors.Errorf("authorization failed with status %d; retrying with a fresh credential", statusCode))
 	}
 
-	return false, errors.Errorf("authentication failed for %d consecutive times (last status %d)", tg.consecutiveAuthFailures, statusCode)
+	return false, error_codes.NewAuthorizationError(
+		errors.Errorf("authentication failed for %d consecutive times (last status %d)",
+			tg.consecutiveAuthFailures, statusCode))
 }
 
 func (tg *tokenGenerator) recordAuthSuccess() {

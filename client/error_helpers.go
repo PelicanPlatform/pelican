@@ -791,8 +791,7 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 	}
 
 	// Catch-all: check if error is already a PelicanError
-	var pe *error_codes.PelicanError
-	if errors.As(err, &pe) {
+	if errors.Is(err, error_codes.ErrPelican) {
 		return err, false, ""
 	}
 	// Unknown error type - wrap as generic TransferError

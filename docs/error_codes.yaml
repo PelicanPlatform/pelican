@@ -34,6 +34,15 @@
 # This means that the whole client process will restart with the HTCondor job so the process could succeed
 # if it hits a different cache/site or hits the same cache/site when it is in a better state.
 
+# clientExitCode and retryable are not independent: exit code 11 is reserved for, and required by, every
+# retryable error, so a wrapper can decide whether to resubmit from the exit status alone without having
+# to consult this table. Non-retryable errors take a code in 1-10, which then says which *kind* of
+# permanent failure it was. Every retryable entry below therefore has clientExitCode 11, and no
+# non-retryable entry may claim it. An entry that breaks this is rejected when this file is processed
+# rather than left to review, since the mistake is invisible until a job either fails to retry or
+# retries forever. Codes 1-3 stay unassigned: 1 remains the exit for an error that reached the client
+# with no classification at all.
+
 ############################
 #     Parameter Errors     #
 ############################
@@ -66,7 +75,7 @@ retryable: false
 ---
 type: Resolution.Timeout
 code: 2001
-clientExitCode: 5
+clientExitCode: 11
 description: >-
   The client timed out while querying for federation metadata during discovery.
   This could be a DNS timeout, a dial timeout, or a header timeout. This is
@@ -75,7 +84,7 @@ retryable: true
 ---
 type: Resolution.ConnectionFailure
 code: 2002
-clientExitCode: 5
+clientExitCode: 11
 description: >-
   The client failed to connect while querying for federation metadata during discovery.
   This could be a network unreachable error, no route to host, proxy connection refused,
@@ -124,7 +133,7 @@ retryable: false
 ---
 type: Contact.ConnectionReset
 code: 3005
-clientExitCode: 6
+clientExitCode: 11
 description: >-
   The client attempted to contact a server but the connection was reset by the remote peer.
   This is often a transient network error that can be resolved by retrying.
@@ -132,7 +141,7 @@ retryable: true
 ---
 type: Contact.ConnectionSetup
 code: 3006
-clientExitCode: 6
+clientExitCode: 11
 description: >-
   The client attempted to establish a connection to the server but failed before the request could be completed.
 retryable: true
@@ -199,7 +208,7 @@ retryable: false
 ---
 type: Transfer
 code: 6000
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client started transferring the file but did not complete it for some reason, or if the file
   failed post-transfer validation.
@@ -207,28 +216,28 @@ retryable: true
 ---
 type: Transfer.StoppedTransfer
 code: 6001
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.
 retryable: true
 ---
 type: Transfer.SlowTransfer
 code: 6002
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client started transferring data but the transfer was slower than the minimum configured timeout rate.
 retryable: true
 ---
 type: Transfer.TimedOut
 code: 6003
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client started transferring data but the transfer timed out.
 retryable: true
 ---
 type: Transfer.HeaderTimeout
 code: 6004
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client attempted to contact the server but timed out waiting for response headers.
   This indicates the server did not respond before the header timeout threshold.
@@ -236,7 +245,7 @@ retryable: true
 ---
 type: Transfer.DirectorTimeout
 code: 6005
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client timed out while querying the director for namespace information.
   This indicates the director did not respond before the timeout threshold.
@@ -244,7 +253,7 @@ retryable: true
 ---
 type: Transfer.ChecksumMismatch
 code: 6006
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client successfully transferred the file but the checksum computed by the client
   did not match the checksum reported by the server.
@@ -252,7 +261,7 @@ retryable: true
 ---
 type: Transfer.ChecksumMissing
 code: 6007
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   The client required checksum verification but the server did not provide any
   checksum information or only provided unsupported algorithms.
@@ -260,7 +269,7 @@ retryable: true
 ---
 type: Transfer.OriginUnresponsive
 code: 6008
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   A cache refused to admit the upstream fetch because the origin has accepted
   connections but is not delivering data (the origin appears unresponsive). The
@@ -271,7 +280,7 @@ retryable: true
 ---
 type: Transfer.OriginSlow
 code: 6009
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   A cache refused to admit the upstream fetch because the origin is transferring
   data but is already holding its fair share of the cache's worker pool. The
@@ -282,7 +291,7 @@ retryable: true
 ---
 type: Transfer.CacheOverloaded
 code: 6010
-clientExitCode: 9
+clientExitCode: 11
 description: >-
   A server rejected the request because it was at capacity. When a cache's fair
   scheduler reports this reason, its global pending buffer was full and the

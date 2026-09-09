@@ -211,39 +211,28 @@ func onlyThrottled(err error) bool {
 // anyAttemptNotFound reports whether any attempt in err definitively found the
 // object missing.
 //
-// errors.As stops at the first PelicanError in tree order, which for an
-// accumulator is whatever the first object server happened to return. When one
-// origin was throttled and another answered "not found", that ordering decides
-// whether the client is told 404 or something far less useful, so the
-// definitive answer is searched for explicitly instead.
+// Asking errors.Is rather than reaching for the first classification with
+// errors.As is what makes "any attempt" true. errors.As stops at the first
+// PelicanError in tree order, which for an accumulator is whatever the first
+// object server happened to return; when one origin was throttled and another
+// answered "not found", that ordering would decide whether the client is told
+// 404 or something far less useful. errors.Is walks the whole tree, including
+// the Unwrap() []error branches an accumulator produces, and stops only on a
+// match.
+//
+// Two classifications qualify. Specification.FileNotFound is the direct answer.
+// The bare Specification code is how a director reports that nothing in the
+// federation serves the requested path, which on a read is the same answer --
+// hence Exactly, since the family's other members (FileNotCreated,
+// FileAlreadyExists) are write-path answers and never mean "absent".
 //
 // This only ranks not-found above the *unclassified* remainder. A status code
 // relayed from upstream, and an authorization failure, still win: they say
 // something about the object that a sibling's 404 does not.
 func anyAttemptNotFound(err error) bool {
-	for cur := err; cur != nil; {
-		if pe, ok := cur.(*error_codes.PelicanError); ok && pe.Code() == fileNotFoundErrorCode {
-			return true
-		}
-		if multi, ok := cur.(interface{ Unwrap() []error }); ok {
-			for _, child := range multi.Unwrap() {
-				if anyAttemptNotFound(child) {
-					return true
-				}
-			}
-			return false
-		}
-		single, ok := cur.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		cur = single.Unwrap()
-	}
-	return false
+	return errors.Is(err, error_codes.ErrSpecification_FileNotFound) ||
+		errors.Is(err, error_codes.Exactly(error_codes.ErrSpecification))
 }
-
-// fileNotFoundErrorCode is error_codes' Specification.FileNotFound.
-const fileNotFoundErrorCode = 5011
 
 // validShedReason returns reason if it is one of the known shed reasons, and
 // the generic "too_many_requests" otherwise.
@@ -322,25 +311,27 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 
 	reqLog.Errorln("Failed to get file from cache:", getErr)
 	var sce *client.StatusCodeError
-	var pe *error_codes.PelicanError
 	var netErr net.Error
 	if errors.As(getErr, &sce) {
 		code := int(*sce)
 		writeJSON(code, http.StatusText(code), getErr.Error())
-	} else if errors.As(getErr, &pe) {
-		// Map Pelican error codes to HTTP status codes
+	} else if errors.Is(getErr, error_codes.ErrPelican) {
+		// Map Pelican classifications to HTTP status codes. Each case asks the
+		// whole error tree "is this that error", so a definitive answer from
+		// any attempt is found wherever it sits; the case order is the
+		// precedence between two attempts that answered differently.
 		switch {
-		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
+		case errors.Is(getErr, error_codes.ErrAuthorization):
 			// Ranked above not-found: "you may not read this" is actionable
 			// (refresh a credential) and, unlike a sibling's 404, does not
 			// claim the object is absent.
 			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())
-		case pe.Code() == fileNotFoundErrorCode || anyAttemptNotFound(getErr):
+		case anyAttemptNotFound(getErr):
 			// A definitive "the object is not here" from any attempt beats a
-			// sibling attempt's transient failure, whichever one errors.As
-			// happened to reach first. Without the second test, a throttle
-			// recorded ahead of the not-found decides the response and the
-			// client is told to come back for an object that will never exist.
+			// sibling attempt's transient failure. Without the tree-wide
+			// search, a throttle recorded ahead of the not-found decides the
+			// response and the client is told to come back for an object that
+			// will never exist.
 			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		default:
 			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())

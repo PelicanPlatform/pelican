@@ -24,8 +24,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 func TestBearerAuthenticator_Authorize(t *testing.T) {
@@ -67,6 +69,13 @@ func TestBearerAuthenticator_Verify(t *testing.T) {
 		redo, err := authenticator.Verify(nil, &http.Response{StatusCode: http.StatusUnauthorized}, "/test/path")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "retrying with a fresh credential")
+		// Classified, so callers exit with the documented Authorization code
+		// (7) instead of the untyped fallback of 1, and the HTCondor plugin
+		// reports an ErrorType rather than "Unprocessed".
+		require.ErrorIs(t, err, error_codes.ErrAuthorization)
+		code, ok := error_codes.ExitCodeFor(err)
+		require.True(t, ok)
+		assert.Equal(t, 7, code)
 		assert.True(t, redo, "unauthorized attempt %d should trigger a retry", i+1)
 	}
 

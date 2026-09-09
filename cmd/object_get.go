@@ -333,24 +333,61 @@ func getMain(cmd *cobra.Command, args []string) {
 		if handleCredentialPasswordError(attemptErr) {
 			os.Exit(1)
 		}
+		// Which message, and which exit code, are two separate questions.
+		//
+		// The message is an alternation: the per-attempt list if a transfer
+		// accumulated one, else the classified error's own message, else
+		// whatever the error says for itself.
+		//
+		// The exit code is not an alternation, because the classification can
+		// sit *inside* the accumulator whose message won above. A refused
+		// upload is exactly that shape -- the error is a TransferErrors whose
+		// attempt error is an Authorization PelicanError -- so folding these
+		// two questions into one if/else would report exit 1 for it instead
+		// of 7.
+		//
+		// Both lookups go through error_codes helpers rather than a type
+		// assertion, because the error arrives wrapped for context several
+		// layers deep. An assertion sees only the outermost *withStack and
+		// would match neither.
+		//
+		// ExitCodeFor asks the sentinels "is this that error" and reads the
+		// code off the match, since the exit code belongs to the
+		// classification rather than to this particular error. Message is the
+		// one thing a sentinel cannot answer -- it knows the category but not
+		// the cause -- so the instance's own text comes from there.
+		//
+		// ShouldRetry is asked *before* ExitCodeFor, and the order is the
+		// point. Exit 11 means "a resubmission could succeed" and is reserved
+		// for exactly the retryable errors, so that a wrapper can decide from
+		// the exit status alone; a code in 1-10 is a promise that retrying is
+		// futile. Every retryable classification carries 11, so the two agree
+		// for a classified error -- but the classification is not the only
+		// source of retryability. client.IsRetryable overrides it per
+		// instance: a permission denial is retryable when the token had
+		// expired or none was sent, though its class, Authorization, is not.
+		// Those are genuinely worth another attempt -- a resubmitted job gets
+		// a fresh credential, and the no-token case is a cache that has not
+		// yet learned the namespace -- so asking ExitCodeFor first would exit
+		// 7 and tell the wrapper not to bother. The cost is that such a
+		// failure no longer names itself as an auth problem through its exit
+		// code; the message still does.
 		errMsg := attemptErr.Error()
-		var pe error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(attemptErr, &te) {
 			errMsg = te.UserError()
+		} else if msg, ok := error_codes.Message(attemptErr); ok {
+			errMsg = msg
 		}
-		if errors.Is(attemptErr, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(attemptErr) {
-				log.Errorln("Errors are retryable")
-				os.Exit(11)
-			}
-			os.Exit(1)
+		log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
+		if client.ShouldRetry(attemptErr) {
+			log.Errorln("Errors are retryable")
+			os.Exit(11)
 		}
+		if code, ok := error_codes.ExitCodeFor(attemptErr); ok {
+			os.Exit(code)
+		}
+		os.Exit(1)
 	}
 
 	// No failures so we can write the transfer stats
