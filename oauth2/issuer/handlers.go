@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/ory/fosite"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
@@ -224,25 +225,60 @@ func handleDispatchDelete(ctx *gin.Context) {
 	}
 }
 
+// NamespaceJWKS returns the public key set this provider's JWKS endpoint
+// publishes: the server's exported public key set merged with any extra
+// public keys configured via ExtraJwksPath.
+//
+// The extra file is optional; if it cannot be published, this degrades to
+// the server's base keys and logs rather than failing. Only a failure to
+// load the base keys, which leaves no correct subset to serve, is returned
+// as an error, and it has already been logged when it is.
+//
+// Both conditions are standing misconfigurations on an unauthenticated
+// endpoint, and the underlying read is already cached -- failures included
+// -- so every request is handed the same error without touching the
+// filesystem. That leaves the log write as the only per-request cost a
+// client can still drive. So each condition is reported once per distinct
+// error text, and forgotten once it clears so that a later recurrence is
+// not swallowed as a duplicate.
+//
+// The origin's startup probe of IssuerJwks calls this too, rather than
+// loading and logging on its own. A fault it reports then shares the
+// endpoint's de-duplication state and wording, so the first request stays
+// quiet instead of repeating the startup line in other words.
+func (p *OIDCProvider) NamespaceJWKS() (jwk.Set, error) {
+	extraFailed := false
+	key, err := config.GetIssuerPublicJWKSForNamespace(p.ExtraJwksPath,
+		func(e error) error {
+			// Called synchronously from the line above and never retained,
+			// so the captured flag needs no synchronization.
+			extraFailed = true
+			config.ReportNamespaceExtraFault(p.Namespace, e)
+			return nil
+		})
+	if err != nil {
+		// Reported against the server's key set rather than this
+		// namespace, and shared with the server-level JWKS endpoint; see
+		// config.ReportBaseKeysFault.
+		config.ReportBaseKeysFault(err)
+		return nil, err
+	}
+	config.ForgetBaseKeysFault()
+	if !extraFailed {
+		// Either the extra file merged cleanly or there is none to merge:
+		// the callback above runs only on failure.
+		config.ForgetNamespaceExtraFault(p.Namespace)
+	}
+	return key, nil
+}
+
 // handleNamespaceJWKS serves the public-key JWKS for a per-namespace
-// issuer endpoint. The response merges the server's exported public key
-// set with any extra public keys configured for this namespace via
-// OIDCProvider.ExtraJwksPath.
+// issuer endpoint; see OIDCProvider.NamespaceJWKS for what it contains and
+// how its failures are reported.
 func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// The extra file is optional; if it cannot be published, degrade to
-		// the server's base keys and log rather than failing the whole
-		// endpoint. Only a failure to load the base keys, which leaves no
-		// correct subset to serve, reaches the 500 below.
-		key, err := config.GetIssuerPublicJWKSForNamespace(provider.ExtraJwksPath,
-			func(e error) error {
-				log.Errorf("Namespace %s: serving base keys only; per-namespace "+
-					"IssuerJwks is currently unpublishable: %v", provider.Namespace, e)
-				return nil
-			})
+		key, err := provider.NamespaceJWKS()
 		if err != nil {
-			log.Errorf("Failed to load base JWKS for namespace %s: %v",
-				provider.Namespace, err)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Failed to load public key",
@@ -261,8 +297,8 @@ func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
 		// ending in ".well-known/issuer.jwks").
 		ctx.Header("Access-Control-Allow-Origin", "*")
 
-		// GetIssuerPublicJWKSForNamespace already returns public keys, and this
-		// is a machine-facing endpoint, so serve the body inline.
+		// NamespaceJWKS already returns public keys, and this is a
+		// machine-facing endpoint, so serve the body inline.
 		server_utils.WriteJWKS(ctx, key)
 	}
 }

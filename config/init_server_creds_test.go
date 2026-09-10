@@ -837,6 +837,92 @@ func TestGetIssuerPublicJWKSForNamespace(t *testing.T) {
 		assert.ElementsMatch(t, collectKIDs(t, base), collectKIDs(t, got),
 			"a degraded result must be exactly the base set")
 	})
+
+	t.Run("a reintroduced kid override is warned about again", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		// Install the clock after ResetConfig, which clears the issue state:
+		// the other order would wipe what this subtest goes on to accumulate.
+		clock := useFakeClock(t)
+		count := countLogs(t)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+		serverKID := firstKID(t)
+
+		// One path throughout. The scope is keyed on it, so writing each
+		// version to a path of its own would be three unrelated scopes and
+		// would prove nothing about suppression.
+		path := filepath.Join(tmpDir, "extra.jwks")
+		mergeWith := func(kid string) {
+			t.Helper()
+			configtest.WriteJWKSFile(t, tmpDir, "extra.jwks", newPublicJWK(t, kid))
+			_, err := GetIssuerPublicJWKSForNamespace(path, strictExtra)
+			require.NoError(t, err)
+			clock.advance(jwksFileCacheTTL)
+		}
+
+		mergeWith(serverKID)
+		require.Equal(t, 1, count("republishes kid"),
+			"precondition: a kid the base set also publishes is warned about")
+
+		mergeWith("distinct-extra-kid")
+		require.Equal(t, 1, count("republishes kid"),
+			"separating the kids should say nothing new")
+
+		mergeWith(serverKID)
+		assert.Equal(t, 2, count("republishes kid"),
+			"the same collision after a repair should be warned about again")
+	})
+
+	t.Run("an unreadable extra file does not re-arm the override warning", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		clock := useFakeClock(t)
+		count := countLogs(t)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+		serverKID := firstKID(t)
+
+		path := filepath.Join(tmpDir, "extra.jwks")
+		degrade := func(error) error { return nil }
+		merge := func() {
+			t.Helper()
+			_, err := GetIssuerPublicJWKSForNamespace(path, degrade)
+			require.NoError(t, err, "a degrading policy must not surface the extra-file error")
+			clock.advance(jwksFileCacheTTL)
+		}
+
+		configtest.WriteJWKSFile(t, tmpDir, "extra.jwks", newPublicJWK(t, serverKID))
+		merge()
+		require.Equal(t, 1, count("republishes kid"),
+			"precondition: the collision is warned about")
+
+		// Remove the file rather than corrupting it: a file that once loaded
+		// and then will not parse falls back to the last good version, which
+		// still carries the collision. A missing file gets no fallback.
+		require.NoError(t, os.Remove(path))
+		merge()
+
+		configtest.WriteJWKSFile(t, tmpDir, "extra.jwks", newPublicJWK(t, serverKID))
+		merge()
+		assert.Equal(t, 1, count("republishes kid"),
+			"a fault that merely hid the override must not re-arm the warning: "+
+				"the override itself never went away")
+	})
+}
+
+// firstKID returns the kid of one of the keys in the server's own public key
+// set, for tests that need an extra-file key to collide with. The caller must
+// already have pointed param.IssuerKey at a usable location.
+func firstKID(t *testing.T) string {
+	t.Helper()
+	base, err := GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	it := base.Keys(t.Context())
+	require.True(t, it.Next(t.Context()), "expected at least one server key")
+	return it.Pair().Value.(jwk.Key).KeyID()
 }
 
 // strictExtra is the onExtraError policy that propagates any extra-file

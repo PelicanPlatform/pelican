@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -103,6 +104,30 @@ func captureLogs(t *testing.T) func(substr string) bool {
 			}
 		}
 		return false
+	}
+}
+
+// countLogs installs a logrus test hook and returns a function that counts
+// the captured messages containing substr. A test that a condition is
+// reported once, and reported again after a recovery, needs the count rather
+// than just whether it appeared.
+func countLogs(t *testing.T) func(substr string) int {
+	t.Helper()
+	hook := logrustest.NewLocal(log.StandardLogger())
+	prevLevel := log.GetLevel()
+	log.SetLevel(log.DebugLevel)
+	t.Cleanup(func() {
+		log.SetLevel(prevLevel)
+		hook.Reset()
+	})
+	return func(substr string) int {
+		n := 0
+		for _, entry := range hook.AllEntries() {
+			if strings.Contains(entry.Message, substr) {
+				n++
+			}
+		}
+		return n
 	}
 }
 
@@ -341,4 +366,247 @@ func TestJWKSFileWarningsDoNotRepeat(t *testing.T) {
 	}
 	assert.Equal(t, 1, countWorldWritable(),
 		"a standing permission problem should be logged once, not once per refresh")
+}
+
+// TestJWKSWorldWritableWarnsAgainAfterRecovery verifies that a file whose mode
+// is loosened, tightened, and loosened again to the same value is warned about
+// both times.
+//
+// The signature is the mode, but a tightened file returns before reaching the
+// logger, so nothing records that the condition cleared and the remembered
+// signature stays at the last loose mode. Without forgetting it, the second
+// loosening matches and is dropped -- silently withholding the only notice
+// that any local user can write keys this server publishes as trusted.
+func TestJWKSWorldWritableWarnsAgainAfterRecovery(t *testing.T) {
+	skipIfNoUnixFilePerms(t)
+
+	clock := useFakeClock(t)
+	count := countLogs(t)
+
+	dir := t.TempDir()
+	path := configtest.WriteJWKSFile(t, dir, "loose.jwks", newPublicJWK(t, "loose-key"))
+
+	// Each read must cross a TTL boundary, or the cache answers without ever
+	// looking at the file's mode.
+	readAt := func(perm os.FileMode) {
+		t.Helper()
+		require.NoError(t, os.Chmod(path, perm))
+		_, err := ReadPublicJWKSFile(path)
+		require.NoError(t, err, "a permission warning must not block the keys")
+		clock.advance(jwksFileCacheTTL)
+	}
+
+	readAt(0666)
+	require.Equal(t, 1, count("world-writable"),
+		"precondition: a world-writable file is warned about")
+
+	readAt(0640)
+	require.Equal(t, 1, count("world-writable"),
+		"tightening the mode should say nothing new")
+
+	readAt(0666)
+	assert.Equal(t, 2, count("world-writable"),
+		"the same loose mode after a repair should be warned about again")
+}
+
+// TestJWKSIssueReporting covers the de-duplication that keeps a standing
+// misconfiguration from costing a log line per request on the unauthenticated
+// JWKS endpoints: a repeated signature is reported once, a changed one is
+// reported again, scopes and kinds are independent, forgetting a resolved
+// condition re-arms it, and the level is the caller's.
+func TestJWKSIssueReporting(t *testing.T) {
+	hook := logrustest.NewLocal(log.StandardLogger())
+	prevLevel := log.GetLevel()
+	log.SetLevel(log.DebugLevel)
+	t.Cleanup(func() {
+		log.SetLevel(prevLevel)
+		hook.Reset()
+		ResetJWKSFileCache()
+	})
+
+	// reset clears both the captured entries and the de-dup state so that each
+	// subtest starts from nothing.
+	reset := func() {
+		hook.Reset()
+		ResetJWKSFileCache()
+	}
+	count := func(substr string, level log.Level) int {
+		n := 0
+		for _, entry := range hook.AllEntries() {
+			if entry.Level == level && strings.Contains(entry.Message, substr) {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("a standing condition is reported once", func(t *testing.T) {
+		reset()
+		issue := jwksNamespaceExtraIssue("/data/analysis")
+		for i := 0; i < 5; i++ {
+			issue.reportOnChange(log.ErrorLevel, "same error", "standing probe: %s", "same error")
+		}
+		assert.Equal(t, 1, count("standing probe", log.ErrorLevel),
+			"a condition that has not changed should be reported once, not once per call")
+	})
+
+	t.Run("a changed signature is reported again", func(t *testing.T) {
+		reset()
+		issue := jwksNamespaceExtraIssue("/data/analysis")
+		issue.reportOnChange(log.ErrorLevel, "first error", "changed probe: first")
+		issue.reportOnChange(log.ErrorLevel, "second error", "changed probe: second")
+		assert.Equal(t, 1, count("changed probe: first", log.ErrorLevel))
+		assert.Equal(t, 1, count("changed probe: second", log.ErrorLevel),
+			"a different failure should be reported even for the same scope and kind")
+	})
+
+	t.Run("identifiers from different domains do not collide", func(t *testing.T) {
+		reset()
+		// A federation prefix and a filesystem path can be spelled the same.
+		// Both calls use the same kind and the same signature, so if the two
+		// scopes aliased each other the second would be suppressed.
+		const same = "/etc/pelican/issuer.jwks"
+		fileIssue := jwksIssue{scope: jwksFileScope(same), kind: jwksKindKidOverride}
+		namespaceIssue := jwksIssue{scope: jwksNamespaceScope(same), kind: jwksKindKidOverride}
+		fileIssue.warnOnChange("sig", "domain probe: file")
+		namespaceIssue.warnOnChange("sig", "domain probe: namespace")
+		assert.Equal(t, 1, count("domain probe: file", log.WarnLevel))
+		assert.Equal(t, 1, count("domain probe: namespace", log.WarnLevel),
+			"a namespace and a path that read the same must not share a scope")
+	})
+
+	t.Run("kinds within one scope are independent", func(t *testing.T) {
+		reset()
+		const path = "/etc/pelican/issuer.jwks"
+		jwksWorldWritableIssue(path).warnOnChange("sig", "kind probe: permissions")
+		jwksStaleFallbackIssue(path).warnOnChange("sig", "kind probe: stale")
+		assert.Equal(t, 1, count("kind probe: permissions", log.WarnLevel))
+		assert.Equal(t, 1, count("kind probe: stale", log.WarnLevel),
+			"one file can have two distinct problems at once")
+	})
+
+	t.Run("forgetting re-arms an identical recurrence", func(t *testing.T) {
+		reset()
+		report := func() {
+			jwksBaseKeysIssue().reportOnChange(log.ErrorLevel, "same error", "recovery probe")
+		}
+		report()
+		report()
+		require.Equal(t, 1, count("recovery probe", log.ErrorLevel),
+			"precondition: the repeat is suppressed while the condition stands")
+
+		jwksBaseKeysIssue().forget()
+		report()
+		assert.Equal(t, 2, count("recovery probe", log.ErrorLevel),
+			"the same failure after a recovery should be reported again")
+	})
+
+	t.Run("forgetting an unreported condition is a no-op", func(t *testing.T) {
+		reset()
+		// The handlers call this on every healthy request, so it must be safe
+		// when there is nothing recorded.
+		jwksNamespaceExtraIssue("/never/reported").forget()
+		jwksBaseKeysIssue().forget()
+	})
+
+	t.Run("the level is the caller's", func(t *testing.T) {
+		reset()
+		jwksBaseKeysIssue().reportOnChange(log.ErrorLevel, "sig", "level probe: error")
+		jwksStaleFallbackIssue("/some/file.jwks").reportOnChange(log.WarnLevel, "sig",
+			"level probe: warning")
+		assert.Equal(t, 1, count("level probe: error", log.ErrorLevel))
+		assert.Equal(t, 0, count("level probe: error", log.WarnLevel))
+		assert.Equal(t, 1, count("level probe: warning", log.WarnLevel))
+	})
+
+	t.Run("the two JWKS endpoints share one base-key report", func(t *testing.T) {
+		reset()
+		const msg = "Failed to load the server's public key set"
+		boom := errors.New("the key set is gone")
+
+		// The two calls stand in for the per-namespace and server-level JWKS
+		// endpoints: the fault is server-wide, so they report it once between
+		// them rather than once each.
+		ReportBaseKeysFault(boom)
+		ReportBaseKeysFault(boom)
+		require.Equal(t, 1, count(msg, log.ErrorLevel),
+			"precondition: one server-wide fault is one report")
+
+		ForgetBaseKeysFault()
+		ReportBaseKeysFault(boom)
+		assert.Equal(t, 2, count(msg, log.ErrorLevel),
+			"the same fault after a recovery should be reported again")
+	})
+
+	t.Run("extra-key reports are per namespace", func(t *testing.T) {
+		reset()
+		boom := errors.New("the extra file is gone")
+
+		// Two exports may point at one IssuerJwks, so each namespace is named
+		// rather than the first one fetched suppressing the rest.
+		ReportNamespaceExtraFault("/data/one", boom)
+		ReportNamespaceExtraFault("/data/two", boom)
+		require.Equal(t, 2, count("unpublishable", log.ErrorLevel),
+			"precondition: each namespace reports for itself")
+
+		ForgetNamespaceExtraFault("/data/one")
+		ReportNamespaceExtraFault("/data/one", boom)
+		ReportNamespaceExtraFault("/data/two", boom)
+		assert.Equal(t, 3, count("unpublishable", log.ErrorLevel),
+			"clearing one namespace should not re-arm another")
+	})
+}
+
+// TestJWKSStaleFallbackWarnsAgainAfterRecovery verifies that a file which
+// breaks, is repaired, and then breaks again the same way is reported both
+// times. The signature is the error text, so without forgetting the first
+// report on the successful load in between, the second break would be
+// suppressed as a duplicate of a line the operator has already acted on.
+func TestJWKSStaleFallbackWarnsAgainAfterRecovery(t *testing.T) {
+	clock := useFakeClock(t)
+	hook := logrustest.NewLocal(log.StandardLogger())
+	t.Cleanup(hook.Reset)
+
+	dir := t.TempDir()
+	path := configtest.WriteJWKSFile(t, dir, "keys.jwks", newPublicJWK(t, "good-key"))
+
+	countStale := func() int {
+		n := 0
+		for _, entry := range hook.AllEntries() {
+			if strings.Contains(entry.Message, "could not be loaded") {
+				n++
+			}
+		}
+		return n
+	}
+	breakFile := func() {
+		require.NoError(t, os.WriteFile(path, []byte("not a jwks"), 0600))
+	}
+	repairFile := func() {
+		configtest.WriteJWKSFile(t, dir, "keys.jwks", newPublicJWK(t, "good-key"))
+	}
+	// Each read has to cross the TTL to reach the filesystem at all.
+	read := func() {
+		clock.advance(jwksFileCacheTTL)
+		_, err := ReadPublicJWKSFile(path)
+		require.NoError(t, err)
+	}
+
+	// Prime the cache with a version that loads, so a later bad read has
+	// something to fall back to rather than simply failing.
+	read()
+	require.Equal(t, 0, countStale())
+
+	breakFile()
+	read()
+	require.Equal(t, 1, countStale(), "the first breakage should be reported")
+
+	repairFile()
+	read()
+	require.Equal(t, 1, countStale(), "a successful load should not report anything")
+
+	breakFile()
+	read()
+	assert.Equal(t, 2, countStale(),
+		"an identical failure after a repair should be reported again")
 }

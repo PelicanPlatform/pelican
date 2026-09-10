@@ -1217,12 +1217,24 @@ func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(err
 		}
 		sort.Strings(kids)
 		joined := strings.Join(kids, ", ")
-		logJWKSWarningOnChange(extraJwksPath, "kid-override", joined,
+		jwksKidOverrideIssue(extraJwksPath).warnOnChange(joined,
 			"Per-namespace JWKS file %s republishes kid(s) %s, which the server's own key "+
 				"set also publishes. The per-namespace key wins: the server's key with that "+
 				"kid is not published for this namespace, so tokens this server signed with "+
 				"it will no longer verify here. Give the per-namespace key a distinct kid if "+
 				"that was not intended.", extraJwksPath, joined)
+	} else {
+		// The file no longer claims any of the base set's kids. The signature
+		// is the kid list and a clean merge never reaches the logger, so
+		// without dropping the earlier complaint here, an operator who
+		// separates the kids and later reintroduces the same collision would
+		// never hear about it again.
+		//
+		// Only this branch clears it. A file that will not load says nothing
+		// about whether it still claims a base kid, so the merge-error path
+		// above leaves the state alone: unknown rather than resolved, with
+		// the failure itself reported under jwksKindNamespaceExtra.
+		jwksKidOverrideIssue(extraJwksPath).forget()
 	}
 	// Build a fresh set so that the merged keys cannot alias the base set or
 	// the read cache's set and affect other callers.

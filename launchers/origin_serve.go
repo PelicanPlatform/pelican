@@ -544,8 +544,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		// within the file) shows up in the logs at startup rather than only
 		// on the first request. This is never fatal: the namespace still
 		// serves its base keys, and the JWKS endpoint degrades the same way
-		// at request time. The strict policy here (return the error) is used
-		// only to detect it.
+		// at request time.
 		if export.IssuerJwks != "" {
 			// The keys are only trusted by XRootD and by caches if this
 			// export actually advertises the per-namespace issuer whose JWKS
@@ -562,22 +561,14 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 					namespace, export.IssuerJwks, export.IssuerUrls, issuerURL)
 			}
 
-			// The callback fires only for an extra-file merge failure; a
-			// base-key-set load failure returns before it is ever called.
-			// Tracking whether it fired lets us attribute the error to the
-			// right key set instead of always blaming the operator's file.
-			extraFailed := false
-			if _, err := config.GetIssuerPublicJWKSForNamespace(export.IssuerJwks,
-				func(e error) error { extraFailed = true; return e }); err != nil {
-				if extraFailed {
-					log.Errorf("Namespace %s: IssuerJwks %q is unpublishable; the namespace "+
-						"will serve base keys only until fixed: %v", namespace, export.IssuerJwks, err)
-				} else {
-					log.Errorf("Namespace %s: failed to load the server's base issuer key set; "+
-						"the per-namespace JWKS endpoint will be unavailable until fixed: %v",
-						namespace, err)
-				}
-			}
+			// Load through the endpoint's own method rather than logging here,
+			// so that each fault is reported with the endpoint's wording and
+			// de-duplication state: the first request then stays quiet
+			// instead of repeating the startup report in other words, and a
+			// base-key failure is reported once server-wide rather than once
+			// per export. The error needs no handling, since it has already
+			// been reported and the probe is not fatal.
+			_, _ = provider.NamespaceJWKS()
 		}
 
 		registry.Register(namespace, provider)
