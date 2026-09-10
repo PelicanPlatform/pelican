@@ -761,14 +761,21 @@ The URL of the server.
 | `Origin`     | Origin server   |
 | `Cache`      | Cache server    |
 
-### Deprecated Metrics
+### Removed Metrics
 
-The following metrics are deprecated and will be removed in a future release.
+The previously deprecated metrics below have been removed. Use the replacement listed for each.
 
-- `pelican_director_geoip_errors`: [Deprecated -- split into separate client/server metrics (pelican_director_maxmind_\{server,client\}_errors_total)] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database.
-- `xrootd_monitoring_packets_received`: Renamed to `xrootd_monitoring_packets_received_total`.
-- `xrootd_transfer_readv_segments_count`: Renamed to `xrootd_transfer_readv_segments_total`.
-- `xrootd_transfer_operations_count`: Renamed to `xrootd_transfer_operations_total`.
-- `xrootd_server_connection_count`: Renamed to `xrootd_server_connections_total`.
-- `xrootd_server_bytes`: Renamed to `xrootd_server_bytes_total`.
-- `xrootd_server_io_wait_time`: Renamed to `xrootd_server_io_wait_seconds_total`.
+XRootD metrics:
+
+- `xrootd_monitoring_packets_received`: Removed; use `xrootd_monitoring_packets_received_total`.
+- `xrootd_transfer_readv_segments_count` and `xrootd_transfer_readv_segments_toal`: Removed; use `xrootd_transfer_readv_segments_total`.
+- `xrootd_transfer_operations_count`: Removed; use `xrootd_transfer_operations_total`.
+- `xrootd_server_connection_count`: Removed; use `xrootd_server_connections_total`.
+- `xrootd_server_bytes`: Removed; use `xrootd_server_bytes_total`.
+- `xrootd_server_io_wait_time`: Removed; use `xrootd_server_io_wait_seconds_total`.
+
+Director metrics:
+
+- `pelican_director_client_version_total`: Removed; use `pelican_director_client_requests_total`.
+- `pelican_director_redirections_total`: Removed; use `pelican_director_redirects_total`.
+- `pelican_director_geoip_errors` and `pelican_director_geoip_errors_total`: Removed; these were split into `pelican_director_maxmind_server_errors_total` and `pelican_director_maxmind_client_errors_total`.

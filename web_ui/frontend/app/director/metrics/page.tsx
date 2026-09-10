@@ -57,7 +57,7 @@ const Page = () => {
                   />,
                   <MetricBoxPlot
                     key={'transfer-operations'}
-                    metric={`sum by (server_name) (increase(xrootd_transfer_operations_count[$\{range}]))`}
+                    metric={`sum by (server_name) (increase(xrootd_transfer_operations_total[$\{range}]))`}
                     title={'XRootD Transfer Operations'}
                   />,
                   <BytesMetricBoxPlot
@@ -75,7 +75,7 @@ const Page = () => {
                   <MetricBoxPlot
                     key={'threads'}
                     metric={
-                      'sum by (server_name) (sum_over_time(xrootd_server_connection_count[${range}])) / sum by (server_name) (count_over_time(xrootd_server_connection_count[${range}]))'
+                      'sum by (server_name) (sum_over_time(xrootd_server_connections_total[${range}])) / sum by (server_name) (count_over_time(xrootd_server_connections_total[${range}]))'
                     }
                     title={'XRootD Server Connections'}
                   />,
@@ -128,13 +128,13 @@ const Page = () => {
                 {[
                   <BigBytesMetric
                     key={'rx'}
-                    metric={'xrootd_server_bytes{direction="rx"}'}
+                    metric={'xrootd_server_bytes_total{direction="rx"}'}
                     title={'Bytes Received'}
                     color={green[300]}
                   />,
                   <BigBytesMetric
                     key={'tx'}
-                    metric={'xrootd_server_bytes{direction="tx"}'}
+                    metric={'xrootd_server_bytes_total{direction="tx"}'}
                     title={'Bytes Transferred'}
                     color={green[300]}
                   />,

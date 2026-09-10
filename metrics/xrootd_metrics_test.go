@@ -372,7 +372,7 @@ xrootd_sched_thread_creations 10
 			},
 		}
 
-		BytesXfer.Reset()
+		BytesXferTotal.Reset()
 		Threads.Reset()
 
 		mockLinkSummaryBaseBytes, err := xml.Marshal(mockLinkSummaryBase)
@@ -383,29 +383,29 @@ xrootd_sched_thread_creations 10
 		require.NoError(t, err, "Error Marshal Summary packet")
 
 		mockPromLinkConnectBase := `
-		# HELP xrootd_server_connection_count Aggregate number of server connections
-		# TYPE xrootd_server_connection_count counter
-		xrootd_server_connection_count 9
+		# HELP xrootd_server_connections_total Aggregate number of server connections
+		# TYPE xrootd_server_connections_total counter
+		xrootd_server_connections_total 9
 		`
 
 		mockPromLinkByteXferBase := `
-		# HELP xrootd_server_bytes Number of bytes read into the server
-		# TYPE xrootd_server_bytes counter
-		xrootd_server_bytes{direction="rx"} 99
-		xrootd_server_bytes{direction="tx"} 999
+		# HELP xrootd_server_bytes_total Number of bytes read into the server
+		# TYPE xrootd_server_bytes_total counter
+		xrootd_server_bytes_total{direction="rx"} 99
+		xrootd_server_bytes_total{direction="tx"} 999
 		`
 
 		mockPromLinkConnectInc := `
-		# HELP xrootd_server_connection_count Aggregate number of server connections
-		# TYPE xrootd_server_connection_count counter
-		xrootd_server_connection_count 10
+		# HELP xrootd_server_connections_total Aggregate number of server connections
+		# TYPE xrootd_server_connections_total counter
+		xrootd_server_connections_total 10
 		`
 
 		mockPromLinkByteXferInc := `
-		# HELP xrootd_server_bytes Number of bytes read into the server
-		# TYPE xrootd_server_bytes counter
-		xrootd_server_bytes{direction="rx"} 100
-		xrootd_server_bytes{direction="tx"} 1000
+		# HELP xrootd_server_bytes_total Number of bytes read into the server
+		# TYPE xrootd_server_bytes_total counter
+		xrootd_server_bytes_total{direction="rx"} 100
+		xrootd_server_bytes_total{direction="tx"} 1000
 		`
 
 		expectedLinkConnectBase := strings.NewReader(mockPromLinkConnectBase)
@@ -418,10 +418,10 @@ xrootd_sched_thread_creations 10
 		// First time received a summary packet
 		err = handlePacket(mockLinkSummaryBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
-		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectBase, "xrootd_server_connection_count"); err != nil {
+		if err := testutil.CollectAndCompare(ConnectionsTotal, expectedLinkConnectBase, "xrootd_server_connections_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
-		if err := testutil.CollectAndCompare(BytesXfer, expectedLinkByteXferBase, "xrootd_server_bytes"); err != nil {
+		if err := testutil.CollectAndCompare(BytesXferTotal, expectedLinkByteXferBase, "xrootd_server_bytes_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 
@@ -438,10 +438,10 @@ xrootd_sched_thread_creations 10
 		err = handlePacket(mockLinkSummaryIncBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 
-		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectInc, "xrootd_server_connection_count"); err != nil {
+		if err := testutil.CollectAndCompare(ConnectionsTotal, expectedLinkConnectInc, "xrootd_server_connections_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
-		if err := testutil.CollectAndCompare(BytesXfer, expectedLinkByteXferInc, "xrootd_server_bytes"); err != nil {
+		if err := testutil.CollectAndCompare(BytesXferTotal, expectedLinkByteXferInc, "xrootd_server_bytes_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 
@@ -449,10 +449,10 @@ xrootd_sched_thread_creations 10
 		err = handlePacket(mockLinkSummaryCMSDBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 
-		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectIncDup, "xrootd_server_connection_count"); err != nil {
+		if err := testutil.CollectAndCompare(ConnectionsTotal, expectedLinkConnectIncDup, "xrootd_server_connections_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
-		if err := testutil.CollectAndCompare(BytesXfer, expectedLinkByteXferIncDup, "xrootd_server_bytes"); err != nil {
+		if err := testutil.CollectAndCompare(BytesXferTotal, expectedLinkByteXferIncDup, "xrootd_server_bytes_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 	})
@@ -707,8 +707,8 @@ xrootd_sched_thread_creations 10
 		mockWriteCalls := int32(30)
 		mockReadVSegments := int64(1000)
 
-		TransferReadvSegs.Reset()
-		TransferOps.Reset()
+		TransferReadvSegsTotal.Reset()
+		TransferOpsTotal.Reset()
 		TransferBytes.Reset()
 
 		openPacket, err := mockFileOpenPacket(0, mockFileID, mockUserID, mockSID, "/full/path/to/file.txt")
@@ -741,17 +741,17 @@ xrootd_sched_thread_creations 10
 		require.Equal(t, 0, len(transfers.Keys()), "Transfer cache didn't update")
 
 		expectedTransferReadvSegs := `
-		# HELP xrootd_transfer_readv_segments_count Number of segments in readv operations
-		# TYPE xrootd_transfer_readv_segments_count counter
-		xrootd_transfer_readv_segments_count{ap="",dn="",network="",org="",path="/",proj="",role=""} 1000
+		# HELP xrootd_transfer_readv_segments_total Number of segments in readv operations
+		# TYPE xrootd_transfer_readv_segments_total counter
+		xrootd_transfer_readv_segments_total{ap="",dn="",network="",org="",path="/",proj="",role=""} 1000
 		`
 
 		expectedTransferOps := `
-		# HELP xrootd_transfer_operations_count Number of transfer operations performed
-		# TYPE xrootd_transfer_operations_count counter
-		xrootd_transfer_operations_count{ap="",dn="",network="",org="",path="/",proj="",role="",type="read"} 120
-		xrootd_transfer_operations_count{ap="",dn="",network="",org="",path="/",proj="",role="",type="readv"} 10
-		xrootd_transfer_operations_count{ap="",dn="",network="",org="",path="/",proj="",role="",type="write"} 30
+		# HELP xrootd_transfer_operations_total Number of transfer operations performed
+		# TYPE xrootd_transfer_operations_total counter
+		xrootd_transfer_operations_total{ap="",dn="",network="",org="",path="/",proj="",role="",type="read"} 120
+		xrootd_transfer_operations_total{ap="",dn="",network="",org="",path="/",proj="",role="",type="readv"} 10
+		xrootd_transfer_operations_total{ap="",dn="",network="",org="",path="/",proj="",role="",type="write"} 30
 		`
 
 		expectedTransferBytes := `
@@ -766,11 +766,11 @@ xrootd_sched_thread_creations 10
 		expectedTransferOpsReader := strings.NewReader(expectedTransferOps)
 		expectedTransferBytesReader := strings.NewReader(expectedTransferBytes)
 
-		if err := testutil.CollectAndCompare(TransferReadvSegs, expectedTransferReadvSegsReader, "xrootd_transfer_readv_segments_count"); err != nil {
+		if err := testutil.CollectAndCompare(TransferReadvSegsTotal, expectedTransferReadvSegsReader, "xrootd_transfer_readv_segments_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 
-		if err := testutil.CollectAndCompare(TransferOps, expectedTransferOpsReader, "xrootd_transfer_operations_count"); err != nil {
+		if err := testutil.CollectAndCompare(TransferOpsTotal, expectedTransferOpsReader, "xrootd_transfer_operations_total"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 

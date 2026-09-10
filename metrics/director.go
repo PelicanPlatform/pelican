@@ -87,45 +87,18 @@ var (
 		Help: "The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "from_topology"})
 
-	// TODO: Remove this metric (the line directly below)
-	// The renamed metric was added in v7.16
-	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_director_client_version_total",
-		Help: "The total number of requests from client versions.",
-	}, []string{"version", "service"})
-
 	PelicanDirectorClientRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_requests_total",
 		Help: "The total number of requests from clients.",
 	}, []string{"version", "service"})
-
-	// TODO: Remove this metric (the line directly below)
-	// The renamed metric was added in v7.16
-	PelicanDirectorRedirectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_director_redirections_total",
-		Help: "The total number of redirections the director issued.",
-	}, []string{"destination", "status_code", "version", "network"})
 
 	PelicanDirectorRedirectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_redirects_total",
 		Help: "The total number of redirects the director issued.",
 	}, []string{"destination", "status_code", "version", "network"})
 
-	// TODO: Remove these two metrics (the lines directly below)
-	// They're no longer being tracked because they were split into separate client/server metrics
-	// (see PelicanDirectorMaxMind{Server,Client}ErrorsTotal) because the error conditions are
-	// now different and generated under different internal processes.
-	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_director_geoip_errors",
-		Help: "[Deprecated] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
-	}, []string{"network", "source", "proj"})
-
-	PelicanDirectorGeoIPErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_director_geoip_errors_total",
-		Help: "[Deprecated -- split into separate client/server metrics (pelican_director_maxmind_{server,client}_errors_total)] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
-	}, []string{"network", "source", "proj"})
-
-	// The next two metrics replace the previous two deprecated GeoIP error metrics
+	// The error conditions for server and client coordinate resolution are different and
+	// generated under different internal processes, so they are tracked separately.
 	PelicanDirectorMaxMindServerErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_maxmind_server_errors_total",
 		Help: "The total number of errors encountered trying to resolve server coordinates using the GeoIP MaxMind database",
