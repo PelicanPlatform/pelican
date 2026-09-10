@@ -234,20 +234,49 @@ func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
 		// the server's base keys and log rather than failing the whole
 		// endpoint. Only a failure to load the base keys, which leaves no
 		// correct subset to serve, reaches the 500 below.
+		//
+		// Both conditions are standing misconfigurations on an unauthenticated
+		// endpoint, and the underlying read is already cached -- failures
+		// included -- so the handler is handed the same error on every request
+		// without touching the filesystem. That leaves the log write as the
+		// only per-request cost a client can still drive. So report each
+		// condition once per distinct error text, and forget it once it clears
+		// so that a later recurrence is not swallowed as a duplicate.
+		extraFailed := false
 		key, err := config.GetIssuerPublicJWKSForNamespace(provider.ExtraJwksPath,
 			func(e error) error {
-				log.Errorf("Namespace %s: serving base keys only; per-namespace "+
-					"IssuerJwks is currently unpublishable: %v", provider.Namespace, e)
+				// Called synchronously from the line above and never retained,
+				// so the captured flag needs no synchronization.
+				extraFailed = true
+				config.LogJWKSIssueOnChange(log.ErrorLevel,
+					config.JWKSNamespaceScope(provider.Namespace),
+					config.JWKSKindNamespaceExtra, e.Error(),
+					"Namespace %s: serving base keys only; per-namespace "+
+						"IssuerJwks is currently unpublishable: %v", provider.Namespace, e)
 				return nil
 			})
 		if err != nil {
-			log.Errorf("Failed to load base JWKS for namespace %s: %v",
-				provider.Namespace, err)
+			// Scoped to the server's key set rather than to this namespace,
+			// and worded without one: the base set is server-wide, so naming
+			// the namespace would name whichever request happened to trip a
+			// fault that has nothing to do with it, and reporting per
+			// namespace would multiply one fault by the export count.
+			config.LogJWKSIssueOnChange(log.ErrorLevel,
+				config.JWKSServerKeysScope, config.JWKSKindBaseKeys, err.Error(),
+				"Failed to load the server's public key set while serving a "+
+					"JWKS endpoint: %v", err)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Failed to load public key",
 			})
 			return
+		}
+		config.ForgetJWKSIssue(config.JWKSServerKeysScope, config.JWKSKindBaseKeys)
+		if !extraFailed {
+			// Either the extra file merged cleanly or there is none to merge:
+			// the callback above runs only on failure.
+			config.ForgetJWKSIssue(config.JWKSNamespaceScope(provider.Namespace),
+				config.JWKSKindNamespaceExtra)
 		}
 		// This endpoint is what the per-namespace discovery document advertises
 		// as its jwks_uri, so a browser-based OIDC client fetches it right

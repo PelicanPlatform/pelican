@@ -33,7 +33,7 @@ func warnIfJWKSFileWorldWritable(path string, perm os.FileMode) {
 	if perm&0o002 == 0 {
 		return
 	}
-	logJWKSWarningOnChange(path, "world-writable", perm.String(),
+	logJWKSWarningOnChange(JWKSFileScope(path), "world-writable", perm.String(),
 		"JWKS file %s is world-writable (mode %#o). Every key it holds is published "+
 			"as a trusted signing key, so any local user can mint tokens this server "+
 			"will accept. Restrict it to mode 0640 or tighter.", path, perm)

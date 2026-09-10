@@ -165,12 +165,20 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 func exportIssuerJWKS(ctx *gin.Context) {
 	key, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		log.Errorf("Failed to load server's public key: %v", err)
+		// Same scope and kind as the per-namespace JWKS handler uses: this is
+		// one server-wide fault seen through a second unauthenticated
+		// endpoint, so the two report it once between them rather than once
+		// per request on each.
+		config.LogJWKSIssueOnChange(log.ErrorLevel,
+			config.JWKSServerKeysScope, config.JWKSKindBaseKeys, err.Error(),
+			"Failed to load the server's public key set while serving a "+
+				"JWKS endpoint: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to load server's public key",
 		})
 	} else {
+		config.ForgetJWKSIssue(config.JWKSServerKeysScope, config.JWKSKindBaseKeys)
 		// The public JWKS must be readable cross-origin: browser-based OIDC
 		// clients follow the discovery document's jwks_uri here to validate
 		// token signatures. The discovery endpoint above already allows any

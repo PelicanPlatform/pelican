@@ -1216,7 +1216,7 @@ func GetIssuerPublicJWKSForNamespace(extraJwksPath string, onExtraError func(err
 		}
 		sort.Strings(kids)
 		joined := strings.Join(kids, ", ")
-		logJWKSWarningOnChange(extraJwksPath, "kid-override", joined,
+		logJWKSWarningOnChange(JWKSFileScope(extraJwksPath), "kid-override", joined,
 			"Per-namespace JWKS file %s republishes kid(s) %s, which the server's own key "+
 				"set also publishes. The per-namespace key wins: the server's key with that "+
 				"kid is not published for this namespace, so tokens this server signed with "+

@@ -40,6 +40,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	jwtpkg "github.com/lestrrat-go/jwx/v2/jwt"
+	log "github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -2007,4 +2009,102 @@ func extractWellFormedJWKSKIDs(t *testing.T, body []byte) []string {
 		kids = append(kids, kid)
 	}
 	return kids
+}
+
+// captureIssuerLogs installs a logrus capture hook on the shared standard
+// logger and returns a counter over the entries it collects.
+//
+// The hook is removed when the test finishes. The copy matters: LevelHooks is
+// mutated in place by Add, so holding a reference to the logger's own map and
+// putting it back would restore nothing and leave the hook collecting entries
+// for the rest of the package's tests.
+func captureIssuerLogs(t *testing.T) func(substr string, level log.Level) int {
+	t.Helper()
+	originalHooks := log.LevelHooks{}
+	for level, hooks := range log.StandardLogger().Hooks {
+		originalHooks[level] = append([]log.Hook(nil), hooks...)
+	}
+	hook := logrustest.NewLocal(log.StandardLogger())
+	t.Cleanup(func() {
+		hook.Reset()
+		log.StandardLogger().ReplaceHooks(originalHooks)
+	})
+	return func(substr string, level log.Level) int {
+		n := 0
+		for _, entry := range hook.AllEntries() {
+			if entry.Level == level && strings.Contains(entry.Message, substr) {
+				n++
+			}
+		}
+		return n
+	}
+}
+
+// TestIntegrationNamespaceJWKSBrokenExtraLogsOnce verifies that a standing
+// per-namespace JWKS misconfiguration is reported once rather than once per
+// request. The endpoint is unauthenticated, so logging per request lets any
+// client turn its own request rate into the server's log rate.
+//
+// The read behind it is already cached, but the cache stores the *failure* and
+// hands it back to the handler on every request, so what is under test here is
+// the log de-duplication rather than the read throttle.
+func TestIntegrationNamespaceJWKSBrokenExtraLogsOnce(t *testing.T) {
+	// setupIntegration calls config.ResetConfig, which clears the de-dup
+	// state, so this starts from a clean slate.
+	provider, ts := setupIntegration(t)
+	countLogs := captureIssuerLogs(t)
+
+	provider.ExtraJwksPath = "/nonexistent/path/to/extra.jwks"
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+
+	const requests = 5
+	for i := 0; i < requests; i++ {
+		// Every request still succeeds, serving the server's base keys.
+		require.NotEmpty(t, fetchNamespaceJWKSKIDs(t, ts, url))
+	}
+
+	assert.Equal(t, 1, countLogs("unpublishable", log.ErrorLevel),
+		"%d requests against one broken ExtraJwksPath should be reported once", requests)
+}
+
+// TestIntegrationNamespaceJWKSBrokenExtraRelogsAfterRecovery verifies the
+// other half of "log on change": once the operator repairs the configuration,
+// a later identical breakage is reported again rather than suppressed as a
+// duplicate of the line they have already acted on.
+func TestIntegrationNamespaceJWKSBrokenExtraRelogsAfterRecovery(t *testing.T) {
+	provider, ts := setupIntegration(t)
+	countLogs := captureIssuerLogs(t)
+
+	const brokenPath = "/nonexistent/path/to/extra.jwks"
+	url := ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/issuer.jwks"
+
+	extraPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	extraPub, err := jwk.FromRaw(extraPriv.PublicKey)
+	require.NoError(t, err)
+	const extraKID = "recovered-ns-key"
+	require.NoError(t, extraPub.Set(jwk.KeyIDKey, extraKID))
+	// The repaired configuration has to point at a *different* path. The read
+	// cache holds the broken path's failure for jwksFileCacheTTL, and this
+	// package cannot reach the unexported clock to step past it, so writing a
+	// good file over the broken path would keep serving the cached failure and
+	// the test would prove nothing.
+	goodPath := test_utils.WriteJWKSFile(t, t.TempDir(), "extra.jwks", extraPub)
+
+	provider.ExtraJwksPath = brokenPath
+	require.NotEmpty(t, fetchNamespaceJWKSKIDs(t, ts, url))
+	require.NotEmpty(t, fetchNamespaceJWKSKIDs(t, ts, url))
+	require.Equal(t, 1, countLogs("unpublishable", log.ErrorLevel),
+		"precondition: the standing failure is reported once")
+
+	provider.ExtraJwksPath = goodPath
+	assert.Contains(t, fetchNamespaceJWKSKIDs(t, ts, url), extraKID,
+		"the repaired file's key should be published")
+	require.Equal(t, 1, countLogs("unpublishable", log.ErrorLevel),
+		"a healthy request should report nothing")
+
+	provider.ExtraJwksPath = brokenPath
+	require.NotEmpty(t, fetchNamespaceJWKSKIDs(t, ts, url))
+	assert.Equal(t, 2, countLogs("unpublishable", log.ErrorLevel),
+		"the same failure after a repair should be reported again")
 }

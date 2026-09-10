@@ -66,15 +66,40 @@ var (
 	// so that tests can advance time without sleeping.
 	jwksFileCacheNow = time.Now
 
-	jwksFileWarnMu sync.Mutex
-	// jwksFileWarnState remembers, per file path and warning kind, the last
-	// signature warned about. A misconfiguration that persists is worth one
-	// log line per change, not one per cache refresh.
-	jwksFileWarnState = map[string]map[string]string{}
+	jwksIssueMu sync.Mutex
+
+	// jwksIssueState remembers, per scope and issue kind, the last signature
+	// reported. A misconfiguration that persists is worth one log line per
+	// change, not one per cache refresh -- and, on the unauthenticated JWKS
+	// endpoints, not one per request, or any client could turn its own request
+	// rate into the server's log rate.
+	jwksIssueState = map[JWKSScope]map[string]string{}
+)
+
+// JWKSScope identifies what a reported JWKS problem belongs to.
+type JWKSScope string
+
+func JWKSFileScope(path string) JWKSScope {
+	return JWKSScope("fs-path:" + path)
+}
+
+func JWKSNamespaceScope(prefix string) JWKSScope {
+	return JWKSScope("namespace:" + prefix)
+}
+
+const JWKSServerKeysScope JWKSScope = "server-keys:"
+
+const (
+	// Failure to load the server's own key set.
+	JWKSKindBaseKeys = "base-jwks"
+	// A per-namespace IssuerJwks file that cannot be published.
+	JWKSKindNamespaceExtra = "extra-jwks"
+	// A JWKS file that will not load while a previous good version is still being served.
+	jwksKindStaleFallback = "stale-fallback"
 )
 
 // ResetJWKSFileCache drops all cached JWKS file contents and the record of
-// which warnings have already been logged. Called from ResetConfig so that a
+// which problems have already been reported. Called from ResetConfig so that a
 // test writing a new file at a path a previous test already used sees the new
 // contents rather than a cached projection.
 func ResetJWKSFileCache() {
@@ -82,29 +107,71 @@ func ResetJWKSFileCache() {
 	jwksFileCache = map[string]*jwksFileCacheEntry{}
 	jwksFileCacheMu.Unlock()
 
-	jwksFileWarnMu.Lock()
-	jwksFileWarnState = map[string]map[string]string{}
-	jwksFileWarnMu.Unlock()
+	jwksIssueMu.Lock()
+	jwksIssueState = map[JWKSScope]map[string]string{}
+	jwksIssueMu.Unlock()
 }
 
-// logJWKSWarningOnChange logs at warning level the first time it sees
-// signature for the given path and kind, and thereafter only when signature
+// LogJWKSIssueOnChange logs at the given level the first time it sees
+// signature for the given scope and kind, and thereafter only when signature
 // changes. Callers on a per-request path use this so that a standing
-// misconfiguration does not reprint on every cache refresh.
-func logJWKSWarningOnChange(path, kind, signature, format string, args ...interface{}) {
-	jwksFileWarnMu.Lock()
-	if byKind := jwksFileWarnState[path]; byKind != nil {
+// misconfiguration costs one log line per change rather than one per request.
+//
+// kind identifies which problem it is, and signature is the part that should
+// re-report when it changes -- usually err.Error(). Every scope must be
+// derived from configuration and never from request input, so that what this
+// accumulates stays bounded.
+//
+// The level is a parameter rather than fixed at warning because the same
+// throttling applies to conditions of different severity, and no caller should
+// have to choose between logging at the right level and logging at the right
+// frequency.
+func LogJWKSIssueOnChange(level log.Level, scope JWKSScope, kind, signature, format string, args ...interface{}) {
+	jwksIssueMu.Lock()
+	if byKind := jwksIssueState[scope]; byKind != nil {
 		if prev, ok := byKind[kind]; ok && prev == signature {
-			jwksFileWarnMu.Unlock()
+			jwksIssueMu.Unlock()
 			return
 		}
 	} else {
-		jwksFileWarnState[path] = map[string]string{}
+		jwksIssueState[scope] = map[string]string{}
 	}
-	jwksFileWarnState[path][kind] = signature
-	jwksFileWarnMu.Unlock()
+	jwksIssueState[scope][kind] = signature
+	jwksIssueMu.Unlock()
 
-	log.Warnf(format, args...)
+	// logrus has no package-level Logf, so go through the standard logger.
+	log.StandardLogger().Logf(level, format, args...)
+}
+
+// ForgetJWKSIssue drops any remembered report for the given scope and kind, so
+// that the next occurrence is logged again even if it carries a signature that
+// was already reported. Callers invoke it once they observe the condition
+// resolved; without it, a problem that is fixed and later recurs identically
+// stays silent for the rest of the process's life.
+//
+// A request that observes the condition resolved can interleave with one that
+// hits it. The map is guarded, so nothing is corrupted, and at worst a single
+// duplicate or missing line appears at the instant the state flips -- the
+// condition is re-evaluated on the next request either way.
+func ForgetJWKSIssue(scope JWKSScope, kind string) {
+	jwksIssueMu.Lock()
+	defer jwksIssueMu.Unlock()
+
+	byKind := jwksIssueState[scope]
+	if byKind == nil {
+		return
+	}
+	delete(byKind, kind)
+	if len(byKind) == 0 {
+		delete(jwksIssueState, scope)
+	}
+}
+
+// logJWKSWarningOnChange is LogJWKSIssueOnChange at warning level, for the
+// readers in this package: each reports a condition the server keeps running
+// through.
+func logJWKSWarningOnChange(scope JWKSScope, kind, signature, format string, args ...interface{}) {
+	LogJWKSIssueOnChange(log.WarnLevel, scope, kind, signature, format, args...)
 }
 
 // readPublicJWKSFileCached returns the public projection of the JWKS file at
@@ -135,7 +202,7 @@ func readPublicJWKSFileCached(path string) (jwk.Set, error) {
 	keys, nonEmpty, err := loadPublicJWKSFile(path)
 	if err != nil {
 		if nonEmpty && entry != nil && entry.keys != nil {
-			logJWKSWarningOnChange(path, "stale-fallback", err.Error(),
+			logJWKSWarningOnChange(JWKSFileScope(path), jwksKindStaleFallback, err.Error(),
 				"JWKS file %s is present but could not be loaded; continuing to use the "+
 					"last version that loaded successfully. Until this is fixed, edits to "+
 					"the file will not take effect: %v", path, err)
@@ -145,6 +212,8 @@ func readPublicJWKSFileCached(path string) (jwk.Set, error) {
 		jwksFileCache[path] = &jwksFileCacheEntry{err: err, checkedAt: now}
 		return nil, err
 	}
+	// The file loads again, so forget any stale-fallback complaint.
+	ForgetJWKSIssue(JWKSFileScope(path), jwksKindStaleFallback)
 	jwksFileCache[path] = &jwksFileCacheEntry{keys: keys, checkedAt: now}
 	return keys, nil
 }
