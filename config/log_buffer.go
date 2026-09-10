@@ -233,6 +233,11 @@ func StartLogRingBuffer(ctx context.Context) {
 	// install cannot be dropped by a rebuild running alongside it.
 	globalTransformMu.Lock()
 	log.AddHook(&logRingBufferHook{buf: buf})
+	// The ring documents an info-and-above capture floor (see shouldBuffer),
+	// so logrus's level gate must admit info entries while the ring is
+	// installed even when the operator configured a quieter level. The
+	// buffer was stored above, so the re-derivation sees it.
+	syncLogrusLevelLocked()
 	globalTransformMu.Unlock()
 }
 
@@ -249,6 +254,12 @@ func StopLogRingBuffer() {
 	// new entries are delivered.
 	buf.closed.Store(true)
 	removeLogRingBufferHook()
+	// With the buffer gone (swapped to nil above), drop logrus's level back
+	// to whatever the remaining consumers need -- the info floor the ring
+	// imposed no longer applies.
+	globalTransformMu.Lock()
+	syncLogrusLevelLocked()
+	globalTransformMu.Unlock()
 	// Stop the compression worker. Cancelling the worker context is sufficient
 	// on its own: compressLoop selects on workerCtx.Done(). We deliberately do
 	// NOT close compressQueue -- Fire performs a non-blocking send on it under
@@ -329,8 +340,14 @@ func (h *logRingBufferHook) Fire(entry *log.Entry) error {
 //
 // The effective level comes from GetEffectiveLogLevel (which knows about
 // the hook-based filtering initFilterLogging installs); logrus's own
-// GetLevel is often pinned to TraceLevel so hooks see everything even when
-// the operator asked for info-only output.
+// GetLevel can sit above the operator's configured level while a registered
+// RegexpFilter needs to observe more verbose entries (see logrusLevelFor),
+// so it is not a reliable statement of what the operator asked for.
+//
+// The "always buffered" tier is only deliverable because logrusLevelFor
+// floors logrus's level gate at info while the ring is installed -- info
+// entries on a warn/error-configured server would otherwise be rejected
+// before any hook fires. If you change that floor, change this contract.
 func shouldBuffer(level log.Level) bool {
 	if level <= log.InfoLevel {
 		return true
