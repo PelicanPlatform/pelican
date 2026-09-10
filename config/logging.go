@@ -24,6 +24,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -45,12 +46,13 @@ type (
 		Regexp *regexp.Regexp
 		Name   string
 		// Levels declares which log levels this filter observes; Fire is only
-		// invoked for entries at these levels. The declaration also feeds
-		// logrusLevelFor, which raises logrus's internal level just far enough
-		// for the filter to see what it asked for. Leaving Levels empty means
-		// "observe everything" -- at the cost of pinning logrus to TraceLevel
-		// (full entry construction for every suppressed log call in the
-		// process) for as long as the filter is registered.
+		// invoked for entries at these levels. The declaration also feeds the
+		// level-demand registry (see syncFilterDemandLocked), which raises logrus's
+		// internal level just far enough for the filter to see what it asked
+		// for. Leaving Levels empty means "observe everything" -- at the cost
+		// of raising logrus to TraceLevel (full entry construction for every
+		// suppressed log call in the process) for as long as the filter is
+		// registered.
 		Levels []log.Level
 		Fire   func(*log.Entry) error
 	}
@@ -99,14 +101,29 @@ var (
 	// level-changing site derives from it; none may write it.
 	effectiveLogLevel atomic.Uint32
 
-	// testLogFloor is a level floor declared by a test harness whose log hook
-	// forwards entries to t.Log for failure diagnostics (see
-	// test_utils.SetupTestLogging). Zero means "no floor". It participates in
-	// logrusLevelFor the same way the ring buffer and registered filters do,
-	// which is what lets the harness's verbosity survive a mid-test
-	// InitClient/InitServer re-deriving the level from the configured value.
-	testLogFloor atomic.Uint32
+	// levelDemands holds every consumer that needs logrus to admit entries
+	// below the operator-configured level -- the log ring buffer, registered
+	// RegexpFilters, and test harnesses -- keyed by a stable string. It is
+	// guarded by globalTransformMu and read by deriveLevelLocked.
+	levelDemands = map[string]levelDemand{}
+
+	// demandSeq stamps each RegisterLevelDemand registration with a unique
+	// sequence number (so a superseded registration's release is a no-op) and
+	// hands each SetTestLogFloor call a unique demand key.
+	demandSeq atomic.Uint64
 )
+
+// levelDemand is one consumer's declared need for logrus to admit entries at
+// `level` or more verbose. A hookOnly demand counts only while hook-based
+// filtering is active (see deriveLevelLocked). seq identifies the registration
+// that installed it, so a release from a superseded RegisterLevelDemand call
+// does not remove a newer demand under the same key (zero for demands set
+// through the internal locked helpers, which release unconditionally by key).
+type levelDemand struct {
+	level    log.Level
+	hookOnly bool
+	seq      uint64
+}
 
 func (sw *syncWriter) Write(p []byte) (n int, err error) {
 	sw.mu.Lock()
@@ -178,7 +195,7 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 	filters := fh.filters.Load()
 	for _, filter := range *filters {
 		// A filter only observes the levels it declared (empty means all).
-		// logrusLevelFor uses the same declaration to decide how far logrus's
+		// syncFilterDemandLocked uses the same declaration to decide how far logrus's
 		// level gate must open, so declaration and delivery stay in agreement.
 		if len(filter.Levels) > 0 && !slices.Contains(filter.Levels, entry.Level) {
 			continue
@@ -279,94 +296,121 @@ func redactEntryCopy(entry *log.Entry) *log.Entry {
 	return &dup
 }
 
-// logrusLevelFor returns the level logrus itself should run at: the
-// operator's configured level, raised only as far as the registered
-// consumers of sub-level entries need to observe. Today those consumers are
-// registered RegexpFilters (each declaring its Levels) and the log ring
-// buffer (a standing info-and-above floor while installed). logrus's level gate sits in front of all
-// entry construction (formatting, hook dispatch, and three acquisitions of
-// the logger's global mutex), so keeping the level as low as possible is
-// what spares suppressed Tracef/Debugf calls on hot request paths the
-// formatting, hook dispatch, and global-mutex traffic of entry construction
-// (argument boxing may still allocate at call sites with parameters).
+// deriveLevelLocked returns the level logrus must run at: the operator's
+// configured level, raised to satisfy every registered demand that applies in
+// the current gating mode.
 //
-// A filter that does not declare Levels is assumed to need everything,
-// which restores the historical pin to TraceLevel while it is registered.
+// The configured level comes from the effective-level cache (the authoritative
+// record, seeded at package init and stored only by SetLogging), never from
+// log.GetLevel(). log.GetLevel() may already be raised by a standing demand,
+// so deriving from it would make the derivation a one-way ratchet that could
+// never lower the level again once a demand is released.
 //
-// If another filter needs to be added in lets move to a new method of level
-// registration to enable rather than continuously piling on.
-func logrusLevelFor(configured log.Level) log.Level {
-	needed := floorLevelFor(configured)
-	if filters := globalFilters.filters.Load(); filters != nil {
-		for _, filter := range *filters {
-			if len(filter.Levels) == 0 {
-				return log.TraceLevel
+// A hookOnly demand -- a RegexpFilter -- counts only while hook-based
+// filtering is active: in that mode logrus's level merely decides which
+// entries reach the hooks, so opening the gate for a filter costs nothing on
+// the output. Before hook-based filtering is installed logrus's Out is the
+// real writer, so raising the gate for a filter would leak filter-only lines
+// to the output; those demands are skipped until then. Floors (ring buffer,
+// test harness) are not hookOnly and apply in both modes -- the ring buffer's
+// "info and above always captured" tier must hold from the moment it is
+// installed, which on a server is well before initFilterLogging runs. The
+// accepted price is that a quiet-configured server writes those floor-admitted
+// lines to its output during that startup window.
+//
+// Callers must hold globalTransformMu.
+func deriveLevelLocked() log.Level {
+	needed := GetEffectiveLogLevel()
+	for _, d := range levelDemands {
+		if d.hookOnly && !addedGlobalFilters {
+			continue
+		}
+		needed = max(needed, d.level)
+	}
+	return needed
+}
+
+// syncLogrusLevelLocked re-derives and applies logrus's internal level after a
+// change to the registered demands, the filter set, or the configured level.
+// Callers must hold globalTransformMu: SetLogging updates the level under the
+// same mutex, so a derive-then-set outside it could interleave with a
+// concurrent SetLogging and leave logrus below what a just-registered consumer
+// needs (a lost update, and a consumer that never fires).
+func syncLogrusLevelLocked() {
+	log.SetLevel(deriveLevelLocked())
+}
+
+// registerLevelDemandLocked records a demand and releaseLevelDemandLocked
+// removes it. Both only mutate the map; the caller re-derives the level (it
+// already holds the mutex and usually batches the demand change with other
+// work). Callers must hold globalTransformMu.
+func registerLevelDemandLocked(key string, level log.Level, hookOnly bool) {
+	levelDemands[key] = levelDemand{level: level, hookOnly: hookOnly}
+}
+
+func releaseLevelDemandLocked(key string) {
+	delete(levelDemands, key)
+}
+
+// RegisterLevelDemand declares that the consumer identified by `key` needs
+// logrus to admit entries at `level` or more verbose, regardless of the
+// operator-configured level, and returns a function that withdraws the demand.
+// The gate is raised immediately and re-derived when the demand is withdrawn.
+// Re-registering the same key replaces its level; the release returned by the
+// superseded call then becomes a no-op, so independent owners sharing a key
+// never withdraw one another's live demand.
+//
+// This is the general mechanism behind the ring-buffer floor, filter needs,
+// and the test-harness floor (SetTestLogFloor): a new consumer that must
+// observe sub-configured entries should register here rather than growing
+// another special case. Demands registered through this exported entry point
+// are floors -- they hold in every logging mode. (Filter needs, which apply
+// only while hook-based filtering is active, are registered internally.)
+func RegisterLevelDemand(key string, level log.Level) (release func()) {
+	seq := demandSeq.Add(1)
+	globalTransformMu.Lock()
+	levelDemands[key] = levelDemand{level: level, hookOnly: false, seq: seq}
+	syncLogrusLevelLocked()
+	globalTransformMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			globalTransformMu.Lock()
+			// Only remove the demand if this registration still owns the key:
+			// a later RegisterLevelDemand(key, ...) supersedes us, and its demand
+			// must survive our release.
+			if d, ok := levelDemands[key]; ok && d.seq == seq {
+				releaseLevelDemandLocked(key)
+				syncLogrusLevelLocked()
 			}
-			for _, lvl := range filter.Levels {
-				if lvl > needed {
-					needed = lvl
-				}
-			}
+			globalTransformMu.Unlock()
+		})
+	}
+}
+
+// syncFilterDemandLocked recomputes the single "filters" demand from the live
+// filter list: the max level any registered filter declared, or TraceLevel if
+// any filter declares no Levels (it observes everything). Keying all filters
+// under one demand -- rather than one demand per filter name -- matches the
+// old whole-list scan and avoids a same-name registration clobbering another
+// filter's need. Caller must hold globalTransformMu.
+func syncFilterDemandLocked() {
+	filters := globalFilters.filters.Load()
+	if filters == nil || len(*filters) == 0 {
+		releaseLevelDemandLocked("filters")
+		return
+	}
+	needed := log.PanicLevel
+	for _, f := range *filters {
+		if len(f.Levels) == 0 {
+			needed = log.TraceLevel
+			break
+		}
+		for _, lvl := range f.Levels {
+			needed = max(needed, lvl)
 		}
 	}
-	return needed
-}
-
-// floorLevelFor applies the standing level floors -- the consumers that must
-// observe sub-configured entries in every logging mode, hook-based or not:
-//
-//   - The log ring buffer (served by the pelican.log_read triage endpoints)
-//     documents that info and above are always captured, so a server running
-//     a quiet Logging.Level still has recent context available for remote
-//     triage. That contract must hold from the moment StartLogRingBuffer
-//     runs -- which on a server is early in InitServer, well before
-//     initFilterLogging installs hook-based output gating.
-//   - A test harness forwarding entries to t.Log declares a floor so failing
-//     tests keep their diagnostic output across in-test re-initialization.
-//
-// Unlike filter needs (see logrusLevelFor), floors deliberately apply even
-// when hook-based filtering is inactive. In that mode logrus's Out is the
-// real writer, so floor-admitted entries also reach the output -- e.g. a
-// warn-configured server writes info lines during the InitServer window.
-// That is the accepted price of the ring's "always captured" tier; once
-// initFilterLogging installs the hook-gated writer, output returns to the
-// configured level while the floors keep feeding the hooks.
-func floorLevelFor(configured log.Level) log.Level {
-	needed := configured
-	if globalLogBuffer.Load() != nil && log.InfoLevel > needed {
-		needed = log.InfoLevel
-	}
-	// testLogFloor == 0 means "no floor declared"; no explicit check is
-	// needed because 0 is PanicLevel, the least verbose level, which can
-	// never exceed `needed` -- the sentinel is inert by construction.
-	if floor := log.Level(testLogFloor.Load()); floor > needed {
-		needed = floor
-	}
-	return needed
-}
-
-// syncLogrusLevelLocked re-derives logrus's internal level after a change to
-// the registered floors or filter set. Callers must hold globalTransformMu:
-// SetLogging updates the level under the same mutex, so a derive-then-set
-// outside it could interleave with a concurrent SetLogging and leave logrus
-// below what a just-registered consumer needs (a lost update, and a consumer
-// that never fires).
-//
-// Both branches derive from the effective-level cache -- the authoritative
-// record of the operator's configured level (seeded at package init, stored
-// unconditionally by SetLogging) -- never from log.GetLevel(), which may
-// already be floor-raised; deriving from it would make the sync a one-way
-// ratchet that can never lower the level after a floor is lifted. Filter
-// needs apply only when hook-based filtering is active; otherwise raising
-// the level for a filter would leak filter-only lines straight to the
-// output. Floors (ring buffer, test harness) apply in both modes -- see
-// floorLevelFor.
-func syncLogrusLevelLocked() {
-	if addedGlobalFilters {
-		log.SetLevel(logrusLevelFor(GetEffectiveLogLevel()))
-	} else {
-		log.SetLevel(floorLevelFor(GetEffectiveLogLevel()))
-	}
+	registerLevelDemandLocked("filters", needed, true)
 }
 
 func initFilterLogging() {
@@ -405,9 +449,8 @@ func initFilterLogging() {
 	// Tracef/Debugf in the codebase to pay full logrus entry construction
 	// (three global-mutex acquisitions and a formatting pass) on hot
 	// request paths; now the level is raised only as far as registered
-	// consumers actually need (see logrusLevelFor).
+	// consumers actually need (see deriveLevelLocked).
 	configLevel := GetEffectiveLogLevel()
-	log.SetLevel(logrusLevelFor(configLevel))
 	hookLevel := make([]log.Level, 0)
 	for _, lvl := range log.AllLevels {
 		if lvl <= configLevel {
@@ -435,36 +478,23 @@ func initFilterLogging() {
 		newRegex := regexp.MustCompile(bearerTokenRegexStr)
 		globalTransform.regex.Store(newRegex)
 	}
+
+	// Re-derive now that addedGlobalFilters is set: the hookOnly filter demands
+	// apply from here on, so the gate opens to what the filters need.
+	syncLogrusLevelLocked()
 }
 
 // SetTestLogFloor declares that a test harness needs logrus to admit entries
-// at lvl and below-severity regardless of the configured level, so its log
-// hook (which forwards entries to t.Log) keeps receiving diagnostics when a
-// test re-initializes logging via InitClient/InitServer. Cleared with
-// ClearTestLogFloor; intended only for test harnesses.
-// The returned restore function reinstates the floor that was in effect
-// before this call, so nested harnesses (a package-level
-// SetupGlobalTestLogging plus per-test SetupTestLogging, or parent tests
-// with subtests) do not wipe each other's declarations.
+// at lvl or more verbose regardless of the configured level, so its log hook
+// (which forwards entries to t.Log) keeps receiving diagnostics when a test
+// re-initializes logging via InitClient/InitServer. It returns a restore
+// function that withdraws just this declaration. Each call takes a unique
+// demand key, so concurrent or nested harnesses never wipe one another's floor
+// and restores may run in any order. Intended only for test harnesses; it is a
+// thin wrapper over RegisterLevelDemand.
 func SetTestLogFloor(lvl log.Level) (restore func()) {
-	prev := testLogFloor.Swap(uint32(lvl))
-	globalTransformMu.Lock()
-	syncLogrusLevelLocked()
-	globalTransformMu.Unlock()
-	return func() {
-		testLogFloor.Store(prev)
-		globalTransformMu.Lock()
-		syncLogrusLevelLocked()
-		globalTransformMu.Unlock()
-	}
-}
-
-// ClearTestLogFloor removes the floor installed by SetTestLogFloor.
-func ClearTestLogFloor() {
-	testLogFloor.Store(0)
-	globalTransformMu.Lock()
-	defer globalTransformMu.Unlock()
-	syncLogrusLevelLocked()
+	key := "test-harness:" + strconv.FormatUint(demandSeq.Add(1), 10)
+	return RegisterLevelDemand(key, lvl)
 }
 
 // ResetGlobalLoggingHooks resets the global logging hooks and flags for testing.
@@ -505,7 +535,10 @@ func AddFilter(newFilter *RegexpFilter) {
 	newFilters = append(newFilters, newFilter)
 	globalFilters.filters.Store(&newFilters)
 	// The new filter may need to observe levels below the configured one;
-	// raise logrus's level accordingly for as long as it is registered.
+	// recompute the filters' collective demand so logrus's level is raised for
+	// as long as it is registered (a hookOnly demand: it applies only in hook
+	// mode).
+	syncFilterDemandLocked()
 	syncLogrusLevelLocked()
 }
 
@@ -524,6 +557,7 @@ func RemoveFilter(name string) {
 	}
 	globalFilters.filters.Store(&result)
 	// Drop logrus's level back down if this filter was what held it up.
+	syncFilterDemandLocked()
 	syncLogrusLevelLocked()
 }
 
@@ -549,10 +583,10 @@ func SetLogging(logLevel log.Level) {
 	// internal level filtering: the hooks decide what is written via hookLevel. logrus's
 	// own level then only controls which entries reach the hooks, so run it at the
 	// configured level, raised just far enough for any registered RegexpFilter to see
-	// the messages it declared interest in (see logrusLevelFor).
+	// the messages it declared interest in (see deriveLevelLocked).
 	globalTransformMu.Lock()
 	if addedGlobalFilters {
-		log.SetLevel(logrusLevelFor(logLevel))
+		syncLogrusLevelLocked()
 		hookLevel := make([]log.Level, 0, len(log.AllLevels))
 
 		// Atomically get current hooks
@@ -607,8 +641,8 @@ func SetLogging(logLevel log.Level) {
 		// No hook-based gating yet: logrus's own level is the output gate.
 		// Still honor the standing floors (ring buffer, test harness) so
 		// their capture contracts hold before initFilterLogging runs; see
-		// floorLevelFor for the output-leak trade this accepts.
-		log.SetLevel(floorLevelFor(logLevel))
+		// deriveLevelLocked for the output-leak trade this accepts.
+		syncLogrusLevelLocked()
 		globalTransformMu.Unlock()
 	}
 }
@@ -616,7 +650,7 @@ func SetLogging(logLevel log.Level) {
 // GetEffectiveLogLevel returns the effective log level -- the level the
 // operator asked for, as opposed to logrus's internal log.GetLevel(),
 // which may sit temporarily above it while a registered RegexpFilter needs
-// to observe more verbose entries (see logrusLevelFor). The value is
+// to observe more verbose entries (see deriveLevelLocked). The value is
 // served from an atomic cache seeded at package init and updated only by
 // SetLogging; the hot path (LogRingBuffer.shouldBuffer, invoked on every
 // entry) is therefore a single atomic load with no mutex contention or

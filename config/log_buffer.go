@@ -234,9 +234,11 @@ func StartLogRingBuffer(ctx context.Context) {
 	globalTransformMu.Lock()
 	log.AddHook(&logRingBufferHook{buf: buf})
 	// The ring documents an info-and-above capture floor (see shouldBuffer),
-	// so logrus's level gate must admit info entries while the ring is
-	// installed even when the operator configured a quieter level. The
-	// buffer was stored above, so the re-derivation sees it.
+	// so register an Info demand: logrus's level gate must admit info entries
+	// while the ring is installed even when the operator configured a quieter
+	// level. It is a floor (not hookOnly), so it holds during the InitServer
+	// window before hook-based filtering is active.
+	registerLevelDemandLocked("log-ring-buffer", log.InfoLevel, false)
 	syncLogrusLevelLocked()
 	globalTransformMu.Unlock()
 }
@@ -254,10 +256,10 @@ func StopLogRingBuffer() {
 	// new entries are delivered.
 	buf.closed.Store(true)
 	removeLogRingBufferHook()
-	// With the buffer gone (swapped to nil above), drop logrus's level back
-	// to whatever the remaining consumers need -- the info floor the ring
-	// imposed no longer applies.
+	// Withdraw the info floor and re-derive: logrus drops back to whatever the
+	// remaining consumers need.
 	globalTransformMu.Lock()
+	releaseLevelDemandLocked("log-ring-buffer")
 	syncLogrusLevelLocked()
 	globalTransformMu.Unlock()
 	// Stop the compression worker. Cancelling the worker context is sufficient
@@ -341,11 +343,12 @@ func (h *logRingBufferHook) Fire(entry *log.Entry) error {
 // The effective level comes from GetEffectiveLogLevel (which knows about
 // the hook-based filtering initFilterLogging installs); logrus's own
 // GetLevel can sit above the operator's configured level while a registered
-// RegexpFilter needs to observe more verbose entries (see logrusLevelFor),
+// RegexpFilter needs to observe more verbose entries (see deriveLevelLocked),
 // so it is not a reliable statement of what the operator asked for.
 //
-// The "always buffered" tier is only deliverable because logrusLevelFor
-// floors logrus's level gate at info while the ring is installed -- info
+// The "always buffered" tier is only deliverable because StartLogRingBuffer
+// registers an info-level demand (see RegisterLevelDemand / deriveLevelLocked)
+// that floors logrus's level gate at info while the ring is installed -- info
 // entries on a warn/error-configured server would otherwise be rejected
 // before any hook fires. If you change that floor, change this contract.
 func shouldBuffer(level log.Level) bool {

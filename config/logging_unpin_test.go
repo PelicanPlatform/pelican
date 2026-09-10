@@ -241,8 +241,11 @@ func TestHarnessLogFloorSurvivesReinit(t *testing.T) {
 	prevEffective := GetEffectiveLogLevel()
 	prevOut := log.StandardLogger().Out
 	prevHooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
+	var restore func()
 	t.Cleanup(func() {
-		ClearTestLogFloor()
+		if restore != nil {
+			restore()
+		}
 		log.StandardLogger().ReplaceHooks(prevHooks)
 		log.SetOutput(prevOut)
 		SetLogging(prevEffective)
@@ -252,7 +255,7 @@ func TestHarnessLogFloorSurvivesReinit(t *testing.T) {
 
 	ResetGlobalLoggingHooks()
 	log.SetOutput(io.Discard)
-	SetTestLogFloor(log.TraceLevel)
+	restore = SetTestLogFloor(log.TraceLevel)
 
 	// Simulate a mid-test InitClient/InitServer: init runs with a quiet
 	// configured level, but the harness floor must keep the gate open.
@@ -265,34 +268,48 @@ func TestHarnessLogFloorSurvivesReinit(t *testing.T) {
 	assert.Equal(t, log.TraceLevel, log.GetLevel(),
 		"the harness floor must survive SetLogging")
 
-	ClearTestLogFloor()
+	restore()
 	assert.Equal(t, log.WarnLevel, log.GetLevel(),
-		"clearing the floor must restore the configured level")
+		"withdrawing the floor must restore the configured level")
 }
 
-// The test-harness floor is a single global slot shared by nested harnesses
-// (a package-level SetupGlobalTestLogging plus per-test SetupTestLogging, or
-// parent tests with subtests), so restoring must reinstate the previous
-// floor rather than wiping it.
+// Test-harness floors are independent keyed demands, so nested or concurrent
+// harnesses (a package-level SetupGlobalTestLogging plus per-test
+// SetupTestLogging, or parallel tests) never wipe one another and their
+// restores may run in any order -- the gate always reflects the most verbose
+// demand still outstanding.
 func TestTestLogFloorNesting(t *testing.T) {
-	t.Cleanup(ClearTestLogFloor)
-	ClearTestLogFloor()
+	prevLevel := log.GetLevel()
+	prevEffective := GetEffectiveLogLevel()
+	prevOut := log.StandardLogger().Out
+	t.Cleanup(func() {
+		log.SetOutput(prevOut)
+		SetLogging(prevEffective)
+		log.SetLevel(prevLevel)
+		ResetGlobalLoggingHooks()
+	})
 
-	outerRestore := SetTestLogFloor(log.TraceLevel)
-	innerRestore := SetTestLogFloor(log.DebugLevel)
-	assert.Equal(t, log.DebugLevel, log.Level(testLogFloor.Load()))
+	ResetGlobalLoggingHooks()
+	log.SetOutput(io.Discard)
+	SetLogging(log.WarnLevel)
+
+	outerRestore := SetTestLogFloor(log.InfoLevel)
+	innerRestore := SetTestLogFloor(log.TraceLevel)
+	assert.Equal(t, log.TraceLevel, log.GetLevel(),
+		"the most verbose outstanding floor wins")
+
+	// Restore out of nesting order -- the outer (less verbose) first.
+	outerRestore()
+	assert.Equal(t, log.TraceLevel, log.GetLevel(),
+		"withdrawing a less-verbose floor leaves the more-verbose one intact")
 
 	innerRestore()
-	assert.Equal(t, log.TraceLevel, log.Level(testLogFloor.Load()),
-		"an inner harness's restore must reinstate the outer floor, not wipe it")
-
-	outerRestore()
-	assert.Equal(t, log.Level(0), log.Level(testLogFloor.Load()),
-		"the outermost restore returns to no-floor")
+	assert.Equal(t, log.WarnLevel, log.GetLevel(),
+		"with no floors outstanding the gate returns to the configured level")
 }
 
 // A filter's Levels declaration must control which entries its Fire callback
-// observes, so declaration and delivery agree (logrusLevelFor uses the same
+// observes, so declaration and delivery agree (syncFilterDemandLocked uses the same
 // declaration to decide how far the level gate opens).
 func TestRegexpFilterLevelEnforcement(t *testing.T) {
 	var declaredFired, undeclaredFired atomic.Int64
