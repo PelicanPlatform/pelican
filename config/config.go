@@ -2335,6 +2335,20 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.OriginType) {
+		// The external Java-based OA4MP issuer is deprecated; the embedded issuer
+		// is now the default and only supported implementation.  Refuse to start
+		// rather than silently swap an admin's issuer out from under them: the two
+		// implementations do not share state, so registered clients and grants do
+		// not carry over.
+		if param.Origin_IssuerMode.GetString() == "oa4mp" {
+			return errors.Errorf("%s is set to \"oa4mp\", but the OA4MP issuer is deprecated and no longer "+
+				"supported; set %s to \"embedded\" to use the built-in issuer. The embedded issuer's identity "+
+				"and discovery URLs are per-namespace (<external web url>/api/v1.0/issuer/ns<prefix>): tokens "+
+				"issued before the switch stop validating, and any Origin.Exports[].IssuerUrls pinned to the "+
+				"old issuer URL must be cleared or updated to match.",
+				param.Origin_IssuerMode.GetName(), param.Origin_IssuerMode.GetName())
+		}
+
 		ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse %s", param.Origin_StorageType.GetName())

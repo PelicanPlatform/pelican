@@ -587,7 +587,7 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	// Origin.HttpAuthTokenPassthrough
 	v.SetDefault(param.Origin_HttpAuthTokenPassthrough.GetName(), false)
 	// Origin.IssuerMode
-	v.SetDefault(param.Origin_IssuerMode.GetName(), "oa4mp")
+	v.SetDefault(param.Origin_IssuerMode.GetName(), "embedded")
 	// Origin.Metadata.AccessFlushInterval
 	v.SetDefault(param.Origin_Metadata_AccessFlushInterval.GetName(), "5m")
 	// Origin.Metadata.AllowMultipart
