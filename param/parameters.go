@@ -509,6 +509,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.AutoEnrollUsernameClaims": false,
 	"Server.CollectionAdminGroups": false,
 	"Server.CollectionAdminUsers": false,
+	"Server.ConfigReadOnly": false,
 	"Server.DatabaseBackup.Frequency": false,
 	"Server.DatabaseBackup.Location": false,
 	"Server.DatabaseBackup.MaxCount": false,
@@ -1170,6 +1171,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
 	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
 	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
+	"Server.ConfigReadOnly": func(c *Config) bool { return c.Server.ConfigReadOnly },
 	"Server.DropPrivileges": func(c *Config) bool { return c.Server.DropPrivileges },
 	"Server.EnablePKCS11": func(c *Config) bool { return c.Server.EnablePKCS11 },
 	"Server.EnablePprof": func(c *Config) bool { return c.Server.EnablePprof },
@@ -1817,6 +1819,7 @@ var allParameterNames = []string{
 	"Server.AutoEnrollUsernameClaims",
 	"Server.CollectionAdminGroups",
 	"Server.CollectionAdminUsers",
+	"Server.ConfigReadOnly",
 	"Server.DatabaseBackup.Frequency",
 	"Server.DatabaseBackup.Location",
 	"Server.DatabaseBackup.MaxCount",
@@ -2330,6 +2333,7 @@ var (
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
+	Server_ConfigReadOnly = BoolParam{"Server.ConfigReadOnly"}
 	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
 	Server_EnablePKCS11 = BoolParam{"Server.EnablePKCS11"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
@@ -2871,6 +2875,7 @@ func init() {
 		"Registry.RequireCacheApproval": Registry_RequireCacheApproval,
 		"Registry.RequireKeyChaining": Registry_RequireKeyChaining,
 		"Registry.RequireOriginApproval": Registry_RequireOriginApproval,
+		"Server.ConfigReadOnly": Server_ConfigReadOnly,
 		"Server.DropPrivileges": Server_DropPrivileges,
 		"Server.EnablePKCS11": Server_EnablePKCS11,
 		"Server.EnablePprof": Server_EnablePprof,

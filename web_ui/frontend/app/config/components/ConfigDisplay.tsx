@@ -26,6 +26,9 @@ export interface ConfigDisplayProps {
   includeLabels?: boolean;
   omitLabels?: boolean;
   showDescription?: boolean;
+  // Render the values without allowing edits, e.g. when the server has
+  // Server.ConfigReadOnly enabled and would reject a PATCH anyway.
+  readOnly?: boolean;
 }
 
 export const ConfigDisplay = memo(NonMemoizedConfigDisplay);
@@ -37,6 +40,7 @@ export function NonMemoizedConfigDisplay({
   onChange,
   omitLabels = false,
   showDescription = false,
+  readOnly = false,
 }: ConfigDisplayProps) {
   const existingLabels = new Set<string>();
 
@@ -60,6 +64,7 @@ export function NonMemoizedConfigDisplay({
               focused={name in patch && !isEqual(patch[name], config?.[name])}
               onChange={onChange}
               showDescription={showDescription}
+              readOnly={readOnly}
             />
           </Box>
         );
@@ -74,6 +79,7 @@ interface ConfigFieldProps {
   onChange: (patch: any) => void;
   focused: boolean;
   showDescription?: boolean;
+  readOnly?: boolean;
 }
 
 export const ConfigField = ({
@@ -82,6 +88,7 @@ export const ConfigField = ({
   onChange,
   focused,
   showDescription = false,
+  readOnly = false,
 }: ConfigFieldProps) => {
   const [expandDescription, setExpandDescription] = useState(false);
 
@@ -94,6 +101,7 @@ export const ConfigField = ({
             value={value}
             onChange={onChange}
             focused={focused}
+            readOnly={readOnly}
           />
           {metadata.description && showDescription && expandDescription && (
             <Box p={1} bgcolor={grey[100]} borderRadius={1} mb={1}>

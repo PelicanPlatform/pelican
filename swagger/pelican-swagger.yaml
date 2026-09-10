@@ -2971,7 +2971,8 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "403":
-          description: Permission denied. Admin privilege required.
+          description: Permission denied. Admin privilege is required, or the server
+            configuration is read-only because `Server.ConfigReadOnly` is enabled.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"

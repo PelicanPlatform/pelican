@@ -14,6 +14,7 @@ export type DurationFieldProps = {
   name: string;
   value: number;
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (x: number) => void;
 };
 
@@ -22,6 +23,7 @@ const DurationField = ({
   name,
   value,
   focused,
+  readOnly,
 }: DurationFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
 
@@ -63,6 +65,7 @@ const DurationField = ({
       label={name}
       variant={'outlined'}
       focused={focused}
+      InputProps={{ readOnly }}
       value={bufferValue}
       onChange={(e) => setBufferValue(e.target.value)}
       onBlur={handleOnChange}

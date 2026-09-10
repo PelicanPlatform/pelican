@@ -668,8 +668,10 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// Version endpoint
 	routerGroup.GET("/version", getVersionHandler)
 
-	// Config management endpoints
-	configAPIGroup := routerGroup.Group("/config", AuthHandler, AdminAuthHandler)
+	// Config management endpoints. ConfigReadOnlyMiddleware guards the whole
+	// group so any future write route under /config is covered by
+	// Server.ConfigReadOnly without needing to remember it.
+	configAPIGroup := routerGroup.Group("/config", AuthHandler, AdminAuthHandler, ConfigReadOnlyMiddleware)
 	{
 		configAPIGroup.GET("", getConfigValues)
 		configAPIGroup.PATCH("", updateConfigValues)

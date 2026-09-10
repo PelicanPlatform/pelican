@@ -35,6 +35,7 @@ const Field = ({
   value,
   name,
   focused,
+  readOnly,
   ...props
 }: ParameterInputProps) => {
   const handleChange = useMemo(() => {
@@ -54,6 +55,7 @@ const Field = ({
       return (
         <BooleanField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<boolean>}
           name={name}
           value={value as boolean}
@@ -63,6 +65,7 @@ const Field = ({
       return (
         <DurationField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<Duration>}
           name={name}
           value={value as number}
@@ -72,6 +75,7 @@ const Field = ({
       return (
         <StringSliceField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<string[]>}
           name={name}
           value={value as string[]}
@@ -81,6 +85,7 @@ const Field = ({
       return (
         <StringField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<string>}
           name={name}
           value={value as string}
@@ -90,6 +95,7 @@ const Field = ({
       return (
         <StringField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<string>}
           name={name}
           value={value as string}
@@ -99,6 +105,7 @@ const Field = ({
       return (
         <StringField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<string>}
           name={name}
           value={value as string}
@@ -108,6 +115,7 @@ const Field = ({
       return (
         <IntegerField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<number>}
           name={name}
           value={value as number}
@@ -117,6 +125,7 @@ const Field = ({
       return (
         <StringField
           focused={focused}
+          readOnly={readOnly}
           onChange={handleChange<string>}
           name={name}
           value={value as string}
@@ -127,6 +136,7 @@ const Field = ({
         case 'Institutions':
           return (
             <ObjectField<Institution>
+              readOnly={readOnly}
               onChange={handleChange<Institution[]>}
               name={name}
               value={value as Institution[]}
@@ -138,6 +148,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<GeoIPOverride[]>}
               name={name}
               value={value as GeoIPOverride[]}
@@ -149,6 +160,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<OIDCAuthenticationRequirement[]>}
               name={name}
               value={value as OIDCAuthenticationRequirement[]}
@@ -160,6 +172,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<AuthorizationTemplate[]>}
               name={name}
               value={value as AuthorizationTemplate[]}
@@ -171,6 +184,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<IPMapping[]>}
               name={name}
               value={value as IPMapping[]}
@@ -182,6 +196,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<CustomRegistrationField[]>}
               name={name}
               value={value as CustomRegistrationField[]}
@@ -193,6 +208,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<Export[]>}
               name={name}
               value={value as Export[]}
@@ -204,6 +220,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<PolicyDefinition[]>}
               name={name}
               value={value as PolicyDefinition[]}
@@ -218,6 +235,7 @@ const Field = ({
           return (
             <ObjectField
               focused={focused}
+              readOnly={readOnly}
               onChange={handleChange<StorageDir[]>}
               name={name}
               value={value as StorageDir[]}
