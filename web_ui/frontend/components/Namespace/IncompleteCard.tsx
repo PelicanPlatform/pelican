@@ -1,39 +1,31 @@
 'use client';
 
-import React, { useContext, useRef, useState } from 'react';
-import {
-  Avatar,
-  Box,
-  IconButton,
-  Tooltip,
-  Typography,
-  useMediaQuery,
-} from '@mui/material';
-import { Block, Check, Edit, Person } from '@mui/icons-material';
+import React, { useContext, useState } from 'react';
+import { Avatar, Box, IconButton, Tooltip, useMediaQuery } from '@mui/material';
+import { Block, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
 
 import { Alert, RegistryNamespace, User } from '@/index';
 import InformationDropdown from './InformationDropdown';
-import { NamespaceIcon, userOwnsNamespace } from '@/components/Namespace/index';
+import { userOwnsNamespace } from '@/components/Namespace/index';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { approveNamespace, denyNamespace } from '@/helpers/api';
+import { denyNamespace } from '@/helpers/api';
 import { Theme } from '@mui/system';
 import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 
-export interface PendingCardProps {
+export interface IncompleteCardProps {
   namespace: RegistryNamespace;
   onUpdate: () => void;
   onAlert: (alert: Alert) => void;
   authenticated?: User;
 }
 
-export const PendingCard = ({
+export const IncompleteCard = ({
   namespace,
   onUpdate,
-  onAlert,
   authenticated,
-}: PendingCardProps) => {
+}: IncompleteCardProps) => {
   const size = useMediaQuery((theme: Theme) => theme.breakpoints.down('md'))
     ? 'small'
     : 'medium';
@@ -81,48 +73,28 @@ export const PendingCard = ({
               </Box>
             )}
             {authenticated?.role == 'admin' && (
-              <>
-                <Tooltip title={'Deny Registration'}>
-                  <IconButton
-                    sx={{ bgcolor: '#ff00001a', mx: 1 }}
-                    size={size}
-                    color={'error'}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await alertOnError(
-                        () => denyNamespace(namespace.id),
-                        "Couldn't deny namespace",
-                        dispatch
-                      );
-                      onUpdate();
-                    }}
-                  >
-                    <Block fontSize={size} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title={'Approve Registration'}>
-                  <IconButton
-                    sx={{ bgcolor: '#2e7d3224', mx: 1 }}
-                    size={size}
-                    color={'success'}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await alertOnError(
-                        () => approveNamespace(namespace.id),
-                        "Couldn't approve namespace",
-                        dispatch
-                      );
-                      onUpdate();
-                    }}
-                  >
-                    <Check fontSize={size} />
-                  </IconButton>
-                </Tooltip>
-              </>
+              <Tooltip title={'Deny Registration'}>
+                <IconButton
+                  sx={{ bgcolor: '#ff00001a', mx: 1 }}
+                  size={size}
+                  color={'error'}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await alertOnError(
+                      () => denyNamespace(namespace.id),
+                      "Couldn't deny namespace",
+                      dispatch
+                    );
+                    onUpdate();
+                  }}
+                >
+                  <Block fontSize={size} />
+                </IconButton>
+              </Tooltip>
             )}
             {(authenticated?.role == 'admin' ||
               userOwnsNamespace(authenticated, namespace)) && (
-              <Tooltip title={'Edit Registration'}>
+              <Tooltip title={'Complete Registration'}>
                 <Link
                   href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
                 >
@@ -148,4 +120,4 @@ export const PendingCard = ({
   );
 };
 
-export default PendingCard;
+export default IncompleteCard;

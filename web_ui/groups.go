@@ -1709,6 +1709,67 @@ func handleRedeemCollectionOwnershipInvite(ctx *gin.Context) {
 	})
 }
 
+// handleRedeemRegistrationOwnershipInvite consumes a single-use
+// ownership-transfer invite for a registry registration, recording the
+// authenticated caller's Pelican User.ID as the registration's owner.
+// Single-use is enforced inside the DB helper; the caller MUST be
+// authenticated — anonymous redemption would let link-holders make
+// ANYBODY the owner; we record the caller's User.ID specifically so
+// the registration names a real account.
+func handleRedeemRegistrationOwnershipInvite(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	var req RedeemInviteLinkReq
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Token == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "invite token is required",
+		})
+		return
+	}
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user",
+		})
+		return
+	}
+	registrationID, prefix, err := database.RedeemRegistrationOwnershipInviteLink(database.ServerDatabase, req.Token, userId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "invite link not found",
+			})
+		} else {
+			log.Warningf("Failed to redeem registration ownership invite link: %v", err)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to redeem invite link",
+			})
+		}
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":             server_structs.RespOK,
+		"message":            "Registration ownership transferred to you.",
+		"registrationId":     registrationID,
+		"registrationPrefix": prefix,
+	})
+}
+
 // --- User Status / AUP Handlers ---
 
 func handleUpdateUserStatus(ctx *gin.Context) {

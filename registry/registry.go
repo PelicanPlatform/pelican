@@ -435,8 +435,10 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 	}
 
-	// Overwrite status to Pending to filter malicious request
-	ns.AdminMetadata.Status = server_structs.RegPending
+	// Registrations coming through the automated flow/CLI carry only the basic info;
+	// the additional fields (institution, etc.) hasn't been filled in yet, so they
+	// start as Incomplete. Submitting the web form promotes them to Pending.
+	ns.AdminMetadata.Status = server_structs.RegIncomplete
 
 	if server_structs.IsServerPrefix(data.Prefix) {
 		if ns.CustomFields == nil {
@@ -1200,7 +1202,11 @@ func checkStatusHandler(ctx *gin.Context) {
 				Msg:    "Server error when getting federation information: " + err.Error(),
 			})
 		}
-		if server_structs.IsCacheNS(prefix) {
+		if ns.AdminMetadata.UserID == "" {
+			// Unowned registrations go through the claim page first, which
+			// binds the registration to the logged-in user before editing.
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/claim/?id=%d", fed.RegistryEndpoint, ns.ID)
+		} else if server_structs.IsCacheNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		} else if server_structs.IsOriginNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.RegistryEndpoint, ns.ID)

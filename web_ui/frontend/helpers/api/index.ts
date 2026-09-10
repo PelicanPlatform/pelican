@@ -249,6 +249,50 @@ export const getNamespace = async (
   return await fetchApi(async () => await fetch(url));
 };
 
+/**
+ * Claims an unowned namespace registration for the logged-in user
+ * @param id Namespace ID
+ * @param accessToken Access token minted by the registered server, proving
+ *   the caller operates it
+ */
+export const claimNamespace = async (
+  id: string | number,
+  accessToken: string
+): Promise<Response> => {
+  const url = new URL(
+    `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/claim`,
+    window.location.origin
+  );
+  url.searchParams.append('access_token', accessToken);
+  return await fetchApi(
+    async () => await secureFetch(url.toString(), { method: 'POST' })
+  );
+};
+
+/**
+ * Mints a single-use ownership-transfer invite for a namespace
+ * registration; the redeemer becomes the new owner. Owner/admin only.
+ * @param id Namespace ID
+ * @param expiresIn Optional Go duration string (e.g. "168h"); server
+ *   defaults to 7 days
+ */
+export const createRegistrationOwnershipInvite = async (
+  id: number,
+  expiresIn?: string
+): Promise<Response> => {
+  return await fetchApi(
+    async () =>
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/ownership-invites`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expiresIn: expiresIn ?? '' }),
+        }
+      )
+  );
+};
+
 export const postGeneralNamespace = async (
   data: RegistryNamespace
 ): Promise<Response> => {

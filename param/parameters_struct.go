@@ -508,6 +508,7 @@ type Config struct {
 		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
 		Modules []string `mapstructure:"modules" yaml:"Modules"`
 		NewUserDefaultScopes []string `mapstructure:"newuserdefaultscopes" yaml:"NewUserDefaultScopes"`
+		RegistrationCompletionLinkFile string `mapstructure:"registrationcompletionlinkfile" yaml:"RegistrationCompletionLinkFile"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
 		SSRFProtection struct {
 			AllowedCIDRs []string `mapstructure:"allowedcidrs" yaml:"AllowedCIDRs"`
@@ -1097,6 +1098,7 @@ type configWithType struct {
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
 		NewUserDefaultScopes struct { Type string; Value []string }
+		RegistrationCompletionLinkFile struct { Type string; Value string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SSRFProtection struct {
 			AllowedCIDRs struct { Type string; Value []string }

@@ -145,6 +145,11 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 			log.Errorf("Failed to populate the data for the new server tables: %v", err)
 			return errors.Wrap(err, "server data migration failed")
 		}
+
+		// Migrate registrations owned by a CILogon subject to the Pelican user id carrying that subject
+		if err := migrateLegacyRegistrationOwners(ServerDatabase); err != nil {
+			log.Warnf("Legacy registration owner migration failed: %v", err)
+		}
 	}
 
 	return nil

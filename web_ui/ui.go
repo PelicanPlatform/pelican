@@ -763,6 +763,8 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// doesn't grant management-policy authority — those gates run on
 	// the API surface itself, not on the act of being an owner).
 	routerGroup.POST("/invites/redeem/collection-ownership", AuthHandler, handleRedeemCollectionOwnershipInvite)
+	// Same posture for registry-registration ownership transfers.
+	routerGroup.POST("/invites/redeem/registration-ownership", AuthHandler, handleRedeemRegistrationOwnershipInvite)
 	// Public-info probe so the redemption UI can render the right form
 	// without consuming the link.
 	routerGroup.GET("/invites/info", handleGetInviteInfo)

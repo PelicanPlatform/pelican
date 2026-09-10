@@ -172,6 +172,9 @@ const RedeemRouter: React.FC = () => {
   if (info.kind === 'collection_ownership') {
     return <CollectionOwnershipRedeem token={token} info={info} />;
   }
+  if (info.kind === 'registration_ownership') {
+    return <RegistrationOwnershipRedeem token={token} info={info} />;
+  }
   return <GroupRedeem token={token} info={info} />;
 };
 
@@ -498,6 +501,118 @@ const CollectionOwnershipRedeem: React.FC<{
                   sx={{ fontFamily: 'monospace', fontWeight: 600 }}
                 >
                   {info.collectionNamespace}
+                </Box>
+              </>
+            )}
+            .
+          </Typography>
+          {error && <Alert severity='error'>{error}</Alert>}
+          <Box display='flex' justifyContent='flex-end' gap={1}>
+            <Button onClick={() => router.push('/')} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button variant='contained' onClick={submit} disabled={submitting}>
+              {submitting ? 'Accepting…' : 'Accept ownership'}
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    </AuthenticatedContent>
+  );
+};
+
+// ============================================================================
+// Registration-ownership kind: authenticated confirm page. Accepting makes
+// the caller the owner of the registry registration named by the invite.
+// ============================================================================
+
+const RegistrationOwnershipRedeem: React.FC<{
+  token: string;
+  info: InviteInfo;
+}> = ({ token, info }) => {
+  const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const registrationLabel =
+    info.registrationSiteName?.trim() ||
+    info.registrationPrefix ||
+    'a registration';
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await InviteService.redeemRegistrationOwnership(token);
+      setDone(true);
+    } catch (err) {
+      let message = 'Failed to redeem invite';
+      if (err instanceof Response) {
+        try {
+          message = await getErrorMessage(err);
+        } catch {
+          /* default */
+        }
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <Paper variant='outlined' sx={{ p: 4 }}>
+        <Stack spacing={2}>
+          <Typography variant='h4'>Ownership transferred</Typography>
+          <Alert severity='success'>
+            You are now the owner of <strong>{registrationLabel}</strong>
+            {info.registrationPrefix && (
+              <>
+                {' '}
+                (<code>{info.registrationPrefix}</code>)
+              </>
+            )}
+            .
+          </Alert>
+          <Box display='flex' gap={1}>
+            <Button
+              variant='contained'
+              onClick={() => router.push('/registry/')}
+            >
+              Go to registry
+            </Button>
+            <Button variant='text' onClick={() => router.push('/')}>
+              Home
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    );
+  }
+
+  return (
+    <AuthenticatedContent redirect>
+      <Paper variant='outlined' sx={{ p: 4 }}>
+        <Stack spacing={2}>
+          <Typography variant='h4'>Accept registration ownership</Typography>
+          <Typography variant='body1'>
+            Accepting will make you the owner of the registration{' '}
+            <Box component='span' sx={{ fontWeight: 600 }}>
+              {registrationLabel}
+            </Box>
+            {info.registrationPrefix && (
+              <>
+                {' '}
+                for prefix{' '}
+                <Box
+                  component='span'
+                  sx={{ fontFamily: 'monospace', fontWeight: 600 }}
+                >
+                  {info.registrationPrefix}
                 </Box>
               </>
             )}
