@@ -35,7 +35,7 @@ export const CacheMetricPage = ({
             <ProjectTable key={'project-table'} server_name={server_name} />,
             <BigBytesMetric
               key={'rx'}
-              metric={bm('xrootd_server_bytes', {
+              metric={bm('xrootd_server_bytes_total', {
                 direction: 'rx',
                 server_name,
               })}
@@ -44,7 +44,7 @@ export const CacheMetricPage = ({
             />,
             <BigBytesMetric
               key={'tx'}
-              metric={bm('xrootd_server_bytes', {
+              metric={bm('xrootd_server_bytes_total', {
                 direction: 'tx',
                 server_name,
               })}
@@ -213,7 +213,9 @@ export const CacheMetricPage = ({
               <Grid size={6}>
                 <BigMetric
                   title={'XRootD Server Connections'}
-                  metric={bm('xrootd_server_connection_count', { server_name })}
+                  metric={bm('xrootd_server_connections_total', {
+                    server_name,
+                  })}
                   finalType={'last'}
                   color={green[300]}
                 />
