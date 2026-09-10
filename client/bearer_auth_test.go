@@ -62,11 +62,15 @@ func TestBearerAuthenticator_Verify(t *testing.T) {
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 
-	// First three 401/403 responses assert `redo=true` with the "retrying with a fresh credential" message
+	// First three 401/403 responses assert `redo=true`. The message must not
+	// promise a retry of this request: gowebdav returns as soon as Verify
+	// yields an error, so what the clearing buys is a fresh credential for the
+	// next request, not a retry of this one.
 	for i := 0; i < 3; i++ {
 		redo, err := authenticator.Verify(nil, &http.Response{StatusCode: http.StatusUnauthorized}, "/test/path")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "retrying with a fresh credential")
+		assert.Contains(t, err.Error(), "the server refused the credential")
+		assert.NotContains(t, err.Error(), "retrying", "the message must not claim this request is being retried")
 		assert.True(t, redo, "unauthorized attempt %d should trigger a retry", i+1)
 	}
 
@@ -84,6 +88,6 @@ func TestBearerAuthenticator_Verify(t *testing.T) {
 	// After a success, the next unauthorized response should allow one more retry.
 	redo, err = authenticator.Verify(nil, &http.Response{StatusCode: http.StatusForbidden}, "/test/path")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "retrying with a fresh credential")
+	assert.Contains(t, err.Error(), "the server refused the credential")
 	assert.True(t, redo, "failure counter should reset after a success")
 }

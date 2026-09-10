@@ -39,9 +39,14 @@ type PermissionDeniedError struct {
 	noToken bool // true when no token was sent (e.g., public namespace via stale cache)
 }
 
+// credentialRefused spells out the 403 above for a reader who does not know
+// the status codes. It describes a read; a write's 403 has other causes, so
+// callers on a write path should say what a refusal means there instead.
+const credentialRefused = "your credential does not grant access to this object"
+
 func (e *PermissionDeniedError) Error() string {
 	if e.message == "" {
-		return "permission denied"
+		return "permission denied: " + credentialRefused
 	}
 	return e.message
 }
