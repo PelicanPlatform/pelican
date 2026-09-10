@@ -30,9 +30,6 @@ Startd = "Startd"
 STARTD = "STARTD"
 StartdAttrs = "StartdAttrs"
 
-[type.xrootd-metrics]
-extend-glob = ["xrootd_metrics.go"]
-extend-ignore-words-re = [
-    # xrootd_metrics.go uses 'toal' as part of XRootD metric field names
-    "toal",
-]
+# A removed XRootD metric had 'toal' in its name. The docs still name
+# it so that users can migrate off it.
+xrootd_transfer_readv_segments_toal = "xrootd_transfer_readv_segments_toal"
