@@ -43,6 +43,9 @@ func TestLogLevelManager_AddChange(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()
@@ -87,6 +90,9 @@ func TestLogLevelManager_RemoveChange(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()
@@ -140,6 +146,9 @@ func TestLogLevelManager_MultipleChanges(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()
@@ -221,6 +230,9 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()
@@ -272,6 +284,9 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()
@@ -326,6 +341,9 @@ func TestLogLevelManager_BackgroundExpiry(t *testing.T) {
 	origLevel := log.GetLevel()
 	defer log.SetLevel(origLevel)
 
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer func() {
 		manager.Shutdown()

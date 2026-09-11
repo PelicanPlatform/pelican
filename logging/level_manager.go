@@ -50,6 +50,13 @@ type (
 		cancel        context.CancelFunc
 		egrp          *errgroup.Group
 		updateCh      chan struct{}
+		// getLevel returns the operator-configured log level for Logging.Level.
+		// Injected by InitLogLevelManager (config.GetEffectiveLogLevel) so the
+		// manager compares against the configured level rather than logrus's raw
+		// level, which can sit above it while a floor is active. Nil on the
+		// un-injected GetLogLevelManager path, where getCurrentLevel falls back
+		// to log.GetLevel().
+		getLevel func() log.Level
 	}
 )
 
@@ -88,6 +95,7 @@ func InitLogLevelManager(ctx context.Context, egrp *errgroup.Group, setFunc func
 			cancel:        cancel,
 			egrp:          egrp,
 			updateCh:      make(chan struct{}, 1),
+			getLevel:      getFunc,
 		}
 
 		globalManager.applyChanges()
@@ -374,8 +382,14 @@ func (m *LogLevelManager) getCurrentLevel(paramName string) log.Level {
 		}
 	}
 
-	// For Logging.Level, fall back to logrus current level
+	// For Logging.Level, fall back to the configured level. Prefer the injected
+	// effective-level accessor: logrus's own level can sit above the configured
+	// level while a floor is active, and reading it here would make applyChanges
+	// issue a spurious param write on every base-level capture.
 	if paramName == param.Logging_Level.GetName() {
+		if m.getLevel != nil {
+			return m.getLevel()
+		}
 		return log.GetLevel()
 	}
 

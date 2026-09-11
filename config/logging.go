@@ -77,6 +77,14 @@ var (
 
 	// Track whether we've already configured the formatter to avoid resetting it
 	formatterConfigured bool
+
+	// effectiveLogLevel is the authoritative record of the operator-configured
+	// level: seeded at package init and written only by SetLogging. It is what
+	// GetEffectiveLogLevel returns, so consumers read the configured level from
+	// one atomic load rather than inferring it from logrus's own level (which
+	// the filter pipeline historically pinned to Trace). Every other
+	// level-changing site derives from it; none may write it.
+	effectiveLogLevel atomic.Uint32
 )
 
 func (sw *syncWriter) Write(p []byte) (n int, err error) {
@@ -124,6 +132,10 @@ func init() {
 	globalTransform.hook.Store(initialHook)
 	initialRegex := regexp.MustCompile(bearerTokenRegexStr)
 	globalTransform.regex.Store(initialRegex)
+	// Seed the effective-level cache with logrus's boot default (info) so
+	// GetEffectiveLogLevel returns something sane between package init and the
+	// first SetLogging call.
+	effectiveLogLevel.Store(uint32(log.GetLevel()))
 }
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
@@ -190,7 +202,7 @@ func initFilterLogging() {
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
 
-	configLevel := log.GetLevel()
+	configLevel := GetEffectiveLogLevel()
 	log.SetLevel(log.TraceLevel)
 	hookLevel := make([]log.Level, 0)
 	for _, lvl := range log.AllLevels {
@@ -263,6 +275,10 @@ func RemoveFilter(name string) {
 }
 
 func SetLogging(logLevel log.Level) {
+	// Record the operator-configured level first so any concurrent reader of
+	// GetEffectiveLogLevel sees at worst a slightly-early-but-valid value.
+	effectiveLogLevel.Store(uint32(logLevel))
+
 	// Only configure the formatter once to preserve formatting across log level changes
 	if !formatterConfigured {
 		textFormatter := log.TextFormatter{}
@@ -332,31 +348,14 @@ func SetLogging(logLevel log.Level) {
 	}
 }
 
-// GetEffectiveLogLevel returns the effective log level based on the transform hook.
-// When global filters are active, logrus's log.GetLevel() is set to TraceLevel to allow
-// filters to see all messages, while the actual filtering happens via hooks. This function
-// returns the true effective level by examining what levels the hook is configured to output.
+// GetEffectiveLogLevel returns the effective log level -- the level the
+// operator asked for, as opposed to logrus's internal log.GetLevel(), which
+// the filter pipeline historically pinned to Trace so filters could observe
+// every message. The value is served from an atomic cache seeded at package
+// init and updated only by SetLogging, so answering the query is a single
+// atomic load with no mutex contention.
 func GetEffectiveLogLevel() log.Level {
-	globalTransformMu.Lock()
-	defer globalTransformMu.Unlock()
-	if addedGlobalFilters && globalTransform != nil {
-		hook := globalTransform.hook.Load()
-		if hook == nil {
-			return log.GetLevel()
-		}
-		// Find the highest (most verbose) level in the hook's configured levels.
-		// In logrus, higher numeric values = more verbose (Trace=6 > Debug=5 > ... > Panic=0).
-		// The hook's LogLevels contains all levels that should be output, so the max
-		// value represents the effective log level.
-		var maxLevel log.Level
-		for _, hookLvl := range hook.LogLevels {
-			if hookLvl > maxLevel {
-				maxLevel = hookLvl
-			}
-		}
-		return maxLevel
-	}
-	return log.GetLevel()
+	return log.Level(effectiveLogLevel.Load())
 }
 
 // Disable the logging censor functionality

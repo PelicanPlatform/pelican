@@ -84,6 +84,9 @@ func TestHandleSetLogLevel(t *testing.T) {
 	})
 
 	router := setupLoggingRouter()
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer manager.Shutdown()
 
@@ -197,6 +200,9 @@ func TestHandleGetLogLevel(t *testing.T) {
 	})
 
 	router := setupLoggingRouter()
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer manager.Shutdown()
 
@@ -273,6 +279,9 @@ func TestHandleDeleteLogLevel(t *testing.T) {
 	})
 
 	router := setupLoggingRouter()
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer manager.Shutdown()
 
@@ -341,6 +350,9 @@ func TestLogLevelIntegration(t *testing.T) {
 	})
 
 	router := setupLoggingRouter()
+	// Wire the manager the way config.InitConfig does, so it reads the
+	// configured level via GetEffectiveLogLevel rather than logrus's raw level.
+	logging.InitLogLevelManager(nil, nil, config.SetLogging, config.GetEffectiveLogLevel)
 	manager := logging.GetLogLevelManager()
 	defer manager.Shutdown()
 
