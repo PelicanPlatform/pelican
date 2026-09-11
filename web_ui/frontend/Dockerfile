@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-FROM node:24-alpine
+FROM node:26-alpine
 
 # Install the exact pnpm version pinned by "packageManager" in package.json, so
 # this image, CI, and developer machines all agree. Corepack used to provide
