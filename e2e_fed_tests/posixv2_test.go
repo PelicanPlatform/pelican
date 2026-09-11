@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pkg/xattr"
 	"github.com/stretchr/testify/assert"
@@ -43,8 +42,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 const posixv2OriginConfig = `
@@ -93,38 +90,6 @@ func (a *simpleTokenAuthenticator) Verify(c *http.Client, rs *http.Response, pat
 	return false, nil
 }
 
-// Helper function to get a token with write permissions for testing
-func getTempTokenForTest(t testing.TB) string {
-	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
-
-	// Get the server issuer URL (same as FedTest uses)
-	issuer, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
-
-	// Create a token
-	tokenConfig := token.NewWLCGToken()
-	tokenConfig.Lifetime = time.Minute
-	tokenConfig.Issuer = issuer
-	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudienceAny()
-
-	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
-	require.NoError(t, err)
-	scopes = append(scopes, readScope)
-	createScope, err := token_scopes.Wlcg_Storage_Create.Path("/")
-	require.NoError(t, err)
-	scopes = append(scopes, createScope)
-	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
-	require.NoError(t, err)
-	scopes = append(scopes, modScope)
-	tokenConfig.AddScopes(scopes...)
-	tkn, err := tokenConfig.CreateToken()
-	require.NoError(t, err)
-
-	return tkn
-}
-
 // Test POSIXv2 origin upload and download with the Pelican client
 func TestPosixv2OriginUploadDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -155,7 +120,7 @@ func TestPosixv2OriginUploadDownload(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/test_file.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	transferResultsUpload, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
 	require.NotEmpty(t, transferResultsUpload)
@@ -206,7 +171,7 @@ func TestPosixv2OriginStat(t *testing.T) {
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
 	// Stat without checksum
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	statInfo, err := client.DoStat(ft.Ctx, statURL, client.WithToken(testToken))
 	require.NoError(t, err)
 	assert.Equal(t, int64(len(testContent)), statInfo.Size, "File size should match")
@@ -251,7 +216,7 @@ func TestPosixv2OriginMultipleFiles(t *testing.T) {
 	}
 
 	localTmpDir := t.TempDir()
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Upload all files using the Pelican client
 	for filename, content := range testFiles {
@@ -321,7 +286,7 @@ func TestPosixv2OriginLargeFile(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/large_file.bin",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	transferResultsUpload, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
 	require.NoError(t, err)
@@ -382,7 +347,7 @@ Director:
 	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "file2.txt"), []byte("content2"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "file3.txt"), []byte("content3"), 0644))
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Test listing root directory
 	listURL := fmt.Sprintf("pelican://%s:%d/test/",
@@ -464,7 +429,7 @@ Director:
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "file3.txt"), []byte("content3"), 0644))
 
 	// Get token
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Query the director to get the cache location
 	// The director defaults to routing to cache (via DefaultResponse: cache)
@@ -583,7 +548,7 @@ Director:
 	require.NoError(t, os.WriteFile(filepath.Join(level2, "level2_file.txt"), []byte("level2"), 0644))
 
 	// Get token
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Construct the WebDAV URL for the origin server directly
 	// WebDAV handlers are registered at /api/v1.0/origin/data/<prefix>
@@ -683,7 +648,7 @@ Director:
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDeepdir, "file4.txt"), []byte("content4"), 0644))
 
 	// Get token
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Test recursive upload - upload entire directory structure
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/",

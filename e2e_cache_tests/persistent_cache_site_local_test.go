@@ -18,10 +18,9 @@
  *
  ***************************************************************/
 
-package fed_tests
+package cache_tests
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -30,7 +29,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sync"
 	"testing"
 	"time"
 
@@ -112,7 +110,7 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Build the pelican binary used for the site-local cache child process.
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	// Enable the persistent cache for the in-process (upstream) cache.
 	require.NoError(t, param.Cache_EnableV2.Set(true))
@@ -187,11 +185,10 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 
 	// Launch the site-local cache child process.  It is tied to the federation
 	// context so it is torn down when the test's context is cancelled.
-	var childOutput bytes.Buffer
-	var outputMu sync.Mutex
+	var childOutput fed_test_utils.LockedWriter
 	cmd := exec.CommandContext(ft.Ctx, cliPath, "cache", "serve", "--config", childConfigPath)
 	cmd.Env = os.Environ()
-	cmd.Stdout = &lockedWriter{w: &childOutput, mu: &outputMu}
+	cmd.Stdout = &childOutput
 	cmd.Stderr = cmd.Stdout
 	require.NoError(t, cmd.Start(), "failed to start site-local cache process")
 	t.Cleanup(func() {
@@ -199,15 +196,11 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 			_ = cmd.Process.Kill()
 			_, _ = cmd.Process.Wait()
 		}
-		outputMu.Lock()
-		defer outputMu.Unlock()
 		if t.Failed() {
 			t.Logf("site-local cache process output:\n%s", childOutput.String())
 		}
 	})
 	childOutputSnapshot := func() string {
-		outputMu.Lock()
-		defer outputMu.Unlock()
 		return childOutput.String()
 	}
 
@@ -295,7 +288,7 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 }
 
 // mintReadToken creates a short-lived WLCG read token signed by the running
-// federation's issuer key.  Unlike getTempTokenForTest it does NOT reset
+// federation's issuer key.  Unlike fed_test_utils.TempWriteToken it does NOT reset
 // IssuerKeysDirectory, so the token is signed by the key the federation
 // actually published (and which the child cache can therefore verify).
 func mintReadToken(t testing.TB) string {
@@ -324,17 +317,4 @@ func hostnameFromDiscovery(t testing.TB, discoveryUrl string) string {
 	u, err := url.Parse(discoveryUrl)
 	require.NoError(t, err)
 	return u.Host
-}
-
-// lockedWriter serialises writes to an underlying buffer so the child
-// process's stdout and stderr can share one buffer safely.
-type lockedWriter struct {
-	w  *bytes.Buffer
-	mu *sync.Mutex
-}
-
-func (lw *lockedWriter) Write(p []byte) (int, error) {
-	lw.mu.Lock()
-	defer lw.mu.Unlock()
-	return lw.w.Write(p)
 }

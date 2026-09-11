@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package oauth_tests
 
 import (
 	"bufio"
@@ -406,7 +406,7 @@ func TestClientAcquireTokenE2E(t *testing.T) {
 	discoveryURL := param.Federation_DiscoveryUrl.GetString()
 
 	// Get the once-built pelican CLI binary
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.PelicanBinary(t)
 
 	// Prepare a local file to upload
 	localTmpDir := t.TempDir()

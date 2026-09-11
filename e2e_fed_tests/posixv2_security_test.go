@@ -63,7 +63,7 @@ Director:
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create a test file in storage
 	testContent := "This is a test file"
@@ -113,7 +113,7 @@ Director:
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create a sensitive file OUTSIDE the federation namespace
 	// but in the same parent directory as the storage
@@ -234,7 +234,7 @@ Director:
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create legitimate file in storage
 	allowedContent := "This is allowed"
@@ -341,7 +341,7 @@ Director:
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Create a malicious symlink in the storage directory pointing outside
 	// (simulating a symlink created via other means, not via HTTP upload)
@@ -391,7 +391,7 @@ Origin:
 	require.NotNil(t, ft)
 	require.Greater(t, len(ft.Exports), 0)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Test Case 1: Verify that reads still work (sanity check)
 	t.Run("ReadsStillWork", func(t *testing.T) {
@@ -460,7 +460,7 @@ Origin:
 	require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "file1.txt"), []byte("content1"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "file2.txt"), []byte("content2"), 0644))
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Test Case 1: Individual file reads should still work
 	t.Run("IndividualReadsWork", func(t *testing.T) {

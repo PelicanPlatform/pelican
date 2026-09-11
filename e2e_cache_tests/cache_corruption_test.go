@@ -23,7 +23,7 @@
 // AES-GCM authentication catches tampering and that the cache either
 // serves an error or re-fetches from origin.
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func setupCorruptEnv(t *testing.T) *corruptEnv {
 	require.NoError(t, param.LocalCache_FDCacheSize.Set(0))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	// The Cache module stores persistent cache data under
 	// Cache.StorageLocation/persistent-cache (see launchers/cache_serve.go).

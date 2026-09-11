@@ -26,7 +26,7 @@
 // serves it as though it were the object the user named -- which is how the
 // confusing downloads reported in issue #1706 were produced.
 
-package fed_tests
+package cache_tests
 
 import (
 	"fmt"
@@ -84,7 +84,7 @@ func TestCacheCollectionNotStoredAsObject(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig(""))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	collection := makeCollectionInOrigin(t, ft, "a-collection")
 	cacheURL := waitForCacheRedirectURL(t, ft, collection, token)
@@ -128,7 +128,7 @@ func TestClientRefusesCachedCollection(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig(""))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	collection := makeCollectionInOrigin(t, ft, "refused-collection")
 	// Make sure the cache is advertising before the client asks.
@@ -170,7 +170,7 @@ func TestCacheXrootdCollectionNotStoredAsObject(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, xrootdCollectionOriginConfig)
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	collection := makeCollectionInOrigin(t, ft, "xrootd-collection")
 	cacheURL := waitForCacheRedirectURL(t, ft, collection, token)
@@ -218,7 +218,7 @@ func TestCacheServesButDoesNotStoreXrootdCollectionListing(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, xrootdCollectionOriginConfig)
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	collection := makeCollectionInOrigin(t, ft, "aged-collection")
 	cacheURL := waitForCacheRedirectURL(t, ft, collection, token)

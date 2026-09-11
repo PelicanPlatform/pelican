@@ -76,7 +76,7 @@ func TestXRootDRestart(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a federation with origin and cache
-	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	ft := fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	if param.Origin_StorageType.GetString() == "posixv2" {
 		t.Skip("Skipping XRootD restart test with posixv2 storage type; not supported")
@@ -183,7 +183,7 @@ func TestXRootDRestartConcurrent(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a federation
-	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	ft := fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	oldPids := ft.Pids
 	require.NotEmpty(t, oldPids, "No PIDs found for XRootD processes")

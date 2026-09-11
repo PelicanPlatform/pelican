@@ -25,7 +25,7 @@
 // We use a POSIXv2 origin with Origin.TransferRateLimit to simulate a
 // slow backend.
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -138,7 +138,7 @@ func TestStreaming_FirstBytesArriveFast(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("40KB/s"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	const fileSize = 512 * 1024 // 512 KB
 	content := writeOriginFile(t, ft, "stream_test.bin", fileSize)
@@ -201,7 +201,7 @@ func TestStreaming_RangeOnCacheMiss(t *testing.T) {
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	// 50 KB/s: the full 2 MB file would take ~40 s to download sequentially.
 	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("50KB/s"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	const fileSize = 2 * 1024 * 1024 // 2 MB
 	content := writeOriginFile(t, ft, "range_miss.bin", fileSize)
@@ -299,7 +299,7 @@ func TestStreaming_SecondReadIsCacheHit(t *testing.T) {
 	// bucket (100 KB) and is genuinely throttled.  At 1 MB/s the burst
 	// alone covers the whole file, letting it complete instantly.
 	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("100KB/s"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	const fileSize = 256 * 1024 // 256 KB
 	content := writeOriginFile(t, ft, "hit_test.bin", fileSize)

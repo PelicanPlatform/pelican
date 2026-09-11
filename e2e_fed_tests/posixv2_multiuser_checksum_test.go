@@ -87,7 +87,7 @@ Director:
 
 	// Probe xattr support on the *actual* export root, not a separate
 	// t.TempDir() that may live on a different filesystem.
-	skipUnlessXattrs(t, ft.Exports[0].StoragePrefix)
+	fed_test_utils.SkipUnlessXattrs(t, ft.Exports[0].StoragePrefix)
 
 	// The export root NewFedTest created is mode 0755. In multiuser mode the
 	// origin switches to the request's UID (alice) for I/O, so it must be

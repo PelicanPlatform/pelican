@@ -145,7 +145,7 @@ func TestMetricsEndToEndWithAuth(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile, []byte(testContent), 0644))
 
 	// Make authenticated GET request
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	client := &http.Client{Transport: config.GetTransport()}
 	downloadURL := fmt.Sprintf("%s/test/auth_test.txt", param.Server_ExternalWebUrl.GetString())
 	req, err := http.NewRequest("GET", downloadURL, nil)
@@ -180,7 +180,7 @@ func TestMetricsEndToEndWriteOperations(t *testing.T) {
 
 	// Create test content and make authenticated PUT request
 	testContent := "test data for write metrics"
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	client := &http.Client{Transport: config.GetTransport()}
 	uploadURL := fmt.Sprintf("%s/test/write_test.txt", param.Server_ExternalWebUrl.GetString())
 	req, err := http.NewRequest("PUT", uploadURL, bytes.NewBufferString(testContent))

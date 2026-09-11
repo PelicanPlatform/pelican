@@ -1,6 +1,6 @@
 //go:build !windows
 
-package fed_tests
+package cache_tests
 
 /***************************************************************
  *
@@ -77,7 +77,7 @@ func setupTSEnv(t *testing.T) *tsEnv {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	return &tsEnv{ft: ft, token: token}
 }
@@ -373,7 +373,7 @@ func TestTransferStatus_Failure_NonExistent(t *testing.T) {
 func populateOriginChecksums(ctx context.Context, t *testing.T, name, token string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead,
-		originServerURL()+"/api/v1.0/origin/data/test/"+name, nil)
+		fed_test_utils.OriginServerURL()+"/api/v1.0/origin/data/test/"+name, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Want-Digest", "md5,crc32c,crc32,sha")
@@ -429,7 +429,7 @@ func doOnlyIfCached(ctx context.Context, url, token string) int {
 // an object whose transfer result carries a checksum error.
 func TestTransferStatus_Failure_OriginChecksumMismatch(t *testing.T) {
 	env := setupTSEnv(t)
-	skipUnlessXattrs(t, env.ft.Exports[0].StoragePrefix)
+	fed_test_utils.SkipUnlessXattrs(t, env.ft.Exports[0].StoragePrefix)
 
 	const name = "ts_origin_mismatch.bin"
 	originFile := filepath.Join(env.ft.Exports[0].StoragePrefix, name)

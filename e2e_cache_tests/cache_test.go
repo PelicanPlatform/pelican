@@ -18,7 +18,7 @@
 *
 ***************************************************************/
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -54,7 +54,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 		cache.MinFedTokenTickerRate = oldMinTokRate
 	}()
 	cache.MinFedTokenTickerRate = 1 * time.Second
-	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	// Run the token maintenance routine for two periods and make sure
 	// the cache token on disk is never older than 4s (1/3 the configured lifetime)
@@ -97,7 +97,7 @@ func TestCacheServe_PreservesExistingPort(t *testing.T) {
 	require.NoError(t, param.Cache_Url.Set("https://example.com:8442"))
 
 	// Launch the federation (starts CacheServe among others)
-	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	// After startup, Cache.Url should remain with the original port
 	finalURL := viper.GetString(param.Cache_Url.GetName())
@@ -117,7 +117,7 @@ func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
 	require.NoError(t, param.Cache_Url.Set("https://example.com"))
 
 	// Launch the federation (starts CacheServe among others)
-	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	// After startup, Cache.Url should include a port
 	finalURL := viper.GetString(param.Cache_Url.GetName())

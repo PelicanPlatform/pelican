@@ -68,7 +68,7 @@ Director:
 	const contents = "the object's contents"
 	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "solo.txt"), []byte(contents), 0644))
 
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 	objectURL := fmt.Sprintf("pelican://%s:%d/test/solo.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 

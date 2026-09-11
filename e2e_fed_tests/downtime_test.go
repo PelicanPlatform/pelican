@@ -72,7 +72,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, param.Director_RegistryQueryInterval.Set(1*time.Second))
 	customAdvertisementInterval := 100 * time.Millisecond
 	require.NoError(t, param.Server_AdvertisementInterval.Set(customAdvertisementInterval)) // was 1 minute by default
-	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "Failed to get federation service info")
 
