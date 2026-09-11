@@ -51,6 +51,7 @@ import (
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -919,7 +920,21 @@ func wildcardHandler(ctx *gin.Context) {
 				}
 			}
 		}
-		ctx.JSON(http.StatusOK, jwks)
+		// Registry-stored keys should already be public, but sanitize
+		// best-effort so a single malformed stored key is skipped rather
+		// than turning this federation-critical endpoint into a 500. Serve
+		// inline: the consumers here are machines, not browsers. If every
+		// stored key is unpublishable, fail loudly rather than serve an empty
+		// JWKS that would silently break token verification.
+		pub, err := publicJWKSForServing(jwks)
+		if err != nil {
+			log.Errorf("Refusing to serve JWKS for prefix %s: %v", prefix, err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server has no publishable keys for this namespace"})
+			return
+		}
+		server_utils.WriteJWKS(ctx, pub)
 		return
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
@@ -936,6 +951,7 @@ func wildcardHandler(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+			return
 		}
 		// Construct the openid-configuration JSON and return to the requester
 		// For a given namespace "foo", the jwks should be located at <registry url>/api/v1.0/registry/foo/.well-known/issuer.jwks

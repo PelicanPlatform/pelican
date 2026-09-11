@@ -33,20 +33,27 @@ import (
 // document, which is public, non-sensitive metadata.
 const oidcDiscoverySuffix = "/.well-known/openid-configuration"
 
+// oidcJWKSSuffix is the path suffix of the per-namespace JWKS endpoint. Like
+// the discovery document it is public metadata, and it is the jwks_uri that
+// document advertises, so a browser client that may read discovery must be
+// able to read this too.
+const oidcJWKSSuffix = "/.well-known/issuer.jwks"
+
 // corsMiddleware lets browser-based applications read the embedded issuer's
 // endpoints cross-origin. It follows the two CORS conventions already used
 // elsewhere in Pelican:
 //
-//   - The OIDC discovery document is public, non-sensitive metadata, so any
-//     origin may read it (Access-Control-Allow-Origin: *), matching the
-//     server-level discovery endpoint in server_utils/oidc.go. Because the
-//     namespace is not yet resolved when this middleware runs, a URL path
-//     ending in the discovery suffix may still dispatch to a different,
-//     credentialed handler (e.g. oidc-cm/<id>/.well-known/openid-configuration
-//     is a client-configuration read); the wildcard on the *response* is
-//     therefore set by handleIssuerDiscovery itself, and this middleware only
-//     approves the wildcard for the discovery-suffix *preflight*, which by
-//     itself grants no access to response data.
+//   - The OIDC discovery document and the JWKS it advertises as its jwks_uri
+//     are public, non-sensitive metadata, so any origin may read them
+//     (Access-Control-Allow-Origin: *), matching the server-level discovery
+//     and JWKS endpoints in server_utils/oidc.go. Because the namespace is not
+//     yet resolved when this middleware runs, a URL path ending in either
+//     suffix may still dispatch to a different, credentialed handler (e.g.
+//     oidc-cm/<id>/.well-known/openid-configuration is a client-configuration
+//     read); the wildcard on the *response* is therefore set by
+//     handleIssuerDiscovery and handleNamespaceJWKS themselves, and this
+//     middleware only approves the wildcard for those suffixes' *preflight*,
+//     which by itself grants no access to response data.
 //   - The credentialed endpoints (token, userinfo, introspection, ...) echo
 //     the request's Origin back only when it is one of the configured
 //     Issuer.RedirectUris, matching the OA4MP proxy in oa4mp/proxy.go, so
@@ -60,7 +67,9 @@ func corsMiddleware(ctx *gin.Context) {
 		// All responses here depend on the request's Origin header, so caches
 		// must not reuse one site's response (allowed or denied) for another.
 		ctx.Header("Vary", "Origin")
-		if ctx.Request.Method == http.MethodOptions && strings.HasSuffix(ctx.Request.URL.Path, oidcDiscoverySuffix) {
+		if ctx.Request.Method == http.MethodOptions &&
+			(strings.HasSuffix(ctx.Request.URL.Path, oidcDiscoverySuffix) ||
+				strings.HasSuffix(ctx.Request.URL.Path, oidcJWKSSuffix)) {
 			ctx.Header("Access-Control-Allow-Origin", "*")
 		} else if isRegisteredOrigin(origin) {
 			ctx.Header("Access-Control-Allow-Origin", origin)

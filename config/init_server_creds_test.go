@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config/configtest"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -514,5 +516,569 @@ func TestLoadSinglePEMAlgorithm(t *testing.T) {
 		key, err := LoadSinglePEM(keyFile)
 		require.NoError(t, err)
 		assert.Equal(t, jwa.KeyAlgorithmFrom(jwa.RS256), key.Algorithm())
+	})
+}
+
+// TestGetIssuerPublicJWKSForNamespace verifies the per-namespace JWKS helper:
+// empty path returns the server key set unchanged, a valid extra JWKS file
+// causes its keys to be merged in, and a missing or invalid file yields
+// an error.
+func TestGetIssuerPublicJWKSForNamespace(t *testing.T) {
+	t.Run("empty path returns server keys", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		got, err := GetIssuerPublicJWKSForNamespace("", strictExtra)
+		require.NoError(t, err)
+
+		// Should contain exactly the same key IDs.
+		baseKIDs := collectKIDs(t, base)
+		gotKIDs := collectKIDs(t, got)
+		assert.ElementsMatch(t, baseKIDs, gotKIDs)
+	})
+
+	t.Run("non-existent path returns error", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		_, err := GetIssuerPublicJWKSForNamespace("/nonexistent/path/extra.jwks", strictExtra)
+		require.Error(t, err)
+	})
+
+	t.Run("valid extra JWKS merges keys", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		extraPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		extraPub, err := jwk.FromRaw(extraPriv.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, extraPub.Set(jwk.KeyIDKey, "extra-test-key-merge"))
+		extraPath := configtest.WriteJWKSFile(t, tmpDir, "extra.jwks", extraPub)
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		got, err := GetIssuerPublicJWKSForNamespace(extraPath, strictExtra)
+		require.NoError(t, err)
+
+		// Result should have one more key than the base set.
+		assert.Equal(t, base.Len()+1, got.Len())
+
+		// The extra key's ID should be present.
+		gotKIDs := collectKIDs(t, got)
+		assert.Contains(t, gotKIDs, "extra-test-key-merge")
+	})
+
+	t.Run("private key in file strips private material", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		// Write a JWKS containing a private EC key (not just the public part).
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "priv-key-should-become-public"))
+		privPath := configtest.WriteJWKSFile(t, tmpDir, "private.jwks", privJWK)
+
+		got, err := GetIssuerPublicJWKSForNamespace(privPath, strictExtra)
+		require.NoError(t, err)
+
+		// The key should be present, but only as its public projection:
+		// a public EC key has no "d" (private scalar) field.
+		rawJSON, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.NotContains(t, string(rawJSON), `"d":`,
+			"private key material must not be present in the JWKS response")
+		gotKIDs := collectKIDs(t, got)
+		assert.Contains(t, gotKIDs, "priv-key-should-become-public")
+	})
+
+	t.Run("symmetric key is rejected", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		symKey, err := jwk.FromRaw(make([]byte, 32))
+		require.NoError(t, err)
+		symPath := configtest.WriteJWKSFile(t, tmpDir, "sym.jwks", symKey)
+
+		_, err = GetIssuerPublicJWKSForNamespace(symPath, strictExtra)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symmetric")
+	})
+
+	t.Run("shared kid overrides the base key", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		logged := captureLogs(t)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		// Get the server's existing kid to reuse in the extra file.
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		require.Positive(t, base.Len(), "expected at least one server key")
+
+		it := base.Keys(t.Context())
+		require.True(t, it.Next(t.Context()))
+		serverKey := it.Pair().Value.(jwk.Key)
+		serverKID := serverKey.KeyID()
+		require.NotEmpty(t, serverKID, "server key should have a kid")
+		serverX, ok := serverKey.Get("x")
+		require.True(t, ok, "server EC key should carry an x coordinate")
+
+		// Write an extra key that reuses the server's kid. The per-namespace
+		// file is the more specific configuration, so its key wins.
+		extraKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		extraJWK, err := jwk.FromRaw(extraKey.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, extraJWK.Set(jwk.KeyIDKey, serverKID))
+		extraX, ok := extraJWK.Get("x")
+		require.True(t, ok)
+		require.NotEqual(t, serverX, extraX, "the two keys must actually differ")
+		dupPath := configtest.WriteJWKSFile(t, tmpDir, "dup.jwks", extraJWK)
+
+		got, err := GetIssuerPublicJWKSForNamespace(dupPath, strictExtra)
+		require.NoError(t, err, "a shared kid is an override, not an error")
+
+		// Exactly one key carries the shared kid, and it is the extra file's.
+		matching := make([]jwk.Key, 0, 1)
+		require.NoError(t, ForEachKey(got, func(k jwk.Key) error {
+			if k.KeyID() == serverKID {
+				matching = append(matching, k)
+			}
+			return nil
+		}))
+		require.Len(t, matching, 1,
+			"the overridden base key must be dropped, not published alongside")
+		gotX, ok := matching[0].Get("x")
+		require.True(t, ok)
+		assert.Equal(t, extraX, gotX,
+			"the per-namespace key should win over the server's key with the same kid")
+
+		// The base set had only the one key, so the override replaced it
+		// rather than adding to it.
+		assert.Equal(t, base.Len(), got.Len(),
+			"an override should not change the number of published keys")
+
+		// Silently shadowing one of the server's own keys would be a bad
+		// surprise: tokens this origin signed with that kid stop verifying
+		// for this namespace, so the override has to be visible in the log.
+		assert.True(t, logged("republishes kid"),
+			"an override of a server key should be logged")
+		assert.True(t, logged(serverKID),
+			"the override log line should name the kid")
+	})
+
+	t.Run("shared kid overrides only the colliding base key", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		it := base.Keys(t.Context())
+		require.True(t, it.Next(t.Context()))
+		serverKID := it.Pair().Value.(jwk.Key).KeyID()
+
+		// One key collides with the server's kid, one does not.
+		mk := func(kid string) jwk.Key {
+			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			require.NoError(t, err)
+			pub, err := jwk.FromRaw(priv.PublicKey)
+			require.NoError(t, err)
+			require.NoError(t, pub.Set(jwk.KeyIDKey, kid))
+			return pub
+		}
+		p := configtest.WriteJWKSFile(t, tmpDir, "mixed.jwks", mk(serverKID), mk("extra-distinct-kid"))
+
+		got, err := GetIssuerPublicJWKSForNamespace(p, strictExtra)
+		require.NoError(t, err)
+
+		kids := collectKIDs(t, got)
+		assert.Contains(t, kids, "extra-distinct-kid",
+			"a non-colliding extra key should still be merged")
+		assert.Equal(t, 1, countKID(kids, serverKID),
+			"the colliding kid should appear exactly once")
+		assert.Equal(t, base.Len()+1, got.Len(),
+			"one key overridden, one key added")
+	})
+
+	t.Run("duplicate kid within the extra file is rejected", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		// Two distinct keys in the same file sharing one kid. This collides
+		// within the file, not with the server's key set.
+		const sharedKID = "dup-within-file"
+		makeKey := func() jwk.Key {
+			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			require.NoError(t, err)
+			pub, err := jwk.FromRaw(priv.PublicKey)
+			require.NoError(t, err)
+			require.NoError(t, pub.Set(jwk.KeyIDKey, sharedKID))
+			return pub
+		}
+		dupPath := configtest.WriteJWKSFile(t, tmpDir, "dup-in-file.jwks", makeKey(), makeKey())
+
+		// Unlike an extra-vs-base collision, neither key here is the more
+		// specific configuration, so there is no defensible winner and the
+		// whole file is rejected.
+		_, err := GetIssuerPublicJWKSForNamespace(dupPath, strictExtra)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "appears more than once",
+			"an intra-file kid collision should still be an error")
+		assert.Contains(t, err.Error(), sharedKID,
+			"the error should name the colliding kid")
+	})
+
+	t.Run("keyless extra keys are merged without a uniqueness check", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		baseLen := base.Len()
+
+		// Two distinct keys, neither carrying a kid. The uniqueness guard only
+		// applies to keys that carry a kid, so both are merged as-is.
+		makeKey := func() jwk.Key {
+			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			require.NoError(t, err)
+			pub, err := jwk.FromRaw(priv.PublicKey)
+			require.NoError(t, err)
+			return pub
+		}
+		keylessPath := configtest.WriteJWKSFile(t, tmpDir, "keyless.jwks", makeKey(), makeKey())
+
+		got, err := GetIssuerPublicJWKSForNamespace(keylessPath, strictExtra)
+		require.NoError(t, err)
+		assert.Equal(t, baseLen+2, got.Len(),
+			"both keyless keys should be merged without a conflict error")
+	})
+
+	t.Run("missing file degrades to base keys when policy allows", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+
+		var captured error
+		got, err := GetIssuerPublicJWKSForNamespace("/nonexistent/path/extra.jwks",
+			func(e error) error { captured = e; return nil })
+		require.NoError(t, err, "a degrading policy must not surface the extra-file error")
+		require.Error(t, captured, "the policy should have been handed the extra-file error")
+
+		// The result is exactly the base set: no extra keys, none dropped.
+		assert.ElementsMatch(t, collectKIDs(t, base), collectKIDs(t, got))
+	})
+
+	t.Run("intra-file kid collision degrades to base keys when policy allows", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		base, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		require.Positive(t, base.Len(), "expected at least one server key")
+
+		// Two keys in one file sharing a kid: a hard error, so under a
+		// degrading policy the whole extra file is dropped, never partially
+		// merged. (An extra-vs-base kid collision is an override instead and
+		// never reaches the degrade path.)
+		mk := func() jwk.Key {
+			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			require.NoError(t, err)
+			pub, err := jwk.FromRaw(priv.PublicKey)
+			require.NoError(t, err)
+			require.NoError(t, pub.Set(jwk.KeyIDKey, "same-kid-twice"))
+			return pub
+		}
+		dupPath := configtest.WriteJWKSFile(t, tmpDir, "dup.jwks", mk(), mk())
+
+		var captured error
+		got, err := GetIssuerPublicJWKSForNamespace(dupPath,
+			func(e error) error { captured = e; return nil })
+		require.NoError(t, err)
+		require.Error(t, captured)
+		assert.ElementsMatch(t, collectKIDs(t, base), collectKIDs(t, got),
+			"a degraded result must be exactly the base set")
+	})
+}
+
+// strictExtra is the onExtraError policy that propagates any extra-file
+// failure as an error. Tests asserting the strict (non-degrading) behavior
+// pass it to GetIssuerPublicJWKSForNamespace.
+func strictExtra(e error) error { return e }
+
+// collectKIDs returns the key IDs from all keys in a jwk.Set.
+func collectKIDs(t *testing.T, s jwk.Set) []string {
+	t.Helper()
+	kids := make([]string, 0, s.Len())
+	for it := s.Keys(t.Context()); it.Next(t.Context()); {
+		kids = append(kids, it.Pair().Value.(jwk.Key).KeyID())
+	}
+	return kids
+}
+
+// countKID returns how many entries of kids equal kid.
+func countKID(kids []string, kid string) int {
+	n := 0
+	for _, k := range kids {
+		if k == kid {
+			n++
+		}
+	}
+	return n
+}
+
+// TestReadPublicJWKSFile verifies the canonical JWKS-file loader directly.
+// Because ReadPublicJWKSFile enforces the security invariants used at both
+// validation time and request time, these tests confirm the contract
+// independently of the higher-level callers.
+func TestReadPublicJWKSFile(t *testing.T) {
+	t.Run("non-existent file returns error", func(t *testing.T) {
+		_, err := ReadPublicJWKSFile("/nonexistent/path/keys.jwks")
+		require.Error(t, err)
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		badPath := filepath.Join(t.TempDir(), "bad.jwks")
+		require.NoError(t, os.WriteFile(badPath, []byte("not json"), 0600))
+		_, err := ReadPublicJWKSFile(badPath)
+		require.Error(t, err)
+	})
+
+	t.Run("empty JWKS returns empty set", func(t *testing.T) {
+		emptyPath := configtest.WriteJWKSFile(t, t.TempDir(), "empty.jwks")
+		got, err := ReadPublicJWKSFile(emptyPath)
+		require.NoError(t, err)
+		assert.Equal(t, 0, got.Len())
+	})
+
+	t.Run("public EC key is accepted unchanged", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pubJWK, err := jwk.FromRaw(privKey.PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, pubJWK.Set(jwk.KeyIDKey, "pub-only-key"))
+		p := configtest.WriteJWKSFile(t, t.TempDir(), "pub.jwks", pubJWK)
+
+		got, err := ReadPublicJWKSFile(p)
+		require.NoError(t, err)
+		require.Equal(t, 1, got.Len())
+		kids := collectKIDs(t, got)
+		assert.Contains(t, kids, "pub-only-key")
+	})
+
+	t.Run("private EC key strips private material", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "private-key-stripped"))
+		p := configtest.WriteJWKSFile(t, t.TempDir(), "priv.jwks", privJWK)
+
+		got, err := ReadPublicJWKSFile(p)
+		require.NoError(t, err)
+		rawJSON, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.NotContains(t, string(rawJSON), `"d":`,
+			"private key material must be stripped")
+		kids := collectKIDs(t, got)
+		assert.Contains(t, kids, "private-key-stripped")
+	})
+
+	t.Run("symmetric key is rejected", func(t *testing.T) {
+		symKey, err := jwk.FromRaw(make([]byte, 32))
+		require.NoError(t, err)
+		p := configtest.WriteJWKSFile(t, t.TempDir(), "sym.jwks", symKey)
+
+		_, err = ReadPublicJWKSFile(p)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symmetric")
+	})
+
+	// An RSA private JWK carries its secret in p, q, dp, dq, and qi as well as
+	// d, so a projection that dropped only d would still publish enough to
+	// reconstruct the key. The other tests here exercise EC keys only and
+	// assert on the absence of the substring `"d":`, which would not catch
+	// that; this checks every private RSA parameter structurally.
+	t.Run("private RSA key strips every private parameter", func(t *testing.T) {
+		privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "rsa-private-key"))
+
+		// Sanity-check the fixture: the key really does carry the private
+		// parameters we expect to be stripped, so a pass cannot be vacuous.
+		for _, field := range rsaPrivateParams {
+			_, ok := privJWK.Get(field)
+			require.True(t, ok, "fixture RSA private key should carry %q", field)
+		}
+
+		p := configtest.WriteJWKSFile(t, t.TempDir(), "rsa-priv.jwks", privJWK)
+		got, err := ReadPublicJWKSFile(p)
+		require.NoError(t, err)
+		require.Equal(t, 1, got.Len())
+
+		pub, ok := got.LookupKeyID("rsa-private-key")
+		require.True(t, ok, "the key's public projection should still be served")
+		assertNoPrivateParams(t, pub, rsaPrivateParams)
+
+		// The public halves must survive, or the published key is useless.
+		for _, field := range []string{"n", "e"} {
+			_, ok := pub.Get(field)
+			assert.True(t, ok, "public RSA parameter %q must be preserved", field)
+		}
+	})
+
+	t.Run("private EC key strips its private parameter structurally", func(t *testing.T) {
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "ec-private-key"))
+		_, ok := privJWK.Get("d")
+		require.True(t, ok, "fixture EC private key should carry d")
+
+		p := configtest.WriteJWKSFile(t, t.TempDir(), "ec-priv.jwks", privJWK)
+		got, err := ReadPublicJWKSFile(p)
+		require.NoError(t, err)
+
+		pub, ok := got.LookupKeyID("ec-private-key")
+		require.True(t, ok)
+		assertNoPrivateParams(t, pub, []string{"d"})
+		for _, field := range []string{"crv", "x", "y"} {
+			_, ok := pub.Get(field)
+			assert.True(t, ok, "public EC parameter %q must be preserved", field)
+		}
+	})
+}
+
+// rsaPrivateParams are the JWK members that carry RSA private key material.
+// Publishing any one of them leaks the key.
+var rsaPrivateParams = []string{"d", "p", "q", "dp", "dq", "qi"}
+
+// assertNoPrivateParams asserts that key carries none of the named members,
+// checking the parsed key rather than substring-matching serialized JSON so
+// that a differently-named private member cannot slip past.
+func assertNoPrivateParams(t *testing.T, key jwk.Key, fields []string) {
+	t.Helper()
+	for _, field := range fields {
+		_, ok := key.Get(field)
+		assert.False(t, ok, "published key must not carry private parameter %q", field)
+	}
+	// Belt and braces: the serialized form must not carry them either, in case
+	// a member is reachable through marshaling but not through Get.
+	raw, err := json.Marshal(key)
+	require.NoError(t, err)
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	for _, field := range fields {
+		_, ok := decoded[field]
+		assert.False(t, ok, "serialized key must not carry private parameter %q", field)
+	}
+}
+
+// TestGetIssuerPublicJWKSWithServerIssuerJwks verifies that GetIssuerPublicJWKS
+// respects Server.IssuerJwks: private key material is stripped, and symmetric
+// keys (which are shared secrets with no public projection) are rejected so
+// they can never be published.
+func TestGetIssuerPublicJWKSWithServerIssuerJwks(t *testing.T) {
+	t.Run("private key in Server.IssuerJwks is stripped", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		privJWK, err := jwk.FromRaw(privKey)
+		require.NoError(t, err)
+		require.NoError(t, privJWK.Set(jwk.KeyIDKey, "server-private-key"))
+		jwksPath := configtest.WriteJWKSFile(t, tmpDir, "server.jwks", privJWK)
+		require.NoError(t, param.Server_IssuerJwks.Set(jwksPath))
+
+		got, err := GetIssuerPublicJWKS()
+		require.NoError(t, err)
+		rawJSON, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.NotContains(t, string(rawJSON), `"d":`,
+			"private key material must not appear in the server JWKS")
+		kids := collectKIDs(t, got)
+		assert.Contains(t, kids, "server-private-key")
+	})
+
+	t.Run("symmetric key in Server.IssuerJwks is rejected", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		tmpDir := t.TempDir()
+		require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+
+		symKey, err := jwk.FromRaw(make([]byte, 32))
+		require.NoError(t, err)
+		require.NoError(t, symKey.Set(jwk.KeyIDKey, "server-sym-key"))
+		jwksPath := configtest.WriteJWKSFile(t, tmpDir, "server.jwks", symKey)
+		require.NoError(t, param.Server_IssuerJwks.Set(jwksPath))
+
+		_, err = GetIssuerPublicJWKS()
+		require.Error(t, err,
+			"a symmetric key in Server.IssuerJwks must not be publishable")
+		assert.Contains(t, err.Error(), "symmetric")
+	})
+
+	// A symmetric key held among the in-memory issuer private keys must be
+	// rejected too, exercising the private-keys loop in loadIssuerPublicJWKS
+	// (no Server.IssuerJwks and no PEM override), not just the file branch.
+	t.Run("symmetric key among issuer private keys is rejected", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		symKey, err := jwk.FromRaw(make([]byte, 32))
+		require.NoError(t, err)
+		require.NoError(t, symKey.Set(jwk.KeyIDKey, "issuer-sym-key"))
+		setIssuerKey(symKey)
+
+		_, err = GetIssuerPublicJWKS()
+		require.Error(t, err,
+			"a symmetric issuer private key must not be publishable")
+		assert.Contains(t, err.Error(), "symmetric")
 	})
 }

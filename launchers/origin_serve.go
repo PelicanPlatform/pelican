@@ -517,6 +517,12 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	for _, export := range originExports {
 		// Only create an issuer for exports that need authentication
 		if export.Capabilities.PublicReads && !export.Capabilities.Writes {
+			if export.IssuerJwks != "" {
+				log.Warnf("Export %s sets IssuerJwks (%q) but is public-read with no writes, so it "+
+					"gets no embedded issuer and no per-namespace JWKS endpoint. The file will not "+
+					"be read and its keys will not be published.",
+					export.FederationPrefix, export.IssuerJwks)
+			}
 			continue
 		}
 
@@ -526,6 +532,52 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		provider, err := issuer.NewOIDCProvider(database.ServerDatabase, issuerURL, gracePeriod, namespace)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create embedded OIDC provider for namespace %s", namespace)
+		}
+
+		// Attach any extra public keys this export wants merged into its
+		// per-namespace JWKS endpoint. The zero value (empty string)
+		// means "no extra keys" and is handled by the JWKS endpoint.
+		provider.ExtraJwksPath = export.IssuerJwks
+
+		// Probe the extra file once now so an unpublishable IssuerJwks
+		// (unreadable/corrupt file, a symmetric key, or one kid used twice
+		// within the file) shows up in the logs at startup rather than only
+		// on the first request. This is never fatal: the namespace still
+		// serves its base keys, and the JWKS endpoint degrades the same way
+		// at request time. The strict policy here (return the error) is used
+		// only to detect it.
+		if export.IssuerJwks != "" {
+			// The keys are only trusted by XRootD and by caches if this
+			// export actually advertises the per-namespace issuer whose JWKS
+			// endpoint publishes them. handleIssuersIfNeeded assigns that URL
+			// only to exports with no IssuerUrls of their own, so an export
+			// that names its issuers explicitly publishes these keys at an
+			// endpoint nothing consults.
+			if !slices.Contains(export.IssuerUrls, issuerURL) {
+				log.Warnf("Export %s sets IssuerJwks (%q) but its configured issuer URLs (%v) do "+
+					"not include this origin's per-namespace issuer %q. The keys will be published "+
+					"at that issuer's JWKS endpoint, but caches and XRootD resolve keys through the "+
+					"issuers named above, so the keys will not authorize anything. Remove the "+
+					"export's IssuerUrls to use the embedded per-namespace issuer.",
+					namespace, export.IssuerJwks, export.IssuerUrls, issuerURL)
+			}
+
+			// The callback fires only for an extra-file merge failure; a
+			// base-key-set load failure returns before it is ever called.
+			// Tracking whether it fired lets us attribute the error to the
+			// right key set instead of always blaming the operator's file.
+			extraFailed := false
+			if _, err := config.GetIssuerPublicJWKSForNamespace(export.IssuerJwks,
+				func(e error) error { extraFailed = true; return e }); err != nil {
+				if extraFailed {
+					log.Errorf("Namespace %s: IssuerJwks %q is unpublishable; the namespace "+
+						"will serve base keys only until fixed: %v", namespace, export.IssuerJwks, err)
+				} else {
+					log.Errorf("Namespace %s: failed to load the server's base issuer key set; "+
+						"the per-namespace JWKS endpoint will be unavailable until fixed: %v",
+						namespace, err)
+				}
+			}
 		}
 
 		registry.Register(namespace, provider)
