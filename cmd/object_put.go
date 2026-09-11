@@ -142,18 +142,25 @@ func verifyFileChecksum(filePath, expectedChecksum string, alg client.ChecksumTy
 // inferRemoteObjectName joins the base name of a local source onto a remote
 // collection URL, producing the per-source destination used by rows P3, P8,
 // and P9 of docs/object-transfer-semantics.md.
+func inferRemoteObjectName(destURL *url.URL, localSource string) (string, error) {
+	return joinInferredObjectName(destURL, filepath.Base(localSource), localSource)
+}
+
+// joinInferredObjectName joins an already-extracted object name onto a remote
+// collection URL.  `object copy` infers names from remote sources too, where
+// the base name comes off a URL path rather than a filesystem path, so the
+// join and its guard live apart from the extraction.
 //
 // The base name is validated rather than trusted.  path.Join cleans its
 // result, so a source named "/data/tree/.." would otherwise resolve to the
 // parent of the collection the caller asked for and upload there without
 // saying so.  Refusing is the only safe answer: there is no object name to
 // infer, and the caller has to name the destination object explicitly.
-func inferRemoteObjectName(destURL *url.URL, localSource string) (string, error) {
-	name := filepath.Base(localSource)
+func joinInferredObjectName(destURL *url.URL, name, source string) (string, error) {
 	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) ||
 		strings.ContainsAny(name, `/\`) {
-		return "", errors.Errorf("cannot infer a remote object name from local source %q; "+
-			"name the destination object explicitly", localSource)
+		return "", errors.Errorf("cannot infer a remote object name from source %q; "+
+			"name the destination object explicitly", source)
 	}
 
 	inferred := *destURL
