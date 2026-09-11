@@ -18,6 +18,13 @@ USE_DOCKER=0
 
 CONTAINER_TOOL=docker
 
+# When USE_DOCKER=1, Go's module and build caches are bind-mounted from the host
+# so they persist between runs and don't live on the (small) Docker VM disk. A
+# full goreleaser snapshot build compiles ~17 targets and needs well over 10GB of
+# cache, which is enough to exhaust a default Docker Desktop VM disk.
+DOCKER_CACHE_DIR ?= $(HOME)/.cache/pelican-docker
+DOCKER_GO_CACHE_MOUNTS = -v $(DOCKER_CACHE_DIR)/go-mod:/go/pkg/mod -v $(DOCKER_CACHE_DIR)/go-build:/root/.cache/go-build
+
 ifeq ($(OS),Windows_NT)
 	goos := windows
 	ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
@@ -46,11 +53,11 @@ WEBSITE_SRC_PATH := web_ui/frontend
 WEBSITE_OUT_PATH := web_ui/frontend/out
 WEBSITE_CACHE_PATH := web_ui/frontend/.next
 
-WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml")
+WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*.pnpm-store*" -not -path "*pelican-swagger.yaml")
 WEBSITE_CLEAN_LIST := $(WEBSITE_OUT_PATH) \
 						$(WEBSITE_CACHE_PATH)
 
-$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
+$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*.pnpm-store*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
 
 
 .PHONY: all
@@ -74,7 +81,8 @@ generate: docs/parameters.json web_ui/frontend/public/data/parameters.json swagg
 ifeq ($(USE_DOCKER),0)
 	@go generate ./...
 else
-	@$(CONTAINER_TOOL) run --rm -v $(PWD):/code -w /code golang:1.26 go generate ./...
+	@mkdir -p $(DOCKER_CACHE_DIR)/go-mod $(DOCKER_CACHE_DIR)/go-build
+	@$(CONTAINER_TOOL) run --rm $(DOCKER_GO_CACHE_MOUNTS) -v $(PWD):/code -w /code golang:1.26 go generate ./...
 endif
 
 .PHONY: web-build
@@ -88,11 +96,13 @@ else
 web-build: generate web_ui/frontend/out/index.html
 endif
 
+# CI=true lets pnpm purge and recreate a node_modules that was populated by a
+# different Node/pnpm on the host; without a TTY it would otherwise abort.
 web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES) swagger/pelican-swagger.yaml
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && pnpm install --frozen-lockfile && pnpm run build
 else
-	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run build'
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -e CI=true -v `pwd`:/webapp origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run build'
 endif
 
 .PHONY: web-serve
@@ -100,7 +110,7 @@ web-serve:
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && pnpm install && pnpm run dev
 else
-	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run dev'
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -e CI=true -v `pwd`:/webapp -p 3000:3000 origin-ui sh -c 'pnpm install --frozen-lockfile --prefer-offline && pnpm run dev'
 endif
 
 
@@ -117,21 +127,28 @@ goreleaser-config:
 	./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
 .PHONY: pelican-build
-pelican-build: goreleaser-config
+# web-build is listed here as well as in the goreleaser `before` hooks. When
+# USE_DOCKER=1, goreleaser runs inside the goreleaser/goreleaser image, which
+# has neither pnpm nor a Docker daemon, so the hook's `make web-build` can only
+# succeed if web_ui/frontend/out is already up to date. Building the website
+# here first (in its own node/pnpm container) guarantees the hook is a no-op.
+pelican-build: goreleaser-config web-build
 	@echo PELICAN BUILD
 ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot --config .goreleaser.generated.yml
 else
-	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.generated.yml
+	@mkdir -p $(DOCKER_CACHE_DIR)/go-mod $(DOCKER_CACHE_DIR)/go-build
+	@$(CONTAINER_TOOL) run --rm $(DOCKER_GO_CACHE_MOUNTS) -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.generated.yml
 endif
 
 .PHONY: pelican-dev-build
-pelican-dev-build:
+pelican-dev-build: web-build
 	@echo PELICAN DEV BUILD
 ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot --config .goreleaser.dev.yml
 else
-	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.dev.yml
+	@mkdir -p $(DOCKER_CACHE_DIR)/go-mod $(DOCKER_CACHE_DIR)/go-build
+	@$(CONTAINER_TOOL) run --rm $(DOCKER_GO_CACHE_MOUNTS) -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.dev.yml
 endif
 
 .PHONY: pelican-serve-test-origin

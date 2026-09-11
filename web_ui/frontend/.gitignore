@@ -4,6 +4,9 @@
 /node_modules
 /.pnp
 .pnp.js
+# pnpm falls back to a store inside the project when its global store is on a
+# different filesystem (e.g. the bind mount used by `make web-build USE_DOCKER=1`)
+/.pnpm-store
 
 # This project uses pnpm; pnpm-lock.yaml is the committed lockfile. Ignore the
 # other package managers' lockfiles so that an accidental `npm install` or
