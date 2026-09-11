@@ -19,12 +19,67 @@
 package test_utils
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
+
+// captureHook records every entry it receives, standing in for the harness's
+// TestLogHook (which forwards to t.Log) so a test can assert that diagnostic
+// output still reaches hooks.
+type captureHook struct {
+	mu     sync.Mutex
+	levels []logrus.Level
+	msgs   []string
+}
+
+func (h *captureHook) Levels() []logrus.Level { return logrus.AllLevels }
+func (h *captureHook) Fire(e *logrus.Entry) error {
+	h.mu.Lock()
+	h.levels = append(h.levels, e.Level)
+	h.msgs = append(h.msgs, e.Message)
+	h.mu.Unlock()
+	return nil
+}
+
+// A test calls SetupTestLogging, then InitClient with a quiet configured level
+// (as hundreds of tests do). The harness's diagnostic hook (TestLogHook ->
+// t.Log) must keep receiving debug/trace entries afterward, or a failing test
+// emits no diagnostics. A capture hook stands in for TestLogHook (added the
+// same way, via AddHook); this confirms a debug entry still reaches it AND that
+// logrus's gate stayed at Trace while the configured level reads Error.
+func TestDiagnosticOutputSurvivesInitClient(t *testing.T) {
+	defer SetupTestLogging(t)()
+
+	cap := &captureHook{}
+	logrus.AddHook(cap)
+
+	InitClient(t, map[param.Param]any{param.Logging_Level: "error"})
+
+	logrus.Debug("diag-marker-xyz")
+
+	require.Equal(t, logrus.TraceLevel, logrus.GetLevel(),
+		"harness Trace floor must survive InitClient")
+	require.Equal(t, logrus.ErrorLevel, config.GetEffectiveLogLevel(),
+		"the operator-configured level should still read as Error")
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	found := false
+	for i, l := range cap.levels {
+		if l == logrus.DebugLevel && cap.msgs[i] == "diag-marker-xyz" {
+			found = true
+		}
+	}
+	require.True(t, found,
+		"a debug entry must still reach hooks after InitClient (diagnostic output preserved)")
+}
 
 // TestGenerateJWK tests the GenerateJWK function.
 func TestGenerateJWK(t *testing.T) {

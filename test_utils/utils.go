@@ -526,12 +526,17 @@ func SetupGlobalTestLogging() func() {
 	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
 	logrus.AddHook(&globalBufferHook{buf: &globalLogBuffer, mu: &globalLogMu})
+	// Package-level capture wants full verbosity too, and must survive any
+	// InitClient/InitServer a TestMain performs before tests run. Declaring the
+	// floor raises logrus's level; the returned restore re-derives it on cleanup.
+	restoreFloor := config.SetTestLogFloor(logrus.TraceLevel)
 
 	return func() {
 		logrus.SetOutput(originalOut)
 		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
+		restoreFloor()
 	}
 }
 
@@ -562,6 +567,15 @@ func SetupTestLogging(t testing.TB) func() {
 	logrus.SetOutput(io.Discard)
 	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
+	// The test hook wants to observe every entry regardless of the configured
+	// level: tests assert on debug/trace lines, and the hook forwards entries to
+	// t.Log so failing tests carry their diagnostics. Production code no longer
+	// pins logrus to TraceLevel (see config.initFilterLogging), so the harness
+	// must request the verbosity itself -- and must declare it as a floor, or a
+	// test that calls InitClient/InitServer would re-derive the level from the
+	// configured value and silently starve the hook. The returned restore is
+	// keyed uniquely, so nested/parallel harnesses do not wipe one another.
+	restoreFloor := config.SetTestLogFloor(logrus.TraceLevel)
 	hook := NewTestLogHook(t)
 	logrus.AddHook(hook)
 
@@ -583,6 +597,7 @@ func SetupTestLogging(t testing.TB) func() {
 		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
+		restoreFloor()
 		globalHookEnabled.Store(previousGlobalHookState)
 	}
 }

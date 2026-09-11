@@ -253,7 +253,7 @@ func TestLogLevelManager_ExpiredChanges(t *testing.T) {
 	require.NoError(t, manager.AddChange("test-1", "Logging.Level", log.DebugLevel, 100*time.Millisecond))
 
 	require.Eventually(t,
-		func() bool { return log.DebugLevel == log.GetLevel() },
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
 		1*time.Second,
 		10*time.Millisecond,
 	)
@@ -306,7 +306,7 @@ func TestLogLevelManager_SetBaseLevel(t *testing.T) {
 	require.NoError(t, manager.AddChange("test-1", "Logging.Level", log.DebugLevel, 1*time.Hour))
 
 	require.Eventually(t,
-		func() bool { return log.DebugLevel == log.GetLevel() },
+		func() bool { return log.DebugLevel == config.GetEffectiveLogLevel() },
 		1*time.Second,
 		10*time.Millisecond,
 	)
