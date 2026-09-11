@@ -139,7 +139,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 
 	testCache := "http://cache.edu:8000"
 
-	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
+	os.Setenv("PELICAN_DISABLE_PROXY_FALLBACK", "")
 	test_utils.InitClient(t, map[param.Param]any{})
 
 	transfers := generateTransferDetails(testCache, transferDetailsOptions{})
@@ -152,7 +152,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
-	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
+	os.Unsetenv("PELICAN_DISABLE_PROXY_FALLBACK")
 	server_utils.ResetTestState()
 	err := config.InitClient()
 	assert.Nil(t, err)

@@ -34,7 +34,7 @@ type ConfigSourceType string
 const (
 	SourceDefault    ConfigSourceType = "default"     // Set by SetParameterDefaults (from parameters.yaml)
 	SourceConfigFile ConfigSourceType = "config-file" // Loaded from a YAML config file
-	SourceEnvVar     ConfigSourceType = "env"         // Set via a PELICAN_* (or OSDF_*/STASH_*) environment variable
+	SourceEnvVar     ConfigSourceType = "env"         // Set via a PELICAN_* environment variable
 	SourceWebConfig  ConfigSourceType = "web-config"  // Set via the web UI config file
 	SourceDynamic    ConfigSourceType = "dynamic"     // Set programmatically at runtime (v.Set)
 )
@@ -173,37 +173,24 @@ func (st *SourceTracker) RecordConfigFileKeys(filePath string, sourceType Config
 	return nil
 }
 
-// RecordEnvVarSources scans the environment for variables matching the
-// active prefixes (determined by the binary name via GetAllPrefixes) and
-// records those keys. For a "pelican" binary, only PELICAN_* is considered;
-// for an "osdf" binary, OSDF_*, STASH_*, and PELICAN_* are all matched.
+// RecordEnvVarSources scans the environment for PELICAN_* variables and
+// records the keys they set.
 //
-// Rather than reimplementing the env-var-to-config-key conversion, this uses
-// param.LookupParam to resolve the canonical parameter name. OSDF_/STASH_
-// env vars are normalized to the PELICAN_ equivalent before lookup, since
-// the param package indexes env vars under the PELICAN_ prefix only.
+// Rather than reimplement the env-var-to-config-key conversion, this function
+// uses param.LookupParam to resolve the canonical parameter name.
 func (st *SourceTracker) RecordEnvVarSources() {
-	prefixes := make([]string, 0, 3)
-	for _, p := range GetAllPrefixes() {
-		prefixes = append(prefixes, p.String()+"_")
-	}
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		envName := parts[0]
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(envName, prefix) {
-				// Normalize to PELICAN_ prefix for param.LookupParam,
-				// which indexes env vars under PELICAN_ only.
-				canonicalEnv := "PELICAN_" + envName[len(prefix):]
-				if p, ok := param.LookupParam(canonicalEnv); ok {
-					viperKey := strings.ToLower(p.GetName())
-					st.Record(viperKey, ConfigSource{Type: SourceEnvVar, Detail: envName})
-				}
-				break
-			}
+		if !strings.HasPrefix(envName, "PELICAN_") {
+			continue
+		}
+		if p, ok := param.LookupParam(envName); ok {
+			viperKey := strings.ToLower(p.GetName())
+			st.Record(viperKey, ConfigSource{Type: SourceEnvVar, Detail: envName})
 		}
 	}
 }

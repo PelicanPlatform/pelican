@@ -138,10 +138,10 @@ func TestSharingUrl(t *testing.T) {
 	// Call QueryDirector with the test server URL and a source path
 	testObj, err := url.Parse("/test/foo/bar")
 	require.NoError(t, err)
-	os.Setenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK", "true")
+	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "true")
 	token, err := client.CreateSharingUrl(context.Background(), testObj, true)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	fmt.Println(token)
-	os.Unsetenv(config.GetPreferredPrefix().String() + "_SKIP_TERMINAL_CHECK")
+	os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 }

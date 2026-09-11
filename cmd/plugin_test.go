@@ -368,7 +368,7 @@ func TestStashPluginMain(t *testing.T) {
 
 	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
 	cmd := exec.Command(os.Args[0], "-test.run=TestStashPluginMain")
-	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "STASH_LOGGING_LEVEL=debug")
+	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1")
 
 	// Create buffers for stderr (the output we want for test)
 	var stderr bytes.Buffer
