@@ -1250,9 +1250,11 @@ func whoamiHandler(ctx *gin.Context) {
 		// audience+issuer were verified upstream so the row's
 		// authority is not a security check — just a label lookup.
 		var userRecord *database.User
-		if rec, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
-			userRecord = rec
-			res.DisplayName = rec.DisplayName
+		if database.ServerDatabase != nil {
+			if rec, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
+				userRecord = rec
+				res.DisplayName = rec.DisplayName
+			}
 		}
 
 		// Check AUP compliance. resolveAUP centralizes the operator-file

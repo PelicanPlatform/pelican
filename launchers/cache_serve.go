@@ -39,7 +39,6 @@ import (
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/lotman"
@@ -87,10 +86,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 // cacheServeWithPersistentCache launches the cache using the persistent cache implementation
 func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	log.Info("Using new persistent cache implementation")
-
-	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
-		return nil, err
-	}
 
 	// The persistent cache has no XRootD process to launch the monitoring
 	// shoveler (which the XRootD-based cache does via xrootd config), so start
@@ -236,10 +231,6 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 	}
 
 	if err := cache.CheckCacheSentinelLocation(); err != nil {
-		return nil, err
-	}
-
-	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
 		return nil, err
 	}
 
