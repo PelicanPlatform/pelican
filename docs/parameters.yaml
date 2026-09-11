@@ -1678,17 +1678,21 @@ components: ["origin"]
 name: Origin.IssuerMode
 description: |+
   Select the issuer implementation to use when Origin.EnableIssuer is true.
-  "embedded" uses the fosite-based OIDC provider built directly into Pelican,
-  which requires no external processes. This is under canary testing and
-  is expected to become the default in a future release.
-  "oa4mp" uses the external Java-based OA4MP issuer (legacy, will be deprecated in a future release).
-  When switching between modes, state is not migrated between the two databases.
+  "embedded", the fosite-based OIDC provider built directly into Pelican, is
+  the only supported value.
+
+  "oa4mp", the external Java-based OA4MP issuer, is deprecated and setting it
+  is a fatal error at origin startup. The parameter is retained, and hidden
+  from the public reference, so that an existing configuration naming "oa4mp"
+  produces that error instead of being silently ignored. It will be removed
+  once OA4MP support is fully retired.
 
   Note: the Issuer.AccessTokenLifetime, Issuer.AuthorizationCodeLifetime,
   Issuer.IDTokenLifetime, and Issuer.RefreshTokenLifetime settings only take
-  effect when this is set to "embedded".
+  effect with the embedded issuer.
 type: string
-default: "oa4mp"
+default: "embedded"
+hidden: true
 components: ["origin"]
 ---
 name: Origin.ScitokensRestrictedPaths
