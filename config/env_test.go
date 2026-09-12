@@ -33,128 +33,115 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-func TestOsdfEnvToPelican(t *testing.T) {
+func TestWarnRemovedEnv(t *testing.T) {
 	SetLogging(log.DebugLevel)
 	hook := test.NewGlobal()
 
-	t.Run("non-osdf-prefix-does-nothing", func(t *testing.T) {
+	t.Run("non-removed-var-does-nothing", func(t *testing.T) {
 		ResetConfig()
-		testingPreferredPrefix = PelicanPrefix
+		hook.Reset()
+		t.Setenv("PELICAN_FEDERATION_DIRECTORURL", "https://director.example.com")
 
-		os.Setenv("OSDF_MOCK", "randomStr")
-		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_MOCK")
-			require.NoError(t, err)
-			validPrefixes[PelicanPrefix] = false
-		})
-		bindNonPelicanEnv()
-		assert.False(t, viper.IsSet("MOCK"))
+		warnRemovedEnv()
+		assert.Empty(t, hook.Entries)
 	})
 
-	t.Run("one-osdf-env", func(t *testing.T) {
+	t.Run("warns-exactly-once-naming-every-removed-var", func(t *testing.T) {
+		ResetConfig()
+		hook.Reset()
+		t.Setenv("OSDF_FEDERATION_DIRECTORURL", "https://director.example.com")
+		t.Setenv("NEAREST_CACHE", "https://cache.example.com")
+
+		warnRemovedEnv()
+
+		require.Equal(t, 1, len(hook.Entries))
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		// Names should be sorted.
+		assert.Contains(t, hook.LastEntry().Message, "NEAREST_CACHE, OSDF_FEDERATION_DIRECTORURL")
+		assert.Contains(t, hook.LastEntry().Message, "Please use the equivalent PELICAN_ variable instead.")
+
+		// A second call within the same process stays quiet.
+		warnRemovedEnv()
+		assert.Equal(t, 1, len(hook.Entries))
+	})
+
+	t.Run("matches-cp-variants-and-osg-names", func(t *testing.T) {
+		ResetConfig()
+		hook.Reset()
+		t.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
+		t.Setenv("STASHCP_MINIMUM_DOWNLOAD_SPEED", "1024")
+
+		warnRemovedEnv()
+
+		require.Equal(t, 1, len(hook.Entries))
+		assert.Contains(t, hook.LastEntry().Message, "OSG_DISABLE_PROXY_FALLBACK")
+		assert.Contains(t, hook.LastEntry().Message, "STASHCP_MINIMUM_DOWNLOAD_SPEED")
+	})
+
+	t.Run("removed-var-does-not-reach-viper", func(t *testing.T) {
 		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = OsdfPrefix
+		t.Cleanup(func() { testingPreferredPrefix = "" })
+		t.Setenv("OSDF_FEDERATION_DIRECTORURL", "https://director.example.com")
 
-		os.Setenv("OSDF_MOCK", "randomStr")
-		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_MOCK")
-			require.NoError(t, err)
-		})
-		bindNonPelicanEnv()
-		assert.Equal(t, "randomStr", viper.Get("mock")) // viper key is case-insensitive
-		assert.Equal(t, "randomStr", viper.Get("MOCK"))
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
-	})
-
-	t.Run("one-stash-env", func(t *testing.T) {
-		ResetConfig()
-		hook.Reset()
-		testingPreferredPrefix = StashPrefix
-
-		os.Setenv("STASH_MOCK", "randomStr")
-		t.Cleanup(func() {
-			err := os.Unsetenv("STASH_MOCK")
-			require.NoError(t, err)
-		})
-		bindNonPelicanEnv()
-		assert.Equal(t, "randomStr", viper.Get("mock")) // viper key is case-insensitive
-		assert.Equal(t, "randomStr", viper.Get("MOCK"))
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, "Environment variables with STASH prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
-	})
-
-	t.Run("complex-osdf-env", func(t *testing.T) {
-		ResetConfig()
-		hook.Reset()
-		testingPreferredPrefix = OsdfPrefix
-
-		os.Setenv("OSDF_FEDERATION_DIRECTORURL", "randomStr")
-		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_FEDERATION_DIRECTORURL")
-			require.NoError(t, err)
-		})
-		bindNonPelicanEnv()
-		assert.Equal(t, "randomStr", viper.Get("Federation.DirectorUrl"))
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
-	})
-
-	t.Run("pelican-env-still-works", func(t *testing.T) {
-		ResetConfig()
-		hook.Reset()
-		testingPreferredPrefix = OsdfPrefix
-
-		os.Setenv("OSDF_FEDERATION_DIRECTORURL", "randomStr")
-		os.Setenv("PELICAN_FEDERATION_REGISTRYURL", "registry")
-		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_FEDERATION_DIRECTORURL")
-			require.NoError(t, err)
-			err = os.Unsetenv("PELICAN_FEDERATION_REGISTRYURL")
-			require.NoError(t, err)
-		})
-
-		bindNonPelicanEnv()
+		warnRemovedEnv()
 
 		viper.SetEnvPrefix("pelican")
 		viper.AutomaticEnv()
 		viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-		assert.Equal(t, "randomStr", viper.Get("Federation.DirectorUrl"))
-		assert.Equal(t, "registry", viper.Get("Federation.RegistryUrl"))
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
+		assert.Nil(t, viper.Get("Federation.DirectorUrl"))
+	})
+}
+
+func TestBindLegacyClientEnv(t *testing.T) {
+	SetLogging(log.DebugLevel)
+
+	t.Run("pelican-nearest-cache-is-honored", func(t *testing.T) {
+		ResetConfig()
+		t.Setenv("PELICAN_NEAREST_CACHE", "https://cache1.example.com,https://cache2.example.com")
+
+		bindLegacyClientEnv()
+
+		assert.Equal(t, []string{"https://cache1.example.com", "https://cache2.example.com"},
+			viper.GetStringSlice(param.Client_PreferredCaches.GetName()))
 	})
 
-	t.Run("pelican-env-overwrites-osdf", func(t *testing.T) {
+	t.Run("unprefixed-nearest-cache-is-ignored", func(t *testing.T) {
 		ResetConfig()
-		hook.Reset()
-		testingPreferredPrefix = OsdfPrefix
+		t.Setenv("NEAREST_CACHE", "https://cache.example.com")
 
-		os.Setenv("OSDF_FEDERATION_REGISTRYUR", "osdf-registry")
-		os.Setenv("PELICAN_FEDERATION_REGISTRYURL", "pelican-registry")
-		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_FEDERATION_REGISTRYUR")
-			require.NoError(t, err)
-			err = os.Unsetenv("PELICAN_FEDERATION_REGISTRYURL")
-			require.NoError(t, err)
-		})
+		bindLegacyClientEnv()
 
-		bindNonPelicanEnv()
+		assert.Empty(t, viper.GetStringSlice(param.Client_PreferredCaches.GetName()))
+	})
 
-		viper.SetEnvPrefix("pelican")
-		viper.AutomaticEnv()
-		viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	t.Run("pelican-director-url-is-honored", func(t *testing.T) {
+		ResetConfig()
+		t.Setenv("PELICAN_DIRECTOR_URL", "https://director.example.com")
 
-		assert.Equal(t, "pelican-registry", viper.Get("Federation.RegistryUrl"))
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
+		bindLegacyClientEnv()
+
+		assert.Equal(t, "https://director.example.com", viper.GetString(param.Federation_DirectorUrl.GetName()))
+	})
+
+	t.Run("osdf-director-url-is-ignored", func(t *testing.T) {
+		ResetConfig()
+		t.Setenv("OSDF_DIRECTOR_URL", "https://director.example.com")
+
+		bindLegacyClientEnv()
+
+		assert.Empty(t, viper.GetString(param.Federation_DirectorUrl.GetName()))
+	})
+
+	t.Run("stashcp-minimum-download-speed-is-ignored", func(t *testing.T) {
+		ResetConfig()
+		t.Setenv("STASHCP_MINIMUM_DOWNLOAD_SPEED", "1024")
+
+		bindLegacyClientEnv()
+
+		assert.NotEqual(t, int64(1024), viper.GetInt64(param.Client_MinimumDownloadSpeed.GetName()))
 	})
 }
 

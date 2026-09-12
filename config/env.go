@@ -20,8 +20,10 @@ package config
 
 import (
 	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	classad "github.com/PelicanPlatform/classad/classad"
 	log "github.com/sirupsen/logrus"
@@ -30,115 +32,98 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// Bind environment variables with non-Pelican prefixes (i.e. OSDF/STASH) to correct Pelican config keys
-func bindNonPelicanEnv() {
-	prefix := GetPreferredPrefix()
-	if prefix != PelicanPrefix {
-		found := false
-		envs := os.Environ()
-		for _, env := range envs {
-			if strings.HasPrefix(env, prefix.String()+"_") { // OSDF_ | STASH_
-				if !found {
-					log.Warningf("Environment variables with %s prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.", prefix.String())
-					found = true
-				}
-				osdfKey := strings.SplitN(env, "=", 2)[0]                                                   // OSDF_FOO_BAR
-				viperKey := strings.Replace(strings.TrimPrefix(osdfKey, prefix.String()+"_"), "_", ".", -1) // FOO.BAR
-				if err := viper.BindEnv(viperKey, osdfKey); err != nil {
-					log.Errorf("Error binding environment variable %s to configuration parameter %s: %v", osdfKey, viperKey, err)
-				}
-			}
-		}
-	}
-}
+var (
+	// Environment variable prefixes Pelican no longer reads.
+	removedEnvPrefixes = []string{"OSDF_", "STASH_", "OSDFCP_", "STASHCP_", "PELICANCP_"}
 
-// bindLegacyClientEnv handles legacy/grandfathered client environment variables that use
-// non-standard naming conventions (e.g., STASHCP_*, OSG_*, NEAREST_CACHE, etc.).
-// This should be called from InitClient after InitConfigInternal has set up the base viper config.
-func bindLegacyClientEnv() {
-	prefixes := GetAllPrefixes()
-	prefixes_with_osg := append(prefixes, "OSG")
+	// Individual environment variables Pelican no longer reads.
+	removedEnvNames = []string{"NEAREST_CACHE", "OSG_DISABLE_HTTP_PROXY", "OSG_DISABLE_PROXY_FALLBACK"}
 
-	// Handle DISABLE_HTTP_PROXY
-	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
-			viper.Set(param.Client_DisableHttpProxy.GetName(), true)
-			break
-		}
-	}
+	// The warning about removed environment variables is emitted
+	// at most once per process, even though config initialization
+	// may run several times.
+	warnRemovedEnvOnce sync.Once
+)
 
-	// Handle DISABLE_PROXY_FALLBACK
-	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
-			viper.Set(param.Client_DisableProxyFallback.GetName(), true)
-			break
-		}
-	}
-
-	// Handle DIRECTOR_URL
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
-			viper.Set("Federation.DirectorURL", val)
-			break
-		}
-	}
-
-	// Handle NAMESPACE_URL
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.RegistryUrl", val)
-			break
-		}
-	}
-
-	// Handle TOPOLOGY_NAMESPACE_URL
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
-			viper.Set(param.Federation_TopologyNamespaceUrl.GetName(), val)
-			break
-		}
-	}
-
-	// Handle MINIMUM_DOWNLOAD_SPEED (including STASHCP_* variants)
-	var prefixes_with_cp []ConfigPrefix
-	for _, prefix := range prefixes {
-		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
-	}
-	for _, prefix := range append(prefixes, prefixes_with_cp...) {
-		downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
-		if len(downloadLimitStr) == 0 {
+// warnRemovedEnv warns, once per process, about environment variables
+// that Pelican used to read but no longer does.
+// The variables have no effect; the warning exists so that an operator
+// who still sets them learns why their configuration stopped applying.
+func warnRemovedEnv() {
+	found := make([]string, 0)
+	for _, env := range os.Environ() {
+		name := strings.SplitN(env, "=", 2)[0]
+		if slices.Contains(removedEnvNames, name) {
+			found = append(found, name)
 			continue
 		}
-		downloadLimit, err := strconv.ParseInt(downloadLimitStr, 10, 64)
-		if err != nil {
-			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
-				prefix, downloadLimitStr, err.Error())
-			continue
-		}
-		if downloadLimit < 0 {
-			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is negative value; ignoring and will use "+
-				"built-in default of %v", prefix, downloadLimitStr, viper.Get(param.Client_MinimumDownloadSpeed.GetName()))
-			continue
-		}
-
-		// Backward compatibility environment variables do not overwrite the new-style ones
-		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
-
-		break
-	}
-
-	// Handle legacy config for (PELICAN_)NEAREST_CACHE
-	if configuredCaches, isSet := os.LookupEnv("NEAREST_CACHE"); isSet {
-		log.Warningf("You are using a legacy/deprecated parameter 'NEAREST_CACHE' to indicate preferred caches. Please use %s instead", param.Client_PreferredCaches.GetName())
-		viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(configuredCaches, ","))
-	} else {
-		for _, prefix := range prefixes {
-			if val, isSet := os.LookupEnv(prefix.String() + "_NEAREST_CACHE"); isSet {
-				log.Warningf("You are using a legacy/deprecated parameter '%s_NEAREST_CACHE' to indicate preferred caches. Please use %s instead", prefix.String(), param.Client_PreferredCaches.GetName())
-				viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(val, ","))
+		for _, prefix := range removedEnvPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				found = append(found, name)
 				break
 			}
 		}
+	}
+	if len(found) == 0 {
+		return
+	}
+	warnRemovedEnvOnce.Do(func() {
+		// Sort so that the message is deterministic regardless of environment order.
+		slices.Sort(found)
+		log.Warningf("Ignoring environment variable(s) %s: Pelican no longer reads configuration from the "+
+			"OSDF_, STASH_, STASHCP_, or OSG_ prefixes, nor from an unprefixed NEAREST_CACHE. "+
+			"Please use the equivalent PELICAN_ variable instead.", strings.Join(found, ", "))
+	})
+}
+
+// bindLegacyClientEnv handles legacy/grandfathered client environment variables that use
+// non-standard naming conventions (e.g., PELICAN_DIRECTOR_URL, PELICAN_NEAREST_CACHE, etc.).
+// This should be called from InitClient after InitConfigInternal has set up the base viper config.
+func bindLegacyClientEnv() {
+	// Handle DISABLE_HTTP_PROXY
+	if _, isSet := os.LookupEnv("PELICAN_DISABLE_HTTP_PROXY"); isSet {
+		viper.Set(param.Client_DisableHttpProxy.GetName(), true)
+	}
+
+	// Handle DISABLE_PROXY_FALLBACK
+	if _, isSet := os.LookupEnv("PELICAN_DISABLE_PROXY_FALLBACK"); isSet {
+		viper.Set(param.Client_DisableProxyFallback.GetName(), true)
+	}
+
+	// Handle DIRECTOR_URL
+	if val, isSet := os.LookupEnv("PELICAN_DIRECTOR_URL"); isSet {
+		viper.Set(param.Federation_DirectorUrl.GetName(), val)
+	}
+
+	// Handle NAMESPACE_URL
+	if val, isSet := os.LookupEnv("PELICAN_NAMESPACE_URL"); isSet {
+		viper.Set(param.Federation_RegistryUrl.GetName(), val)
+	}
+
+	// Handle TOPOLOGY_NAMESPACE_URL
+	if val, isSet := os.LookupEnv("PELICAN_TOPOLOGY_NAMESPACE_URL"); isSet {
+		viper.Set(param.Federation_TopologyNamespaceUrl.GetName(), val)
+	}
+
+	// Handle MINIMUM_DOWNLOAD_SPEED
+	if downloadLimitStr := os.Getenv("PELICAN_MINIMUM_DOWNLOAD_SPEED"); len(downloadLimitStr) > 0 {
+		downloadLimit, err := strconv.ParseInt(downloadLimitStr, 10, 64)
+		if err != nil {
+			log.Errorf("Environment variable PELICAN_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
+				downloadLimitStr, err.Error())
+		} else if downloadLimit < 0 {
+			log.Errorf("Environment variable PELICAN_MINIMUM_DOWNLOAD_SPEED=%s is a negative value; ignoring and using "+
+				"default of %v", downloadLimitStr, viper.Get(param.Client_MinimumDownloadSpeed.GetName()))
+		} else {
+			// Backward compatibility environment variables do not overwrite the new-style ones
+			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
+		}
+	}
+
+	// Handle legacy config for PELICAN_NEAREST_CACHE
+	if val, isSet := os.LookupEnv("PELICAN_NEAREST_CACHE"); isSet {
+		log.Warningf("You are using a legacy/deprecated parameter 'PELICAN_NEAREST_CACHE' to indicate preferred caches. Please use %s instead", param.Client_PreferredCaches.GetName())
+		viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(val, ","))
 	}
 }
 
@@ -272,18 +257,13 @@ func bindClassAdConfig() {
 // these config parameters are not included in the params table, meaning
 // `config/config.go::handleDeprecatedConfig` will not catch them/log warnings.
 func bindLegacyServerEnv() {
-	prefixes := GetAllPrefixes()
-
 	// MAXMINDKEY
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_MAXMINDKEY"); isSet {
-			log.Warningf("You are using a legacy/deprecated parameter '%s_MAXMINDKEY' to indicate the MaxMind license key. "+
-				"Support for this environment variable will be removed in a future release. Please use %s instead", prefix.String(),
-				param.Director_MaxMindKeyFile.GetName())
+	if val, isSet := os.LookupEnv("PELICAN_MAXMINDKEY"); isSet {
+		log.Warningf("You are using a legacy/deprecated parameter 'PELICAN_MAXMINDKEY' to indicate the MaxMind license key. "+
+			"Support for this environment variable will be removed in a future release. Please use %s instead",
+			param.Director_MaxMindKeyFile.GetName())
 
-			// Use SetDefault so that if both the env var and the config param are set, the config param takes precedence
-			viper.SetDefault(param.Director_MaxMindKeyFile.GetName(), val)
-			break
-		}
+		// Use SetDefault so that if both the env var and the config param are set, the config param takes precedence
+		viper.SetDefault(param.Director_MaxMindKeyFile.GetName(), val)
 	}
 }

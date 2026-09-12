@@ -1198,9 +1198,11 @@ func TestDiscoverFederationImpl(t *testing.T) {
 	}
 }
 
-// TestEnvVarConfigMapping tests that environment variables are correctly mapped into
-// Pelican config structs for both client and server initialization paths.
-// This addresses issue #2819 where PELICAN_* env vars were ignored in certain modes.
+// TestEnvVarConfigMapping tests that environment variables are
+// correctly mapped into Pelican config structs for both client and server
+// initialization paths. This addresses:
+//   - Issue #2819, where PELICAN_* env vars were ignored in certain modes
+//   - Issue #2700, where the OSDF_ and other env var prefixes are removed
 func TestEnvVarConfigMapping(t *testing.T) {
 	type initMode string
 	const (
@@ -1209,26 +1211,24 @@ func TestEnvVarConfigMapping(t *testing.T) {
 	)
 
 	type testCase struct {
-		name              string
-		binaryPrefix      ConfigPrefix // PELICAN or OSDF
-		envVarPrefix      string       // PELICAN, OSDF, or other
-		envVarSuffix      string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
-		configValue       string       // the value to set for the env var
-		mode              initMode     // client or server
-		configShouldApply bool         // whether the config should be picked up
-		validateFunc      func(t *testing.T)
+		name         string
+		binaryPrefix ConfigPrefix // PELICAN or OSDF
+		envVarPrefix string       // PELICAN, OSDF, or other
+		envVarSuffix string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
+		configValue  string       // the value to set for the env var
+		mode         initMode     // client or server
+		validateFunc func(t *testing.T)
 	}
 
 	tests := []testCase{
 		// Client mode tests
 		{
-			name:              "pelican-binary-pelican-env-client",
-			binaryPrefix:      PelicanPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
+			name:         "pelican-binary-pelican-env-client",
+			binaryPrefix: PelicanPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "CLIENT_PREFERREDCACHES",
+			configValue:  "https://cache.example.com:8443",
+			mode:         clientMode,
 			validateFunc: func(t *testing.T) {
 				caches := param.Client_PreferredCaches.GetStringSlice()
 				require.Len(t, caches, 1)
@@ -1236,13 +1236,12 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			},
 		},
 		{
-			name:              "osdf-binary-pelican-env-client",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
+			name:         "osdf-binary-pelican-env-client",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "CLIENT_PREFERREDCACHES",
+			configValue:  "https://cache.example.com:8443",
+			mode:         clientMode,
 			validateFunc: func(t *testing.T) {
 				caches := param.Client_PreferredCaches.GetStringSlice()
 				require.Len(t, caches, 1)
@@ -1250,54 +1249,48 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			},
 		},
 		{
-			name:              "osdf-binary-osdf-env-client-backward-compat",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "OSDF",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
+			name:         "osdf-binary-osdf-env-client-is-ignored",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "OSDF",
+			envVarSuffix: "CLIENT_PREFERREDCACHES",
+			configValue:  "https://cache.example.com:8443",
+			mode:         clientMode,
 			validateFunc: func(t *testing.T) {
-				caches := param.Client_PreferredCaches.GetStringSlice()
-				require.Len(t, caches, 1)
-				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+				assert.Empty(t, param.Client_PreferredCaches.GetStringSlice())
 			},
 		},
 		// Server mode tests - verify env vars work for server initialization too
 		{
-			name:              "pelican-binary-pelican-env-server",
-			binaryPrefix:      PelicanPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
+			name:         "pelican-binary-pelican-env-server",
+			binaryPrefix: PelicanPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "SERVER_WEBPORT",
+			configValue:  "9999",
+			mode:         serverMode,
 			validateFunc: func(t *testing.T) {
 				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
 			},
 		},
 		{
-			name:              "osdf-binary-pelican-env-server",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
+			name:         "osdf-binary-pelican-env-server",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "SERVER_WEBPORT",
+			configValue:  "9999",
+			mode:         serverMode,
 			validateFunc: func(t *testing.T) {
 				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
 			},
 		},
 		{
-			name:              "osdf-binary-osdf-env-server-backward-compat",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "OSDF",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
+			name:         "osdf-binary-osdf-env-server-is-ignored",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "OSDF",
+			envVarSuffix: "SERVER_WEBPORT",
+			configValue:  "9999",
+			mode:         serverMode,
 			validateFunc: func(t *testing.T) {
-				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+				assert.NotEqual(t, 9999, param.Server_WebPort.GetInt())
 			},
 		},
 	}
@@ -1329,10 +1322,8 @@ func TestEnvVarConfigMapping(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			// Validate the config was applied (or not) as expected
-			if tc.configShouldApply {
-				tc.validateFunc(t)
-			}
+			// Validate the config was applied (or ignored) as expected
+			tc.validateFunc(t)
 		})
 	}
 }

@@ -56,8 +56,7 @@ func validateConfigKeys() []string {
 	envs := os.Environ()
 	for _, env := range envs {
 		parts := strings.SplitN(env, "=", 2)
-		// Until we fully deprecate OSDF and STASH prefixes, we'll check for them here
-		if strings.HasPrefix(parts[0], "PELICAN_") || strings.HasPrefix(parts[0], "OSDF_") || strings.HasPrefix(parts[0], "STASH_") {
+		if strings.HasPrefix(parts[0], "PELICAN_") {
 			// Strip off the prefix, convert to lower and replace _ with .
 			key := strings.SplitN(parts[0], "_", 2)[1]
 			key = strings.ToLower(key)

@@ -71,7 +71,7 @@ const standaloneCliPrefix = "/standalone-cli"
 func pelicanEnv(extra ...string) []string {
 	env := make([]string, 0, len(os.Environ())+len(extra))
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "PELICAN_") || strings.HasPrefix(kv, "OSDF_") || strings.HasPrefix(kv, "STASH_") {
+		if strings.HasPrefix(kv, "PELICAN_") {
 			continue
 		}
 		env = append(env, kv)
