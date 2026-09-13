@@ -102,17 +102,6 @@ ARG XROOTD_MULTIUSER_VER=2.2.1
 ARG XROOTD_MULTIUSER_RELEASE=
 # ARG XROOTD_MULTIUSER_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
-# For controlling the version of OA4MP that is installed.
-ARG OA4MP_VER=6.2.3
-ARG JAVA_VER=17
-ARG TOMCAT_VER=9.0.115
-
-# For controlling where OA4MP is installed.
-# The args' names loosely match Pelican's configuration parameters.
-ARG QDL_LOC=/opt/qdl
-ARG SCITOKENS_SERVER_LOC=/opt/scitokens-server
-ARG TOMCAT_LOC=/opt/tomcat
-
 #################################################################
 # Pelican Build Base
 #
@@ -565,143 +554,19 @@ ENDRUN
 # Origin Software Base
 #
 # This stage assembles together everything needed to run a Pelican
-# origin, except for the `pelican` binary itself. Most of the work
-# here is installing OA4MP and its dependencies by hand.
+# origin, except for the `pelican` binary itself.
 #################################################################
 FROM xrootd-software-base AS origin-software-base
 ARG TARGETPLATFORM
-ARG TOMCAT_USERNAME
-ARG TOMCAT_UID
-ARG TOMCAT_GID
-ARG OA4MP_VER
-ARG JAVA_VER
-ARG TOMCAT_VER
-ARG QDL_LOC
-ARG SCITOKENS_SERVER_LOC
-ARG TOMCAT_LOC
 
-# Define environment variables for where OA4MP and Apache Tomcat are
-# installed, and for how to run them. Note that their names follow the
-# conventions and requirements of these apps, not Pelican's.
-
-ENV ST_HOME="${SCITOKENS_SERVER_LOC}" \
-    QDL_HOME="${QDL_LOC}" \
-    CATALINA_HOME="${TOMCAT_LOC}"
-
-ENV CATALINA_PID="${CATALINA_HOME}/temp/tomcat.pid" \
-    CATALINA_OPTS="-Xms512M -Xmx1024M -server -XX:+UseParallelGC" \
-    JAVA_HOME="/usr/lib/jvm/jre" \
-    JAVA_OPTS="-Djava.awt.headless=true -Djava.security.egd=file:/dev/urandom -Djava.library.path=${CATALINA_HOME}/lib" \
-    PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
-
-RUN --mount=type=bind,source=oa4mp/resources,target=/context \
-    --mount=type=tmpfs,target=/tmp \
-    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
     <<ENDRUN
-
-  # In the same vein as the cache mount for 'dnf', this step uses a tmpfs
-  # mount for '/tmp' so that we can download files somewhere and not worry
-  # about cleaning up after ourselves.
 
   set -eux
   set -o pipefail
 
   # Some XRootD multi-user setups require sssd-client.
   dnf install -y sssd-client
-
-  # OA4MP and Apache Tomcat both require a Java runtime.
-  dnf install -y java-${JAVA_VER}-openjdk-headless
-
-  #---------------------------------------------------------------
-  # Install Apache Tomcat.
-
-  # Create a user and group for running the Tomcat server.
-  groupadd -g ${TOMCAT_GID} ${TOMCAT_USERNAME}
-  useradd -u ${TOMCAT_UID} -g ${TOMCAT_GID} -d / -s /sbin/nologin -c "Apache Tomcat server" ${TOMCAT_USERNAME}
-
-  # Download and install Tomcat.
-  mkdir -p ${CATALINA_HOME}
-  curl -fSL https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VER}/bin/apache-tomcat-${TOMCAT_VER}.tar.gz | tar -xz -f - -C ${CATALINA_HOME} --strip-components=1
-
-  # Remove the demo apps to minimize unexpected behavior.
-  rm -rf ${CATALINA_HOME}/webapps/*
-
-  # Let Tomcat read its own installation.
-  # The permissions in the tarball are unusually restrictive.
-  chmod -R g+rX ${CATALINA_HOME}/*
-  chgrp -R ${TOMCAT_USERNAME} ${CATALINA_HOME}/*
-
-  # Let Tomcat write to its own working directories.
-  chmod g+w ${CATALINA_HOME}/logs
-  chmod g+w ${CATALINA_HOME}/temp
-  chmod g+w ${CATALINA_HOME}/work
-
-  #---------------------------------------------------------------
-  # Install OA4MP.
-  #
-  # The OA4MP installer is overkill in that it installs quite a bit more
-  # than what Pelican needs. However, to be consistent with QDL below, we
-  # run the installer as intended and then remove extra bits afterwards.
-
-  OA4MP_INSTALLER=/tmp/oa4mp-installer.jar
-  curl -fSL https://github.com/ncsa/oa4mp/releases/download/v${OA4MP_VER}/server-installer.jar -o ${OA4MP_INSTALLER}
-  java -jar ${OA4MP_INSTALLER} install -dir ${ST_HOME} -store file_store
-
-  OA4MP_WEBAPP=${CATALINA_HOME}/webapps/scitokens-server
-  mkdir -p ${OA4MP_WEBAPP}
-  unzip -d ${OA4MP_WEBAPP} ${ST_HOME}/lib/oauth2.war
-
-  # Make the unpacked webapp match the rest of the Tomcat installation.
-  chmod -R u=rwX,g=rX,o= ${OA4MP_WEBAPP}
-  chgrp -R ${TOMCAT_USERNAME} ${OA4MP_WEBAPP}
-
-  # We have no need for .war files now that we've unpacked the ones we need.
-  rm -rf ${ST_HOME}/lib/*.war
-
-  # We have no need for this OAuth2 command-line tool.
-  # (It does not even appear to come with a shell script for running it.)
-  rm ${ST_HOME}/lib/clc.jar
-
-  # We have no need for this JWT command-line tool.
-  rm ${ST_HOME}/bin/jwt
-  rm ${ST_HOME}/lib/jwt.jar
-
-  # We currently have no need for this database migration tool.
-  rm ${ST_HOME}/bin/migrate
-  rm ${ST_HOME}/lib/fs-migrate.jar
-
-  # Replace various web pages with Pelican-themed versions.
-  cp /context/jsp-overrides/*.jsp ${OA4MP_WEBAPP}
-
-  # Make OA4MP's executables executable by everyone, not only 'root'.
-  chmod a+rX ${ST_HOME}/bin/*
-
-  # Let OA4MP write to its own working directories.
-  chmod -R ug=rwX,o= ${ST_HOME}/var/storage
-  chgrp -R ${TOMCAT_USERNAME} ${ST_HOME}/var/storage
-
-  #---------------------------------------------------------------
-  # Install QDL.
-
-  QDL_INSTALLER=/tmp/qdl-installer.jar
-  curl -fSL https://github.com/ncsa/oa4mp/releases/download/v${OA4MP_VER}/qdl-installer.jar -o ${QDL_INSTALLER}
-  java -jar ${QDL_INSTALLER} install -dir ${QDL_HOME} -qdl
-
-  # Make QDL's executables executable by everyone, not only 'root'.
-  chmod a+rX ${QDL_HOME}/bin/*
-
-  #---------------------------------------------------------------
-  # Set up Pelican's OAuth2 client templates.
-
-  mkdir -p ${ST_HOME}/var/qdl/scitokens
-  mkdir -p ${ST_HOME}/etc/templates
-  cp /context/oa4mp-config/client-template.xml ${ST_HOME}/etc/templates
-  mkdir -p ${QDL_HOME}/var/scripts
-  cp /context/qdl-scripts/boot.qdl ${QDL_HOME}/var/scripts
-
-  # Let Tomcat create the socket file it listens on.
-  chmod ug=rwX,o= ${ST_HOME}/var
-  chgrp ${TOMCAT_USERNAME} ${ST_HOME}/var
 ENDRUN
 
 #################################################################
