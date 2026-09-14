@@ -35,20 +35,19 @@ const UserForm: React.FC<UserFormProps> = ({
 }) => {
   const [username, setUsername] = useState(user?.username || '');
   const [displayName, setDisplayName] = useState(user?.displayName || '');
-  const [sub, setSub] = useState(user?.sub || '');
-  const [issuer, setIssuer] = useState(user?.issuer || '');
+  const [sub, setSub] = useState('');
+  const [issuer, setIssuer] = useState('');
   // No password field — admins do NOT set passwords. After creating a
   // local user, mint a password-set invite (see the edit page) and hand
   // the link to the user; they pick their own password.
   //
-  // In edit mode the user kind is locked to whatever the record already is.
-  // (Switching an OIDC user to a local one — or vice versa — would silently
-  // break their existing authentication and is intentionally not supported here.)
-  const initialKind: UserKind =
-    user && (user.sub || user.issuer) && user.sub !== user.username
-      ? 'oidc'
-      : 'local';
-  const [kind, setKind] = useState<UserKind>(initialKind);
+  // The kind toggle only appears when creating (it is hidden in edit mode
+  // below), and sub/issuer are only submitted on create, so the initial value
+  // matters just for the create form, which starts as a local account. A
+  // user's identities are no longer carried on the User record — they are
+  // managed through the identities endpoints — so there is nothing to detect
+  // here for an existing record.
+  const [kind, setKind] = useState<UserKind>('local');
 
   const isEdit = Boolean(user);
 

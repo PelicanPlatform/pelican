@@ -95,7 +95,6 @@ func callerIsCollectionAdmin(ctx *gin.Context) bool {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	if isAdmin, _ := web_ui.CheckAdmin(identity); isAdmin {
 		return true
@@ -547,7 +546,6 @@ func handleListCollections(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -811,7 +809,6 @@ func handleUpdateCollection(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -1238,7 +1235,6 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -1300,7 +1296,6 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -1356,7 +1351,6 @@ func handleGetCollection(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -1450,7 +1444,6 @@ func handleDeleteCollection(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -1524,7 +1517,6 @@ func handleListCollectionCandidateOwners(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isCollectionAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -1598,7 +1590,6 @@ func handleListCollectionShares(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -1732,7 +1723,6 @@ func handleCreateCollectionShare(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -1896,7 +1886,6 @@ func handleCreateCollectionOwnershipInvite(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isCollectionAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -1967,7 +1956,6 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin := false
 	if a, _ := web_ui.CheckAdmin(identity); a {
@@ -2059,7 +2047,6 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
@@ -2143,7 +2130,6 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 

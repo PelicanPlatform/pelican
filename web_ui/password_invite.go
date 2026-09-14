@@ -71,7 +71,6 @@ func handleCreatePasswordInvite(ctx *gin.Context) {
 		Username: caller,
 		ID:       callerID,
 		Groups:   callerGroups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
 	isUserAdmin, _ := CheckUserAdmin(identity)
@@ -339,7 +338,6 @@ func handleClearUserPassword(ctx *gin.Context) {
 		Username: caller,
 		ID:       callerID,
 		Groups:   callerGroups,
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
 	isUserAdmin, _ := CheckUserAdmin(identity)

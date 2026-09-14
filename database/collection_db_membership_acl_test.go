@@ -42,12 +42,12 @@ func TestACLViaDBMembership(t *testing.T) {
 
 		// Bob owns "alpha" with a writers ACL granted to "alpha-writers".
 		require.NoError(t, db.Create(&User{
-			ID: "u-bob", Username: "bob", Sub: "bob@oidc",
-			Issuer: "https://idp.example.com", Status: UserStatusActive,
+			ID: "u-bob", Username: "bob",
+			Status: UserStatusActive,
 		}).Error)
 		require.NoError(t, db.Create(&User{
-			ID: "u-carol", Username: "carol", Sub: "carol@oidc",
-			Issuer: "https://idp.example.com", Status: UserStatusActive,
+			ID: "u-carol", Username: "carol",
+			Status: UserStatusActive,
 		}).Error)
 		writers := &Group{
 			ID: "g-writers", Name: "alpha-writers",
@@ -112,8 +112,8 @@ func TestACLViaDBMembership(t *testing.T) {
 			}},
 		}).Error)
 		require.NoError(t, db.Create(&User{
-			ID: "u-stranger", Username: "stranger", Sub: "s@oidc",
-			Issuer: "https://idp.example.com", Status: UserStatusActive,
+			ID: "u-stranger", Username: "stranger",
+			Status: UserStatusActive,
 		}).Error)
 
 		got, err := ListCollections(db, "stranger", "u-stranger", nil, false)

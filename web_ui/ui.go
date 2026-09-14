@@ -402,7 +402,6 @@ func handleWebUIAuth(ctx *gin.Context) {
 			Username: user,
 			ID:       userId,
 			Groups:   groups,
-			Sub:      ctx.GetString("OIDCSub"),
 		}
 		isAdmin, _ := CheckAdmin(identity)
 		if isAdmin {

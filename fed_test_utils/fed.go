@@ -43,7 +43,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -430,14 +429,12 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	}
 
 	// config.InitServer above ran BootstrapAdminAndBackfillOwners while
-	// Server.WebPort was still 0, so the "admin" user row's issuer is set to
-	// Server.ExternalWebUrl at the unbound default port. LaunchModules has
-	// now bound the real ephemeral port (UpdateConfigFromListener), so any
-	// login flow from here on computes a different issuer for "admin" and
-	// won't find that row. Here we realign it via UPDATE.
-	require.NoError(t, database.ServerDatabase.Model(&database.User{}).
-		Where("username = ?", "admin").
-		Update("issuer", param.Server_ExternalWebUrl.GetString()).Error)
+	// Server.WebPort was still 0, so the "admin" identity was recorded under
+	// Server.ExternalWebUrl at the unbound default port. That no longer needs
+	// realigning: admin resolution now keys off the globally-unique username
+	// (see the fallback lookup in web_ui/authentication.go), not the issuer,
+	// so the ephemeral port that UpdateConfigFromListener binds is irrelevant
+	// and the "admin" row is found regardless of which issuer authenticated.
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)

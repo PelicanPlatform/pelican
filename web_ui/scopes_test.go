@@ -109,7 +109,7 @@ func TestEffectiveScopesForIdentity(t *testing.T) {
 		// Same user with a non-matching username doesn't get the scope —
 		// catches accidental ID/Sub matching regressions.
 		none := EffectiveScopesForIdentity(UserIdentity{
-			Username: "bob", ID: "u-alice", Sub: "alice",
+			Username: "bob", ID: "u-alice",
 		})
 		assert.False(t, contains(none, token_scopes.Server_Admin),
 			"admin lists must match Username, never ID or Sub")
@@ -142,7 +142,7 @@ func TestEffectiveScopesForIdentity(t *testing.T) {
 	t.Run("DB-stored grants combine with config grants and dedupe", func(t *testing.T) {
 		db := setupScopesTestDB(t)
 		require.NoError(t, db.Create(&database.User{
-			ID: "u-eve", Username: "eve", Sub: "eve", Issuer: "local",
+			ID: "u-eve", Username: "eve",
 		}).Error)
 		require.NoError(t, database.GrantUserScope(db, "u-eve",
 			token_scopes.Server_CollectionAdmin, database.CreatorSelf()))
@@ -201,7 +201,7 @@ func TestCheckHelpersConsultEffectiveScopes(t *testing.T) {
 		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"alice"}))
 		// ID == "alice" must NOT elevate; this catches the security
 		// regression CheckAdmin used to have.
-		ok, _ := CheckAdmin(UserIdentity{Username: "bob", ID: "alice", Sub: "alice"})
+		ok, _ := CheckAdmin(UserIdentity{Username: "bob", ID: "alice"})
 		assert.False(t, ok)
 	})
 

@@ -54,16 +54,6 @@ const ensureMinDuration = async (start: number) => {
   }
 };
 
-// isInternalIdentity reports whether the caller's *primary* (sub, issuer)
-// is the internal one — the one we use to issue cookies for accounts
-// with locally-stored passwords. Per the design contract, on the
-// internal issuer the sub equals the username (CreateLocalUser sets
-// it that way and RenameUser keeps them in lockstep). So we can
-// detect "this is the internal identity" without reading server
-// config: the sub matches the username. Anything else is an external
-// IdP-issued identity worth showing in the linked-identities list.
-const isInternalIdentity = (me: Me) => me.sub === me.username;
-
 const Page = () => {
   return (
     // Any logged-in user (no role filter); not-logged-in users get
@@ -546,10 +536,13 @@ const IdentitiesCard: React.FC<{
   identities: UserIdentity[];
   onChanged: () => Promise<UserIdentity[] | undefined> | void;
 }> = ({ me, identities, onChanged }) => {
-  const showPrimary = !isInternalIdentity(me);
-  const totalRows = (showPrimary ? 1 : 0) + identities.length;
+  // Every identity now comes from /me/identities (there is no separate
+  // "primary" on the user record any more). The internal local-password
+  // identity — sub equals the username — is noise here, since the password
+  // indicator on the account card already conveys it, so it is filtered out.
+  const externalIdentities = identities.filter((id) => id.sub !== me.username);
 
-  if (totalRows === 0) {
+  if (externalIdentities.length === 0) {
     return (
       <Paper variant='outlined' sx={{ p: 3 }}>
         <Typography variant='body2' color='text.secondary'>
@@ -563,8 +556,7 @@ const IdentitiesCard: React.FC<{
   return (
     <Paper variant='outlined'>
       <Stack divider={<Divider />}>
-        {showPrimary && <IdentityRow sub={me.sub} issuer={me.issuer} primary />}
-        {identities.map((id) => (
+        {externalIdentities.map((id) => (
           <IdentityRow
             key={id.id}
             sub={id.sub}
