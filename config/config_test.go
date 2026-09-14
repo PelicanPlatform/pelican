@@ -631,17 +631,6 @@ func TestSetPreferredPrefix(t *testing.T) {
 		}
 	})
 
-	t.Run("TestStashPreferredPrefix", func(t *testing.T) {
-		oldPref, err := SetPreferredPrefix(StashPrefix)
-		assert.NoError(t, err)
-		if GetPreferredPrefix() != StashPrefix {
-			t.Errorf("Expected preferred prefix to be 'STASH', got '%s'", GetPreferredPrefix())
-		}
-		if oldPref != OsdfPrefix {
-			t.Errorf("Expected old preferred prefix to be 'osdf', got '%s'", oldPref)
-		}
-	})
-
 	t.Run("TestInvalidPreferredPrefix", func(t *testing.T) {
 		_, err := SetPreferredPrefix("invalid")
 		assert.Error(t, err)

@@ -176,7 +176,6 @@ type (
 const (
 	PelicanPrefix ConfigPrefix = "PELICAN"
 	OsdfPrefix    ConfigPrefix = "OSDF"
-	StashPrefix   ConfigPrefix = "STASH"
 )
 
 const (
@@ -442,7 +441,6 @@ var (
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
 		OsdfPrefix:    true,
-		StashPrefix:   true,
 		"":            true,
 	}
 
@@ -623,13 +621,6 @@ func GetPreferredPrefix() ConfigPrefix {
 		return ConfigPrefix(testingPreferredPrefix)
 	}
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
-	underscore_idx := strings.Index(arg0, "_")
-	if underscore_idx != -1 {
-		prefix := string(ConfigPrefix(arg0[0:underscore_idx]))
-		if prefix == "STASH" {
-			return OsdfPrefix
-		}
-	}
 	if strings.HasPrefix(arg0, "STASH") || strings.HasPrefix(arg0, "OSDF") {
 		return OsdfPrefix
 	}
@@ -2776,8 +2767,7 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Deprecated param defaults: excluded from generated SetParameterDefaults.
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 
-	upperPrefix := GetPreferredPrefix()
-	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
+	if GetPreferredPrefix() == OsdfPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
