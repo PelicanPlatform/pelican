@@ -24,13 +24,11 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -62,13 +60,12 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -85,12 +82,12 @@ func syncMain(cmd *cobra.Command, args []string) {
 	}
 
 	if len(args) < 2 {
-		log.Errorln("No source or destination to sync")
+		reportError("No source or destination to sync")
 		err = cmd.Help()
 		if err != nil {
 			log.Errorln("Failed to print out help:", err)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	sources := args[:len(args)-1]
 	dest := args[len(args)-1]
@@ -101,8 +98,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 			// Both source and destination are remote: third-party-copy sync
 			for _, src := range sources {
 				if !pelican_url.IsPelicanURL(src) {
-					log.Errorln("When synchronizing between federation URLs, all sources must be pelican URLs:", src)
-					os.Exit(1)
+					exitWithError(1, "When synchronizing between federation URLs, all sources must be pelican URLs:", src)
 				}
 			}
 			log.Debugln("Synchronizing between Pelican data federation endpoints (third-party-copy)")
@@ -110,21 +106,18 @@ func syncMain(cmd *cobra.Command, args []string) {
 		} else {
 			for _, src := range sources {
 				if pelican_url.IsPelicanURL(src) {
-					log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL from local files", src)
-					os.Exit(1)
+					exitWithErrorf(1, "URL (%s) cannot be a source when synchronizing to a federation URL from local files", src)
 				}
 			}
 			log.Debugln("Synchronizing to a Pelican data federation")
 		}
 	} else {
 		if !pelican_url.IsPelicanURL(sources[0]) {
-			log.Errorln("Either the first or last argument must be a pelican:// or osdf://-style URL specifying a remote destination")
-			os.Exit(1)
+			exitWithError(1, "Either the first or last argument must be a pelican:// or osdf://-style URL specifying a remote destination")
 		}
 		for _, src := range sources {
 			if !pelican_url.IsPelicanURL(src) {
-				log.Errorln("When synchronizing to a local directory, all sources must be pelican URLs:", src)
-				os.Exit(1)
+				exitWithError(1, "When synchronizing to a local directory, all sources must be pelican URLs:", src)
 			}
 		}
 		log.Debugln("Synchronizing from a Pelican data federation")
@@ -139,18 +132,15 @@ func syncMain(cmd *cobra.Command, args []string) {
 				// Check for conflicting prefercached parameter
 				u, pErr := url.Parse(src)
 				if pErr != nil {
-					log.Errorln("Failed to parse URL:", pErr)
-					os.Exit(1)
+					exitWithError(1, "Failed to parse URL:", pErr)
 				}
 				if u.Query().Has("prefercached") {
-					log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
-					os.Exit(1)
+					exitWithError(1, "Cannot use --direct flag with URLs that have '?prefercached' query parameter")
 				}
 
 				newSrc, pErr := addQueryParam(src, "directread", "")
 				if pErr != nil {
-					log.Errorln("Failed to process --direct option:", pErr)
-					os.Exit(1)
+					exitWithError(1, "Failed to process --direct option:", pErr)
 				}
 				sources[i] = newSrc
 			}
@@ -166,17 +156,14 @@ func syncMain(cmd *cobra.Command, args []string) {
 	// as options.
 	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln("Failed to get preferred caches:", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get preferred caches:", err)
 	}
 
 	if doDownload && len(sources) > 1 {
 		if destStat, err := os.Stat(dest); err != nil {
-			log.Errorln("Destination does not exist")
-			os.Exit(1)
+			exitWithError(1, "Destination does not exist")
 		} else if !destStat.IsDir() {
-			log.Errorln("Destination is not a directory")
-			os.Exit(1)
+			exitWithError(1, "Destination is not a directory")
 		}
 	}
 
@@ -216,8 +203,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 	} else {
 		for _, src := range sources {
 			if srcStat, err := os.Stat(src); err != nil {
-				log.Errorln("Source: " + src + " does not exist")
-				os.Exit(1)
+				exitWithError(1, "Source: "+src+" does not exist")
 			} else if !srcStat.IsDir() && string(dest[len(dest)-1]) == `/` {
 				log.Warningln("Destination: " + dest + " ends with '/', but the source is a file. If the destination does not exist, it will be treated as an object, not a collection.")
 			}
@@ -239,26 +225,9 @@ func syncMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if err != nil {
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		// Print the list of errors
-		errMsg := err.Error()
-		var pe error_codes.PelicanError
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		if errors.Is(err, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
-			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(err) {
-				log.Errorln("Errors are retryable")
-				os.Exit(11)
-			}
-			os.Exit(1)
-		}
+		exitTransferFailure(err, "Failure getting "+lastSrc)
 	}
 }

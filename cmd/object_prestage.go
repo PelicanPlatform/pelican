@@ -26,14 +26,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -65,13 +63,12 @@ func prestageMain(cmd *cobra.Command, args []string) {
 
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
+		reportError(err)
 
 		if client.IsRetryable(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		} else {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
@@ -80,20 +77,19 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	if isAsync {
 		// Validate arguments
 		if len(args) < 1 {
-			log.Errorln("Prefix(es) to prestage must be specified")
+			reportError("Prefix(es) to prestage must be specified")
 			err = cmd.Help()
 			if err != nil {
 				log.Errorln("Failed to print out help:", err)
 			}
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 
 		// Ensure server is running, starting it if necessary
 		apiClient, err := ensureClientAgentRunning(cmd.Context(), 5)
 		if err != nil {
-			log.Errorln("Failed to ensure API server is running:", err)
-			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
-			os.Exit(1)
+			reportError("Failed to ensure API server is running:", err)
+			exitWithError(1, "You can manually start it with 'pelican client-api serve --daemonize'")
 		}
 
 		// Get flags for transfer options
@@ -102,8 +98,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 		// Get preferred caches
 		caches, err := getPreferredCaches()
 		if err != nil {
-			log.Errorln("Failed to get preferred caches:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to get preferred caches:", err)
 		}
 
 		// Convert caches to strings
@@ -122,8 +117,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 		transfers := make([]client_agent.TransferRequest, len(args))
 		for i, src := range args {
 			if !pelican_url.IsPelicanURL(src) {
-				log.Errorln("Provided URL is not a valid Pelican URL:", src)
-				os.Exit(1)
+				exitWithError(1, "Provided URL is not a valid Pelican URL:", src)
 			}
 			transfers[i] = client_agent.TransferRequest{
 				Operation:   "prestage",
@@ -142,16 +136,14 @@ func prestageMain(cmd *cobra.Command, args []string) {
 				warmItems[i] = asyncWarmItem{url: src, write: false}
 			}
 			if err := warmWalletForAsync(ctx, apiClient, warmItems); err != nil {
-				log.Errorln("Failed to prepare credentials for async transfer:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to prepare credentials for async transfer:", err)
 			}
 		}
 
 		// Create job
 		jobID, err := apiClient.CreateJob(ctx, transfers, options)
 		if err != nil {
-			log.Errorln("Failed to create job:", err)
-			os.Exit(1)
+			exitWithError(1, "Failed to create job:", err)
 		}
 
 		if outputJSON {
@@ -161,8 +153,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 			}
 			jsonBytes, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
-				log.Errorln("Failed to marshal JSON:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to marshal JSON:", err)
 			}
 			fmt.Println(string(jsonBytes))
 		} else {
@@ -179,22 +170,19 @@ func prestageMain(cmd *cobra.Command, args []string) {
 			// Wait with a reasonable timeout (e.g., 1 hour)
 			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
 			if err != nil {
-				log.Errorln("Error waiting for job:", err)
-				os.Exit(1)
+				exitWithError(1, "Error waiting for job:", err)
 			}
 
 			// Get final job status
 			status, err := apiClient.GetJobStatus(ctx, jobID)
 			if err != nil {
-				log.Errorln("Failed to get job status:", err)
-				os.Exit(1)
+				exitWithError(1, "Failed to get job status:", err)
 			}
 
 			if outputJSON {
 				jsonBytes, err := json.MarshalIndent(status, "", "  ")
 				if err != nil {
-					log.Errorln("Failed to marshal JSON:", err)
-					os.Exit(1)
+					exitWithError(1, "Failed to marshal JSON:", err)
 				}
 				fmt.Println(string(jsonBytes))
 			} else {
@@ -202,7 +190,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 			}
 
 			if status.Status != "completed" {
-				os.Exit(1)
+				exitWithFlush(1)
 			}
 		} else {
 			if !outputJSON {
@@ -224,12 +212,12 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	}
 
 	if len(args) < 1 {
-		log.Errorln("Prefix(es) to prestage must be specified")
+		reportError("Prefix(es) to prestage must be specified")
 		err = cmd.Help()
 		if err != nil {
 			log.Errorln("Failed to print out help:", err)
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 
 	log.Debugln("Prestage prefixes:", args)
@@ -238,16 +226,14 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	// as options.
 	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln("Failed to get preferred caches:", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get preferred caches:", err)
 	}
 
 	lastSrc := ""
 
 	for _, src := range args {
 		if !pelican_url.IsPelicanURL(src) {
-			log.Errorln("Provided URL is not a valid Pelican URL:", src)
-			os.Exit(1)
+			exitWithError(1, "Provided URL is not a valid Pelican URL:", src)
 		}
 		if _, err = client.DoPrestage(ctx, src,
 			client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
@@ -261,25 +247,8 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	if err != nil {
 		// Print the list of errors
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
-		errMsg := err.Error()
-		var pe error_codes.PelicanError
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		if errors.Is(err, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
-			os.Exit(pe.ExitCode())
-		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
-			log.Errorln("Failure prestaging " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(err) {
-				log.Errorln("Errors are retryable")
-				os.Exit(11)
-			}
-			os.Exit(1)
-		}
+		exitTransferFailure(err, "Failure prestaging "+lastSrc)
 	}
 }
