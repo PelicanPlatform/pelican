@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -640,14 +641,10 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
-	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
-	test_utils.MockFederationRoot(t, nil, nil)
-	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempConfigDir, "issuer-keys")))
-	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
-
 	// A scripted stand-in for the registry's completeness endpoint. Each
 	// subtest installs the response it wants; the request counter shows
-	// whether the watcher kept polling or stopped.
+	// whether the watcher kept polling or stopped. The handler runs on the
+	// server's goroutine, so it must only assert (never require/FailNow).
 	var (
 		respondMu sync.Mutex
 		respond   func(w http.ResponseWriter)
@@ -661,7 +658,9 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 	statusResponse := func(res server_structs.CheckNamespaceCompleteRes) func(w http.ResponseWriter) {
 		return func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "application/json")
-			require.NoError(t, json.NewEncoder(w).Encode(res))
+			if err := json.NewEncoder(w).Encode(res); !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 		}
 	}
 	mux := http.NewServeMux()
@@ -674,7 +673,12 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 	})
 	svr := httptest.NewServer(mux)
 	defer svr.Close()
-	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+
+	// The fake registry exists before the server is initialized, so the
+	// federation metadata can point at it from the start and InitServer runs once.
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{RegistryEndpoint: svr.URL}, nil)
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempConfigDir, "issuer-keys")))
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	linkFile := filepath.Join(tempConfigDir, "completion-link")
@@ -776,22 +780,34 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 		assert.GreaterOrEqual(t, requests.Load(), int32(2))
 	})
 
-	t.Run("incomplete-without-link-warns-and-keeps-polling", func(t *testing.T) {
+	t.Run("incomplete-without-link-retires-stale-link-and-keeps-polling", func(t *testing.T) {
 		logHook.Reset()
 		requests.Store(0)
+		// First poll: a link is offered and written to the file.
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix: {EditUrl: editUrl, Msg: "Incomplete registration: Institution is a required field"},
+			},
+		}))
+		stop := start(t)
+		require.Eventually(t, func() bool { return !fileAbsent() }, 5*time.Second, 10*time.Millisecond)
+
+		// The registration then vanishes on the registry: no link, only an
+		// explanation. The stale link must be retired, not left on disk.
+		polled := requests.Load()
 		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
 			Results: map[string]server_structs.NamespaceCompletenessResult{
 				prefix: {Msg: "Namespace " + prefix + " does not exist"},
 			},
 		}))
-		stop := start(t)
-		require.Eventually(t, func() bool { return requests.Load() >= 2 }, 5*time.Second, 10*time.Millisecond,
+		require.Eventually(t, fileAbsent, 5*time.Second, 10*time.Millisecond,
+			"a poll without a completion link must remove the previously written link")
+		require.Eventually(t, func() bool { return requests.Load() >= polled+2 }, 5*time.Second, 10*time.Millisecond,
 			"the watcher must keep polling when no link is available")
 		stop()
 
 		assert.True(t, logged(logrus.WarnLevel, "no completion link is available"))
 		assert.True(t, logged(logrus.WarnLevel, "does not exist"), "the registry's explanation must be surfaced")
-		assert.False(t, logged(logrus.ErrorLevel, "Server registration is incomplete"), "no link, no link banner")
 		assert.True(t, fileAbsent())
 	})
 

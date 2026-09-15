@@ -688,6 +688,10 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			errMsg := "Validation failed: "
 			totalErr := 0
 			for _, err := range validationErrs {
+				// Registry admin can correct an unclaimed registration
+				if err.Field() == "UserID" && err.Tag() == "required" && isAdmin {
+					continue
+				}
 				errMsg += err.Translate(config.GetEnTranslator()) + "\n"
 				totalErr += 1
 			}
@@ -710,11 +714,12 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// A fully-valid submission moves an auto-registered (Incomplete)
-		// registration into the admin review queue. Partially-filled updates
-		// (e.g. an admin correcting an unclaimed registration) keep it Incomplete.
-		// Denial is likewise not final: editing a Denied registration (e.g. to
-		// fix the problem that led to the denial) resubmits it as Pending for
-		// another round of review.
+		// registration into the admin review queue. The only way an update
+		// reaches this point while still failing validation is the admin
+		// UserID bypass above: an admin correcting an unowned registration
+		// leaves it Incomplete until someone claims it. Denial is likewise not
+		// final: editing a Denied registration (e.g. to fix the problem that
+		// led to the denial) resubmits it as Pending for another round of review.
 		if existingStatus == server_structs.RegIncomplete || existingStatus == server_structs.RegDenied {
 			if verr := config.GetValidate().Struct(ns); verr == nil {
 				if serr := updateRegistrationStatusById(ns.ID, server_structs.RegPending, ""); serr != nil {

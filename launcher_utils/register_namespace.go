@@ -401,12 +401,19 @@ func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, pref
 				// Incomplete with no link to offer: the registry could not
 				// resolve the registration (e.g. the prefix is no longer
 				// registered, or a lookup failed on its side). Surface the
-				// registry's explanation instead of silently retrying.
+				// registry's explanation instead of silently retrying, and
+				// remove any link written on an earlier poll to avoid the file
+				// from keeping a link the registry no longer stands behind.
+				// Limitation: A transient failure clears the link briefly;
+				// the next successful poll writes a fresh one.
 				msg := strings.TrimSpace(result.Msg)
 				if msg == "" {
-					msg = "the registry returned neither a completion link nor an explanation"
+					msg = "the registry returned no explanation"
 				}
 				log.Warningf("Registration for %s is incomplete and no completion link is available: %s", prefix, msg)
+				if _, path, wErr := updateRegCompletionLinkFile(prefix, ""); wErr != nil {
+					log.Warningf("Failed to update the registration completion link file %s: %v", path, wErr)
+				}
 			}
 			select {
 			case <-ticker.C:

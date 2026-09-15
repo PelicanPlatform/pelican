@@ -1696,7 +1696,7 @@ func handleRedeemCollectionOwnershipInvite(ctx *gin.Context) {
 			log.Warningf("Failed to redeem ownership invite link: %v", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Failed to redeem invite link",
+				Msg:    fmt.Sprintf("Failed to redeem invite link: %v", err),
 			})
 		}
 		return
@@ -1754,10 +1754,13 @@ func handleRedeemRegistrationOwnershipInvite(ctx *gin.Context) {
 				Msg:    "invite link not found",
 			})
 		} else {
+			// The helper's errors name the actual obstacle (link already
+			// redeemed, registration gone, account inactive); pass them on so
+			// the caller can tell what to do next.
 			log.Warningf("Failed to redeem registration ownership invite link: %v", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Failed to redeem invite link",
+				Msg:    fmt.Sprintf("Failed to redeem invite link: %v", err),
 			})
 		}
 		return
