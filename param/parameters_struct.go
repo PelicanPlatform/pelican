@@ -168,6 +168,7 @@ type Config struct {
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
 		AuthorizationCodeLifetime time.Duration `mapstructure:"authorizationcodelifetime" yaml:"AuthorizationCodeLifetime"`
 		AuthorizationTemplates any `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		DeviceCodePollingInterval time.Duration `mapstructure:"devicecodepollinginterval" yaml:"DeviceCodePollingInterval"`
 		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
 		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
@@ -757,6 +758,7 @@ type configWithType struct {
 		AuthenticationSource struct { Type string; Value string }
 		AuthorizationCodeLifetime struct { Type string; Value time.Duration }
 		AuthorizationTemplates struct { Type string; Value any }
+		DeviceCodePollingInterval struct { Type string; Value time.Duration }
 		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
 		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }

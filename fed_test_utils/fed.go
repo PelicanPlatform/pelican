@@ -189,6 +189,11 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	// In tests, skip the drain-wait period before XRootD restarts
 	// so tests don't time out waiting for PIDs to change.
 	require.NoError(t, param.Xrootd_ShutdownTimeout.Set(0))
+	// RFC 8628's 5s device-code polling interval is paced for a human reading a code off
+	// a screen; a test approves instantly, so the client would spend most of the flow
+	// asleep.  One second is the floor the protocol can express (the "interval" field is
+	// whole seconds).
+	require.NoError(t, param.Issuer_DeviceCodePollingInterval.Set(time.Second))
 	require.NoError(t, param.Server_EnableUI.Set(false))
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(t.TempDir(), "server.sqlite")))
