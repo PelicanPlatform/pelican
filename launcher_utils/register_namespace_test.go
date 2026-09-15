@@ -27,13 +27,20 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -604,4 +611,216 @@ func TestUpdateRegCompletionLinkFile(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 	_, _, err = updateRegCompletionLinkFile("/foo", "")
 	require.NoError(t, err)
+}
+
+// TestWatchRegistrationCompletion drives the completion-link watcher against
+// a scripted registry and covers each branch of its poll loop: the registry
+// lacking the endpoint, an incomplete registration with and without a
+// completion link, a response missing the prefix, a transport-level error,
+// and completion clearing the link file and ending the watch.
+func TestWatchRegistrationCompletion(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	logHook := logtest.NewGlobal()
+	t.Cleanup(func() {
+		regCompletionLinksMutex.Lock()
+		regCompletionLinks = make(map[string]string)
+		regCompletionLinksMutex.Unlock()
+		server_utils.ResetTestState()
+	})
+	server_utils.ResetTestState()
+	regCompletionLinksMutex.Lock()
+	regCompletionLinks = make(map[string]string)
+	regCompletionLinksMutex.Unlock()
+
+	origInterval := regCompletionLinkInterval
+	regCompletionLinkInterval = 20 * time.Millisecond
+	t.Cleanup(func() { regCompletionLinkInterval = origInterval })
+
+	tempConfigDir := t.TempDir()
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	require.NoError(t, param.ConfigBase.Set(tempConfigDir))
+	test_utils.MockFederationRoot(t, nil, nil)
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempConfigDir, "issuer-keys")))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	// A scripted stand-in for the registry's completeness endpoint. Each
+	// subtest installs the response it wants; the request counter shows
+	// whether the watcher kept polling or stopped.
+	var (
+		respondMu sync.Mutex
+		respond   func(w http.ResponseWriter)
+		requests  atomic.Int32
+	)
+	setResponse := func(fn func(w http.ResponseWriter)) {
+		respondMu.Lock()
+		defer respondMu.Unlock()
+		respond = fn
+	}
+	statusResponse := func(res server_structs.CheckNamespaceCompleteRes) func(w http.ResponseWriter) {
+		return func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(w).Encode(res))
+		}
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1.0/registry/namespaces/check/status", func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		respondMu.Lock()
+		fn := respond
+		respondMu.Unlock()
+		fn(w)
+	})
+	svr := httptest.NewServer(mux)
+	defer svr.Close()
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	linkFile := filepath.Join(tempConfigDir, "completion-link")
+	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(linkFile))
+
+	const prefix = "/origins/example.org"
+	const editUrl = "https://registry.example/view/registry/claim/?id=7"
+
+	logged := func(level logrus.Level, substr string) bool {
+		for _, e := range logHook.AllEntries() {
+			if e.Level == level && strings.Contains(e.Message, substr) {
+				return true
+			}
+		}
+		return false
+	}
+	fileAbsent := func() bool {
+		_, err := os.Stat(linkFile)
+		return os.IsNotExist(err)
+	}
+	// start launches the watcher on a fresh context and returns a function
+	// that cancels it and waits for the goroutine to exit.
+	start := func(t *testing.T) (stop func()) {
+		wctx, wcancel, wegrp := test_utils.TestContext(ctx, t)
+		watchRegistrationCompletion(wctx, wegrp, prefix)
+		return func() {
+			wcancel()
+			require.NoError(t, wegrp.Wait())
+		}
+	}
+	// waitForExit asserts the watcher goroutine ends on its own (without a cancel).
+	waitForExit := func(t *testing.T, wegrp interface{ Wait() error }) {
+		done := make(chan error, 1)
+		go func() { done <- wegrp.Wait() }()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("watcher did not exit on its own")
+		}
+	}
+
+	t.Run("registry-without-endpoint-stops-quietly", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) })
+
+		wctx, wcancel, wegrp := test_utils.TestContext(ctx, t)
+		defer wcancel()
+		watchRegistrationCompletion(wctx, wegrp, prefix)
+		waitForExit(t, wegrp)
+
+		assert.EqualValues(t, 1, requests.Load(), "an unsupported registry must not be polled again")
+		assert.True(t, fileAbsent())
+		assert.False(t, logged(logrus.ErrorLevel, "Server registration is incomplete"))
+	})
+
+	t.Run("incomplete-with-link-writes-file-then-completion-clears-it", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix: {EditUrl: editUrl, Msg: "Incomplete registration: Institution is a required field"},
+			},
+		}))
+
+		wctx, wcancel, wegrp := test_utils.TestContext(ctx, t)
+		defer wcancel()
+		watchRegistrationCompletion(wctx, wegrp, prefix)
+
+		require.Eventually(t, func() bool { return !fileAbsent() }, 5*time.Second, 10*time.Millisecond)
+		contents, err := os.ReadFile(linkFile)
+		require.NoError(t, err)
+		line := strings.TrimSpace(string(contents))
+		require.True(t, strings.HasPrefix(line, "Complete server registration at "), line)
+		assert.Contains(t, line, "(expire at ")
+		// The link is the registry's claim URL with a proof-of-possession token
+		// appended (query keys are re-encoded in sorted order).
+		linkStr := strings.TrimPrefix(line, "Complete server registration at ")
+		linkStr = strings.TrimSpace(strings.SplitN(linkStr, " (expire at", 2)[0])
+		link, err := url.Parse(linkStr)
+		require.NoError(t, err, linkStr)
+		want, _ := url.Parse(editUrl)
+		assert.Equal(t, want.Host, link.Host)
+		assert.Equal(t, want.Path, link.Path)
+		assert.Equal(t, "7", link.Query().Get("id"))
+		assert.NotEmpty(t, link.Query().Get("access_token"), "the link must carry a proof-of-possession token")
+		assert.True(t, logged(logrus.ErrorLevel, "Server registration is incomplete"))
+		assert.True(t, logged(logrus.WarnLevel, "Institution is a required field"), "the registry's explanation must be surfaced")
+
+		// A later poll finds the registration complete: the link is retired
+		// and the watcher ends.
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{prefix: {Completed: true}},
+		}))
+		waitForExit(t, wegrp)
+		assert.True(t, fileAbsent(), "completion must remove the link file")
+		assert.True(t, logged(logrus.InfoLevel, "is complete"))
+		assert.GreaterOrEqual(t, requests.Load(), int32(2))
+	})
+
+	t.Run("incomplete-without-link-warns-and-keeps-polling", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix: {Msg: "Namespace " + prefix + " does not exist"},
+			},
+		}))
+		stop := start(t)
+		require.Eventually(t, func() bool { return requests.Load() >= 2 }, 5*time.Second, 10*time.Millisecond,
+			"the watcher must keep polling when no link is available")
+		stop()
+
+		assert.True(t, logged(logrus.WarnLevel, "no completion link is available"))
+		assert.True(t, logged(logrus.WarnLevel, "does not exist"), "the registry's explanation must be surfaced")
+		assert.False(t, logged(logrus.ErrorLevel, "Server registration is incomplete"), "no link, no link banner")
+		assert.True(t, fileAbsent())
+	})
+
+	t.Run("response-missing-prefix-warns-and-keeps-polling", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{"/other": {Completed: true}},
+		}))
+		stop := start(t)
+		require.Eventually(t, func() bool { return requests.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+		stop()
+
+		assert.True(t, logged(logrus.WarnLevel, "does not contain the registration status"))
+		assert.True(t, fileAbsent())
+	})
+
+	t.Run("registry-error-warns-and-keeps-polling", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("boom"))
+		})
+		stop := start(t)
+		require.Eventually(t, func() bool { return requests.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+		stop()
+
+		assert.True(t, logged(logrus.WarnLevel, "Failed to check registration completeness"))
+		assert.True(t, fileAbsent())
+	})
 }

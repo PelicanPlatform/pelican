@@ -3137,10 +3137,16 @@ func RedeemRegistrationOwnershipInviteLink(db *gorm.DB, plaintext string, redeem
 		// real, active user.
 		var reg server_structs.Registration
 		if err := tx.First(&reg, "id = ?", link.RegistrationID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("the registration (ID %d) this invite refers to no longer exists", link.RegistrationID)
+			}
 			return err
 		}
 		var redeemer User
 		if err := tx.First(&redeemer, "id = ?", redeemerUserID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("redeemer user %q does not exist", redeemerUserID)
+			}
 			return err
 		}
 		if redeemer.Status != UserStatusActive {
@@ -3166,23 +3172,8 @@ func RedeemRegistrationOwnershipInviteLink(db *gorm.DB, plaintext string, redeem
 			return errors.New("invite link has already been redeemed")
 		}
 
-		// The owner lives inside the JSON-serialized admin metadata, so
-		// transfer via read-modify-write within this transaction.
-		reg.AdminMetadata.UserID = redeemer.ID
-		reg.AdminMetadata.UpdatedAt = now
-		adminMetadataBytes, err := json.Marshal(reg.AdminMetadata)
-		if err != nil {
-			return err
-		}
-		if err := tx.Model(&server_structs.Registration{}).
-			Where("id = ?", reg.ID).
-			Update("admin_metadata", string(adminMetadataBytes)).Error; err != nil {
-			return err
-		}
-		// A successful transfer invalidates every other outstanding invite
-		// for this registration: they were minted under the previous owner's
-		// authority, which the transfer just ended.
-		return RevokeRegistrationOwnershipInviteLinks(tx, reg.ID)
+		// The link is consumed; hand the registration to the redeemer.
+		return SetRegistrationOwner(tx, &reg, redeemer.ID)
 	})
 	if err != nil {
 		return 0, "", err
@@ -3190,13 +3181,49 @@ func RedeemRegistrationOwnershipInviteLink(db *gorm.DB, plaintext string, redeem
 	return registrationID, registrationPrefix, nil
 }
 
+// SetRegistrationOwner is the single primitive through which a registration's
+// owner (admin_metadata.user_id, a Pelican user ID) is written to the database.
+// Every ownership change (a key-holder claim, or an ownership-transfer invite
+// redemption) goes through it so the two side effects that must stay in
+// lockstep cannot drift apart:
+//
+//  1. the owner is rewritten inside the JSON-serialized admin metadata
+//     (read-modify-write, so reg must have been loaded within tx), and
+//  2. every outstanding ownership-transfer invite for the registration is
+//     revoked, because it was minted under an authority (the previous owner,
+//     or an admin acting on an unowned row) that the change just ended.
+//
+// Callers own their preconditions (an unowned row for a claim, a valid
+// single-use link for a redemption) and must run inside the transaction
+// that read reg. reg is updated in place to mirror the write.
+func SetRegistrationOwner(tx *gorm.DB, reg *server_structs.Registration, owner string) error {
+	if owner == "" {
+		return errors.New("registration owner must not be empty")
+	}
+	if reg == nil || reg.ID <= 0 {
+		return errors.New("registration must be loaded before its owner can be set")
+	}
+	reg.AdminMetadata.UserID = owner
+	reg.AdminMetadata.UpdatedAt = time.Now()
+	adminMetadataBytes, err := json.Marshal(reg.AdminMetadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal admin metadata: %w", err)
+	}
+	if err := tx.Model(&server_structs.Registration{}).
+		Where("id = ?", reg.ID).
+		Update("admin_metadata", string(adminMetadataBytes)).Error; err != nil {
+		return err
+	}
+	return RevokeRegistrationOwnershipInviteLinks(tx, reg.ID)
+}
+
 // RevokeRegistrationOwnershipInviteLinks revokes every outstanding
 // (unredeemed, unrevoked) ownership-transfer invite for the given
-// registration. Call it whenever the registration's owner changes (a claim
-// or an invite redemption) so links minted under the previous owner's
-// authority cannot transfer the registration out from under the new owner.
-// Accepts a transaction so callers can revoke atomically with the owner
-// write.
+// registration. SetRegistrationOwner calls it on every owner change so links
+// minted under the previous owner's authority cannot transfer the
+// registration out from under the new owner; call it directly only when
+// invites must die without the owner changing. Accepts a transaction so the
+// revocation is atomic with the owner write.
 func RevokeRegistrationOwnershipInviteLinks(db *gorm.DB, registrationID int) error {
 	return db.Model(&GroupInviteLink{}).
 		Where("kind = ? AND registration_id = ? AND redeemed_by = '' AND revoked = 0",

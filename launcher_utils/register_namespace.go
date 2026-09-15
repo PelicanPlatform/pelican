@@ -294,7 +294,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 // The registration edit token attached to the completion link is valid for
 // origin.RegEditTokenLifetime (15 minutes); re-write the link (with a fresh
 // token) at a shorter interval so the most recent link is always usable.
-const regCompletionLinkInterval = 10 * time.Minute
+var regCompletionLinkInterval = 10 * time.Minute // var so tests can shorten the poll period
 
 // Request-link lines for this server's incomplete registrations, one per
 // prefix, mirrored into Server.RegistrationCompletionLinkFile.
@@ -397,6 +397,16 @@ func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, pref
 				}
 				log.Errorf("Server registration is incomplete; open the link below in a browser and log in to the registry to complete it (a fresh link is written to %s every %s):\n%s",
 					dest, regCompletionLinkInterval, strings.TrimRight(contents, "\n"))
+			} else {
+				// Incomplete with no link to offer: the registry could not
+				// resolve the registration (e.g. the prefix is no longer
+				// registered, or a lookup failed on its side). Surface the
+				// registry's explanation instead of silently retrying.
+				msg := strings.TrimSpace(result.Msg)
+				if msg == "" {
+					msg = "the registry returned neither a completion link nor an explanation"
+				}
+				log.Warningf("Registration for %s is incomplete and no completion link is available: %s", prefix, msg)
 			}
 			select {
 			case <-ticker.C:
