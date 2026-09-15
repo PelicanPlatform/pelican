@@ -2433,6 +2433,21 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	return
 }
 
+// The token operations a third-party copy asks for.
+//
+// A copy reads the source and writes the destination exactly the way a get and
+// a put do, so it asks for the same two operations they do.  The Shared*
+// variants are for `pelican object share`: they demand a credential whose
+// scope names the object *exactly* and they suppress the issuer's scope-depth
+// narrowing.  Asking for those here made every ordinary user credential -- one
+// scoped to a prefix, which is what an issuer hands out -- look unacceptable,
+// so a copy warned "Using provided token ... even though it does not appear to
+// be acceptable to perform transfer" and then used it anyway, once per file.
+const (
+	copySourceTokenOperation      = config.TokenRead
+	copyDestinationTokenOperation = config.TokenWrite
+)
+
 // Create a new third-party copy job for the client.
 //
 // This creates a transfer that uses the HTTP COPY verb to instruct the
@@ -2484,12 +2499,12 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		xferType:          transferTypeCopy,
 		uuid:              id,
 		project:           project,
-		token:             NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
+		token:             NewTokenGenerator(&copyDestUrl, nil, copyDestinationTokenOperation, !tc.skipAcquire),
 	}
 	tj.fedToken = tc.fedToken
 	tj.cacheMode = tc.cacheMode
 	tj.srcURL = src
-	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
+	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, copySourceTokenOperation, !tc.skipAcquire)
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
 		tj.srcToken.SetToken(tc.token)
