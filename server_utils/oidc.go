@@ -19,7 +19,6 @@
 package server_utils
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -166,30 +165,30 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 func exportIssuerJWKS(ctx *gin.Context) {
 	key, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		log.Errorf("Failed to load server's public key: %v", err)
+		// Same scope and kind as the per-namespace JWKS handler uses: this is
+		// one server-wide fault seen through a second unauthenticated
+		// endpoint, so the two report it once between them rather than once
+		// per request on each.
+		config.LogJWKSIssueOnChange(log.ErrorLevel,
+			config.JWKSServerKeysScope, config.JWKSKindBaseKeys, err.Error(),
+			"Failed to load the server's public key set while serving a "+
+				"JWKS endpoint: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to load server's public key",
 		})
 	} else {
-		jsonData, err := json.MarshalIndent(key, "", "  ")
-		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to marshal server's public key",
-			})
-			return
-		}
-		// Append a new line to the JSON data
-		jsonData = append(jsonData, '\n')
-		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
+		config.ForgetJWKSIssue(config.JWKSServerKeysScope, config.JWKSKindBaseKeys)
 		// The public JWKS must be readable cross-origin: browser-based OIDC
 		// clients follow the discovery document's jwks_uri here to validate
 		// token signatures. The discovery endpoint above already allows any
 		// origin; without the same header on the JWKS, those clients fail on
 		// the very next fetch.
 		ctx.Header("Access-Control-Allow-Origin", "*")
-		ctx.Data(200, "application/json", jsonData)
+		// This shipped as a downloadable attachment before the JWKS response
+		// writers were consolidated; preserve that header so the server-level
+		// endpoint's response is unchanged.
+		WriteJWKS(ctx, key, "public-signing-key.jwks")
 	}
 }
 
