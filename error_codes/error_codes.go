@@ -126,7 +126,7 @@ var (
 		exitCode:    11,
 		code:        3006,
 		retryable:   true,
-		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
+		description: "The client never established a connection, so the request was never sent and the server has no record of it. Whether the address was unreachable, the name did not resolve, or the handshake did not complete, the failure is at the connection layer and a resubmitted job may reach a different server or find the same one recovered.",
 	}
 	ErrAuthorization = &PelicanError{
 		errorType:   "Authorization",
@@ -410,7 +410,7 @@ func NewContact_ConnectionSetupError(err error) *PelicanError {
 		exitCode:    11,
 		code:        3006,
 		retryable:   true,
-		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
+		description: "The client never established a connection, so the request was never sent and the server has no record of it. Whether the address was unreachable, the name did not resolve, or the handshake did not complete, the failure is at the connection layer and a resubmitted job may reach a different server or find the same one recovered.",
 		err:         err,
 	}
 }
