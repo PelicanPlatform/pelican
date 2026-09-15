@@ -32,10 +32,6 @@ type RegistrationStatus string
 // The AdminMetadata is used in [Namespace] as a marshaled JSON string
 // to be stored in registry DB.
 //
-// The UserID and SecurityContactUserID are meant to correspond to the "sub" claim of the user token that
-// the OAuth client issues if the user is logged in using OAuth, or it should be
-// "admin" from local password-based authentication.
-//
 // To prevent users from writing to certain fields (readonly), you may use "post" tag
 // with value "exclude". This will exclude the field from user's create/update requests
 // and the field will also be excluded from field discovery endpoint (OPTION method).
@@ -45,11 +41,11 @@ type RegistrationStatus string
 // endpoint to tell the UI if a field is required. For other validator tags,
 // visit: https://pkg.go.dev/github.com/go-playground/validator/v10
 type AdminMetadata struct {
-	UserID                string             `json:"user_id" post:"exclude" validate:"required"` // "sub" claim of user JWT who requested registration
+	UserID                string             `json:"user_id" post:"exclude" validate:"required"` // Pelican user ID of the owner; empty until claimed
 	Description           string             `json:"description" validate:"required"`
 	SiteName              string             `json:"site_name"`
 	Institution           string             `json:"institution" validate:"required"`                                                                                // the unique identifier of the institution
-	SecurityContactUserID string             `json:"security_contact_user_id" description:"User Identifier of the user responsible for the security of the service"` // "sub" claim of user who is responsible for taking security concern
+	SecurityContactUserID string             `json:"security_contact_user_id" description:"User Identifier of the user responsible for the security of the service"` // default to the owner's user ID
 	Status                RegistrationStatus `json:"status" post:"exclude"`
 	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
 	ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`

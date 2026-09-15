@@ -30,9 +30,12 @@ import (
 
 // This file serves as the db migration for v26.0 and could be removed later.
 
-// cilogonSubjectRegexp matches the owner encoding the registry used before the
-// 7.27 user model: the raw CILogon OIDC `sub` claim of the user who registered,
-// e.g. http://cilogon.org/serverA/users/12345.
+// cilogonSubjectRegexp matches the owner encoding the registry used before
+// ownership was bound to Pelican user IDs: the raw CILogon OIDC `sub` claim of
+// the user who registered, e.g. http://cilogon.org/serverA/users/12345. Both
+// producers of that encoding are gone — web-UI registrations stopped writing
+// it with the 7.27 user model, and the CLI's --with-identity flow now resolves
+// the subject to a Pelican user ID (see registry.ownerIdFromOidcIdentity).
 var cilogonSubjectRegexp = regexp.MustCompile(`^https?://cilogon\.org/server[A-Za-z0-9]+/users/[0-9]+$`)
 
 // migrateLegacyRegistrationOwners re-homes registrations whose

@@ -166,6 +166,53 @@ func registrationBelongsToUser(id int, userId string) (bool, error) {
 	return userId != "" && result.AdminMetadata.UserID == userId, nil
 }
 
+// ownerIdFromOidcIdentity maps an OIDC identity presented at registration
+// time (the CLI's --with-identity device flow) onto the Pelican user ID that
+// carries it, so the registration is owned by the same account the person
+// would use in the web UI. When the issuer is known the (sub, issuer) pair is
+// looked up exactly, across primary and linked identities; otherwise (or on
+// an issuer miss) the subject alone is used, but only when it resolves to a
+// single account. Returns "" when no (or no unique) account matches, leaving
+// the registration unowned for the regular claim flow.
+func ownerIdFromOidcIdentity(sub string, iss string) string {
+	if sub == "" {
+		return ""
+	}
+	db := database.ServerDatabase
+	if iss != "" {
+		var ids []string
+		if err := db.Model(&database.User{}).Where("sub = ? AND issuer = ?", sub, iss).Limit(1).Pluck("id", &ids).Error; err != nil {
+			log.Warningf("Failed to look up a Pelican user for OIDC identity %s@%s: %v", sub, iss, err)
+			return ""
+		}
+		if len(ids) == 1 {
+			return ids[0]
+		}
+		// Linked (secondary) identities
+		if err := db.Model(&database.UserIdentity{}).Where("sub = ? AND issuer = ?", sub, iss).Limit(1).Pluck("user_id", &ids).Error; err != nil {
+			log.Warningf("Failed to look up a linked Pelican identity for %s@%s: %v", sub, iss, err)
+			return ""
+		}
+		if len(ids) == 1 {
+			return ids[0]
+		}
+	}
+	var ids []string
+	if err := db.Model(&database.User{}).Where("sub = ?", sub).Limit(2).Pluck("id", &ids).Error; err != nil {
+		log.Warningf("Failed to look up a Pelican user for OIDC subject %s: %v", sub, err)
+		return ""
+	}
+	switch len(ids) {
+	case 1:
+		return ids[0]
+	case 0:
+		log.Infof("OIDC subject %s has no Pelican account yet; the registration stays unowned until it is claimed", sub)
+	default:
+		log.Warningf("OIDC subject %s matches more than one Pelican account; the registration stays unowned until it is claimed", sub)
+	}
+	return ""
+}
+
 // errRegistrationAlreadyOwned reports that a claim repeated or lost a race:
 // the registration already carries a non-empty owner. Handlers translate it
 // to an HTTP conflict (or forbidden, on the tokenized-edit leg).

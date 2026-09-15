@@ -389,13 +389,13 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			log.Errorln("Failed to decode non-empty Identity field:", err)
 			return false, nil, err
 		}
-		sub, ok := idMap["sub"]
-		if ok {
-			val, ok := sub.(string)
-			if ok {
-				ns.AdminMetadata.UserID = val
-			}
-		}
+		// The owner column holds Pelican user IDs only, not the raw OIDC
+		// subject; map the presented identity onto the matching Pelican
+		// account when one exists, and otherwise leave the registration
+		// unowned so the regular claim flow applies.
+		sub, _ := idMap["sub"].(string)
+		iss, _ := idMap["iss"].(string)
+		ns.AdminMetadata.UserID = ownerIdFromOidcIdentity(sub, iss)
 		if inTopo {
 			topoNssStr := GetTopoPrefixString(topoNss)
 			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)

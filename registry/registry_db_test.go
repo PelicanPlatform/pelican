@@ -1017,3 +1017,38 @@ func TestClaimRegistration(t *testing.T) {
 		require.ErrorIs(t, claimRegistration(404404, "u-owner-id"), errRegistrationNotFound)
 	})
 }
+
+// TestOwnerIdFromOidcIdentity covers the mapping the CLI --with-identity
+// registration path uses so the owner column only ever holds Pelican user IDs.
+func TestOwnerIdFromOidcIdentity(t *testing.T) {
+	setupMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
+
+	const issA = "https://idp-a.example"
+	const issB = "https://idp-b.example"
+	alice, err := database.CreateUser(database.ServerDatabase, "alice", "sub-alice", issA, database.CreatorSelf())
+	require.NoError(t, err)
+	// The same subject issued by two providers belongs to two distinct accounts
+	bobA, err := database.CreateUser(database.ServerDatabase, "bob-a", "sub-bob", issA, database.CreatorSelf())
+	require.NoError(t, err)
+	_, err = database.CreateUser(database.ServerDatabase, "bob-b", "sub-bob", issB, database.CreatorSelf())
+	require.NoError(t, err)
+	// A secondary identity linked to alice's account (inserted directly: the
+	// mock DB lacks the credential view database.CreateUserIdentity consults)
+	require.NoError(t, database.ServerDatabase.Create(&database.UserIdentity{
+		ID: "ident-alice-b", UserID: alice.ID, Sub: "sub-alice-linked", Issuer: issB,
+	}).Error)
+
+	assert.Equal(t, "", ownerIdFromOidcIdentity("", issA), "no subject, no owner")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-nobody", issA), "unknown identity stays unowned")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-nobody", ""))
+
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice", issA), "exact (sub, iss) match")
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice", ""), "unique subject resolves without an issuer")
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice", issB), "issuer miss falls back to the unique subject")
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice-linked", issB), "linked identities resolve to their account")
+
+	assert.Equal(t, bobA.ID, ownerIdFromOidcIdentity("sub-bob", issA), "ambiguous subject disambiguated by issuer")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-bob", ""), "ambiguous subject without issuer stays unowned")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-bob", "https://idp-c.example"), "ambiguous subject under an unknown issuer stays unowned")
+}

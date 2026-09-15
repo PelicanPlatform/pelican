@@ -320,7 +320,7 @@ definitions:
         example: "/test"
       identity:
         type: string
-        description: The user identity we get from CILogon if the namespace is registered via CLI with `--with-identity` flag
+        description: The OIDC user-info document (JSON) received from the identity provider when the namespace is registered via Pelican CLI with the `--with-identity` flag.
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
       custom_fields:
