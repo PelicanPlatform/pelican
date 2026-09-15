@@ -77,6 +77,7 @@ In Pelican 26.0+, ownership is bound to your Registry **User ID** rather than lo
 
 * **Unowned Legacy Registrations:** Registrations created before Pelican 26.0 can be claimed using a completion link once running 26.0+, or via the Origin Web UI on any version.
 * **Legacy Ownership Strings:** Registrations with older owner strings are automatically migrated to Pelican User IDs upon upgrading the Registry to 26.0 without breaking backwards compatibility.
+* **CLI Registrations with `--with-identity`:** The identity you present is matched to the Pelican account carrying it (log into the Registry web UI once beforehand so the account exists). If no single account matches, the registration is created unowned and can be claimed later.
 * **Loss of Admin Access:** If you lose access to your Pelican service following an upgrade, request an ownership-transfer link from a federation administrator to re-bind the service to your account.
 
 ## For Federation Administrators
