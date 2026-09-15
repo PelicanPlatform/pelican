@@ -1,6 +1,6 @@
 {
   "name": "src",
-  "version": "7.2.0",
+  "version": "26.0.0-rc.0",
   "private": true,
   "scripts": {
     "copy-sw": "cp node_modules/@pelicanplatform/web-client/dist/serviceWorker/downloadServiceWorker.js public/downloadServiceWorker.js",
