@@ -102,13 +102,13 @@ Server:
 
 ### `Registry.RequireOriginApproval`
 
-By default, a Pelican registry allows any origin to join the federation and serve objects (not the case if running in OSDF mode). You can set `Registry.RequireOriginApproval` if you want to review registration details of a new origin before allowing it to join your federation. With `Registry.RequireOriginApproval == true`, a new origin can successfully *register* against your registry, but the director will not be able to direct object requests to the unapproved origin.
+By default, a new origin can successfully *register* against the registry, but the origin is still in unapproved state. The director will not be able to direct object requests to the unapproved origin until it is approved manually by the admin. When this configuration parameter is set to `false`, any origin will be able to join without admin approval.
 
-A registry admin may edit, review, approve, or deny a new origin registration in your registry Web UI.
+A registry admin may edit, review, approve, or deny a new origin registration in the registry Web UI.
 
 ### `Registry.RequireCacheApproval`
 
-Similarly, Pelican by default allows any cache to join the federation. You can set `Registry.RequireCacheApproval` to `true` in order for caches to require approval before they can serve an object.
+Similarly, a new cache can successfully *register* against the registry but still remains in unapproved state. The director will not redirect object requests to the unapproved cache until it is approved manually by the admin. Set this parameter to `false` if you want any cache to join without admin approval.
 
 ### `Registry.RequireKeyChaining`
 
