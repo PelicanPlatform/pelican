@@ -122,14 +122,22 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 		},
 	)
 
+	// Touch-on-hit must stay disabled on all three caches: extending an
+	// entry's lifetime on every read would let a continuously-active user
+	// keep stale identity data forever — most importantly a secondary-GID
+	// list (which feeds setgroups(2)) from before an admin revoked a group
+	// membership, and cached negative results past the point the account
+	// was created.  With it disabled, staleness is bounded by the TTLs.
 	cl.userCache = ttlcache.New[string, cachedUserResult](
 		ttlcache.WithTTL[string, cachedUserResult](positiveTTL),
+		ttlcache.WithDisableTouchOnHit[string, cachedUserResult](),
 		ttlcache.WithLoader[string, cachedUserResult](ttlcache.NewSuppressedLoader[string, cachedUserResult](userLoader, nil)),
 		ttlcache.WithCapacity[string, cachedUserResult](4096),
 	)
 
 	cl.gidCache = ttlcache.New[string, cachedGIDResult](
 		ttlcache.WithTTL[string, cachedGIDResult](positiveTTL),
+		ttlcache.WithDisableTouchOnHit[string, cachedGIDResult](),
 		ttlcache.WithLoader[string, cachedGIDResult](ttlcache.NewSuppressedLoader[string, cachedGIDResult](gidLoader, nil)),
 		ttlcache.WithCapacity[string, cachedGIDResult](4096),
 	)
@@ -150,6 +158,7 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 
 	cl.secondaryCache = ttlcache.New[string, cachedSecondaryResult](
 		ttlcache.WithTTL[string, cachedSecondaryResult](positiveTTL),
+		ttlcache.WithDisableTouchOnHit[string, cachedSecondaryResult](),
 		ttlcache.WithLoader[string, cachedSecondaryResult](ttlcache.NewSuppressedLoader[string, cachedSecondaryResult](secondaryLoader, nil)),
 		ttlcache.WithCapacity[string, cachedSecondaryResult](4096),
 	)

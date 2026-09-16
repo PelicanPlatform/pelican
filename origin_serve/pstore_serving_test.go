@@ -41,7 +41,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -148,7 +147,7 @@ func newServedOrigin(t *testing.T, exports []server_utils.OriginExport, storageD
 	require.NotNil(t, ac)
 	for _, export := range exports {
 		for _, issuer := range export.IssuerUrls {
-			ac.issuerKeys.Set(issuer, authConfigItem{set: set}, ttlcache.DefaultTTL)
+			ac.issuerKeys.Set(issuer, set)
 		}
 	}
 
