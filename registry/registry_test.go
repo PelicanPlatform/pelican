@@ -107,7 +107,8 @@ func TestHandleWildcard(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Return 200 as by default Registry.RequireOriginApproval == false
+		// Expect HTTP 200. Since server_utils.ResetTestState() internally calls viper.Reset()
+		// which removes all config params from the map. Therefore Registry.RequireOriginApproval is false (Go's default zero value)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, string(mockJWKSBytes), w.Body.String())
 	})
