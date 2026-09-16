@@ -26,10 +26,6 @@ To register a prefix manually in advance, see [Federation Namespace Prefix Regis
 * **Re-submitting:** Denial is non-final. Editing and resubmitting a `Denied` registration returns it to `Pending`.
 * **Trust Boundary:** Approval is the primary trust boundary. The Director only routes traffic to `Approved` services, and once approved, core properties can only be altered by an administrator.
 
-<Callout type="info">
-Only registrations created by Pelican 26.0+ services start as `Incomplete`. Existing federation registrations retain their current status and meaning.
-</Callout>
-
 ## How Services Register
 
 ### 1. Automatic Registration
@@ -37,11 +33,10 @@ When an Origin or Cache starts up, it automatically registers with the federatio
 It submits its public key, namespace prefix(es), and site name, entering the system as `Incomplete`.
 
 ### 2. Finding the Registration Link
-While a registration remains incomplete, the service generates a **registration completion link** (valid for 15 minutes and refreshed every 10 minutes). Access this link through:
+While any of the service's registrations remains incomplete, the service generates a **registration completion link** for each incomplete prefix (valid for 15 minutes and re-minted every 10 minutes). Access these links through:
 
-* **Service Logs / stdout:** Indicated by `Complete server registration at <link> (expire at <local time>)`.
-* **Link File:** Output to the path defined in [`Server.RegistrationCompletionLinkFile`](../parameters.mdx#Server-RegistrationCompletionLinkFile) (one line per prefix) for headless or automated setups.
-The file is removed once all registrations are complete.
+* **Service Logs / stdout:** Every 10 minutes the service logs, at `error` level, `Server registration is incomplete; open the link below in a browser and log in to the registry to complete it ...`, followed by one `Complete server registration at <link> (expire at <time>)` line per prefix. The expiry is printed in the server's local time zone.
+* **Link File:** The same `Complete server registration at ...` lines (one per prefix) are written to the path defined in [`Server.RegistrationCompletionLinkFile`](../parameters.mdx#Server-RegistrationCompletionLinkFile), facilitating headless or automated setups. A prefix's line disappears on the poll after its registration is complete, and the file is removed once no incomplete registration remains. Set the parameter to an empty string to disable the file.
 * **Origin Admin UI:** Displayed under the **Data Exports** table for each prefix.
 
 ### 3. Claiming Ownership
@@ -62,29 +57,29 @@ Once claimed, you will be directed to the registration form:
 2. Confirm the security contact (defaults to your account).
 3. Submit the form to transition status to `Pending` (displayed to admins as "Pending (Ready to review)").
 
-*Note: Your service does not require a restart during this process. It will automatically detect approval via Registry polling and go live.*
+*Note: Your service does not require a restart during this process. It detects approval on its next advertisement cycle (about one minute) and goes live. An Origin is only accepted by the Director once its server registration **and every exported namespace** are approved.*
 
 ## Post-Registration Management
 
 As a registration owner, you can manage your resource through the Registry UI:
 
-* **Resubmit Rejected Entries:** Edit a `Denied` registration and resubmit it to return it to the `Pending` queue.
-* **Transfer Ownership:** Generate a single-use, expiring invite link from the registration's card. Once a colleague logs into their Pelican account and redeems the link, ownership is transferred to them.
+* **Resubmit Denied Entries:** Your `Denied` registrations are listed at `/view/registry/denied/` on the Registry (they do not appear on the dashboard). Edit one and submit it to return it to the `Pending` queue.
+* **Transfer Ownership:** From the card of an `Approved` registration you own, generate a single-use invite link (valid for 7 days; it is shown only once). Once a colleague logs into their Pelican account and redeems the link, ownership is transferred to them; the second redemption of the same link will be rejected.
 
 ## Upgrading to Pelican 26.0+
 
 In Pelican 26.0+, ownership is bound to your Registry **User ID** rather than login usernames or identity strings (e.g., CILogon sub).
 
 * **Unowned Legacy Registrations:** Registrations created before Pelican 26.0 can be claimed using a completion link once running 26.0+, or via the Origin Web UI on any version.
-* **Legacy Ownership Strings:** Registrations with older owner strings are automatically migrated to Pelican User IDs upon upgrading the Registry to 26.0 without breaking backwards compatibility.
+* **Legacy Ownership Strings:** Registrations owned by a CILogon subject are re-homed onto the Pelican account carrying that subject when the Registry starts, provided exactly one active account matches. The check runs on every Registry start, so owners who have not logged in yet are picked up later. Registrations owned by any other string, or by an ambiguous or deactivated account, are left unchanged; use an ownership-transfer link for those.
 * **CLI Registrations with `--with-identity`:** The identity you present is matched to the Pelican account carrying it (log into the Registry web UI once beforehand so the account exists). If no single account matches, the registration is created unowned and can be claimed later.
 * **Loss of Admin Access:** If you lose access to your Pelican service following an upgrade, request an ownership-transfer link from a federation administrator to re-bind the service to your account.
+* **Registration Status:** Only registrations created after the Registry runs Pelican 26.0+ start as `Incomplete`; the Registry assigns the status regardless of the registering service's version. Existing registrations retain their current status and meaning.
 
 ## For Federation Administrators
 
 Administrators manage registrations via the Registry web UI (see [Serving a Pelican Registry](../operating-a-federation/registry.mdx)):
 
-* **Review Queue Priority:** Items marked `Pending (Ready to review)` appear at the top of the queue. `Incomplete` registrations are grouped separately as they do not yet require review.
-* **Editing & Decisions:** You may edit registration fields ("correct") prior to approving or denying a submission.
-* **Manual Overrides:** You can directly approve an `Incomplete` registration (useful for legacy services where operators cannot access claim links).
-* **Transfer Invites:** You can generate an ownership-transfer link for **any** registration to help reassign legacy entries to active Pelican user accounts.
+* **Review Queue:** The dashboard lists **Pending Registrations** (complete forms awaiting your decision) above **Incomplete Registrations** (the server admin has not claimed or completed the form yet; nothing to review). Both lists offer deny and edit; approve is offered on `Pending` and `Denied` entries.
+* **Editing & Decisions:** You can edit registration fields before approving or denying a submission, even for unowned entries. Editing an Incomplete registration does not assign ownership, and it remains Incomplete until explicitly claimed. When denying a submission, you can update the description field to provide actionable feedback for the server admin before they resubmit.
+* **Transfer Invites:** You can generate an ownership-transfer link to reassign any approved registration to another active Pelican user account.

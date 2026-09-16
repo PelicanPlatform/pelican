@@ -124,6 +124,8 @@ export default function Page() {
     return `/registry/${namespaceType}/edit/?${params.toString()}`;
   }, [id, namespaceType, accessToken, fromUrl]);
 
+  const alreadyApproved = namespace?.admin_metadata?.status === 'Approved';
+
   const claimAndContinue = async () => {
     if (id === undefined || accessToken === undefined || editUrl == undefined) {
       return;
@@ -136,7 +138,9 @@ export default function Page() {
     );
     setClaiming(false);
     if (response) {
-      router.push(editUrl);
+      // Approved registrations cannot be edited by their owner; land on the
+      // dashboard, where the newly owned registration is listed.
+      router.push(alreadyApproved ? '/registry/' : editUrl);
     }
   };
 
@@ -159,6 +163,12 @@ export default function Page() {
                 needs an owner. Accepting makes your account the owner of this
                 registration so you can complete and manage it.
               </Typography>
+              {alreadyApproved && (
+                <Typography variant={'body2'} pb={2}>
+                  This registration is already approved. Only Registry admins
+                  can make changes to its fields.
+                </Typography>
+              )}
               <Box pb={2}>
                 <Typography variant={'subtitle2'}>Prefix</Typography>
                 <Typography variant={'body2'} pb={1}>
