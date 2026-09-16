@@ -24,6 +24,13 @@ var (
 	// ErrReservedGroupPrefix indicates a requested group name collides with the
 	// reserved prefix used for automatically managed personal groups.
 	ErrReservedGroupPrefix = errors.New("reserved group name prefix 'user-'")
+	// ErrACLGrantCollision is returned by a group or user rename when the
+	// new name already appears as a collection ACL target. Moving the
+	// renamed principal's grants onto that name would merge them with
+	// grants issued to whoever the name previously referred to, so the
+	// rename is refused; the caller must revoke the existing grants
+	// first. The returned error wraps this sentinel and names them.
+	ErrACLGrantCollision = errors.New("existing collection ACL grants for the new name must be revoked first")
 	// ErrInvalidPassword is returned by VerifyLocalUserPassword when the user
 	// exists but has no local password configured or the password doesn't match.
 	ErrInvalidPassword = errors.New("invalid username or password")
@@ -896,6 +903,39 @@ func GetCollectionAcls(db *gorm.DB, id, user, userID string, groups []string, is
 	}
 
 	return collection.ACLs, nil
+}
+
+// migrateCollectionACLGrants rewrites every collection_acls row keyed
+// by oldName so it is keyed by newName. Because ACLs are name-keyed,
+// a rename that does not carry its grants along leaves them orphaned
+// under the old name, where whoever next claims that name inherits
+// them.
+//
+// If any ACL row already targets newName (a live group can't, since
+// names are unique, but a name granted to an IdP-asserted group has no
+// local row) the rename is refused with an error wrapping
+// ErrACLGrantCollision that names those rows; the caller must revoke
+// them first. Must run inside the same transaction as the rename of
+// the owning users/groups row so a refusal rolls the whole rename back.
+func migrateCollectionACLGrants(tx *gorm.DB, oldName, newName string) error {
+	if oldName == newName {
+		return nil
+	}
+	// Check if there are existing CollectionACLs with the target group listed
+	var existing []CollectionACL
+	if err := tx.Where("group_id = ?", newName).Order("collection_id, role").Find(&existing).Error; err != nil {
+		return err
+	}
+	// If there are return an error to prevent the new group from gaining their access
+	if len(existing) > 0 {
+		parts := make([]string, 0, len(existing))
+		for _, e := range existing {
+			parts = append(parts, fmt.Sprintf("%s on collection %s", e.Role, e.CollectionID))
+		}
+		return fmt.Errorf("cannot rename %q to %q: %q already holds %s: %w",
+			oldName, newName, newName, strings.Join(parts, ", "), ErrACLGrantCollision)
+	}
+	return tx.Model(&CollectionACL{}).Where("group_id = ?", oldName).Update("group_id", newName).Error
 }
 
 func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, groupId string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
@@ -1819,10 +1859,20 @@ func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
 		return nil
 	}
 
-	if err := db.Model(&User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
+	return db.Transaction(func(tx *gorm.DB) error {
+		if username != nil {
+			// Same name-keyed ACL contract as RenameUser: carry the
+			// personal-group grants along with the rename.
+			var user User
+			if err := tx.First(&user, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if err := migrateCollectionACLGrants(tx, "user-"+user.Username, "user-"+*username); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&User{}).Where("id = ?", id).Updates(updates).Error
+	})
 }
 
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user
@@ -1911,6 +1961,14 @@ func RenameUser(db *gorm.DB, id, newUsername, localIssuer string) error {
 		}
 		if user.Username == newUsername {
 			return nil
+		}
+		// The personal ACL group "user-<username>" is synthesised from
+		// the username at check time (see ExpandCallerACLGroups), so a
+		// rename must carry the user's name-keyed grants along;
+		// otherwise they stay orphaned under the old name for whoever
+		// claims that username next.
+		if err := migrateCollectionACLGrants(tx, "user-"+user.Username, "user-"+newUsername); err != nil {
+			return err
 		}
 		updates := map[string]interface{}{"username": newUsername}
 		// Local-issuer accounts: keep the primary sub in lockstep so
@@ -2360,6 +2418,18 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 
 		if !isGroupOwnerOrAdmin(tx, &group, requestorUserID, isAdmin) {
 			return ErrForbidden
+		}
+
+		// Collection ACLs are keyed by group name, so a rename has to
+		// carry the group's grants with it; otherwise they stay
+		// orphaned under the old name for whoever claims it next.
+		// If the new name already holds any grant (e.g. one issued to
+		// an IdP-asserted group of that name) the rename is refused
+		// until those grants are revoked.
+		if name != nil && *name != group.Name {
+			if err := migrateCollectionACLGrants(tx, group.Name, *name); err != nil {
+				return err
+			}
 		}
 
 		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
