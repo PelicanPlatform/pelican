@@ -403,6 +403,13 @@ func handleCreateGroup(ctx *gin.Context) {
 			})
 			return
 		}
+		if errors.Is(err, database.ErrACLGrantCollision) {
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 		if errors.Is(err, database.ErrInvalidIdentifier) || errors.Is(err, database.ErrInvalidDisplayName) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -485,6 +492,11 @@ func handleUpdateGroup(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Group name cannot start with 'user-'",
+			})
+		} else if errors.Is(err, database.ErrACLGrantCollision) {
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
 			})
 		} else if errors.Is(err, database.ErrInvalidIdentifier) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -1025,6 +1037,13 @@ func handleUpdateUser(ctx *gin.Context) {
 		if err := database.RenameUser(database.ServerDatabase, id, *req.Username, localIssuer); err != nil {
 			if errors.Is(err, database.ErrInvalidIdentifier) {
 				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    err.Error(),
+				})
+				return
+			}
+			if errors.Is(err, database.ErrACLGrantCollision) {
+				ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    err.Error(),
 				})

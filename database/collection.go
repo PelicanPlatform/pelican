@@ -24,13 +24,15 @@ var (
 	// ErrReservedGroupPrefix indicates a requested group name collides with the
 	// reserved prefix used for automatically managed personal groups.
 	ErrReservedGroupPrefix = errors.New("reserved group name prefix 'user-'")
-	// ErrACLGrantCollision is returned by a group or user rename when the
-	// new name already appears as a collection ACL target. Moving the
-	// renamed principal's grants onto that name would merge them with
-	// grants issued to whoever the name previously referred to, so the
-	// rename is refused; the caller must revoke the existing grants
-	// first. The returned error wraps this sentinel and names them.
-	ErrACLGrantCollision = errors.New("existing collection ACL grants for the new name must be revoked first")
+	// ErrACLGrantCollision is returned when a group is created with, or
+	// a group/user is renamed to, a name that already appears as a
+	// collection ACL target. ACLs are matched on name, so letting a
+	// principal take that name would hand it every grant issued to
+	// whoever the name previously referred to (typically an
+	// IdP-asserted group with no local row). The operation is refused;
+	// the caller must revoke the existing grants first. The returned
+	// error wraps this sentinel and names them.
+	ErrACLGrantCollision = errors.New("existing collection ACL grants for the name must be revoked first")
 	// ErrInvalidPassword is returned by VerifyLocalUserPassword when the user
 	// exists but has no local password configured or the password doesn't match.
 	ErrInvalidPassword = errors.New("invalid username or password")
@@ -921,21 +923,36 @@ func migrateCollectionACLGrants(tx *gorm.DB, oldName, newName string) error {
 	if oldName == newName {
 		return nil
 	}
-	// Check if there are existing CollectionACLs with the target group listed
-	var existing []CollectionACL
-	if err := tx.Where("group_id = ?", newName).Order("collection_id, role").Find(&existing).Error; err != nil {
+	// Refuse if the target name already holds grants, so the renamed
+	// principal cannot absorb them.
+	held, err := describeACLGrantsForName(tx, newName)
+	if err != nil {
 		return err
 	}
-	// If there are return an error to prevent the new group from gaining their access
-	if len(existing) > 0 {
-		parts := make([]string, 0, len(existing))
-		for _, e := range existing {
-			parts = append(parts, fmt.Sprintf("%s on collection %s", e.Role, e.CollectionID))
-		}
+	if held != "" {
 		return fmt.Errorf("cannot rename %q to %q: %q already holds %s: %w",
-			oldName, newName, newName, strings.Join(parts, ", "), ErrACLGrantCollision)
+			oldName, newName, newName, held, ErrACLGrantCollision)
 	}
 	return tx.Model(&CollectionACL{}).Where("group_id = ?", oldName).Update("group_id", newName).Error
+}
+
+// describeACLGrantsForName returns a human-readable list of the
+// collection ACL grants currently keyed by `name` ("read on collection
+// c1, write on collection c3"), or "" when there are none. Shared by
+// the create-group and rename refusals so both report the same detail.
+func describeACLGrantsForName(db *gorm.DB, name string) (string, error) {
+	var existing []CollectionACL
+	if err := db.Where("group_id = ?", name).Order("collection_id, role").Find(&existing).Error; err != nil {
+		return "", err
+	}
+	if len(existing) == 0 {
+		return "", nil
+	}
+	parts := make([]string, 0, len(existing))
+	for _, e := range existing {
+		parts = append(parts, fmt.Sprintf("%s on collection %s", e.Role, e.CollectionID))
+	}
+	return strings.Join(parts, ", "), nil
 }
 
 func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, groupId string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
@@ -2152,6 +2169,19 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	// Disallow creating groups that start with the reserved personal-group prefix.
 	if strings.HasPrefix(name, "user-") {
 		return nil, ErrReservedGroupPrefix
+	}
+	// Collection ACLs are matched on group name, and DB-stored
+	// membership is consulted regardless of Issuer.GroupSource. A name
+	// that already holds grants but has no local group row belongs to
+	// an IdP-asserted group; if any authenticated user could create a
+	// local group of that name and join it, they would inherit those
+	// grants. Refuse until the grants are revoked.
+	held, err := describeACLGrantsForName(db, name)
+	if err != nil {
+		return nil, err
+	}
+	if held != "" {
+		return nil, fmt.Errorf("cannot create group %q: it already holds %s: %w", name, held, ErrACLGrantCollision)
 	}
 
 	createdBy := creatorOrUnknown(creator.UserID)
