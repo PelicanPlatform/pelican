@@ -11,10 +11,11 @@ This section describes what kinds of access can be granted and situations it may
 
 ## Requirements
 
-1. An Origin service, with a operational web interface
+1. An Origin service, with an operational web interface
 2. A Namespace Prefix export configured in the Origin
 
-To create or delete a "collection" (see below), you must be a collections administrator (includes Origin administrators).
+To *create* a "collection" (see below), you must be a collections administrator (includes Origin administrators).
+Everything after that — including deleting the collection — is done by the collection's owner and the people they delegate to, with no administrator privilege at all.
 
 ## Process
 
@@ -30,15 +31,15 @@ A collection:
 The main benefit to this collection model is the ability to delegate the administration of the collection to others.
 
 1. A collections administrator creates a "collection" and designates a "collection owner".
-2. The collection owner may delegate management of the collection to another individual or to an "admin group".
-3. The collection owner or designated admin can further grant read or write access to other individuals or groups.
+2. The collection owner may delegate management of the collection to an "admin group".
+3. The collection owner or a member of the admin group can further grant read or write access to other groups.
 
 ### Collection management
 
 A collections administrator, the collection owner, or a member of the designated admin group may
 
 * edit the collection settings (name, description, etc.)
-* designate a different collection admin (individual or group)
+* designate a different admin group for the collection
 * grant read or write access to the collection to other groups
 
 ### Users and groups
@@ -50,12 +51,15 @@ A **group** consists of one or more users.
 
 **Access permissions for a collection can only be assigned to a group, not a user.**
 
+To give one person access, put them in a group — or use the implicit personal group every user has, named `user-` followed by their username, which can be granted to directly.
+There is also a virtual target, `@authenticated`, that matches every signed-in user; it grants no access to anonymous callers.
+
 An Origin configured with an OIDC provider will automatically provision users as they log into the Origin.
 Otherwise, an admin or different user can send an invite that will create a local account for the user.
 
 ## Example
 
-<Callout type="note">
+<Callout type="info">
   This example covers the full scope of what is possible, not what is required to implement.
 </Callout>
 
@@ -87,9 +91,9 @@ Here is a summary of the stakeholders in the story and their access requirements
 
 1. Sysadmin Brian deploys the Origin, exposing the storage under `/riptide-university/reyes-lab`.
 2. Sysadmin Brian creates a collection with
- * Name: `Reyes Lab`
-* Namespace: `/riptide-university/reyes-lab`
-* Owner: `Dr. Reyes`
+   * Name: `Reyes Lab`
+   * Namespace: `/riptide-university/reyes-lab`
+   * Owner: `Dr. Reyes`
 3. Since Dr. Reyes hasn't used the system yet, Sysadmin Brian generates an invite link and shares it.
 4. Dr. Reyes accepts the invitation and creates an account in the Origin service, via the browser.
 
@@ -97,9 +101,11 @@ At this point, Sysadmin Brian is no longer involved in the data access managemen
 
 #### Administering the collection
 
-1. In the Origin's browser interface, Dr. Reyes navigates to the collections menu and selects her `Reyes Lab` collection.
-2. Dr. Reyes then assigns her lab manager Christina as the admin of the `Reyes Lab` collection.
-3. Lab manager Christina similarly receives an invitation and creates an account in the Origin service, via the browser.
+1. Dr. Reyes generates an invite link for her lab manager Christina, who redeems it and creates an account in the Origin service, via the browser.
+2. In the Origin's browser interface, Dr. Reyes navigates to the collections menu and selects her `Reyes Lab` collection.
+3. Dr. Reyes creates a group `reyes_admins`, adds Christina to it, and assigns that group as the admin group of the `Reyes Lab` collection.
+
+A collection delegates to a *group*, never to an individual, which is why Christina gets a group of her own rather than being named directly.
 
 At this point, either Dr. Reyes or Christina can administer the collection.
 
@@ -110,10 +116,12 @@ At this point, either Dr. Reyes or Christina can administer the collection.
 3. Christina repeats the process to create another group `reyes_students` (for read access).
 4. Christina generates a separate invite link for this group and sends it to undergrad student Andrew.
 
-Once Danny and Andrew follow their invite links, they'll be members of their respective groups and have the corresponding access permissions.
+Once Danny and Andrew follow their invite links, they'll be members of their respective groups.
+The groups carry no access to the data yet — that comes next.
 
-<Callout type="note">
-  Since Christina created the groups, she is the owner as well as a member of the groups.
+<Callout type="info">
+  Creating a group makes you its owner but not automatically a member.
+  Christina leaves **Add me as a member of this group** checked on both, so she is the owner and a member of each.
 </Callout>
 
 #### Granting access
@@ -129,19 +137,29 @@ As a member of the `reyes_students` group, Andrew is now able to read (but not w
 
 ## Shares
 
-A "share" grants read-only access to a collection or subset of a collection.
+A "share" is a child collection that an ordinary user creates to pass on part of the access they already hold, without needing any administrator privilege of their own.
 
-* **Anyone with read access to a collection can create a share**
-* The receipient of a share can **not** propagate access to others
+* **Anyone with read access to a collection can create a share**, once the collection's owner or admin group has enabled sharing on it
+* A share is itself a collection, so its creator can grant `read` or `write` on it, and manages it as its owner
+* Data read or written through a share is served as the **share's owner**, who stays accountable for it
+* The recipient of a share can **not** propagate access onward — there is no share of a share
 
-The admin of a collection can enable the ability to create a "share".
+The owner or the admin group of a collection enables the ability to create a "share".
 
 ### Example (continued)
 
-Let's say that undergrad student Andrew wants to use some of the Reyes Lab research data for a class project.
-Christina creates and populates a `/riptide-university/reyes-lab/andrews-project` namespace with some example data.
+Let's say undergrad student Andrew wants to use some of the Reyes Lab research data for a class project, alongside two classmates who have no connection to the lab.
 
-To share the project data with his classmates, Andrew creates a "share" targeting the designated namespace and with "public" visibility.
+1. Christina creates and populates `/riptide-university/reyes-lab/andrews-project` with some example data, and switches on **Allow users to create shares** on the `Reyes Lab` collection.
+2. Andrew creates a "share" targeting `/riptide-university/reyes-lab/andrews-project`.
+3. Andrew grants his classmates `read` on the share — through a group, or through each classmate's personal `user-` group.
 
-Now, anyone can use a Pelican Client to read the data at `/riptide-university/reyes-lab/andrews-project`.
-No invites, no accounts, and no bugging the Origin admin to make a public namespace!
+Andrew's classmates can now read that prefix with a Pelican Client, and they never needed a role on the `Reyes Lab` collection itself.
+Because the share is served as Andrew, it also cannot outlast his own access: if Andrew's `reyes_students` grant is removed, the share stops issuing usable tokens.
+No tickets to the Origin admin, and nobody had to widen access to the rest of the lab's data.
+
+<Callout type="warning">
+  Setting a collection or a share to **public** visibility only makes its *existence* visible to people who hold no access to it.
+  It grants no data access, and it does not make objects readable without an account.
+  Whether an anonymous client can read a prefix is decided by the Origin's export configuration, not by a collection or a share.
+</Callout>
