@@ -28,7 +28,7 @@
 //   - Returns correct Age headers
 //   - Handles If-None-Match / ETag conditional requests (304)
 
-package fed_tests
+package cache_tests
 
 import (
 	"crypto/sha256"
@@ -139,7 +139,7 @@ func TestCacheControl_MaxAgePassthrough(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "maxage.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/maxage.bin", token)
@@ -187,7 +187,7 @@ func TestCacheControl_NoStore(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("no-store"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "nostore.bin", 4096)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/nostore.bin", token)
@@ -237,7 +237,7 @@ func TestCacheControl_DefaultBehavior(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("")) // No CC set
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "default.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/default.bin", token)
@@ -283,7 +283,7 @@ func TestCacheControl_ETagConditional(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	writeTestFile(t, ft, "etag.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/etag.bin", token)
@@ -318,7 +318,7 @@ func TestCacheControl_AgeHeaderAccuracy(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "age.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/age.bin", token)
@@ -361,7 +361,7 @@ func TestCacheControl_NoCacheWithMustRevalidate(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("no-cache, must-revalidate"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "nocache.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/nocache.bin", token)
@@ -404,7 +404,7 @@ func TestCacheControl_PrivateNotStored(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("private"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "private.bin", 4096)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/private.bin", token)
@@ -434,7 +434,7 @@ func TestCacheControl_ETagStarWildcard(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	writeTestFile(t, ft, "wildcard.bin", 4096)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/wildcard.bin", token)
@@ -461,7 +461,7 @@ func TestCacheControl_SMaxAgePriority(t *testing.T) {
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	// Origin sets both max-age and s-maxage with different values
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=60, s-maxage=7200"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "smaxage.bin", 8192)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/smaxage.bin", token)
@@ -497,7 +497,7 @@ func TestCacheControl_ETagChangeAfterExpiry(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=1"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	// Step 1: Write initial content
 	originalContent := writeTestFile(t, ft, "update_me.bin", 8192)
@@ -540,7 +540,7 @@ func TestCacheControl_StaleServedWithinMaxAge(t *testing.T) {
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	// Use a long max-age so the entry stays fresh
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	// Write initial content and fetch
 	originalContent := writeTestFile(t, ft, "fresh.bin", 8192)
@@ -588,7 +588,7 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	require.NoError(t, param.LocalCache_LowWaterMarkPercentage.Set(50))
 
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
+	token := fed_test_utils.TempWriteToken(t)
 
 	// Write 5 × 20KB files on the origin
 	fileNames := make([]string, 5)
@@ -728,7 +728,7 @@ func TestWriteThrough_PutAndGet(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
+	tkn := fed_test_utils.TempWriteToken(t)
 
 	// Step 1: Write initial content to the origin and fetch through cache to populate it
 	originalContent := writeTestFile(t, ft, "writable.bin", 4096)
@@ -780,7 +780,7 @@ func TestWriteThrough_PutNewFile(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
+	tkn := fed_test_utils.TempWriteToken(t)
 
 	// We need a cache URL. Discover it using an existing file, then
 	// substitute the path for the new file we want to create.
@@ -819,7 +819,7 @@ func TestWriteThrough_Unauthorized(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
+	tkn := fed_test_utils.TempWriteToken(t)
 
 	content := writeTestFile(t, ft, "secret.bin", 1024)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/secret.bin", tkn)

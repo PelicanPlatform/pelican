@@ -47,9 +47,6 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 )
 
-//go:embed resources/both-public.yml
-var bothPubNamespaces string
-
 type serverAdUnmarshal struct {
 	Type string `json:"type"`
 	URL  string `json:"url"`
@@ -61,7 +58,7 @@ type serverAdUnmarshal struct {
 func TestDirectorCacheHealthTest(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Spin up a federation
-	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	ctx := context.Background()
 	ctx, _, _ = test_utils.TestContext(ctx, t)
@@ -235,7 +232,7 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 			}
 
 			require.NoError(t, param.Director_RegistryQueryInterval.SetString("1s"))
-			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+			_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 			// If the sitename is not set, this fetches the server's hostname.
 			// Since all servers running in the fed test have the same hostname,
@@ -354,7 +351,7 @@ func TestDirectorMetadataHosting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.NoError(t, param.Director_EnableFederationMetadataHosting.Set(tt.enableHosting))
-			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+			_ = fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 			ctx := context.Background()
 			ctx, _, _ = test_utils.TestContext(ctx, t)

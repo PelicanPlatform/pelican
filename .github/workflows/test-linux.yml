@@ -122,6 +122,13 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # Several test packages shell out to the pelican CLI. Build it once here rather
+          # than letting each of those test processes build its own copy.
+          echo "::group::Building the pelican CLI for tests"
+          go build -tags "client,server" -buildvcs=false -o "${RUNNER_TEMP}/pelican-test-cli" ./cmd
+          echo "PELICAN_TEST_BINARY=${RUNNER_TEMP}/pelican-test-cli" >> "$GITHUB_ENV"
+          export PELICAN_TEST_BINARY="${RUNNER_TEMP}/pelican-test-cli"
+          echo "::endgroup::"
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
