@@ -1,3 +1,10 @@
+// Matches authentication_test.go, which is where the shared schema
+// helper (migrateTestDB) lives. Without the constraint the Windows
+// build of this package's tests references a helper that is not
+// compiled there, and golangci-lint's typecheck fails the build before
+// any test runs.
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research

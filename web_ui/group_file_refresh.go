@@ -63,11 +63,11 @@ func LaunchPeriodicGroupFileRefresh(ctx context.Context, egrp *errgroup.Group) {
 		// One pass at startup so a server that has been down across a
 		// group-file edit does not serve stale memberships until the
 		// first tick.
-		refreshGroupFileMemberships()
+		refreshGroupFileMemberships(ctx)
 		for {
 			select {
 			case <-ticker.C:
-				refreshGroupFileMemberships()
+				refreshGroupFileMemberships(ctx)
 			case <-ctx.Done():
 				log.Debug("Periodic group-file refresh has shut down")
 				return nil
@@ -85,26 +85,43 @@ func LaunchPeriodicGroupFileRefresh(ctx context.Context, egrp *errgroup.Group) {
 // REMOVED from the file must have its mirrored memberships retracted —
 // and that only happens if we ask about the account. Passing an empty
 // group list for such a user is the retraction.
-func refreshGroupFileMemberships() {
-	if database.ServerDatabase == nil {
+//
+// Every step re-checks ctx, and the function goes silent once it is
+// cancelled. Both matter more than the wasted work they save: a pass
+// over every account can outlive the server it belongs to, and under
+// `go test` the logging hooks route through t.Log, which panics when a
+// goroutine writes after its test has completed. Shutting up promptly
+// is what keeps this routine from turning a slow pass into a test
+// failure somewhere else in the suite.
+func refreshGroupFileMemberships(ctx context.Context) {
+	if database.ServerDatabase == nil || ctx.Err() != nil {
 		return
 	}
 	users, err := database.ListUsers(database.ServerDatabase)
 	if err != nil {
-		log.Warnf("Failed to list users for the periodic group-file refresh: %v", err)
+		if ctx.Err() == nil {
+			log.Warnf("Failed to list users for the periodic group-file refresh: %v", err)
+		}
 		return
 	}
 	refreshed := 0
 	for _, user := range users {
+		if ctx.Err() != nil {
+			return
+		}
 		groups, err := generateGroupInfo(user.Username)
 		if err != nil {
 			// A read or parse failure is about the file, not this user;
 			// one complaint is enough.
-			log.Warnf("Periodic group-file refresh aborted: %v", err)
+			if ctx.Err() == nil {
+				log.Warnf("Periodic group-file refresh aborted: %v", err)
+			}
 			return
 		}
 		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, groups)
 		refreshed++
 	}
-	log.Debugf("Periodic group-file refresh reconciled memberships for %d user(s)", refreshed)
+	if ctx.Err() == nil {
+		log.Debugf("Periodic group-file refresh reconciled memberships for %d user(s)", refreshed)
+	}
 }
