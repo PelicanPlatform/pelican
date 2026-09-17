@@ -224,3 +224,52 @@ func TestIsSystemAdminUserIDSeesAssertedAdminGroups(t *testing.T) {
 			"a retraction removes the row outright, unlike expiry")
 	})
 }
+
+// The file source is the only one that can recover from an outage on
+// its own: LaunchPeriodicGroupFileRefresh runs a pass at startup
+// precisely so a server that was down across a group-file edit — or
+// down for longer than Issuer.AssertedGroupMembershipTTL — does not
+// serve stale memberships until each user happens to log in.
+func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
+	db := setupAssertedGroupTest(t, `{"alice": ["ops"], "bob": ["research"]}`)
+	alice := seedTestUser(t, db, "u-alice", "alice")
+	bob := seedTestUser(t, db, "u-bob", "bob")
+	carol := seedTestUser(t, db, "u-carol", "carol")
+
+	refreshGroupFileMemberships()
+
+	assert.Contains(t, memberships(t, db, alice.ID), "ops")
+	assert.Contains(t, memberships(t, db, bob.ID), "research")
+	assert.Empty(t, memberships(t, db, carol.ID),
+		"a user the file says nothing about gets no membership invented for them")
+
+	t.Run("a pass after an outage re-asserts stale memberships", func(t *testing.T) {
+		var ops database.Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, db.Model(&database.GroupMember{}).
+			Where("group_id = ? AND user_id = ?", ops.ID, alice.ID).
+			Update("asserted_at", time.Now().Add(-30*24*time.Hour)).Error)
+
+		refreshGroupFileMemberships()
+
+		refreshed := memberships(t, db, alice.ID)
+		require.Contains(t, refreshed, "ops")
+		require.NotNil(t, refreshed["ops"].AssertedAt)
+		assert.WithinDuration(t, time.Now(), *refreshed["ops"].AssertedAt, time.Minute,
+			"the pass must re-assert, not merely leave the row alone")
+	})
+
+	t.Run("a user removed from the file has their membership retracted", func(t *testing.T) {
+		// This is why the pass walks USERS rather than the file's keys:
+		// an account dropped from the file only gets retracted if we ask
+		// about the account.
+		require.NoError(t, os.WriteFile(param.Issuer_GroupFile.GetString(),
+			[]byte(`{"bob": ["research"]}`), 0o600))
+
+		refreshGroupFileMemberships()
+
+		assert.Empty(t, memberships(t, db, alice.ID),
+			"removing someone from the group file takes effect within one interval, not at their next login")
+		assert.Contains(t, memberships(t, db, bob.ID), "research")
+	})
+}
