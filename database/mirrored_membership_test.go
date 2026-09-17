@@ -30,13 +30,16 @@ package database
 // there, treating a stale copy as absence is what opens the guard.
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -187,4 +190,104 @@ func TestMirroredMembershipCannotBeRemovedLocally(t *testing.T) {
 	// A Pelican membership in the same group is removable as always.
 	require.NoError(t, AddGroupMember(db, team.ID, fx.strangerID, fx.ownerID, true))
 	assert.NoError(t, RemoveGroupMember(db, team.ID, fx.strangerID, fx.ownerID, true))
+}
+
+// Mirrored memberships are rows in group_members, not an in-process
+// cache, so they survive a restart — including their asserted_at, which
+// is what decides whether they still grant. A server that is down for
+// longer than the TTL therefore comes back up with every mirrored
+// membership stale, and nothing an oidc or github user can do about it
+// until they log in again.
+func TestMirroredMembershipsSurviveRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "restart.sqlite")
+
+	open := func() (*gorm.DB, func()) {
+		t.Helper()
+		db, err := utils.InitSQLiteDB(dbPath)
+		require.NoError(t, err)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		return db, func() { _ = sqlDB.Close() }
+	}
+
+	// --- First boot: migrate, mirror a membership, shut down.
+	db, closeDB := open()
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	goose.SetBaseFS(EmbedUniversalMigrations)
+	require.NoError(t, goose.SetDialect("sqlite3"))
+	goose.SetTableName("goose_db_version")
+	require.NoError(t, goose.Up(sqlDB, "universal_migrations"))
+
+	withExternalWebURL(t, db)
+	withMembershipTTL(t, time.Hour)
+	alice := mkUser(t, db, "u-alice", "alice")
+	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
+	closeDB()
+
+	// --- Second boot: the same file, a fresh handle.
+	db, closeDB = open()
+	defer closeDB()
+
+	var member GroupMember
+	require.NoError(t, db.Where("user_id = ?", alice.ID).First(&member).Error)
+	assert.Equal(t, ops.ID, member.GroupID)
+	assert.Equal(t, GroupSourceOIDC, member.Source)
+	require.NotNil(t, member.AssertedAt, "asserted_at must survive the restart, not just the row")
+
+	granting, err := grantingMembershipsFor(db, alice.ID)
+	require.NoError(t, err)
+	assert.Contains(t, granting, ops.ID, "a membership asserted just before shutdown still grants after it")
+
+	// A restart does not reset the clock: an outage longer than the TTL
+	// leaves every mirrored membership stale, exactly as if the server
+	// had been up and nobody had logged in.
+	ageMembership(t, db, ops.ID, alice.ID, 2*time.Hour)
+	granting, err = grantingMembershipsFor(db, alice.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, granting, ops.ID)
+
+	// The row is still there for a restricting check, and re-asserting
+	// (i.e. the user logging in again) revives it.
+	names, err := GroupNamesForRestrictionCheck(db, alice.ID)
+	require.NoError(t, err)
+	assert.Contains(t, names, "ops")
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
+	granting, err = grantingMembershipsFor(db, alice.ID)
+	require.NoError(t, err)
+	assert.Contains(t, granting, ops.ID)
+}
+
+// Nothing ages a mirrored membership out of existence. Retraction by the
+// provider is the only thing that removes one, which is what lets a
+// restricting check keep seeing a stale copy.
+func TestStaleMirroredMembershipsAreNeverPruned(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	withExternalWebURL(t, db)
+	withMembershipTTL(t, time.Hour)
+
+	alice := mkUser(t, db, "u-alice", "alice")
+	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
+	ageMembership(t, db, ops.ID, alice.ID, 10*365*24*time.Hour)
+
+	// Ten years stale, and every path that merely reads still finds it.
+	var n int64
+	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
+	assert.EqualValues(t, 1, n)
+
+	// Another provider's assertion does not sweep it either.
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceFile, alice.ID, nil))
+	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
+	assert.EqualValues(t, 1, n)
+
+	// Only the asserting provider retracting it does.
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, nil))
+	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
+	assert.Zero(t, n)
 }
