@@ -27,7 +27,15 @@ type (
 		Scopes      string    `gorm:"column:scopes;type:text" json:"scopes"`
 		ExpiresAt   time.Time `json:"expiration"`
 		CreatedAt   time.Time `json:"createdAt"`
-		CreatedBy   string    `gorm:"column:created_by;type:text" json:"createdBy"`
+		// CreatedBy is the creator's User.ID. It is an authorization
+		// input, not an audit string: the key's persisted scopes are
+		// re-intersected against this user's CURRENT effective scopes on
+		// every call (see api_token.Verify). It held a username until
+		// migration 20260917120000 — which meant a rename bricked the
+		// key and a reused username revived it for whoever still had the
+		// secret. Empty for rows minted before the column existed, which
+		// fails closed on every user-grantable scope.
+		CreatedBy string `gorm:"column:created_by;type:text" json:"createdBy"`
 	}
 
 	ApiKeyResponse struct {
@@ -37,7 +45,11 @@ type (
 		Scopes      []string  `gorm:"column:scopes;type:text" json:"scopes"`
 		ExpiresAt   time.Time `json:"expiration"`
 		CreatedAt   time.Time `json:"createdAt"`
-		CreatedBy   string    `gorm:"column:created_by;type:text" json:"createdBy"`
+		// CreatedBy is the creator's username, resolved server-side for
+		// display; empty when the account no longer exists. CreatedByID
+		// is what the row actually stores — see ApiKey.CreatedBy.
+		CreatedBy   string `gorm:"column:created_by;type:text" json:"createdBy"`
+		CreatedByID string `json:"createdById"`
 	}
 
 	// ServerLocalMetadata is the local record of Origin/Cache server's metadata it fetched from the Registry,

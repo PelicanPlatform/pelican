@@ -343,3 +343,75 @@ func TestNameSpaceAndIDSpaceAreDisjoint(t *testing.T) {
 		assert.Equal(t, victim.ID, acls[0].SubjectID)
 	})
 }
+
+// A Group.ID is an authorization handle, so it must never come back.
+// DeleteGroup is a soft delete for that reason, and it clears every
+// reference that would otherwise survive the group and be inherited by
+// whatever next held the ID.
+func TestDeleteGroupIsSoftAndExhaustive(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	fx := seedGroupAuthzFixtures(t, db)
+	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
+
+	// Wire the group into every place that can reference it.
+	require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
+		fx.opsName, AclRoleWrite, nil, false))
+	require.NoError(t, GrantGroupScope(db, fx.opsID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
+	require.NoError(t, db.Model(&Collection{}).Where("id = ?", coll.ID).
+		Update("admin_id", fx.opsID).Error)
+	require.NoError(t, db.Model(&Group{}).Where("id = ?", fx.opsAdminsID).
+		Updates(map[string]interface{}{"admin_id": fx.opsID, "admin_type": AdminTypeGroup}).Error)
+
+	require.NoError(t, DeleteGroup(db, fx.opsID, fx.ownerID, false))
+
+	t.Run("the row is tombstoned, not removed", func(t *testing.T) {
+		// Gone from every ordinary query...
+		assert.ErrorIs(t, db.First(&Group{}, "id = ?", fx.opsID).Error, gorm.ErrRecordNotFound)
+		// ...but still occupying its ID, so no later group can be
+		// minted with it and inherit anything this cleanup missed.
+		var n int64
+		require.NoError(t, db.Unscoped().Model(&Group{}).Where("id = ?", fx.opsID).Count(&n).Error)
+		assert.EqualValues(t, 1, n)
+		assert.Error(t, db.Create(&Group{ID: fx.opsID, Name: "reused-id", CreatedBy: fx.ownerID}).Error,
+			"the tombstone must keep the ID spent")
+	})
+
+	t.Run("every reference to it is cleared", func(t *testing.T) {
+		assert.Empty(t, reload(t, db, coll.ID).ACLs)
+
+		scopes, err := ListGroupScopes(db, fx.opsID)
+		require.NoError(t, err)
+		assert.Empty(t, scopes, "a group's scopes must not outlive it")
+
+		var adminID string
+		require.NoError(t, db.Table("collections").Select("admin_id").
+			Where("id = ?", coll.ID).Scan(&adminID).Error)
+		assert.Empty(t, adminID, "a collection must not be left naming an administrator that no longer exists")
+
+		var sibling Group
+		require.NoError(t, db.First(&sibling, "id = ?", fx.opsAdminsID).Error)
+		assert.Empty(t, sibling.AdminID)
+		assert.Empty(t, string(sibling.AdminType))
+
+		var members int64
+		require.NoError(t, db.Model(&GroupMember{}).Where("group_id = ?", fx.opsID).Count(&members).Error)
+		assert.Zero(t, members)
+	})
+
+	t.Run("the name is released and the replacement inherits nothing", func(t *testing.T) {
+		// Unlike the ID, the name is free again — nothing keys on it.
+		replacement, err := CreateGroup(db, fx.opsName, "", "", Creator{UserID: fx.strangerID}, "", false)
+		require.NoError(t, err)
+		assert.NotEqual(t, fx.opsID, replacement.ID)
+
+		require.NoError(t, db.Create(&GroupMember{
+			GroupID: replacement.ID, UserID: fx.strangerID, AddedBy: fx.strangerID,
+		}).Error)
+		assert.ErrorIs(t, validateACL(db, reload(t, db, coll.ID), "eve-stranger", fx.strangerID,
+			[]string{fx.opsName}, token_scopes.Collection_Read), ErrForbidden)
+
+		scopes, err := ListGroupScopes(db, replacement.ID)
+		require.NoError(t, err)
+		assert.Empty(t, scopes)
+	})
+}

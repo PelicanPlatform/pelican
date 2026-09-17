@@ -104,20 +104,21 @@ func init() {
 		// (i.e. the user-grantable subset of their tokens stops
 		// working) on the next call.
 		//
-		// The api_token.ApiKey.created_by column has historically
-		// captured whichever of {user-id-slug, username} the create
-		// handler had on hand — newer rows store the slug (consistent
-		// with every other audit field), but older rows may hold the
-		// username. Try ID first, fall back to username; the user
-		// record is the same either way and the effective-scope
-		// evaluation is stable across both lookups.
+		// api_keys.created_by holds a User.ID and nothing else.
+		// Migration 20260917120000 converted the rows that held a
+		// username; anything that resolved to no user became empty,
+		// which the caller already treats as "cannot attribute this key"
+		// and fails closed on every user-grantable scope.
+		//
+		// There is deliberately no username fallback. Usernames are
+		// released when an account is soft-deleted, so falling back
+		// meant a dead key's dormant management scopes came back to
+		// life the moment someone new was onboarded under the old
+		// name — for whoever still held the key's secret.
 		if database.ServerDatabase == nil {
 			return nil
 		}
 		user, err := database.GetUserByID(database.ServerDatabase, userID)
-		if err != nil {
-			user, err = database.GetUserByUsername(database.ServerDatabase, userID)
-		}
 		if err != nil {
 			return nil
 		}

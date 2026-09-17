@@ -41,7 +41,12 @@ import (
 // versionBeforeIDKeyedAuthz is the migration immediately preceding
 // 20260916120000. Seeding happens at this version, where
 // `collections.owner` and `collection_acls.group_id` still exist.
-const versionBeforeIDKeyedAuthz = 20260812000000
+const versionBeforeIDKeyedAuthz = 20260911120000
+
+// versionBeforeIDKeyedAPIKeys is the migration immediately preceding
+// 20260917120000, i.e. the last version where `api_keys.created_by` may
+// hold a username and `groups` has no `deleted_at`.
+const versionBeforeIDKeyedAPIKeys = 20260916120000
 
 // migrateToVersion opens a fresh on-disk SQLite database and runs the
 // universal migrations up to (and including) `version`.
@@ -228,5 +233,66 @@ func TestIDKeyedAuthzMigration(t *testing.T) {
 		require.Len(t, rows, 2)
 		assert.Equal(t, "u-alice", rows[0].AddedBy)
 		assert.Equal(t, "unknown", rows[1].AddedBy, "an unresolvable username becomes the audit sentinel")
+	})
+}
+
+func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
+	t.Run("api_keys.created_by becomes a user ID, or empty", func(t *testing.T) {
+		db, sqlDB := migrateToVersion(t, versionBeforeIDKeyedAPIKeys)
+
+		require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
+			('u-alice', 'alice', 'alice@idp', 'https://idp.example', 'unknown')`).Error)
+		// Three shapes the column has held: a username (what the create
+		// handler wrote), an ID (what the code always assumed), and a
+		// name that resolves to nobody at all.
+		require.NoError(t, db.Exec(`INSERT INTO api_keys (id, name, hashed_value, scopes, expires_at, created_at, created_by) VALUES
+			('k1', 'by-name',    'h1', 'web_ui.access', '2030-01-01', '2026-01-01', 'alice'),
+			('k2', 'by-id',      'h2', 'web_ui.access', '2030-01-01', '2026-01-01', 'u-alice'),
+			('k3', 'by-nobody',  'h3', 'web_ui.access', '2030-01-01', '2026-01-01', 'long-gone'),
+			('k4', 'pre-column', 'h4', 'web_ui.access', '2030-01-01', '2026-01-01', '')`).Error)
+
+		finishMigrations(t, sqlDB)
+
+		var rows []struct {
+			ID        string
+			CreatedBy string
+		}
+		require.NoError(t, db.Table("api_keys").Select("id, created_by").Order("id").Scan(&rows).Error)
+		require.Len(t, rows, 4)
+		assert.Equal(t, "u-alice", rows[0].CreatedBy, "a username must be converted to the account's ID")
+		assert.Equal(t, "u-alice", rows[1].CreatedBy, "a value that is already an ID is left alone")
+		assert.Empty(t, rows[2].CreatedBy,
+			"a creator that resolves to nobody becomes empty, which fails closed on user-grantable scopes")
+		assert.Empty(t, rows[3].CreatedBy)
+	})
+
+	t.Run("groups gain a tombstone and release their name", func(t *testing.T) {
+		db, sqlDB := migrateToVersion(t, versionBeforeIDKeyedAPIKeys)
+		require.NoError(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)
+			VALUES ('g-ops', 'ops', 'unknown', 1, 'pelican')`).Error)
+
+		finishMigrations(t, sqlDB)
+
+		// Existing rows come through live, with every column intact —
+		// the table is rebuilt to shed an inline UNIQUE constraint, so
+		// this is checking the copy, not just the new column.
+		var ops Group
+		require.NoError(t, db.First(&ops, "id = ?", "g-ops").Error)
+		assert.Equal(t, "ops", ops.Name)
+		assert.Equal(t, GroupSourcePelican, ops.Source)
+		assert.True(t, ops.AuthTemplateEligible)
+		assert.False(t, ops.DeletedAt.Valid)
+
+		// A live name is still unique...
+		assert.Error(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)
+			VALUES ('g-dup', 'ops', 'unknown', 1, 'pelican')`).Error)
+
+		// ...but a tombstoned one is released, while its ID stays spent.
+		require.NoError(t, db.Delete(&ops).Error)
+		require.NoError(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)
+			VALUES ('g-new', 'ops', 'unknown', 1, 'pelican')`).Error)
+		assert.Error(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)
+			VALUES ('g-ops', 'other', 'unknown', 1, 'pelican')`).Error,
+			"the tombstone must keep the ID spent")
 	})
 }

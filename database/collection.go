@@ -744,8 +744,15 @@ func (s GroupSource) IsAsserted() bool {
 // See ValidateIdentifier for the character class enforced on Name.
 // DisplayName has the laxer ValidateDisplayName ruleset.
 type Group struct {
-	ID                  string     `gorm:"primaryKey" json:"id"`
-	Name                string     `gorm:"not null;unique" json:"name"`
+	ID string `gorm:"primaryKey" json:"id"`
+	// The production uniqueness index is PARTIAL (`WHERE deleted_at IS
+	// NULL`), created by migration 20260917120000 so a deleted group
+	// releases its name. Declared as a named uniqueIndex rather than
+	// `unique` so AutoMigrate (tests only) emits a droppable index
+	// instead of an inline column constraint, which SQLite backs with an
+	// undroppable implicit index — setupCollectionTestDB replaces it
+	// with the partial shape.
+	Name                string     `gorm:"not null;uniqueIndex:idx_groups_name_live" json:"name"`
 	DisplayName         string     `gorm:"not null;default:''" json:"displayName"`
 	Description         string     `json:"description"`
 	CreatedBy           string     `gorm:"not null" json:"createdBy"`
@@ -791,6 +798,17 @@ type Group struct {
 	CreatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	UpdatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	Members                []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
+	// DeletedAt is the soft-delete tombstone, mirroring User.DeletedAt.
+	// A Group.ID is an authorization handle, so it must never be reused:
+	// generateSlug picks 8 hex characters with no uniqueness check, and
+	// a hard delete freed the ID for a later group to be minted with,
+	// silently inheriting whatever still referenced it. Keeping the row
+	// spends the ID permanently and leaves historical references
+	// (created_by, audit trails) resolvable, while GORM's default scope
+	// hides it from every ordinary query so it confers nothing. The
+	// NAME is released — see the migration — because nothing keys on a
+	// group name any more.
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type GroupMember struct {
@@ -3257,11 +3275,25 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 	return collections, nil
 }
 
-// DeleteGroup deletes a group and cleans up any collection ACL entries
-// that reference it. ACL rows are keyed on the group's ID, so this is a
-// straight delete rather than the old "match whatever name the group
-// happens to have right now" — which missed rows orphaned by an earlier
-// rename (issue #3752).
+// DeleteGroup soft-deletes a group and clears everything that would
+// otherwise keep pointing at it: collection ACL grants, group scopes,
+// memberships, invite links, and any collection or group that named it
+// as their administrator.
+//
+// Two rules are doing the work here. First, every reference keys on the
+// group's ID, so the cleanup is a straight delete rather than the old
+// "match whatever name the group happens to have right now" — which
+// missed rows orphaned by an earlier rename (issue #3752). Second, the
+// delete is SOFT, so the ID is spent forever; a hard delete freed it
+// for a later group to be minted with (generateSlug is 8 hex characters
+// with no uniqueness check) and inherit anything this cleanup missed.
+// Belt and braces: the cleanup is exhaustive AND the ID cannot come
+// back.
+//
+// Clearing admin_id rather than leaving it dangling matters for the
+// collection case in particular: the collection would otherwise be
+// stuck naming an administrator that no longer exists, which no UI
+// surfaces and no caller can satisfy.
 //
 // Only the group owner or a system admin may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
@@ -3287,12 +3319,32 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 			return err
 		}
 
+		// Remove any scopes granted to the group. Without this the rows
+		// survive the group and are inherited wholesale by anything
+		// that later ends up holding the same ID.
+		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupScope{}).Error; err != nil {
+			return err
+		}
+
+		// Stand the group down as administrator of any collection or
+		// other group that named it.
+		if err := tx.Model(&Collection{}).Where("admin_id = ?", group.ID).
+			Update("admin_id", "").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&Group{}).
+			Where("admin_type = ? AND admin_id = ?", AdminTypeGroup, group.ID).
+			Updates(map[string]interface{}{"admin_id": "", "admin_type": ""}).Error; err != nil {
+			return err
+		}
+
 		// Delete group members explicitly (in addition to any FK cascade).
 		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupMember{}).Error; err != nil {
 			return err
 		}
 
-		// Finally, delete the group itself.
+		// Finally, tombstone the group itself. GORM turns this into an
+		// UPDATE of deleted_at because Group carries a gorm.DeletedAt.
 		if err := tx.Delete(&group).Error; err != nil {
 			return err
 		}
