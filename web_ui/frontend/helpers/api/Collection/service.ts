@@ -4,6 +4,7 @@ import { fetchApi } from '@/helpers/api';
 import {
   CollectionAcl,
   CollectionAclGrant,
+  CollectionAclGrantBySubject,
   CollectionPost,
   CollectionSummary,
 } from './types';
@@ -94,7 +95,7 @@ const CollectionService = {
   // name on write — pass either, the resulting row will store the name.
   grantAcl: async (
     collectionId: string,
-    grant: CollectionAclGrant
+    grant: CollectionAclGrant | CollectionAclGrantBySubject
   ): Promise<void> => {
     await fetchApi(
       async () =>

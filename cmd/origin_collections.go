@@ -939,11 +939,11 @@ func init() {
 	originCollectionsUpdateCmd.Flags().String("description", "", "New collection description")
 	originCollectionsUpdateCmd.Flags().String("visibility", "", "New collection visibility (private|public)")
 
-	originCollectionsACLGrantCmd.Flags().String("group-id", "", "The principal to grant to: a group name or ID, user-<username> or a user ID, or @authenticated (required)")
+	originCollectionsACLGrantCmd.Flags().String("group-id", "", "The principal to grant to: a group name or ID, user-<username>, or @authenticated (required)")
 	originCollectionsACLGrantCmd.Flags().String("role", "", "Role for the ACL (required)")
 	originCollectionsACLGrantCmd.Flags().String("expires-at", "", "Expiration time in RFC3339 format (e.g., 2006-01-02T15:04:05Z07:00)")
 
-	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "The principal to revoke from: a group name or ID, user-<username> or a user ID, or @authenticated (required)")
+	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "The principal to revoke from: a group name or ID, user-<username>, or @authenticated (required)")
 	originCollectionsACLRevokeCmd.Flags().String("role", "", "Role for the ACL (required)")
 
 	originCollectionsOwnershipInviteCreateCmd.Flags().String("expires-in", "", "Expiration duration as a Go duration string (e.g. '168h'); defaults to 7 days server-side")

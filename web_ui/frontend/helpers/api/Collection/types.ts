@@ -98,11 +98,21 @@ export interface CollectionAcl {
 }
 
 export interface CollectionAclGrant {
-  // Accepts a group name, a group ID, `user-<username>`, a user ID, or
-  // the '@authenticated' sentinel; the server resolves it to a stored
-  // (subjectType, subjectId) pair and rejects anything that matches no
-  // group and no user.
+  // Accepts a group name, a group ID, `user-<username>`, or the
+  // '@authenticated' sentinel; the server resolves it to a stored
+  // (subjectType, subjectId) pair and rejects anything that matches
+  // nothing. A bare user ID is NOT a spelling here — pass
+  // subjectType/subjectId to address a principal by ID.
   groupId: string;
+  role: CollectionAclRole;
+  expiresAt?: string;
+}
+
+// Address a principal by its stored ID instead of resolving a name.
+// The only way to grant to a user by ID.
+export interface CollectionAclGrantBySubject {
+  subjectType: CollectionAclSubjectType;
+  subjectId: string;
   role: CollectionAclRole;
   expiresAt?: string;
 }
