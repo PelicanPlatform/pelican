@@ -70,12 +70,26 @@ export interface CollectionPost {
 // by POST /collections/:id/acl.
 export type CollectionAclRole = 'read' | 'write' | 'owner';
 
+// What kind of principal an ACL row grants its role to. The server
+// stores the row as (subjectType, subjectId) where subjectId is an
+// immutable Group.ID or User.ID — never a name — so renaming or
+// deleting a principal can't leave a grant behind for whoever claims
+// the name next.
+export type CollectionAclSubjectType = 'group' | 'user' | 'authenticated';
+
 export interface CollectionAcl {
   collectionId: string;
-  // Group identifier used in ACL grants. Stored as the group *name*
-  // (not slug) — see GrantCollectionAcl in database/collection.go,
-  // which canonicalises slug->name before persisting. Matching with
-  // the /groups list keys off the `name` field for that reason.
+  subjectType: CollectionAclSubjectType;
+  // The stored ID: a Group.ID, a User.ID, or empty for 'authenticated'.
+  subjectId: string;
+  // Current display handle for subjectId — a group name, a username, or
+  // the '@authenticated' sentinel. Server-resolved; empty when the
+  // subject row has been deleted.
+  subjectName: string;
+  // Legacy spelling of the target, kept so older clients keep working:
+  // the group name, `user-<username>`, or '@authenticated'. Derived
+  // from subjectName — matching against the /groups list still keys off
+  // the `name` field. Prefer subjectId when writing new code.
   groupId: string;
   role: CollectionAclRole;
   createdBy?: string;
@@ -84,6 +98,10 @@ export interface CollectionAcl {
 }
 
 export interface CollectionAclGrant {
+  // Accepts a group name, a group ID, `user-<username>`, a user ID, or
+  // the '@authenticated' sentinel; the server resolves it to a stored
+  // (subjectType, subjectId) pair and rejects anything that matches no
+  // group and no user.
   groupId: string;
   role: CollectionAclRole;
   expiresAt?: string;
@@ -97,10 +115,27 @@ export interface CollectionAclGrant {
 // real group name.
 export const ALL_AUTHENTICATED_USERS_ACL_GROUP = '@authenticated';
 
-// labelForACLTarget renders an ACL row's `groupId` for human display.
-// For the all-authenticated-users sentinel it returns the friendly
-// label; everything else (real group names) returns unchanged.
-export const labelForACLTarget = (groupId: string): string =>
-  groupId === ALL_AUTHENTICATED_USERS_ACL_GROUP
-    ? 'All authenticated users'
-    : groupId;
+// labelForACLTarget renders an ACL row's target for human display.
+// Accepts either a whole row (preferred — it carries the subject type)
+// or the bare legacy `groupId` string.
+//
+// A row whose subject has been deleted has an empty subjectName; we say
+// so explicitly rather than rendering a blank chip, since such a row
+// matches nobody and is there to be revoked.
+export const labelForACLTarget = (target: CollectionAcl | string): string => {
+  if (typeof target === 'string') {
+    return target === ALL_AUTHENTICATED_USERS_ACL_GROUP
+      ? 'All authenticated users'
+      : target;
+  }
+  switch (target.subjectType) {
+    case 'authenticated':
+      return 'All authenticated users';
+    case 'user':
+      return target.subjectName
+        ? `${target.subjectName} (user)`
+        : '(deleted user)';
+    default:
+      return target.subjectName || '(deleted group)';
+  }
+};

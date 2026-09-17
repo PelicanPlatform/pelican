@@ -234,7 +234,35 @@ func pickDisplayName(claims map[string]interface{}, fallback string) string {
 	return fallback
 }
 
-// Given a user name, return the list of groups they belong to
+// RecordAssertedGroups reconciles the group names a provider asserted
+// into `groups` records stamped with that provider. Every path that
+// learns a caller's groups from a provider — the OIDC claim, the group
+// file, GitHub organizations — funnels through here so the name gets a
+// stable ID for ACLs and scopes to key on, and so it is held against an
+// unprivileged user creating a group that shadows it. See
+// database.EnsureAssertedGroups.
+//
+// Failures are logged and swallowed: this is bookkeeping, and a login
+// must not fail over it. The next login retries.
+//
+// `source` must be the provider that actually asserted these names. Do
+// NOT feed this group names out of arbitrary federation bearer tokens;
+// a foreign issuer could then reserve names on this server.
+func RecordAssertedGroups(source database.GroupSource, who string, groups []string) {
+	if len(groups) == 0 || database.ServerDatabase == nil {
+		return
+	}
+	if err := database.EnsureAssertedGroups(database.ServerDatabase, source, groups); err != nil {
+		log.Warnf("Failed to record groups asserted by the %s source for %s: %v", source, who, err)
+	}
+}
+
+// Given a user name, return the list of groups they belong to.
+//
+// This is the `Issuer.GroupSource: file` provider, and it is reached
+// from the password-login and init-code paths as well as from
+// generateUserGroupInfo, so the group reconciliation lives here rather
+// than at each call site.
 func generateGroupInfo(user string) (groups []string, err error) {
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
@@ -251,6 +279,7 @@ func generateGroupInfo(user string) (groups []string, err error) {
 		return
 	}
 	groups = groupTable[user]
+	RecordAssertedGroups(database.GroupSourceFile, user, groups)
 	return
 }
 
@@ -502,6 +531,19 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	default:
 		err = errors.Errorf("invalid group source: %s", groupSource)
 		return nil, nil, err
+	}
+
+	// Record a `groups` row for every name this provider asserted, so
+	// the name has a stable ID for ACLs and scopes to key on and is held
+	// against a shadowing Pelican-created group. The `file` source
+	// already did this inside generateGroupInfo (it is reached from the
+	// password-login path too), and `internal` is reading these rows in
+	// the first place.
+	switch groupSource {
+	case GroupSourceTypeOIDC:
+		RecordAssertedGroups(database.GroupSourceOIDC, username, groups)
+	case GroupSourceTypeGitHub:
+		RecordAssertedGroups(database.GroupSourceGitHub, username, groups)
 	}
 
 	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)

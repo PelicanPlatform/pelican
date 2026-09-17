@@ -117,12 +117,15 @@ const Page = () => {
     // the existing reload button on the page.
     revalidateOnFocus: false,
   });
-  const groupIdByName = useMemo(() => {
-    const m = new Map<string, string>();
+  // ACL rows carry the group's ID directly, so this is only used to
+  // decide whether a link to /groups/view would land the caller on a
+  // "permission denied" page.
+  const visibleGroupIds = useMemo(() => {
+    const ids = new Set<string>();
     for (const g of groups ?? []) {
-      m.set(g.name, g.id);
+      ids.add(g.id);
     }
-    return m;
+    return ids;
   }, [groups]);
 
   // Mirror the backend gate on POST /origin_ui/collections: only callers
@@ -223,7 +226,7 @@ const Page = () => {
             c={c}
             onDelete={() => handleDelete(c.id)}
             onChanged={() => mutate()}
-            groupIdByName={groupIdByName}
+            visibleGroupIds={visibleGroupIds}
             canEditUsers={canEditUsers}
           />
         ))}
@@ -238,26 +241,28 @@ const Page = () => {
 // the owner pill so a user can see who runs each collection they have
 // access to even when they can't edit it; the expanded body adds the
 // rest of the metadata + ACL list.
-// groupHrefByName resolves an ACL's group NAME (the backend
-// canonicalises slug→name on write, so ACL rows carry names) to a
-// `/groups/view/?id=…` URL. Returns undefined when the caller has no
-// visibility into the group via /groups — we render a non-clickable
-// chip in that case rather than minting a link the user can't follow.
-const groupHrefByName = (
-  name: string,
-  groupIdByName: Map<string, string>
+// aclGroupHref turns an ACL row into a `/groups/view/?id=…` URL.
+// Returns undefined for rows that don't name a group (a personal grant
+// or the all-authenticated sentinel) and for groups the caller has no
+// visibility into via /groups — we render a non-clickable chip in
+// those cases rather than minting a link the user can't follow.
+const aclGroupHref = (
+  acl: CollectionAcl,
+  visibleGroupIds: Set<string>
 ): string | undefined => {
-  const id = groupIdByName.get(name);
-  return id ? `/groups/view/?id=${encodeURIComponent(id)}` : undefined;
+  if (acl.subjectType !== 'group' || !acl.subjectId) return undefined;
+  return visibleGroupIds.has(acl.subjectId)
+    ? `/groups/view/?id=${encodeURIComponent(acl.subjectId)}`
+    : undefined;
 };
 
 const CollectionCard: React.FC<{
   c: CollectionSummary;
   onDelete: () => void;
   onChanged: () => Promise<unknown> | void;
-  groupIdByName: Map<string, string>;
+  visibleGroupIds: Set<string>;
   canEditUsers: boolean;
-}> = ({ c, onDelete, onChanged, groupIdByName, canEditUsers }) => {
+}> = ({ c, onDelete, onChanged, visibleGroupIds, canEditUsers }) => {
   const [open, setOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const isShare = !!c.parentCollectionId;
@@ -469,7 +474,7 @@ const CollectionCard: React.FC<{
       </CardContent>
       <Collapse in={open} unmountOnExit>
         <Divider />
-        <ExpandedDetails c={c} open={open} groupIdByName={groupIdByName} />
+        <ExpandedDetails c={c} open={open} visibleGroupIds={visibleGroupIds} />
       </Collapse>
       {canCreateShare && (
         <CreateShareDialog
@@ -493,8 +498,8 @@ const CollectionCard: React.FC<{
 const ExpandedDetails: React.FC<{
   c: CollectionSummary;
   open: boolean;
-  groupIdByName: Map<string, string>;
-}> = ({ c, groupIdByName }) => {
+  visibleGroupIds: Set<string>;
+}> = ({ c, visibleGroupIds }) => {
   const { data: acls, isLoading } = useSWR<CollectionAcl[] | undefined>(
     `collection/${c.id}/acls`,
     () => CollectionService.listAcls(c.id)
@@ -518,16 +523,14 @@ const ExpandedDetails: React.FC<{
           ) : (
             <Box display='flex' gap={1} flexWrap='wrap'>
               {acls.map((acl) => {
-                // ACL rows store the group NAME (the backend
-                // canonicalises slug→name on write); resolve to the
-                // slug ID via groupIdByName so the chip links to
-                // /groups/view/?id=…. When the caller can't see this
-                // group in /groups (no membership / admin / owner)
-                // — or when the row targets the all-authenticated
-                // sentinel, which isn't a real group at all — the
-                // lookup misses and we render a non-clickable chip.
-                const href = groupHrefByName(acl.groupId, groupIdByName);
-                const label = `${acl.role}: ${labelForACLTarget(acl.groupId)}`;
+                // ACL rows carry the target's ID. Link to the group's
+                // page when the row names a group the caller can
+                // actually see in /groups; otherwise — a personal
+                // grant, the all-authenticated sentinel, or a group
+                // outside the caller's visibility — render a
+                // non-clickable chip.
+                const href = aclGroupHref(acl, visibleGroupIds);
+                const label = `${acl.role}: ${labelForACLTarget(acl)}`;
                 const chip = (
                   <Chip
                     size='small'
@@ -544,7 +547,9 @@ const ExpandedDetails: React.FC<{
                   />
                 );
                 return (
-                  <React.Fragment key={`${acl.groupId}:${acl.role}`}>
+                  <React.Fragment
+                    key={`${acl.subjectType}:${acl.subjectId}:${acl.role}`}
+                  >
                     {href ? <Link href={href}>{chip}</Link> : chip}
                   </React.Fragment>
                 );
