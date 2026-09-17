@@ -813,15 +813,39 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 
 // IsSystemAdminUserID checks whether the given user ID belongs to a system admin.
 // This is used to prevent user administrators from modifying system admin accounts.
+//
+// This is a RESTRICTING check: a true answer refuses an action, so the
+// conservative reading of an uncertain one is "yes". That is why the
+// target's group list comes from GroupNamesForRestrictionCheck, which
+// includes mirrored memberships the provider asserted some time ago and
+// has not asserted since. An admin whose authority comes from
+// Server.AdminGroups plus a provider-asserted group would otherwise be
+// invisible here — nothing about them is in `group_members` unless the
+// membership was mirrored — and every caller of this guard would open on
+// their account.
+//
+// The residual gap, stated plainly: an admin of that shape who has never
+// logged in since membership mirroring was enabled still has no record
+// to find, and reads as a non-admin exactly as before. Mirroring
+// narrows this guard's blind spot to accounts Pelican has never
+// observed; it does not eliminate it.
 func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
 	user, err := database.GetUserByID(db, userID)
 	if err != nil {
 		return false
 	}
+	// Errors are swallowed rather than failing the check open OR closed
+	// on a transient DB hiccup: the config-derived username paths below
+	// still answer, which is the pre-mirroring behavior.
+	groups, err := database.GroupNamesForRestrictionCheck(db, userID)
+	if err != nil {
+		log.Warningf("Failed to load group memberships while checking whether user %s is a system admin: %v", userID, err)
+	}
 	identity := UserIdentity{
 		Username: user.Username,
 		ID:       user.ID,
 		Sub:      user.Sub,
+		Groups:   groups,
 	}
 	isAdmin, _ := CheckAdmin(identity)
 	return isAdmin
@@ -1080,6 +1104,12 @@ func loginHandler(ctx *gin.Context) {
 		log.Errorf("Failed to generate group info for user %s: %s", userRecord.Username, err)
 		groups = nil
 	}
+	// The group file is read here regardless of Issuer.GroupSource, so
+	// this path is a `file` assertion even on a server configured for
+	// oidc or github. Recording it under that source keeps each
+	// provider's mirrored memberships separate — see
+	// MirrorAssertedGroupMemberships.
+	RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, userRecord.Username, groups)
 
 	setLoginCookie(ctx, userRecord, groups)
 
@@ -1165,6 +1195,9 @@ func initLoginHandler(ctx *gin.Context) {
 			})
 		return
 	}
+	// Same `file` assertion as the password-login path; recorded after
+	// the user record exists, since mirroring a membership needs its ID.
+	RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, userRecord.Username, groups)
 
 	setLoginCookie(ctx, userRecord, groups)
 }

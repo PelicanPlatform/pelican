@@ -284,6 +284,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Issuer.AccessTokenLifetime
 	v.SetDefault(param.Issuer_AccessTokenLifetime.GetName(), "1h")
+	// Issuer.AssertedGroupMembershipTTL
+	v.SetDefault(param.Issuer_AssertedGroupMembershipTTL.GetName(), "168h")
 	// Issuer.AuthenticationSource
 	v.SetDefault(param.Issuer_AuthenticationSource.GetName(), "OIDC")
 	// Issuer.AuthorizationCodeLifetime
@@ -294,6 +296,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Issuer_DynamicClientStaleTimeout.GetName(), "336h")
 	// Issuer.DynamicClientUnusedTimeout
 	v.SetDefault(param.Issuer_DynamicClientUnusedTimeout.GetName(), "1h")
+	// Issuer.GroupFileRefreshInterval
+	v.SetDefault(param.Issuer_GroupFileRefreshInterval.GetName(), "15m")
 	// Issuer.IDTokenLifetime
 	v.SetDefault(param.Issuer_IDTokenLifetime.GetName(), "1h")
 	// Issuer.OIDCGroupClaim
