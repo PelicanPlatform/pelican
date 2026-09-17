@@ -235,6 +235,16 @@ export interface GroupMember {
   user: User;
   createdBy: string;
   createdAt: string;
+  // 'pelican' for a membership an administrator created here. Any other
+  // value names the identity provider that asserts it: those are
+  // mirrored automatically at login and cannot be removed through
+  // Pelican — the user has to be removed at the provider. Optional so
+  // an unmigrated backend doesn't trip TypeScript; treat a missing
+  // value as 'pelican'.
+  source?: 'pelican' | 'oidc' | 'file' | 'github' | 'unknown';
+  // When the provider last asserted a mirrored membership; absent on
+  // 'pelican' ones, which do not expire.
+  assertedAt?: string;
 }
 
 export type GroupMemberPost = Omit<

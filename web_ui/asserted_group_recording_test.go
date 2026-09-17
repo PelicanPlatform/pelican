@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,22 +36,17 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// The `Issuer.GroupSource: file` provider is reached from three places:
-// generateUserGroupInfo (OIDC callback), the password-login handler, and
-// the init-code admin login. Reconciling the asserted names into group
-// records therefore lives inside generateGroupInfo itself rather than at
-// each call site — without that, a group that only ever comes from the
-// file has no ID, and granting a collection ACL to it is rejected as an
-// unknown subject.
-func TestGroupFileSourceRecordsAssertedGroups(t *testing.T) {
+func setupAssertedGroupTest(t *testing.T, groupFileJSON string) *gorm.DB {
+	t.Helper()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	groupFile := filepath.Join(t.TempDir(), "groups.json")
-	require.NoError(t, os.WriteFile(groupFile,
-		[]byte(`{"testuser": ["team-readers", "team-writers"]}`), 0o600))
-	require.NoError(t, param.Issuer_GroupFile.Set(groupFile))
+	if groupFileJSON != "" {
+		groupFile := filepath.Join(t.TempDir(), "groups.json")
+		require.NoError(t, os.WriteFile(groupFile, []byte(groupFileJSON), 0o600))
+		require.NoError(t, param.Issuer_GroupFile.Set(groupFile))
+	}
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 
 	prevDB := database.ServerDatabase
@@ -60,25 +56,171 @@ func TestGroupFileSourceRecordsAssertedGroups(t *testing.T) {
 	t.Cleanup(func() { database.ServerDatabase = prevDB })
 	migrateTestDB(t)
 	require.NoError(t, database.BootstrapAdminAndBackfillOwners(mockDB))
+	return mockDB
+}
 
-	groups, err := generateGroupInfo("testuser")
+func seedTestUser(t *testing.T, db *gorm.DB, id, username string) *database.User {
+	t.Helper()
+	u := &database.User{
+		ID: id, Username: username, Sub: id + "@idp",
+		Issuer: "https://idp.example", Status: database.UserStatusActive,
+	}
+	require.NoError(t, db.Create(u).Error)
+	return u
+}
+
+func memberships(t *testing.T, db *gorm.DB, userID string) map[string]database.GroupMember {
+	t.Helper()
+	var rows []database.GroupMember
+	require.NoError(t, db.Where("user_id = ?", userID).Find(&rows).Error)
+	out := map[string]database.GroupMember{}
+	for _, r := range rows {
+		var g database.Group
+		require.NoError(t, db.First(&g, "id = ?", r.GroupID).Error)
+		out[g.Name] = r
+	}
+	return out
+}
+
+// generateGroupInfo is a pure reader; recording what it found is the
+// caller's job, because mirroring a membership needs the user's ID and
+// the reader only has a name. Every path that reaches the file provider
+// — password login, the init-code admin login, and the OIDC callback
+// when Issuer.GroupSource is "file" — must call RecordAssertedGroups.
+func TestGroupFileSourceRecordsAssertedGroupsAndMemberships(t *testing.T) {
+	db := setupAssertedGroupTest(t, `{"testuser": ["team-readers", "team-writers"]}`)
+	user := seedTestUser(t, db, "u-testuser", "testuser")
+
+	groups, err := generateGroupInfo(user.Username)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"team-readers", "team-writers"}, groups)
 
-	var recorded []database.Group
-	require.NoError(t, mockDB.Order("name").Find(&recorded).Error)
-	require.Len(t, recorded, 2)
-	for _, g := range recorded {
+	var recorded int64
+	require.NoError(t, db.Model(&database.Group{}).Count(&recorded).Error)
+	assert.Zero(t, recorded, "reading the file must not write anything by itself")
+
+	RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, groups)
+
+	var groupRows []database.Group
+	require.NoError(t, db.Order("name").Find(&groupRows).Error)
+	require.Len(t, groupRows, 2)
+	for _, g := range groupRows {
 		assert.Equal(t, database.GroupSourceFile, g.Source,
-			"the record must name the provider that asserted it, not a generic 'external'")
+			"the record must name the provider that asserted it")
 		assert.NotEmpty(t, g.OwnerID, "asserted groups are owned by the built-in admin")
 	}
 
-	// A group the file never mentions is not invented.
-	other, err := generateGroupInfo("nobody")
-	require.NoError(t, err)
-	assert.Empty(t, other)
-	var count int64
-	require.NoError(t, mockDB.Model(&database.Group{}).Count(&count).Error)
-	assert.EqualValues(t, 2, count)
+	mirrored := memberships(t, db, user.ID)
+	require.Len(t, mirrored, 2)
+	for name, m := range mirrored {
+		assert.Equal(t, database.GroupSourceFile, m.Source, "membership in %s", name)
+		assert.True(t, m.IsMirrored())
+		require.NotNil(t, m.AssertedAt, "a mirrored membership must record when it was asserted")
+	}
+}
+
+func TestMirroredMembershipsFollowTheProvider(t *testing.T) {
+	db := setupAssertedGroupTest(t, "")
+	user := seedTestUser(t, db, "u-alice", "alice")
+
+	RecordAssertedGroups(database.GroupSourceOIDC, user.ID, user.Username,
+		[]string{"ops", "research"})
+	require.Len(t, memberships(t, db, user.ID), 2)
+
+	t.Run("a membership the provider stops asserting is retracted", func(t *testing.T) {
+		RecordAssertedGroups(database.GroupSourceOIDC, user.ID, user.Username, []string{"ops"})
+		mirrored := memberships(t, db, user.ID)
+		require.Len(t, mirrored, 1)
+		assert.Contains(t, mirrored, "ops")
+	})
+
+	t.Run("asserting nothing retracts everything", func(t *testing.T) {
+		RecordAssertedGroups(database.GroupSourceOIDC, user.ID, user.Username, nil)
+		assert.Empty(t, memberships(t, db, user.ID),
+			"an empty assertion is a statement, not a no-op")
+	})
+
+	t.Run("one provider does not retract another's memberships", func(t *testing.T) {
+		// A server can genuinely have two asserted sources in play: the
+		// password-login path reads the group file whatever
+		// Issuer.GroupSource says.
+		RecordAssertedGroups(database.GroupSourceOIDC, user.ID, user.Username, []string{"ops"})
+		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, []string{"local-team"})
+		mirrored := memberships(t, db, user.ID)
+		require.Len(t, mirrored, 2)
+		assert.Equal(t, database.GroupSourceOIDC, mirrored["ops"].Source)
+		assert.Equal(t, database.GroupSourceFile, mirrored["local-team"].Source)
+
+		// The file source retracting its own membership leaves the OIDC
+		// one alone.
+		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, nil)
+		mirrored = memberships(t, db, user.ID)
+		require.Len(t, mirrored, 1)
+		assert.Contains(t, mirrored, "ops")
+	})
+
+	t.Run("an administrator's local membership outranks the assertion", func(t *testing.T) {
+		// An admin may add a local member to an asserted group. That
+		// membership is Pelican's, so an assertion must neither stamp an
+		// expiry on it nor retract it.
+		admin, err := database.BuiltinAdminUser(db)
+		require.NoError(t, err)
+		require.NotNil(t, admin)
+		var ops database.Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, database.AddGroupMember(db, ops.ID, admin.ID, admin.ID, true))
+
+		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+		adminMemberships := memberships(t, db, admin.ID)
+		require.Contains(t, adminMemberships, "ops")
+		assert.Equal(t, database.GroupSourcePelican, adminMemberships["ops"].Source)
+		assert.Nil(t, adminMemberships["ops"].AssertedAt,
+			"a Pelican membership does not expire, so it carries no assertion timestamp")
+
+		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, nil)
+		assert.Contains(t, memberships(t, db, admin.ID), "ops",
+			"retracting an assertion must not remove a membership an administrator created")
+	})
+}
+
+// The admin guard is a RESTRICTING check: a true answer refuses an
+// action, so an uncertain one must read as "yes". That is why it looks
+// at mirrored memberships without a freshness filter — an admin whose
+// authority comes from Server.AdminGroups plus an asserted group has
+// nothing else on the server to find them by.
+func TestIsSystemAdminUserIDSeesAssertedAdminGroups(t *testing.T) {
+	db := setupAssertedGroupTest(t, "")
+	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
+
+	admin := seedTestUser(t, db, "u-admin-via-group", "grace")
+	stranger := seedTestUser(t, db, "u-stranger", "mallory")
+
+	assert.False(t, IsSystemAdminUserID(db, admin.ID),
+		"before anything is mirrored there is no record to find them by")
+
+	RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+
+	assert.True(t, IsSystemAdminUserID(db, admin.ID),
+		"a mirrored membership in an AdminGroups group must make the guard fire")
+	assert.False(t, IsSystemAdminUserID(db, stranger.ID))
+
+	t.Run("a stale copy still fires it", func(t *testing.T) {
+		// Granting paths stop honouring this membership once stale.
+		// This one must not: "we last saw this account in an admin group
+		// a month ago" has to mean refuse, not go ahead.
+		var ops database.Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, db.Model(&database.GroupMember{}).
+			Where("group_id = ? AND user_id = ?", ops.ID, admin.ID).
+			Update("asserted_at", time.Now().Add(-365*24*time.Hour)).Error)
+
+		assert.True(t, IsSystemAdminUserID(db, admin.ID),
+			"expiry governs granting, not retention — a restricting check still sees the copy")
+	})
+
+	t.Run("it stops firing once the provider retracts the membership", func(t *testing.T) {
+		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, nil)
+		assert.False(t, IsSystemAdminUserID(db, admin.ID),
+			"a retraction removes the row outright, unlike expiry")
+	})
 }

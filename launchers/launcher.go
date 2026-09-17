@@ -264,6 +264,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	// Start periodic database backup routine
 	database.LaunchPeriodicBackup(ctx, egrp)
 
+	// Keep group memberships mirrored from Issuer.GroupFile current.
+	// The file source is the only one Pelican can re-read without the
+	// user present; oidc and github refresh at login instead.
+	web_ui.LaunchPeriodicGroupFileRefresh(ctx, egrp)
+
 	log.Info("Starting web engine...")
 	lnReference = nil
 	egrp.Go(func() error {

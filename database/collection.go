@@ -38,6 +38,13 @@ var (
 	// raw string is what let a later claimant of that name inherit the
 	// grant (issue #3752).
 	ErrUnknownACLSubject = errors.New("unknown collection ACL subject")
+	// ErrMembershipNotLocal is returned when a caller tries to remove a
+	// group membership that came from a provider's assertion rather than
+	// from the group-management API. Deleting the row would not remove
+	// the person from the group — the provider still asserts it, and the
+	// next login mirrors it straight back — so the operation is refused
+	// rather than quietly appearing to work.
+	ErrMembershipNotLocal = errors.New("membership is asserted by a group source and cannot be removed here")
 	// ErrGroupNameConflict is returned when a Pelican-created group
 	// would take — or an admin would rename a group to — a name that an
 	// identity provider is already known to assert. See
@@ -243,10 +250,13 @@ func (s CallerACLSubjects) ACLWhere() (string, []any) {
 //
 // Group IDs come from two sources, unioned:
 //
-//   - `group_members` joined on the caller's User.ID. This is what
-//     makes the management UI work for callers whose cookie carries no
-//     group claim at all (htpasswd login, or OIDC with
-//     `Issuer.GroupSource: none`).
+//   - `group_members` joined on the caller's User.ID — both the
+//     memberships an administrator created and the ones mirrored from a
+//     provider's assertion, the latter only while still fresh. This is
+//     what makes the management UI work for callers whose cookie carries
+//     no group claim at all (htpasswd login, or OIDC with
+//     `Issuer.GroupSource: none`), and what lets a decision be made
+//     about a user who is not currently making a request.
 //   - The caller-supplied names, resolved through `groups.name`. With
 //     group auto-creation on (the default, see EnsureAssertedGroups)
 //     every name a provider asserts has a record, so this resolves; a
@@ -286,13 +296,13 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 		out.GroupIDs = append(out.GroupIDs, id)
 	}
 	if out.UserID != "" {
-		var rows []struct{ GroupID string }
-		if err := db.Table("group_members").
-			Select("group_id").
-			Where("user_id = ?", out.UserID).
-			Scan(&rows).Error; err == nil {
-			for _, r := range rows {
-				add(r.GroupID)
+		// Pelican-created memberships, plus mirrored ones the provider
+		// has asserted recently enough to still grant. A stale mirrored
+		// row is deliberately excluded here: this path decides what to
+		// hand out. See grantingMembershipsFor.
+		if ids, err := grantingMembershipsFor(db, out.UserID); err == nil {
+			for _, id := range ids {
+				add(id)
 			}
 		}
 	}
@@ -813,12 +823,36 @@ type Group struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
+// GroupMember is one user's membership in one group. There is at most
+// one row per (group, user) regardless of how the membership arose; see
+// Source for how the two kinds interact.
 type GroupMember struct {
 	GroupID string    `gorm:"primaryKey" json:"groupId"`
-	UserID  string    `gorm:"primaryKey" json:"userId"`
+	UserID  string    `gorm:"primaryKey;index" json:"userId"`
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
 	AddedBy string    `gorm:"not null" json:"createdBy"`
 	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	// Source distinguishes a membership an administrator created through
+	// the group API (GroupSourcePelican — authoritative, never expires)
+	// from one mirrored out of a provider's assertion (any other value,
+	// naming that provider). A Pelican membership always wins: an
+	// assertion never overwrites or expires one, so an admin who adds a
+	// local member to an asserted group keeps them.
+	Source GroupSource `gorm:"not null;default:'pelican'" json:"source"`
+	// AssertedAt is when the provider last asserted this membership, and
+	// is NULL on Pelican-created rows. A mirrored row may only GRANT
+	// while it is fresh — see MirroredMembershipTTL and
+	// freshAssertedMembershipCutoff — but it is KEPT once stale, because
+	// a consumer asking a restricting question ("might this account be an
+	// admin?") must still see it. Rows disappear only when the provider
+	// stops asserting the membership.
+	AssertedAt *time.Time `json:"assertedAt,omitempty"`
+}
+
+// IsMirrored reports whether this membership came from a provider's
+// assertion rather than from the group-management API.
+func (m GroupMember) IsMirrored() bool {
+	return m.Source.IsAsserted()
 }
 
 // InviteKind discriminates what an invite link grants when redeemed.
@@ -2718,6 +2752,184 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 	return nil
 }
 
+// MirroredMembershipTTL is how long a mirrored membership may still
+// grant access after the provider last asserted it
+// (Issuer.AssertedGroupMembershipTTL). Zero disables mirrored
+// memberships as an authorization input without disabling the mirror
+// itself — the rows are still recorded and still shown in the UI.
+func MirroredMembershipTTL() time.Duration {
+	return param.Issuer_AssertedGroupMembershipTTL.GetDuration()
+}
+
+// freshAssertedMembershipCutoff returns the timestamp a mirrored row's
+// asserted_at must beat to still grant, and whether mirrored rows may
+// grant at all.
+//
+// Every GRANTING consumer must apply this; a RESTRICTING one
+// ("might this account hold a privilege?") must not, because for those
+// a stale copy still has to answer yes. That asymmetry is the whole
+// reason freshness gates granting rather than retention — see the
+// GroupMember.AssertedAt contract.
+func freshAssertedMembershipCutoff() (time.Time, bool) {
+	ttl := MirroredMembershipTTL()
+	if ttl <= 0 {
+		return time.Time{}, false
+	}
+	return time.Now().Add(-ttl), true
+}
+
+// grantingMembershipsFor returns the group IDs a user holds that may
+// grant access right now: every Pelican-created membership, plus every
+// mirrored membership the provider has asserted within the TTL.
+func grantingMembershipsFor(db *gorm.DB, userID string) ([]string, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	q := db.Table("group_members").
+		Select("group_id").
+		Where("user_id = ?", userID)
+	if cutoff, mirroredMayGrant := freshAssertedMembershipCutoff(); mirroredMayGrant {
+		q = q.Where("source = ? OR asserted_at > ?", GroupSourcePelican, cutoff)
+	} else {
+		q = q.Where("source = ?", GroupSourcePelican)
+	}
+	var rows []struct{ GroupID string }
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.GroupID)
+	}
+	return out, nil
+}
+
+// GroupNamesForRestrictionCheck returns the names of every group the
+// user belongs to, INCLUDING mirrored memberships that have gone stale.
+//
+// This is the deliberate counterpart to grantingMembershipsFor, and the
+// two must not be confused. Use this only where the answer RESTRICTS
+// what a caller may do — web_ui.IsSystemAdminUserID, which stops a
+// user-administrator from acting on a system administrator's account,
+// is the motivating case. There, "we last saw this account in an admin
+// group a month ago" must mean "refuse", not "go ahead": treating a
+// stale copy as absence is what opens the guard.
+//
+// Never use it to decide whether to hand out access.
+func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	var rows []struct{ Name string }
+	if err := db.Table("group_members").
+		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
+		Select("groups.name").
+		Where("group_members.user_id = ?", userID).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Name != "" {
+			out = append(out, r.Name)
+		}
+	}
+	return out, nil
+}
+
+// MirrorAssertedGroupMemberships records, for one user, the memberships
+// `source` just asserted, and drops the ones it no longer asserts.
+//
+// Scope is deliberately narrow in two directions. It only ever touches
+// rows whose Source is `source`: a Pelican-created membership is
+// authoritative and is left alone (so an admin who adds a local member
+// to an asserted group keeps them), and a membership mirrored from a
+// DIFFERENT provider is left alone too, because this call knows nothing
+// about what that provider currently says. A server can genuinely have
+// two asserted sources in play — the password-login path reads
+// Issuer.GroupFile regardless of Issuer.GroupSource — and each must
+// only rewrite its own rows.
+//
+// Group records must already exist; EnsureAssertedGroups is the
+// companion that creates them, and a name it declined to record (a
+// reserved shape, or one already held by a Pelican group) simply has no
+// membership mirrored either. Passing an empty `assertedNames` is
+// meaningful, not a no-op: it means "this provider asserts nothing for
+// this user now", and drops every membership previously mirrored from it.
+func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID string, assertedNames []string) error {
+	if db == nil || userID == "" || !GroupAutoCreationEnabled() {
+		return nil
+	}
+	if !source.IsAsserted() {
+		return fmt.Errorf("group source %q does not assert memberships", source)
+	}
+
+	// Resolve the asserted names to the group records
+	// EnsureAssertedGroups keeps. A name with no record contributes
+	// nothing — there is no ID to key a membership on, which is the same
+	// reason an ACL cannot name it either.
+	assertedIDs := []string{}
+	if len(assertedNames) > 0 {
+		var rows []struct{ ID string }
+		if err := db.Table("groups").
+			Select("id").
+			Where("name IN ? AND deleted_at IS NULL", assertedNames).
+			Scan(&rows).Error; err != nil {
+			return err
+		}
+		for _, r := range rows {
+			assertedIDs = append(assertedIDs, r.ID)
+		}
+	}
+
+	now := time.Now()
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Drop what this provider no longer asserts, before adding, so a
+		// membership that moved between groups cannot briefly appear in
+		// both.
+		stale := tx.Where("user_id = ? AND source = ?", userID, source)
+		if len(assertedIDs) > 0 {
+			stale = stale.Where("group_id NOT IN ?", assertedIDs)
+		}
+		if err := stale.Delete(&GroupMember{}).Error; err != nil {
+			return err
+		}
+		if len(assertedIDs) == 0 {
+			return nil
+		}
+
+		// Refresh or insert. A row that already exists as
+		// GroupSourcePelican is left untouched: it outranks an
+		// assertion, and stamping asserted_at on it would make an
+		// administrator's deliberate membership expire.
+		for _, groupID := range assertedIDs {
+			member := GroupMember{
+				GroupID:    groupID,
+				UserID:     userID,
+				AddedBy:    creatorOrUnknown(""),
+				Source:     source,
+				AssertedAt: &now,
+			}
+			res := tx.Model(&GroupMember{}).
+				Where("group_id = ? AND user_id = ? AND source <> ?", groupID, userID, GroupSourcePelican).
+				Updates(map[string]interface{}{"source": source, "asserted_at": now})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected > 0 {
+				continue
+			}
+			// No mirrored row to refresh: either there is none at all, or
+			// there is a Pelican one we must not touch. DoNothing sorts
+			// the two out without a second query.
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&member).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func GetGroupWithMembers(db *gorm.DB, groupId string) (*Group, error) {
 	group := &Group{}
 	if err := db.Preload("Members.User").First(group, "id = ?", groupId).Error; err != nil {
@@ -3103,7 +3315,25 @@ func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string, isA
 		return ErrForbidden
 	}
 
-	if result := db.Where("group_id = ? AND user_id = ?", groupId, userId).Delete(&GroupMember{}); result.Error != nil {
+	// Same contract as LeaveGroup: a mirrored membership belongs to the
+	// provider. Removing the row here would look like it worked and be
+	// undone at the member's next login, so say so instead. Note this
+	// applies to admins too — the authority to manage a group does not
+	// extend to overruling the identity provider.
+	var member GroupMember
+	err := db.Where("group_id = ? AND user_id = ?", groupId, userId).First(&member).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil // already not a member; removal is idempotent
+		}
+		return err
+	}
+	if member.IsMirrored() {
+		return fmt.Errorf("%w: %q is asserted by the %s group source", ErrMembershipNotLocal, group.Name, member.Source)
+	}
+
+	if result := db.Where("group_id = ? AND user_id = ? AND source = ?", groupId, userId, GroupSourcePelican).
+		Delete(&GroupMember{}); result.Error != nil {
 		return result.Error
 	}
 	return nil
@@ -3274,7 +3504,18 @@ func LeaveGroup(db *gorm.DB, groupID, userID string) error {
 	if group.OwnerID == userID {
 		return ErrForbidden
 	}
-	res := db.Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&GroupMember{})
+	// A mirrored membership is not ours to remove: the provider decides
+	// it, and the next login would put it back. Refusing is the honest
+	// answer — the user has to be removed at the provider.
+	var member GroupMember
+	if err := db.Where("group_id = ? AND user_id = ?", groupID, userID).First(&member).Error; err != nil {
+		return err
+	}
+	if member.IsMirrored() {
+		return fmt.Errorf("%w: %q is asserted by the %s group source", ErrMembershipNotLocal, group.Name, member.Source)
+	}
+	res := db.Where("group_id = ? AND user_id = ? AND source = ?", groupID, userID, GroupSourcePelican).
+		Delete(&GroupMember{})
 	if res.Error != nil {
 		return res.Error
 	}

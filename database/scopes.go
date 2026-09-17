@@ -347,16 +347,23 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 	}
 
 	// 2. group_scopes for groups the user belongs to via group_members.
+	//    Mirrored memberships count only while the provider has asserted
+	//    them recently enough to grant — this is a granting path.
 	if userID != "" {
+		memberGroupIDs, err := grantingMembershipsFor(db, userID)
+		if err != nil {
+			return nil, err
+		}
 		var memberRows []struct {
 			Scope string
 		}
-		if err := db.Table("group_scopes").
-			Select("group_scopes.scope").
-			Joins("JOIN group_members ON group_members.group_id = group_scopes.group_id").
-			Where("group_members.user_id = ?", userID).
-			Scan(&memberRows).Error; err != nil {
-			return nil, err
+		if len(memberGroupIDs) > 0 {
+			if err := db.Table("group_scopes").
+				Select("scope").
+				Where("group_id IN ?", memberGroupIDs).
+				Scan(&memberRows).Error; err != nil {
+				return nil, err
+			}
 		}
 		for _, r := range memberRows {
 			add(r.Scope)
