@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +62,18 @@ const (
 	// functionality.
 	DirectorDiscoveryShutdownKey ContextKey = "discovery_shutdown"
 )
+
+// directorQueryTimeout bounds a single "list directors" request made
+// during director discovery.
+//
+// Chosen to be comfortably shorter than Transport.DialerTimeout (10s by
+// default) because discovery runs on the startup path: the cost of
+// waiting is a server that has not finished starting, while the cost of
+// giving up early is one skipped director for one round of a loop that
+// repeats on Server.AdvertisementInterval. A director too slow to list
+// its peers within a few seconds is not one we should be holding up
+// every server in the federation for.
+const directorQueryTimeout = 3 * time.Second
 
 // Query all known directors & metadata, return a list of unique director ads
 // If no director ads are found, default back to the federation director endpoint
@@ -115,43 +129,100 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		}
 	}
 
-	// For each statically-defined endpoint, query it for all its known directors
+	// Query every statically-defined endpoint for the directors IT knows
+	// about, CONCURRENTLY and with a bounded per-query timeout.
+	//
+	// Both of those matter, and neither is a micro-optimisation. This
+	// function is called synchronously from LaunchPeriodicDirectorDiscovery,
+	// which is called synchronously from launchers.LaunchModules — so
+	// every second spent here is a second before the server finishes
+	// starting and, for a local cache, before its socket exists at all.
+	//
+	// Serially, N endpoints cost the SUM of their latencies, and an
+	// endpoint that is simply unreachable costs a full dial timeout
+	// (Transport.DialerTimeout, 10s by default) on its own. A federation
+	// only has to advertise one dead director for every server in it to
+	// take ten extra seconds to start — which is exactly what happened
+	// when the OSDF's discovery document listed a director that had
+	// stopped accepting connections: `pelican serve --module localcache`
+	// stopped reaching its listener inside the six seconds the CI
+	// integration test allows, on every branch at once.
+	//
+	// The explicit client timeout is the other half. The shared transport
+	// bounds the DIAL, but nothing bounded the request as a whole, so an
+	// endpoint that accepted a connection and then went quiet would block
+	// startup indefinitely. Discovery is a best-effort, periodically
+	// repeated operation: a director too slow to answer within the
+	// timeout is simply skipped this round, and the ticker tries again.
 	var allErrors error = nil
 	contacted := make(map[string]bool)
+	type queryResult struct {
+		endpoint string
+		ads      []server_structs.DirectorAd
+		err      error
+	}
+	results := make([]queryResult, 0, len(endpointsTemp))
+	var resultsMu sync.Mutex
+	var wg sync.WaitGroup
 	for endpoint := range endpointsTemp {
-		var directorUrl *url.URL
-		directorUrl, err = url.Parse(endpoint)
-		if err != nil {
-			allErrors = errors.Join(allErrors, err)
+		directorUrl, parseErr := url.Parse(endpoint)
+		if parseErr != nil {
+			allErrors = errors.Join(allErrors, parseErr)
 			continue
 		}
 		directorUrl.Path, _ = url.JoinPath(directorUrl.Path, "api", "v1.0", "director", "directors")
 
-		client := &http.Client{Transport: config.GetTransport()}
-		directorInfo, err := client.Get(directorUrl.String())
-		if err != nil {
-			newError := fmt.Errorf("failed to contact director at %s: %w", directorUrl.String(), err)
-			allErrors = errors.Join(allErrors, newError)
-			continue
-		}
-		defer directorInfo.Body.Close()
+		wg.Add(1)
+		go func(endpoint string, directorUrl *url.URL) {
+			defer wg.Done()
+			res := queryResult{endpoint: endpoint}
+			defer func() {
+				resultsMu.Lock()
+				results = append(results, res)
+				resultsMu.Unlock()
+			}()
 
-		if directorInfo.StatusCode != http.StatusOK {
-			newError := fmt.Errorf("director at %s responded to 'list directors' API with status code %d", directorUrl.String(), directorInfo.StatusCode)
-			allErrors = errors.Join(allErrors, newError)
-			log.Warningln("Remote director responded with a failure:", newError)
-			continue
-		}
+			queryCtx, cancel := context.WithTimeout(ctx, directorQueryTimeout)
+			defer cancel()
+			req, reqErr := http.NewRequestWithContext(queryCtx, http.MethodGet, directorUrl.String(), nil)
+			if reqErr != nil {
+				res.err = reqErr
+				return
+			}
+			client := &http.Client{Transport: config.GetTransport()}
+			directorInfo, getErr := client.Do(req)
+			if getErr != nil {
+				res.err = fmt.Errorf("failed to contact director at %s: %w", directorUrl.String(), getErr)
+				return
+			}
+			defer directorInfo.Body.Close()
 
-		var directorResponse []server_structs.DirectorAd
-		if err = json.NewDecoder(directorInfo.Body).Decode(&directorResponse); err != nil {
-			log.Warningln("Failed to decode response from director:", err)
-			allErrors = errors.Join(allErrors, err)
+			if directorInfo.StatusCode != http.StatusOK {
+				res.err = fmt.Errorf("director at %s responded to 'list directors' API with status code %d", directorUrl.String(), directorInfo.StatusCode)
+				log.Warningln("Remote director responded with a failure:", res.err)
+				return
+			}
+			if decodeErr := json.NewDecoder(directorInfo.Body).Decode(&res.ads); decodeErr != nil {
+				log.Warningln("Failed to decode response from director:", decodeErr)
+				res.err = decodeErr
+				return
+			}
+		}(endpoint, directorUrl)
+	}
+	wg.Wait()
+
+	// Merge in a deterministic order. The precedence rule below depends
+	// on the order ads are visited, so sorting by endpoint keeps the
+	// outcome reproducible now that the queries themselves race.
+	sort.Slice(results, func(i, j int) bool { return results[i].endpoint < results[j].endpoint })
+	now := time.Now()
+	for _, res := range results {
+		if res.err != nil {
+			allErrors = errors.Join(allErrors, res.err)
 			continue
 		}
-		contacted[endpoint] = true
-		now := time.Now()
-		for _, directorEndpoint := range directorResponse {
+		contacted[res.endpoint] = true
+		for _, directorEndpoint := range res.ads {
 			existingAd := endpointMap[directorEndpoint.AdvertiseUrl]
 			if directorEndpoint.Name == "" {
 				continue

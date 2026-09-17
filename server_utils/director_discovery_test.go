@@ -172,3 +172,62 @@ func TestDoDiscoveryFiltersExpiredPeerEntries(t *testing.T) {
 	assert.True(t, urls[serverURL],
 		"entry with future Expiration must be present")
 }
+
+// TestDoDiscoveryIsNotSerializedByAnUnresponsiveSeed pins the property
+// that motivated making the per-endpoint queries concurrent and bounded:
+// discovery runs synchronously on the server startup path, so its cost is
+// paid before a local cache's socket exists at all.
+//
+// The regression it guards against is not hypothetical. A federation only
+// has to advertise one director that has stopped accepting connections for
+// every server in it to spend a full dial timeout (Transport.DialerTimeout,
+// 10s by default) starting up — which is what took `pelican serve --module
+// localcache` past the six seconds github_scripts/citests.sh allows, on
+// every branch at once.
+func TestDoDiscoveryIsNotSerializedByAnUnresponsiveSeed(t *testing.T) {
+	ResetTestState()
+	t.Cleanup(ResetTestState)
+
+	// A healthy director that reports itself.
+	var healthyURL string
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]server_structs.DirectorAd{{
+			AdvertiseUrl: healthyURL,
+			ServerBaseAd: server_structs.ServerBaseAd{
+				Name: "dir-healthy", InstanceID: "inst-healthy", StartTime: 1,
+			},
+		}})
+	}))
+	defer healthy.Close()
+	healthyURL = healthy.URL
+
+	// A director that accepts the connection and then never answers.
+	// This is the shape a dial timeout cannot help with — the connection
+	// succeeds, so only a request-level bound ends the wait.
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer stalled.Close()
+
+	// Several stalled seeds, so a serial implementation would pay the
+	// timeout once per seed and this test would take multiples of it.
+	seeds := []string{healthy.URL, stalled.URL + "/a", stalled.URL + "/b", stalled.URL + "/c"}
+	require.NoError(t, param.Server_DirectorUrls.Set(seeds))
+
+	start := time.Now()
+	endpoints, err := doDiscovery(context.Background(), false)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err, "one healthy director is enough for discovery to succeed")
+	urls := make(map[string]bool, len(endpoints))
+	for _, ep := range endpoints {
+		urls[ep.AdvertiseUrl] = true
+	}
+	assert.True(t, urls[healthyURL], "the healthy director must still be discovered")
+
+	// The bound is what matters, not the exact number: serially this
+	// would be at least 3x directorQueryTimeout. Allow generous slack so
+	// the assertion is about concurrency, not about machine speed.
+	assert.Less(t, elapsed, 2*directorQueryTimeout,
+		"unresponsive seeds must be queried concurrently and bounded, not one timeout after another")
+}
