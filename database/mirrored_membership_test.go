@@ -77,7 +77,7 @@ func TestMirroredMembershipFreshnessGatesGranting(t *testing.T) {
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
-		"ops", AclRoleRead, nil, false))
+		ACLSubjectRef("ops"), AclRoleRead, nil, false))
 	require.NoError(t, GrantGroupScope(db, ops.ID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
 
 	t.Run("a fresh copy grants", func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestMirroredMembershipRestoresTheShareOwnerClamp(t *testing.T) {
 	var ops Group
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, GrantCollectionAcl(db, parent.ID, parentOwner.Username, parentOwner.ID, nil,
-		"ops", AclRoleWrite, nil, false))
+		ACLSubjectRef("ops"), AclRoleWrite, nil, false))
 
 	assert.Equal(t, AclRole(""), EffectiveCollectionRole(db, reload(t, db, parent.ID), alice.ID, ""),
 		"with nothing mirrored there is no record of alice's access, so the clamp kills the share")
@@ -290,4 +290,47 @@ func TestStaleMirroredMembershipsAreNeverPruned(t *testing.T) {
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, nil))
 	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
 	assert.Zero(t, n)
+}
+
+// The latch that decides whether a user-administrator may act on an
+// account. Its one asymmetry: `possible` is never left.
+func TestGroupAdminObservationLatch(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	alice := mkUser(t, db, "u-alice", "alice")
+
+	status := func() GroupAdminStatus {
+		t.Helper()
+		var u User
+		require.NoError(t, db.First(&u, "id = ?", alice.ID).Error)
+		return u.GroupAdminStatus
+	}
+
+	assert.Equal(t, GroupAdminUnknown, status(), "an account starts out unestablished")
+	assert.True(t, GroupAdminUnknown.MayBeAdmin(), "and 'we have not looked' must read as 'might be'")
+
+	t.Run("an observation with no admin group rules the account out", func(t *testing.T) {
+		require.NoError(t, RecordGroupAdminObservation(db, alice.ID, false))
+		assert.Equal(t, GroupAdminRuledOut, status())
+		assert.False(t, GroupAdminRuledOut.MayBeAdmin())
+
+		var u User
+		require.NoError(t, db.First(&u, "id = ?", alice.ID).Error)
+		require.NotNil(t, u.GroupsObservedAt, "and records that we looked")
+	})
+
+	t.Run("an observation with an admin group latches it", func(t *testing.T) {
+		require.NoError(t, RecordGroupAdminObservation(db, alice.ID, true))
+		assert.Equal(t, GroupAdminPossible, status())
+		assert.True(t, GroupAdminPossible.MayBeAdmin())
+	})
+
+	t.Run("nothing downgrades the latch", func(t *testing.T) {
+		// The provider retracting the membership is exactly the case
+		// this exists for: the evidence goes away, the history does not.
+		for i := 0; i < 3; i++ {
+			require.NoError(t, RecordGroupAdminObservation(db, alice.ID, false))
+			assert.Equal(t, GroupAdminPossible, status(),
+				"an account that could once administer this server stays latched")
+		}
+	})
 }

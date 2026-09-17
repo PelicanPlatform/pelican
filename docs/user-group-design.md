@@ -85,12 +85,34 @@ So Pelican also mirrors the memberships, into `group_members` alongside the ones
 A mirrored membership is a **cached authorization fact**, and a cache that outlives the fact is the same bug as a name that outlives its principal. One rule keeps it honest:
 
 > **Freshness gates granting, not existence.**
+>
+> And, more generally: **which direction is safe depends on what a true answer does.**
 
 A mirrored row may hand out access only while the provider has asserted it within `Issuer.AssertedGroupMembershipTTL`. Past that it is *kept*, not deleted — because a check that asks whether an account might *hold* a privilege has to keep seeing it. For `IsSystemAdminUserID`, "we last saw this account in an admin group a month ago" must mean *refuse*; treating a stale copy as absence is exactly what opens that guard. Consumers therefore declare which direction is safe for them: granting paths filter on freshness, restricting paths do not. Rows go away only when the provider stops asserting them.
 
 The caller's own live assertion is never gated by the TTL — that is the provider speaking directly, not a cache.
 
 Only `file` can be refreshed without the user present, since it is a local file keyed by username; `Issuer.GroupFileRefreshInterval` re-reads it and reconciles every known account, so removing someone from the file takes effect within one interval rather than at their next login. `oidc` and `github` need that user's own token and so refresh at login, which is what the TTL exists to bound.
+
+## Establishing that an account is *not* an administrator
+
+The same asymmetry decides a question the mirror alone cannot answer. `Server.AdminGroups` confers `server.admin` by group name, so when membership comes from a provider there may be nothing on this server to evaluate — and a guard that asks "is this account an administrator?" and answers *no* when it cannot tell will open on exactly the accounts it exists to protect. That is how a caller holding only `server.user_admin` could rename, delete, or mint a password-set invite for an administrator's account.
+
+So the question is inverted: not "have we proved this account **is** an administrator" but "have we proved it is **not** one". `users.group_admin_status` latches the answer:
+
+| state       | meaning                                                                              | a user-administrator may act? |
+| ----------- | ------------------------------------------------------------------------------------ | ----------------------------- |
+| `unknown`   | never established — the default, and what every account carries until first observed | no                            |
+| `possible`  | observed holding a group that confers admin. **Sticky**                              | no                            |
+| `ruled-out` | groups observed, none administrative                                                 | yes                           |
+
+Nothing ever leaves `possible`. A provider retracting an administrative membership removes the evidence, not the history, and an account that could once administer this server should not become manageable because a group assignment changed. Recourse is a full `server.admin`, who bypasses these guards entirely; there is deliberately no API to clear the latch, since that would be an API to defeat it.
+
+`unknown` is conservative by design: on upgrade every account carries it, so a user-administrator can act on none until each has signed in once. Where `Server.AdminGroups` is unset no group can confer admin, so the evidence alone rules an account out and nothing changes.
+
+The two predicates are `MustTreatAsSystemAdmin` (restricting — uncertainty refuses) and `IsConfirmedSystemAdmin` (granting — uncertainty declines). They are not interchangeable: `transfer.registerOAuthClient` marks an administrator's client *shared*, so using the restricting one there would quietly share the clients of accounts nobody has established anything about.
+
+## Removing a mirrored membership
 
 A mirrored membership cannot be removed through Pelican — not by the member, not by an administrator. The provider still asserts it, so the row would reappear at the next login; the removal has to happen at the provider. Adding a *local* member to an asserted group is fine, and that membership is Pelican's: it does not expire and an assertion will not retract it.
 
@@ -103,9 +125,13 @@ Every stored reference used for an authorization decision is an **ID**, never a 
 - Audit columns (`granted_by`, `added_by`, `created_by`) hold User.IDs or the `unknown` / `self-enrolled` sentinels.
 - `api_keys.created_by` holds the creator's User.ID. It is not an audit field: a key's persisted scopes are re-intersected against that user's *current* effective scopes on every call, so the column decides what the key can do. A username there meant a rename silently bricked the key and a reused username revived it for whoever still held the secret.
 
-The two spaces are kept **disjoint**: `ValidateIdentifier` refuses any name of the shape an ID takes (eight lowercase hex characters). Without that, anywhere a handle may be either — an ACL grant target, say — a user could create a group whose *name* is another principal's *ID* and intercept every reference addressed to it, which is the same confusion one layer up. Disjointness also means a resolver can tell which space a handle belongs to by looking at it, instead of trying one and falling back to the other.
+**Which space a value belongs to is carried by its type, never inferred from how it looks.** In Go that is `ACLSubjectRef` (name space: a group name, `user-<username>`, `@authenticated`) versus `ACLSubject` (ID space: a kind plus an ID); over HTTP it is the `groupId` field versus the `subjectType` + `subjectId` pair. Each has its own resolver, and neither consults the other's table — a group ID handed to the name-space resolver simply does not resolve, because no group is *named* that.
 
-A bare user ID is deliberately not accepted as an ACL target: `user-<username>` names a user in the name space and the API's `subjectType` + `subjectId` pair names one in the ID space, so a third, guessed spelling would buy nothing.
+This matters because the alternative is a guess. An earlier draft of this work decided by the shape of the string, and shape is exactly what an attacker controls: group creation is open to any authenticated user, so creating a group *named* after another principal's *ID* was enough to intercept every grant addressed to that ID. A guess at a security boundary is a vulnerability waiting for the input that fools it.
+
+A bare user ID is therefore not an accepted `groupId` spelling at all. Naming a user goes through `user-<username>` in the name space or `subjectType`/`subjectId` in the ID space; a third, inferred form would put the two spaces back together.
+
+Separately, `ValidateIdentifier` refuses a *locally created* name shaped like an ID (eight lowercase hex characters). That is **hygiene, not a control** — a group called `a1b2c3d4` is confusing in a log line or a bug report, and nothing is allowed to depend on the rule. A name a provider asserts is exempt, because it is a record of what the provider says rather than something a user chose.
 
 This is what makes renaming safe. A rename changes one row in `users` or `groups`; nothing else references the old value, so there is nothing to migrate and nothing left behind for a later claimant of that name. It is also why granting an ACL to a name this server has no record of is an error rather than a stored string: a stored name would be matched by whoever holds it next.
 

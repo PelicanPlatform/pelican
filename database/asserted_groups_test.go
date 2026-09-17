@@ -170,23 +170,24 @@ func TestEnsureAssertedGroups(t *testing.T) {
 			"an admin's decision to distrust an asserted name must survive the next login")
 	})
 
-	t.Run("records hierarchical issuer names but not reserved ACL-target forms", func(t *testing.T) {
+	t.Run("records any name a provider asserts but not reserved ACL-target forms", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
 
 		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{
 			"/cms/production", // WLCG-style; ValidateIdentifier would reject the slash
+			"a1b2c3d4",        // ID-shaped; only a naming-hygiene rule, not a control
 			"",                // empty
 			"user-alice",      // reserved personal-group prefix
 			"@authenticated",  // the virtual ACL sentinel
-			"a1b2c3d4",        // the ID shape — a name here could impersonate a slug
 		}))
 
 		var names []string
-		require.NoError(t, db.Model(&Group{}).Pluck("name", &names).Error)
-		assert.Equal(t, []string{"/cms/production"}, names,
-			"the identifier rules govern what a user may name a group, not what an issuer may assert; "+
-				"only names that would be indistinguishable from this server's own ACL-target forms are skipped")
+		require.NoError(t, db.Model(&Group{}).Order("name").Pluck("name", &names).Error)
+		assert.Equal(t, []string{"/cms/production", "a1b2c3d4"}, names,
+			"the identifier rules govern what a USER may name a group, not what a provider may assert; "+
+				"an ID-shaped asserted name is harmless because nothing resolves a handle by its shape. "+
+				"Only names indistinguishable from this server's own NAME-space ACL-target forms are skipped")
 	})
 
 	t.Run("does nothing when auto-creation is disabled", func(t *testing.T) {
@@ -212,13 +213,13 @@ func TestAssertedGroupBecomesAnUsableACLTarget(t *testing.T) {
 	// Before anyone from the group has logged in, there is nothing to
 	// grant to.
 	err := GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
-		"cms-production", AclRoleRead, nil, false)
+		ACLSubjectRef("cms-production"), AclRoleRead, nil, false)
 	assert.ErrorIs(t, err, ErrUnknownACLSubject)
 
 	// A login asserting the group reconciles it...
 	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production"}))
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
-		"cms-production", AclRoleRead, nil, false))
+		ACLSubjectRef("cms-production"), AclRoleRead, nil, false))
 
 	// ...and a caller asserting that name resolves to the same record.
 	member := mkUser(t, db, "u-member2", "member2")

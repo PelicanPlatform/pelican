@@ -318,92 +318,112 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 	return out
 }
 
-// ResolveACLSubject turns a caller-supplied ACL target — a Group.ID, a
-// Group.Name, the `user-<username>` personal form, or the
-// `@authenticated` sentinel — into the stored (type, id) pair.
+// ACLSubjectRef is a NAME-space reference to an ACL target: a group
+// name, `user-<username>`, or the `@authenticated` sentinel. It is what
+// a human writes and what a provider asserts.
 //
-// Which space the target belongs to is decided by LOOKING AT IT, not by
-// a fallback chain: ValidateIdentifier refuses to let any name take the
-// shape of an ID, so the two spaces are disjoint and LooksLikeSlug
-// answers the question outright. An earlier version of this function
-// tried names first and then IDs, which meant a user who created a
-// group named after somebody else's ID slug — group creation is open to
-// any authenticated user, and eight hex characters is a legal name —
-// would intercept every grant an operator addressed to that ID. That is
-// the same name-versus-ID confusion the ID-keyed model exists to
-// remove, reintroduced one layer up.
+// It is a distinct type from a plain string on purpose. The name space
+// and the ID space are different things that happen to share a Go
+// representation, and a function that accepts "either" has to guess
+// which one it was handed — which is not a guess that can be made
+// safely. Group creation is open to any authenticated user, so if a
+// resolver ever consults names and IDs together, creating a group NAMED
+// after another principal's ID is enough to intercept every grant
+// addressed to that ID. Making the two spaces separate types means the
+// resolver never has to ask, and a caller that has an ID cannot reach a
+// name lookup by accident: converting is an explicit, greppable act.
+type ACLSubjectRef string
+
+// ACLSubject is the stored, ID-space identity of an ACL target: what
+// actually lands in `collection_acls`. Kind and ID together, never a
+// bare string, because an ID alone does not say which table it is in.
+type ACLSubject struct {
+	Type ACLSubjectType
+	ID   string
+}
+
+// ResolveACLSubjectRef turns a name-space reference into the stored
+// subject.
 //
-// A bare User.ID is deliberately NOT accepted. `user-<username>` names a
-// user in the name space and the API's explicit `subjectType` +
-// `subjectId` pair names one in the ID space; a third, guessed spelling
-// buys nothing and costs the disjointness argument above.
+// Name space ONLY. A group ID handed to this function does not resolve,
+// because no group is *named* that — which is the correct outcome, not a
+// limitation: callers holding an ID use LookupACLSubject and say so.
 //
-// Unlike the pre-ID model this NEVER falls back to "trust the caller
-// and store the string": an unresolvable target is an error, because
-// storing it would recreate the dangling-name grant that issue #3752
-// describes. Operators who want to pre-grant access to a
-// provider-asserted group that nobody has logged in with yet create the
-// group first (`POST /api/v1.0/groups`), which is also where the
+// It NEVER falls back to "trust the caller and store the string" the way
+// the pre-ID model did: an unresolvable reference is an error, because
+// storing it would recreate the dangling-name grant of issue #3752.
+// Operators who want to pre-grant access to a provider-asserted group
+// that nobody has logged in with yet create the group first
+// (`POST /api/v1.0/groups`), which is also where the
 // auth-template-eligibility decision belongs.
-func ResolveACLSubject(db *gorm.DB, target string) (ACLSubjectType, string, error) {
-	target = strings.TrimSpace(target)
+func ResolveACLSubjectRef(db *gorm.DB, ref ACLSubjectRef) (ACLSubject, error) {
+	target := strings.TrimSpace(string(ref))
 	if target == "" {
-		return "", "", errors.New("ACL subject is required")
+		return ACLSubject{}, errors.New("ACL subject is required")
 	}
 	if IsACLGroupVirtual(target) {
-		return ACLSubjectAuthenticated, "", nil
+		return ACLSubject{Type: ACLSubjectAuthenticated}, nil
 	}
 	if db == nil {
-		return "", "", errors.New("database is required to resolve an ACL subject")
+		return ACLSubject{}, errors.New("database is required to resolve an ACL subject")
 	}
 	if name, ok := strings.CutPrefix(target, PersonalACLGroupPrefix); ok {
 		var u User
 		if err := db.Select("id").Where("username = ?", name).First(&u).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return "", "", fmt.Errorf("%w: no such user %q", ErrUnknownACLSubject, name)
+				return ACLSubject{}, fmt.Errorf("%w: no such user %q", ErrUnknownACLSubject, name)
 			}
-			return "", "", err
+			return ACLSubject{}, err
 		}
-		return ACLSubjectUser, u.ID, nil
+		return ACLSubject{Type: ACLSubjectUser, ID: u.ID}, nil
 	}
 	var grp Group
-	lookup := func(column string) (bool, error) {
-		err := db.Select("id").Where(column+" = ?", target).First(&grp).Error
-		if err == nil {
-			return true, nil
-		}
+	if err := db.Select("id").Where("name = ?", target).First(&grp).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
+			return ACLSubject{}, fmt.Errorf(
+				"%w: no group is named %q (name a user as %s<username>, or address either by subjectType/subjectId)",
+				ErrUnknownACLSubject, target, PersonalACLGroupPrefix)
 		}
-		return false, err
+		return ACLSubject{}, err
 	}
+	return ACLSubject{Type: ACLSubjectGroup, ID: grp.ID}, nil
+}
 
-	// An ID-shaped target is resolved in the ID space and nowhere else.
-	// ValidateIdentifier refuses to let any name take this shape, so
-	// consulting names here could only ever match a row that predates
-	// that rule — exactly the row that would be there to hijack the
-	// grant.
-	if !LooksLikeSlug(target) {
-		found, err := lookup("name")
-		if err != nil {
-			return "", "", err
-		}
-		if found {
-			return ACLSubjectGroup, grp.ID, nil
-		}
+// LookupACLSubject validates an ID-space reference: that the kind is one
+// we know and that the row it names exists.
+//
+// Granting to an ID with no row would leave a dangling reference, and
+// IDs are never reused, so such a reference can only ever be a mistake.
+func LookupACLSubject(db *gorm.DB, subject ACLSubject) (ACLSubject, error) {
+	switch subject.Type {
+	case ACLSubjectAuthenticated:
+		// The sentinel names no row; an ID on it is meaningless, so
+		// normalise it away rather than storing something that would
+		// never be matched.
+		return ACLSubject{Type: ACLSubjectAuthenticated}, nil
+	case ACLSubjectGroup, ACLSubjectUser:
+	default:
+		return ACLSubject{}, fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
 	}
-	// IDs are slug-shaped everywhere generateSlug produces them, but
-	// nothing in the schema enforces it, so fall through to an ID lookup
-	// for a target that is neither a known name nor slug-shaped.
-	found, err := lookup("id")
+	if db == nil {
+		return ACLSubject{}, errors.New("database is required to resolve an ACL subject")
+	}
+	if subject.ID == "" {
+		return ACLSubject{}, fmt.Errorf("%w: a %s subject needs an ID", ErrUnknownACLSubject, subject.Type)
+	}
+	var err error
+	if subject.Type == ACLSubjectGroup {
+		err = db.Select("id").Where("id = ?", subject.ID).First(&Group{}).Error
+	} else {
+		err = db.Select("id").Where("id = ?", subject.ID).First(&User{}).Error
+	}
 	if err != nil {
-		return "", "", err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ACLSubject{}, fmt.Errorf("%w: no %s with ID %q", ErrUnknownACLSubject, subject.Type, subject.ID)
+		}
+		return ACLSubject{}, err
 	}
-	if found {
-		return ACLSubjectGroup, grp.ID, nil
-	}
-	return "", "", fmt.Errorf("%w: %q matches no group on this server (name a user as %s<username>, or address either by subjectType/subjectId)",
-		ErrUnknownACLSubject, target, PersonalACLGroupPrefix)
+	return subject, nil
 }
 
 // AnnotateACLSubjects fills the display-only SubjectName / GroupID
@@ -576,6 +596,38 @@ const (
 	UserStatusInactive UserStatus = "inactive"
 )
 
+// GroupAdminStatus latches what Pelican has established about an
+// account's group-derived administrator privileges. It exists so that
+// "we have not checked" is a state a guard can see, rather than a
+// silence it has to interpret as "not an administrator" — which is how
+// a server.user_admin came to be able to act on an administrator whose
+// authority arrived in a provider's group assertion.
+//
+// The three states are ordered by how much they let a caller do, and
+// only one transition is forbidden: nothing ever leaves
+// GroupAdminPossible. See RecordGroupAdminObservation.
+type GroupAdminStatus string
+
+const (
+	// GroupAdminUnknown — never established. Treated as a possible
+	// administrator: refuse. The default, and what every account
+	// carries until it is first observed.
+	GroupAdminUnknown GroupAdminStatus = "unknown"
+	// GroupAdminPossible — observed holding a group that confers an
+	// administrator scope. Sticky: a provider retracting the membership
+	// removes the evidence, not the history.
+	GroupAdminPossible GroupAdminStatus = "possible"
+	// GroupAdminRuledOut — groups observed, none of them administrative.
+	GroupAdminRuledOut GroupAdminStatus = "ruled-out"
+)
+
+// MayBeAdmin reports whether this status requires treating the account
+// as a possible administrator. Both "we saw one" and "we have not
+// looked" do.
+func (s GroupAdminStatus) MayBeAdmin() bool {
+	return s != GroupAdminRuledOut
+}
+
 // User is the canonical user record. Four concepts live on this row and
 // they are intentionally distinct — code that conflates them is a bug.
 //
@@ -645,6 +697,15 @@ type User struct {
 	DisplayName string     `gorm:"not null;default:''" json:"displayName"`
 	AUPVersion  string     `gorm:"not null;default:''" json:"aupVersion"`
 	AUPAgreedAt *time.Time `json:"aupAgreedAt"`
+	// GroupAdminStatus latches what has been established about this
+	// account's group-derived administrator privileges; see the type.
+	// Consulted only by the guard that stops a user-administrator from
+	// acting on an administrator's account — never to GRANT anything.
+	GroupAdminStatus GroupAdminStatus `gorm:"not null;default:'unknown'" json:"groupAdminStatus"`
+	// GroupsObservedAt is when this account's provider-asserted group
+	// set was last reconciled, or NULL if it never has been. Says when
+	// the observation happened; GroupAdminStatus says what it concluded.
+	GroupsObservedAt *time.Time `json:"groupsObservedAt,omitempty"`
 	// HasPassword is a derived JSON-only field — populated in AfterFind
 	// via a side query that reads only a boolean projection of the
 	// password_hash column. The hash itself never lives on this struct;
@@ -1275,13 +1336,13 @@ func GetCollectionAcls(db *gorm.DB, id, user, userID string, groups []string, is
 
 // GrantCollectionAcl adds (or refreshes) a role grant on a collection.
 //
-// `subject` is the caller-supplied target: a group name, a group slug,
-// `user-<username>`, a User.ID, or the `@authenticated` sentinel. It is
-// resolved to an immutable (type, id) pair before anything is written;
-// a target that matches nothing is rejected with ErrUnknownACLSubject
-// rather than persisted verbatim. `grantedByID` is the granting user's
-// User.ID, recorded for audit.
-func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, subject string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+// `ref` is a NAME-space target: a group name, `user-<username>`, or the
+// `@authenticated` sentinel. Callers holding an ID use
+// GrantCollectionAclBySubject instead — the two spaces have separate
+// entry points so neither has to be guessed from the string. A
+// reference that matches nothing is rejected with ErrUnknownACLSubject
+// rather than persisted verbatim.
+func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, expiresAt *time.Time, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
@@ -1294,23 +1355,18 @@ func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, s
 		}
 	}
 
-	subjectType, subjectID, err := ResolveACLSubject(db, subject)
+	subject, err := ResolveACLSubjectRef(db, ref)
 	if err != nil {
 		return err
 	}
-	return GrantCollectionAclBySubject(db, id, user, userID, groups, subjectType, subjectID, role, expiresAt, isAdmin)
+	return GrantCollectionAclBySubject(db, id, user, userID, groups, subject, role, expiresAt, isAdmin)
 }
 
-// GrantCollectionAclBySubject is GrantCollectionAcl without the name
-// resolution step — the caller supplies the stored (type, id) pair
-// directly. This is the only way to grant to a *user* by ID, since a
-// bare user ID is deliberately not one of the name-space spellings
-// ResolveACLSubject accepts.
-//
-// The subject must exist: granting to an ID with no row would leave a
-// dangling reference, and IDs are never reused, so it can only ever be
-// a mistake.
-func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subjectType ACLSubjectType, subjectID string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+// GrantCollectionAclBySubject is the ID-space counterpart of
+// GrantCollectionAcl: the caller supplies the stored subject directly,
+// so there is no name to resolve and nothing to guess. This is the only
+// way to grant to a *user* by ID.
+func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, expiresAt *time.Time, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
@@ -1322,32 +1378,16 @@ func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []
 		}
 	}
 
-	switch subjectType {
-	case ACLSubjectAuthenticated:
-		subjectID = ""
-	case ACLSubjectGroup:
-		if err := db.Select("id").Where("id = ?", subjectID).First(&Group{}).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("%w: no group with ID %q", ErrUnknownACLSubject, subjectID)
-			}
-			return err
-		}
-	case ACLSubjectUser:
-		if err := db.Select("id").Where("id = ?", subjectID).First(&User{}).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("%w: no user with ID %q", ErrUnknownACLSubject, subjectID)
-			}
-			return err
-		}
-	default:
-		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subjectType)
+	subject, err := LookupACLSubject(db, subject)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
-			SubjectType:  subjectType,
-			SubjectID:    subjectID,
+			SubjectType:  subject.Type,
+			SubjectID:    subject.ID,
 			Role:         role,
 			GrantedBy:    creatorOrUnknown(userID),
 			ExpiresAt:    expiresAt,
@@ -1360,10 +1400,11 @@ func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []
 	})
 }
 
-// RevokeCollectionAcl removes a role grant. `subject` accepts the same
-// spellings as GrantCollectionAcl, including the `groupId` value the
-// API hands back on a listing, so a client can round-trip what it read.
-func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, subject string, role AclRole, isAdmin bool) error {
+// RevokeCollectionAcl removes a role grant named in the NAME space —
+// the same spellings GrantCollectionAcl accepts, including the `groupId`
+// value the API hands back on a listing, so a client can round-trip what
+// it read.
+func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
@@ -1376,18 +1417,19 @@ func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, 
 		}
 	}
 
-	subjectType, subjectID, err := ResolveACLSubject(db, subject)
+	subject, err := ResolveACLSubjectRef(db, ref)
 	if err != nil {
 		return err
 	}
-	return RevokeCollectionAclBySubject(db, id, user, userID, groups, subjectType, subjectID, role, isAdmin)
+	return RevokeCollectionAclBySubject(db, id, user, userID, groups, subject, role, isAdmin)
 }
 
-// RevokeCollectionAclBySubject is RevokeCollectionAcl without the name
-// resolution step — the caller supplies the stored (type, id) pair
-// directly. This is the only way to clear a row whose subject has since
-// been deleted, since there is no name left to resolve.
-func RevokeCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subjectType ACLSubjectType, subjectID string, role AclRole, isAdmin bool) error {
+// RevokeCollectionAclBySubject is the ID-space counterpart of
+// RevokeCollectionAcl. It is also the only way to clear a row whose
+// subject has since been deleted, since there is no name left to
+// resolve — so unlike the grant path it does NOT require the subject to
+// still exist.
+func RevokeCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
@@ -1399,15 +1441,17 @@ func RevokeCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups [
 		}
 	}
 
-	switch subjectType {
-	case ACLSubjectGroup, ACLSubjectUser, ACLSubjectAuthenticated:
+	switch subject.Type {
+	case ACLSubjectGroup, ACLSubjectUser:
+	case ACLSubjectAuthenticated:
+		subject.ID = ""
 	default:
-		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subjectType)
+		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		if result := tx.Where("collection_id = ? AND subject_type = ? AND subject_id = ? AND role = ?",
-			id, subjectType, subjectID, role).Delete(&CollectionACL{}); result.Error != nil {
+			id, subject.Type, subject.ID, role).Delete(&CollectionACL{}); result.Error != nil {
 			return result.Error
 		}
 		return nil
@@ -2634,13 +2678,14 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 		// `/cms/production`. Refusing those would leave exactly the
 		// groups an operator most wants to ACL without an ID.
 		//
-		// Three shapes are still excluded, because they would be
+		// Two shapes are still excluded, because they would be
 		// indistinguishable from this server's own presentation forms
-		// for an ACL target: the `user-` personal prefix, the `@`
-		// sentinel namespace, and the eight-hex-character ID shape. An
-		// asserted name of any of those keeps working for auth-template
-		// matching; it just doesn't get a record.
-		if strings.HasPrefix(name, PersonalACLGroupPrefix) || strings.HasPrefix(name, "@") || LooksLikeSlug(name) {
+		// for a NAME-space ACL target: the `user-` personal prefix and
+		// the `@` sentinel namespace. An asserted name of either keeps
+		// working for auth-template matching; it just doesn't get a
+		// record. An ID-shaped name is fine here — nothing resolves a
+		// name by its shape, so it cannot be mistaken for an ID.
+		if strings.HasPrefix(name, PersonalACLGroupPrefix) || strings.HasPrefix(name, "@") {
 			log.Debugf("Not recording group %q asserted by the %s source: the name collides with a reserved ACL-target form", name, source)
 			continue
 		}
@@ -2810,6 +2855,40 @@ func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error)
 		}
 	}
 	return out, nil
+}
+
+// RecordGroupAdminObservation latches what an observation of a user's
+// asserted group set concluded about their administrator privileges.
+//
+// `sawAdminGroup` is the caller's verdict — the group-to-scope matching
+// lives in the web layer, which owns the Server.*AdminGroups config, so
+// this function does not re-derive it. It only enforces the latch:
+//
+//   - true always sets GroupAdminPossible.
+//   - false moves GroupAdminUnknown to GroupAdminRuledOut, and leaves
+//     GroupAdminPossible alone. That asymmetry IS the latch: a provider
+//     retracting an administrative membership removes the evidence, not
+//     the history, and an account that has ever been able to administer
+//     this server should not become manageable by a user-administrator
+//     because the evidence went away.
+//
+// GroupsObservedAt is stamped either way, so an operator can tell "we
+// looked and found nothing" from "we have never looked".
+func RecordGroupAdminObservation(db *gorm.DB, userID string, sawAdminGroup bool) error {
+	if db == nil || userID == "" {
+		return nil
+	}
+	now := time.Now()
+	updates := map[string]interface{}{"groups_observed_at": now}
+	if sawAdminGroup {
+		updates["group_admin_status"] = GroupAdminPossible
+		return db.Model(&User{}).Where("id = ?", userID).Updates(updates).Error
+	}
+	// Never downgrade a latched account.
+	updates["group_admin_status"] = GroupAdminRuledOut
+	return db.Model(&User{}).
+		Where("id = ? AND group_admin_status <> ?", userID, GroupAdminPossible).
+		Updates(updates).Error
 }
 
 // MirrorAssertedGroupMemberships records, for one user, the memberships

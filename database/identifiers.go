@@ -53,24 +53,27 @@ var ErrInvalidIdentifier = errors.New("invalid identifier: must be 2-64 characte
 // compact.
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$`)
 
-// slugShapePattern matches the exact shape generateSlug produces for a
-// User.ID / Group.ID: eight lowercase hex characters. Names of that
-// shape are refused so the name space and the ID space stay DISJOINT.
+// slugShapePattern matches the shape generateSlug produces for a
+// User.ID / Group.ID: eight lowercase hex characters. Locally-created
+// names of that shape are refused.
 //
-// Without this they overlap, and anywhere a handle can be either — an
-// ACL grant target, say — an attacker can create a principal whose NAME
-// is some other principal's ID and intercept references meant for it.
-// Keeping them disjoint means a resolver can decide which space a
-// handle belongs to by looking at it, with no precedence rule to get
-// wrong. Eight hex characters is not a plausible thing to want to call
-// a person or a team, so the cost is nil.
+// This is HYGIENE, not a security control, and the distinction matters.
+// Nothing decides which identifier space a value belongs to by looking
+// at it: ACL targets carry their space in the type (see
+// database.ACLSubjectRef versus database.ACLSubject) and in which API
+// fields the caller populates, and every other lookup names its column
+// outright. An earlier version of this branch did decide by shape, and
+// that was wrong — "looks like an ID" is a guess, and a guess at a
+// security boundary is a vulnerability waiting for someone to find the
+// input that fools it.
+//
+// What the rule buys, then, is only this: a group called `a1b2c3d4` is
+// genuinely confusing in a log line, a config file, or a bug report,
+// and eight hex characters is not a plausible thing to want to call a
+// person or a team. Keeping the spaces visually distinct costs nothing
+// and removes a class of human error. Do not add code that relies on
+// it.
 var slugShapePattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
-
-// LooksLikeSlug reports whether a handle is in the ID space rather than
-// the name space. See slugShapePattern.
-func LooksLikeSlug(handle string) bool {
-	return slugShapePattern.MatchString(handle)
-}
 
 // ValidateIdentifier returns nil if name is a well-formed user/group
 // machine identifier per the design contract on the User/Group structs,
@@ -89,8 +92,9 @@ func ValidateIdentifier(name string) error {
 	if strings.Contains(name, "..") {
 		return ErrInvalidIdentifier
 	}
-	// Names must not be able to impersonate an ID. See slugShapePattern.
-	if LooksLikeSlug(name) {
+	// Keep locally-created names visually distinct from IDs. Hygiene
+	// only — see slugShapePattern for why nothing may depend on it.
+	if slugShapePattern.MatchString(name) {
 		return ErrInvalidIdentifier
 	}
 	return nil
