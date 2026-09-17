@@ -17,6 +17,7 @@ const IntegerField = ({
   required,
   description,
   value,
+  disabled,
 }: BaseCustomRegistrationFieldProps<number>) => {
   const [error, setError] = React.useState<string | undefined>(undefined);
 
@@ -39,6 +40,7 @@ const IntegerField = ({
     <TextField
       fullWidth
       required={required}
+      disabled={disabled}
       size='small'
       label={displayed_name}
       name={name}

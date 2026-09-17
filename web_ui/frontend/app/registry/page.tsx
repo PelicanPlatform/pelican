@@ -195,7 +195,7 @@ export default function Home() {
               'As an administrator, you can edit Approved Registrations by clicking the pencil button.'}
             {user !== undefined &&
               user?.role != 'admin' &&
-              'To edit an Approved Registration you own, please contact the registry administrators.'}
+              'You can edit the description, site name, institution, and security contact of an Approved Registration you own by clicking the pencil button; other changes require a registry administrator.'}
           </Typography>
 
           <Typography variant={'h6'} py={2}>

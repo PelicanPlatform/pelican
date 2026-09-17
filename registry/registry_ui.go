@@ -357,7 +357,10 @@ func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdm
 
 // Create a new namespace registration or update existing namespace registration.
 //
-// For update, only admin-user can update an existing registration if it's been approved already.
+// For update, an admin can change any field of any registration. The owner of an approved
+// registration can change only its descriptive fields (description, site name, institution,
+// security contact); the prefix, public key, custom fields, and ownership stay pinned to
+// their stored values.
 //
 // One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
 // AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
@@ -390,6 +393,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			Msg:    "You need to login to perform this action"})
 		return
 	}
+	var existingNs *server_structs.Registration
 	if isUpdate {
 		idStr := ctx.Param("id")
 		var err error
@@ -399,6 +403,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Invalid ID format. ID must a positive integer"})
+			return
+		}
+		existingNs, err = getRegistrationById(id)
+		if errors.Is(err, errRegistrationNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Can't update namespace: namespace not found"})
+			return
+		} else if err != nil {
+			log.Error("Failed to get namespace by ID: ", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error retrieving namespace"})
 			return
 		}
 	}
@@ -415,6 +432,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
+
+	// Allow the owner of an approved registration to change its descriptive fields only
+	ownerEditOfApproved := isUpdate && !isAdmin &&
+		existingNs.AdminMetadata.Status == server_structs.RegApproved
+	if ownerEditOfApproved {
+		ns.Prefix = existingNs.Prefix
+		ns.Pubkey = existingNs.Pubkey
+		ns.CustomFields = existingNs.CustomFields
+	}
 
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
@@ -496,17 +522,24 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	formatCustomFields(ns.CustomFields)
 
-	if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
-		if !validCF && err != nil {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Validation failed: %v", err)})
-			return
-		} else if !validCF {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Invalid custom fields without a validation error returned"})
-			return
+	// The custom fields of an owner's edit of an approved registration are
+	// pinned to the stored values, which were validated when they were
+	// written and cannot change in this request, so they are not validated
+	// again: a custom field that became required after the approval must not
+	// lock the owner out of the fields they are allowed to change.
+	if !ownerEditOfApproved {
+		if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
+			if !validCF && err != nil {
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Validation failed: %v", err)})
+				return
+			} else if !validCF {
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Invalid custom fields without a validation error returned"})
+				return
+			}
 		}
 	}
 
@@ -551,31 +584,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				})
 		}
 	} else { // Update
-		// First check if the namespace exists
-		exists, err := registrationExistsById(ns.ID)
-		if err != nil {
-			log.Error("Failed to get namespace by ID:", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Fail to find if namespace exists"})
-			return
-		}
-
-		if !exists { // Return 404 is the namespace does not exists
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Can't update namespace: namespace not found"})
-			return
-		}
-
-		existingNs, err := getRegistrationById(ns.ID)
-		if err != nil {
-			log.Error("Error checking namespace status: ", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Error checking namespace status"})
-			return
-		}
 		existingStatus := existingNs.AdminMetadata.Status
 
 		// Ownership can never be set or changed through the request body.
@@ -604,11 +612,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				}
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
-				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
-				return
+				if !belongsTo {
+					log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
+					return
+				}
 			}
 
 			// If non-admin user accesses a namespace with user_id != user but with access_token
