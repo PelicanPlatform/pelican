@@ -279,7 +279,46 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 	}
 	if err := database.MirrorAssertedGroupMemberships(database.ServerDatabase, source, userID, groups); err != nil {
 		log.Warnf("Failed to mirror %s group memberships for %s: %v", source, who, err)
+		// Do not record an observation we did not complete: leaving the
+		// account GroupAdminUnknown keeps the restricting guard
+		// conservative, which is the right way to fail here.
+		return
 	}
+	// This is the moment Pelican actually knows what groups the provider
+	// puts this account in, so it is the moment to latch what that
+	// implies about administrator privileges. The verdict is computed
+	// here rather than in the database layer because the
+	// Server.*AdminGroups matching lives in this package.
+	if err := database.RecordGroupAdminObservation(database.ServerDatabase, userID, assertsAdminGroup(groups)); err != nil {
+		log.Warnf("Failed to record the group-admin observation for %s: %v", who, err)
+	}
+}
+
+// assertsAdminGroup reports whether any of the asserted names is a group
+// that would confer server.admin — i.e. whether observing this set has
+// to latch the account as a possible administrator.
+//
+// It applies the same auth-template-eligibility filter the scope
+// evaluator does, so a group a user created for themselves cannot latch
+// their own account (which would be a self-inflicted denial of service,
+// not an escalation, but is still wrong).
+func assertsAdminGroup(groups []string) bool {
+	if len(groups) == 0 || !param.Server_AdminGroups.IsSet() {
+		return false
+	}
+	configured := param.Server_AdminGroups.GetStringSlice()
+	if len(configured) == 0 {
+		return false
+	}
+	eligible := database.FilterAuthTemplateEligibleGroups(database.ServerDatabase, groups)
+	for _, want := range configured {
+		for _, got := range eligible {
+			if want == got {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Given a user name, return the list of groups they belong to according

@@ -48,6 +48,11 @@ const versionBeforeIDKeyedAuthz = 20260911120000
 // hold a username and `groups` has no `deleted_at`.
 const versionBeforeIDKeyedAPIKeys = 20260916120000
 
+// versionBeforeGroupAdminLatch is the migration immediately preceding
+// 20260919120000, i.e. the last version where `users` has no
+// group_admin_status.
+const versionBeforeGroupAdminLatch = 20260918120000
+
 // migrateToVersion opens a fresh on-disk SQLite database and runs the
 // universal migrations up to (and including) `version`.
 func migrateToVersion(t *testing.T, version int64) (*gorm.DB, *sql.DB) {
@@ -295,4 +300,36 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 			VALUES ('g-ops', 'other', 'unknown', 1, 'pelican')`).Error,
 			"the tombstone must keep the ID spent")
 	})
+}
+
+// Every account that existed before the latch is 'unknown', not
+// 'ruled-out'. That is the whole point: before this migration nothing
+// was recorded about group-derived admin privileges, so nothing is
+// known, and a guard that reads silence as "not an administrator" is
+// how a user-administrator came to be able to act on one.
+func TestGroupAdminLatchMigrationDefaultsToUnknown(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGroupAdminLatch)
+
+	require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
+		('u-alice', 'alice', 'alice@idp', 'https://idp.example', 'unknown'),
+		('u-bob',   'bob',   'bob@idp',   'https://idp.example', 'unknown')`).Error)
+
+	finishMigrations(t, sqlDB)
+
+	var users []User
+	require.NoError(t, db.Order("id").Find(&users).Error)
+	require.Len(t, users, 2)
+	for _, u := range users {
+		assert.Equal(t, GroupAdminUnknown, u.GroupAdminStatus,
+			"account %s must not be presumed safe to touch", u.Username)
+		assert.True(t, u.GroupAdminStatus.MayBeAdmin())
+		assert.Nil(t, u.GroupsObservedAt, "nothing has been observed yet")
+	}
+
+	// And a new account created after the migration starts the same way.
+	require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
+		('u-carol', 'carol', 'carol@idp', 'https://idp.example', 'unknown')`).Error)
+	var carol User
+	require.NoError(t, db.First(&carol, "id = ?", "u-carol").Error)
+	assert.Equal(t, GroupAdminUnknown, carol.GroupAdminStatus)
 }

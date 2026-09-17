@@ -129,7 +129,7 @@ func TestReclaimedUsernameInheritsNoCollections(t *testing.T) {
 	other := mkUser(t, db, "u-other", "other")
 	shared := mkCollection(t, db, "c2", "shared", other.ID)
 	require.NoError(t, GrantCollectionAcl(db, shared.ID, other.Username, other.ID, nil,
-		"user-alice", AclRoleWrite, nil, false))
+		ACLSubjectRef("user-alice"), AclRoleWrite, nil, false))
 
 	require.NoError(t, DeleteUser(db, alice.ID, alice.ID, false))
 
@@ -156,7 +156,7 @@ func TestRenamedUserKeepsGrantsAndLeavesNothingBehind(t *testing.T) {
 	alice := mkUser(t, db, "u-alice", "alice")
 	coll := mkCollection(t, db, "c1", "data", owner.ID)
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
-		"user-alice", AclRoleRead, nil, false))
+		ACLSubjectRef("user-alice"), AclRoleRead, nil, false))
 
 	require.NoError(t, RenameUser(db, alice.ID, "alicia", localIssuerForTests))
 
@@ -176,7 +176,7 @@ func TestRenamedGroupKeepsGrantsAndVacatedNameInheritsNothing(t *testing.T) {
 	fx := seedGroupAuthzFixtures(t, db)
 	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-		fx.opsName, AclRoleWrite, nil, false))
+		ACLSubjectRef(fx.opsName), AclRoleWrite, nil, false))
 
 	// dave-member is in "ops" and can write.
 	assert.NoError(t, validateACL(db, reload(t, db, coll.ID), "dave-member", fx.memberID, nil, token_scopes.Collection_Modify))
@@ -210,7 +210,7 @@ func TestDeleteGroupAfterRenameClearsGrants(t *testing.T) {
 	fx := seedGroupAuthzFixtures(t, db)
 	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-		fx.opsName, AclRoleRead, nil, false))
+		ACLSubjectRef(fx.opsName), AclRoleRead, nil, false))
 
 	newName := "ops-renamed"
 	require.NoError(t, UpdateGroup(db, fx.opsID, &newName, nil, nil, nil, fx.ownerID, true, true))
@@ -226,17 +226,17 @@ func TestGrantCollectionAclSubjectResolution(t *testing.T) {
 
 	t.Run("refuses a name that matches no group and no user", func(t *testing.T) {
 		err := GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			"cms-production", AclRoleRead, nil, false)
+			ACLSubjectRef("cms-production"), AclRoleRead, nil, false)
 		assert.ErrorIs(t, err, ErrUnknownACLSubject,
 			"storing an unresolvable name is what let a later claimant inherit the grant")
 		assert.Empty(t, reload(t, db, coll.ID).ACLs)
 	})
 
-	t.Run("accepts a group by name or by ID and stores the ID either way", func(t *testing.T) {
+	t.Run("each space has its own entry point and both store the ID", func(t *testing.T) {
 		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			fx.opsName, AclRoleRead, nil, false))
-		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			fx.opsAdminsID, AclRoleWrite, nil, false))
+			ACLSubjectRef(fx.opsName), AclRoleRead, nil, false))
+		require.NoError(t, GrantCollectionAclBySubject(db, coll.ID, "owner", fx.ownerID, nil,
+			ACLSubject{Type: ACLSubjectGroup, ID: fx.opsAdminsID}, AclRoleWrite, nil, false))
 
 		acls := reload(t, db, coll.ID).ACLs
 		require.Len(t, acls, 2)
@@ -248,9 +248,9 @@ func TestGrantCollectionAclSubjectResolution(t *testing.T) {
 
 	t.Run("the sentinel and personal forms round-trip through the display fields", func(t *testing.T) {
 		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			AllAuthenticatedUsersACLGroup, AclRoleRead, nil, false))
+			ACLSubjectRef(AllAuthenticatedUsersACLGroup), AclRoleRead, nil, false))
 		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			"user-dave-member", AclRoleRead, nil, false))
+			ACLSubjectRef("user-dave-member"), AclRoleRead, nil, false))
 
 		acls, err := GetCollectionAcls(db, coll.ID, "owner", fx.ownerID, nil, false)
 		require.NoError(t, err)
@@ -266,9 +266,9 @@ func TestGrantCollectionAclSubjectResolution(t *testing.T) {
 
 	t.Run("revoking by the listed groupId works, and so does revoking by subject", func(t *testing.T) {
 		require.NoError(t, RevokeCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			"user-dave-member", AclRoleRead, false))
+			ACLSubjectRef("user-dave-member"), AclRoleRead, false))
 		require.NoError(t, RevokeCollectionAclBySubject(db, coll.ID, "owner", fx.ownerID, nil,
-			ACLSubjectAuthenticated, "", AclRoleRead, false))
+			ACLSubject{Type: ACLSubjectAuthenticated}, AclRoleRead, false))
 
 		for _, a := range reload(t, db, coll.ID).ACLs {
 			assert.Equal(t, ACLSubjectGroup, a.SubjectType)
@@ -297,17 +297,22 @@ func TestUpdateCollectionRejectsUnusableOwner(t *testing.T) {
 	assert.Equal(t, alice.ID, reload(t, db, coll.ID).OwnerID)
 }
 
-// Names and IDs live in disjoint spaces, so no principal can be created
-// whose name is another principal's ID and thereby intercept references
-// meant for it. Group creation is open to any authenticated user, so
-// without this an eight-hex-character group name is a free hijack of
-// every ACL grant an operator addresses by ID.
+// Names and IDs are different spaces, and which one a value belongs to
+// is carried by its TYPE rather than inferred from how it looks. An
+// earlier version of this branch inferred it from the shape of the
+// string, which is a guess — and a guess at a security boundary is a
+// vulnerability waiting for the input that fools it. Group creation is
+// open to any authenticated user, so a group NAMED after another
+// principal's ID was enough to intercept grants addressed to that ID.
 func TestNameSpaceAndIDSpaceAreDisjoint(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	fx := seedGroupAuthzFixtures(t, db)
 	victim := mkUser(t, db, "a1b2c3d4", "victim")
 	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
 
+	// Hygiene, not a control: nothing resolves a handle by its shape any
+	// more (see the subtests below), but keeping names and IDs visually
+	// distinct removes a class of human error in logs and config.
 	t.Run("a group cannot be named like an ID", func(t *testing.T) {
 		_, err := CreateGroup(db, victim.ID, "", "", Creator{UserID: fx.strangerID}, "", false)
 		assert.ErrorIs(t, err, ErrInvalidIdentifier)
@@ -319,24 +324,49 @@ func TestNameSpaceAndIDSpaceAreDisjoint(t *testing.T) {
 		assert.ErrorIs(t, RenameUser(db, victim.ID, "0badf00d", localIssuerForTests), ErrInvalidIdentifier)
 	})
 
-	t.Run("an ID-shaped target resolves in the ID space only", func(t *testing.T) {
-		// The group ID resolves to that group...
-		typ, id, err := ResolveACLSubject(db, fx.opsID)
-		require.NoError(t, err)
-		assert.Equal(t, ACLSubjectGroup, typ)
-		assert.Equal(t, fx.opsID, id)
-
-		// ...and a bare User.ID is not a spelling at all: naming a user
-		// goes through user-<username> or subjectType/subjectId, so
-		// there is no third form for a group name to shadow.
-		_, _, err = ResolveACLSubject(db, victim.ID)
-		assert.ErrorIs(t, err, ErrUnknownACLSubject)
+	t.Run("the name space never consults IDs", func(t *testing.T) {
+		// This is the property that replaced deciding by shape: an ID
+		// handed to the name-space resolver does not resolve, because no
+		// group is NAMED that. It cannot be silently misrouted to a
+		// group whose name happens to look like an ID, because names are
+		// never compared against IDs at all.
+		_, err := ResolveACLSubjectRef(db, ACLSubjectRef(fx.opsID))
+		assert.ErrorIs(t, err, ErrUnknownACLSubject, "a group ID is not a group name")
+		_, err = ResolveACLSubjectRef(db, ACLSubjectRef(victim.ID))
+		assert.ErrorIs(t, err, ErrUnknownACLSubject, "nor is a user ID")
 		assert.ErrorIs(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			victim.ID, AclRoleRead, nil, false), ErrUnknownACLSubject)
+			ACLSubjectRef(victim.ID), AclRoleRead, nil, false), ErrUnknownACLSubject)
 
-		// The supported spellings still work and land on the user.
+		// A group name resolves, and lands on that group.
+		subject, err := ResolveACLSubjectRef(db, ACLSubjectRef(fx.opsName))
+		require.NoError(t, err)
+		assert.Equal(t, ACLSubject{Type: ACLSubjectGroup, ID: fx.opsID}, subject)
+	})
+
+	t.Run("the ID space names its kind and never consults names", func(t *testing.T) {
+		// The counterpart: an ID-space reference says which table it is
+		// in, so there is nothing to infer.
+		subject, err := LookupACLSubject(db, ACLSubject{Type: ACLSubjectGroup, ID: fx.opsID})
+		require.NoError(t, err)
+		assert.Equal(t, fx.opsID, subject.ID)
+
+		_, err = LookupACLSubject(db, ACLSubject{Type: ACLSubjectGroup, ID: fx.opsName})
+		assert.ErrorIs(t, err, ErrUnknownACLSubject, "a group name is not a group ID")
+
+		// A user by ID works here and only here.
+		subject, err = LookupACLSubject(db, ACLSubject{Type: ACLSubjectUser, ID: victim.ID})
+		require.NoError(t, err)
+		assert.Equal(t, ACLSubjectUser, subject.Type)
+
+		// And mixing the kinds up is caught rather than silently
+		// resolved against the wrong table.
+		_, err = LookupACLSubject(db, ACLSubject{Type: ACLSubjectUser, ID: fx.opsID})
+		assert.ErrorIs(t, err, ErrUnknownACLSubject, "a group ID is not a user ID")
+	})
+
+	t.Run("the personal form still lands on the user", func(t *testing.T) {
 		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-			PersonalACLGroupPrefix+victim.Username, AclRoleRead, nil, false))
+			ACLSubjectRef(PersonalACLGroupPrefix+victim.Username), AclRoleRead, nil, false))
 		acls := reload(t, db, coll.ID).ACLs
 		require.Len(t, acls, 1)
 		assert.Equal(t, ACLSubjectUser, acls[0].SubjectType)
@@ -355,7 +385,7 @@ func TestDeleteGroupIsSoftAndExhaustive(t *testing.T) {
 
 	// Wire the group into every place that can reference it.
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
-		fx.opsName, AclRoleWrite, nil, false))
+		ACLSubjectRef(fx.opsName), AclRoleWrite, nil, false))
 	require.NoError(t, GrantGroupScope(db, fx.opsID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
 	require.NoError(t, db.Model(&Collection{}).Where("id = ?", coll.ID).
 		Update("admin_id", fx.opsID).Error)

@@ -1016,10 +1016,10 @@ func handleUpdateUser(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1194,10 +1194,10 @@ func handleDeleteUser(ctx *gin.Context) {
 	}
 
 	// User admins cannot delete system admin users
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot delete system admin accounts",
+			Msg:    "cannot delete this account: " + why,
 		})
 		return
 	}
@@ -1848,10 +1848,10 @@ func handleUpdateUserStatus(ctx *gin.Context) {
 
 	// User admins cannot modify system admin users (only system admins can)
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1971,10 +1971,10 @@ func handleClearAUPAgreement(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot clear a system admin's AUP acceptance",
+			Msg:    "cannot clear this account's AUP acceptance: " + why,
 		})
 		return
 	}

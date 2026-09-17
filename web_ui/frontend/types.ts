@@ -137,6 +137,18 @@ export interface User {
   aupAgreedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // What the server has established about this account's group-derived
+  // administrator privileges. Read-only, and only ever a reason to
+  // WITHHOLD an action from a caller holding server.user_admin — never
+  // a reason to offer one. 'unknown' (the default until the account's
+  // groups are first observed) and 'possible' (observed holding an
+  // administrative group; sticky) both mean a user-administrator may
+  // not act; only 'ruled-out' means they may. Optional so an unmigrated
+  // backend doesn't trip TypeScript.
+  groupAdminStatus?: 'unknown' | 'possible' | 'ruled-out';
+  // When the account's provider-asserted groups were last reconciled;
+  // absent if never.
+  groupsObservedAt?: string;
 }
 
 export type UserPost = Omit<
