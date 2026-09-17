@@ -1549,11 +1549,13 @@ definitions:
   GrantACLRequest:
     type: object
     description: >-
-      Grants a role on a collection. The target may be named as a group
-      name, a group ID, `user-<username>` or a user ID for a personal
-      grant, or the `@authenticated` sentinel; the server resolves it to
-      a stored (subjectType, subjectId) pair. A target that matches no
-      group and no user is rejected with 400 — grants are keyed on IDs,
+      Grants a role on a collection. `groupId` accepts a group name, a
+      group ID, `user-<username>` for a personal grant, or the
+      `@authenticated` sentinel; the server resolves it to a stored
+      (subjectType, subjectId) pair. A bare user ID is NOT accepted —
+      name a user with `user-<username>`, or address either kind of
+      principal unambiguously with `subjectType` + `subjectId`. A target
+      that matches nothing is rejected with 400: grants are keyed on IDs,
       so there is nothing to store for a name this server does not know.
       To pre-grant access to a group your identity provider asserts but
       nobody has logged in with yet, create the group first.
@@ -1565,11 +1567,20 @@ definitions:
         type: string
         description: The ACL target. See the schema description for accepted spellings.
         example: "research-team"
+      subjectType:
+        type: string
+        description: >-
+          Address the principal by its stored ID instead of resolving a
+          name. Use together with `subjectId`.
+        enum:
+          - group
+          - user
+          - authenticated
+        example: "user"
       subjectId:
         type: string
         description: >-
-          The target's stored ID, as an unambiguous alternative to
-          `groupId`. Takes precedence when both are supplied.
+          The target's stored ID; used together with `subjectType`.
         example: "abc12345"
       role:
         type: string

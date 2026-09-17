@@ -53,6 +53,25 @@ var ErrInvalidIdentifier = errors.New("invalid identifier: must be 2-64 characte
 // compact.
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$`)
 
+// slugShapePattern matches the exact shape generateSlug produces for a
+// User.ID / Group.ID: eight lowercase hex characters. Names of that
+// shape are refused so the name space and the ID space stay DISJOINT.
+//
+// Without this they overlap, and anywhere a handle can be either — an
+// ACL grant target, say — an attacker can create a principal whose NAME
+// is some other principal's ID and intercept references meant for it.
+// Keeping them disjoint means a resolver can decide which space a
+// handle belongs to by looking at it, with no precedence rule to get
+// wrong. Eight hex characters is not a plausible thing to want to call
+// a person or a team, so the cost is nil.
+var slugShapePattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
+
+// LooksLikeSlug reports whether a handle is in the ID space rather than
+// the name space. See slugShapePattern.
+func LooksLikeSlug(handle string) bool {
+	return slugShapePattern.MatchString(handle)
+}
+
 // ValidateIdentifier returns nil if name is a well-formed user/group
 // machine identifier per the design contract on the User/Group structs,
 // or ErrInvalidIdentifier otherwise. Apply at every point a name enters
@@ -68,6 +87,10 @@ func ValidateIdentifier(name string) error {
 	// path-traversal marker and there is no legitimate reason a username
 	// or group name would contain it. Cheap, conservative.
 	if strings.Contains(name, "..") {
+		return ErrInvalidIdentifier
+	}
+	// Names must not be able to impersonate an ID. See slugShapePattern.
+	if LooksLikeSlug(name) {
 		return ErrInvalidIdentifier
 	}
 	return nil
