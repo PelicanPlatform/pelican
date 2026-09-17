@@ -296,3 +296,50 @@ func TestUpdateCollectionRejectsUnusableOwner(t *testing.T) {
 
 	assert.Equal(t, alice.ID, reload(t, db, coll.ID).OwnerID)
 }
+
+// Names and IDs live in disjoint spaces, so no principal can be created
+// whose name is another principal's ID and thereby intercept references
+// meant for it. Group creation is open to any authenticated user, so
+// without this an eight-hex-character group name is a free hijack of
+// every ACL grant an operator addresses by ID.
+func TestNameSpaceAndIDSpaceAreDisjoint(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	fx := seedGroupAuthzFixtures(t, db)
+	victim := mkUser(t, db, "a1b2c3d4", "victim")
+	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
+
+	t.Run("a group cannot be named like an ID", func(t *testing.T) {
+		_, err := CreateGroup(db, victim.ID, "", "", Creator{UserID: fx.strangerID}, "", false)
+		assert.ErrorIs(t, err, ErrInvalidIdentifier)
+		// Nor can an admin rename an existing group into the ID space.
+		slugName := "0badf00d"
+		assert.ErrorIs(t, UpdateGroup(db, fx.opsID, &slugName, nil, nil, nil, fx.ownerID, true, true),
+			ErrInvalidIdentifier)
+		// Nor can a user be renamed into it.
+		assert.ErrorIs(t, RenameUser(db, victim.ID, "0badf00d", localIssuerForTests), ErrInvalidIdentifier)
+	})
+
+	t.Run("an ID-shaped target resolves in the ID space only", func(t *testing.T) {
+		// The group ID resolves to that group...
+		typ, id, err := ResolveACLSubject(db, fx.opsID)
+		require.NoError(t, err)
+		assert.Equal(t, ACLSubjectGroup, typ)
+		assert.Equal(t, fx.opsID, id)
+
+		// ...and a bare User.ID is not a spelling at all: naming a user
+		// goes through user-<username> or subjectType/subjectId, so
+		// there is no third form for a group name to shadow.
+		_, _, err = ResolveACLSubject(db, victim.ID)
+		assert.ErrorIs(t, err, ErrUnknownACLSubject)
+		assert.ErrorIs(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
+			victim.ID, AclRoleRead, nil, false), ErrUnknownACLSubject)
+
+		// The supported spellings still work and land on the user.
+		require.NoError(t, GrantCollectionAcl(db, coll.ID, "owner", fx.ownerID, nil,
+			PersonalACLGroupPrefix+victim.Username, AclRoleRead, nil, false))
+		acls := reload(t, db, coll.ID).ACLs
+		require.Len(t, acls, 1)
+		assert.Equal(t, ACLSubjectUser, acls[0].SubjectType)
+		assert.Equal(t, victim.ID, acls[0].SubjectID)
+	})
+}

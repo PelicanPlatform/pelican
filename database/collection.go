@@ -311,15 +311,31 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 }
 
 // ResolveACLSubject turns a caller-supplied ACL target — a Group.ID, a
-// Group.Name, the `user-<username>` personal form, a User.ID, or the
+// Group.Name, the `user-<username>` personal form, or the
 // `@authenticated` sentinel — into the stored (type, id) pair.
+//
+// Which space the target belongs to is decided by LOOKING AT IT, not by
+// a fallback chain: ValidateIdentifier refuses to let any name take the
+// shape of an ID, so the two spaces are disjoint and LooksLikeSlug
+// answers the question outright. An earlier version of this function
+// tried names first and then IDs, which meant a user who created a
+// group named after somebody else's ID slug — group creation is open to
+// any authenticated user, and eight hex characters is a legal name —
+// would intercept every grant an operator addressed to that ID. That is
+// the same name-versus-ID confusion the ID-keyed model exists to
+// remove, reintroduced one layer up.
+//
+// A bare User.ID is deliberately NOT accepted. `user-<username>` names a
+// user in the name space and the API's explicit `subjectType` +
+// `subjectId` pair names one in the ID space; a third, guessed spelling
+// buys nothing and costs the disjointness argument above.
 //
 // Unlike the pre-ID model this NEVER falls back to "trust the caller
 // and store the string": an unresolvable target is an error, because
 // storing it would recreate the dangling-name grant that issue #3752
-// describes. Operators who want to pre-grant access to an
-// issuer-asserted group that nobody has logged in with yet create the
-// group row first (`POST /api/v1.0/groups`), which is also where the
+// describes. Operators who want to pre-grant access to a
+// provider-asserted group that nobody has logged in with yet create the
+// group first (`POST /api/v1.0/groups`), which is also where the
 // auth-template-eligibility decision belongs.
 func ResolveACLSubject(db *gorm.DB, target string) (ACLSubjectType, string, error) {
 	target = strings.TrimSpace(target)
@@ -342,32 +358,44 @@ func ResolveACLSubject(db *gorm.DB, target string) (ACLSubjectType, string, erro
 		}
 		return ACLSubjectUser, u.ID, nil
 	}
-	// Groups are looked up by name first (that is what an issuer
-	// asserts and what a human types) and then by ID, so the
-	// create-group endpoint's slug round-trips too.
 	var grp Group
-	err := db.Select("id").Where("name = ?", target).First(&grp).Error
-	if err == nil {
+	lookup := func(column string) (bool, error) {
+		err := db.Select("id").Where(column+" = ?", target).First(&grp).Error
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// An ID-shaped target is resolved in the ID space and nowhere else.
+	// ValidateIdentifier refuses to let any name take this shape, so
+	// consulting names here could only ever match a row that predates
+	// that rule — exactly the row that would be there to hijack the
+	// grant.
+	if !LooksLikeSlug(target) {
+		found, err := lookup("name")
+		if err != nil {
+			return "", "", err
+		}
+		if found {
+			return ACLSubjectGroup, grp.ID, nil
+		}
+	}
+	// IDs are slug-shaped everywhere generateSlug produces them, but
+	// nothing in the schema enforces it, so fall through to an ID lookup
+	// for a target that is neither a known name nor slug-shaped.
+	found, err := lookup("id")
+	if err != nil {
+		return "", "", err
+	}
+	if found {
 		return ACLSubjectGroup, grp.ID, nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", "", err
-	}
-	if err := db.Select("id").Where("id = ?", target).First(&grp).Error; err == nil {
-		return ACLSubjectGroup, grp.ID, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", "", err
-	}
-	// Last resort: a bare User.ID. The edit UI grants to groups, but
-	// the API is documented to accept a user as a target and a caller
-	// holding a User.ID shouldn't have to synthesize `user-<name>`.
-	var u User
-	if err := db.Select("id").Where("id = ?", target).First(&u).Error; err == nil {
-		return ACLSubjectUser, u.ID, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", "", err
-	}
-	return "", "", fmt.Errorf("%w: %q matches no group or user on this server", ErrUnknownACLSubject, target)
+	return "", "", fmt.Errorf("%w: %q matches no group on this server (name a user as %s<username>, or address either by subjectType/subjectId)",
+		ErrUnknownACLSubject, target, PersonalACLGroupPrefix)
 }
 
 // AnnotateACLSubjects fills the display-only SubjectName / GroupID
@@ -1229,6 +1257,50 @@ func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, s
 	subjectType, subjectID, err := ResolveACLSubject(db, subject)
 	if err != nil {
 		return err
+	}
+	return GrantCollectionAclBySubject(db, id, user, userID, groups, subjectType, subjectID, role, expiresAt, isAdmin)
+}
+
+// GrantCollectionAclBySubject is GrantCollectionAcl without the name
+// resolution step — the caller supplies the stored (type, id) pair
+// directly. This is the only way to grant to a *user* by ID, since a
+// bare user ID is deliberately not one of the name-space spellings
+// ResolveACLSubject accepts.
+//
+// The subject must exist: granting to an ID with no row would leave a
+// dangling reference, and IDs are never reused, so it can only ever be
+// a mistake.
+func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subjectType ACLSubjectType, subjectID string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if !isAdmin {
+		if err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete); err != nil {
+			return err
+		}
+	}
+
+	switch subjectType {
+	case ACLSubjectAuthenticated:
+		subjectID = ""
+	case ACLSubjectGroup:
+		if err := db.Select("id").Where("id = ?", subjectID).First(&Group{}).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: no group with ID %q", ErrUnknownACLSubject, subjectID)
+			}
+			return err
+		}
+	case ACLSubjectUser:
+		if err := db.Select("id").Where("id = ?", subjectID).First(&User{}).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: no user with ID %q", ErrUnknownACLSubject, subjectID)
+			}
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subjectType)
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -2489,14 +2561,21 @@ func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 // ResolveCallerACLSubjects resolves a caller's asserted names to these
 // IDs on every request.
 //
-// AuthTemplateEligible is set true, which preserves today's behavior
-// rather than changing it: FilterAuthTemplateEligibleGroups passes
-// through names it has no record for, so an asserted name already
-// matches Issuer.AuthorizationTemplates / Server.*AdminGroups. Creating
-// the record with the bit clear would silently revoke that. A name whose
-// record already exists with source GroupSourcePelican is left completely
-// alone — a user-created group must never be promoted to template
-// eligibility by an assertion.
+// AuthTemplateEligible is set true AT CREATION, which preserves today's
+// behavior rather than changing it: FilterAuthTemplateEligibleGroups
+// passes through names it has no record for, so an asserted name already
+// matches Issuer.AuthorizationTemplates / Server.*AdminGroups, and
+// recording it with the bit clear would silently revoke that.
+//
+// Re-observation deliberately does NOT touch the bit. An admin who
+// clears it has made a decision — often precisely because the name is
+// attacker-influenced, e.g. a GitHub org anyone may register — and
+// restoring it on the next login of any member would undo that
+// decision silently and leave the operator no lever at all.
+//
+// A record that already exists with source GroupSourcePelican is left
+// completely alone: a user-created group must never be promoted to
+// template eligibility by an assertion.
 //
 // `source` must be the provider that actually asserted the names, and
 // must be one an operator configured via Issuer.GroupSource. Do NOT feed
@@ -2528,12 +2607,13 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 		// `/cms/production`. Refusing those would leave exactly the
 		// groups an operator most wants to ACL without an ID.
 		//
-		// Two shapes are still excluded, because they would be
+		// Three shapes are still excluded, because they would be
 		// indistinguishable from this server's own presentation forms
-		// for an ACL target: the `user-` personal prefix and the `@`
-		// sentinel namespace. An asserted name of either shape keeps
-		// working for auth-template matching; it just doesn't get a row.
-		if strings.HasPrefix(name, PersonalACLGroupPrefix) || strings.HasPrefix(name, "@") {
+		// for an ACL target: the `user-` personal prefix, the `@`
+		// sentinel namespace, and the eight-hex-character ID shape. An
+		// asserted name of any of those keeps working for auth-template
+		// matching; it just doesn't get a record.
+		if strings.HasPrefix(name, PersonalACLGroupPrefix) || strings.HasPrefix(name, "@") || LooksLikeSlug(name) {
 			log.Debugf("Not recording group %q asserted by the %s source: the name collides with a reserved ACL-target form", name, source)
 			continue
 		}
@@ -2583,19 +2663,13 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 					"assertion will resolve to it", name, source, g.ID)
 				continue
 			}
-			// Re-observing an asserted group is the trusted signal that
-			// restores template eligibility if an admin cleared it, and
-			// that stamps the real provider onto a record the migration
-			// could only mark GroupSourceUnknown.
-			updates := map[string]interface{}{}
-			if !g.AuthTemplateEligible {
-				updates["auth_template_eligible"] = true
-			}
+			// Re-observing an asserted group stamps the real provider
+			// onto a record the migration could only mark
+			// GroupSourceUnknown. AuthTemplateEligible is left alone —
+			// see the doc comment.
 			if g.Source != source {
-				updates["source"] = source
-			}
-			if len(updates) > 0 {
-				if err := db.Model(&Group{}).Where("id = ?", g.ID).Updates(updates).Error; err != nil {
+				if err := db.Model(&Group{}).Where("id = ?", g.ID).
+					Update("source", source).Error; err != nil {
 					return err
 				}
 			}

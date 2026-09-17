@@ -405,34 +405,34 @@ type MetadataValue struct {
 
 // GrantAclReq names the ACL target and the role to grant.
 //
-// The target is accepted in three spellings, all resolved to the same
-// stored (subject type, subject ID) pair by
-// database.ResolveACLSubject: a group name, a group ID, `user-<name>`
-// or a user ID for a personal grant, and the `@authenticated`
-// sentinel. `groupId` and `group_id` are equivalent — the frontend
-// uses camelCase, older tooling and existing tests use snake_case —
-// and the field name is historical: it has never been restricted to
-// groups. A target that resolves to nothing is a 400; ACL rows are
-// keyed on IDs, so there is nothing to store for an unknown name.
+// `groupId` names the target the way a human writes it: a group name, a
+// group ID, `user-<name>` for a personal grant, or the `@authenticated`
+// sentinel, all resolved by database.ResolveACLSubject. `group_id` is
+// the equivalent snake_case spelling — the frontend uses camelCase,
+// older tooling and existing tests use snake_case — and the field name
+// is historical: it has never been restricted to groups. A target that
+// resolves to nothing is a 400; ACL rows are keyed on IDs, so there is
+// nothing to store for an unknown name.
+//
+// `subjectType` + `subjectId` address the principal by its stored ID
+// instead, with no resolution step. That pair is the only way to name a
+// *user* by ID: a bare user ID is deliberately not a `groupId` spelling,
+// since a third guessed form would put names and IDs back in the same
+// space. See ResolveACLSubject.
 type GrantAclReq struct {
 	GroupID         string     `json:"groupId"`
 	GroupIDSnakeAlt string     `json:"group_id"`
 	Role            string     `json:"role"`
 	ExpiresAt       *time.Time `json:"expiresAt"`
 	ExpiresAtSnake  *time.Time `json:"expires_at"`
-	// SubjectID names the target by its stored ID directly, skipping
-	// name resolution. Either spelling works; this one is unambiguous
-	// and is what the listing echoes back alongside `groupId`.
-	SubjectID string `json:"subjectId"`
+	SubjectType     string     `json:"subjectType"`
+	SubjectID       string     `json:"subjectId"`
 }
 
 // resolvedGroupID returns whichever of groupId / group_id the caller
 // actually populated. The frontend uses camelCase; older tooling and
 // existing tests use snake_case.
 func (r *GrantAclReq) resolvedGroupID() string {
-	if r.SubjectID != "" {
-		return r.SubjectID
-	}
 	if r.GroupID != "" {
 		return r.GroupID
 	}
@@ -2120,10 +2120,12 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 	groupID := req.resolvedGroupID()
 	expiresAt := req.resolvedExpiresAt()
 
-	if groupID == "" || req.Role == "" {
+	// An `authenticated` subject has an empty subject ID by design, so
+	// the presence of subjectType is what makes that target complete.
+	if (groupID == "" && req.SubjectType == "") || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "groupId and role are required",
+			Msg:    "groupId (or subjectType) and role are required",
 		})
 		return
 	}
@@ -2165,7 +2167,14 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, expiresAt, isAdmin)
+	// An explicit subjectType addresses the principal by its stored ID,
+	// skipping name resolution — the only way to grant to a user by ID.
+	if req.SubjectType != "" {
+		err = database.GrantCollectionAclBySubject(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
+			database.ACLSubjectType(req.SubjectType), req.SubjectID, role, expiresAt, isAdmin)
+	} else {
+		err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, expiresAt, isAdmin)
+	}
 	if err != nil {
 		if errors.Is(err, database.ErrUnknownACLSubject) {
 			// The target names no group and no user. ACL rows are keyed

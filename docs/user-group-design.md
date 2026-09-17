@@ -83,6 +83,10 @@ Every stored reference used for an authorization decision is an **ID**, never a 
 - `collection_acls` rows are keyed on `(subject_type, subject_id)`, where `subject_id` is a Group.ID, a User.ID, or empty for the all-authenticated sentinel. The `user-<username>` and `@authenticated` spellings are *presentation* forms accepted and returned by the API; they never reach a column.
 - Audit columns (`granted_by`, `added_by`, `created_by`) hold User.IDs or the `unknown` / `self-enrolled` sentinels.
 
+The two spaces are kept **disjoint**: `ValidateIdentifier` refuses any name of the shape an ID takes (eight lowercase hex characters). Without that, anywhere a handle may be either — an ACL grant target, say — a user could create a group whose *name* is another principal's *ID* and intercept every reference addressed to it, which is the same confusion one layer up. Disjointness also means a resolver can tell which space a handle belongs to by looking at it, instead of trying one and falling back to the other.
+
+A bare user ID is deliberately not accepted as an ACL target: `user-<username>` names a user in the name space and the API's `subjectType` + `subjectId` pair names one in the ID space, so a third, guessed spelling would buy nothing.
+
 This is what makes renaming safe. A rename changes one row in `users` or `groups`; nothing else references the old value, so there is nothing to migrate and nothing left behind for a later claimant of that name. It is also why granting an ACL to a name this server has no record of is an error rather than a stored string: a stored name would be matched by whoever holds it next.
 
 # Authorizations

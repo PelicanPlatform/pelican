@@ -764,12 +764,13 @@ const OnboardForm: React.FC = () => {
         }
       } else {
         // ACL rows are keyed on the group's ID (see
-        // GrantCollectionAcl); pass the slug we already hold rather
-        // than making the server resolve a name.
+        // GrantCollectionAcl); address it by ID explicitly rather than
+        // handing the server a string to classify.
         const aclOk = await alertOnError(
           () =>
             CollectionService.grantAcl(collection.id, {
-              groupId,
+              subjectType: 'group',
+              subjectId: groupId,
               role: row.role,
             }).then(() => true),
           `Failed to grant ${row.role} ACL to "${groupName}"`,

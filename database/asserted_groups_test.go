@@ -151,19 +151,23 @@ func TestEnsureAssertedGroups(t *testing.T) {
 			"an assertion must never promote a user-created group into auth-template authority")
 	})
 
-	t.Run("re-observation restores eligibility on an external record only", func(t *testing.T) {
+	t.Run("re-observation does not restore an admin-cleared eligibility bit", func(t *testing.T) {
+		// The bit is the operator's only lever over a name they do not
+		// control — a GitHub org is registerable by anyone, and an OIDC
+		// claim is only as trustworthy as the provider. If every login
+		// of every member restored it, clearing it would be useless.
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"atlas"}))
+		require.NoError(t, EnsureAssertedGroups(db, GroupSourceGitHub, []string{"atlas"}))
 		require.NoError(t, db.Model(&Group{}).Where("name = ?", "atlas").
 			Update("auth_template_eligible", false).Error)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"atlas"}))
+		require.NoError(t, EnsureAssertedGroups(db, GroupSourceGitHub, []string{"atlas"}))
 
 		var g Group
 		require.NoError(t, db.First(&g, "name = ?", "atlas").Error)
-		assert.True(t, g.AuthTemplateEligible,
-			"a fresh assertion from the configured identity source is the trusted signal")
+		assert.False(t, g.AuthTemplateEligible,
+			"an admin's decision to distrust an asserted name must survive the next login")
 	})
 
 	t.Run("records hierarchical issuer names but not reserved ACL-target forms", func(t *testing.T) {
@@ -175,6 +179,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 			"",                // empty
 			"user-alice",      // reserved personal-group prefix
 			"@authenticated",  // the virtual ACL sentinel
+			"a1b2c3d4",        // the ID shape — a name here could impersonate a slug
 		}))
 
 		var names []string
