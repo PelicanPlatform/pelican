@@ -319,13 +319,6 @@ func TestStashPluginMain(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
-	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
-	defer func() {
-		_, err = config.SetPreferredPrefix(oldPrefix)
-		require.NoError(t, err)
-	}()
-	assert.NoError(t, err)
-
 	// Temp dir for downloads
 	tempDir := os.TempDir()
 	defer os.Remove(tempDir)
@@ -335,8 +328,7 @@ func TestStashPluginMain(t *testing.T) {
 	// and leaves xrootd running. To work with this, we wrap the test in its own command and parse the output for successful run
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
 		require.NoError(t, param.Origin_EnablePublicReads.Set(true))
-		// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
-		// avoid real web lookups.
+		// Unset various osg-htc.org URLs to avoid real web lookups.
 		require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
 		require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
 		require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
@@ -368,7 +360,7 @@ func TestStashPluginMain(t *testing.T) {
 
 	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
 	cmd := exec.Command(os.Args[0], "-test.run=TestStashPluginMain")
-	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "STASH_LOGGING_LEVEL=debug")
+	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1")
 
 	// Create buffers for stderr (the output we want for test)
 	var stderr bytes.Buffer
@@ -376,7 +368,7 @@ func TestStashPluginMain(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
-	err = cmd.Run()
+	err := cmd.Run()
 	assert.NoError(t, err, stderr.String()+"\n=====\n"+stdout.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
@@ -420,14 +412,6 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 		stashPluginMain(args)
 	}
 
-	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
-	assert.NoError(t, err)
-
-	defer func() {
-		_, err = config.SetPreferredPrefix(oldPrefix)
-		require.NoError(t, err)
-	}()
-
 	tempUploadDir, err := os.MkdirTemp("", "TempUploadDir")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempUploadDir)
@@ -451,8 +435,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
 	require.NoError(t, param.TLSSkipVerify.Set(true))
-	// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
-	// avoid real web lookups.
+	// Unset various osg-htc.org URLs to avoid real web lookups.
 	require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
 	require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
 	require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
@@ -520,7 +503,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	cmd.Stderr = &stderr
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	err = cmd.Run()
+	_ = cmd.Run()
 
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 	t.Log("Stderr of the Plugin Subprocess Start\n", output, "\nStderr of the Plugin Subprocess End\n")
