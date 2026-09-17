@@ -403,6 +403,17 @@ func handleCreateGroup(ctx *gin.Context) {
 			})
 			return
 		}
+		if errors.Is(err, database.ErrGroupNameConflict) {
+			// The name belongs to a group this server's identity
+			// provider asserts. Handing it to a local group would let
+			// its members stand in for the provider's group in every
+			// ACL keyed on it.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 		if errors.Is(err, database.ErrInvalidIdentifier) || errors.Is(err, database.ErrInvalidDisplayName) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -485,6 +496,11 @@ func handleUpdateGroup(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Group name cannot start with 'user-'",
+			})
+		} else if errors.Is(err, database.ErrGroupNameConflict) {
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
 			})
 		} else if errors.Is(err, database.ErrInvalidIdentifier) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{

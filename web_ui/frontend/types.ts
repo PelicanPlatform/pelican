@@ -198,6 +198,17 @@ export interface Group {
   // backend that hasn't been migrated yet (or a partial response that
   // doesn't include the field) doesn't trip TypeScript.
   authTemplateEligible?: boolean;
+  // Which provider this group came from. 'pelican' groups were created
+  // through this API and their membership lives in the database. Every
+  // other value names a provider that asserts the group (same
+  // vocabulary as the Issuer.GroupSource config): those are recorded
+  // automatically the first time the name is observed, are owned by the
+  // built-in admin, cannot be renamed, and their membership is whatever
+  // the provider says — there is nothing local to add or remove.
+  // 'unknown' is a migration-backfilled record whose asserting provider
+  // was never recorded. Optional so an unmigrated backend doesn't trip
+  // TypeScript; treat a missing value as 'pelican'.
+  source?: 'pelican' | 'oidc' | 'file' | 'github' | 'unknown';
   // Resolved server-side; absent if the referenced user/group no longer
   // exists. The UI falls back to the raw id in that case.
   ownerUser?: UserCard;
@@ -208,6 +219,7 @@ export interface Group {
 
 export type GroupPost = Omit<
   Group,
+  | 'source'
   | 'members'
   | 'createdBy'
   | 'createdAt'

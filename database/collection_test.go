@@ -53,6 +53,25 @@ func setupCollectionTestDB(t *testing.T) *gorm.DB {
 	// view so the column gets added — the User struct intentionally has
 	// no PasswordHash field, see database/credentials.go.
 	require.NoError(t, db.AutoMigrate(&userCredential{}))
+	// GORM builds uniqueness indexes from struct tags and can only
+	// express them as FULL unique indexes. Production scopes the user
+	// ones to live rows (migrations 20260503120000 / 20260812000000) so
+	// a soft-deleted account releases its username and identity, and
+	// scopes the collection one to rows that actually have an owner
+	// (migration 20260916120000). Recreate those shapes here, or tests
+	// can't exercise the reuse paths at all — and "can a released name
+	// be reclaimed, and does the claimant inherit anything" is exactly
+	// what several of them are about.
+	for _, stmt := range []string{
+		"DROP INDEX IF EXISTS idx_user_username_live",
+		"CREATE UNIQUE INDEX idx_user_username_live ON users (username) WHERE deleted_at IS NULL",
+		"DROP INDEX IF EXISTS idx_user_sub_issuer",
+		"CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer) WHERE deleted_at IS NULL",
+		"DROP INDEX IF EXISTS idx_owner_name",
+		"CREATE UNIQUE INDEX idx_owner_name ON collections (owner_id, name) WHERE owner_id <> ''",
+	} {
+		require.NoError(t, db.Exec(stmt).Error)
+	}
 	err = db.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err)
 	return db
@@ -284,7 +303,6 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		coll := Collection{
 			ID:        "col-iota",
 			Name:      "iota",
-			Owner:     "owner1",
 			OwnerID:   "owner-1",
 			Namespace: "/iota",
 		}
@@ -322,7 +340,6 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		var afterCol Collection
 		require.NoError(t, db.First(&afterCol, "id = ?", "col-iota").Error)
 		assert.Equal(t, "redeemer-1", afterCol.OwnerID)
-		assert.Equal(t, "redeemer1", afterCol.Owner)
 
 		// The onboarded group's ownership followed.
 		var afterOnboarded Group
@@ -360,7 +377,7 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 
 		coll := Collection{
 			ID: "col-alpha", Name: "alpha",
-			Owner: "owner2", OwnerID: "owner-2", Namespace: "/alpha",
+			OwnerID: "owner-2", Namespace: "/alpha",
 		}
 		require.NoError(t, db.Create(&coll).Error)
 

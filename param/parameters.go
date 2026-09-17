@@ -226,6 +226,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.AuthenticationSource": false,
 	"Issuer.AuthorizationCodeLifetime": false,
 	"Issuer.AuthorizationTemplates": false,
+	"Issuer.DisableGroupAutoCreation": false,
 	"Issuer.DynamicClientStaleTimeout": false,
 	"Issuer.DynamicClientUnusedTimeout": false,
 	"Issuer.GroupFile": false,
@@ -1124,6 +1125,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Director.FilterCachesInErrorState": func(c *Config) bool { return c.Director.FilterCachesInErrorState },
 	"DisableHttpProxy": func(c *Config) bool { return c.DisableHttpProxy },
 	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
+	"Issuer.DisableGroupAutoCreation": func(c *Config) bool { return c.Issuer.DisableGroupAutoCreation },
 	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
@@ -1536,6 +1538,7 @@ var allParameterNames = []string{
 	"Issuer.AuthenticationSource",
 	"Issuer.AuthorizationCodeLifetime",
 	"Issuer.AuthorizationTemplates",
+	"Issuer.DisableGroupAutoCreation",
 	"Issuer.DynamicClientStaleTimeout",
 	"Issuer.DynamicClientUnusedTimeout",
 	"Issuer.GroupFile",
@@ -2286,6 +2289,7 @@ var (
 	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Issuer_DisableGroupAutoCreation = BoolParam{"Issuer.DisableGroupAutoCreation"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
@@ -2828,6 +2832,7 @@ func init() {
 		"Director.FilterCachesInErrorState": Director_FilterCachesInErrorState,
 		"DisableHttpProxy": DisableHttpProxy,
 		"DisableProxyFallback": DisableProxyFallback,
+		"Issuer.DisableGroupAutoCreation": Issuer_DisableGroupAutoCreation,
 		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,

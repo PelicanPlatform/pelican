@@ -4888,6 +4888,36 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Issuer.DisableGroupAutoCreation
+description: |+
+  Disable recording a group for every group name observed from the
+  provider named by `Issuer.GroupSource` (the OIDC group claim, the
+  group file, or GitHub organizations).
+
+  By default, the first time a user logs in asserting membership in a
+  group Pelican has no record of, Pelican creates one owned by the
+  built-in `admin` user and stamped with the source that asserted it.
+  The record exists so the group has a stable, immutable ID: collection
+  ACLs and group scopes are keyed on IDs, never on names, so a group
+  that only ever exists in a token has nothing for a grant to point at.
+  It also holds the name — without it, an unprivileged user could create
+  a group whose name matches one the provider asserts, and thereby step
+  into the grants held by the provider's group.
+
+  Membership of these records is NOT stored locally; the asserting
+  provider remains the source of truth for who belongs to them.
+  Administrators can see them in the group listing and use them as ACL
+  targets, but there is nothing to add or remove members from, and they
+  cannot be renamed.
+
+  Set this to `true` only if you do not want Pelican writing groups it
+  did not create. With it set, an asserted group has no ID, so it cannot
+  be named in a collection ACL, and its name remains available for any
+  authenticated user to claim.
+type: bool
+default: false
+components: ["origin", "registry", "director", "cache"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
