@@ -71,6 +71,46 @@ func AutoMigrateCredentialsForTests(db *gorm.DB) error {
 	return db.AutoMigrate(&userCredential{})
 }
 
+// ApplyPartialIndexesForTests rebuilds the uniqueness indexes that
+// production scopes to LIVE rows, for test setups that build their
+// schema from GORM struct tags instead of running the goose migrations.
+//
+// This is not cosmetic. GORM can only emit a FULL unique index, so
+// without this a soft-deleted user keeps reserving its username and
+// identity forever — which means the account-reuse paths cannot be
+// exercised at all, and a test written against the reuse vulnerabilities
+// of issues #3752 / #3753 passes vacuously because the second account
+// can never be created. The same applies to a deleted group's name.
+//
+// Mirrors migrations 20260503120000, 20260812000000, 20260916120000 and
+// 20260917120000. Call after AutoMigrate; production schema comes from
+// the migrations and must not call this.
+func ApplyPartialIndexesForTests(db *gorm.DB) error {
+	for _, stmt := range []string{
+		// users: a soft-deleted account releases its username and its
+		// (sub, issuer) identity so the person can re-enrol.
+		"DROP INDEX IF EXISTS idx_user_username_live",
+		"CREATE UNIQUE INDEX idx_user_username_live ON users (username) WHERE deleted_at IS NULL",
+		"DROP INDEX IF EXISTS idx_user_issuer",
+		"DROP INDEX IF EXISTS idx_user_sub_issuer",
+		"CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer) WHERE deleted_at IS NULL",
+		// groups: a soft-deleted group releases its name; its ID stays
+		// spent because the tombstone keeps the primary key.
+		"DROP INDEX IF EXISTS uni_groups_name",
+		"DROP INDEX IF EXISTS idx_groups_name_live",
+		"CREATE UNIQUE INDEX idx_groups_name_live ON groups (name) WHERE deleted_at IS NULL",
+		// collections: one owner may not hold two collections of the
+		// same name, but ownerless legacy rows do not collide.
+		"DROP INDEX IF EXISTS idx_owner_name",
+		"CREATE UNIQUE INDEX idx_owner_name ON collections (owner_id, name) WHERE owner_id <> ''",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SetUserPassword stores a bcrypt hash of plaintext as the user's local
 // password. Pass an empty plaintext to clear the password (disable
 // local login for that account).

@@ -243,7 +243,10 @@ definitions:
         description: The name of the token
       createdBy:
         type: string
-        description: The user who created the token
+        description: >-
+          Ignored on create. The server records the calling user's ID as
+          the token's creator; the token's scopes are re-intersected
+          against that user's current effective scopes on every use.
       expiration:
         type: string
         description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
@@ -268,7 +271,18 @@ definitions:
               description: The name of the token
             createdBy:
               type: string
-              description: The user who created the token
+              description: >-
+                Username of whoever created the token, resolved
+                server-side from the stored creator ID. Empty when that
+                account no longer exists — such a token no longer carries
+                any user-derived authority.
+            createdById:
+              type: string
+              description: >-
+                The creator's User.ID, which is what the row stores. The
+                token's scopes are re-intersected against this user's
+                current effective scopes on every use, so a creator who
+                loses a privilege loses it on every token they minted.
             expiration:
               type: string
               description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
