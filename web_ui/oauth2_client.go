@@ -234,35 +234,63 @@ func pickDisplayName(claims map[string]interface{}, fallback string) string {
 	return fallback
 }
 
-// RecordAssertedGroups reconciles the group names a provider asserted
-// into `groups` records stamped with that provider. Every path that
-// learns a caller's groups from a provider — the OIDC claim, the group
-// file, GitHub organizations — funnels through here so the name gets a
-// stable ID for ACLs and scopes to key on, and so it is held against an
-// unprivileged user creating a group that shadows it. See
-// database.EnsureAssertedGroups.
+// RecordAssertedGroups reconciles what a provider just asserted about
+// one user: the group names get `groups` records stamped with that
+// provider, and the user's memberships in them are mirrored into
+// `group_members`. Every path that learns a caller's groups from a
+// provider — the OIDC claim, the group file, GitHub organizations —
+// funnels through here.
+//
+// Two different things depend on each half. The group record gives the
+// name a stable ID for ACLs and scopes to key on, and holds the name
+// against an unprivileged user creating a group that shadows it. The
+// mirrored membership is what lets Pelican answer a question about this
+// user when they are NOT the one making the request — whether a share's
+// owner still has access to its parent, whether an account a
+// user-administrator is about to act on is itself an admin — and it is
+// what fills an asserted group's member list in the UI. See
+// database.EnsureAssertedGroups and MirrorAssertedGroupMemberships.
+//
+// `userID` may be empty only when the caller genuinely has no user
+// record; the group records are still written, the memberships are not.
+// An empty `groups` is meaningful rather than a no-op: it means the
+// provider asserts nothing for this user now, and retracts whatever it
+// asserted before.
 //
 // Failures are logged and swallowed: this is bookkeeping, and a login
 // must not fail over it. The next login retries.
 //
 // `source` must be the provider that actually asserted these names. Do
 // NOT feed this group names out of arbitrary federation bearer tokens;
-// a foreign issuer could then reserve names on this server.
-func RecordAssertedGroups(source database.GroupSource, who string, groups []string) {
-	if len(groups) == 0 || database.ServerDatabase == nil {
+// a foreign issuer could then reserve names on this server, and mirror
+// memberships in them.
+func RecordAssertedGroups(source database.GroupSource, userID, who string, groups []string) {
+	if database.ServerDatabase == nil {
 		return
 	}
-	if err := database.EnsureAssertedGroups(database.ServerDatabase, source, groups); err != nil {
-		log.Warnf("Failed to record groups asserted by the %s source for %s: %v", source, who, err)
+	if len(groups) > 0 {
+		if err := database.EnsureAssertedGroups(database.ServerDatabase, source, groups); err != nil {
+			log.Warnf("Failed to record groups asserted by the %s source for %s: %v", source, who, err)
+			return
+		}
+	}
+	if userID == "" {
+		return
+	}
+	if err := database.MirrorAssertedGroupMemberships(database.ServerDatabase, source, userID, groups); err != nil {
+		log.Warnf("Failed to mirror %s group memberships for %s: %v", source, who, err)
 	}
 }
 
-// Given a user name, return the list of groups they belong to.
+// Given a user name, return the list of groups they belong to according
+// to Issuer.GroupFile.
 //
-// This is the `Issuer.GroupSource: file` provider, and it is reached
-// from the password-login and init-code paths as well as from
-// generateUserGroupInfo, so the group reconciliation lives here rather
-// than at each call site.
+// Pure: it reads the file and nothing else. Recording what it found is
+// the caller's job via RecordAssertedGroups, because mirroring a
+// membership needs the user's ID and this function only has a name.
+// Every caller must do so — the file provider is reached from the
+// password-login and init-code paths as well as from
+// generateUserGroupInfo.
 func generateGroupInfo(user string) (groups []string, err error) {
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
@@ -279,7 +307,6 @@ func generateGroupInfo(user string) (groups []string, err error) {
 		return
 	}
 	groups = groupTable[user]
-	RecordAssertedGroups(database.GroupSourceFile, user, groups)
 	return
 }
 
@@ -533,17 +560,16 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		return nil, nil, err
 	}
 
-	// Record a `groups` row for every name this provider asserted, so
-	// the name has a stable ID for ACLs and scopes to key on and is held
-	// against a shadowing Pelican-created group. The `file` source
-	// already did this inside generateGroupInfo (it is reached from the
-	// password-login path too), and `internal` is reading these rows in
-	// the first place.
+	// Record what this provider asserted — the group records and this
+	// user's memberships in them. `internal` is reading these rows in
+	// the first place, so it has nothing to record.
 	switch groupSource {
 	case GroupSourceTypeOIDC:
-		RecordAssertedGroups(database.GroupSourceOIDC, username, groups)
+		RecordAssertedGroups(database.GroupSourceOIDC, userRecord.ID, username, groups)
+	case GroupSourceTypeFile:
+		RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, username, groups)
 	case GroupSourceTypeGitHub:
-		RecordAssertedGroups(database.GroupSourceGitHub, username, groups)
+		RecordAssertedGroups(database.GroupSourceGitHub, userRecord.ID, username, groups)
 	}
 
 	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)

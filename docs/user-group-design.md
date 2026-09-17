@@ -76,6 +76,24 @@ An asserted group cannot be renamed — its name is the link to the provider's a
 
 Operators who do not want Pelican writing groups it did not create can set `Issuer.DisableGroupAutoCreation`. The cost is that an asserted group has no ID, so it cannot be named in a collection ACL, and its name stays available for any authenticated user to claim.
 
+## Mirrored memberships
+
+Recording the group is not enough on its own. Membership still lives at the provider, which works for the caller in front of us — their asserted names are resolved to group IDs on each request — and fails for every decision made *about* a user who is not in front of us: whether the owner of a share still has access to its parent collection (computed at token-mint time, with no session for that owner), whether an account a user-administrator is about to act on is itself a system administrator, or simply who is in this group.
+
+So Pelican also mirrors the memberships, into `group_members` alongside the ones administrators create. A row's `source` says which it is: `pelican` for a membership created through the group API — authoritative, never expires, and an assertion never overwrites or retracts one — or the provider that asserted it, with `asserted_at` recording when it last did so.
+
+A mirrored membership is a **cached authorization fact**, and a cache that outlives the fact is the same bug as a name that outlives its principal. One rule keeps it honest:
+
+> **Freshness gates granting, not existence.**
+
+A mirrored row may hand out access only while the provider has asserted it within `Issuer.AssertedGroupMembershipTTL`. Past that it is *kept*, not deleted — because a check that asks whether an account might *hold* a privilege has to keep seeing it. For `IsSystemAdminUserID`, "we last saw this account in an admin group a month ago" must mean *refuse*; treating a stale copy as absence is exactly what opens that guard. Consumers therefore declare which direction is safe for them: granting paths filter on freshness, restricting paths do not. Rows go away only when the provider stops asserting them.
+
+The caller's own live assertion is never gated by the TTL — that is the provider speaking directly, not a cache.
+
+Only `file` can be refreshed without the user present, since it is a local file keyed by username; `Issuer.GroupFileRefreshInterval` re-reads it and reconciles every known account, so removing someone from the file takes effect within one interval rather than at their next login. `oidc` and `github` need that user's own token and so refresh at login, which is what the TTL exists to bound.
+
+A mirrored membership cannot be removed through Pelican — not by the member, not by an administrator. The provider still asserts it, so the row would reappear at the next login; the removal has to happen at the provider. Adding a *local* member to an asserted group is fine, and that membership is Pelican's: it does not expire and an assertion will not retract it.
+
 # Identifiers in the database
 
 Every stored reference used for an authorization decision is an **ID**, never a name. Concretely:

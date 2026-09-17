@@ -856,6 +856,13 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "you do not have permission to remove members from this group",
 			})
+		} else if errors.Is(err, database.ErrMembershipNotLocal) {
+			// Not a permission problem — no one, including an admin, can
+			// remove a membership the identity provider keeps asserting.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error() + "; remove them at the identity provider instead",
+			})
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

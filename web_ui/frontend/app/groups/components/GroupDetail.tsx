@@ -255,10 +255,11 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
                 {group.source === 'unknown'
                   ? 'configured group source'
                   : `${group.source} group source`}{' '}
-                asserted its name. Membership comes from that provider on each
-                login, so the list below shows only members added here. The name
-                cannot be changed — it is what the provider&apos;s assertion is
-                matched against.
+                asserted its name. Membership is decided there and mirrored here
+                as people log in, so the list below may lag the provider, and a
+                member marked <em>via</em> a source can only be removed at that
+                provider. The group&apos;s name cannot be changed — it is what
+                the provider&apos;s assertion is matched against.
               </Typography>
             </Box>
           )}

@@ -1193,6 +1193,10 @@ definitions:
         type: string
   GroupMember:
     type: object
+    description: >-
+      One user's membership in one group. There is at most one row per
+      (group, user) however the membership arose; `source` says which
+      kind it is.
     properties:
       groupId:
         type: string
@@ -1201,6 +1205,32 @@ definitions:
       userId:
         type: string
         description: ID of the user
+      source:
+        type: string
+        description: >-
+          `pelican` for a membership created through this API —
+          authoritative, never expires, and an assertion will neither
+          overwrite nor retract it. Any other value names the provider
+          that asserted the membership; such a membership is mirrored
+          automatically at login, cannot be removed through Pelican
+          (remove the user at the provider instead), and only grants
+          access while `assertedAt` is inside
+          `Issuer.AssertedGroupMembershipTTL`.
+        enum:
+          - pelican
+          - oidc
+          - file
+          - github
+          - unknown
+        example: "pelican"
+      assertedAt:
+        type: string
+        format: date-time
+        description: >-
+          When the provider last asserted this membership. Absent on
+          `pelican` memberships, which do not expire. A mirrored
+          membership older than the TTL is kept but no longer grants
+          access; logging in refreshes it.
       user:
         $ref: "#/definitions/User"
       createdBy:

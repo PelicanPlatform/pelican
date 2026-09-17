@@ -4133,6 +4133,59 @@ type: bool
 default: false
 components: ["origin", "registry", "director", "cache"]
 ---
+name: Issuer.AssertedGroupMembershipTTL
+description: |+
+  How long a group membership mirrored from `Issuer.GroupSource` may
+  still grant access after the provider last asserted it.
+
+  When group membership comes from an outside provider, Pelican records
+  a copy of it each time the user logs in. The copy is what lets Pelican
+  answer questions about a user who is not currently making a request —
+  whether the owner of a share still has access to the parent
+  collection, or whether an account a user-administrator is about to act
+  on is itself a system administrator — and what populates an asserted
+  group's member list in the web UI.
+
+  A mirrored membership is a cached fact, so it expires. Past this
+  window Pelican will no longer grant access on the strength of the
+  copy; the user's own requests are unaffected, because those carry the
+  provider's assertion directly and are never gated by this setting.
+  Logging in refreshes the copy.
+
+  Expiry governs *granting*, not retention: a stale copy is kept, so a
+  check that asks whether an account might hold a privilege — rather
+  than whether to hand one out — still sees it and answers
+  conservatively. Copies are removed when the provider stops asserting
+  the membership.
+
+  Only the `file` group source can be refreshed without the user
+  present, and Pelican re-reads it on `Issuer.GroupFileRefreshInterval`;
+  `oidc` and `github` memberships refresh only at login, which is what
+  this window exists to bound. Set to 0 to disable mirrored memberships
+  as an authorization input entirely — the copies are still recorded and
+  still shown in the UI, they simply never grant.
+type: duration
+default: 168h
+components: ["origin", "registry", "director", "cache"]
+---
+name: Issuer.GroupFileRefreshInterval
+description: |+
+  How often to re-read `Issuer.GroupFile` and refresh the group
+  memberships mirrored from it.
+
+  Unlike the `oidc` and `github` group sources, the group file is local
+  and keyed by username, so Pelican can refresh it for every known user
+  without any of them being present. That keeps mirrored memberships
+  from this source continuously fresh rather than only as fresh as each
+  user's last login.
+
+  Only takes effect when `Issuer.GroupFile` is set. Set to 0 to disable
+  the periodic refresh, in which case file-derived memberships refresh
+  at login like the other sources.
+type: duration
+default: 15m
+components: ["origin", "registry", "director", "cache"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
