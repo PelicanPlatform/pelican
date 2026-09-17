@@ -1293,10 +1293,24 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.JSONEq(t, `{"msg":"You do not have permissions to access this namespace registration. Check the id or if you own the namespace", "status":"error"}`, string(body))
 	})
 
-	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
+	t.Run("reg-user-can-edit-descriptive-fields-after-approv", func(t *testing.T) {
 		resetMockRegistryDB(t)
-		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}, {ID: "1001"}}
 		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+		customFieldsConf := []map[string]interface{}{
+			{"name": "reviewed_note", "type": "string", "required": false},
+		}
+		require.NoError(t, param.Registry_CustomRegistrationFields.Set(customFieldsConf))
+		// InitCustomRegistrationFields appends to the package-level registrationFields,
+		// and earlier tests leave their (required) custom fields behind in it. Start
+		// from the built-in fields and restore the list afterwards.
+		origRegFields := registrationFields
+		registrationFields = populateRegistrationFields("", server_structs.Registration{})
+		require.NoError(t, InitCustomRegistrationFields())
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+			registrationFields = origRegFields
+		}()
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1305,11 +1319,14 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
 			AdminMetadata: server_structs.AdminMetadata{
-				Institution: "1000",
-				UserID:      "u-mock-id",                // same as currently sign-in user
-				Status:      server_structs.RegApproved, // but it's approved
-				SiteName:    "test-site-name",
+				Description:           "oldDescription",
+				Institution:           "1000",
+				UserID:                "u-mock-id",                // same as currently sign-in user
+				Status:                server_structs.RegApproved, // and it's approved
+				SiteName:              "test-site-name",
+				SecurityContactUserID: "u-old-contact",
 			},
+			CustomFields: map[string]interface{}{"reviewed_note": "set-by-admin"},
 		}
 
 		err = insertMockDBData([]server_structs.Registration{mockNs})
@@ -1318,9 +1335,22 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		id, err := getLastNamespaceId()
 		require.NoError(t, err)
 
-		mockNsBytes, err := json.Marshal(mockNs)
+		// The owner changes every field they are allowed to and also tampers
+		// with the fields that must stay pinned to their stored values
+		otherPubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
-		// Create a request to the endpoint
+		updatedNs := mockNs
+		updatedNs.Prefix = "/sneaky-new-prefix"
+		updatedNs.Pubkey = otherPubKeyStr
+		updatedNs.CustomFields = map[string]interface{}{"reviewed_note": "tampered"}
+		updatedNs.AdminMetadata.Description = "newDescription"
+		updatedNs.AdminMetadata.SiteName = "new-site-name"
+		updatedNs.AdminMetadata.Institution = "1001"
+		updatedNs.AdminMetadata.SecurityContactUserID = "u-new-contact"
+		updatedNs.AdminMetadata.UserID = "u-someone-else"
+		updatedNs.AdminMetadata.Status = server_structs.RegPending
+		mockNsBytes, err := json.Marshal(updatedNs)
+		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
@@ -1328,8 +1358,72 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode, string(body))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		// The allowed edits went through
+		assert.Equal(t, "newDescription", got.AdminMetadata.Description)
+		assert.Equal(t, "new-site-name", got.AdminMetadata.SiteName)
+		assert.Equal(t, "1001", got.AdminMetadata.Institution)
+		assert.Equal(t, "u-new-contact", got.AdminMetadata.SecurityContactUserID)
+		// The pinned fields kept their stored values
+		assert.Equal(t, "/foo", got.Prefix)
+		assert.Equal(t, pubKeyStr, got.Pubkey)
+		assert.Equal(t, map[string]interface{}{"reviewed_note": "set-by-admin"}, got.CustomFields)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID)
+		assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
+	})
+
+	t.Run("non-owner-with-key-token-cant-change-after-approv", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+
+		privStored, _, storedJWKS, err := test_utils.GenerateJWK()
+		require.NoError(t, err)
+		stored := server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Description: "oldDescription",
+				Institution: "1000",
+				UserID:      "u-other-owner", // not the currently signed-in user
+				Status:      server_structs.RegApproved,
+				SiteName:    "test-site-name",
+			},
+		}
+		require.NoError(t, insertMockDBData([]server_structs.Registration{stored}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// Even proof of possession of the registration's key does not let a
+		// non-owner edit an approved registration
+		editToken, err := jwt.NewBuilder().
+			Claim("scope", token_scopes.Registry_EditRegistration.String()).
+			Build()
+		require.NoError(t, err)
+		signed, err := jwt.Sign(editToken, jwt.WithKey(jwa.RS256, privStored))
+		require.NoError(t, err)
+
+		updated := stored
+		updated.AdminMetadata.Description = "newDescription"
+		body, err := json.Marshal(updated)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		target := "/namespaces/" + strconv.Itoa(id) + "?access_token=" + url.QueryEscape(string(signed))
+		req, _ := http.NewRequest("PUT", target, bytes.NewReader(body))
+		router.ServeHTTP(w, req)
+
+		respBody, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
 		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"You don't have permission to modify an approved registration. Please contact your federation administrator", "status":"error"}`, string(body))
+		assert.JSONEq(t, `{"msg":"You don't have permission to modify an approved registration. Please contact your federation administrator", "status":"error"}`, string(respBody))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "oldDescription", got.AdminMetadata.Description, "a rejected request must write nothing")
 	})
 
 	t.Run("reg-user-success-change", func(t *testing.T) {

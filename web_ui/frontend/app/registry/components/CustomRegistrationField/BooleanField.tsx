@@ -12,12 +12,13 @@ const BooleanField = ({
   required,
   description,
   value,
+  disabled,
 }: BaseCustomRegistrationFieldProps<boolean>) => {
   const id = useMemo(() => createId(name), [name]);
   const labelId = useMemo(() => `${id}-label`, [id]);
 
   return (
-    <FormControl fullWidth size={'small'}>
+    <FormControl fullWidth size={'small'} disabled={disabled}>
       <InputLabel id={labelId}>{displayed_name}</InputLabel>
       <Select
         size='small'
