@@ -38,7 +38,6 @@ func TestCreateShare(t *testing.T) {
 		p := &Collection{
 			ID:            "p1",
 			Name:          "parent",
-			Owner:         "alice",
 			OwnerID:       "u-alice",
 			Namespace:     "/data/parent",
 			Visibility:    VisibilityPrivate,
@@ -58,7 +57,6 @@ func TestCreateShare(t *testing.T) {
 			Description:        "for bob",
 			Namespace:          "", // default to parent's namespace
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "bob",
 			OwnerID:            "u-bob",
 		})
 		require.NoError(t, err)
@@ -79,7 +77,6 @@ func TestCreateShare(t *testing.T) {
 			Name:               "subset",
 			Namespace:          "/data/parent/subset",
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "bob",
 			OwnerID:            "u-bob",
 		})
 		require.NoError(t, err)
@@ -95,7 +92,6 @@ func TestCreateShare(t *testing.T) {
 			Name:               "escape",
 			Namespace:          "/elsewhere",
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "bob",
 			OwnerID:            "u-bob",
 		})
 		require.Error(t, err)
@@ -112,10 +108,9 @@ func TestCreateShare(t *testing.T) {
 			// /data/parent2 starts with the same string but isn't a
 			// sub-path of /data/parent — guard against the classic
 			// strings.HasPrefix bug.
-			Namespace:     "/data/parent2",
-			Visibility:    VisibilityPrivate,
-			OwnerUsername: "bob",
-			OwnerID:       "u-bob",
+			Namespace:  "/data/parent2",
+			Visibility: VisibilityPrivate,
+			OwnerID:    "u-bob",
 		})
 		require.Error(t, err)
 	})
@@ -128,7 +123,6 @@ func TestCreateShare(t *testing.T) {
 			ParentCollectionID: "p1",
 			Name:               "nope",
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "bob",
 			OwnerID:            "u-bob",
 		})
 		assert.ErrorIs(t, err, ErrSharingDisabled)
@@ -145,7 +139,6 @@ func TestCreateShare(t *testing.T) {
 		share := &Collection{
 			ID:                 "s1",
 			Name:               "first-level",
-			Owner:              "bob",
 			OwnerID:            "u-bob",
 			Namespace:          "/data/parent",
 			Visibility:         VisibilityPrivate,
@@ -158,7 +151,6 @@ func TestCreateShare(t *testing.T) {
 			ParentCollectionID: "s1",
 			Name:               "second-level",
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "carol",
 			OwnerID:            "u-carol",
 		})
 		require.Error(t, err)
@@ -174,7 +166,6 @@ func TestCreateShare(t *testing.T) {
 			Name:               "bob-share",
 			Namespace:          "/data/parent/bob",
 			Visibility:         VisibilityPrivate,
-			OwnerUsername:      "bob",
 			OwnerID:            "u-bob",
 		})
 		require.NoError(t, err)
@@ -184,7 +175,6 @@ func TestCreateShare(t *testing.T) {
 			Name:               "public-share",
 			Namespace:          "/data/parent/pub",
 			Visibility:         VisibilityPublic,
-			OwnerUsername:      "alice",
 			OwnerID:            "u-alice",
 		})
 		require.NoError(t, err)

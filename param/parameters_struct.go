@@ -160,6 +160,7 @@ type Config struct {
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
 		AuthorizationCodeLifetime time.Duration `mapstructure:"authorizationcodelifetime" yaml:"AuthorizationCodeLifetime"`
 		AuthorizationTemplates any `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		DisableGroupAutoCreation bool `mapstructure:"disablegroupautocreation" yaml:"DisableGroupAutoCreation"`
 		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
 		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
@@ -664,6 +665,7 @@ type configWithType struct {
 		AuthenticationSource struct { Type string; Value string }
 		AuthorizationCodeLifetime struct { Type string; Value time.Duration }
 		AuthorizationTemplates struct { Type string; Value any }
+		DisableGroupAutoCreation struct { Type string; Value bool }
 		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
 		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }

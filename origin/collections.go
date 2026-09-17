@@ -399,24 +399,36 @@ type MetadataValue struct {
 	Value string `json:"value"`
 }
 
-// GrantAclReq accepts BOTH camelCase (groupId) and snake_case
-// (group_id) so the older test/CLI clients that use group_id keep
-// working alongside the frontend's groupId convention. Same for
-// RevokeAclReq below. The handler resolves the effective value via
-// `cmp.Or` style: groupId wins when both are set, otherwise
-// group_id is used.
+// GrantAclReq names the ACL target and the role to grant.
+//
+// The target is accepted in three spellings, all resolved to the same
+// stored (subject type, subject ID) pair by
+// database.ResolveACLSubject: a group name, a group ID, `user-<name>`
+// or a user ID for a personal grant, and the `@authenticated`
+// sentinel. `groupId` and `group_id` are equivalent — the frontend
+// uses camelCase, older tooling and existing tests use snake_case —
+// and the field name is historical: it has never been restricted to
+// groups. A target that resolves to nothing is a 400; ACL rows are
+// keyed on IDs, so there is nothing to store for an unknown name.
 type GrantAclReq struct {
 	GroupID         string     `json:"groupId"`
 	GroupIDSnakeAlt string     `json:"group_id"`
 	Role            string     `json:"role"`
 	ExpiresAt       *time.Time `json:"expiresAt"`
 	ExpiresAtSnake  *time.Time `json:"expires_at"`
+	// SubjectID names the target by its stored ID directly, skipping
+	// name resolution. Either spelling works; this one is unambiguous
+	// and is what the listing echoes back alongside `groupId`.
+	SubjectID string `json:"subjectId"`
 }
 
 // resolvedGroupID returns whichever of groupId / group_id the caller
 // actually populated. The frontend uses camelCase; older tooling and
 // existing tests use snake_case.
 func (r *GrantAclReq) resolvedGroupID() string {
+	if r.SubjectID != "" {
+		return r.SubjectID
+	}
 	if r.GroupID != "" {
 		return r.GroupID
 	}
@@ -431,13 +443,21 @@ func (r *GrantAclReq) resolvedExpiresAt() *time.Time {
 	return r.ExpiresAtSnake
 }
 
+// RevokeAclReq mirrors GrantAclReq. Supplying `subjectType` +
+// `subjectId` bypasses name resolution entirely, which is the only way
+// to clear a row whose subject row has since been deleted.
 type RevokeAclReq struct {
 	GroupID         string `json:"groupId"`
 	GroupIDSnakeAlt string `json:"group_id"`
 	Role            string `json:"role"`
+	SubjectType     string `json:"subjectType"`
+	SubjectID       string `json:"subjectId"`
 }
 
 func (r *RevokeAclReq) resolvedGroupID() string {
+	if r.SubjectID != "" {
+		return r.SubjectID
+	}
 	if r.GroupID != "" {
 		return r.GroupID
 	}
@@ -506,6 +526,63 @@ type GetCollectionRes struct {
 	// edit page disable controls (or refuse to mount) when the caller
 	// can read but not modify this row.
 	CanEdit bool `json:"canEdit"`
+}
+
+// ownerUsernameFor resolves a collection's owner User.ID to the
+// username the `owner` response field has always carried. The
+// collections table no longer stores a username — it was an
+// authorization fallback that survived ownership transfers and account
+// deletions (issue #3753) — so the value is now looked up from the
+// users table at render time and is empty when the owner row is gone.
+func ownerUsernameFor(cards map[string]database.UserCard, ownerID string) string {
+	if c, ok := cards[ownerID]; ok {
+		return c.Username
+	}
+	return ""
+}
+
+// collectionSummary renders a single freshly-written collection in the
+// same shape the listing endpoint returns. The owner's username is
+// looked up rather than read off the row — the row holds only
+// `owner_id` — and stays empty when there is no owner to resolve (a
+// bearer-token caller with no user record). The caller is the owner on
+// both create paths, so CanEdit is true by construction.
+func collectionSummary(c database.Collection) ListCollectionRes {
+	row := ListCollectionRes{
+		ID:                 c.ID,
+		Name:               c.Name,
+		OwnerID:            c.OwnerID,
+		AdminID:            c.AdminID,
+		Description:        c.Description,
+		Visibility:         string(c.Visibility),
+		Namespace:          c.Namespace,
+		EnableSharing:      c.EnableSharing,
+		ParentCollectionID: c.ParentCollectionID,
+		CreatedAt:          c.CreatedAt,
+		UpdatedAt:          c.UpdatedAt,
+		CanEdit:            true,
+	}
+	if c.OwnerID == "" {
+		return row
+	}
+	if cards, err := database.GetUserCards(database.ServerDatabase, []string{c.OwnerID}); err == nil {
+		if card, ok := cards[c.OwnerID]; ok {
+			row.Owner = card.Username
+			row.OwnerCard = &card
+		}
+	}
+	return row
+}
+
+// ownerCardsFor batches the owner lookups for a set of collections.
+func ownerCardsFor(colls []database.Collection) (map[string]database.UserCard, error) {
+	ids := make([]string, 0, len(colls))
+	for _, c := range colls {
+		if c.OwnerID != "" {
+			ids = append(ids, c.OwnerID)
+		}
+	}
+	return database.GetUserCards(database.ServerDatabase, ids)
 }
 
 func handleListCollections(ctx *gin.Context) {
@@ -591,12 +668,16 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
+	// One identity resolution for the whole listing — the per-row
+	// canEdit check below is then in-memory.
+	callerSubjects := database.ResolveCallerACLSubjects(database.ServerDatabase, user, userId, groups)
+
 	res := make([]ListCollectionRes, 0)
 	for _, collection := range collections {
 		row := ListCollectionRes{
 			ID:                 collection.ID,
 			Name:               collection.Name,
-			Owner:              collection.Owner,
+			Owner:              ownerUsernameFor(ownerCards, collection.OwnerID),
 			OwnerID:            collection.OwnerID,
 			AdminID:            collection.AdminID,
 			Description:        collection.Description,
@@ -615,16 +696,9 @@ func handleListCollections(ctx *gin.Context) {
 		}
 		// Mirror the PATCH gate (database.UpdateCollection): admin
 		// scope holders pass unconditionally, otherwise the row's
-		// owner / admin-group members can edit. The membership check
-		// touches the DB; we eat the per-row cost rather than
-		// inventing a join — a typical listing has at most dozens of
-		// rows so the latency hit is negligible.
-		row.CanEdit = isAdmin ||
-			database.CallerIsCollectionOwnerOrAdmin(
-				database.ServerDatabase,
-				&collection,
-				user, userId, groups,
-			)
+		// owner / admin-group members can edit. The caller's identity
+		// is resolved once above, so this is a pure in-memory check.
+		row.CanEdit = isAdmin || callerSubjects.IsOwnerOrAdmin(&collection)
 		res = append(res, row)
 	}
 
@@ -742,12 +816,11 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	// Pass both `user` (legacy username audit field — kept for the
-	// uniqueness index and back-compat) and `userId` (User.ID slug —
-	// the authoritative ownership handle going forward). userId may be
-	// empty for bearer-token callers without a user record; the
-	// collection then falls back to username-only ownership semantics.
-	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, userId, req.Namespace, visibility, req.EnableSharing, req.Metadata)
+	// `userId` (the User.ID slug) is the sole ownership handle. It may
+	// be empty for bearer-token callers with no user record, in which
+	// case the collection is manageable only through its admin group,
+	// its ACLs, or an admin scope.
+	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, userId, req.Namespace, visibility, req.EnableSharing, req.Metadata)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -756,7 +829,10 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, coll)
+	// Echo the same shape the listing returns, so `owner` (the owner's
+	// username, resolved from owner_id) is present on the created row
+	// too — the collection itself stores only the ID.
+	ctx.JSON(http.StatusCreated, collectionSummary(*coll))
 }
 
 func handleUpdateCollection(ctx *gin.Context) {
@@ -1384,10 +1460,29 @@ func handleGetCollection(ctx *gin.Context) {
 		members = append(members, member.ObjectURL)
 	}
 
+	// ACL rows come back keyed on IDs; fill in the display fields
+	// (subjectName / the legacy groupId spelling) so existing clients
+	// keep rendering a human-readable target.
+	if err := database.AnnotateACLSubjects(database.ServerDatabase, coll.ACLs); err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to resolve ACL subjects: %v", err),
+		})
+		return
+	}
+	ownerCards, err := ownerCardsFor([]database.Collection{*coll})
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to resolve owner card: %v", err),
+		})
+		return
+	}
+
 	res := GetCollectionRes{
 		ID:                 coll.ID,
 		Name:               coll.Name,
-		Owner:              coll.Owner,
+		Owner:              ownerUsernameFor(ownerCards, coll.OwnerID),
 		OwnerID:            coll.OwnerID,
 		AdminID:            coll.AdminID,
 		Description:        coll.Description,
@@ -1628,12 +1723,22 @@ func handleListCollectionShares(ctx *gin.Context) {
 		return
 	}
 
+	shareSubjects := database.ResolveCallerACLSubjects(database.ServerDatabase, user, userId, groups)
+	shareOwnerCards, err := ownerCardsFor(shares)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to resolve owner cards: %v", err),
+		})
+		return
+	}
+
 	out := make([]ListCollectionRes, 0, len(shares))
 	for _, share := range shares {
 		out = append(out, ListCollectionRes{
 			ID:                 share.ID,
 			Name:               share.Name,
-			Owner:              share.Owner,
+			Owner:              ownerUsernameFor(shareOwnerCards, share.OwnerID),
 			OwnerID:            share.OwnerID,
 			AdminID:            share.AdminID,
 			Description:        share.Description,
@@ -1644,9 +1749,7 @@ func handleListCollectionShares(ctx *gin.Context) {
 			CreatedAt:          share.CreatedAt,
 			UpdatedAt:          share.UpdatedAt,
 			// CanEdit per row, same as the main listing.
-			CanEdit: isAdmin || database.CallerIsCollectionOwnerOrAdmin(
-				database.ServerDatabase, &share, user, userId, groups,
-			),
+			CanEdit: isAdmin || shareSubjects.IsOwnerOrAdmin(&share),
 		})
 	}
 	ctx.JSON(http.StatusOK, out)
@@ -1789,7 +1892,6 @@ func handleCreateCollectionShare(ctx *gin.Context) {
 		Description:        req.Description,
 		Namespace:          req.Namespace,
 		Visibility:         visibility,
-		OwnerUsername:      user,
 		OwnerID:            userId,
 	})
 	if err != nil {
@@ -1812,7 +1914,7 @@ func handleCreateCollectionShare(ctx *gin.Context) {
 		}
 		return
 	}
-	ctx.JSON(http.StatusCreated, share)
+	ctx.JSON(http.StatusCreated, collectionSummary(*share))
 }
 
 // CreateCollectionOwnershipInviteReq is the body for
@@ -2061,7 +2163,16 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 
 	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, expiresAt, isAdmin)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+		if errors.Is(err, database.ErrUnknownACLSubject) {
+			// The target names no group and no user. ACL rows are keyed
+			// on IDs, so there is nothing to store — tell the caller
+			// rather than silently persisting a string that would match
+			// whoever claims the name next.
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+		} else if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "collection not found",
@@ -2099,10 +2210,12 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 	}
 
 	groupID := req.resolvedGroupID()
-	if groupID == "" || req.Role == "" {
+	// An `authenticated` subject has an empty subject ID by design, so
+	// the presence of subjectType is what makes the target complete.
+	if (groupID == "" && req.SubjectType == "") || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "groupId and role are required",
+			Msg:    "groupId (or subjectType) and role are required",
 		})
 		return
 	}
@@ -2143,9 +2256,21 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, isAdmin)
+	// An explicit subjectType skips name resolution — the escape hatch
+	// for clearing a grant whose group or user row is already gone.
+	if req.SubjectType != "" {
+		err = database.RevokeCollectionAclBySubject(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
+			database.ACLSubjectType(req.SubjectType), req.SubjectID, role, isAdmin)
+	} else {
+		err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, isAdmin)
+	}
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+		if errors.Is(err, database.ErrUnknownACLSubject) {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+		} else if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "collection not found",
