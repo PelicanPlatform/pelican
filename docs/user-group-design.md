@@ -46,6 +46,7 @@ A group has the following properties:
 - **Creation date, last edit date**: Metadata about changes; useful in diagnosing the source of users.
 - **Creator**: The user ID + session info that created this record. Similar to creator for users.
 - **Scopes**: A list of known authorizations the group has in the Pelican server.
+- **Deletion**: A soft delete, like users. The ID is spent permanently; the name is released. See "Identifiers in the database".
 
 **Notes**:
 
@@ -82,12 +83,17 @@ Every stored reference used for an authorization decision is an **ID**, never a 
 - `collections.owner_id` is the sole ownership handle. There is no companion username column; the `owner` field in API responses is resolved from the `users` table for display.
 - `collection_acls` rows are keyed on `(subject_type, subject_id)`, where `subject_id` is a Group.ID, a User.ID, or empty for the all-authenticated sentinel. The `user-<username>` and `@authenticated` spellings are *presentation* forms accepted and returned by the API; they never reach a column.
 - Audit columns (`granted_by`, `added_by`, `created_by`) hold User.IDs or the `unknown` / `self-enrolled` sentinels.
+- `api_keys.created_by` holds the creator's User.ID. It is not an audit field: a key's persisted scopes are re-intersected against that user's *current* effective scopes on every call, so the column decides what the key can do. A username there meant a rename silently bricked the key and a reused username revived it for whoever still held the secret.
 
 The two spaces are kept **disjoint**: `ValidateIdentifier` refuses any name of the shape an ID takes (eight lowercase hex characters). Without that, anywhere a handle may be either — an ACL grant target, say — a user could create a group whose *name* is another principal's *ID* and intercept every reference addressed to it, which is the same confusion one layer up. Disjointness also means a resolver can tell which space a handle belongs to by looking at it, instead of trying one and falling back to the other.
 
 A bare user ID is deliberately not accepted as an ACL target: `user-<username>` names a user in the name space and the API's `subjectType` + `subjectId` pair names one in the ID space, so a third, guessed spelling would buy nothing.
 
 This is what makes renaming safe. A rename changes one row in `users` or `groups`; nothing else references the old value, so there is nothing to migrate and nothing left behind for a later claimant of that name. It is also why granting an ACL to a name this server has no record of is an error rather than a stored string: a stored name would be matched by whoever holds it next.
+
+**IDs are never reused.** Deleting a user is a soft delete: the row stays, so the ID is spent permanently and historical references remain resolvable, while the account confers nothing. Deleting a group works the same way and for the same reason — a Group.ID is an authorization handle, and `generateSlug` picks eight hex characters with no uniqueness check, so freeing one would let a later group be minted with it and inherit whatever still pointed there. `DeleteGroup` additionally clears every such reference (ACL grants, group scopes, memberships, invite links, and any collection or group that named it as administrator), so the cleanup is exhaustive *and* the ID cannot come back.
+
+**Names are reused, deliberately.** A soft-deleted user releases its username and its `(sub, issuer)` identity so the person can re-enrol; a soft-deleted group releases its name so an operator can recreate it after a cleanup. That is safe precisely because nothing stores a name as an authorization handle — the next holder inherits nothing.
 
 # Authorizations
 

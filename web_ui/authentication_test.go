@@ -68,6 +68,11 @@ func migrateTestDB(t *testing.T) {
 	// adds the password_hash column so password-based login tests work.
 	require.NoError(t, database.AutoMigrateCredentialsForTests(database.ServerDatabase),
 		"Failed to migrate DB for user credentials column")
+	// Production scopes several uniqueness indexes to live rows; GORM
+	// can only emit full ones from struct tags, which would make every
+	// name-reuse path in this package untestable.
+	require.NoError(t, database.ApplyPartialIndexesForTests(database.ServerDatabase),
+		"Failed to apply the production partial indexes")
 	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
 	require.NoError(t, err, "Failed to migrate DB for group invite links table")
 	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
